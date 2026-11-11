@@ -416,6 +416,62 @@ describe.skipIf(!haveDaemon)("stores against the real daemon", () => {
     expect(readFileSync(join(ws, "README.md"), "utf8")).toBe("# keep me\n");
   });
 
+  it("a save that fails for a non-conflict reason shows a banner and answers saveFailed", async () => {
+    await app.workspace.openFolder(ws);
+    app.documents.open("src/main.rs");
+    await waitFor(() => editor.text("src/main.rs") !== undefined);
+    const failed: string[] = [];
+    const realPort = editor;
+    // Wrap the port (methods live on the prototype, so bind through the target)
+    // so the test can see the shell answer `saveFailed`.
+    const spied = new Proxy(realPort, {
+      get(target, prop) {
+        if (prop === "saveFailed") {
+          return (p: { path: string }) => {
+            failed.push(p.path);
+            target.saveFailed(p);
+          };
+        }
+        const value = Reflect.get(target, prop, target) as unknown;
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    app.documents.attachEditor(spied);
+    try {
+      // Deterministic, filesystem-independent failure: the daemon refuses a
+      // write over 16 MiB with `too_large` (ipc.md §fs/writeFile).
+      editor.type("src/main.rs", "x".repeat(16 * 1024 * 1024 + 1024));
+      await waitFor(() => app.documents.getSnapshot().docs[0]!.dirty);
+      app.documents.save("src/main.rs");
+      await waitFor(() => app.documents.getSnapshot().banner.includes("Could not save"), 8000, "banner");
+      expect(failed).toEqual(["src/main.rs"]);
+      expect(app.documents.getSnapshot().docs[0]!.dirty).toBe(true); // nothing was lost
+    } finally {
+      app.documents.attachEditor(realPort);
+    }
+  });
+
+  it("links open externally only for http and https", async () => {
+    const opened: string[] = [];
+    app.documents.openExternal = (url) => void opened.push(url);
+    app.documents.openLink({ url: "https://example.com/a" });
+    app.documents.openLink({ url: "http://example.com/b" });
+    app.documents.openLink({ url: "file:///etc/passwd" });
+    app.documents.openLink({ url: "javascript:alert(1)" });
+    app.documents.openLink({ url: "vscode://x" });
+    expect(opened).toEqual(["https://example.com/a", "http://example.com/b"]);
+  });
+
+  it("a page error is reported without breaking the editor", async () => {
+    await app.workspace.openFolder(ws);
+    app.documents.open("README.md");
+    await waitFor(() => app.documents.getSnapshot().editorReady);
+    const before = app.documents.getSnapshot().docs.length;
+    app.documents.reportError({ message: "boom", detail: "stack" });
+    expect(app.documents.getSnapshot().editorReady).toBe(true);
+    expect(app.documents.getSnapshot().docs).toHaveLength(before);
+  });
+
   it("a save requested for a path that is not open is ignored", async () => {
     await app.workspace.openFolder(ws);
     const before = readFileSync(join(ws, "README.md"), "utf8");

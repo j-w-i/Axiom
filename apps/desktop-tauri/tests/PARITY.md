@@ -85,7 +85,7 @@ or has no equivalent in the new architecture.
 | `conflictOverwriteRetriesAndAnswersSaved` | S `reloads a clean document changed on disk; a dirty one conflicts and Overwrite wins`; E 6b |
 | `conflictReloadShowsTheDiskVersionAsClean` | S `conflict → Reload shows the disk version as clean` |
 | `conflictCancelAnswersSaveFailedAndKeepsDirty` | S `conflict → Cancel keeps the unsaved text and answers the pending save` |
-| `otherSaveErrorsShowABannerAndAnswerSaveFailed` | S `refuses a non-UTF-8 file…` (banner rendering path) — a non-conflict write error is not separately forced |
+| `otherSaveErrorsShowABannerAndAnswerSaveFailed` | S `a save that fails for a non-conflict reason shows a banner and answers saveFailed` (a >16 MiB write → `too_large`) |
 | `menuSaveAsksThePageWhichAnswersWithSaveRequested` | S `edits, saves…` (Save goes through the port's `requestSave`); E 5 (Ctrl+S inside Monaco) |
 | `cleanDocumentReloadsWhenTheFileChangesOnDisk` | S `reloads a clean document changed on disk…`; E 6a |
 | `dirtyDocumentIsMarkedChangedOnDiskNotReloaded` | S same (asserts `changedOnDisk`); E 6b (tab badge) |
@@ -99,8 +99,8 @@ or has no equivalent in the new architecture.
 | `tabsAndActiveTabAreRestoredSkippingMissingFiles` | S `restoring tabs skips files that no longer exist`, `persists expanded folders, tabs and the active tab across a restart`; E 8 |
 | `unsavedTextComesBackFromTheLatestSnapshotAfterACrash` | S `unsaved text comes back from the host snapshot after a webview crash`; E 11a–11c (real web process killed) |
 | `switchingWorkspacesClosesDocumentsAndIgnoresLateAnswers` | S `switching workspaces closes the documents of the old one` (generation counters are the same code) |
-| `linksOnlyOpenForHttpSchemes` | `open_external` rejects non-http(s); asserted in `src-tauri/src/lib.rs` by inspection — **not** separately tested (no way to observe the system browser in CI) |
-| `pageErrorsAreLoggedNotFatal` | `DocumentsStore.reportError` logs via `console.warn`; not asserted (no observable effect) |
+| `linksOnlyOpenForHttpSchemes` | S `links open externally only for http and https` (five schemes; only http/https reach the host) |
+| `pageErrorsAreLoggedNotFatal` | S `a page error is reported without breaking the editor` |
 
 ## tst_tasks (19) — command output
 
@@ -174,7 +174,7 @@ reloads from the bundle after a crash). Feature-parity row E-17 records this.
 | linebuffer | 9 | 8 | 1 | 0 |
 | daemonclient | 13 | 13 | 0 | 0 (stderr prefix: indirect) |
 | workspace | 15 | 15 | 1 (row signals) | 1 (rename) |
-| documents | 29 | 27 | 1 (`runCommand`/`reveal`) | 2 (link schemes, page errors) |
+| documents | 29 | 29 | 1 (`runCommand`/`reveal`) | 1 (cursor text: asserted in E, not unit-tested) |
 | tasks | 19 | 19 | 0 | 3 (reducer constants / workspace-close cancel) |
 | settings | 6 | 6 | 0 | 0 |
 | assethandler | 7 | 0 | 7 (Tauri asset protocol) | 0 |
