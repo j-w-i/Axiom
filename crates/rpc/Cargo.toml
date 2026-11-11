@@ -1,0 +1,23 @@
+[package]
+name = "axiom-rpc"
+description = "Domain-free JSON-RPC server and client over NDJSON byte streams for the Axiom protocol."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-protocol = { path = "../protocol" }
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[lints]
+workspace = true

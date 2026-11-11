@@ -16,19 +16,20 @@ started.** No product code exists yet except the protocol crate.
 | Provider / diagnostics / inspection contracts | Draft types + schemas + tests; reference `providers/rust/provider.toml` |
 | Agent contract | Draft document |
 | Experiments E1–E3 | Passed (results in `experiments/README.md`) |
-| `crates/rpc`, `store`, `workspace`, `exec`, `axiomd` | Not started |
+| `crates/rpc` | M1-RPC-001 tested (24 tests) |
+| `crates/store`, `workspace`, `exec`, `axiomd` | Not started |
 | `editor/`, `apps/desktop/` | Not started |
 | CI | Workflow file exists for the Rust job; **never run** (no remote yet) |
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-11-phase0-architecture.md`
+`agents/handoffs/2026-11-11-M1-RPC-001.md`
 
 ## Next task
 
-Run `scripts/tasks.py next`. At the time of writing: **M1-RPC-001**, and
-wave A (`M1-RPC-001`, `M1-STORE-001`, `M1-WS-001`, `M1-EXEC-001`,
-`M1-EDITOR-001`) is ready to run in parallel.
+Run `scripts/tasks.py next`. At the time of writing: **M1-STORE-001**; wave A
+(`M1-STORE-001`, `M1-WS-001`, `M1-EXEC-001`, `M1-EDITOR-001`) is ready to run
+in parallel (`M1-RPC-001` is tested, awaiting review).
 
 ## Blockers
 
