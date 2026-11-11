@@ -1,8 +1,8 @@
 ---
 id: M1-SHELL-002
 title: Workspace opening and file explorer
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: [M1-SHELL-001, M1-DAEMON-002]
 order: 41
 scope: apps/desktop/

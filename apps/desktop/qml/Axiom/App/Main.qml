@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import Axiom.Ui
 
 Basic.ApplicationWindow {
@@ -11,13 +12,14 @@ Basic.ApplicationWindow {
 
     property bool sideBarVisible: width >= narrowWidth
     property bool panelVisible: true
+    property string workspaceError
 
     // `backend` is a context property provided by the shell (src/Backend.h).
     readonly property string statusText: backend.starting ? qsTr("Connecting…")
         : backend.ready ? qsTr("Connected — axiomd %1").arg(backend.serverVersion)
         : qsTr("Backend stopped")
 
-    title: qsTr("Axiom")
+    title: workspace.open ? qsTr("%1 — Axiom").arg(workspace.name) : qsTr("Axiom")
     width: 1100
     height: 720
     minimumWidth: 720
@@ -47,6 +49,34 @@ Basic.ApplicationWindow {
             title: qsTr("&File")
             delegate: AxMenuItem {}
             background: AxMenuBackground {}
+            Basic.Action {
+                text: qsTr("&Open Folder…")
+                shortcut: StandardKey.Open
+                enabled: backend.ready
+                onTriggered: folderDialog.open()
+            }
+            Basic.Menu {
+                id: recentMenu
+                title: qsTr("Open &Recent")
+                enabled: backend.ready && workspace.recent.count > 0
+                delegate: AxMenuItem {}
+                background: AxMenuBackground {}
+                Repeater {
+                    model: workspace.recent
+                    delegate: AxMenuItem {
+                        required property string root
+                        required property string name
+                        text: name + "  —  " + root
+                        onTriggered: workspace.openFolder(root)
+                    }
+                }
+            }
+            Basic.Action {
+                text: qsTr("&Close Folder")
+                enabled: workspace.open
+                onTriggered: workspace.close()
+            }
+            Basic.MenuSeparator {}
             Basic.Action {
                 text: qsTr("&Quit")
                 shortcut: StandardKey.Quit
@@ -92,6 +122,15 @@ Basic.ApplicationWindow {
             onActionTriggered: backend.restart()
         }
 
+        AxBanner {
+            Layout.fillWidth: true
+            visible: window.workspaceError.length > 0
+            variant: "warning"
+            text: window.workspaceError
+            actionText: qsTr("Dismiss")
+            onActionTriggered: window.workspaceError = ""
+        }
+
         Basic.SplitView {
             id: horizontalSplit
             Layout.fillWidth: true
@@ -120,10 +159,17 @@ Basic.ApplicationWindow {
                     AxLabel {
                         Layout.fillWidth: true
                         Layout.margins: Theme.space3
+                        visible: !workspace.open
                         text: qsTr("No folder open")
                         role: "muted"
                     }
-                    Item { Layout.fillHeight: true }
+                    ExplorerView {
+                        id: explorer
+                        objectName: "explorerView"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: workspace.open
+                    }
                 }
             }
 
@@ -141,6 +187,13 @@ Basic.ApplicationWindow {
                     color: Theme.bg
                     Accessible.role: Accessible.Pane
                     Accessible.name: qsTr("Content")
+
+                    WelcomeView {
+                        anchors.fill: parent
+                        visible: !workspace.open
+                        onOpenFolderRequested: folderDialog.open()
+                        onOpenRecent: (root) => workspace.openFolder(root)
+                    }
                 }
 
                 // Bottom panel: command output arrives with M1-SHELL-004.
@@ -198,6 +251,18 @@ Basic.ApplicationWindow {
                 }
             }
         }
+    }
+
+    FolderDialog {
+        id: folderDialog
+        title: qsTr("Open Folder")
+        onAccepted: workspace.openFolderUrl(selectedFolder)
+    }
+
+    Connections {
+        target: workspace
+        function onErrorOccurred(message) { window.workspaceError = message }
+        function onOpenChanged() { if (workspace.open) window.workspaceError = "" }
     }
 
     AxDialog {

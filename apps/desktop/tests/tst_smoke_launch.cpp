@@ -137,6 +137,87 @@ private slots:
         QVERIFY(waitFor([&] { return statusText(w) == QStringLiteral("Connected — axiomd 0.1.0"); }));
     }
 
+    // The whole explorer path through QML: open a folder, the tree shows it, keys drive it.
+    void explorerShowsTreeAndKeyboardNavigationWorks()
+    {
+        const QString daemon = qEnvironmentVariable("AXIOMD_UNDER_TEST");
+        QTemporaryDir ws;
+        QVERIFY(ws.isValid());
+        QDir(ws.path()).mkpath("src");
+        QDir(ws.path()).mkpath("docs");
+        for (const char *f : { "src/main.rs", "src/lib.rs", "README.md" }) {
+            QFile file(QString(ws.path()) + "/" + f);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("x");
+        }
+        ShellOptions opts;
+        opts.daemonPath = daemon;
+        opts.dataDir = m_data.path();
+        Shell shell(opts);
+        QVERIFY(shell.load());
+        QQuickWindow *w = shell.window();
+        QVERIFY(waitFor([&] { return shell.backend()->ready(); }));
+        w->show();
+
+        // Welcome view first: Open Folder button present, no recent placeholder text.
+        QVERIFY(findByName(w->contentItem(), "openFolderButton"));
+        QVERIFY(findByName(w->contentItem(), "openFolderButton")->isVisible());
+
+        QSignalSpy opened(shell.workspace(), &WorkspaceController::opened);
+        shell.workspace()->openFolder(ws.path());
+        QVERIFY(opened.wait(8000));
+        QVERIFY(waitFor([&] { return w->title() == QFileInfo(ws.path()).fileName() + QStringLiteral(" — Axiom"); }));
+        QVERIFY(!findByName(w->contentItem(), "openFolderButton")->isVisible());
+
+        QQuickItem *tree = findByName(w->contentItem(), "explorerTree");
+        QVERIFY(tree);
+        QVERIFY(waitFor([&] { return tree->property("rows").toInt() == 3; })); // docs, src, README.md
+        tree->forceActiveFocus();
+        QVERIFY(tree->hasActiveFocus());
+
+        auto currentRow = [&] { return tree->property("currentRow").toInt(); };
+        auto rows = [&] { return tree->property("rows").toInt(); };
+
+        // Down selects the first row; Down again moves on.
+        QTest::keyClick(w, Qt::Key_Down);
+        QTRY_COMPARE(currentRow(), 0);
+        QTest::keyClick(w, Qt::Key_Down);
+        QTRY_COMPARE(currentRow(), 1); // src
+        // Right expands src: its two files appear.
+        QTest::keyClick(w, Qt::Key_Right);
+        QTRY_COMPARE(rows(), 5);
+        // Right again moves into the first child, Left returns to the parent, Left collapses.
+        QTest::keyClick(w, Qt::Key_Right);
+        QTRY_COMPARE(currentRow(), 2);
+        QTest::keyClick(w, Qt::Key_Left);
+        QTRY_COMPARE(currentRow(), 1);
+        QTest::keyClick(w, Qt::Key_Left);
+        QTRY_COMPARE(rows(), 3);
+        // End / Home.
+        QTest::keyClick(w, Qt::Key_End);
+        QTRY_COMPARE(currentRow(), 2);
+        QTest::keyClick(w, Qt::Key_Home);
+        QTRY_COMPARE(currentRow(), 0);
+        // Enter on a directory toggles it (src is row 1).
+        QTest::keyClick(w, Qt::Key_Down);
+        QTRY_COMPARE(currentRow(), 1);
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_VERIFY(shell.workspace()->treeModel()->expandedPaths().contains("src"));
+        QTRY_COMPARE(rows(), 5);
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_VERIFY(!shell.workspace()->treeModel()->expandedPaths().contains("src"));
+        QTRY_COMPARE(rows(), 3);
+
+        // Enter on a file activates it (the signal is consumed by the editor in M1-SHELL-003).
+        QSignalSpy activated(findByName(w->contentItem(), "explorerView"), SIGNAL(fileActivated(QString)));
+        QTest::keyClick(w, Qt::Key_End);
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(activated.count(), 1);
+        QCOMPARE(activated.first().first().toString(), QStringLiteral("README.md"));
+
+        w->grabWindow().save(m_shots + "/explorer.png");
+    }
+
     void missingDaemonShowsFailureNotACrash()
     {
         ShellOptions opts;

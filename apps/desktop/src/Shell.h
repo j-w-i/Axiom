@@ -1,6 +1,7 @@
 #pragma once
 #include "Backend.h"
 #include "daemon/DaemonClient.h"
+#include "models/WorkspaceController.h"
 
 #include <QQmlApplicationEngine>
 #include <QString>
@@ -33,6 +34,7 @@ public:
 
     DaemonClient *client() { return &m_client; }
     Backend *backend() { return &m_backend; }
+    WorkspaceController *workspace() { return &m_workspace; }
     QQmlApplicationEngine *engine() { return &m_engine; }
     QQuickWindow *window() const { return m_window; }
 
@@ -43,6 +45,8 @@ private:
     ShellOptions m_options;
     DaemonClient m_client;
     Backend m_backend;
+    WorkspaceController m_workspace;
+    bool m_reopenDone = false;
     QQmlApplicationEngine m_engine; // last: destroyed first, before what QML uses
     QQuickWindow *m_window = nullptr;
 };

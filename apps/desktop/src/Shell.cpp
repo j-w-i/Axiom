@@ -1,6 +1,8 @@
 #include "Shell.h"
 
 #include <QCoreApplication>
+#include <QEventLoop>
+#include <QTimer>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -46,7 +48,7 @@ QString resolveMonoFamily()
 }
 
 Shell::Shell(const ShellOptions &options, QObject *parent)
-    : QObject(parent), m_options(options), m_client(this), m_backend(&m_client, this)
+    : QObject(parent), m_options(options), m_client(this), m_backend(&m_client, this), m_workspace(&m_client, this)
 {
     // The design system is built on the Basic style.
     QQuickStyle::setStyle(QStringLiteral("Basic"));
@@ -55,12 +57,27 @@ Shell::Shell(const ShellOptions &options, QObject *parent)
 Shell::~Shell()
 {
     saveGeometry();
+    // Persist explorer state, waiting (bounded) for the daemon to confirm.
+    if (m_client.state() == DaemonClient::Ready && m_workspace.isOpen()) {
+        QEventLoop loop;
+        QTimer::singleShot(1500, &loop, &QEventLoop::quit);
+        m_workspace.flushState([&loop] { loop.quit(); });
+        loop.exec();
+    }
     m_client.shutdown();
 }
 
 bool Shell::load()
 {
     m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &m_backend);
+    m_engine.rootContext()->setContextProperty(QStringLiteral("workspace"), &m_workspace);
+    // Once per launch: reopen the last workspace when the setting says so.
+    connect(&m_client, &DaemonClient::stateChanged, this, [this] {
+        if (m_client.state() == DaemonClient::Ready && !m_reopenDone) {
+            m_reopenDone = true;
+            m_workspace.reopenLast();
+        }
+    });
     QObject::connect(&m_engine, &QQmlEngine::quit, qApp, &QCoreApplication::quit);
     m_engine.loadFromModule("Axiom.App", "Main");
     if (m_engine.rootObjects().isEmpty())
