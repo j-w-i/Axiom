@@ -1,8 +1,8 @@
 ---
 id: M1-STORE-001
 title: Implement the axiom-store crate (SQLite persistence)
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: []
 order: 11
 scope: crates/store/, Cargo.toml (workspace members and dependencies only)

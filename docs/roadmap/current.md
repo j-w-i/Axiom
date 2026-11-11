@@ -17,13 +17,14 @@ started.** No product code exists yet except the protocol crate.
 | Agent contract | Draft document |
 | Experiments E1–E3 | Passed (results in `experiments/README.md`) |
 | `crates/rpc` | M1-RPC-001 tested (24 tests) |
-| `crates/store`, `workspace`, `exec`, `axiomd` | Not started |
+| `crates/store` | M1-STORE-001 tested (11 tests) |
+| `crates/workspace`, `exec`, `axiomd` | Not started |
 | `editor/`, `apps/desktop/` | Not started |
 | CI | Workflow file exists for the Rust job; **never run** (no remote yet) |
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-11-M1-RPC-001.md`
+`agents/handoffs/2026-11-11-M1-STORE-001.md`
 
 ## Next task
 

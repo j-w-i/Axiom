@@ -1,0 +1,218 @@
+use super::*;
+use serde_json::json;
+
+fn map(items: &[(&str, Option<Value>)]) -> BTreeMap<String, Option<Value>> {
+    items
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect()
+}
+
+#[test]
+fn settings_round_trip_and_delete() {
+    let s = Store::open_in_memory().unwrap();
+    assert_eq!(s.setting_get("a").unwrap(), None);
+    s.settings_set(&map(&[
+        ("a", Some(json!(1))),
+        ("b", Some(json!({"x": [1, 2]}))),
+    ]))
+    .unwrap();
+    assert_eq!(s.setting_get("a").unwrap(), Some(json!(1)));
+    s.settings_set(&map(&[("a", Some(json!("two"))), ("b", None)]))
+        .unwrap();
+    let all = s.settings_all().unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all["a"], json!("two"));
+    // Deleting a missing key is not an error.
+    s.settings_set(&map(&[("zzz", None)])).unwrap();
+}
+
+#[test]
+fn recent_ordering_limit_and_update() {
+    let s = Store::open_in_memory().unwrap();
+    s.recent_touch("/a", "a", 100).unwrap();
+    s.recent_touch("/b", "b", 300).unwrap();
+    s.recent_touch("/c", "c", 200).unwrap();
+    let l = s.recent_list(10).unwrap();
+    assert_eq!(
+        l.iter().map(|r| r.root.as_str()).collect::<Vec<_>>(),
+        ["/b", "/c", "/a"]
+    );
+    assert_eq!(s.recent_list(2).unwrap().len(), 2);
+    assert_eq!(s.recent_list(0).unwrap().len(), 0);
+    s.recent_touch("/a", "renamed", 400).unwrap();
+    let l = s.recent_list(10).unwrap();
+    assert_eq!(
+        l[0],
+        Recent {
+            root: "/a".into(),
+            name: "renamed".into(),
+            last_opened_ms: 400
+        }
+    );
+    assert_eq!(l.len(), 3);
+    s.recent_remove("/a").unwrap();
+    assert_eq!(s.recent_list(10).unwrap().len(), 2);
+    s.recent_remove("/never").unwrap();
+}
+
+#[test]
+fn recent_list_does_not_check_filesystem() {
+    let s = Store::open_in_memory().unwrap();
+    s.recent_touch("/definitely/not/a/real/dir", "x", 1)
+        .unwrap();
+    assert_eq!(s.recent_list(5).unwrap().len(), 1);
+}
+
+#[test]
+fn workspace_state_keys_all_and_delete_and_isolation() {
+    let s = Store::open_in_memory().unwrap();
+    s.workspace_state_set(
+        "/w1",
+        &map(&[("tabs", Some(json!(["a"]))), ("sel", Some(json!("a")))]),
+    )
+    .unwrap();
+    s.workspace_state_set("/w2", &map(&[("tabs", Some(json!(["z"])))]))
+        .unwrap();
+    assert_eq!(s.workspace_state_get("/w1", &[]).unwrap().len(), 2);
+    let only = s
+        .workspace_state_get("/w1", &["sel".into(), "missing".into()])
+        .unwrap();
+    assert_eq!(only.len(), 1);
+    assert_eq!(only["sel"], json!("a"));
+    s.workspace_state_set("/w1", &map(&[("sel", None)]))
+        .unwrap();
+    assert_eq!(s.workspace_state_get("/w1", &[]).unwrap().len(), 1);
+    assert_eq!(
+        s.workspace_state_get("/w2", &[]).unwrap()["tabs"],
+        json!(["z"])
+    );
+}
+
+#[test]
+fn data_survives_reopen_and_creates_parent_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested/deeper/axiom.db");
+    {
+        let s = Store::open(&path).unwrap();
+        s.settings_set(&map(&[("k", Some(json!(true)))])).unwrap();
+        s.recent_touch("/r", "r", 5).unwrap();
+        s.workspace_state_set("/r", &map(&[("s", Some(json!(1)))]))
+            .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    assert_eq!(s.setting_get("k").unwrap(), Some(json!(true)));
+    assert_eq!(s.recent_list(5).unwrap().len(), 1);
+    assert_eq!(s.workspace_state_get("/r", &[]).unwrap()["s"], json!(1));
+    assert!(s.recovered_from_corruption().is_none());
+}
+
+#[test]
+fn wal_and_user_version_are_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("axiom.db");
+    let _s = Store::open(&path).unwrap();
+    let c = Connection::open(&path).unwrap();
+    let mode: String = c
+        .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+        .unwrap();
+    let v: u32 = c
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(mode, "wal");
+    assert_eq!(v, latest_version());
+}
+
+#[test]
+fn schema_too_new_is_rejected_and_file_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("axiom.db");
+    {
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("CREATE TABLE t(x); PRAGMA user_version = 999;")
+            .unwrap();
+    }
+    let before = std::fs::read(&path).unwrap();
+    let err = Store::open(&path).unwrap_err();
+    assert!(
+        matches!(err, StoreError::SchemaTooNew { found: 999, supported } if supported == latest_version()),
+        "{err:?}"
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "file must be byte-identical"
+    );
+    let siblings: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+    assert_eq!(siblings.len(), 1, "no wal/shm/corrupt files created");
+}
+
+#[test]
+fn corrupt_database_is_moved_aside_and_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("axiom.db");
+    {
+        let s = Store::open(&path).unwrap();
+        s.settings_set(&map(&[("k", Some(json!(1)))])).unwrap();
+    }
+    std::fs::write(&path, vec![0xAB; 8192]).unwrap();
+    let s = Store::open(&path).unwrap();
+    let moved = s.recovered_from_corruption().expect("recovered");
+    assert!(moved.exists());
+    assert!(moved
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with("axiom.db.corrupt-"));
+    assert!(s.settings_all().unwrap().is_empty());
+    s.settings_set(&map(&[("fresh", Some(json!(1)))])).unwrap();
+    assert_eq!(std::fs::read(&moved).unwrap(), vec![0xAB; 8192]);
+}
+
+#[test]
+fn too_large_is_atomic_and_reports_key() {
+    let s = Store::open_in_memory().unwrap();
+    let big = Value::String("x".repeat(MAX_VALUE_BYTES + 1));
+    let err = s
+        .settings_set(&map(&[("a", Some(json!(1))), ("big", Some(big.clone()))]))
+        .unwrap_err();
+    match err {
+        StoreError::TooLarge { key, limit, .. } => {
+            assert_eq!(key, "big");
+            assert_eq!(limit, MAX_VALUE_BYTES);
+        }
+        e => panic!("{e:?}"),
+    }
+    assert!(s.settings_all().unwrap().is_empty(), "nothing written");
+    let err = s
+        .workspace_state_set("/w", &map(&[("a", Some(json!(1))), ("big", Some(big))]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::TooLarge { .. }));
+    assert!(s.workspace_state_get("/w", &[]).unwrap().is_empty());
+    // Exactly at the limit is fine (2 bytes of quotes + content).
+    let ok = Value::String("x".repeat(MAX_VALUE_BYTES - 2));
+    s.settings_set(&map(&[("ok", Some(ok))])).unwrap();
+}
+
+#[test]
+fn default_db_path_honours_axiom_data_dir() {
+    // Single test touching this variable; keep it that way.
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("AXIOM_DATA_DIR", dir.path());
+    assert_eq!(default_db_path(), dir.path().join("axiom.db"));
+    std::env::remove_var("AXIOM_DATA_DIR");
+    let p = default_db_path();
+    assert!(p.ends_with("axiom.db"));
+    assert!(!p.starts_with(dir.path()));
+}
+
+#[test]
+fn sqlite_version_is_reported() {
+    let s = Store::open_in_memory().unwrap();
+    let v: String = s
+        .conn()
+        .query_row("SELECT sqlite_version()", [], |r| r.get(0))
+        .unwrap();
+    eprintln!("sqlite_version={v}");
+    assert!(!v.is_empty());
+}
