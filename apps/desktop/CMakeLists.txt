@@ -119,7 +119,7 @@ function(axiom_test name)
   add_test(NAME ${name} COMMAND ${name})
   set_tests_properties(${name} PROPERTIES
     ENVIRONMENT "AXIOM_EMIT=${AXIOM_EMIT};AXIOM_EDITOR_ASSETS=${CMAKE_BINARY_DIR}/editor;QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox --disable-gpu;AXIOMD_UNDER_TEST=${AXIOMD_UNDER_TEST};XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-home;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-home"
-    TIMEOUT 120)
+    TIMEOUT 45)  # the slowest test takes ~8 s locally; a hang fails in 45 s, not minutes
 endfunction()
 
 axiom_test(tst_linebuffer)

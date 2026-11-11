@@ -266,6 +266,39 @@ impl Workspace {
     }
 }
 
+/// Renames the temp file over the target. On Windows a replace can fail with
+/// access-denied while another process (an indexer, a virus scanner, or a reader
+/// that has not closed its handle yet) still has the destination open; retrying
+/// briefly is what every Windows editor does. On Unix `rename` either succeeds or
+/// fails for a reason that retrying cannot fix.
+fn persist_with_retry(tmp: tempfile::NamedTempFile, abs: &Path, rel: &str) -> Result<(), WsError> {
+    #[cfg(windows)]
+    {
+        let mut tmp = tmp;
+        const ATTEMPTS: u32 = 20;
+        for attempt in 0..ATTEMPTS {
+            match tmp.persist(abs) {
+                Ok(_) => return Ok(()),
+                Err(e)
+                    if e.error.kind() == std::io::ErrorKind::PermissionDenied
+                        && attempt + 1 < ATTEMPTS =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    tmp = e.file;
+                }
+                Err(e) => return Err(WsError::from_io(e.error, rel)),
+            }
+        }
+        unreachable!("the loop either persists or returns")
+    }
+    #[cfg(not(windows))]
+    {
+        tmp.persist(abs)
+            .map_err(|e| WsError::from_io(e.error, rel))?;
+        Ok(())
+    }
+}
+
 fn write_blocking(
     abs: &Path,
     rel: &str,
@@ -324,7 +357,6 @@ fn write_blocking(
         std::fs::set_permissions(tmp.path(), m.permissions())
             .map_err(|e| WsError::from_io(e, rel))?;
     }
-    tmp.persist(abs)
-        .map_err(|e| WsError::from_io(e.error, rel))?;
+    persist_with_retry(tmp, abs, rel)?;
     Ok(version_of(bytes))
 }

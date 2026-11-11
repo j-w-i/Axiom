@@ -90,6 +90,16 @@ jobs:
           # Pin to a released version once one contains the fix (see docs/roadmap/current.md).
           aqtsource: "git+https://github.com/miurahr/aqtinstall.git@master"
 
+      # Tests load Qt DLLs from PATH; another Qt6Core earlier on PATH gives
+      # 0xC0000139 (entry point not found) at process start. Put our Qt first.
+      - name: Windows - Qt DLLs first on PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Qt root: $env:QT_ROOT_DIR"
+          "$env:QT_ROOT_DIR\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "QT_MODULE_DLL=$env:QT_ROOT_DIR\bin\Qt6Core.dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Linux packages (GL, xkbcommon, WebEngine runtime libraries)
         if: runner.os == 'Linux'
         run: |
@@ -128,46 +138,35 @@ jobs:
       # ---- smoke tests, offscreen. Chromium's sandbox cannot start inside the Linux CI
       # container (no user namespaces / setuid helper), so it is disabled on Linux CI ONLY.
       # The application itself never sets this; developers' runs keep the sandbox.
-      # Windows: the Qt test executables time out in this VM. This step records whether they
-      # crash or hang, and whether the daemon and the app itself start, before the suite runs.
-      # Temporary diagnostic (see docs/roadmap/current.md, known defect KD-WIN-1); it never
-      # fails the job.
-      - name: Windows test diagnostics
+      # Windows only: identify which Qt6Core the binaries load and whether the app starts at
+      # all. Cheap (each probe is capped at 15 s) and never fails the job.
+      - name: Windows DLL diagnostics
         if: runner.os == 'Windows'
         shell: pwsh
         continue-on-error: true
         run: |
-          $ErrorActionPreference = 'Continue'
-          function Probe($label, $exe, $argsList, $limitSec) {
-            Write-Host "=== $label : $exe $argsList"
-            if (-not (Test-Path $exe)) { Write-Host "MISSING: $exe"; return }
-            $out = "$env:RUNNER_TEMP/p.out"; $err = "$env:RUNNER_TEMP/p.err"
-            Remove-Item $out,$err -ErrorAction SilentlyContinue
-            $p = Start-Process -FilePath $exe -ArgumentList $argsList -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
-            if (-not $p.WaitForExit($limitSec * 1000)) { Write-Host "HUNG after $limitSec s"; try { $p.Kill() } catch {} } else { Write-Host "exit=$($p.ExitCode)" }
-            Write-Host "--- stdout"; Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 15
-            Write-Host "--- stderr"; Get-Content $err -ErrorAction SilentlyContinue | Select-Object -First 15
+          Write-Host "QT_ROOT_DIR=$env:QT_ROOT_DIR"
+          Write-Host "Qt6Core first on PATH: $((Get-Command -Name 'Qt6Core.dll' -ErrorAction SilentlyContinue).Source)"
+          Write-Host "Qt6Core in Qt bin: $(Get-Item "$env:QT_ROOT_DIR\bin\Qt6Core.dll" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty VersionInfo | Select-Object -ExpandProperty FileVersion)"
+          foreach ($c in @('axiomd.exe --version', 'build/desktop/axiom.exe --version')) {
+            $exe, $rest = $c -split ' ', 2
+            $p = Start-Process -FilePath $exe -ArgumentList $rest -PassThru -NoNewWindow -RedirectStandardOutput "$env:RUNNER_TEMP/o" -RedirectStandardError "$env:RUNNER_TEMP/e"
+            if (-not $p.WaitForExit(15000)) { Write-Host "$c HUNG"; try { $p.Kill() } catch {} } else { Write-Host "$c exit=$($p.ExitCode)" }
+            Get-Content "$env:RUNNER_TEMP/e" -ErrorAction SilentlyContinue | Select-Object -First 5
           }
-          Probe 'daemon version' 'target/debug/axiomd.exe' '--version' 20
-          Probe 'app version (no display needed)' 'build/desktop/axiom.exe' '--version' 20
-          Probe 'qt test, no test functions (startup only)' 'build/desktop/tst_assethandler.exe' '-functions' 20
-          Probe 'qt test, assethandler' 'build/desktop/tst_assethandler.exe' '' 25
-          Write-Host "=== Qt bin on PATH:"; ($env:PATH -split ';' | Where-Object { $_ -like '*Qt*' })
-          Write-Host "=== webengine dll present:"
-          Get-ChildItem -Path (($env:PATH -split ';' | Where-Object { $_ -like '*Qt*' }) | Select-Object -First 1) -Filter 'Qt6WebEngine*.dll' -ErrorAction SilentlyContinue | Select-Object -First 3 Name
 
       - name: Test (Linux)
         if: runner.os == 'Linux'
         env:
           QTWEBENGINE_DISABLE_SANDBOX: "1"
           AXIOM_SCREENSHOT_DIR: ${{ github.workspace }}/build/screenshots
-        run: ctest --test-dir build/desktop --output-on-failure
+        run: ctest --test-dir build/desktop --output-on-failure --stop-on-failure --timeout 45
       - name: Test (macOS, Windows)
         if: runner.os != 'Linux'
         env:
           AXIOM_SCREENSHOT_DIR: ${{ github.workspace }}/build/screenshots
         shell: bash
-        run: ctest --test-dir build/desktop --output-on-failure
+        run: ctest --test-dir build/desktop --output-on-failure --stop-on-failure --timeout 45
 
       - name: Upload logs and screenshots
         if: failure()
