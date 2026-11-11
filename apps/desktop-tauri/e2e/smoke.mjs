@@ -3,27 +3,42 @@
 // axiomd, driven through WebDriver. Covers the prototype's ten demonstration
 // points (prototype-plan.md §Demonstrations) and writes screenshots.
 //
-// Usage: node e2e/smoke.mjs   (after scripts/e2e.sh has started Xvfb + tauri-driver)
-// Env:   AXIOM_TAURI_APP, AXIOMD_UNDER_TEST, TAURI_DRIVER_URL, AXIOM_SCREENSHOT_DIR
+// Usage: node e2e/runner.mjs   (starts a private X server on Linux, then this)
+// Env:   AXIOM_TAURI_APP (built with --features e2e), AXIOMD_UNDER_TEST,
+//        AXIOM_SCREENSHOT_DIR, AXIOM_E2E_LOG
 
-import { findDescendantsByName, findWebContentProcesses, readProcessTable } from "./processes.mjs";
+import { findDescendantsByName, findWebContentProcesses, killNow, readProcessTable } from "./processes.mjs";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Keys, WebDriver } from "./webdriver.mjs";
+import { Keys, PROVIDER, TRUSTED_INPUT, WebDriver, appLogger } from "./webdriver.mjs";
+
+// The app's command modifier: Cmd on macOS, Ctrl elsewhere (App.tsx IS_MAC;
+// Monaco uses the same rule for Ctrl/Cmd+S and Ctrl/Cmd+Home).
+const MOD = process.platform === "darwin" ? Keys.META : Keys.CTRL;
 
 const here = import.meta.dirname;
 const repo = resolve(here, "../../..");
-const APP = process.env.AXIOM_TAURI_APP ?? join(repo, "target/release/axiom-tauri");
-const DAEMON = process.env.AXIOMD_UNDER_TEST ?? join(repo, "target/debug/axiomd");
-const DRIVER = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
+const EXE = process.platform === "win32" ? ".exe" : "";
+const APP = process.env.AXIOM_TAURI_APP ?? join(repo, `target/release/axiom-tauri${EXE}`);
+const DAEMON = process.env.AXIOMD_UNDER_TEST ?? join(repo, `target/debug/axiomd${EXE}`);
 const SHOTS = process.env.AXIOM_SCREENSHOT_DIR ?? join(tmpdir(), "axiom-tauri-shots");
 mkdirSync(SHOTS, { recursive: true });
+// The app's own stderr (the host's `[axiomd]` and `[recovery]` lines), kept in
+// memory for assertions and appended to a file for CI artifacts.
+const appLog = [];
+const onLog = appLogger("smoke", (line) => appLog.push(line));
 
 const results = [];
+const skipped = [];
 function check(name, ok, detail = "") {
   results.push({ name, ok, detail });
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? " — " + detail : ""}`);
+}
+/** A check that cannot be performed on this platform: reported, never counted as passed. */
+function notRun(name, reason) {
+  skipped.push({ name, reason });
+  console.log(`N/A   ${name} — ${reason}`);
 }
 
 const dataDir = mkdtempSync(join(tmpdir(), "axiom-tauri-e2e-data-"));
@@ -43,7 +58,7 @@ const docsTab = (path, dirty) =>
 const appExpr = "window.__axiom";
 
 async function launch() {
-  return WebDriver.start(DRIVER, APP, ["--daemon", DAEMON, "--data-dir", dataDir]);
+  return WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", dataDir], {}, onLog);
 }
 
 async function shot(wd, name) {
@@ -65,7 +80,7 @@ function killWebContentProcess(appPid) {
   if (victims.length === 0) {
     throw new Error(`no web content process under app ${appPid}; none found in the process table`);
   }
-  for (const pid of victims) process.kill(pid, "SIGKILL");
+  for (const pid of victims) killNow(pid);
   return victims;
 }
 
@@ -77,15 +92,6 @@ const alive = (pid) => {
     return false;
   }
 };
-
-function readDriverLog() {
-  if (!process.env.TAURI_DRIVER_LOG) return "";
-  try {
-    return readFileSync(process.env.TAURI_DRIVER_LOG, "utf8");
-  } catch {
-    return "";
-  }
-}
 
 /**
  * Waits until the host has noticed the dead content process and loaded a new
@@ -99,7 +105,7 @@ async function waitForRecovery(appPid, before, killed, ms) {
   let logged = false;
   while (Date.now() < deadline) {
     newPids = contentProcessesOf(appPid).filter((p) => !before.includes(p) && !killed.includes(p));
-    logged = readDriverLog().includes("[recovery]");
+    logged = appLog.some((l) => l.includes("[recovery]"));
     if (newPids.length > 0 && logged) break;
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -110,7 +116,7 @@ async function waitForRecovery(appPid, before, killed, ms) {
     appAlive: alive(appPid),
     // The daemon is a child of the app: it must still be *this* app's daemon,
     // not one belonging to another instance (or to a developer's terminal).
-    daemonAlive: findDescendantsByName(readProcessTable(), appPid, /^axiomd/i).length > 0,
+    daemonAlive: findDescendantsByName(readProcessTable(), appPid, /^axiomd(\.exe)?$/i).length > 0,
   };
 }
 
@@ -161,13 +167,25 @@ try {
   check("4a file opens in Monaco with syntax colouring", coloured >= 2, `${coloured} token classes`);
   await shot(wd, "04-editor-dark");
   await wd.click(await wd.find(".monaco-editor .view-lines"));
-  await wd.chord(Keys.CTRL, "\uE011"); // Ctrl+Home
+  await wd.chord(MOD, "\uE011"); // Ctrl+Home
+  // Count how the keystrokes reach the page: trusted (OS-level, WebKitWebDriver)
+  // or synthetic (the embedded driver dispatches them by script).
+  await wd.exec(`window.__keyTrust = []; document.addEventListener('keydown', (e) => window.__keyTrust.push(e.isTrusted), true)`);
   await wd.keys([..."// edited", "\uE007"]);
   await wd.waitFor(`return document.querySelector('[data-path="src/main.rs"][role=tab]')?.dataset.dirty === 'true'`, [], 5000, "dirty tab");
-  check("4b typing with real key events marks the tab dirty", true);
+  const trust = await wd.exec(`return window.__keyTrust`);
+  const allTrusted = trust.length > 0 && trust.every(Boolean);
+  if (TRUSTED_INPUT) {
+    check("4b typing with real (trusted) key events marks the tab dirty", allTrusted, `${trust.length} keydown events, all trusted=${allTrusted}`);
+  } else {
+    // The edit itself is still asserted byte-for-byte by check 5; what this
+    // server cannot prove is that the events came from the OS.
+    check("4b typing marks the tab dirty", true, `${trust.length} keydown events (synthetic: ${PROVIDER} driver)`);
+    notRun("4b' typing with trusted key events", `the ${PROVIDER} WebDriver dispatches keys by script; covered on Linux and by the manual protocol`);
+  }
 
   // ---- 5. save through the daemon (Ctrl+S inside Monaco) -----------------------
-  await wd.chord(Keys.CTRL, "s");
+  await wd.chord(MOD, "s");
   await wd.waitFor(`return document.querySelector('[data-path="src/main.rs"][role=tab]')?.dataset.dirty === 'false'`, [], 5000, "clean after Ctrl+S");
   const onDisk = readFileSync(join(ws, "src", "main.rs"), "utf8");
   check("5 Ctrl+S saves through fs/writeFile; bytes on disk match", onDisk === '// edited\nfn main() {\n    println!("hello");\n}\n', JSON.stringify(onDisk.slice(0, 30)));
@@ -181,7 +199,7 @@ try {
   await wd.waitFor(`return document.querySelector('[data-path="src/main.rs"][role=tab]')?.dataset.dirty === 'true'`, [], 5000, "dirty again");
   writeFileSync(join(ws, "src", "main.rs"), "fn main() { /* theirs */ }\n");
   await wd.waitFor(`return document.querySelector('[data-path="src/main.rs"][role=tab]')?.textContent.includes('changed on disk')`, [], 5000, "changed-on-disk badge");
-  await wd.chord(Keys.CTRL, "s");
+  await wd.chord(MOD, "s");
   await wd.waitFor(`return document.querySelector('[data-testid=conflict-dialog]') !== null`, [], 5000, "conflict dialog");
   await new Promise((r) => setTimeout(r, 400)); // let the 160 ms entry animation finish
   const dlgOpacity = await wd.exec(`return getComputedStyle(document.querySelector('[data-testid=conflict-dialog]')).opacity`);
@@ -205,7 +223,7 @@ try {
   check("7a command streams stdout and stderr distinctly with exit status", okStreams, `${out.length} rows`);
   await shot(wd, "07-output-dark");
   await wd.click(input);
-  await wd.chord(Keys.CTRL, "a");
+  await wd.chord(MOD, "a");
   await wd.keys(["\uE017"]); // Delete: clear the previous command
   await wd.keys([..."sleep 30 & sleep 30; wait", Keys.ENTER]);
   await wd.waitFor(`return document.querySelector('[data-testid=stop]') !== null`, [], 5000, "running");
@@ -232,7 +250,7 @@ try {
   // command palette screenshot (10: polish evidence)
   await wd.click(await wd.find(".monaco-editor .view-lines"));
   await wd.exec(`document.activeElement?.blur()`);
-  await wd.chord(Keys.CTRL, "k");
+  await wd.chord(MOD, "k");
   await wd.waitFor(`return document.activeElement?.classList.contains('palette__input')`, [], 3000, "palette input focused");
   await wd.keys([..."theme"]);
   await wd.waitFor(`return document.querySelector('.palette__item[aria-selected=true]')?.textContent.includes('Theme')`, [], 3000, "palette filters to the theme command");
@@ -296,21 +314,35 @@ try {
   );
   await shot(wd, "11a-before-crash-dark");
   const hostPid = await wd.execAsync(`const cb = arguments[arguments.length-1]; window.__axiomHost.appInfo().then(i => cb(i.pid))`);
+  if (hostPid !== wd.pid) {
+    throw new Error(`app_info reports pid ${hostPid}, but the launched process is ${wd.pid}`);
+  }
   const before = contentProcessesOf(hostPid);
-  const victims = killWebContentProcess(hostPid);
-  const tCrash = Date.now();
-  // The page is gone; the next calls must not be made on this session.
-  const recovered = await waitForRecovery(hostPid, before, victims, 45000);
-  check(
-    "11b the host detects the dead webview and reloads it (new content process)",
-    recovered.reloaded && recovered.logged,
-    `killed ${victims.join(",")}; new content process ${recovered.newPids.join(",") || "none"} after ${Date.now() - tCrash} ms; host logged=${recovered.logged}`,
-  );
-  check(
-    "11c the app and its daemon survive the crash",
-    recovered.appAlive && recovered.daemonAlive,
-    `app alive=${recovered.appAlive} daemon alive=${recovered.daemonAlive}`,
-  );
+  if (process.platform === "darwin" && before.length === 0) {
+    // WKWebView's WebContent process is a launchd-owned XPC service, not a
+    // child of the app, so it cannot be told apart from another app's (see
+    // tests/processes.test.ts). Killing "a" WebContent would be wrong, and
+    // passing without a crash would be a lie: the check is reported as not run.
+    notRun(
+      "11b/11c crash recovery on macOS",
+      "WebContent is not a descendant of the app; no safe way to kill only ours (the host uses the heartbeat on macOS)",
+    );
+  } else {
+    const victims = killWebContentProcess(hostPid);
+    const tCrash = Date.now();
+    // The page is gone; the next calls must not be made on this session.
+    const recovered = await waitForRecovery(hostPid, before, victims, 45000);
+    check(
+      "11b the host detects the dead webview and reloads it (new content process)",
+      recovered.reloaded && recovered.logged,
+      `killed ${victims.join(",")}; new content process ${recovered.newPids.join(",") || "none"} after ${Date.now() - tCrash} ms; host logged=${recovered.logged}`,
+    );
+    check(
+      "11c the app and its daemon survive the crash",
+      recovered.appAlive && recovered.daemonAlive,
+      `app alive=${recovered.appAlive} daemon alive=${recovered.daemonAlive}`,
+    );
+  }
   // The session is dead from here on (its page is gone); nothing else may run.
 } catch (e) {
   check("unexpected failure", false, e instanceof Error ? e.message : String(e));
@@ -330,5 +362,9 @@ try {
 }
 
 const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} checks passed; screenshots in ${SHOTS}`);
+console.log(
+  `\n${results.length - failed.length}/${results.length} checks passed` +
+    (skipped.length ? `, ${skipped.length} not run on ${process.platform}` : "") +
+    `; screenshots in ${SHOTS}`,
+);
 process.exit(failed.length ? 1 : 0);

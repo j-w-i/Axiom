@@ -54,17 +54,20 @@ if [[ ( "$what" == all || "$what" == tauri ) && -f apps/desktop-tauri/package.js
   # dependencies must be present for tsc to resolve monaco-editor's types.
   (cd editor && pnpm install --frozen-lockfile)
   (cd apps/desktop-tauri && pnpm install --frozen-lockfile && pnpm run check && pnpm run build && pnpm run test)
-  step "tauri shell: Rust host (needs the bundle it embeds)"
+  step "tauri shell: Rust host (needs the bundle it embeds), with and without the e2e feature"
   cargo clippy -p axiom-desktop-tauri --all-targets -- -D warnings
-  cargo test -p axiom-desktop-tauri
+  cargo clippy -p axiom-desktop-tauri --all-targets --features e2e -- -D warnings
+  cargo test -p axiom-desktop-tauri   # includes the release guard
 fi
 
 # End-to-end (real app, real webview, real daemon, real input). Needs a private
-# X server + tauri-driver, so it is opt-in: `scripts/check.sh e2e`.
+# X server, so it is opt-in: `scripts/check.sh e2e`. On Linux it runs twice:
+# through WebKitWebDriver (trusted OS-level key events) and through the
+# embedded driver that Windows and macOS CI use, so both paths stay honest.
 if [[ "$what" == e2e ]]; then
   step "tauri shell: end-to-end (headless)"
   cargo build -p axiomd
-  apps/desktop-tauri/scripts/e2e.sh
+  apps/desktop-tauri/scripts/e2e.sh --driver all
 fi
 
 if [[ ( "$what" == all || "$what" == desktop ) && -f apps/desktop/CMakeLists.txt ]]; then

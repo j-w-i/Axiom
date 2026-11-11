@@ -1,179 +1,140 @@
 #!/usr/bin/env node
-// Runs the end-to-end suite on any OS: starts an X server when the platform
-// needs one (Linux: a private Xvfb, never the developer's desktop), starts
-// tauri-driver, runs e2e/smoke.mjs, then cleans everything up.
+// Runs the end-to-end suites on any OS against the app built with the `e2e`
+// Cargo feature, which embeds the WebDriver server: no tauri-driver, no
+// WebKitWebDriver, no msedgedriver. Each suite launches the app itself
+// (e2e/webdriver.mjs) and ends it.
 //
-// Usage: node e2e/runner.mjs [--no-xvfb]
-// Env:   AXIOM_XVFB (path to Xvfb), AXIOM_TAURI_APP, AXIOMD_UNDER_TEST,
-//        AXIOM_SCREENSHOT_DIR, TAURI_DRIVER_LOG
+//   Linux    a private Xvfb, always: an inherited DISPLAY (the developer's
+//            screen) is ignored unless AXIOM_ALLOW_EXISTING_DISPLAY=1
+//   Windows  the session's desktop (CI runner)
+//   macOS    the session's GUI (CI runner)
+//
+// Usage: node e2e/runner.mjs [suite.mjs ...]     (default: smoke, quit, geometry)
+// Env:   AXIOM_TAURI_APP, AXIOMD_UNDER_TEST, AXIOM_SCREENSHOT_DIR, AXIOM_E2E_LOG,
+//        AXIOM_XVFB (path to Xvfb), AXIOM_ALLOW_EXISTING_DISPLAY
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, openSync } from "node:fs";
-import { createServer } from "node:net";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const here = import.meta.dirname;
-const repo = resolve(here, "../..");
-const noXvfb = process.argv.includes("--no-xvfb");
-// Any non-flag argument is an alternative suite (probes, one-off checks); the
-// display, driver and cleanup are the same either way. With none, the default
-// suites run in order: the main one, then quitting with unsaved work (which
-// ends with the app exiting).
-const customSuites = process.argv.filter(
-  (a, i) => i >= 2 && !a.startsWith("--"),
-);
+const repo = resolve(here, "../../..");
+const EXE = process.platform === "win32" ? ".exe" : "";
+
+const customSuites = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const suites = customSuites.length
   ? customSuites
-  : process.env.AXIOM_E2E_SCRIPT
-    ? [process.env.AXIOM_E2E_SCRIPT]
-    : [join(here, "smoke.mjs"), join(here, "quit.mjs"), join(here, "geometry.mjs")];
+  : [join(here, "smoke.mjs"), join(here, "quit.mjs"), join(here, "geometry.mjs")];
+
 const children = [];
+const log = (msg) => console.error(`[e2e] ${msg}`);
 
-function log(msg) {
-  console.error(`[e2e] ${msg}`);
-}
-
-async function freePort() {
-  return new Promise((res, rej) => {
-    const srv = createServer();
-    srv.once("error", rej);
-    srv.listen(0, "127.0.0.1", () => {
-      const port = srv.address().port;
-      srv.close(() => res(port));
-    });
-  });
-}
-
-function start(cmd, args, env = {}, stdio = "inherit") {
-  const child = spawn(cmd, args, { env: { ...process.env, ...env }, stdio });
-  children.push(child);
-  return child;
-}
-
+/** Ends a child and, on POSIX, everything in its process group (the app a suite launched). */
 function killTree(child) {
-  if (!child || child.exitCode !== null) return;
+  if (!child) return;
   if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-  } else {
+    if (child.exitCode === null && child.signalCode === null) {
+      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    }
+    return;
+  }
+  // The group outlives its leader: a suite that has exited may still have left
+  // its app running, so signal the group even when the suite itself is gone.
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    /* no such group: nothing left */
+  }
+  if (child.exitCode === null && child.signalCode === null) {
     try {
-      process.kill(-child.pid, "SIGTERM"); // own process group
+      child.kill("SIGTERM");
     } catch {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        /* already gone */
-      }
+      /* already gone */
     }
   }
 }
 
-async function waitForHttp(url, ms) {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return true;
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 100));
+function findXvfb() {
+  if (process.env.AXIOM_XVFB) return process.env.AXIOM_XVFB;
+  for (const p of ["/usr/bin/Xvfb", join(repo, ".toolchains/tauri-sysroot/usr/bin/Xvfb")]) {
+    if (existsSync(p)) return p;
   }
-  return false;
+  return null;
+}
+
+async function linuxDisplay() {
+  if (process.env.AXIOM_ALLOW_EXISTING_DISPLAY === "1" && process.env.DISPLAY) {
+    log(`using the existing DISPLAY ${process.env.DISPLAY} (AXIOM_ALLOW_EXISTING_DISPLAY=1)`);
+    return { GDK_BACKEND: "x11" };
+  }
+  const xvfb = findXvfb();
+  if (!xvfb) {
+    throw new Error(
+      "refusing to run: no private X server (install Xvfb, or run apps/desktop-tauri/scripts/sysroot.sh). " +
+        "AXIOM_ALLOW_EXISTING_DISPLAY=1 uses the current display instead.",
+    );
+  }
+  let n;
+  for (let i = 0; i < 40; i++) {
+    const candidate = 90 + Math.floor(Math.random() * 60);
+    if (!existsSync(`/tmp/.X11-unix/X${candidate}`) && !existsSync(`/tmp/.X${candidate}-lock`)) {
+      n = candidate;
+      break;
+    }
+  }
+  if (n === undefined) throw new Error("no free X display number");
+  const x = spawn(xvfb, [`:${n}`, "-screen", "0", "1440x900x24", "-nolisten", "tcp", "-extension", "RANDR"], {
+    stdio: "ignore",
+  });
+  children.push(x);
+  for (let i = 0; i < 100 && !existsSync(`/tmp/.X11-unix/X${n}`); i++) {
+    if (x.exitCode !== null) throw new Error(`Xvfb exited with code ${x.exitCode}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  if (!existsSync(`/tmp/.X11-unix/X${n}`)) throw new Error("Xvfb did not start");
+  // Never fall through to the developer's Wayland session.
+  delete process.env.WAYLAND_DISPLAY;
+  delete process.env.WAYLAND_SOCKET;
+  log(`private Xvfb on :${n} (an inherited DISPLAY is ignored)`);
+  return {
+    DISPLAY: `:${n}`,
+    GDK_BACKEND: "x11",
+    XDG_SESSION_TYPE: "x11",
+    // A virtual display has no GPU: keep WebKitGTK off the DMABUF renderer.
+    WEBKIT_DISABLE_DMABUF_RENDERER: "1",
+  };
 }
 
 async function main() {
-  const env = {};
-
-  // ---- display -----------------------------------------------------------------
-  // A test must NEVER put a window on the developer's screen. On Linux that means
-  // always starting our own Xvfb: an inherited DISPLAY (:0, the desktop session)
-  // is ignored unless AXIOM_ALLOW_EXISTING_DISPLAY=1 says otherwise (CI inside
-  // `xvfb-run`, or a deliberate manual run).
-  if (process.platform === "linux") {
-    const allowExisting = process.env.AXIOM_ALLOW_EXISTING_DISPLAY === "1";
-    if (allowExisting && process.env.DISPLAY) {
-      log(`using the existing DISPLAY ${process.env.DISPLAY} (AXIOM_ALLOW_EXISTING_DISPLAY=1)`);
-      env.GDK_BACKEND = "x11";
-    } else {
-      const xvfb = process.env.AXIOM_XVFB ?? (existsSync("/usr/bin/Xvfb") ? "/usr/bin/Xvfb" : null);
-      if (!xvfb) {
-        throw new Error(
-          "refusing to run: no private X server available (install Xvfb, or run " +
-            "apps/desktop-tauri/scripts/sysroot.sh; AXIOM_ALLOW_EXISTING_DISPLAY=1 overrides)",
-        );
-      }
-      let display;
-      for (let i = 0; i < 20; i++) {
-        const n = 90 + Math.floor(Math.random() * 40);
-        if (!existsSync(`/tmp/.X11-unix/X${n}`)) {
-          display = `:${n}`;
-          break;
-        }
-      }
-      if (!display) throw new Error("no free X display number");
-      const x = spawn(xvfb, [display, "-screen", "0", "1440x900x24", "-nolisten", "tcp", "-extension", "RANDR"], {
-        stdio: "ignore",
-      });
-      children.push(x);
-      for (let i = 0; i < 100 && !existsSync(`/tmp/.X11-unix/X${display.slice(1)}`); i++) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      // Wayland must not win over X11, and GTK must not probe DMABUF on a virtual display.
-      Object.assign(env, {
-        DISPLAY: display,
-        GDK_BACKEND: "x11",
-        XDG_SESSION_TYPE: "x11",
-        WEBKIT_DISABLE_DMABUF_RENDERER: "1",
-      });
-      delete process.env.WAYLAND_DISPLAY;
-      log(`private Xvfb on ${display} (DISPLAY from the environment is ignored)`);
-    }
+  const app = process.env.AXIOM_TAURI_APP ?? join(repo, `target/release/axiom-tauri${EXE}`);
+  if (!existsSync(app)) {
+    throw new Error(`the app is not built at ${app}; run: cargo build --release -p axiom-desktop-tauri --features e2e`);
   }
+  const env = process.platform === "linux" ? await linuxDisplay() : {};
+  // One app log per run (the host's stderr), uploaded by CI on failure.
+  const appLog = process.env.AXIOM_E2E_LOG ?? join(tmpdir(), "axiom-tauri-e2e-app.log");
+  mkdirSync(dirname(appLog), { recursive: true });
+  writeFileSync(appLog, "");
 
-  // ---- driver + suites ------------------------------------------------------------
-  // One tauri-driver per suite: WebKitWebDriver keeps a single session, and the
-  // crash test deliberately leaves its session behind (the page it was bound to
-  // is dead), so a shared driver would refuse the next suite with
-  // "Maximum number of active sessions".
-  const logPath = process.env.TAURI_DRIVER_LOG ?? join(tmpdir(), "axiom-tauri-driver.log");
   let code = 0;
   for (const suitePath of suites) {
-    const driverPort = await freePort();
-    const logFd = openSync(logPath, "w");
-    const driver = spawn("tauri-driver", ["--port", String(driverPort), "--native-port", String(driverPort + 1)], {
-      env: { ...process.env, ...env },
-      stdio: ["ignore", logFd, logFd],
-    });
-    children.push(driver);
-    driver.on("error", (e) => log(`tauri-driver could not start: ${e.message}`));
-
-    const ready = await waitForHttp(`http://127.0.0.1:${driverPort}/status`, 15000);
-    if (!ready) {
-      log(`tauri-driver did not answer on port ${driverPort}; see ${logPath}`);
-      code = 1;
-    } else {
-      log(`suite: ${suitePath} (driver ${driverPort}, app log ${logPath})`);
-      const suiteCode = await new Promise((res) => {
-        const suite = spawn(process.execPath, [suitePath], {
-          env: {
-            ...process.env,
-            ...env,
-            TAURI_DRIVER_URL: `http://127.0.0.1:${driverPort}`,
-            TAURI_DRIVER_LOG: logPath,
-          },
-          stdio: "inherit",
-        });
-        children.push(suite);
-        suite.on("exit", (c) => res(c ?? 1));
+    log(`suite: ${suitePath}`);
+    const suiteCode = await new Promise((resolveExit) => {
+      const suite = spawn(process.execPath, [suitePath], {
+        env: { ...process.env, ...env, AXIOM_TAURI_APP: app, AXIOM_E2E_LOG: appLog },
+        stdio: "inherit",
+        // Own process group on POSIX, so a failing suite cannot leave its app behind.
+        detached: process.platform !== "win32",
       });
-      if (suiteCode !== 0) code = suiteCode;
-    }
-    // Release this driver (and its native driver) before the next suite.
-    killTree(driver);
-    children.splice(children.indexOf(driver), 1);
-    await new Promise((r) => setTimeout(r, 500));
+      children.push(suite);
+      suite.on("exit", (c) => resolveExit(c ?? 1));
+    });
+    if (suiteCode !== 0) code = suiteCode;
+    // Anything the suite left running (its app after a crash check) ends here.
+    killTree(children.pop());
   }
+  log(`app log: ${appLog}`);
   return code;
 }
 
@@ -183,13 +144,6 @@ try {
 } catch (e) {
   log(e instanceof Error ? e.message : String(e));
 } finally {
-  // The crash test deliberately leaves the app running after its session dies.
-  spawnSync(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/IM", "axiom-tauri.exe", "/F"], { stdio: "ignore" });
-  } else {
-    spawnSync("pkill", ["-f", `${repo}/target/release/axiom-tauri`], { stdio: "ignore" });
-  }
   for (const c of children.reverse()) killTree(c);
 }
 process.exit(exitCode);

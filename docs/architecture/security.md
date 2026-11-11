@@ -136,6 +136,27 @@ Axiom uses three distinct words and the UI must too:
 - The editor bundle pins exact npm versions with a lockfile; Rust uses
   `Cargo.lock`; `cargo deny` (licences + advisories) is added in M1-CI-001.
 
+
+## Test-only code in the desktop shell
+
+The end-to-end suites drive the app through an **embedded W3C WebDriver
+server** (`tauri-plugin-wdio-webdriver`, MIT, pinned `=2.0.0-next.0`). It can
+run arbitrary JavaScript in the page, so it is treated as a capability that
+must never reach a user:
+
+- It is an **optional** dependency, enabled only by the `e2e` Cargo feature;
+  the default feature set does not include it.
+- It listens on **127.0.0.1** only (verified in its source and with `ss` on a
+  running instance), on a port the test harness chooses.
+- It registers **no IPC commands** and no capability permissions, so the
+  page's command surface (`capabilities/main.json`, `tests/surface.rs`) is the
+  same with and without it.
+- `src-tauri/tests/release_guard.rs` fails if the manifest or the resolved
+  dependency graph of a default build includes it (shown to fail by enabling
+  it in `default`).
+- `scripts/bundle.sh` never passes a feature and **refuses to package** a
+  binary that contains the server (shown to detect an `e2e` build).
+
 ## Known gaps (tracked, not hidden)
 
 - M1 has no isolation at all for tasks: equivalent to a terminal.

@@ -5,16 +5,16 @@
 // per-machine state the Qt shell kept in QSettings), so this needs a real
 // relaunch: set a size, quit through the app's own path, start again, read it back.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { WebDriver } from "./webdriver.mjs";
+import { WebDriver, appLogger } from "./webdriver.mjs";
 
 const here = import.meta.dirname;
 const repo = resolve(here, "../../..");
-const APP = process.env.AXIOM_TAURI_APP ?? join(repo, "target/release/axiom-tauri");
-const DAEMON = process.env.AXIOMD_UNDER_TEST ?? join(repo, "target/debug/axiomd");
-const DRIVER = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
+const EXE = process.platform === "win32" ? ".exe" : "";
+const APP = process.env.AXIOM_TAURI_APP ?? join(repo, `target/release/axiom-tauri${EXE}`);
+const DAEMON = process.env.AXIOMD_UNDER_TEST ?? join(repo, `target/debug/axiomd${EXE}`);
 
 const results = [];
 function check(name, ok, detail = "") {
@@ -22,15 +22,14 @@ function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? " — " + detail : ""}`);
 }
 
-// One data dir for both launches, and one config dir so window.json survives.
+// One data dir for both launches. With --data-dir the host keeps window.json
+// there (not in the user's profile), so this works and stays isolated on every OS.
 const data = mkdtempSync(join(tmpdir(), "axiom-geom-data-"));
-const config = join(data, "config");
-const env = { XDG_CONFIG_HOME: config };
 
 const TARGET = { width: 1000, height: 700, x: 40, y: 40 };
 
 async function launch() {
-  const wd = await WebDriver.start(DRIVER, APP, ["--daemon", DAEMON, "--data-dir", data], env);
+  const wd = await WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", data], {}, appLogger("geometry"));
   await wd.waitFor(`return document.querySelector('[data-testid=status]')?.dataset.state === 'ready'`, [], 20000, "connected");
   return wd;
 }
@@ -57,19 +56,16 @@ try {
   // Restore the target size and quit: app_quit saves the geometry.
   await wd.cmd("POST", "/window/rect", TARGET);
   await new Promise((r) => setTimeout(r, 300));
+  // The app exits while answering, so the script's own result never arrives.
   await wd.execAsync(`const cb = arguments[arguments.length-1]; window.__axiomHost.quit().then(() => cb(true))`).catch(() => {});
-  const gone = Date.now() + 10000;
-  let exited = false;
-  while (Date.now() < gone) {
-    try {
-      await wd.cmd("GET", "/window/rect");
-    } catch {
-      exited = true;
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  check("3 the app exits when asked", exited);
+  const exited = await wd.waitForExit(10000);
+  const code = wd.exitCode;
+  check(
+    "3 the app exits when asked" + (code === undefined ? "" : " cleanly"),
+    exited && (code === undefined || code === 0),
+    `exited=${exited} code=${code ?? "n/a (launched by WebKitWebDriver)"}`,
+  );
+  check("3b the geometry was written to the data directory", existsSync(join(data, "window.json")));
   try {
     await wd.quit();
   } catch {

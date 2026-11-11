@@ -17,7 +17,7 @@ and in CI. A task is not Tested until it passes.
 | Web design guard | No literal colours, both themes define every token, WCAG AA contrast | `apps/desktop-tauri/tests/tokens.test.ts` | — |
 | Shell component (Qt) | C++ models and `DaemonClient` against the real daemon | `apps/desktop/tests/tst_*.cpp` (Qt Test, offscreen) | a display |
 | GUI smoke (Qt) | The real window, real editor bundle, real daemon: open → type → save → run | `apps/desktop/tests/tst_smoke_*.cpp` (offscreen) | a display |
-| End-to-end (Tauri) | The real Tauri app, real webview, real daemon, real key events, driven over WebDriver | `apps/desktop-tauri/e2e/smoke.mjs` (`tauri-driver`) | Linux/Windows: WebDriver; macOS: embedded driver |
+| End-to-end (Tauri) | The real Tauri app, real webview, real daemon, real key events, driven over WebDriver: open, edit, save, conflicts, commands, themes, palette, restore, quit with unsaved work, geometry, webview-crash recovery | `apps/desktop-tauri/e2e/{smoke,quit,geometry}.mjs` through `e2e/runner.mjs`; two WebDriver servers, see below | a model; macOS crash kill (see below) |
 | Provider contract (M2) | Every manifest under `providers/` | `crates/env/tests/provider_contract.rs` | network (except opt-in install tests) |
 | Agent (M3) | Loop, tools, permissions, checkpoints with a scripted model | `crates/agent/tests/` | network, a real model |
 | Inspection (M5) | Select → source → patch → verify on fixture apps with known element→source maps | `tests/fixtures/inspect-*`, `crates/inspect/tests/` | a real model |
@@ -50,6 +50,35 @@ and in CI. A task is not Tested until it passes.
 8. **Flakiness is a defect.** New async/IO tests are looped (10–20 runs)
    before the task is reported Tested.
 
+### End-to-end: two WebDriver servers, and what each proves
+
+| Server | Where | Key events | How it is selected |
+|--------|-------|-----------|--------------------|
+| `external`: tauri-driver → WebKitWebDriver | Linux | **trusted** (WebKit's own automation) | default on Linux |
+| `embedded`: `tauri-plugin-wdio-webdriver`, compiled into the app under the `e2e` Cargo feature, 127.0.0.1 only | Linux, Windows, macOS | synthetic (`isTrusted === false`), dispatched by script | default on Windows and macOS |
+
+Linux runs the suites through **both** (`scripts/e2e.sh --driver all`, also in
+CI), so the embedded path is compared with the trusted one on every change.
+Check 4b reports which kind of input it saw; on the embedded server the
+trusted-input claim is reported **N/A**, never as a pass. The input fidelity
+of a server is measured, not assumed: `e2e/input-probe.mjs` types every
+printable ASCII character into Monaco, saves, and compares the bytes on disk.
+(That probe found that `tauri-plugin-wdio-webdriver` 1.5.1 sent `keyCode` =
+character code, so `p` arrived as F1 and opened Monaco's command palette
+mid-typing; fixed upstream in 2.0.0-next.0, which is what the app pins.)
+
+The crash check (11) kills the webview's content process. Linux and Windows
+find it as a descendant of the app (`e2e/processes.mjs`, unit-tested for all
+three OSes in `tests/processes.test.ts`). On macOS WebContent is a
+launchd-owned XPC service, not a descendant, and cannot be told apart from
+another app's: the check is reported **N/A** there rather than killing an
+arbitrary process. The macOS host reacts to WebKit's own termination callback
+(`on_web_content_process_terminate`), the same recovery path as Linux.
+
+The embedded server must never ship: `src-tauri/tests/release_guard.rs` fails
+if a default build depends on it, and `scripts/bundle.sh` refuses to package a
+binary that contains it.
+
 ## What CI runs
 
 | Job | OS | Added by |
@@ -57,7 +86,7 @@ and in CI. A task is not Tested until it passes.
 | `rust`: fmt, clippy, tests, schema check (+ deps matrix, cargo-deny, task board) | Linux, macOS, Windows | exists; guards by M1-CI-001 |
 | `editor`: typecheck, build, unit tests | Linux | M1-EDITOR-001 |
 | `desktop`: build + Qt tests + GUI smoke, offscreen | Linux, macOS, Windows | M1-CI-002 |
-| `tauri`: bridge tests + UI-state tests + token guard + E2E, headless | Linux, macOS, Windows | M1.5 T-09 |
+| `tauri`: typecheck, bundle, UI-state tests (real daemon), token + process-lookup tests, host clippy (with and without `e2e`) and tests incl. the release guard, end-to-end (Linux: both WebDriver servers; Windows, macOS: embedded), packages (deb+rpm / nsis / app) | Linux, macOS, Windows | M1.5 T-09, T-13 |
 
 ## Manual verification
 

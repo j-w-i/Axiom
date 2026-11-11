@@ -544,7 +544,15 @@ struct Geometry {
     maximized: bool,
 }
 
+/// Where the window geometry is kept. With an explicit data directory
+/// (`--data-dir` / `AXIOM_DATA_DIR`) it lives there, next to the daemon's
+/// database, so an isolated instance (tests, a second profile) never reads or
+/// writes the user's real one. Otherwise the per-machine app config dir.
 fn geometry_file(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let state = app.state::<HostState>();
+    if let Some(dir) = &state.data_dir {
+        return Some(dir.join("window.json"));
+    }
     app.path()
         .app_config_dir()
         .ok()
@@ -633,8 +641,25 @@ pub fn run() {
         }),
     );
 
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    // macOS: WKWebView reports a dead WebContent process directly
+    // (webViewWebContentProcessDidTerminate). Tauri's default handler reloads
+    // silently; this one goes through schedule_recovery so the page knows it
+    // was recovered and restores the host-held snapshots - the same path as
+    // the Linux WebKitGTK signal.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        eprintln!("[recovery] the webview process terminated; reloading");
+        let app = webview.app_handle().clone();
+        let h = app.clone();
+        let _ = app.run_on_main_thread(move || schedule_recovery(&h));
+    });
+    // End-to-end builds only: an embedded W3C WebDriver server on 127.0.0.1
+    // (port from TAURI_WEBDRIVER_PORT). Compiled out of every other build.
+    #[cfg(feature = "e2e")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
+    let app = builder
         .manage(HostState {
             bridge: bridge.clone(),
             recovery: Recovery::default(),
