@@ -44,7 +44,7 @@ jobs:
     env:
       # Both the Vitest store tests and the end-to-end suite spawn the real
       # daemon; this is the one this job builds (release, for speed).
-      AXIOMD_UNDER_TEST: ${{ github.workspace }}/target/release/axiomd${{ runner.os == 'Windows' && '.exe' || '' }}
+      AXIOMD_UNDER_TEST: ${{ github.workspace }}/target/release/axiomd${{ matrix.os == 'windows-latest' && '.exe' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
