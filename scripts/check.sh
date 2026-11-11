@@ -21,6 +21,12 @@ if [[ "$what" == all || "$what" == rust ]]; then
   step "schema files are current";     cargo run -q -p axiom-protocol --example export_schema -- --check
   step "task board is consistent";     python3 scripts/tasks.py check
   step "dependency matrix";            python3 scripts/check_deps.py
+  step "CI workflow syntax"
+  if command -v actionlint >/dev/null 2>&1; then
+    actionlint -ignore 'unknown label' .github/workflows/*.yml
+  else
+    echo "SKIPPED: actionlint is not installed (go install github.com/rhysd/actionlint/cmd/actionlint@latest). CI rejects a malformed workflow before any job starts; M1.5 lost a round to that."
+  fi
   step "cargo deny (licences, advisories, bans)"
   if cargo deny --version >/dev/null 2>&1; then
     cargo deny check
@@ -40,6 +46,9 @@ if [[ ( "$what" == all || "$what" == tauri ) && -f apps/desktop-tauri/package.js
   # under .toolchains/ when the -devel packages cannot be installed.
   # shellcheck disable=SC1091
   source apps/desktop-tauri/scripts/env.sh
+  # The shell compiles editor/src directly (ADR-0012 §4): the editor package's
+  # dependencies must be present for tsc to resolve monaco-editor's types.
+  (cd editor && pnpm install --frozen-lockfile)
   (cd apps/desktop-tauri && pnpm install --frozen-lockfile && pnpm run check && pnpm run build && pnpm run test)
 fi
 

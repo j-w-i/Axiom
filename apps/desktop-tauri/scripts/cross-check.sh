@@ -32,13 +32,6 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   rustup target add "${missing[@]}"
 fi
 
-# `externalBin` must exist for the target triple or tauri-build refuses to run.
-# The real daemon is built per OS by CI; an empty placeholder is enough to
-# type-check (and is never shipped: binaries/ is git-ignored).
-mkdir -p "$here/src-tauri/binaries"
-touch "$here/src-tauri/binaries/axiomd-x86_64-apple-darwin"
-touch "$here/src-tauri/binaries/axiomd-x86_64-pc-windows-msvc.exe"
-
 status=0
 cd "$root"
 

@@ -2,7 +2,7 @@
 // Qt suites tst_workspace, tst_documents, tst_tasks and tst_settings so the
 // parity matrix can cite equivalent evidence for both shells.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +54,15 @@ class StringModel implements ModelLike {
   dispose() {}
 }
 
-describe.skipIf(!haveDaemon)("stores against the real daemon", () => {
+// The stores are only meaningful against the real daemon (testing.md §Rules:
+// "fail closed"). A missing binary is a failure with instructions, never a skip.
+describe("stores against the real daemon", () => {
+  beforeAll(() => {
+    if (!haveDaemon) {
+      throw new Error(`axiomd is not built at ${daemonPath()} - run 'cargo build -p axiomd' (scripts/check.sh does it)`);
+    }
+  });
+
   let transport: NodeTransport;
   let app: AppStores;
   let ws: string;

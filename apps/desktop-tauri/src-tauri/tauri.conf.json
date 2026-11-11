@@ -52,9 +52,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "binaries/axiomd"
-    ],
     "shortDescription": "Axiom desktop shell",
     "longDescription": "Axiom: an open-source, cross-platform, LLM-native development platform. The desktop shell presents the Axiom daemon (axiomd), which owns every workspace, file, process and task operation.",
     "linux": {

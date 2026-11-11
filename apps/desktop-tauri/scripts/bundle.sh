@@ -21,4 +21,9 @@ cp "$root/target/$profile/axiomd$ext" "$here/src-tauri/binaries/axiomd-$triple$e
 echo "sidecar: src-tauri/binaries/axiomd-$triple$ext"
 cd "$here"
 [[ $profile == debug ]] && args+=(--debug)
-exec pnpm -s tauri build "${args[@]}"
+# The daemon is a sidecar only in the *package*: keeping `externalBin` in
+# tauri.conf.json would make every `cargo build` (and so clippy and the test
+# suite) depend on a prebuilt binary, which is what broke CI. It is injected
+# here instead, where the sidecar really exists.
+exec pnpm -s tauri build "${args[@]}" \
+  --config '{"bundle":{"externalBin":["binaries/axiomd"]}}'

@@ -21,6 +21,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@v2
+      # The Tauri host is a workspace member, so clippy and the tests build the
+      # GTK/WebKit sys crates and need their pkg-config files.
+      - name: Linux webview dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev librsvg2-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # crates/desktop-bridge's tests spawn the real daemon binary.
@@ -72,6 +81,12 @@ jobs:
       # their tests run in the `rust` job. Here: the shell itself.
       - run: cargo build --release -p axiomd --manifest-path ../../Cargo.toml
       - run: pnpm install --frozen-lockfile
+      # The shell compiles editor/src directly (ADR-0012 §4), so the editor
+      # package's own dependencies (monaco-editor and its types) must be
+      # installed too - tsc resolves types relative to the importing file.
+      - name: Editor package dependencies
+        working-directory: editor
+        run: pnpm install --frozen-lockfile
       - run: pnpm run check          # tsc --noEmit
       - run: pnpm run build          # vite build (the bundle the app embeds)
       - run: pnpm run test           # Vitest: UI state against the real axiomd + token guards
