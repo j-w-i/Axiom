@@ -84,6 +84,11 @@ jobs:
           arch: ${{ matrix.os == 'windows-latest' && 'win64_msvc2022_64' || '' }}
           modules: qtwebengine qtwebchannel qtwebsockets qtpositioning
           cache: true
+          # The released aqtinstall (3.3.0) cannot read the Windows 6.12.0 repository layout
+          # (qt6_6120_msvc2022_64) and fails with "Failed to locate XML data". The master
+          # branch can, and installs qtwebengine from the separate extensions repository.
+          # Pin to a released version once one contains the fix (see docs/roadmap/current.md).
+          aqtsource: "git+https://github.com/miurahr/aqtinstall.git@master"
 
       - name: Linux packages (GL, xkbcommon, WebEngine runtime libraries)
         if: runner.os == 'Linux'

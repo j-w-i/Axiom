@@ -110,16 +110,22 @@ inline bool runningAsRoot()
 #endif
 }
 
+// Human-readable list of this process's descendants (pid, parent, command line), for failure
+// messages: a test that cannot find a process must say what it saw instead.
+inline QString describeDescendants();
+
 // Direct and indirect child processes of this process whose command line contains `needle`.
 // Linux: /proc. Windows: a toolhelp snapshot. macOS: `ps`. Only descendants of THIS process
 // are ever returned, so a test cannot touch the user's own browsers or other applications.
-inline QList<qint64> descendantsMatching(const QByteArray &needle)
+struct ProcInfo
 {
-    struct P
-    {
-        qint64 parent;
-        QByteArray cmd;
-    };
+    qint64 parent;
+    QByteArray cmd;
+};
+
+inline QHash<qint64, ProcInfo> snapshotProcesses()
+{
+    using P = ProcInfo;
     QHash<qint64, P> procs;
 #if defined(Q_OS_LINUX)
     for (const QString &e : QDir(QStringLiteral("/proc")).entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
@@ -151,28 +157,57 @@ inline QList<qint64> descendantsMatching(const QByteArray &needle)
     ps.start(QStringLiteral("/bin/ps"), { QStringLiteral("-axo"), QStringLiteral("pid=,ppid=,command=") });
     if (ps.waitForFinished(5000)) {
         for (const QByteArray &line : ps.readAllStandardOutput().split('\n')) {
-            const QList<QByteArray> f = line.trimmed().split(' ');
-            if (f.size() < 3)
+            // `ps` right-aligns its columns, so fields are separated by runs of spaces.
+            const QByteArray t = line.trimmed();
+            const qsizetype a = t.indexOf(' ');
+            if (a <= 0)
                 continue;
-            procs.insert(f.at(0).toLongLong(), { f.at(1).toLongLong(), line });
+            const QByteArray rest = t.mid(a).trimmed();
+            const qsizetype b = rest.indexOf(' ');
+            if (b <= 0)
+                continue;
+            bool okPid = false, okPpid = false;
+            const qint64 pid = t.left(a).toLongLong(&okPid);
+            const qint64 ppid = rest.left(b).toLongLong(&okPpid);
+            if (okPid && okPpid)
+                procs.insert(pid, { ppid, rest.mid(b).trimmed() });
         }
     }
 #endif
+    return procs;
+}
+
+inline bool isDescendant(const QHash<qint64, ProcInfo> &procs, qint64 pid)
+{
     const qint64 me = QCoreApplication::applicationPid();
-    QList<qint64> out;
-    for (auto it = procs.constBegin(); it != procs.constEnd(); ++it) {
-        if (!it.value().cmd.contains(needle))
-            continue;
-        qint64 pid = it.key();
-        for (int depth = 0; depth < 16 && procs.contains(pid); ++depth) {
-            pid = procs.value(pid).parent;
-            if (pid == me) {
-                out << it.key();
-                break;
-            }
-        }
+    for (int depth = 0; depth < 32 && procs.contains(pid); ++depth) {
+        pid = procs.value(pid).parent;
+        if (pid == me)
+            return true;
     }
+    return false;
+}
+
+inline QList<qint64> descendantsMatching(const QByteArray &needle)
+{
+    const QHash<qint64, ProcInfo> procs = snapshotProcesses();
+    QList<qint64> out;
+    for (auto it = procs.constBegin(); it != procs.constEnd(); ++it)
+        if (it.value().cmd.contains(needle) && isDescendant(procs, it.key()))
+            out << it.key();
     return out;
+}
+
+inline QString describeDescendants()
+{
+    const QHash<qint64, ProcInfo> procs = snapshotProcesses();
+    QStringList lines;
+    lines << QStringLiteral("this process: %1; %2 processes visible").arg(QCoreApplication::applicationPid()).arg(procs.size());
+    for (auto it = procs.constBegin(); it != procs.constEnd(); ++it)
+        if (isDescendant(procs, it.key()))
+            lines << QStringLiteral("  pid %1 ppid %2: %3").arg(it.key()).arg(it.value().parent)
+                         .arg(QString::fromUtf8(QByteArray(it.value().cmd).replace('\0', ' ').left(160)));
+    return lines.join(QLatin1Char('\n'));
 }
 
 } // namespace TestSupport

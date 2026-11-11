@@ -50,6 +50,10 @@ class TstSmokeEditor : public QObject
         f.write(data);
     }
 
+    // The platform's "command" modifier as Monaco's CtrlCmd sees it: Qt maps ControlModifier to
+    // the Command key on macOS and to Ctrl elsewhere, which is the one Monaco binds Save to.
+    static constexpr Qt::KeyboardModifier SaveModifier = Qt::ControlModifier;
+
     // Delivers to the item with active focus, as E1 does: WebEngine forwards input from its focus proxy.
     void key(QQuickWindow *w, int k, Qt::KeyboardModifiers mods, const QString &text)
     {
@@ -142,8 +146,13 @@ private slots:
 
         // ---- Ctrl+S, handled by Monaco's own keybinding
         key(w, Qt::Key_S, Qt::ControlModifier, QString());
-        QVERIFY2(waitFor([&] { return readFile(m_ws.path() + "/src/main.rs").contains("//K"); }),
-                 "Ctrl+S did not write the file");
+        const bool savedByKey = waitFor([&] { return readFile(m_ws.path() + "/src/main.rs").contains("//K"); }, 8000);
+        if (!savedByKey)
+            qWarning().noquote() << "Ctrl+S diagnostics: dirty =" << docs->isDirty("src/main.rs")
+                                 << "editorReady =" << docs->editorReady()
+                                 << "cursor =" << docs->cursorText()
+                                 << "file =" << readFile(m_ws.path() + "/src/main.rs").left(80);
+        QVERIFY2(savedByKey, "Ctrl+S did not write the file (the keybinding did not reach Monaco)");
         QVERIFY2(waitFor([&] { return !docs->isDirty("src/main.rs"); }), "document stayed dirty after the save");
         QVERIFY(readFile(m_ws.path() + "/src/main.rs").contains("fn main()"));
         // The cursor position reached the status text.
@@ -212,7 +221,7 @@ private slots:
 
         // Kill the real renderer process: a child of this one started with --type=renderer.
         const QList<qint64> renderers = TestSupport::descendantsMatching("--type=renderer");
-        QVERIFY2(!renderers.isEmpty(), "no Chromium renderer process found to kill");
+        QVERIFY2(!renderers.isEmpty(), qPrintable("no Chromium renderer process found to kill; descendants seen:\n" + TestSupport::describeDescendants()));
         for (qint64 pid : renderers)
             TestSupport::killProcess(pid);
         QVERIFY2(waitFor([&] { return docs->rendererCrashed(); }, 15000),
