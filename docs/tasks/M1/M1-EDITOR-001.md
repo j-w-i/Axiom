@@ -1,8 +1,8 @@
 ---
 id: M1-EDITOR-001
 title: Build the editor surface package (Monaco + bridge)
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: []
 order: 14
 scope: editor/, scripts/check.sh (editor section only), .github/workflows/ci.yml (add editor job)

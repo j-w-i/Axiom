@@ -21,18 +21,18 @@ started.** No product code exists yet except the protocol crate.
 | `crates/workspace` | M1-WS-001 tested (42 tests; no watching yet) |
 | `crates/exec` | M1-EXEC-001 tested (23 tests, Linux only; Windows compiles, untested) |
 | `axiomd` | Not started |
-| `editor/`, `apps/desktop/` | Not started |
+| `editor/` | M1-EDITOR-001 tested (43 Vitest tests; dist 14 MB) |
+| `apps/desktop/` | Not started |
 | CI | Workflow file exists for the Rust job; **never run** (no remote yet) |
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-11-M1-EXEC-001.md`
+`agents/handoffs/2026-11-11-M1-EDITOR-001.md`
 
 ## Next task
 
-Run `scripts/tasks.py next`. At the time of writing: **M1-STORE-001**; wave A
-(`M1-STORE-001`, `M1-WS-001`, `M1-EXEC-001`, `M1-EDITOR-001`) is ready to run
-in parallel (`M1-RPC-001` is tested, awaiting review).
+Run `scripts/tasks.py next`. At the time of writing: wave A (RPC, STORE, WS-001, EXEC, EDITOR) is tested and awaiting
+review; next planned: `M1-WS-002`, `M1-DAEMON-001`, `M1-CI-001`, `M1-SHELL-001`.
 
 ## Blockers
 

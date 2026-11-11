@@ -25,5 +25,22 @@ jobs:
       - run: cargo test --workspace
       - run: cargo run -q -p axiom-protocol --example export_schema -- --check
 
-  # The editor and desktop jobs are added by tasks M1-EDITOR-001 and M1-CI-002
-  # once those directories exist. Do not add placeholder jobs here.
+  editor:
+    name: Editor (ubuntu-latest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: editor/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - run: pnpm run build
+      - run: pnpm run test
+
+  # The desktop job is added by task M1-CI-002 once apps/desktop exists.
+  # Do not add placeholder jobs here.

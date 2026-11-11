@@ -35,9 +35,11 @@ Debian/Ubuntu `sudo apt install libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-de
 ```sh
 scripts/check.sh          # everything that exists: fmt, clippy, tests, schema freshness, editor, desktop
 scripts/check.sh rust     # Rust only
+scripts/check.sh editor   # editor only: install --frozen-lockfile, check, build, test
 ```
-`check.sh` skips the editor and desktop sections until those directories
-exist. It is the gate for every task and for CI.
+Editor development in a plain browser (fake host, sample document, no Qt):
+`cd editor && pnpm install && pnpm dev`.
+`check.sh` skips the desktop section until `apps/desktop` exists. It is the gate for every task and for CI.
 
 ## Running the app (once M1 exists)
 
