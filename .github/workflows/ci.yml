@@ -138,21 +138,27 @@ jobs:
       # ---- smoke tests, offscreen. Chromium's sandbox cannot start inside the Linux CI
       # container (no user namespaces / setuid helper), so it is disabled on Linux CI ONLY.
       # The application itself never sets this; developers' runs keep the sandbox.
-      # Windows only: identify which Qt6Core the binaries load and whether the app starts at
-      # all. Cheap (each probe is capped at 15 s) and never fails the job.
-      - name: Windows DLL diagnostics
+      # Windows only: pin down where a test executable stops. Each function runs on its own
+      # with a 15 s cap, writing QtTest's log to a file (stdout is lost when a process is
+      # killed). Never fails the job.
+      - name: Windows per-function diagnostics
         if: runner.os == 'Windows'
         shell: pwsh
         continue-on-error: true
         run: |
-          Write-Host "QT_ROOT_DIR=$env:QT_ROOT_DIR"
-          Write-Host "Qt6Core first on PATH: $((Get-Command -Name 'Qt6Core.dll' -ErrorAction SilentlyContinue).Source)"
-          Write-Host "Qt6Core in Qt bin: $(Get-Item "$env:QT_ROOT_DIR\bin\Qt6Core.dll" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty VersionInfo | Select-Object -ExpandProperty FileVersion)"
-          foreach ($c in @('axiomd.exe --version', 'build/desktop/axiom.exe --version')) {
-            $exe, $rest = $c -split ' ', 2
-            $p = Start-Process -FilePath $exe -ArgumentList $rest -PassThru -NoNewWindow -RedirectStandardOutput "$env:RUNNER_TEMP/o" -RedirectStandardError "$env:RUNNER_TEMP/e"
-            if (-not $p.WaitForExit(15000)) { Write-Host "$c HUNG"; try { $p.Kill() } catch {} } else { Write-Host "$c exit=$($p.ExitCode)" }
-            Get-Content "$env:RUNNER_TEMP/e" -ErrorAction SilentlyContinue | Select-Object -First 5
+          $exe = 'build/desktop/tst_daemonclient.exe'
+          $log = "$env:RUNNER_TEMP/q.log"
+          $fx = & $exe -functions 2>&1 | Where-Object { $_ -match '\(\)$' } | ForEach-Object { ($_ -split '\(')[0].Trim() }
+          Write-Host "functions: $($fx -join ', ')"
+          foreach ($f in @('initTestCase') + $fx) {
+            Remove-Item $log -ErrorAction SilentlyContinue
+            $p = Start-Process -FilePath $exe -ArgumentList @($f, '-o', "$log,txt") -PassThru -NoNewWindow
+            if (-not $p.WaitForExit(15000)) {
+              Write-Host "FUNCTION $f : HUNG 15 s (exit would be unknown)"; try { $p.Kill() } catch {}
+            } else {
+              Write-Host "FUNCTION $f : exit=$($p.ExitCode) (0xC0000139=entry point, 0xC0000005=access violation)"
+            }
+            if (Test-Path $log) { Get-Content $log | Select-Object -Last 6 }
           }
 
       - name: Test (Linux)
