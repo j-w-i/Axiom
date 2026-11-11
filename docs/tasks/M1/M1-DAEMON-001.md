@@ -1,8 +1,8 @@
 ---
 id: M1-DAEMON-001
 title: Create the axiomd binary and wire all protocol 0.1 methods
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: [M1-RPC-001, M1-STORE-001, M1-WS-002, M1-EXEC-001]
 order: 30
 scope: crates/axiomd/, Cargo.toml (workspace members and dependencies only); additive fixes in crates/{rpc,store,workspace,exec}/ only as allowed under Failure conditions

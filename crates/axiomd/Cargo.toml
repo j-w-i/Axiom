@@ -1,0 +1,33 @@
+[package]
+name = "axiomd"
+description = "The Axiom daemon: serves protocol 0.1 over stdio by delegating to the service crates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "axiomd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "axiomd"
+path = "src/main.rs"
+
+[dependencies]
+axiom-protocol = { path = "../protocol" }
+axiom-rpc = { path = "../rpc" }
+axiom-store = { path = "../store" }
+axiom-workspace = { path = "../workspace" }
+axiom-exec = { path = "../exec" }
+tokio = { version = "1", features = ["full"] }
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
