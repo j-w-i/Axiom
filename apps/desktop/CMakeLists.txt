@@ -36,6 +36,9 @@ qt_add_qml_module(axiom_ui
     qml/Axiom/Ui/AxListRow.qml
     qml/Axiom/Ui/AxTabButton.qml
     qml/Axiom/Ui/AxComboBox.qml
+    qml/Axiom/Ui/AxCheckBox.qml
+    qml/Axiom/Ui/AxSpinBox.qml
+    qml/Axiom/Ui/AxTextField.qml
     qml/Axiom/Ui/AxBanner.qml
     qml/Axiom/Ui/AxPanelHeader.qml
     qml/Axiom/Ui/AxSplitHandle.qml
@@ -57,6 +60,7 @@ qt_add_qml_module(axiom_app
     qml/Axiom/App/WelcomeView.qml
     qml/Axiom/App/EditorArea.qml
     qml/Axiom/App/OutputPanel.qml
+    qml/Axiom/App/SettingsDialog.qml
 )
 target_link_libraries(axiom_app PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::WebEngineQuick Qt6::WebChannel)
 
@@ -72,6 +76,7 @@ add_library(axiom_core STATIC
   src/models/OpenDocumentsModel.h src/models/OpenDocumentsModel.cpp
   src/models/TaskOutputModel.h src/models/TaskOutputModel.cpp
   src/models/TaskController.h src/models/TaskController.cpp
+  src/models/SettingsStore.h src/models/SettingsStore.cpp
   src/editor/EditorBridge.h src/editor/EditorBridge.cpp
   src/editor/AssetSchemeHandler.h src/editor/AssetSchemeHandler.cpp
   src/editor/EditorSetup.h src/editor/EditorSetup.cpp
@@ -122,5 +127,6 @@ axiom_test(tst_workspace)
 axiom_test(tst_assethandler)
 axiom_test(tst_documents)
 axiom_test(tst_tasks)
+axiom_test(tst_settings)
 axiom_test(tst_smoke_launch axiom_appplugin axiom_uiplugin)
 axiom_test(tst_smoke_editor axiom_appplugin axiom_uiplugin)

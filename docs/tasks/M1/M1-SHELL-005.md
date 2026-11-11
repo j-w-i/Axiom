@@ -1,8 +1,8 @@
 ---
 id: M1-SHELL-005
 title: Settings — theme, editor font, reopen-last
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: [M1-SHELL-003]
 order: 44
 scope: apps/desktop/

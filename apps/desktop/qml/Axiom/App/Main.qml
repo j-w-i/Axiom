@@ -91,6 +91,12 @@ Basic.ApplicationWindow {
             }
             Basic.MenuSeparator {}
             Basic.Action {
+                text: qsTr("&Settings…")
+                shortcut: "Ctrl+,"
+                onTriggered: settingsDialog.open()
+            }
+            Basic.MenuSeparator {}
+            Basic.Action {
                 text: qsTr("&Quit")
                 shortcut: StandardKey.Quit
                 onTriggered: documents.requestQuit()
@@ -220,6 +226,11 @@ Basic.ApplicationWindow {
                         text: qsTr("No folder open")
                         role: "muted"
                     }
+                    // Keeps the header and hint at the top while the tree is hidden.
+                    Item {
+                        Layout.fillHeight: true
+                        visible: !workspace.open
+                    }
                     ExplorerView {
                         id: explorer
                         objectName: "explorerView"
@@ -344,11 +355,20 @@ Basic.ApplicationWindow {
         function onQuitConfirmed() { window.quitting = true; Qt.quit() }
     }
 
-    // ---- the editor follows the OS appearance until settings exist (M1-SHELL-005)
-    function syncAppearance() { documents.setAppearance(Theme.dark, 13, "", false) }
-    Connections { target: Theme; function onDarkChanged() { window.syncAppearance() } }
-    Connections { target: documents; function onEditorReadyChanged() { if (documents.editorReady) window.syncAppearance() } }
-    Component.onCompleted: syncAppearance()
+    // ---- appearance: Theme.dark follows the theme setting; the editor gets resolved values
+    readonly property bool osDark: Qt.styleHints.colorScheme === Qt.Dark
+    readonly property bool wantDark: settings.theme === "dark" || (settings.theme === "system" && osDark)
+    onWantDarkChanged: Theme.dark = wantDark
+    function syncEditor() {
+        documents.setAppearance(Theme.dark, settings.editorFontSize,
+                                settings.editorFontFamily !== "" ? settings.editorFontFamily : Theme.monoFamily,
+                                settings.editorWordWrap)
+    }
+    Connections { target: settings; function onChanged() { window.syncEditor() } }
+    Connections { target: Theme; function onDarkChanged() { window.syncEditor() } }
+    Connections { target: Theme; function onMonoFamilyChanged() { window.syncEditor() } }
+    Connections { target: documents; function onEditorReadyChanged() { if (documents.editorReady) window.syncEditor() } }
+    Component.onCompleted: { Theme.dark = wantDark; syncEditor() }
 
     // ---- conflict: the file changed on disk since it was opened
     AxDialog {
@@ -405,17 +425,25 @@ Basic.ApplicationWindow {
         }
     }
 
+    SettingsDialog { id: settingsDialog }
+
     AxDialog {
         id: aboutDialog
+        objectName: "aboutDialog"
         title: qsTr("About Axiom")
-        AxLabel {
-            text: qsTr("Axiom %1").arg(backend.appVersion)
-            role: "heading"
-        }
-        AxLabel {
-            text: backend.ready ? qsTr("Backend: axiomd %1").arg(backend.serverVersion)
-                                : qsTr("Backend: not connected")
-            role: "muted"
+        AxLabel { text: qsTr("Axiom %1").arg(backend.appVersion); role: "heading" }
+        GridLayout {
+            columns: 2
+            columnSpacing: Theme.space3
+            rowSpacing: Theme.space1
+            AxLabel { text: qsTr("Backend"); role: "muted" }
+            AxLabel { objectName: "aboutBackend"; text: backend.ready ? qsTr("axiomd %1").arg(backend.serverVersion) : qsTr("not connected") }
+            AxLabel { text: qsTr("Protocol"); role: "muted" }
+            AxLabel { objectName: "aboutProtocol"; text: protocolVersionText }
+            AxLabel { text: qsTr("Qt"); role: "muted" }
+            AxLabel { objectName: "aboutQt"; text: qtVersionText }
+            AxLabel { text: qsTr("Data directory"); role: "muted" }
+            AxLabel { objectName: "aboutDataDir"; text: dataDirText; Layout.maximumWidth: 260; elide: Text.ElideMiddle }
         }
     }
 }

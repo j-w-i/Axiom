@@ -2,6 +2,7 @@
 #include "Backend.h"
 #include "daemon/DaemonClient.h"
 #include "models/OpenDocumentsModel.h"
+#include "models/SettingsStore.h"
 #include "models/TaskController.h"
 #include "models/WorkspaceController.h"
 
@@ -40,6 +41,7 @@ public:
     WorkspaceController *workspace() { return &m_workspace; }
     OpenDocumentsModel *documents() { return &m_documents; }
     TaskController *tasks() { return &m_tasks; }
+    SettingsStore *settings() { return &m_settings; }
     QString editorAssetDir() const { return m_editorAssets; }
     QQmlApplicationEngine *engine() { return &m_engine; }
     QQuickWindow *window() const { return m_window; }
@@ -54,6 +56,7 @@ private:
     WorkspaceController m_workspace;
     OpenDocumentsModel m_documents;
     TaskController m_tasks;
+    SettingsStore m_settings;
     QString m_editorAssets;
     bool m_reopenDone = false;
     QQmlApplicationEngine m_engine; // last: destroyed first, before what QML uses

@@ -295,6 +295,98 @@ private slots:
         QTRY_COMPARE(list->property("count").toInt(), 0);
     }
 
+    // Settings through QML: the dialog opens, a change flips Theme.dark live, About shows details.
+    void settingsApplyLiveAndAboutShowsDetails()
+    {
+        ShellOptions opts;
+        opts.daemonPath = qEnvironmentVariable("AXIOMD_UNDER_TEST");
+        QTemporaryDir data;
+        opts.dataDir = data.path();
+        Shell shell(opts);
+        QVERIFY(shell.load());
+        QQuickWindow *w = shell.window();
+        QVERIFY(waitFor([&] { return shell.settings()->loaded(); }));
+        QObject *theme = shell.engine()->singletonInstance<QObject *>("Axiom.Ui", "Theme");
+        QVERIFY(theme);
+        w->show();
+
+        // Light: the theme setting rules, not the OS.
+        // Wait for the daemon's confirmation of each value: requests are handled concurrently,
+        // so two writes in flight at once may be applied in either order.
+        shell.settings()->setTheme("light");
+        QTRY_COMPARE(shell.settings()->theme(), QStringLiteral("light"));
+        QTRY_COMPARE(theme->property("dark").toBool(), false);
+        QCOMPARE(w->color().lightness() > 128, true);
+        shell.settings()->setTheme("dark");
+        QTRY_COMPARE(shell.settings()->theme(), QStringLiteral("dark"));
+        QTRY_COMPARE(theme->property("dark").toBool(), true);
+        QTRY_VERIFY(w->color().lightness() < 128);
+
+        // Open the dialog through its QML object and change the font size with the real control.
+        QObject *dialog = w->findChild<QObject *>("settingsDialog");
+        QVERIFY(dialog);
+        QMetaObject::invokeMethod(dialog, "open");
+        QTRY_COMPARE(dialog->property("visible").toBool(), true);
+        QQuickItem *spin = nullptr;
+        QTRY_VERIFY((spin = dialog->findChild<QQuickItem *>("fontSizeBox")) != nullptr);
+        spin->setProperty("value", 21);
+        QMetaObject::invokeMethod(spin, "valueModified");
+        QTRY_COMPARE(shell.settings()->editorFontSize(), 21);
+        // An invalid size typed in the box is refused and the box returns to the stored value.
+        QSignalSpy err(shell.settings(), &SettingsStore::errorOccurred);
+        shell.settings()->setEditorFontSize(99);
+        QVERIFY(err.wait(5000));
+        QCOMPARE(shell.settings()->editorFontSize(), 21);
+        QTRY_COMPARE(spin->property("value").toInt(), 21);
+        QTRY_VERIFY(dialog->findChild<QQuickItem *>("themeBox") != nullptr);
+
+        for (bool dark : { false, true }) {
+            shell.settings()->setTheme(dark ? "dark" : "light");
+            QTRY_COMPARE(shell.settings()->theme(), dark ? QStringLiteral("dark") : QStringLiteral("light"));
+            QTRY_COMPARE(theme->property("dark").toBool(), dark);
+            QTest::qWait(250);
+            const QImage img = w->grabWindow();
+            QVERIFY(img.save(m_shots + (dark ? "/settings-dark.png" : "/settings-light.png")));
+        }
+        QMetaObject::invokeMethod(dialog, "close");
+
+        // About: versions and the data directory as passed on the command line.
+        QObject *about = w->findChild<QObject *>("aboutDialog");
+        QVERIFY(about);
+        QMetaObject::invokeMethod(about, "open");
+        QTRY_COMPARE(about->property("visible").toBool(), true);
+        auto text = [&](const char *name) {
+            QObject *o = about->findChild<QObject *>(name);
+            return o ? o->property("text").toString() : QString();
+        };
+        QTRY_VERIFY(text("aboutBackend").startsWith("axiomd 0.1.0"));
+        QCOMPARE(text("aboutProtocol"), QStringLiteral("0.1"));
+        QCOMPARE(text("aboutQt"), QString::fromLatin1(qVersion()));
+        QCOMPARE(text("aboutDataDir"), data.path());
+        w->grabWindow().save(m_shots + "/about.png");
+        QMetaObject::invokeMethod(about, "close");
+    }
+
+    void aboutShowsDefaultLocationWithoutDataDir()
+    {
+        ShellOptions opts;
+        opts.daemonPath = qEnvironmentVariable("AXIOMD_UNDER_TEST");
+        opts.dataDir = m_data.path(); // the daemon needs one in tests; the label is what we check below
+        Shell shell(opts);
+        QVERIFY(shell.load());
+        QCOMPARE(shell.engine()->rootContext()->contextProperty("dataDirText").toString(), m_data.path());
+        // No --data-dir: the daemon would use the default location. Tests never touch the user's
+        // profile, so redirect that default to a temp dir through the environment.
+        QTemporaryDir isolated;
+        qputenv("AXIOM_DATA_DIR", isolated.path().toUtf8());
+        ShellOptions none;
+        none.daemonPath = opts.daemonPath;
+        Shell shell2(none);
+        QVERIFY(shell2.load());
+        QCOMPARE(shell2.engine()->rootContext()->contextProperty("dataDirText").toString(), QStringLiteral("default location"));
+        qunsetenv("AXIOM_DATA_DIR");
+    }
+
     void missingDaemonShowsFailureNotACrash()
     {
         ShellOptions opts;
