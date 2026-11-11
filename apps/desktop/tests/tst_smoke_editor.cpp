@@ -12,7 +12,7 @@
 #include <QTemporaryDir>
 #include <QtQml>
 #include <QtTest>
-#include <csignal>
+#include "TestSupport.h"
 
 Q_IMPORT_QML_PLUGIN(Axiom_UiPlugin)
 Q_IMPORT_QML_PLUGIN(Axiom_AppPlugin)
@@ -58,46 +58,6 @@ class TstSmokeEditor : public QObject
         QKeyEvent release(QEvent::KeyRelease, k, mods, text);
         QCoreApplication::sendEvent(target, &press);
         QCoreApplication::sendEvent(target, &release);
-    }
-
-    // Chromium renderer processes among the DESCENDANTS of this process (Linux: /proc).
-    // Only our own process tree is ever touched, never other browsers on the machine.
-    static QList<qint64> rendererPids()
-    {
-        QHash<qint64, qint64> parentOf;
-        QHash<qint64, QByteArray> cmdOf;
-        for (const QString &e : QDir("/proc").entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-            bool ok = false;
-            const qint64 pid = e.toLongLong(&ok);
-            if (!ok)
-                continue;
-            QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
-            if (!stat.open(QIODevice::ReadOnly))
-                continue;
-            const QByteArray st = stat.readAll();
-            const QList<QByteArray> rest = st.mid(st.lastIndexOf(')') + 2).split(' ');
-            if (rest.size() < 2)
-                continue;
-            parentOf.insert(pid, rest.at(1).toLongLong());
-            QFile cmd(QStringLiteral("/proc/%1/cmdline").arg(pid));
-            if (cmd.open(QIODevice::ReadOnly))
-                cmdOf.insert(pid, cmd.readAll());
-        }
-        const qint64 me = QCoreApplication::applicationPid();
-        auto isDescendant = [&](qint64 pid) {
-            for (int depth = 0; depth < 16 && parentOf.contains(pid); ++depth) {
-                pid = parentOf.value(pid);
-                if (pid == me)
-                    return true;
-            }
-            return false;
-        };
-        QList<qint64> out;
-        for (auto it = cmdOf.constBegin(); it != cmdOf.constEnd(); ++it)
-            if (it.value().contains("--type=renderer") && it.value().contains("QtWebEngineProcess")
-                && isDescendant(it.key()))
-                out << it.key();
-        return out;
     }
 
     QQuickItem *find(QQuickItem *root, const QString &name)
@@ -251,10 +211,10 @@ private slots:
         QTest::qWait(1800);
 
         // Kill the real renderer process: a child of this one started with --type=renderer.
-        const QList<qint64> renderers = rendererPids();
+        const QList<qint64> renderers = TestSupport::descendantsMatching("--type=renderer");
         QVERIFY2(!renderers.isEmpty(), "no Chromium renderer process found to kill");
         for (qint64 pid : renderers)
-            ::kill(static_cast<pid_t>(pid), SIGKILL);
+            TestSupport::killProcess(pid);
         QVERIFY2(waitFor([&] { return docs->rendererCrashed(); }, 15000),
                  "renderProcessTerminated was not reported after killing the renderer");
         QVERIFY(docs->isDirty("src/lib.rs"));

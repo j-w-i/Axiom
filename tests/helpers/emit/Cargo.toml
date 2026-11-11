@@ -1,0 +1,11 @@
+[package]
+name = "emit"
+description = "Test helper: prints text to stdout/stderr, sleeps and exits with a code, identically on every OS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

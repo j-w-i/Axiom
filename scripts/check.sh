@@ -31,8 +31,8 @@ fi
 
 if [[ ( "$what" == all || "$what" == desktop ) && -f apps/desktop/CMakeLists.txt ]]; then
   step "desktop: QML literal guard";  python3 scripts/check_qml.py
-  step "desktop: build axiomd (debug) for the tests"
-  cargo build -p axiomd
+  step "desktop: build axiomd and the emit test helper (debug) for the tests"
+  cargo build -p axiomd -p emit
   step "desktop: configure, build, test"
   # shellcheck disable=SC1091
   source scripts/dev-env.sh

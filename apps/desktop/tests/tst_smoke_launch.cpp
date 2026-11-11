@@ -7,7 +7,7 @@
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QtQml>
-#include <csignal>
+#include "TestSupport.h"
 #include <QtTest>
 
 // The QML modules' static plugins are linked into this test.
@@ -115,7 +115,7 @@ private slots:
         QQuickWindow *w = shell.window();
         QVERIFY(waitFor([&] { return shell.backend()->ready(); }));
 
-        ::kill(static_cast<pid_t>(shell.client()->processId()), SIGKILL);
+        TestSupport::killProcess(shell.client()->processId());
         QVERIFY(waitFor([&] { return shell.backend()->failed(); }));
         QVERIFY(waitFor([&] { return statusText(w) == QStringLiteral("Backend stopped"); }));
         QVERIFY(!shell.backend()->errorText().isEmpty());
@@ -222,9 +222,7 @@ private slots:
     // The output panel through QML: type a command, Enter runs it, rows appear, Stop works.
     void outputPanelRunsCommandsAndStops()
     {
-#ifdef Q_OS_WIN
-        QSKIP("Unix shell commands; Windows equivalents arrive with M1-CI-002");
-#endif
+        QVERIFY2(QFileInfo(TestSupport::emitPath()).isExecutable(), "emit helper not built");
         QTemporaryDir ws;
         QVERIFY(ws.isValid());
         ShellOptions opts;
@@ -251,9 +249,12 @@ private slots:
         QVERIFY(editor);
         editor->forceActiveFocus();
         QVERIFY(waitFor([&] { return editor->hasActiveFocus(); }));
-        for (QChar c : QStringLiteral("echo hi; echo oops >&2; exit 2"))
-            QTest::keyClick(w, c.toLatin1() ? static_cast<Qt::Key>(c.toUpper().unicode()) : Qt::Key_unknown, Qt::NoModifier);
-        QTRY_COMPARE(field->property("editText").toString(), QStringLiteral("echo hi; echo oops >&2; exit 2"));
+        // The command contains characters that need modifiers or are not plain keys, so it is typed
+        // as text events (what an input method or keyboard layout would deliver).
+        const QString command = TestSupport::emitCommand({ "out", "hi", "err", "oops", "exit", "2" });
+        for (QChar c : command)
+            QTest::sendKeyEvent(QTest::Click, w, Qt::Key_unknown, c, Qt::NoModifier);
+        QTRY_COMPARE(field->property("editText").toString(), command);
         QSignalSpy finished(shell.tasks(), &TaskController::finished);
         QTest::keyClick(w, Qt::Key_Return);
         QVERIFY(finished.wait(10000));
@@ -263,7 +264,7 @@ private slots:
         QTRY_COMPARE(list->property("count").toInt(), 3);
         auto *out = shell.tasks()->outputModel();
         QCOMPARE(out->textAt(2).contains("Failed with exit code 2"), true);
-        QCOMPARE(shell.tasks()->history(), QStringList{ "echo hi; echo oops >&2; exit 2" });
+        QCOMPARE(shell.tasks()->history(), QStringList{ command });
         QQuickItem *status = findByName(w->contentItem(), "taskStatus");
         QVERIFY(status && status->isVisible());
         QVERIFY(status->property("text").toString().contains("failed (2)"));
@@ -274,7 +275,7 @@ private slots:
         QQuickItem *stop = findByName(w->contentItem(), "stopButton");
         QVERIFY(run && stop);
         QVERIFY(!stop->isEnabled());
-        field->setProperty("editText", "sleep 30");
+        field->setProperty("editText", TestSupport::emitCommand({ "sleep", "30000" }));
         QTRY_VERIFY(run->isEnabled());
         auto center = [](QQuickItem *i) { return i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint(); };
         QTest::mouseClick(w, Qt::LeftButton, Qt::NoModifier, center(run));

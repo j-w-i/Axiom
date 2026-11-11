@@ -109,6 +109,7 @@ enable_testing()
 # The daemon under test; check.sh builds it (debug) before running ctest.
 set(AXIOM_FIXTURES_DIR "${CMAKE_SOURCE_DIR}/../../tests/fixtures")
 set(AXIOMD_UNDER_TEST "${CMAKE_SOURCE_DIR}/../../target/debug/axiomd${CMAKE_EXECUTABLE_SUFFIX}")
+set(AXIOM_EMIT "${CMAKE_SOURCE_DIR}/../../target/debug/emit${CMAKE_EXECUTABLE_SUFFIX}")
 
 function(axiom_test name)
   qt_add_executable(${name} tests/${name}.cpp)
@@ -117,7 +118,7 @@ function(axiom_test name)
   axiom_warnings(${name})
   add_test(NAME ${name} COMMAND ${name})
   set_tests_properties(${name} PROPERTIES
-    ENVIRONMENT "AXIOM_EDITOR_ASSETS=${CMAKE_BINARY_DIR}/editor;QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox --disable-gpu;AXIOMD_UNDER_TEST=${AXIOMD_UNDER_TEST};XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-home;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-home"
+    ENVIRONMENT "AXIOM_EMIT=${AXIOM_EMIT};AXIOM_EDITOR_ASSETS=${CMAKE_BINARY_DIR}/editor;QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox --disable-gpu;AXIOMD_UNDER_TEST=${AXIOMD_UNDER_TEST};XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-home;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-home"
     TIMEOUT 120)
 endfunction()
 

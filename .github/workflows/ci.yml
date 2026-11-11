@@ -53,6 +53,95 @@ jobs:
       - run: pnpm run build
       - run: pnpm run test
 
-  # The desktop job (and with it scripts/check_qml.py) is added by task M1-CI-002
-  # once apps/desktop exists.
-  # Do not add placeholder jobs here.
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QT_VERSION: "6.12.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- toolchains
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: editor/pnpm-lock.yaml }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      # ---- Qt with WebEngine (LGPL modules only, ADR-0011)
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ matrix.os == 'windows-latest' && 'win64_msvc2022_64' || '' }}
+          modules: qtwebengine qtwebchannel qtwebsockets qtpositioning
+          cache: true
+
+      - name: Linux packages (GL, xkbcommon, WebEngine runtime libraries)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libnss3 libnspr4 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxi6 \
+            libasound2t64 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 libfontconfig1
+      - name: Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+      - name: MSVC developer environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # ---- build the daemon, the test helper and the editor bundle
+      - run: cargo build -p axiomd -p emit
+      - name: Editor bundle
+        working-directory: editor
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      # ---- the QML literal guard, then the app
+      - run: python3 scripts/check_qml.py
+      - name: Configure
+        shell: bash
+        run: cmake -S apps/desktop -B build/desktop -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - name: Build
+        run: cmake --build build/desktop
+
+      # ---- smoke tests, offscreen. Chromium's sandbox cannot start inside the Linux CI
+      # container (no user namespaces / setuid helper), so it is disabled on Linux CI ONLY.
+      # The application itself never sets this; developers' runs keep the sandbox.
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        env:
+          QTWEBENGINE_DISABLE_SANDBOX: "1"
+          AXIOM_SCREENSHOT_DIR: ${{ github.workspace }}/build/screenshots
+        run: ctest --test-dir build/desktop --output-on-failure
+      - name: Test (macOS, Windows)
+        if: runner.os != 'Linux'
+        env:
+          AXIOM_SCREENSHOT_DIR: ${{ github.workspace }}/build/screenshots
+        shell: bash
+        run: ctest --test-dir build/desktop --output-on-failure
+
+      - name: Upload logs and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            build/desktop/Testing/Temporary/LastTest.log
+            build/screenshots/
+          if-no-files-found: ignore

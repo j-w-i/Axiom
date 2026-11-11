@@ -10,8 +10,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QtTest>
-#include <csignal>
-#include <unistd.h>
+#include "TestSupport.h"
 
 // Real daemon, a temp copy of tests/fixtures/basic. The controller and model
 // under test never touch the filesystem; only the test does, to cause changes.
@@ -295,7 +294,7 @@ private slots:
     void unreadableDirectoryShowsInlineErrorRow()
     {
 #ifdef Q_OS_UNIX
-        if (::geteuid() == 0)
+        if (TestSupport::runningAsRoot())
             QSKIP("root can read anything");
         Env e(m_daemon, m_data.path(), m_fixtures);
         QVERIFY(openAndWait(e));
@@ -364,7 +363,7 @@ private slots:
     {
         Env e(m_daemon, m_data.path(), m_fixtures);
         QVERIFY(openAndWait(e));
-        ::kill(static_cast<pid_t>(e.client.processId()), SIGKILL);
+        TestSupport::killProcess(e.client.processId());
         QVERIFY(waitFor([&] { return !e.ctl.isOpen(); }));
         QCOMPARE(e.tree()->rowCount(), 0);
         e.client.restart();

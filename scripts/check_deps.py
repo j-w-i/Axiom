@@ -19,6 +19,8 @@ ALLOWED = {
     "axiom-workspace": {"axiom-protocol"},
     "axiom-exec": {"axiom-protocol"},
     "axiomd": {"axiom-protocol", "axiom-rpc", "axiom-store", "axiom-workspace", "axiom-exec"},
+    # Test helper binary (tests/helpers/emit): depends on nothing in the workspace.
+    "emit": set(),
 }
 
 

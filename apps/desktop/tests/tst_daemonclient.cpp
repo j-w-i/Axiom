@@ -6,7 +6,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
-#include <csignal>
+#include "TestSupport.h"
 
 class TstDaemonClient : public QObject
 {
@@ -126,7 +126,7 @@ private slots:
             got = e;
             done = true;
         });
-        ::kill(static_cast<pid_t>(c->processId()), SIGKILL);
+        TestSupport::killProcess(c->processId());
 
         QVERIFY(waitFor([&] { return c->state() == DaemonClient::Failed; }));
         QVERIFY(!c->errorText().isEmpty());
@@ -147,20 +147,27 @@ private slots:
         // exists in protocol 0.1, so use an unanswerable call: write while the process
         // is stopped by SIGSTOP, then kill it.
         const qint64 pid = c->processId();
-        ::kill(static_cast<pid_t>(pid), SIGSTOP);
+        if (TestSupport::canSuspend())
+            TestSupport::suspendProcess(pid);
         RpcError got;
         bool done = false;
         c->call(QStringLiteral("settings/get"), {}, [&](const QJsonObject &, const RpcError &e) {
             got = e;
             done = true;
         });
-        QTest::qWait(100);
-        QVERIFY(!done);
-        ::kill(static_cast<pid_t>(pid), SIGKILL);
+        // Where a process can be frozen the call stays pending until it is killed; elsewhere it
+        // may be answered before the kill, which is a valid outcome of the same race.
+        if (TestSupport::canSuspend()) {
+            QTest::qWait(100);
+            QVERIFY(!done);
+        }
+        TestSupport::killProcess(pid);
         QVERIFY(waitFor([&] { return done; }));
-        QVERIFY(!got.ok());
-        QCOMPARE(got.kind, QStringLiteral("internal"));
-        QCOMPARE(got.message, QStringLiteral("Backend stopped"));
+        if (TestSupport::canSuspend()) {
+            QVERIFY(!got.ok());
+            QCOMPARE(got.kind, QStringLiteral("internal"));
+            QCOMPARE(got.message, QStringLiteral("Backend stopped"));
+        }
         QCOMPARE(c->state(), DaemonClient::Failed);
         delete c;
     }
@@ -170,7 +177,7 @@ private slots:
         auto *c = newClient();
         QVERIFY(waitFor([&] { return c->state() == DaemonClient::Ready; }));
         const qint64 first = c->processId();
-        ::kill(static_cast<pid_t>(first), SIGKILL);
+        TestSupport::killProcess(first);
         QVERIFY(waitFor([&] { return c->state() == DaemonClient::Failed; }));
 
         c->restart();
@@ -227,7 +234,9 @@ private slots:
         auto *c = newClient();
         QVERIFY(waitFor([&] { return c->state() == DaemonClient::Ready; }));
         const qint64 pid = c->processId();
-        ::kill(static_cast<pid_t>(pid), SIGSTOP); // the daemon cannot answer
+        if (!TestSupport::canSuspend())
+            QSKIP("freezing a process (SIGSTOP) is not available on this platform");
+        TestSupport::suspendProcess(pid); // the daemon cannot answer
         RpcError got;
         bool done = false;
         QElapsedTimer t;
@@ -240,7 +249,7 @@ private slots:
         QVERIFY(t.elapsed() >= 290);
         QCOMPARE(got.kind, QStringLiteral("timeout"));
         QVERIFY(c->state() == DaemonClient::Ready); // a timeout does not fail the backend
-        ::kill(static_cast<pid_t>(pid), SIGCONT);
+        TestSupport::resumeProcess(pid);
 
         // The late answer to the timed-out request is ignored and the connection works on.
         bool ok = false;
@@ -260,7 +269,7 @@ private slots:
         QVERIFY(t.elapsed() < 2000);
         QCOMPARE(c->state(), DaemonClient::Stopped);
         QVERIFY(c->errorText().isEmpty()); // an orderly stop is not an error
-        QVERIFY(::kill(static_cast<pid_t>(pid), 0) != 0); // gone
+        QVERIFY(!TestSupport::processAlive(pid)); // gone
         delete c;
     }
 

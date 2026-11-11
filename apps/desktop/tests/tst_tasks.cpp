@@ -11,9 +11,10 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+#include "TestSupport.h"
 
-// TaskController / TaskOutputModel against the real daemon. Unix shell commands;
-// skipped on Windows until M1-CI-002 adds equivalents.
+// TaskController / TaskOutputModel against the real daemon. Commands go through the
+// cross-platform `emit` helper (tests/helpers/emit) so the same tests run on every OS.
 class TstTasks : public QObject
 {
     Q_OBJECT
@@ -73,11 +74,9 @@ class TstTasks : public QObject
 private slots:
     void initTestCase()
     {
-#ifdef Q_OS_WIN
-        QSKIP("Unix shell commands; Windows equivalents arrive with M1-CI-002");
-#endif
         m_daemon = qEnvironmentVariable("AXIOMD_UNDER_TEST");
         QVERIFY2(QFileInfo(m_daemon).isExecutable(), qPrintable("axiomd not built: " + m_daemon));
+        QVERIFY2(QFileInfo(TestSupport::emitPath()).isExecutable(), qPrintable("emit helper not built: " + TestSupport::emitPath()));
     }
 
     // ---- the model on its own ----------------------------------------------------
@@ -178,7 +177,7 @@ private slots:
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
         QVERIFY(e.tasks.canRun());
-        QVERIFY(e.runAndWait("echo out; echo err >&2; exit 3"));
+        QVERIFY(e.runAndWait(TestSupport::emitCommand({ "out", "out", "err", "err", "exit", "3" })));
         QVERIFY(!e.tasks.running());
         auto *m = e.out();
         QCOMPARE(m->rowCount(), 3);
@@ -205,7 +204,7 @@ private slots:
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        QVERIFY(e.runAndWait("echo fine"));
+        QVERIFY(e.runAndWait(TestSupport::emitCommand({ "out", "fine" })));
         QCOMPARE(rows(e.out()).first(), QStringLiteral("fine"));
         QVERIFY2(rows(e.out()).last().startsWith("✔ Succeeded in"), qPrintable(rows(e.out()).last()));
         QCOMPARE(e.tasks.lastStatus().value("exitCode").toInt(), 0);
@@ -215,9 +214,11 @@ private slots:
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        QVERIFY(e.runAndWait("definitely-not-a-command-xyz"));
-        QVERIFY2(rows(e.out()).last().contains("exit code 127"), qPrintable(rows(e.out()).join('|')));
-        QCOMPARE(e.tasks.lastStatus().value("exitCode").toInt(), 127);
+        QVERIFY(e.runAndWait(QStringLiteral("definitely-not-a-command-xyz")));
+        QVERIFY2(rows(e.out()).last().contains("exit code"), qPrintable(rows(e.out()).join('|')));
+        // 127 on POSIX shells, 1 on cmd.exe: both say "command not found".
+        const int code = e.tasks.lastStatus().value("exitCode").toInt();
+        QVERIFY2(code == 127 || code == 1, qPrintable(QString::number(code)));
         // The shell's complaint is on stderr.
         const QStringList streams = rows(e.out(), TaskOutputModel::StreamRole);
         QVERIFY(streams.contains("stderr"));
@@ -241,7 +242,7 @@ private slots:
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
         QSignalSpy done(&e.tasks, &TaskController::finished);
-        e.tasks.run("sleep 30");
+        e.tasks.run(TestSupport::emitCommand({ "sleep", "30000" }));
         QVERIFY(waitFor([&] { return e.tasks.running(); }));
         QVERIFY(!e.tasks.canRun()); // one task at a time
         QElapsedTimer t;
@@ -263,11 +264,12 @@ private slots:
         QVERIFY(!e.tasks.running());
         QVERIFY(e.tasks.history().isEmpty());
         QVERIFY(e.openWorkspace());
-        e.tasks.run("sleep 30");
+        const QString sleeper = TestSupport::emitCommand({ "sleep", "30000" });
+        e.tasks.run(sleeper);
         QVERIFY(e.tasks.running());
         const int rowsBefore = e.out()->rowCount();
         e.tasks.run("echo second"); // refused
-        QCOMPARE(e.tasks.history(), QStringList{ "sleep 30" });
+        QCOMPARE(e.tasks.history(), QStringList{ sleeper });
         QCOMPARE(e.out()->rowCount(), rowsBefore);
         QSignalSpy done(&e.tasks, &TaskController::finished);
         e.tasks.stop();
@@ -278,7 +280,7 @@ private slots:
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        QVERIFY(e.runAndWait("printf '\\033[31mred\\033[0m\\n'"));
+        QVERIFY(e.runAndWait(TestSupport::emitCommand({ "raw-out", "\\e[31mred\\e[0m\\n" })));
         QCOMPARE(rows(e.out()).first(), QStringLiteral("red"));
     }
 
@@ -286,34 +288,39 @@ private slots:
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        QVERIFY(e.runAndWait("echo \"a  b\" 'c d' | tr a-z A-Z; echo $((6*7))"));
-        QCOMPARE(rows(e.out()).mid(0, 2), (QStringList{ "A  B C D", "42" }));
+        // Shell features work because the line goes to the platform shell untouched:
+        // a pipe-free two-command line with `&&` is valid in both sh and cmd.
+        const QString first = TestSupport::emitCommand({ "out", "one" });
+        const QString second = TestSupport::emitCommand({ "out", "two  spaced" });
+        QVERIFY(e.runAndWait(first + " && " + second));
+        QCOMPARE(rows(e.out()).mid(0, 2), (QStringList{ "one", "two  spaced" }));
         // The working directory is the workspace root.
-        QVERIFY(e.runAndWait("ls"));
-        QVERIFY(rows(e.out()).contains("README.md"));
+        QVERIFY(e.runAndWait(TestSupport::emitCommand({ "cwd" })));
+        QCOMPARE(QDir::cleanPath(rows(e.out()).first()), QDir::cleanPath(QDir(e.dir.path()).canonicalPath()));
     }
 
     void historyIsMostRecentFirstDedupedAndCapped()
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        QVERIFY(e.runAndWait("echo one"));
-        QVERIFY(e.runAndWait("echo two"));
-        QVERIFY(e.runAndWait("echo one")); // moves to the front, no duplicate
-        QCOMPARE(e.tasks.history(), (QStringList{ "echo one", "echo two" }));
-        QCOMPARE(e.tasks.lastCommand(), QStringLiteral("echo one"));
+        auto say = [](const QString &w) { return TestSupport::emitCommand({ "out", w }); };
+        QVERIFY(e.runAndWait(say("one")));
+        QVERIFY(e.runAndWait(say("two")));
+        QVERIFY(e.runAndWait(say("one"))); // moves to the front, no duplicate
+        QCOMPARE(e.tasks.history(), (QStringList{ say("one"), say("two") }));
+        QCOMPARE(e.tasks.lastCommand(), say("one"));
         for (int i = 0; i < 25; ++i)
-            QVERIFY(e.runAndWait(QStringLiteral("echo n%1").arg(i)));
+            QVERIFY(e.runAndWait(say(QStringLiteral("n%1").arg(i))));
         QCOMPARE(e.tasks.history().size(), TaskController::MaxHistory);
-        QCOMPARE(e.tasks.history().first(), QStringLiteral("echo n24"));
-        QVERIFY(!e.tasks.history().contains("echo one"));
+        QCOMPARE(e.tasks.history().first(), say("n24"));
+        QVERIFY(!e.tasks.history().contains(say("one")));
     }
 
     void rerunLastRunsTheMostRecentCommand()
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        QVERIFY(e.runAndWait("echo again"));
+        QVERIFY(e.runAndWait(TestSupport::emitCommand({ "out", "again" })));
         QSignalSpy done(&e.tasks, &TaskController::finished);
         e.tasks.rerunLast();
         QVERIFY(done.wait(8000));
@@ -325,8 +332,10 @@ private slots:
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        QVERIFY(e.runAndWait("echo kept"));
-        QVERIFY(e.runAndWait("echo also kept"));
+        const QString kept = TestSupport::emitCommand({ "out", "kept" });
+        const QString alsoKept = TestSupport::emitCommand({ "out", "also-kept" });
+        QVERIFY(e.runAndWait(kept));
+        QVERIFY(e.runAndWait(alsoKept));
         QTest::qWait(300); // setState requests reach the daemon
         QSignalSpy closed(&e.ws, &WorkspaceController::closed);
         e.ws.close();
@@ -337,26 +346,27 @@ private slots:
         e.ws.openFolder(e.dir.path());
         QVERIFY(opened.wait(8000));
         QVERIFY(waitFor([&] { return e.tasks.history().size() == 2; }));
-        QCOMPARE(e.tasks.history(), (QStringList{ "echo also kept", "echo kept" }));
+        QCOMPARE(e.tasks.history(), (QStringList{ alsoKept, kept }));
     }
 
     void clearEmptiesTheOutputButNotTheHistory()
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        QVERIFY(e.runAndWait("echo x"));
+        const QString cmd = TestSupport::emitCommand({ "out", "x" });
+        QVERIFY(e.runAndWait(cmd));
         QVERIFY(e.out()->rowCount() > 0);
         e.tasks.clear();
         QCOMPARE(e.out()->rowCount(), 0);
         QVERIFY(!e.tasks.hasLastStatus());
-        QCOMPARE(e.tasks.history(), QStringList{ "echo x" });
+        QCOMPARE(e.tasks.history(), QStringList{ cmd });
     }
 
     void closingTheWorkspaceCancelsARunningTask()
     {
         Env e(m_daemon);
         QVERIFY(e.openWorkspace());
-        e.tasks.run("sleep 30");
+        e.tasks.run(TestSupport::emitCommand({ "sleep", "30000" }));
         QVERIFY(waitFor([&] { return e.tasks.running(); }));
         QTest::qWait(300);
         e.ws.close();
@@ -366,7 +376,7 @@ private slots:
         QSignalSpy opened(&e.ws, &WorkspaceController::opened);
         e.ws.openFolder(e.dir.path());
         QVERIFY(opened.wait(8000));
-        QVERIFY(e.runAndWait("echo alive"));
+        QVERIFY(e.runAndWait(TestSupport::emitCommand({ "out", "alive" })));
     }
 
     // ---- large output ------------------------------------------------------------
@@ -395,7 +405,7 @@ private slots:
         QSignalSpy done(&e.tasks, &TaskController::finished);
         QElapsedTimer total;
         total.start();
-        e.tasks.run("seq 1 50000");
+        e.tasks.run(TestSupport::emitCommand({ "seq", "1", "50000" }));
         QVERIFY(done.count() > 0 || done.wait(60000));
         e.out()->flushNow();
         const qint64 wall = total.elapsed();
