@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.21)
+project(e2_qml_probe LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QmlPrivate QuickPrivate)
+qt_add_executable(e2_probe main.cpp)
+qt_add_qml_module(e2_probe URI E2 VERSION 1.0 QML_FILES Main.qml BalanceCard.qml)
+target_link_libraries(e2_probe PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QmlPrivate Qt6::QuickPrivate)

@@ -1,0 +1,125 @@
+{
+  "steps": [
+    {
+      "name": "capture",
+      "cssViewport": [
+        800,
+        513
+      ],
+      "devicePixelRatio": 2,
+      "screenshotPx": [
+        1600,
+        1026
+      ]
+    },
+    {
+      "name": "select",
+      "click": {
+        "x": 71,
+        "y": 268
+      },
+      "backendNodeId": 5,
+      "nodeName": "BUTTON",
+      "borderQuad": [
+        32,
+        251.796875,
+        109.1328125,
+        251.796875,
+        109.1328125,
+        283.296875,
+        32,
+        283.296875
+      ],
+      "ms": 1
+    },
+    {
+      "name": "resolveSource",
+      "chain": [
+        {
+          "tag": "button",
+          "src": "src/components/BalanceCard.jsx:6:7",
+          "owner": "BalanceCard",
+          "hasDebugSource": false,
+          "instanceIndex": 0,
+          "instanceCount": 1
+        },
+        {
+          "tag": "section",
+          "src": "src/components/BalanceCard.jsx:3:5",
+          "owner": "BalanceCard",
+          "hasDebugSource": false,
+          "instanceIndex": 1,
+          "instanceCount": 2
+        },
+        {
+          "tag": "main",
+          "src": "src/App.jsx:10:5",
+          "owner": "App",
+          "hasDebugSource": false,
+          "instanceIndex": 0,
+          "instanceCount": 1
+        },
+        {
+          "tag": "div",
+          "src": null,
+          "owner": null,
+          "hasDebugSource": null,
+          "instanceIndex": 0,
+          "instanceCount": 2
+        },
+        {
+          "tag": "body",
+          "src": null,
+          "owner": null,
+          "hasDebugSource": null,
+          "instanceIndex": 1,
+          "instanceCount": 2
+        },
+        {
+          "tag": "html",
+          "src": null,
+          "owner": null,
+          "hasDebugSource": null,
+          "instanceIndex": 0,
+          "instanceCount": 1
+        }
+      ]
+    },
+    {
+      "name": "verifySourceMapping",
+      "file": "src/components/BalanceCard.jsx",
+      "line": 6,
+      "column": 7,
+      "textAtLocation": "<button style={{ marginLeft: 0, padding:",
+      "exact": true
+    },
+    {
+      "name": "repeatedInstances",
+      "elementsSharingSource": 2
+    },
+    {
+      "name": "hotReload",
+      "beforeX": 32,
+      "afterX": 56,
+      "deltaX": 24,
+      "ms": 101
+    },
+    {
+      "name": "visualDiff",
+      "changedPixels": 3220,
+      "totalPixels": 1641600,
+      "changedRegionCss": {
+        "x": 32,
+        "y": 133,
+        "width": 101,
+        "height": 150.5
+      }
+    },
+    {
+      "name": "verdict",
+      "geometryMatchesIntent": true,
+      "pixelsChanged": true,
+      "verified": true
+    }
+  ]
+}

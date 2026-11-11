@@ -1,0 +1,48 @@
+{
+    "allPassed": true,
+    "checks": {
+        "backendReadFile": true,
+        "backendWriteFile": true,
+        "commandExitCode3": true,
+        "commandStreamsSeparated": true,
+        "daemonInitialize": true,
+        "documentOpenedInMonaco": true,
+        "editorReady": true,
+        "hostEditOnDisk": true,
+        "secureContext": true,
+        "structuredSpawnError": true,
+        "tsWorkerDiagnostics": true,
+        "typedKeysOnDisk": true
+    },
+    "commandOutput": [
+        {
+            "stream": "stdout",
+            "text": "hello-out"
+        },
+        {
+            "stream": "stderr",
+            "text": "hello-err"
+        }
+    ],
+    "consoleErrors": [
+    ],
+    "elapsedMsSinceEditorReady": 1013,
+    "markers": [
+        {
+            "line": 2,
+            "message": "Type 'string' is not assignable to type 'number'."
+        }
+    ],
+    "monacoHasTextFocus": true,
+    "origin": "axiom://editor",
+    "saveTriggeredBy": "ctrl+s-key-event",
+    "spawnError": {
+        "code": -32002,
+        "data": {
+            "kind": "spawn_failed"
+        },
+        "message": "axiom-no-such-binary: No such file or directory (os error 2)"
+    },
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) QtWebEngine/6.11.2 Chrome/140.0.0.0 Safari/537.36"
+}
+

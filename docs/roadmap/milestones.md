@@ -1,0 +1,186 @@
+# Roadmap
+
+Hierarchy: **Milestone → Epic → Task → Acceptance criteria.** Only M1 is
+broken down to tasks (`docs/tasks/M1/`). Later milestones are specified to
+epic level with their exit criteria; the **first task of every milestone**
+is "freeze the draft contract against what has been learned, and write this
+milestone's task files" (an architect-mode task). This is deliberate
+progressive elaboration: detailed specs written now for M4+ would be wrong
+by the time they are used.
+
+Milestones are ordered by dependency, not strictly sequential: see
+`dependency-graph.md` for what can overlap.
+
+---
+
+## M1 — Platform foundation (first vertical slice)
+
+**Outcome.** A cross-platform desktop app that opens a folder, shows its
+files, edits and saves them in an embedded Monaco editor, runs a command with
+streamed output, and remembers its state — with every platform operation
+going through the daemon.
+
+| Epic | Tasks |
+|------|-------|
+| 1.1 RPC foundation | M1-RPC-001 |
+| 1.2 Persistence | M1-STORE-001 |
+| 1.3 Workspace service | M1-WS-001, M1-WS-002 |
+| 1.4 Execution service | M1-EXEC-001 |
+| 1.5 Daemon | M1-DAEMON-001, M1-DAEMON-002 |
+| 1.6 Editor surface | M1-EDITOR-001 |
+| 1.7 Desktop shell | M1-SHELL-001 … 005 |
+| 1.8 Guards and CI | M1-CI-001, M1-CI-002 |
+
+**Exit criteria** (verified and recorded in `verification/M1.md` by
+M1-CI-002). On a clean data directory:
+1. The application launches and shows "Connected".
+2. File ▸ Open Folder opens a directory as a workspace.
+3. The explorer shows its files, lazily, with ignored files dimmed, and
+   updates when files change on disk.
+4. Activating a file opens it in the editor with syntax colouring.
+5. Editing marks the tab dirty; Ctrl/Cmd+S saves; the bytes on disk match.
+   An external modification of a dirty file produces the conflict dialog.
+6. Every one of the above went through `axiomd` (no file access in the
+   shell): demonstrated by the integration tests using the same protocol.
+7. A command run from the Output panel streams stdout and stderr distinctly
+   and shows its exit status; Stop cancels it including child processes.
+8. A failing command and a non-existent program produce clear, structured
+   errors in the UI.
+9. After restart: theme and editor settings, the last workspace, open tabs,
+   expanded folders and command history are restored.
+Plus: `scripts/check.sh` green; CI green on Linux and green-or-explained on
+macOS and Windows.
+
+---
+
+## M2 — Environments and builds
+
+**Outcome.** Axiom recognises what a project needs, shows what is installed,
+installs toolchains into managed storage with user-approved plans, and runs
+provider-defined build/test tasks with structured, navigable diagnostics.
+
+Draft contracts: `docs/protocols/providers.md`,
+`crates/protocol/src/{provider,diagnostics}.rs`, `providers/rust/`.
+
+| Epic | Scope |
+|------|-------|
+| 2.0 Contract freeze + task files | Review drafts against M1 reality; add `env/*`, `build/*` methods to the protocol; write `docs/tasks/M2/` |
+| 2.1 Provider registry (`crates/env`) | Manifest loading/validation from the three locations; contract test suite over `providers/*` |
+| 2.2 Detection | Tool detection (PATH + managed roots), project detection; `env/detect` |
+| 2.3 Managed installation | Download cache with SHA-256, safe extraction, staging + atomic publish, uninstall, `InstallPlan` + approval flow, progress notifications; `delegate` installs with redirected homes |
+| 2.4 System installation | Package-manager detection and plan generation; elevation through the platform prompt; never silent |
+| 2.5 Environments | `Environment` resolution per project (`.axiom/project.toml` + lock); tasks run inside an environment (PATH/vars) |
+| 2.6 Build engine (`crates/build`) | Task templates → `exec`; diagnostics parsers `cargo_json`, `gcc_text`, `regex`, `sarif`; build history; `build/diagnostics` |
+| 2.7 UI | Environment Manager view (installed / available / versions / progress / remove); Problems panel with click-to-source; Run targets from provider tasks |
+| 2.8 Providers | `rust` (reference, complete), `node` (archive install with official checksums), `cmake`+`ninja` (archive), `python` (delegate to `uv`) |
+
+**Exit criteria.** On a machine without Rust: open a Cargo project → Axiom
+reports Rust missing → shows an install plan → installs a managed toolchain
+→ `cargo build` runs inside it → a compile error appears in Problems and
+clicking it opens the file at the line → uninstall removes the directory and
+nothing else. Provider contract suite passes for all bundled providers.
+
+---
+
+## M3 — Agent runtime
+
+**Outcome.** A user can converse with a local or remote model that reads the
+workspace, proposes and applies patches under a permission policy, runs
+builds, and whose session can be resumed later. External agents can drive
+Axiom through MCP.
+
+Draft contract: `docs/protocols/agents.md`.
+
+| Epic | Scope |
+|------|-------|
+| 3.0 Contract freeze + task files | |
+| 3.1 Model providers | `ModelProvider` trait; Anthropic and OpenAI-chat adapters; `ScriptedProvider` for tests; capability profiles; keychain storage |
+| 3.2 Tool registry | Specs + schemas; read tools; `fs.applyPatch`; `task.run`; `build.*`; `env.*` |
+| 3.3 Permission gate | Policy model, evaluation, approval round trip to clients, audit log |
+| 3.4 Checkpoints | Shadow git repo; create/list/restore with conflict detection |
+| 3.5 Agent loop + sessions | Streaming loop, cancellation, JSONL transcripts, resume, compaction |
+| 3.6 Multi-client daemon | Local socket transport with token auth; `apps/cli` (thin client: `axiom task run`, `axiom agent …`) |
+| 3.7 MCP | `axiomd --mcp` server over the registry; MCP client for user-configured servers |
+| 3.8 UI | AI workspace: conversation, tool activity, diff review, approvals, checkpoints, model configuration |
+
+**Exit criteria.** With a scripted provider in CI and a real local model
+manually: "add a function and fix the build" completes through tools only;
+every write was preceded by a checkpoint and can be restored; denied
+operations do not execute; the session resumes after restart; an external
+MCP client can list and call tools subject to the same policy.
+
+---
+
+## M4 — Editor depth
+
+**Outcome.** Language intelligence, terminal and Git, bringing the editing
+experience to daily-driver level.
+
+| Epic | Scope |
+|------|-------|
+| 4.0 Design + task files | LSP relay design (ADR-0004 §Language intelligence) |
+| 4.1 `crates/lsp` | Server supervision, initialize, relay channel, restart policy; server definitions in provider manifests |
+| 4.2 Editor LSP client | Document sync, diagnostics, completion, hover, definition, references, rename, formatting, code actions |
+| 4.3 Terminal | PTY service (`portable-pty` behind a trait; ConPTY verified on Windows), xterm.js surface or QML terminal — decided in 4.0 |
+| 4.4 Git | Status in explorer, gutter change markers, diff view (Monaco diff editor), branch display — via `gix` |
+| 4.5 Editor UX | Split panes, quick open (fuzzy file search), workspace text search, problems from LSP merged with build diagnostics |
+
+**Exit criteria.** rust-analyzer and typescript-language-server provide
+completion, diagnostics, go-to-definition and rename in the editor; the
+integrated terminal runs an interactive shell on all three OSes; Git changes
+are visible and diffable.
+
+---
+
+## M5 — Visual intelligence (web)
+
+**Outcome.** The closed loop of the product vision, for React + Vite apps.
+
+Draft contract: `docs/protocols/inspection.md`,
+`crates/protocol/src/inspection.rs`. Seed: experiment E3.
+
+| Epic | Scope |
+|------|-------|
+| 5.0 Contract freeze, CDP-on-WebEngine validation, task files | Repeat E3's CDP calls against Qt WebEngine (the one unverified link) |
+| 5.1 Preview host | Launch dev server as a task; isolated WebEngine profile; preview view with URL bar, reload, device size |
+| 5.2 `crates/inspect` | Sessions, adapter connections, snapshot store, coordinate model |
+| 5.3 Web adapter | CDP-driven tree/hit-test/details/highlight; screenshot capture |
+| 5.4 Source instrumentation | `@axiom/vite-plugin-source` (from E3), injected at preview launch without editing user config; owner resolution; stable keys |
+| 5.5 Source resolution | Path mapping, generated-code flagging, source-map and heuristic candidates, confidence enforcement |
+| 5.6 Verification | Quiescence, re-identification, checks, pixel diff, `VerificationReport` |
+| 5.7 Agent integration | `preview.*`, `ui.*` tools; context assembly for a selection; assertion-first patch workflow |
+| 5.8 UI | Visual Inspector: preview, hover highlight, click-select, hierarchy tree, properties, source jump, before/after comparison, "Ask AI about this element" |
+| 5.9 Fixtures + tests | `tests/fixtures/inspect-react` with expected source map; end-to-end loop test with the scripted model |
+
+**Exit criteria.** On the fixture app: click a button → correct source
+opens (exact line/column) → scripted agent applies a spacing fix → hot
+reload → report `verified` with a passing geometry check; a deliberately
+wrong patch yields `failed`; an element from an uninstrumented library is
+presented as uncertain, not exact.
+
+---
+
+## M6 — Framework and platform expansion
+
+| Epic | Scope |
+|------|-------|
+| 6.1 QML inspection adapter | Probe library (from E2), per-Qt-minor builds, public-API fallback, `qrc` path mapping, fixture + loop test — proves the protocol is not web-specific |
+| 6.2 Apple via xtool | `apple-xtool` provider with helper process: detect, guided setup (user-supplied Xcode.xip), build, device install/launch; honest capability matrix (`docs/research/xtool.md`) |
+| 6.3 More providers | Swift (swiftly), Go, .NET, Java/Gradle, Android SDK/NDK, Flutter — each a manifest (+helper where needed) passing the contract suite |
+| 6.4 Debugging | DAP client in the daemon, debug UI (breakpoints, stack, variables), adapters: codelldb, debugpy, js-debug |
+| 6.5 Isolation backends | `Sandboxed` (Linux bwrap/Landlock, macOS Seatbelt, Windows) and `Contained` (Podman/Docker, Dev Containers) behind `ExecBackend`, each with a self-test (ADR-0010) |
+| 6.6 Remote execution | `axiomd` over SSH; path mapping; remote workspace open |
+| 6.7 Multi-agent | Worktree-per-agent, task ownership, merge review |
+| 6.8 Generic Level-2 adapter | OS accessibility trees (AT-SPI, UIA, AX) for otherwise opaque apps |
+
+## M7 — Production quality
+
+| Epic | Scope |
+|------|-------|
+| 7.1 Extension compatibility | `monaco-vscode-api` spike (ADR-0004 stage 3), Open VSX client, automated compatibility suite, decision ADR on a Node extension host |
+| 7.2 Packaging | Windows installer (MSVC, windeployqt), macOS signed + notarised dmg (macdeployqt), Linux AppImage and Flatpak; LGPL compliance bundle; size budget |
+| 7.3 Reliability | Crash reporting (opt-in), daemon auto-restart, session recovery, update mechanism |
+| 7.4 Performance | Startup time, memory per window, large-workspace explorer, large-output streaming |
+| 7.5 Accessibility | Screen-reader pass on all three OSes, high contrast, keyboard audit |
+| 7.6 Security review | Threat model walkthrough, sandbox escape tests, dependency audit, legal review of licensing (ADR-0011) |
+| 7.7 Contributor docs | Provider authoring guide, adapter authoring guide, architecture tour |

@@ -1,0 +1,599 @@
+{
+  "$defs": {
+    "ArchiveFormat": {
+      "enum": [
+        "tar.gz",
+        "tar.xz",
+        "zip"
+      ],
+      "type": "string"
+    },
+    "Artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "format": {
+          "$ref": "#/$defs/ArchiveFormat"
+        },
+        "platform": {
+          "$ref": "#/$defs/Platform"
+        },
+        "strip_components": {
+          "default": 0,
+          "description": "Leading path components to strip on extraction.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "url": {
+          "description": "URL template; `${version}` expands.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform",
+        "url",
+        "format",
+        "checksum"
+      ],
+      "type": "object"
+    },
+    "Checksum": {
+      "description": "Integrity is mandatory: an artifact without a verifiable SHA-256 is not\ninstallable.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Per-version digests in the manifest: version -> lowercase hex.",
+          "properties": {
+            "kind": {
+              "const": "sha256",
+              "type": "string"
+            },
+            "values": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "URL template of a checksum file (`sha256sum` format or bare digest).",
+          "properties": {
+            "kind": {
+              "const": "sha256_url",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DiagnosticsFormat": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`cargo --message-format=json` stream on stdout.",
+          "properties": {
+            "kind": {
+              "const": "cargo_json",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`file:line:col: severity: message` (GCC/Clang/Swift text form).",
+          "properties": {
+            "kind": {
+              "const": "gcc_text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "SARIF 2.1.0 document on stdout.",
+          "properties": {
+            "kind": {
+              "const": "sarif",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Line regex with named groups `file`, `line`, optional `column`,\n`severity`, `code`, `message`.",
+          "properties": {
+            "kind": {
+              "const": "regex",
+              "type": "string"
+            },
+            "pattern": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HostOs": {
+      "enum": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "type": "string"
+    },
+    "InstallMethod": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Download a release archive into Axiom-managed storage.",
+          "properties": {
+            "artifacts": {
+              "items": {
+                "$ref": "#/$defs/Artifact"
+              },
+              "type": "array"
+            },
+            "bin_dirs": {
+              "default": [],
+              "description": "Directories (relative to the install root) to prepend to PATH.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "description": "Extra environment variables; `${root}` expands to the install root.",
+              "type": "object"
+            },
+            "kind": {
+              "const": "archive",
+              "type": "string"
+            },
+            "versions": {
+              "$ref": "#/$defs/VersionSource",
+              "description": "Where the list of versions comes from."
+            }
+          },
+          "required": [
+            "kind",
+            "versions",
+            "artifacts"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Delegate to the ecosystem's own installer (rustup, swiftly, uv...).\nRuns with managed HOME-style variables so nothing global is modified\nunless `scope` is `system`.",
+          "properties": {
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "install": {
+              "description": "Command templates; `${version}` and `${root}` expand.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "delegate",
+              "type": "string"
+            },
+            "list_versions": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "scope": {
+              "$ref": "#/$defs/InstallScope"
+            },
+            "uninstall": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "using": {
+              "description": "Tool that must already be available (itself possibly installed by\nanother provider), e.g. `rustup`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "using",
+            "scope",
+            "install",
+            "list_versions"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Install through the host's package manager. Always `system` scope and\nalways requires explicit user approval.",
+          "properties": {
+            "kind": {
+              "const": "system_package",
+              "type": "string"
+            },
+            "packages": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "description": "Package names keyed by manager: `apt`, `dnf`, `pacman`, `brew`,\n`winget`...",
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "packages"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InstallScope": {
+      "oneOf": [
+        {
+          "const": "managed",
+          "description": "Under Axiom's data directory; removable without side effects.",
+          "type": "string"
+        },
+        {
+          "const": "system",
+          "description": "Modifies the user's or machine's global state.",
+          "type": "string"
+        }
+      ]
+    },
+    "Platform": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "description": "`x86_64`, `aarch64`. Absent = any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "os": {
+          "$ref": "#/$defs/HostOs"
+        }
+      },
+      "required": [
+        "os"
+      ],
+      "type": "object"
+    },
+    "ProcessSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "Program and arguments, relative to the manifest's directory.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "ProjectDetection": {
+      "additionalProperties": false,
+      "properties": {
+        "any_file": {
+          "default": [],
+          "description": "Glob patterns relative to a candidate project directory; the provider\napplies if any matches. E.g. `[\"Cargo.toml\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "TaskKind": {
+      "enum": [
+        "build",
+        "run",
+        "test",
+        "clean",
+        "other"
+      ],
+      "type": "string"
+    },
+    "TaskTemplate": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "argv; never passed through a shell.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "diagnostics": {
+          "$ref": "#/$defs/DiagnosticsFormat",
+          "default": {
+            "kind": "none"
+          },
+          "description": "How to turn the command's output into diagnostics."
+        },
+        "id": {
+          "description": "Unique within the provider, e.g. `build`.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/TaskKind"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "command"
+      ],
+      "type": "object"
+    },
+    "ToolSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Unique within the provider, e.g. `cargo`.",
+          "type": "string"
+        },
+        "program": {
+          "description": "Executable name looked up on PATH and in managed install roots.",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "description": "Whether the provider is unusable without this tool.",
+          "type": "boolean"
+        },
+        "version_args": {
+          "default": [
+            "--version"
+          ],
+          "description": "Arguments that print the version. Default `[\"--version\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version_regex": {
+          "description": "Regex with one capture group extracting the version from the output.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "program",
+        "version_regex"
+      ],
+      "type": "object"
+    },
+    "VersionSource": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Fixed list in the manifest.",
+          "properties": {
+            "kind": {
+              "const": "static",
+              "type": "string"
+            },
+            "versions": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "versions"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "JSON document; `pointer` (RFC 6901, `*` wildcard for arrays) selects\nthe version strings.",
+          "properties": {
+            "kind": {
+              "const": "json",
+              "type": "string"
+            },
+            "pointer": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url",
+            "pointer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "GitHub releases of `owner/repo`; tags stripped of `tag_prefix`.",
+          "properties": {
+            "kind": {
+              "const": "github_releases",
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "tag_prefix": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "repo"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "homepage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hosts": {
+      "default": [],
+      "description": "Hosts this provider can run on. Empty = all.",
+      "items": {
+        "$ref": "#/$defs/Platform"
+      },
+      "type": "array"
+    },
+    "id": {
+      "description": "Globally unique, lowercase `[a-z0-9-]+`, e.g. `rust`, `apple-xtool`.",
+      "type": "string"
+    },
+    "install": {
+      "default": [],
+      "description": "Ways to obtain the toolchain, in order of preference.",
+      "items": {
+        "$ref": "#/$defs/InstallMethod"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "process": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProcessSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Out-of-process implementation for operations that cannot be expressed\ndeclaratively. If present, the daemon starts it on first use and\nspeaks the `provider/*` JSON-RPC methods to it."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectDetection",
+      "default": {
+        "any_file": []
+      },
+      "description": "How to recognise a project this provider applies to."
+    },
+    "schema": {
+      "description": "Must be `axiom.provider/1`.",
+      "type": "string"
+    },
+    "tasks": {
+      "default": [],
+      "description": "Project operations offered (build, run, test...).",
+      "items": {
+        "$ref": "#/$defs/TaskTemplate"
+      },
+      "type": "array"
+    },
+    "tools": {
+      "default": [],
+      "description": "Executables/SDKs this provider manages.",
+      "items": {
+        "$ref": "#/$defs/ToolSpec"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Version of this manifest (semver), not of the toolchain.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "name",
+    "description",
+    "version"
+  ],
+  "title": "ProviderManifest",
+  "type": "object"
+}

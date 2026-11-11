@@ -1,0 +1,4 @@
+{ "name": "e1-editor", "private": true, "type": "module",
+  "scripts": { "build": "vite build" },
+  "dependencies": { "monaco-editor": "0.57.0" },
+  "devDependencies": { "vite": "latest" } }

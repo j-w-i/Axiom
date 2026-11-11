@@ -1,0 +1,16 @@
+{
+  "name": "e3-web-source-map",
+  "private": true,
+  "type": "module",
+  "scripts": { "experiment": "node driver.mjs" },
+  "dependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/plugin-syntax-jsx": "^7.25.0",
+    "@vitejs/plugin-react": "latest",
+    "chrome-remote-interface": "^0.33.2",
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "vite": "latest"
+  }
+}
