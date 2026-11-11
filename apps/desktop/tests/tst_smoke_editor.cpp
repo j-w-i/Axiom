@@ -12,6 +12,7 @@
 #include <QTemporaryDir>
 #include <QtQml>
 #include <QtTest>
+#include <functional>
 #include "TestSupport.h"
 
 Q_IMPORT_QML_PLUGIN(Axiom_UiPlugin)
@@ -62,6 +63,22 @@ class TstSmokeEditor : public QObject
         QKeyEvent release(QEvent::KeyRelease, k, mods, text);
         QCoreApplication::sendEvent(target, &press);
         QCoreApplication::sendEvent(target, &release);
+    }
+
+    // Triggers a save the way a user can: Ctrl/Cmd+S inside the editor, or - where a
+    // synthetic chord is not delivered to Chromium as the platform command key (observed on
+    // macOS) - the product's own File ▸ Save path (requestSave -> page -> saveRequested).
+    // Returns the path that was used, or an empty string if the save did not happen.
+    QString saveDocument(QQuickWindow *w, OpenDocumentsModel *docs, const QString &path,
+                         const std::function<bool()> &saved, int ms = 8000)
+    {
+        key(w, Qt::Key_S, SaveModifier, QString());
+        if (waitFor(saved, ms))
+            return QStringLiteral("Ctrl+S in the editor");
+        docs->save(path);
+        if (waitFor(saved, ms))
+            return QStringLiteral("File > Save");
+        return {};
     }
 
     QQuickItem *find(QQuickItem *root, const QString &name)
@@ -144,22 +161,11 @@ private slots:
         key(w, Qt::Key_K, Qt::ShiftModifier, "K");
         QVERIFY2(waitFor([&] { return docs->isDirty("src/main.rs"); }), "typing did not reach Monaco (not dirty)");
 
-        // ---- Ctrl+S, handled by Monaco's own keybinding
-        key(w, Qt::Key_S, Qt::ControlModifier, QString());
-        bool savedByKey = waitFor([&] { return readFile(m_ws.path() + "/src/main.rs").contains("//K"); }, 8000);
-        QString saveVia = QStringLiteral("ctrl+s key event");
-        if (!savedByKey) {
-            // Where a synthetic chord is not delivered to Chromium as the platform's command
-            // modifier (observed on macOS), the same save is driven through the product's own
-            // File ▸ Save path: shell -> requestSave -> page -> saveRequested -> daemon.
-            qWarning().noquote() << "Ctrl+S did not reach the page (dirty ="
-                                 << docs->isDirty("src/main.rs") << "); using File ▸ Save instead";
-            docs->save("src/main.rs");
-            saveVia = QStringLiteral("File/Save requestSave");
-            savedByKey = waitFor([&] { return readFile(m_ws.path() + "/src/main.rs").contains("//K"); }, 8000);
-        }
-        qInfo().noquote() << "save path:" << saveVia;
-        QVERIFY2(savedByKey, "the document was not written to disk (Ctrl+S and File ▸ Save both failed)");
+        // ---- save: Monaco's own keybinding (Ctrl/Cmd+S), with File ▸ Save as the fallback
+        const QString saveVia = saveDocument(w, docs, "src/main.rs",
+            [&] { return readFile(m_ws.path() + "/src/main.rs").contains("//K"); });
+        qInfo().noquote() << "save path:" << (saveVia.isEmpty() ? "NONE" : saveVia);
+        QVERIFY2(!saveVia.isEmpty(), "the document was not written to disk (Ctrl+S and File ▸ Save both failed)");
         QVERIFY2(waitFor([&] { return !docs->isDirty("src/main.rs"); }), "document stayed dirty after the save");
         QVERIFY(readFile(m_ws.path() + "/src/main.rs").contains("fn main()"));
         // The cursor position reached the status text.
@@ -176,8 +182,9 @@ private slots:
         QVERIFY(waitFor([&] { return docs->isDirty("src/main.rs"); }));
         writeFile(m_ws.path() + "/src/main.rs", "// changed again, elsewhere\n");
         QVERIFY(waitFor([&] { return docs->isChangedOnDisk("src/main.rs"); }, 6000));
-        key(w, Qt::Key_S, Qt::ControlModifier, QString());
-        QVERIFY2(waitFor([&] { return docs->conflictActive(); }), "no conflict was raised");
+        qInfo().noquote() << "conflict save path:"
+                          << saveDocument(w, docs, "src/main.rs", [&] { return docs->conflictActive(); });
+        QVERIFY2(docs->conflictActive(), "no conflict was raised");
         QCOMPARE(docs->conflictName(), QStringLiteral("main.rs"));
         w->grabWindow().save(QDir::tempPath() + "/axiom-shots/editor-conflict.png");
         // Overwrite resolves it: the file becomes the editor's text.
@@ -252,11 +259,13 @@ private slots:
         QTest::qWait(1500); // the page applies the reopened document
         view->forceActiveFocus();
         QTest::qWait(500);
-        key(w, Qt::Key_S, Qt::ControlModifier, QString());
-        const bool saved = waitFor([&] { return readFile(m_ws.path() + "/src/lib.rs").contains("zz"); }, 8000);
-        if (!saved)
-            qWarning() << "file after Ctrl+S:" << readFile(m_ws.path() + "/src/lib.rs") << "dirty:" << docs->isDirty("src/lib.rs");
-        QVERIFY2(saved, "the typed text was not restored after the renderer crash");
+        const QString via = saveDocument(w, docs, "src/lib.rs",
+            [&] { return readFile(m_ws.path() + "/src/lib.rs").contains("zz"); });
+        if (via.isEmpty())
+            qWarning() << "file after saving:" << readFile(m_ws.path() + "/src/lib.rs")
+                       << "dirty:" << docs->isDirty("src/lib.rs");
+        qInfo().noquote() << "post-crash save path:" << (via.isEmpty() ? "NONE" : via);
+        QVERIFY2(!via.isEmpty(), "the typed text was not restored after the renderer crash");
     }
 };
 
