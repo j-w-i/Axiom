@@ -1,8 +1,8 @@
 ---
 id: M1-EXEC-001
 title: Implement axiom-exec (process supervision with streamed output)
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: []
 order: 13
 scope: crates/exec/, Cargo.toml (workspace members and dependencies only)
