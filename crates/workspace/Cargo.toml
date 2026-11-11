@@ -1,0 +1,23 @@
+[package]
+name = "axiom-workspace"
+description = "Workspace registry and safe, workspace-relative file access for the Axiom daemon."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-protocol = { path = "../protocol" }
+tokio = { workspace = true }
+ignore.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+dunce.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/protocol", "crates/rpc", "crates/store"]
+members = ["crates/protocol", "crates/rpc", "crates/store", "crates/workspace"]
 exclude = ["experiments"]
 
 [workspace.package]
@@ -21,6 +21,9 @@ futures-util = "0.3"
 rusqlite = { version = "0.37", features = ["bundled"] }
 directories = "6"
 tempfile = "3"
+ignore = "0.4"
+sha2 = "0.10"
+dunce = "1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
