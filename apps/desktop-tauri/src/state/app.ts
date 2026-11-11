@@ -1,0 +1,33 @@
+// Composition root of the UI state (equivalent of the Qt `Shell` object):
+// one DaemonClient and the four stores, wired the same way.
+
+import { DaemonClient, type Transport } from "../daemon/client";
+import { DocumentsStore } from "./documents";
+import { SettingsStore } from "./settings";
+import { TasksStore } from "./tasks";
+import { WorkspaceStore } from "./workspace";
+
+export interface AppStores {
+  client: DaemonClient;
+  workspace: WorkspaceStore;
+  documents: DocumentsStore;
+  tasks: TasksStore;
+  settings: SettingsStore;
+}
+
+export function createApp(transport: Transport): AppStores {
+  const client = new DaemonClient(transport);
+  const workspace = new WorkspaceStore(client);
+  const documents = new DocumentsStore(client, workspace);
+  const tasks = new TasksStore(client, workspace);
+  const settings = new SettingsStore(client);
+  // Once per launch: reopen the last workspace when the setting says so.
+  let reopened = false;
+  client.onState((s) => {
+    if (s.state === "ready" && !reopened) {
+      reopened = true;
+      void workspace.reopenLast();
+    }
+  });
+  return { client, workspace, documents, tasks, settings };
+}

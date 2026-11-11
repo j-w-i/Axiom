@@ -1,0 +1,159 @@
+/* Axiom design tokens (docs/migration/qt-to-tauri/design-system.md).
+ *
+ * Three layers:
+ *   1. primitives  — raw scales (--gray-*, --indigo-*, sizes). Never used by components.
+ *   2. semantic    — roles (--bg, --text-muted, --accent …), themed per [data-theme].
+ *   3. component   — a few component-scoped aliases (--row-h, --tab-h …).
+ * Components and views reference semantic/component tokens only; a guard test
+ * (tests/tokens.test.ts) rejects literal colours outside this file.
+ *
+ * The semantic names are a superset of the Qt Theme singleton
+ * (docs/architecture/design-system.md) so both shells share one vocabulary.
+ */
+
+:root {
+  /* ---- primitives: neutral scale (cool, low-chroma, Linear-like) ---- */
+  --gray-0: #ffffff;
+  --gray-25: #fbfbfc;
+  --gray-50: #f6f7f9;
+  --gray-100: #eef0f3;
+  --gray-150: #e5e7ec;
+  --gray-200: #d9dce3;
+  --gray-300: #c3c7d0;
+  --gray-500: #6b7180;
+  --gray-600: #555b69;
+  --gray-700: #3a3d46;
+  --gray-750: #2e3038;
+  --gray-800: #24262c;
+  --gray-850: #1d1e23;
+  --gray-900: #17181c;
+  --gray-950: #111215;
+  --gray-text-dark: #e6e7eb;
+  --gray-muted-dark: #9a9fab;
+  --gray-faint-dark: #6b707c;
+  --gray-text-light: #1b1d22;
+
+  --indigo-400: #8b9cff;
+  --indigo-500: #6e7ff3;
+  --indigo-600: #5563de;
+  --indigo-700: #4652c9;
+  --red-400: #f0717b;
+  --red-600: #c62f3b;
+  --amber-400: #e0b34f;
+  --amber-700: #9a6700;
+  --green-400: #57c08a;
+  --green-700: #1a7f4b;
+
+  /* ---- spacing (4 px grid; same values as Qt space1..6) ---- */
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* ---- radius ---- */
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --radius-l: 10px;
+
+  /* ---- typography ---- */
+  --font-ui: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", "Cantarell", "Noto Sans", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --text-caption: 11px;
+  --text-body: 13px;
+  --text-title: 15px;
+  --text-heading: 20px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --leading: 1.45;
+
+  /* ---- sizes ---- */
+  --control-h: 28px;
+  --row-h: 24px;
+  --tab-h: 34px;
+  --titlebar-h: 38px;
+  --statusbar-h: 24px;
+  --icon: 16px;
+  --border-w: 1px;
+  --focus-w: 2px;
+
+  /* ---- motion (Qt: durationFast 80, durationNormal 160) ---- */
+  --dur-fast: 80ms;
+  --dur-normal: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ---- semantic: dark (default) ---- */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: var(--gray-900);
+  --bg-subtle: var(--gray-950);
+  --bg-elevated: var(--gray-850);
+  --bg-hover: var(--gray-800);
+  --bg-active: var(--gray-750);
+  --bg-selected: color-mix(in srgb, var(--indigo-500) 22%, transparent);
+  --bg-input: var(--gray-950);
+  --border: var(--gray-800);
+  --border-strong: var(--gray-700);
+  --text: var(--gray-text-dark);
+  --text-muted: var(--gray-muted-dark);
+  --text-faint: var(--gray-faint-dark);
+  --text-on-accent: var(--gray-0);
+  /* Filled accent (primary buttons, white text): AA 4.5:1 needs the deeper
+     indigo; focus rings and markers use --accent-line, which is brighter. */
+  --accent: var(--indigo-600);
+  --accent-hover: var(--indigo-700);
+  --accent-line: var(--indigo-500);
+  --accent-soft: color-mix(in srgb, var(--indigo-500) 16%, transparent);
+  --danger: var(--red-400);
+  --danger-soft: color-mix(in srgb, var(--red-400) 14%, transparent);
+  --warning: var(--amber-400);
+  --warning-soft: color-mix(in srgb, var(--amber-400) 14%, transparent);
+  --success: var(--green-400);
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px var(--gray-750);
+  --scrollbar: var(--gray-750);
+  --scrim: rgb(0 0 0 / 0.45);
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+/* ---- semantic: light ---- */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: var(--gray-0);
+  --bg-subtle: var(--gray-50);
+  --bg-elevated: var(--gray-0);
+  --bg-hover: var(--gray-100);
+  --bg-active: var(--gray-150);
+  --bg-selected: color-mix(in srgb, var(--indigo-600) 13%, transparent);
+  --bg-input: var(--gray-0);
+  --border: var(--gray-150);
+  --border-strong: var(--gray-200);
+  --text: var(--gray-text-light);
+  --text-muted: var(--gray-600);
+  --text-faint: var(--gray-500);
+  --text-on-accent: var(--gray-0);
+  --accent: var(--indigo-600);
+  --accent-hover: var(--indigo-700);
+  --accent-line: var(--indigo-600);
+  --accent-soft: color-mix(in srgb, var(--indigo-600) 10%, transparent);
+  --danger: var(--red-600);
+  --danger-soft: color-mix(in srgb, var(--red-600) 9%, transparent);
+  --warning: var(--amber-700);
+  --warning-soft: color-mix(in srgb, var(--amber-700) 10%, transparent);
+  --success: var(--green-700);
+  --shadow-popover: 0 8px 24px rgb(20 22 30 / 0.14), 0 0 0 1px var(--gray-150);
+  --scrollbar: var(--gray-200);
+  --scrim: rgb(20 22 30 / 0.25);
+  --shadow-raised: 0 1px 2px rgb(20 22 30 / 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-normal: 0ms;
+  }
+}
