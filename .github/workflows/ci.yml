@@ -128,6 +128,27 @@ jobs:
       # ---- smoke tests, offscreen. Chromium's sandbox cannot start inside the Linux CI
       # container (no user namespaces / setuid helper), so it is disabled on Linux CI ONLY.
       # The application itself never sets this; developers' runs keep the sandbox.
+      # Windows: the Qt test executables time out in this VM. This step records whether they
+      # crash or hang, and whether the daemon itself runs, before the suite runs. Temporary
+      # diagnostic (see docs/roadmap/current.md, known defect KD-WIN); it does not fail the job.
+      - name: Windows test diagnostics
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Write-Host "--- axiomd --version"
+          & build/desktop/../../../target/debug/axiomd.exe --version
+          Write-Host "exit=$LASTEXITCODE"
+          foreach ($e in @('tst_linebuffer', 'tst_assethandler', 'tst_daemonclient')) {
+            $exe = "build/desktop/$e.exe"
+            Write-Host "--- $exe"
+            $out = "$e.out"; $err = "$e.err"
+            $p = Start-Process -FilePath $exe -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+            if (-not $p.WaitForExit(20000)) { Write-Host "$e HUNG (20 s)"; try { $p.Kill() } catch {} } else { Write-Host "$e exit=$($p.ExitCode)" }
+            Write-Host "--- stdout"; Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 12
+            Write-Host "--- stderr"; Get-Content $err -ErrorAction SilentlyContinue | Select-Object -First 20
+          }
+
       - name: Test (Linux)
         if: runner.os == 'Linux'
         env:

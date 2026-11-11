@@ -198,6 +198,39 @@ inline QList<qint64> descendantsMatching(const QByteArray &needle)
     return out;
 }
 
+// Processes that belong to this test run but may have been reparented out of the tree
+// (Chromium's zygote can outlive its parent). Matched by kernel session id on POSIX, which
+// still cannot reach another user's applications: they run in other sessions.
+inline QList<qint64> sessionMatching(const QByteArray &needle)
+{
+    QList<qint64> out;
+#if !defined(Q_OS_WIN)
+    const auto mine = ::getsid(0);
+    if (mine < 0)
+        return out;
+    for (const QString &e : QDir(QStringLiteral("/proc")).entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool ok = false;
+        const qint64 pid = e.toLongLong(&ok);
+        if (!ok)
+            continue;
+        QFile cmd(QStringLiteral("/proc/%1/cmdline").arg(pid));
+        if (!cmd.open(QIODevice::ReadOnly))
+            continue;
+        if (!cmd.readAll().contains(needle))
+            continue;
+        // /proc/<pid>/stat field 6 is the session id.
+        QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
+        if (!stat.open(QIODevice::ReadOnly))
+            continue;
+        const QByteArray st = stat.readAll();
+        const QList<QByteArray> rest = st.mid(st.lastIndexOf(')') + 2).split(' ');
+        if (rest.size() >= 4 && rest.at(3).toLongLong() == mine)
+            out << pid;
+    }
+#endif
+    return out;
+}
+
 inline QString describeDescendants()
 {
     const QHash<qint64, ProcInfo> procs = snapshotProcesses();
