@@ -1,6 +1,7 @@
 #pragma once
 #include "Backend.h"
 #include "daemon/DaemonClient.h"
+#include "models/OpenDocumentsModel.h"
 #include "models/WorkspaceController.h"
 
 #include <QQmlApplicationEngine>
@@ -10,6 +11,7 @@ class QQuickWindow;
 
 struct ShellOptions
 {
+    QString editorAssets; // from --editor-assets; empty = look it up
     QString daemonPath; // from --daemon; empty = look it up
     QString dataDir;    // forwarded to the daemon as --data-dir
 };
@@ -35,6 +37,8 @@ public:
     DaemonClient *client() { return &m_client; }
     Backend *backend() { return &m_backend; }
     WorkspaceController *workspace() { return &m_workspace; }
+    OpenDocumentsModel *documents() { return &m_documents; }
+    QString editorAssetDir() const { return m_editorAssets; }
     QQmlApplicationEngine *engine() { return &m_engine; }
     QQuickWindow *window() const { return m_window; }
 
@@ -46,6 +50,8 @@ private:
     DaemonClient m_client;
     Backend m_backend;
     WorkspaceController m_workspace;
+    OpenDocumentsModel m_documents;
+    QString m_editorAssets;
     bool m_reopenDone = false;
     QQmlApplicationEngine m_engine; // last: destroyed first, before what QML uses
     QQuickWindow *m_window = nullptr;

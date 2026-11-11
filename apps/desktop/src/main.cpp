@@ -1,4 +1,5 @@
 #include "Shell.h"
+#include "editor/EditorSetup.h"
 
 #include <QCommandLineParser>
 #include <QGuiApplication>
@@ -14,6 +15,8 @@ int main(int argc, char *argv[])
         }
     }
 
+    // WebEngine needs the scheme registered and initialised before the application exists.
+    initEditorWebEngine();
     QGuiApplication app(argc, argv);
     QGuiApplication::setOrganizationName(QStringLiteral("axiom"));
     QGuiApplication::setApplicationName(QStringLiteral("Axiom"));
@@ -27,12 +30,16 @@ int main(int argc, char *argv[])
     parser.addOption({ QStringLiteral("data-dir"),
                        QStringLiteral("Data directory forwarded to axiomd."),
                        QStringLiteral("dir") });
+    parser.addOption({ QStringLiteral("editor-assets"),
+                       QStringLiteral("Directory with the built editor bundle (editor/dist)."),
+                       QStringLiteral("dir") });
     parser.addOption({ QStringLiteral("version"), QStringLiteral("Print the version.") });
     parser.process(app);
 
     ShellOptions options;
     options.daemonPath = parser.value(QStringLiteral("daemon"));
     options.dataDir = parser.value(QStringLiteral("data-dir"));
+    options.editorAssets = parser.value(QStringLiteral("editor-assets"));
 
     Shell shell(options);
     if (!shell.load())

@@ -98,8 +98,10 @@ Saves are serialised per document:
   Monaco's defaults; the list lives in
   `apps/desktop/qml/Axiom/App/Shortcuts.qml`.
 - E1 verified that synthetic Qt key events reach Monaco (typing and Ctrl+S)
-  on Linux, both offscreen and under Wayland. macOS and Windows are
-  unverified until CI runs the same smoke test (M1-CI-002).
+  on Linux, both offscreen and under Wayland. The M1-SHELL-003 smoke test
+  (`tst_smoke_editor`) repeats this with the real bundle offscreen on Linux:
+  typing, Ctrl+S, conflict and renderer-crash recovery pass 5/5 runs. macOS
+  and Windows are unverified until CI runs the same smoke test (M1-CI-002).
 
 ## Failure modes
 

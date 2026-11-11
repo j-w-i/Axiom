@@ -1,5 +1,7 @@
 #include "Shell.h"
 
+#include "editor/EditorSetup.h"
+
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QTimer>
@@ -48,7 +50,8 @@ QString resolveMonoFamily()
 }
 
 Shell::Shell(const ShellOptions &options, QObject *parent)
-    : QObject(parent), m_options(options), m_client(this), m_backend(&m_client, this), m_workspace(&m_client, this)
+    : QObject(parent), m_options(options), m_client(this), m_backend(&m_client, this), m_workspace(&m_client, this),
+      m_documents(&m_client, &m_workspace, this)
 {
     // The design system is built on the Basic style.
     QQuickStyle::setStyle(QStringLiteral("Basic"));
@@ -57,7 +60,7 @@ Shell::Shell(const ShellOptions &options, QObject *parent)
 Shell::~Shell()
 {
     saveGeometry();
-    // Persist explorer state, waiting (bounded) for the daemon to confirm.
+    // Persist explorer and tab state, waiting (bounded) for the daemon to confirm.
     if (m_client.state() == DaemonClient::Ready && m_workspace.isOpen()) {
         QEventLoop loop;
         QTimer::singleShot(1500, &loop, &QEventLoop::quit);
@@ -71,6 +74,13 @@ bool Shell::load()
 {
     m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &m_backend);
     m_engine.rootContext()->setContextProperty(QStringLiteral("workspace"), &m_workspace);
+    m_engine.rootContext()->setContextProperty(QStringLiteral("documents"), &m_documents);
+    m_editorAssets = locateEditorAssets(m_options.editorAssets);
+    m_engine.rootContext()->setContextProperty(QStringLiteral("editorAvailable"), !m_editorAssets.isEmpty());
+    if (!m_editorAssets.isEmpty())
+        installEditorSchemeHandler(m_editorAssets, this);
+    else
+        qWarning("[editor] no editor assets found (use --editor-assets <dir> or build editor/dist)");
     // Once per launch: reopen the last workspace when the setting says so.
     connect(&m_client, &DaemonClient::stateChanged, this, [this] {
         if (m_client.state() == DaemonClient::Ready && !m_reopenDone) {

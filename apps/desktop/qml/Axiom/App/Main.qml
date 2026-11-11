@@ -67,21 +67,46 @@ Basic.ApplicationWindow {
                         required property string root
                         required property string name
                         text: name + "  —  " + root
-                        onTriggered: workspace.openFolder(root)
+                        onTriggered: documents.requestOpenFolder(root)
                     }
                 }
             }
             Basic.Action {
+                text: qsTr("&Save")
+                enabled: documents.count > 0 && documents.editorReady
+                // Inside the editor Monaco handles Ctrl+S itself; this covers the rest of the window.
+                shortcut: "Ctrl+S"
+                onTriggered: documents.save(documents.activePath)
+            }
+            Basic.Action {
+                text: qsTr("Save A&ll")
+                enabled: documents.hasDirty && documents.editorReady
+                onTriggered: documents.saveAll()
+            }
+            Basic.MenuSeparator {}
+            Basic.Action {
                 text: qsTr("&Close Folder")
                 enabled: workspace.open
-                onTriggered: workspace.close()
+                onTriggered: documents.requestCloseFolder()
             }
             Basic.MenuSeparator {}
             Basic.Action {
                 text: qsTr("&Quit")
                 shortcut: StandardKey.Quit
-                onTriggered: Qt.quit()
+                onTriggered: documents.requestQuit()
             }
+        }
+        Basic.Menu {
+            title: qsTr("&Edit")
+            delegate: AxMenuItem {}
+            background: AxMenuBackground {}
+            Basic.Action { text: qsTr("&Undo");       enabled: documents.count > 0 && documents.editorReady; onTriggered: documents.runCommand("undo") }
+            Basic.Action { text: qsTr("&Redo");       enabled: documents.count > 0 && documents.editorReady; onTriggered: documents.runCommand("redo") }
+            Basic.MenuSeparator {}
+            Basic.Action { text: qsTr("&Find");       enabled: documents.count > 0 && documents.editorReady; onTriggered: documents.runCommand("find") }
+            Basic.Action { text: qsTr("&Replace");    enabled: documents.count > 0 && documents.editorReady; onTriggered: documents.runCommand("replace") }
+            Basic.MenuSeparator {}
+            Basic.Action { text: qsTr("Select &All"); enabled: documents.count > 0 && documents.editorReady; onTriggered: documents.runCommand("selectAll") }
         }
         Basic.Menu {
             title: qsTr("&View")
@@ -120,6 +145,15 @@ Basic.ApplicationWindow {
             text: backend.errorText
             actionText: qsTr("Restart backend")
             onActionTriggered: backend.restart()
+        }
+
+        AxBanner {
+            Layout.fillWidth: true
+            visible: documents.bannerText.length > 0
+            variant: "warning"
+            text: documents.bannerText
+            actionText: qsTr("Dismiss")
+            onActionTriggered: documents.dismissBanner()
         }
 
         AxBanner {
@@ -166,6 +200,7 @@ Basic.ApplicationWindow {
                     ExplorerView {
                         id: explorer
                         objectName: "explorerView"
+                        onFileActivated: (path) => documents.open(path)
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         visible: workspace.open
@@ -188,11 +223,16 @@ Basic.ApplicationWindow {
                     Accessible.role: Accessible.Pane
                     Accessible.name: qsTr("Content")
 
+                    EditorArea {
+                        id: editorArea
+                        anchors.fill: parent
+                        visible: workspace.open
+                    }
                     WelcomeView {
                         anchors.fill: parent
                         visible: !workspace.open
                         onOpenFolderRequested: folderDialog.open()
-                        onOpenRecent: (root) => workspace.openFolder(root)
+                        onOpenRecent: (root) => documents.requestOpenFolder(root)
                     }
                 }
 
@@ -249,6 +289,13 @@ Basic.ApplicationWindow {
                     role: "muted"
                     Accessible.ignored: true
                 }
+                AxLabel {
+                    objectName: "cursorText"
+                    visible: documents.activePath !== ""
+                    text: documents.cursorText
+                    role: "muted"
+                    Accessible.name: qsTr("Cursor position: %1").arg(documents.cursorText)
+                }
             }
         }
     }
@@ -256,13 +303,87 @@ Basic.ApplicationWindow {
     FolderDialog {
         id: folderDialog
         title: qsTr("Open Folder")
-        onAccepted: workspace.openFolderUrl(selectedFolder)
+        onAccepted: documents.requestOpenFolderUrl(selectedFolder)
     }
 
     Connections {
         target: workspace
         function onErrorOccurred(message) { window.workspaceError = message }
         function onOpenChanged() { if (workspace.open) window.workspaceError = "" }
+    }
+
+    // ---- closing the window with unsaved work asks first
+    property bool quitting: false
+    onClosing: (close) => {
+        if (!quitting && documents.hasDirty) {
+            close.accepted = false
+            documents.requestQuit()
+        }
+    }
+    Connections {
+        target: documents
+        function onQuitConfirmed() { window.quitting = true; Qt.quit() }
+    }
+
+    // ---- the editor follows the OS appearance until settings exist (M1-SHELL-005)
+    function syncAppearance() { documents.setAppearance(Theme.dark, 13, "", false) }
+    Connections { target: Theme; function onDarkChanged() { window.syncAppearance() } }
+    Connections { target: documents; function onEditorReadyChanged() { if (documents.editorReady) window.syncAppearance() } }
+    Component.onCompleted: syncAppearance()
+
+    // ---- conflict: the file changed on disk since it was opened
+    AxDialog {
+        id: conflictDialog
+        objectName: "conflictDialog"
+        title: qsTr("%1 changed on disk").arg(documents.conflictName)
+        visible: documents.conflictActive
+        dismissAction: "cancel"
+        buttons: [
+            { text: qsTr("Cancel"), variant: "quiet", action: "cancel" },
+            { text: qsTr("Reload"), variant: "default", action: "reload" },
+            { text: qsTr("Overwrite"), variant: "primary", action: "overwrite" }
+        ]
+        onChosen: (action) => documents.resolveConflict(action)
+        AxLabel {
+            Layout.fillWidth: true
+            text: qsTr("Someone else changed this file after you opened it. Overwrite replaces their version with yours; Reload discards your changes and shows theirs.")
+            wrapMode: Text.Wrap
+            elide: Text.ElideNone
+        }
+    }
+
+    // ---- unsaved work: closing a tab, closing/switching the folder, quitting
+    AxDialog {
+        id: unsavedDialog
+        objectName: "unsavedDialog"
+        title: documents.promptKind === "close" ? qsTr("Save changes to %1?").arg(documents.promptNames[0] || "")
+                                               : qsTr("Save changes before closing?")
+        visible: documents.promptActive
+        dismissAction: "cancel"
+        buttons: [
+            { text: qsTr("Cancel"), variant: "quiet", action: "cancel" },
+            { text: qsTr("Discard"), variant: "default", action: "discard" },
+            { text: qsTr("Save"), variant: "primary", action: "save" }
+        ]
+        onChosen: (action) => documents.resolvePrompt(action)
+        AxLabel {
+            Layout.fillWidth: true
+            visible: documents.promptKind !== "close"
+            text: qsTr("These documents have unsaved changes:")
+            wrapMode: Text.Wrap
+            elide: Text.ElideNone
+        }
+        Repeater {
+            model: documents.promptKind !== "close" ? documents.promptNames : []
+            delegate: AxLabel { required property string modelData; text: "• " + modelData; Layout.fillWidth: true }
+        }
+        AxLabel {
+            Layout.fillWidth: true
+            visible: documents.promptKind === "close"
+            text: qsTr("Your changes will be lost if you do not save them.")
+            wrapMode: Text.Wrap
+            elide: Text.ElideNone
+        }
     }
 
     AxDialog {

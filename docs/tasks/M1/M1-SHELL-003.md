@@ -1,8 +1,8 @@
 ---
 id: M1-SHELL-003
 title: Embed the editor — open, edit, save, tabs
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: [M1-SHELL-002, M1-EDITOR-001]
 order: 42
 scope: apps/desktop/, scripts/check.sh (desktop section), .github/workflows/ci.yml (only if needed for editor assets)

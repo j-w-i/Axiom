@@ -18,6 +18,12 @@ DaemonClient::DaemonClient(QObject *parent) : QObject(parent) {}
 
 DaemonClient::~DaemonClient()
 {
+    // Nobody is left to receive answers: the objects that issued requests may
+    // already be gone (members are destroyed in reverse order of declaration).
+    // Drop pending callbacks silently before the bounded wait in shutdown().
+    for (auto it = m_pending.begin(); it != m_pending.end(); ++it)
+        delete it->timer;
+    m_pending.clear();
     if (m_proc)
         shutdown();
 }
