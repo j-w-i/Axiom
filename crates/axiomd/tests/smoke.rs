@@ -1,6 +1,8 @@
 //! Smoke tests against the real `axiomd` binary.
 
-use axiom_protocol::{ErrorKind, Message};
+use axiom_protocol::ErrorKind;
+#[cfg(unix)]
+use axiom_protocol::Message;
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
