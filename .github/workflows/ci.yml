@@ -112,6 +112,30 @@ jobs:
         run: cargo install tauri-driver --version '^2' --locked
       # The runner starts its own private Xvfb on Linux (e2e/runner.mjs) and
       # never uses an inherited DISPLAY, so `xvfb-run` here would be redundant.
+      # Packages are built on every OS so the artefacts exist for review even
+      # when a platform's end-to-end run is still red (KD-WIN-2).
+      - name: Package
+        shell: bash
+        run: |
+          case "${RUNNER_OS}" in
+            Linux)   bundles=deb,rpm ;;
+            Windows) bundles=nsis ;;
+            macOS)   bundles=app ;;
+          esac
+          echo "bundles: $bundles"
+          apps/desktop-tauri/scripts/bundle.sh --bundles "$bundles"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.os }}
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/macos/*.app
+          if-no-files-found: warn
+
       - name: Build the app the end-to-end suite drives
         if: runner.os != 'macOS'
         run: cargo build --release -p axiom-desktop-tauri --manifest-path ../../Cargo.toml
