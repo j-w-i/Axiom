@@ -1,4 +1,5 @@
 #include "Shell.h"
+#include "editor/EditorSetup.h"
 
 #include <QGuiApplication>
 #include <QImage>
@@ -218,6 +219,82 @@ private slots:
         w->grabWindow().save(m_shots + "/explorer.png");
     }
 
+    // The output panel through QML: type a command, Enter runs it, rows appear, Stop works.
+    void outputPanelRunsCommandsAndStops()
+    {
+#ifdef Q_OS_WIN
+        QSKIP("Unix shell commands; Windows equivalents arrive with M1-CI-002");
+#endif
+        QTemporaryDir ws;
+        QVERIFY(ws.isValid());
+        ShellOptions opts;
+        opts.daemonPath = qEnvironmentVariable("AXIOMD_UNDER_TEST");
+        opts.dataDir = m_data.path();
+        Shell shell(opts);
+        QVERIFY(shell.load());
+        QQuickWindow *w = shell.window();
+        QVERIFY(waitFor([&] { return shell.backend()->ready(); }));
+        w->show();
+
+        // Before a workspace is open the command field is disabled and says why.
+        QQuickItem *field = findByName(w->contentItem(), "commandField");
+        QVERIFY(field);
+        QVERIFY(!field->isEnabled());
+
+        QSignalSpy opened(shell.workspace(), &WorkspaceController::opened);
+        shell.workspace()->openFolder(ws.path());
+        QVERIFY(opened.wait(8000));
+        QVERIFY(waitFor([&] { return field->isEnabled(); }));
+
+        // Type into the real text field and press Enter.
+        auto *editor = field->property("contentItem").value<QQuickItem *>();
+        QVERIFY(editor);
+        editor->forceActiveFocus();
+        QVERIFY(waitFor([&] { return editor->hasActiveFocus(); }));
+        for (QChar c : QStringLiteral("echo hi; echo oops >&2; exit 2"))
+            QTest::keyClick(w, c.toLatin1() ? static_cast<Qt::Key>(c.toUpper().unicode()) : Qt::Key_unknown, Qt::NoModifier);
+        QTRY_COMPARE(field->property("editText").toString(), QStringLiteral("echo hi; echo oops >&2; exit 2"));
+        QSignalSpy finished(shell.tasks(), &TaskController::finished);
+        QTest::keyClick(w, Qt::Key_Return);
+        QVERIFY(finished.wait(10000));
+
+        QQuickItem *list = findByName(w->contentItem(), "outputList");
+        QVERIFY(list);
+        QTRY_COMPARE(list->property("count").toInt(), 3);
+        auto *out = shell.tasks()->outputModel();
+        QCOMPARE(out->textAt(2).contains("Failed with exit code 2"), true);
+        QCOMPARE(shell.tasks()->history(), QStringList{ "echo hi; echo oops >&2; exit 2" });
+        QQuickItem *status = findByName(w->contentItem(), "taskStatus");
+        QVERIFY(status && status->isVisible());
+        QVERIFY(status->property("text").toString().contains("failed (2)"));
+        w->grabWindow().save(m_shots + "/output-failed.png");
+
+        // Run via the button, then stop it via the Stop button.
+        QQuickItem *run = findByName(w->contentItem(), "runButton");
+        QQuickItem *stop = findByName(w->contentItem(), "stopButton");
+        QVERIFY(run && stop);
+        QVERIFY(!stop->isEnabled());
+        field->setProperty("editText", "sleep 30");
+        QTRY_VERIFY(run->isEnabled());
+        auto center = [](QQuickItem *i) { return i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint(); };
+        QTest::mouseClick(w, Qt::LeftButton, Qt::NoModifier, center(run));
+        QTRY_VERIFY(shell.tasks()->running());
+        QTRY_VERIFY(stop->isEnabled());
+        QVERIFY(!run->isEnabled()); // one task at a time
+        QSignalSpy finished2(shell.tasks(), &TaskController::finished);
+        QTest::mouseClick(w, Qt::LeftButton, Qt::NoModifier, center(stop));
+        QVERIFY(finished2.wait(5000));
+        QVERIFY(!shell.tasks()->running());
+        QCOMPARE(finished2.first().first().toString(), QStringLiteral("cancelled"));
+        QVERIFY(status->property("text").toString().contains("cancelled"));
+
+        // Clear empties the list.
+        QQuickItem *clear = findByName(w->contentItem(), "clearButton");
+        QVERIFY(clear);
+        QTest::mouseClick(w, Qt::LeftButton, Qt::NoModifier, center(clear));
+        QTRY_COMPARE(list->property("count").toInt(), 0);
+    }
+
     void missingDaemonShowsFailureNotACrash()
     {
         ShellOptions opts;
@@ -229,5 +306,12 @@ private slots:
     }
 };
 
-QTEST_MAIN(TstSmokeLaunch)
+// WebEngine needs the scheme registered and initialised before the application exists.
+int main(int argc, char *argv[])
+{
+    initEditorWebEngine();
+    QGuiApplication app(argc, argv);
+    TstSmokeLaunch tc;
+    return QTest::qExec(&tc, argc, argv);
+}
 #include "tst_smoke_launch.moc"

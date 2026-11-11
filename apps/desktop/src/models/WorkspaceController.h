@@ -68,6 +68,8 @@ private:
     QString m_name;
     bool m_opening = false;
     bool m_restoring = false;
+    int m_pendingClose = 0;      // workspace/close requests not yet answered
+    QString m_deferredOpen;      // an open requested while a close was in flight
     quint64 m_generation = 0; // invalidates answers for an open that was superseded
     QTimer m_saveTimer;
 };

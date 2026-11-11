@@ -124,6 +124,29 @@ Basic.ApplicationWindow {
             }
         }
         Basic.Menu {
+            title: qsTr("&Run")
+            delegate: AxMenuItem {}
+            background: AxMenuBackground {}
+            Basic.Action {
+                text: qsTr("Run &Command")
+                enabled: workspace.open
+                shortcut: "Ctrl+Shift+R"
+                onTriggered: { window.panelVisible = true; panel.focusCommand() }
+            }
+            Basic.Action {
+                text: qsTr("&Rerun Last")
+                enabled: tasks.canRun && tasks.history.length > 0
+                shortcut: "F5"
+                onTriggered: tasks.rerunLast()
+            }
+            Basic.Action {
+                text: qsTr("&Stop")
+                enabled: tasks.running
+                shortcut: "Shift+F5"
+                onTriggered: tasks.stop()
+            }
+        }
+        Basic.Menu {
             title: qsTr("&Help")
             delegate: AxMenuItem {}
             background: AxMenuBackground {}
@@ -236,25 +259,13 @@ Basic.ApplicationWindow {
                     }
                 }
 
-                // Bottom panel: command output arrives with M1-SHELL-004.
-                Rectangle {
+                // Bottom panel: command bar and streamed output.
+                OutputPanel {
                     id: panel
+                    objectName: "outputPanel"
                     visible: window.panelVisible
-                    Basic.SplitView.preferredHeight: 200
-                    Basic.SplitView.minimumHeight: 80
-                    color: Theme.bgSubtle
-                    Accessible.role: Accessible.Pane
-                    Accessible.name: qsTr("Output")
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        spacing: 0
-                        AxPanelHeader {
-                            Layout.fillWidth: true
-                            title: qsTr("Output")
-                        }
-                        Item { Layout.fillHeight: true }
-                    }
+                    Basic.SplitView.preferredHeight: 220
+                    Basic.SplitView.minimumHeight: 100
                 }
             }
         }
@@ -288,6 +299,14 @@ Basic.ApplicationWindow {
                     text: window.statusText
                     role: "muted"
                     Accessible.ignored: true
+                }
+                AxLabel {
+                    objectName: "taskStatus"
+                    visible: tasks.statusText.length > 0
+                    text: tasks.statusText
+                    role: "muted"
+                    color: tasks.hasLastStatus && tasks.lastStatus.outcome === "failed" ? Theme.danger : Theme.textMuted
+                    Accessible.name: qsTr("Task: %1").arg(tasks.statusText)
                 }
                 AxLabel {
                     objectName: "cursorText"

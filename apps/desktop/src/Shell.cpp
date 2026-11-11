@@ -51,7 +51,8 @@ QString resolveMonoFamily()
 
 Shell::Shell(const ShellOptions &options, QObject *parent)
     : QObject(parent), m_options(options), m_client(this), m_backend(&m_client, this), m_workspace(&m_client, this),
-      m_documents(&m_client, &m_workspace, this)
+      m_documents(&m_client, &m_workspace, this),
+      m_tasks(&m_client, &m_workspace, this)
 {
     // The design system is built on the Basic style.
     QQuickStyle::setStyle(QStringLiteral("Basic"));
@@ -75,6 +76,7 @@ bool Shell::load()
     m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &m_backend);
     m_engine.rootContext()->setContextProperty(QStringLiteral("workspace"), &m_workspace);
     m_engine.rootContext()->setContextProperty(QStringLiteral("documents"), &m_documents);
+    m_engine.rootContext()->setContextProperty(QStringLiteral("tasks"), &m_tasks);
     m_editorAssets = locateEditorAssets(m_options.editorAssets);
     m_engine.rootContext()->setContextProperty(QStringLiteral("editorAvailable"), !m_editorAssets.isEmpty());
     if (!m_editorAssets.isEmpty())

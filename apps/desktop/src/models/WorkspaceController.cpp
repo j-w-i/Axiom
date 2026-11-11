@@ -28,8 +28,11 @@ WorkspaceController::WorkspaceController(DaemonClient *client, QObject *parent)
     connect(client, &DaemonClient::stateChanged, this, [this] {
         if (m_client->state() == DaemonClient::Ready) {
             refreshRecent();
-        } else if (isOpen() || m_opening) {
-            clearOpenState();
+        } else {
+            m_pendingClose = 0;
+            m_deferredOpen.clear();
+            if (isOpen() || m_opening)
+                clearOpenState();
         }
     });
 }
@@ -66,6 +69,12 @@ void WorkspaceController::openFolder(const QString &path)
         return;
     const quint64 gen = ++m_generation;
     setOpening(true);
+    // A close still in flight would otherwise reach the daemon after this open and kill
+    // it (opening a folder is idempotent per root and would return the closing id).
+    if (m_pendingClose > 0) {
+        m_deferredOpen = path;
+        return;
+    }
 
     auto openNew = [this, path, gen] {
         if (gen != m_generation)
@@ -151,9 +160,21 @@ void WorkspaceController::close()
         return;
     const QString id = m_id;
     const QString expandedKeyId = id;
+    ++m_pendingClose;
     flushState([this, expandedKeyId] {
+        if (!m_client) {
+            m_pendingClose = 0;
+            return;
+        }
         m_client->call(QStringLiteral("workspace/close"), { { "workspaceId", expandedKeyId } },
-                       [](const QJsonObject &, const RpcError &) {});
+                       [this](const QJsonObject &, const RpcError &) {
+                           if (m_pendingClose > 0)
+                               --m_pendingClose;
+                           if (m_pendingClose == 0 && !m_deferredOpen.isEmpty()) {
+                               const QString path = std::exchange(m_deferredOpen, QString());
+                               openFolder(path);
+                           }
+                       });
     });
     clearOpenState();
 }
