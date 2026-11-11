@@ -27,7 +27,7 @@ const suites = customSuites.length
   ? customSuites
   : process.env.AXIOM_E2E_SCRIPT
     ? [process.env.AXIOM_E2E_SCRIPT]
-    : [join(here, "smoke.mjs"), join(here, "quit.mjs")];
+    : [join(here, "smoke.mjs"), join(here, "quit.mjs"), join(here, "geometry.mjs")];
 const children = [];
 
 function log(msg) {

@@ -101,9 +101,9 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | S-1 | Settings change only on daemon confirmation; invalid rejected | tst_settings | same | S: "settings change only when…" | ✅ |
 | S-2 | Theme system/light/dark; follows OS | Theme singleton + `Qt.styleHints` | `prefers-color-scheme` + `data-theme` | E: 9 | ✅ (OS-follow untested) |
 | S-3 | About: app, backend, protocol, toolkit versions, data dir | smoke_launch::settingsApplyLiveAndAboutShowsDetails | About sheet (Tauri + webview versions) | code | 🟡 |
-| S-4 | Window geometry persisted, never restored off-screen | Shell::restoreGeometry | host `window.json`, same rules | code | 🟡 |
+| S-4 | Window geometry persisted, never restored off-screen | Shell::restoreGeometry | host `window.json` in the app config dir, same rules | E (geometry suite) 1, 4: resize → quit through the app's path → relaunch restores 1000×700 | ✅ |
 | S-5 | Side bar / panel toggles (Ctrl+B / Ctrl+J), resizable | Main.qml SplitView | splitters + toggles; **sizes persisted** (Qt does not) | screenshots | ✅ (+) |
-| S-6 | Minimum window 720×480; side bar collapsed < 900 px | Main.qml | `minWidth/minHeight`; initial collapse rule | code | 🟡 |
+| S-6 | Minimum window 720×480; side bar collapsed < 900 px | Main.qml | `minWidth/minHeight`; initial collapse rule | E (geometry suite) 2: a 400×300 request yields 720×480 | ✅ (size); collapse rule inspected |
 | S-7 | Menu bar File/Edit/View/Run/Help | QML MenuBar (in-window) | In-window Radix menus File/Edit/View/Run/Help with the same items and shortcuts; a **native** macOS menu (T-07) dispatches the same action ids | screenshots; macOS menu compiled only in CI | ✅ (macOS menu unverified) |
 | S-8 | Accessibility: names/roles on every control, focus ring, keyboard reachability | QML `Accessible.*` | ARIA roles (tree, tablist, log, dialog, menu, radiogroup), `aria-label` on icon buttons, `:focus-visible` ring, Radix focus traps | **no screen-reader test in either shell** | 🟡 |
 | S-9 | Same data directory readable by both shells | — | same `axiom.db`, same keys | E: 8 reads state written via the same protocol; store shared by design | ✅ |
