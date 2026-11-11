@@ -64,6 +64,13 @@ class TstWorkspace : public QObject
         FileTreeModel *tree() { return ctl.treeModel(); }
     };
 
+    // Canonical path in the same form the daemon reports it (native separators;
+    // QDir::canonicalPath() uses '/' even on Windows).
+    static QString canon(const QString &path)
+    {
+        return QDir::toNativeSeparators(QFileInfo(path).canonicalFilePath());
+    }
+
     static QStringList names(FileTreeModel *m, const QModelIndex &parent = {})
     {
         QStringList out;
@@ -322,12 +329,12 @@ private slots:
         QSignalSpy opened(&e.ctl, &WorkspaceController::opened);
         e.ctl.openFolder(other.path());
         QVERIFY(opened.wait(8000)); // switching closes the first workspace
-        QCOMPARE(e.ctl.root(), QDir(other.path()).canonicalPath());
+        QCOMPARE(e.ctl.root(), canon(other.path()));
         e.ctl.refreshRecent();
         auto *r = e.ctl.recentModel();
         QVERIFY(waitFor([&] { return r->rowCount() == 2; }));
-        QCOMPARE(r->data(r->index(0), RecentModel::RootRole).toString(), QDir(other.path()).canonicalPath());
-        QCOMPARE(r->data(r->index(1), RecentModel::RootRole).toString(), QDir(e.dir.path()).canonicalPath());
+        QCOMPARE(QDir::toNativeSeparators(r->data(r->index(0), RecentModel::RootRole).toString()), canon(other.path()));
+        QCOMPARE(QDir::toNativeSeparators(r->data(r->index(1), RecentModel::RootRole).toString()), canon(e.dir.path()));
     }
 
     void reopenLastOpensTheLastWorkspaceWhenEnabled()
