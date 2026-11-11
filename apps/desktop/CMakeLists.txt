@@ -116,7 +116,10 @@ function(axiom_test name)
   target_link_libraries(${name} PRIVATE axiom_core Qt6::Test ${ARGN})
   target_compile_definitions(${name} PRIVATE AXIOM_FIXTURES_DIR="${AXIOM_FIXTURES_DIR}")
   axiom_warnings(${name})
-  add_test(NAME ${name} COMMAND ${name})
+  # QtTest logs to a file as well as stdout: a test killed by a timeout still leaves
+  # a readable record (stdout of a killed process is lost when it is not a terminal).
+  add_test(NAME ${name}
+    COMMAND ${name} -o ${CMAKE_BINARY_DIR}/${name}.log,txt -o -,txt)
   set_tests_properties(${name} PROPERTIES
     ENVIRONMENT "AXIOM_EMIT=${AXIOM_EMIT};AXIOM_EDITOR_ASSETS=${CMAKE_BINARY_DIR}/editor;QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox --disable-gpu;AXIOMD_UNDER_TEST=${AXIOMD_UNDER_TEST};XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-home;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-home"
     TIMEOUT 45)  # the slowest test takes ~8 s locally; a hang fails in 45 s, not minutes

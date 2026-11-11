@@ -174,24 +174,22 @@ jobs:
           }
           Get-ChildItem build/desktop/*.dll | Select-Object -First 5 Name
 
-      - name: Windows per-function diagnostics
+      - name: Windows single-function diagnostics
         if: runner.os == 'Windows'
         shell: pwsh
         continue-on-error: true
+        env:
+          AXIOMD_UNDER_TEST: ${{ github.workspace }}/target/debug/axiomd.exe
+          AXIOM_EMIT: ${{ github.workspace }}/target/debug/emit.exe
+          AXIOM_EDITOR_ASSETS: ${{ github.workspace }}/build/editor
+          AXIOM_SCREENSHOT_DIR: ${{ github.workspace }}/build/screenshots
         run: |
-          $exe = 'build/desktop/tst_daemonclient.exe'
           $log = "$env:RUNNER_TEMP/q.log"
-          $fx = & $exe -functions 2>&1 | Where-Object { $_ -match '\(\)$' } | ForEach-Object { ($_ -split '\(')[0].Trim() }
-          Write-Host "functions: $($fx -join ', ')"
-          foreach ($f in @('initTestCase') + $fx) {
+          foreach ($f in @('initTestCase', 'initializeSucceeds')) {
             Remove-Item $log -ErrorAction SilentlyContinue
-            $p = Start-Process -FilePath $exe -ArgumentList @($f, '-o', "$log,txt") -PassThru -NoNewWindow
-            if (-not $p.WaitForExit(15000)) {
-              Write-Host "FUNCTION $f : HUNG 15 s (exit would be unknown)"; try { $p.Kill() } catch {}
-            } else {
-              Write-Host "FUNCTION $f : exit=$($p.ExitCode) (0xC0000139=entry point, 0xC0000005=access violation)"
-            }
-            if (Test-Path $log) { Get-Content $log | Select-Object -Last 6 }
+            $p = Start-Process -FilePath 'build/desktop/tst_daemonclient.exe' -ArgumentList @($f, '-o', "$log,txt") -PassThru -NoNewWindow
+            if (-not $p.WaitForExit(25000)) { Write-Host "FUNCTION $f HUNG"; try { $p.Kill() } catch {} } else { Write-Host "FUNCTION $f exit=$($p.ExitCode)" }
+            Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Last 12
           }
 
       - name: Test (Linux)
@@ -214,5 +212,6 @@ jobs:
           name: desktop-${{ matrix.os }}
           path: |
             build/desktop/Testing/Temporary/LastTest.log
+            build/desktop/*.log
             build/screenshots/
           if-no-files-found: ignore
