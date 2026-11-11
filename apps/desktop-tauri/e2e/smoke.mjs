@@ -154,8 +154,11 @@ try {
   // ---- 4. open + edit in Monaco ------------------------------------------------
   await wd.click(await wd.find('[data-path="src/main.rs"]'));
   await wd.waitFor(`return !!document.querySelector('.monaco-editor .view-lines') && document.querySelector('.monaco-editor .view-lines').textContent.includes('hello')`, [], 15000, "Monaco shows main.rs");
+  // At least two distinct token classes means Monaco classified the content;
+  // a plain-text editor would leave every span as `mtk1`. The exact count
+  // depends on the tokenizer's version, so it is not asserted.
   const coloured = await wd.exec(`return new Set([...document.querySelectorAll('.monaco-editor .view-lines span span')].map(s => s.className)).size`);
-  check("4a file opens in Monaco with syntax colouring", coloured > 2, `${coloured} token classes`);
+  check("4a file opens in Monaco with syntax colouring", coloured >= 2, `${coloured} token classes`);
   await shot(wd, "04-editor-dark");
   await wd.click(await wd.find(".monaco-editor .view-lines"));
   await wd.chord(Keys.CTRL, "\uE011"); // Ctrl+Home
