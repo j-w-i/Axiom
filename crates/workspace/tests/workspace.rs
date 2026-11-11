@@ -226,15 +226,40 @@ async fn list_orders_dirs_first_then_case_insensitive_name() {
     for dir in ["zdir", "Adir", "bdir"] {
         fs::create_dir(d.path().join(dir)).unwrap();
     }
-    for f in ["b.txt", "A.txt", "a.txt", "C.txt"] {
+    for f in ["b.txt", "A.txt", "C.txt"] {
         fs::write(d.path().join(f), "x").unwrap();
     }
+    // The tie-break by exact name needs a case-sensitive filesystem (macOS and
+    // Windows treat a.txt and A.txt as one file).
+    let case_sensitive = {
+        fs::write(d.path().join("a.txt"), "x").unwrap();
+        fs::read_dir(d.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .to_lowercase()
+                    == "a.txt"
+            })
+            .count()
+            == 2
+    };
     let ws = open(d.path()).await;
     let entries = ws.list(&wp("")).await.unwrap();
-    assert_eq!(
-        names(&entries),
-        ["Adir", "bdir", "zdir", "A.txt", "a.txt", "b.txt", "C.txt"]
-    );
+    let expected: &[&str] = if case_sensitive {
+        &["Adir", "bdir", "zdir", "A.txt", "a.txt", "b.txt", "C.txt"]
+    } else {
+        &["Adir", "bdir", "zdir", "a.txt", "b.txt", "C.txt"]
+    };
+    // On a case-insensitive filesystem the surviving name keeps its case.
+    let got: Vec<String> = names(&entries).iter().map(|n| n.to_lowercase()).collect();
+    let want: Vec<String> = expected.iter().map(|n| n.to_lowercase()).collect();
+    assert_eq!(got, want);
+    if case_sensitive {
+        assert_eq!(names(&entries), expected);
+    }
 }
 
 #[tokio::test]

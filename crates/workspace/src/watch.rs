@@ -336,6 +336,12 @@ fn handle_event(inner: &Inner, ev: Event, batch: &mut Batch, known: &mut Known) 
             continue;
         };
         let kind = known.normalise(&rel, kind, exists(path));
+        // A directory's own "modified" only says that something inside it
+        // changed (Windows reports it for every child change, even under
+        // ignored directories). The child events carry the information.
+        if kind == ChangeKind::Modified && path.is_dir() {
+            continue;
+        }
         if rel.is_empty() {
             continue;
         }
