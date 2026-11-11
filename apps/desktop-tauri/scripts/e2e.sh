@@ -22,6 +22,6 @@ if [[ "${WAYLAND_DISPLAY:-}" != "" && "${AXIOM_ALLOW_EXISTING_DISPLAY:-}" != "1"
   unset WAYLAND_DISPLAY
 fi
 if [[ -n "$script" ]]; then
-  exec node "$script"
+  exec node "$here/e2e/runner.mjs" "$script"
 fi
 exec node "$here/e2e/runner.mjs"

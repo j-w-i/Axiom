@@ -16,6 +16,18 @@ import { join, resolve } from "node:path";
 const here = import.meta.dirname;
 const repo = resolve(here, "../..");
 const noXvfb = process.argv.includes("--no-xvfb");
+// Any non-flag argument is an alternative suite (probes, one-off checks); the
+// display, driver and cleanup are the same either way. With none, the default
+// suites run in order: the main one, then quitting with unsaved work (which
+// ends with the app exiting).
+const customSuites = process.argv.filter(
+  (a, i) => i >= 2 && !a.startsWith("--"),
+);
+const suites = customSuites.length
+  ? customSuites
+  : process.env.AXIOM_E2E_SCRIPT
+    ? [process.env.AXIOM_E2E_SCRIPT]
+    : [join(here, "smoke.mjs"), join(here, "quit.mjs")];
 const children = [];
 
 function log(msg) {
@@ -119,36 +131,49 @@ async function main() {
     }
   }
 
-  // ---- driver --------------------------------------------------------------------
-  const driverPort = await freePort();
-  const nativePort = driverPort + 1;
+  // ---- driver + suites ------------------------------------------------------------
+  // One tauri-driver per suite: WebKitWebDriver keeps a single session, and the
+  // crash test deliberately leaves its session behind (the page it was bound to
+  // is dead), so a shared driver would refuse the next suite with
+  // "Maximum number of active sessions".
   const logPath = process.env.TAURI_DRIVER_LOG ?? join(tmpdir(), "axiom-tauri-driver.log");
-  const logFd = openSync(logPath, "w");
-  const driver = spawn("tauri-driver", ["--port", String(driverPort), "--native-port", String(nativePort)], {
-    env: { ...process.env, ...env },
-    stdio: ["ignore", logFd, logFd],
-  });
-  children.push(driver);
-  driver.on("error", (e) => log(`tauri-driver could not start: ${e.message}`));
-
-  const ready = await waitForHttp(`http://127.0.0.1:${driverPort}/status`, 15000);
-  if (!ready) throw new Error(`tauri-driver did not answer on port ${driverPort}; see ${logPath}`);
-  log(`tauri-driver on ${driverPort}; app log at ${logPath}`);
-
-  // ---- the suite -----------------------------------------------------------------
-  const code = await new Promise((res) => {
-    const suite = spawn(process.execPath, [join(here, "smoke.mjs")], {
-      env: {
-        ...process.env,
-        ...env,
-        TAURI_DRIVER_URL: `http://127.0.0.1:${driverPort}`,
-        TAURI_DRIVER_LOG: logPath,
-      },
-      stdio: "inherit",
+  let code = 0;
+  for (const suitePath of suites) {
+    const driverPort = await freePort();
+    const logFd = openSync(logPath, "w");
+    const driver = spawn("tauri-driver", ["--port", String(driverPort), "--native-port", String(driverPort + 1)], {
+      env: { ...process.env, ...env },
+      stdio: ["ignore", logFd, logFd],
     });
-    children.push(suite);
-    suite.on("exit", (c) => res(c ?? 1));
-  });
+    children.push(driver);
+    driver.on("error", (e) => log(`tauri-driver could not start: ${e.message}`));
+
+    const ready = await waitForHttp(`http://127.0.0.1:${driverPort}/status`, 15000);
+    if (!ready) {
+      log(`tauri-driver did not answer on port ${driverPort}; see ${logPath}`);
+      code = 1;
+    } else {
+      log(`suite: ${suitePath} (driver ${driverPort}, app log ${logPath})`);
+      const suiteCode = await new Promise((res) => {
+        const suite = spawn(process.execPath, [suitePath], {
+          env: {
+            ...process.env,
+            ...env,
+            TAURI_DRIVER_URL: `http://127.0.0.1:${driverPort}`,
+            TAURI_DRIVER_LOG: logPath,
+          },
+          stdio: "inherit",
+        });
+        children.push(suite);
+        suite.on("exit", (c) => res(c ?? 1));
+      });
+      if (suiteCode !== 0) code = suiteCode;
+    }
+    // Release this driver (and its native driver) before the next suite.
+    killTree(driver);
+    children.splice(children.indexOf(driver), 1);
+    await new Promise((r) => setTimeout(r, 500));
+  }
   return code;
 }
 

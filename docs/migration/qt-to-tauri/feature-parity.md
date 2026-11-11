@@ -107,7 +107,7 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | S-7 | Menu bar File/Edit/View/Run/Help | QML MenuBar (in-window) | In-window Radix menus File/Edit/View/Run/Help with the same items and shortcuts; a **native** macOS menu (T-07) dispatches the same action ids | screenshots; macOS menu compiled only in CI | ✅ (macOS menu unverified) |
 | S-8 | Accessibility: names/roles on every control, focus ring, keyboard reachability | QML `Accessible.*` | ARIA roles (tree, tablist, log, dialog, menu, radiogroup), `aria-label` on icon buttons, `:focus-visible` ring, Radix focus traps | **no screen-reader test in either shell** | 🟡 |
 | S-9 | Same data directory readable by both shells | — | same `axiom.db`, same keys | E: 8 reads state written via the same protocol; store shared by design | ✅ |
-| S-10 | Quit confirms unsaved work from window close | Main.qml `onClosing` | Rust `CloseRequested` → UI prompt → `app_quit` | code | 🟡 |
+| S-10 | Quit confirms unsaved work from window close | Main.qml `onClosing` | Rust `CloseRequested` → UI prompt → `app_quit` | E (quit suite) 1–6: prompt lists the document, Cancel keeps window+text and writes nothing, Save writes and the app exits; the window-button → `CloseRequested` hop itself is 6 lines and is covered by the manual protocol (3.3) | ✅ (UI half end-to-end) |
 | S-11 | `--version` without a display | main.cpp | `axiom-tauri --version` / `--help` answered before Tauri starts | R `meta_arguments_answer_without_a_display` | ✅ |
 | S-12 | Native folder dialog | FolderDialog | tauri-plugin-dialog (xdg portal / GTK on Linux) | not driven in either | 🟡 |
 

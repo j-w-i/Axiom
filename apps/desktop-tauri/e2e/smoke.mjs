@@ -121,7 +121,6 @@ async function setTheme(wd, theme) {
 }
 
 let wd;
-let crashSeen = false;
 try {
   // ---- 1. launch + connect ---------------------------------------------------
   const t0 = Date.now();
@@ -309,13 +308,20 @@ try {
     recovered.appAlive && recovered.daemonAlive,
     `app alive=${recovered.appAlive} daemon alive=${recovered.daemonAlive}`,
   );
-  crashSeen = true; // the session is dead from here on
+  // The session is dead from here on (its page is gone); nothing else may run.
 } catch (e) {
   check("unexpected failure", false, e instanceof Error ? e.message : String(e));
   if (wd) await shot(wd, "zz-failure").catch(() => {});
 } finally {
-  // The crash check ends the session itself (the page it was bound to is gone).
-  if (wd && !crashSeen) await wd.quit();
+  // The crash check leaves a session whose page is dead; try to release it
+  // anyway so the driver is not left holding it.
+  if (wd) {
+    try {
+      await wd.quit();
+    } catch {
+      /* already gone */
+    }
+  }
   rmSync(dataDir, { recursive: true, force: true });
   rmSync(ws, { recursive: true, force: true });
 }

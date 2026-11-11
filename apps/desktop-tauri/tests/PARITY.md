@@ -93,7 +93,7 @@ or has no equivalent in the new architecture.
 | `cycleWrapsAround` | E — Ctrl+Tab/Ctrl+PgDn wired in `App.tsx`; asserted only by the window-shortcut test in E 10a style (keyboard reachability), not by a wrap-around unit test |
 | `closingADirtyDocumentPromptsAndEachChoiceDoesWhatItSays` | S `closing a dirty tab prompts; Discard closes without writing`, `unsaved-work prompt: Save writes then proceeds; Cancel keeps the tab` |
 | `saveInThePromptThenCancelledConflictKeepsTheDocument` | S `conflict → Cancel…` (the pending-save bookkeeping is the same code path) |
-| `quitAndFolderChangesListAllDirtyDocuments` | S `unsaved-work prompt: Save writes then proceeds; Cancel keeps the tab` (prompt names) — quit itself is E 10b/window-close path |
+| `quitAndFolderChangesListAllDirtyDocuments` | S `unsaved-work prompt: Save writes then proceeds; Cancel keeps the tab` (prompt names) + the quit E2E suite (quit with unsaved work, checks 1–6) |
 | `cleanQuitAndFolderCloseDoNotPrompt` | S `switching workspaces closes the documents of the old one` (no prompt when clean) |
 | `runCommandAndRevealGoToThePage` | N/A to the shell: `runCommand`/`revealPosition` are `EditorPort` calls; the Monaco side is unchanged from M1 and still covered by `editor/`'s Vitest suite |
 | `tabsAndActiveTabAreRestoredSkippingMissingFiles` | S `restoring tabs skips files that no longer exist`, `persists expanded folders, tabs and the active tab across a restart`; E 8 |
@@ -178,7 +178,7 @@ reloads from the bundle after a crash). Feature-parity row E-17 records this.
 | tasks | 19 | 19 | 0 | 3 (reducer constants / workspace-close cancel) |
 | settings | 6 | 6 | 0 | 0 |
 | assethandler | 7 | 0 | 7 (Tauri asset protocol) | 0 |
-| smoke_launch | 7 | 7 | 0 | 2 (About text) |
+| smoke_launch | 7 | 7 | 0 | 1 (About text) |
 | smoke_editor | 2 | 2 | 0 | 0 |
 
 No test was deleted, skipped or weakened. The "not separately asserted" column
