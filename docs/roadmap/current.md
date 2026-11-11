@@ -18,9 +18,9 @@ which may only run after the parity gate T-12.
 | Backend (`crates/{rpc,store,workspace,exec,axiomd}`) | M1, 227 tests, unmodified by M1.5 |
 | `crates/desktop-bridge` | Tested (12 behaviour + 9 framing tests against the real daemon) |
 | `apps/desktop-tauri` | M1.5 shell: root-workspace Rust host + React UI; 5 host-surface tests, 31 Vitest tests, 21 end-to-end checks |
-| CI | `rust`, `editor`, `desktop` (Qt) green on 3 OSes in earlier runs; new `tauri` job written, **never run** (nothing pushed) |
+| CI | `rust` green on 3 OSes; `editor` green; `tauri` green on Linux and macOS (Windows E2E open, KD-WIN-2); Qt `desktop` green on Linux/macOS (Windows open, KD-WIN-1) — PR #1 |
 | Qt shell | M1, 9 Qt test executables / 107 test functions, green; kept until T-15 |
-| M1.5 gate (T-12) | **Not passed**: macOS and Windows unverified — `docs/roadmap/verification/M1.5.md` |
+| M1.5 gate (T-12) | **Closer, not passed**: Linux and macOS verified in CI; Windows has two open defects (KD-WIN-1 Qt-only, KD-WIN-2 end-to-end) — `docs/roadmap/verification/M1.5.md` §5c |
 
 ## Latest handoff
 
@@ -30,11 +30,9 @@ which may only run after the parity gate T-12.
 
 Finish the M1.5 gate (T-12), in this order:
 
-1. **Push the branch and read the `tauri` CI job** on ubuntu-latest,
-   macos-latest and windows-latest (T-09 is `implemented`, never run). Expect
-   to fix real platform differences here: the Windows end-to-end script, the
-   macOS compile of the native menu, and the way the crash check finds the
-   webview's content process on each OS.
+1. **Fix KD-WIN-2** (Windows end-to-end): the app must expose a WebView2
+   DevTools endpoint for msedgedriver. Needs a Windows machine to iterate;
+   suspects are listed in `verification/M1.5.md` §5c.
 2. **Run `agents/MANUAL_VERIFICATION.md`** on one real machine per OS and
    record the results in `docs/roadmap/verification/M1.5.md`.
 3. **Build the Windows (MSI/NSIS) and macOS (.dmg) packages** in CI; Linux
