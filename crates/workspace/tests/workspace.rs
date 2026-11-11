@@ -93,7 +93,7 @@ async fn open_symlinked_root_resolves_to_canonical_root() {
     let direct = wss.open(real.to_str().unwrap()).await.unwrap();
     assert_eq!(
         via_link.root,
-        fs::canonicalize(&real).unwrap().to_str().unwrap()
+        dunce::canonicalize(&real).unwrap().to_str().unwrap()
     );
     assert_eq!(
         via_link.workspace_id, direct.workspace_id,
@@ -818,6 +818,6 @@ async fn workspace_accessors() {
     let d = TempDir::new().unwrap();
     let ws = open(d.path()).await;
     assert_eq!(ws.id().0, "w1");
-    assert_eq!(ws.root(), fs::canonicalize(d.path()).unwrap());
+    assert_eq!(ws.root(), dunce::canonicalize(d.path()).unwrap());
     assert_eq!(ws.name(), d.path().file_name().unwrap().to_string_lossy());
 }

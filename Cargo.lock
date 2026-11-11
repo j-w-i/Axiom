@@ -134,6 +134,7 @@ dependencies = [
  "axiom-store",
  "axiom-workspace",
  "clap",
+ "dunce",
  "serde_json",
  "tempfile",
  "tokio",

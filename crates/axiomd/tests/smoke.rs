@@ -63,6 +63,7 @@ fn manual_session_prints_two_responses_and_exits_zero() {
     assert_eq!(v2["result"], serde_json::json!({}));
 }
 
+#[cfg(unix)]
 #[test]
 fn stdout_carries_only_valid_protocol_messages_even_with_debug_logging() {
     let dir = tempfile::tempdir().unwrap();

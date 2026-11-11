@@ -1,8 +1,8 @@
 ---
 id: M1-DAEMON-002
 title: End-to-end protocol behaviour tests against the real daemon
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: [M1-DAEMON-001]
 order: 31
 scope: crates/axiomd/, tests/fixtures/; bug fixes in crates/{rpc,store,workspace,exec}/ limited to defects these tests reveal
