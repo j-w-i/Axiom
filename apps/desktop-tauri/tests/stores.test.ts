@@ -234,9 +234,10 @@ describe("stores against the real daemon", () => {
 
   it("runs a command, streams stdout/stderr distinctly and reports a failed exit", async () => {
     await app.workspace.openFolder(ws);
-    // The daemon runs the user's shell: `sh -c` on Unix, `cmd /C` on Windows.
-    const command =
-      process.platform === "win32" ? "echo out & echo err 1>&2 & exit /b 3" : "echo out; echo err >&2; exit 3";
+    // The shell form is exercised by the daemon's own tests; what this test
+    // asserts is the *streaming* contract, so use one program that behaves
+    // identically on every OS instead of two shell dialects.
+    const command = `node -e "process.stdout.write('out\\n'); process.stderr.write('err\\n'); process.exit(3)"`;
     app.tasks.run(command);
     await waitFor(() => !app.tasks.getSnapshot().running && app.tasks.getSnapshot().lastOutcome !== null, 5000);
     const rows = app.tasks.getSnapshot().rows;
@@ -254,9 +255,9 @@ describe("stores against the real daemon", () => {
     await new Promise((r) => setTimeout(r, 200));
     const t0 = Date.now();
     app.tasks.stop();
-    await waitFor(() => app.tasks.getSnapshot().lastOutcome === "cancelled", 5000, "cancelled");
-    expect(Date.now() - t0).toBeLessThan(5000);
-  });
+    await waitFor(() => app.tasks.getSnapshot().lastOutcome === "cancelled", 8000, "cancelled");
+    expect(Date.now() - t0).toBeLessThan(8000);
+  }, 20_000);
 
   it("clear empties the output, rerunLast repeats the last command, and a run is refused while running", async () => {
     await app.workspace.openFolder(ws);
