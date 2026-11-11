@@ -202,7 +202,9 @@ describe("stores against the real daemon", () => {
     expect(app.workspace.isOpen).toBe(false);
   });
 
-  it("an unreadable directory shows an inline error under it", async () => {
+  // chmod does not deny reads on Windows, so the condition cannot be produced
+  // there; the code path is the same one the Qt suite covers on Linux/macOS.
+  it.skipIf(process.platform === "win32")("an unreadable directory shows an inline error under it", async () => {
     mkdirSync(join(ws, "locked"));
     writeFileSync(join(ws, "locked", "secret.txt"), "x\n");
     chmodSync(join(ws, "locked"), 0o000);
@@ -232,18 +234,22 @@ describe("stores against the real daemon", () => {
 
   it("runs a command, streams stdout/stderr distinctly and reports a failed exit", async () => {
     await app.workspace.openFolder(ws);
-    app.tasks.run("echo out; echo err 1>&2; exit 3");
+    // The daemon runs the user's shell: `sh -c` on Unix, `cmd /C` on Windows.
+    const command =
+      process.platform === "win32" ? "echo out & echo err 1>&2 & exit /b 3" : "echo out; echo err >&2; exit 3";
+    app.tasks.run(command);
     await waitFor(() => !app.tasks.getSnapshot().running && app.tasks.getSnapshot().lastOutcome !== null, 5000);
     const rows = app.tasks.getSnapshot().rows;
     expect(rows.find((r) => r.text === "out")?.stream).toBe("stdout");
     expect(rows.find((r) => r.text === "err")?.stream).toBe("stderr");
     expect(rows.at(-1)!.text).toMatch(/Failed with exit code 3/);
-    expect(app.tasks.getSnapshot().history[0]).toBe("echo out; echo err 1>&2; exit 3");
+    expect(app.tasks.getSnapshot().history[0]).toBe(command);
   });
 
   it("stops a long command (including its children) promptly", async () => {
     await app.workspace.openFolder(ws);
-    app.tasks.run("sleep 30 & sleep 30; wait");
+    // A cross-platform long-running child: node is present wherever these tests run.
+    app.tasks.run('node -e "setTimeout(() => {}, 30000)"');
     await waitFor(() => app.tasks.getSnapshot().running);
     await new Promise((r) => setTimeout(r, 200));
     const t0 = Date.now();
@@ -262,7 +268,7 @@ describe("stores against the real daemon", () => {
     expect(app.tasks.getSnapshot().history).toHaveLength(1); // history survives Clear
     app.tasks.rerunLast();
     await waitFor(() => app.tasks.getSnapshot().rows.some((r) => r.text === "one"), 5000, "rerun");
-    app.tasks.run("sleep 5");
+    app.tasks.run('node -e "setTimeout(() => {}, 5000)"');
     await waitFor(() => app.tasks.getSnapshot().running);
     const historyWhileRunning = app.tasks.getSnapshot().history;
     app.tasks.rerunLast(); // refused: a task is already running

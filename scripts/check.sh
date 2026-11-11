@@ -13,11 +13,15 @@ step() { printf '\n==> %s\n' "$*"; }
 
 if [[ "$what" == all || "$what" == rust ]]; then
   step "cargo fmt --check";            cargo fmt --all --check
-  step "cargo clippy (deny warnings)"; cargo clippy --workspace --all-targets -- -D warnings
+  # The desktop shell is excluded here: `tauri::generate_context!` embeds the
+  # built frontend, so it cannot compile before `pnpm run build`. It is checked
+  # in the `tauri` step below, where the bundle exists.
+  step "cargo clippy (deny warnings)"
+  cargo clippy --workspace --all-targets --exclude axiom-desktop-tauri -- -D warnings
   # The bridge tests spawn the real daemon binary.
   step "cargo build -p axiomd (for the desktop-bridge tests)"
   cargo build -p axiomd
-  step "cargo test";                   cargo test --workspace
+  step "cargo test";                   cargo test --workspace --exclude axiom-desktop-tauri
   step "schema files are current";     cargo run -q -p axiom-protocol --example export_schema -- --check
   step "task board is consistent";     python3 scripts/tasks.py check
   step "dependency matrix";            python3 scripts/check_deps.py
@@ -50,6 +54,9 @@ if [[ ( "$what" == all || "$what" == tauri ) && -f apps/desktop-tauri/package.js
   # dependencies must be present for tsc to resolve monaco-editor's types.
   (cd editor && pnpm install --frozen-lockfile)
   (cd apps/desktop-tauri && pnpm install --frozen-lockfile && pnpm run check && pnpm run build && pnpm run test)
+  step "tauri shell: Rust host (needs the bundle it embeds)"
+  cargo clippy -p axiom-desktop-tauri --all-targets -- -D warnings
+  cargo test -p axiom-desktop-tauri
 fi
 
 # End-to-end (real app, real webview, real daemon, real input). Needs a private
