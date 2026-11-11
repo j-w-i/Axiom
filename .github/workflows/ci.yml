@@ -24,6 +24,17 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo run -q -p axiom-protocol --example export_schema -- --check
+      - run: python3 scripts/tasks.py check
+      - run: python3 scripts/check_deps.py
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-deny }
+      - run: cargo deny check
 
   editor:
     name: Editor (ubuntu-latest)
@@ -42,5 +53,6 @@ jobs:
       - run: pnpm run build
       - run: pnpm run test
 
-  # The desktop job is added by task M1-CI-002 once apps/desktop exists.
+  # The desktop job (and with it scripts/check_qml.py) is added by task M1-CI-002
+  # once apps/desktop exists.
   # Do not add placeholder jobs here.

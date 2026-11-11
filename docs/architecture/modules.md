@@ -159,8 +159,8 @@ on *lower* service crates listed in their task spec (e.g. `build` → `exec`,
 stores JSON values and plain rows, which keeps persistence independent of
 wire-format changes.
 
-`scripts/check.sh` will enforce this matrix once task M1-CI-001 adds the
-`cargo metadata` check.
+`scripts/check.sh` enforces this matrix (`scripts/check_deps.py`, via
+`cargo metadata`).
 
 ## Later modules (interfaces drafted, internals deferred)
 

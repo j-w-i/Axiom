@@ -27,12 +27,12 @@ started.** No product code exists yet except the protocol crate.
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-11-M1-DAEMON-002.md`
+`agents/handoffs/2026-11-11-M1-CI-001.md`
 
 ## Next task
 
 Run `scripts/tasks.py next`. At the time of writing: wave A (RPC, STORE, WS-001, EXEC, EDITOR) is tested and awaiting
-review; next planned: `M1-CI-001`, `M1-SHELL-001`, `M1-CI-001`, `M1-SHELL-001`.
+review; next planned: `M1-SHELL-001` (needs the Qt toolchain), `M1-CI-001`, `M1-SHELL-001`.
 
 ## Blockers
 

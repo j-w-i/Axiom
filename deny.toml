@@ -1,0 +1,34 @@
+# cargo-deny configuration. Licence policy: docs/decisions/ADR-0011-licensing.md §5.
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# Vulnerabilities always fail; unmaintained crates warn.
+unmaintained = "workspace"
+yanked = "warn"
+
+[licenses]
+version = 2
+# MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib, Unicode-3.0, MPL-2.0 (unmodified), CC0.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
