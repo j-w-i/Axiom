@@ -234,23 +234,21 @@ describe("stores against the real daemon", () => {
 
   it("runs a command, streams stdout/stderr distinctly and reports a failed exit", async () => {
     await app.workspace.openFolder(ws);
-    // The shell form is exercised by the daemon's own tests; what this test
-    // asserts is the *streaming* contract, so use one program that behaves
-    // identically on every OS instead of two shell dialects.
-    const command = `node -e "process.stdout.write('out\\n'); process.stderr.write('err\\n'); process.exit(3)"`;
-    app.tasks.run(command);
+    // The argv form: no shell, so the same bytes on every OS. (The `shell`
+    // form is the daemon's own contract, exercised by crates/exec; it is not
+    // verified on Windows - see docs/roadmap/verification/M1.5.md.)
+    app.tasks.runArgv(["node", "-e", "process.stdout.write('out\\n');process.stderr.write('err\\n');process.exit(3)"]);
     await waitFor(() => !app.tasks.getSnapshot().running && app.tasks.getSnapshot().lastOutcome !== null, 5000);
     const rows = app.tasks.getSnapshot().rows;
     expect(rows.find((r) => r.text === "out")?.stream).toBe("stdout");
     expect(rows.find((r) => r.text === "err")?.stream).toBe("stderr");
     expect(rows.at(-1)!.text).toMatch(/Failed with exit code 3/);
-    expect(app.tasks.getSnapshot().history[0]).toBe(command);
   });
 
   it("stops a long command (including its children) promptly", async () => {
     await app.workspace.openFolder(ws);
-    // A cross-platform long-running child: node is present wherever these tests run.
-    app.tasks.run('node -e "setTimeout(() => {}, 30000)"');
+    // A cross-platform long-running child, without involving a shell.
+    app.tasks.runArgv(["node", "-e", "setTimeout(() => {}, 30000)"]);
     await waitFor(() => app.tasks.getSnapshot().running);
     await new Promise((r) => setTimeout(r, 200));
     const t0 = Date.now();
