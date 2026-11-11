@@ -1,8 +1,8 @@
 ---
 id: M1-SHELL-001
 title: Desktop shell skeleton — window, design system, daemon client
-status: implemented
-status_note: 2026-11-11; see handoff (live on-screen banner/restart not verified)
+status: tested
+status_note: 2026-11-11; see handoff
 depends_on: [M1-DAEMON-001]
 order: 40
 scope: apps/desktop/, scripts/check.sh (desktop section only)

@@ -126,7 +126,12 @@ private slots:
         QCOMPARE(banner->property("text").toString(), shell.backend()->errorText());
         w->grabWindow().save(m_shots + "/backend-failed.png");
 
-        shell.backend()->restart();
+        // A real mouse click on the button, delivered through Qt's input path.
+        QQuickItem *button = findByProperty(w->contentItem(), "text", QStringLiteral("Restart backend"));
+        QVERIFY(button);
+        QVERIFY(button->isVisible() && button->isEnabled());
+        const QPoint centre = button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint();
+        QTest::mouseClick(w, Qt::LeftButton, Qt::NoModifier, centre);
         QVERIFY(waitFor([&] { return shell.backend()->ready(); }));
         QVERIFY(!banner->isVisible());
         QVERIFY(waitFor([&] { return statusText(w) == QStringLiteral("Connected — axiomd 0.1.0"); }));
