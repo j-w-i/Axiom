@@ -162,6 +162,7 @@ fn overflow_change() -> FileChange {
 }
 
 fn run(inner: Arc<Inner>, raw: mpsc::Receiver<notify::Result<Event>>, subs: Arc<Mutex<Subs>>) {
+    let mut known = Known::default();
     let mut batch: Option<(Batch, Instant)> = None;
     loop {
         let received = match &batch {
@@ -175,7 +176,7 @@ fn run(inner: Arc<Inner>, raw: mpsc::Receiver<notify::Result<Event>>, subs: Arc<
                 let (b, _) =
                     batch.get_or_insert_with(|| (Batch::default(), Instant::now() + DEBOUNCE));
                 match res {
-                    Ok(ev) => handle_event(&inner, ev, b),
+                    Ok(ev) => handle_event(&inner, ev, b, &mut known),
                     Err(e) => {
                         tracing_free_log(&e);
                         b.overflow = true;
@@ -234,11 +235,46 @@ fn rel_of(root: &Path, p: &Path) -> Option<String> {
     Some(parts.join("/"))
 }
 
+/// Platforms differ in how faithfully they report *what* happened:
+/// FSEvents (macOS) coalesces and keeps stale flags, so a later modification
+/// of a file can still carry its old "created" flag and a renamed-away path
+/// can arrive as "modified". The disk and what this watcher has already
+/// reported are the ground truth.
+#[derive(Default)]
+struct Known {
+    /// Paths reported as present since the watcher started (macOS only; on
+    /// other platforms the event kinds are trusted).
+    present: std::collections::HashSet<String>,
+}
+
+impl Known {
+    fn normalise(&mut self, rel: &str, kind: ChangeKind, exists_now: bool) -> ChangeKind {
+        // A path that is not there was removed, whatever the flags say.
+        if !exists_now {
+            self.present.remove(rel);
+            return ChangeKind::Removed;
+        }
+        // A path that is there was not removed (stale or merged flags).
+        let kind = if kind == ChangeKind::Removed {
+            ChangeKind::Modified
+        } else {
+            kind
+        };
+        if cfg!(target_os = "macos") {
+            let was_present = !self.present.insert(rel.to_string());
+            if was_present && kind == ChangeKind::Created {
+                return ChangeKind::Modified;
+            }
+        }
+        kind
+    }
+}
+
 fn exists(p: &Path) -> bool {
     std::fs::symlink_metadata(p).is_ok()
 }
 
-fn handle_event(inner: &Inner, ev: Event, batch: &mut Batch) {
+fn handle_event(inner: &Inner, ev: Event, batch: &mut Batch, known: &mut Known) {
     if ev.need_rescan() {
         batch.overflow = true;
         return;
@@ -299,6 +335,7 @@ fn handle_event(inner: &Inner, ev: Event, batch: &mut Batch) {
         let Some(rel) = rel_of(&inner.root, path) else {
             continue;
         };
+        let kind = known.normalise(&rel, kind, exists(path));
         if rel.is_empty() {
             continue;
         }

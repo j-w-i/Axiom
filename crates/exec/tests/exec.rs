@@ -22,6 +22,15 @@ fn spec(command: Command) -> SpawnSpec {
     }
 }
 
+/// A script in the host's dialect: `sh -c` on Unix, `cmd /C` on Windows.
+fn host(unix: &str, windows: &str) -> SpawnSpec {
+    if cfg!(windows) {
+        sh(windows)
+    } else {
+        sh(unix)
+    }
+}
+
 fn sh(script: &str) -> SpawnSpec {
     #[cfg(unix)]
     return spec(Command::Argv(vec!["sh".into(), "-c".into(), script.into()]));
@@ -124,7 +133,11 @@ async fn wait_until_dead(pid: i32) -> bool {
 
 #[tokio::test]
 async fn captures_and_tags_stdout_and_stderr_and_exit_code() {
-    let c = run(sh("echo out; echo err 1>&2; exit 3")).await;
+    let c = run(host(
+        "echo out; echo err 1>&2; exit 3",
+        "echo out& echo err 1>&2& exit 3",
+    ))
+    .await;
     assert!(c.stream(Stream::Stdout).contains("out"));
     assert!(c.stream(Stream::Stderr).contains("err"));
     assert!(!c.stream(Stream::Stdout).contains("err"));
@@ -145,8 +158,9 @@ async fn success_outcome_and_duration() {
 
 #[tokio::test]
 async fn seq_is_contiguous_from_zero_and_exited_is_last() {
-    let c = run(sh(
+    let c = run(host(
         "for i in 1 2 3 4 5 6 7 8 9 10; do echo o$i; echo e$i 1>&2; done",
+        "for /L %i in (1,1,10) do @(echo o%i& echo e%i 1>&2)",
     ))
     .await;
     assert!(c.events.len() >= 3);
@@ -210,6 +224,12 @@ async fn empty_command_and_missing_cwd() {
 #[tokio::test]
 async fn cwd_and_env_are_applied() {
     let dir = std::env::temp_dir().canonicalize().unwrap();
+    // Windows canonical paths carry a `\\?\` prefix that `cd` never prints.
+    let shown = dir
+        .to_str()
+        .unwrap()
+        .trim_start_matches(r"\\?\")
+        .to_string();
     let mut s = sh(if cfg!(windows) {
         "cd & echo %AXIOM_TEST_VAR%"
     } else {
@@ -220,7 +240,7 @@ async fn cwd_and_env_are_applied() {
     let c = run(s).await;
     let out = c.stream(Stream::Stdout);
     assert!(out.contains("hello-env"), "{out}");
-    assert!(out.contains(dir.to_str().unwrap()), "{out}");
+    assert!(out.contains(&shown), "{out}");
 }
 
 #[tokio::test]
