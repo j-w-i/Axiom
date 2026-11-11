@@ -22,17 +22,17 @@ started.** No product code exists yet except the protocol crate.
 | `crates/exec` | M1-EXEC-001 tested (23 tests, Linux only; Windows compiles, untested) |
 | `axiomd` | M1-DAEMON-001 + M1-DAEMON-002 tested (all 16 methods wired; 98 tests) |
 | `editor/` | M1-EDITOR-001 tested (43 Vitest tests; dist 14 MB) |
-| `apps/desktop/` | Not started |
+| `apps/desktop/` | M1-SHELL-001 tested (shell skeleton, design system, DaemonClient; 3 Qt test executables) |
 | CI | Runs on GitHub (ubuntu/macos/windows Rust + editor). First runs found macOS FSEvents and Windows test-portability bugs, now fixed (see M1-DAEMON-002 handoff) |
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-11-M1-CI-001.md`
+`agents/handoffs/2026-11-11-M1-SHELL-001.md`
 
 ## Next task
 
 Run `scripts/tasks.py next`. At the time of writing: wave A (RPC, STORE, WS-001, EXEC, EDITOR) is tested and awaiting
-review; next planned: `M1-SHELL-001` (needs the Qt toolchain), `M1-CI-001`, `M1-SHELL-001`.
+review; next planned: `M1-SHELL-002`, `M1-CI-001`, `M1-SHELL-001`.
 
 ## Blockers
 

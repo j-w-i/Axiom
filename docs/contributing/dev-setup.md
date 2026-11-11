@@ -41,14 +41,15 @@ Editor development in a plain browser (fake host, sample document, no Qt):
 `cd editor && pnpm install && pnpm dev`.
 `check.sh` skips the desktop section until `apps/desktop` exists. It is the gate for every task and for CI.
 
-## Running the app (once M1 exists)
+## Running the app
 
 ```sh
 cargo build -p axiomd
 (cd editor && pnpm install && pnpm run build)
 source scripts/dev-env.sh
 axiom_cmake -S apps/desktop -B build/desktop && cmake --build build/desktop
-build/desktop/axiom --daemon target/debug/axiomd --editor-assets editor/dist
+build/desktop/axiom --daemon target/debug/axiomd
+# (--editor-assets <dir> arrives with M1-SHELL-003; --data-dir <dir> is forwarded to axiomd)
 ```
 
 ## Headless GUI tests
