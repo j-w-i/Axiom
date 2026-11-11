@@ -27,6 +27,7 @@ Each document has one purpose. If you are implementing a task, start at
 | `roadmap/dependency-graph.md` | Task/milestone dependencies, parallel waves, merge order | Living |
 | `roadmap/verification/` | Recorded milestone exit verifications | Append-only |
 | `tasks/` | Task specifications and their status | Living |
+| `migration/qt-to-tauri/` | Qt → Tauri evaluation: audit, parity, performance, design system, prototype, recommendation, proposed M1.5 roadmap | Proposal — not normative until ADR-0012 is accepted |
 | `contributing/dev-setup.md` | Toolchain setup and commands | Living |
 
 Precedence when documents disagree: code in `crates/protocol` → `protocols/`

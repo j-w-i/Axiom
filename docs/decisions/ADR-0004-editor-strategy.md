@@ -1,6 +1,9 @@
 # ADR-0004: Editor — Monaco first, language servers in the daemon, extension host later
 
-Status: Accepted (2026-11-11)
+Status: Amended by ADR-0012 (2026-11-12). The staged plan and the bridge-1
+contract are unchanged; the host of the editor surface is now the Tauri
+webview rather than Qt WebEngine, and the bridge is an in-process TypeScript
+interface. Language servers (stage 2) still run in the daemon.
 
 ## Context
 "VS Code-based editing with compatible extensions" spans a wide range of

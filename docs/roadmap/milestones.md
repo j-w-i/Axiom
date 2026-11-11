@@ -53,6 +53,46 @@ macOS and Windows.
 
 ---
 
+## M1.5 — Desktop shell on Tauri (replaces the Qt frontend)
+
+**Outcome.** The Tauri 2 + React shell reaches full M1 parity on Linux, macOS
+and Windows, is built and tested by `scripts/check.sh` and CI, ships as
+installable packages, and is then made the default shell. The Qt shell keeps
+building and passing its tests throughout and is deleted only at the end.
+
+Decision: ADR-0012. Design, parity matrix, budgets and evaluation:
+`docs/migration/qt-to-tauri/`. Tasks: `docs/tasks/M1.5/`.
+
+| Epic | Tasks |
+|------|-------|
+| 1.1 Decisions and governance | T-01 |
+| 1.2 Bridge and host in the product build | T-02, T-03, T-04 |
+| 1.3 Parity (behaviour, UI, recovery) | T-05, T-06, T-07, T-08 |
+| 1.4 Cross-platform verification | T-09, T-10 |
+| 1.5 Spikes with a decision | T-11 (editor isolation), M5-PRE-001 (preview engine) |
+| 1.6 Release engineering | T-13 |
+| 1.7 Gate, switch, retire | T-12, T-14, T-15 |
+
+**Exit criteria** (recorded in `verification/M1.5.md` by T-12):
+1. All nine M1 exit criteria hold on the Tauri shell on Linux, macOS and
+   Windows in CI, against the same daemon and protocol (no daemon changes).
+2. Every row of `docs/migration/qt-to-tauri/feature-parity.md` is ✅ or
+   explicitly waived by the owner.
+3. The budgets in `docs/migration/qt-to-tauri/performance.md` §2 are met on
+   all three OSes (CI + one real-GPU machine per OS).
+4. `scripts/check.sh` runs the Tauri gates; CI is green on three OSes.
+5. Manual verification (IME, clipboard, drag and drop, HiDPI, screen reader,
+   real GPU) is recorded per OS.
+6. Packages for each OS install, launch and connect.
+7. T-15 ran only after the removal conditions in
+   `docs/migration/qt-to-tauri/implementation-roadmap.md` §5.
+
+M2's backend epics (2.0–2.6, 2.8) do not touch the shell and may run in
+parallel with M1.5; M2 epic 2.7 (UI) starts only after T-12 and is built in the
+Tauri shell only.
+
+---
+
 ## M2 — Environments and builds
 
 **Outcome.** Axiom recognises what a project needs, shows what is installed,

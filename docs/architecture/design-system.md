@@ -1,4 +1,21 @@
-# Design system (Axiom.Ui)
+# Design system
+
+Two implementations of one vocabulary:
+
+- **Tauri shell (M1.5+, normative for new work):** CSS custom-property tokens
+  and React components. Specification, component list, accessibility rules,
+  guards and library evaluation:
+  `docs/migration/qt-to-tauri/design-system.md`.
+- **Qt shell (M1, until T-15):** the QML module `Axiom.Ui` described below.
+
+The semantic token names are shared (`bg`, `bgSubtle`/`bg-subtle`, `text`,
+`textMuted`/`text-muted`, `accent`, `danger`, …), as are the spacing scale,
+type sizes, motion durations and the accessibility rules. A rule stated here
+(no literal colours in views, every interactive item named, focus always
+visible, no information by colour alone, truncated text has a tooltip) applies
+to **both** shells.
+
+## Qt shell (Axiom.Ui)
 
 The QML module `Axiom.Ui` (`apps/desktop/qml/Axiom/Ui/`) holds every visual
 primitive. Application views (`Axiom.App`) use only these tokens and

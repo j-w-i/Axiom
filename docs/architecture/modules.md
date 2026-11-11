@@ -15,13 +15,15 @@ crates/
   workspace/               workspace registry, fs access, watching         M1
   exec/                    process supervision                             M1
   axiomd/                  daemon binary: wires services to methods        M1
+  desktop-bridge/          daemon process + protocol 0.1 client for a GUI  M1.5
   env/                     provider registry, detection, installation      M2
   build/                   task templates, diagnostics parsing             M2
   agent/                   model providers, agent loop, tools, permissions M3
   lsp/                     language-server supervision and relay           M4
   inspect/                 inspection sessions, source resolution, verify  M5
 apps/
-  desktop/                 Qt shell (C++/QML)                              M1
+  desktop/                 Qt shell (C++/QML) - retired by M1.5 task T-15  M1
+  desktop-tauri/           Tauri shell: Rust host + React webview          M1.5
   cli/                     `axiom` command-line client (Rust)              M3
 editor/                    editor surface (TypeScript, Monaco)             M1
 providers/<id>/            provider manifests (+ optional helper)          rust/ EXISTS
@@ -132,10 +134,51 @@ before the task that needs them** (no empty scaffolding).
   - `qml/Axiom/App/` — application views composed from `Axiom.Ui`.
 - **Rule:** QML never constructs JSON-RPC and never touches the filesystem.
   C++ models never contain layout or colours.
+- **Status:** M1 implementation, superseded by ADR-0012. Kept building and
+  tested until task T-15; no new features.
+
+### `crates/desktop-bridge` — `axiom-desktop-bridge`
+- **Responsibility:** act as the GUI's protocol-0.1 *client*: locate and spawn
+  `axiomd`, one JSON message per line over its stdio, correlate ids, deliver
+  notifications, enforce per-request timeouts (`$/cancel` on expiry), answer
+  every request exactly once, detect process failure, restart, and shut down
+  in bounded time (`docs/architecture/processes.md` §Daemon lifecycle).
+- **Depends on:** `axiom-protocol` (envelope types and the method registry),
+  `tokio`, `serde_json`. Nothing else.
+- **Must not know:** Tauri, any GUI toolkit, or any domain service. It must not
+  interpret payloads beyond the envelope.
+- **Public interface:** `DaemonBridge` (`start`, `request`, `request_forward`,
+  `cancel_forward`, `restart`, `shutdown`, `state`), `BridgeConfig`,
+  `BridgeEvent`, `DaemonState`, `locate_daemon`, `ui_callable`.
+- **Rule:** requests the UI may issue are forwarded as events into the same
+  ordered stream as notifications, so a client sees the `task/start` response
+  before that task's first `task/output`.
+- **Tests:** `tests/bridge.rs` against the real `axiomd` binary (concurrency,
+  ordering, cancel, timeout, crash, restart, shutdown, missing binary).
+
+### `apps/desktop-tauri` — Tauri 2 shell
+- **Responsibility:** the desktop shell. Presents daemon state and forwards
+  user intent. Two halves:
+  - `src-tauri/` (Rust, binary `axiom-tauri`): owns the `DaemonBridge`,
+    delivers one ordered event channel to the webview, exposes exactly the
+    commands in `security.md` §Host commands, persists window geometry,
+    intercepts window close so the UI can confirm unsaved work, and shuts the
+    daemon down in bounded time.
+  - `src/` (React + TypeScript): views, the design system, and the stores
+    that hold presentation state and protocol sequencing (ports of the Qt
+    models: `WorkspaceStore`, `DocumentsStore`, `TasksStore`, `SettingsStore`).
+- **Depends on:** `axiom-desktop-bridge`, `tauri`, `tauri-plugin-dialog`
+  (folder picker only); npm: React, Radix primitives, `@tauri-apps/api`,
+  Monaco (pinned exact version, shared with `editor/`).
+- **Rule:** the webview never touches the filesystem, never spawns a process
+  and never speaks the wire protocol itself; it calls the host's commands.
+  No business logic in either half.
 
 ### `editor/` — package `@axiom/editor`
-- **Responsibility:** the web page loaded in the WebEngine view: Monaco setup,
-  workers, document models, and the page side of the bridge.
+- **Responsibility:** the editor surface: Monaco setup, workers, document
+  models and the page side of the bridge. Its framework-neutral modules
+  (`documents.ts`, `monaco-setup.ts`, `bridge.ts`, `version.ts`) are imported
+  directly by the Tauri shell's webview; the Qt shell loads the built bundle.
 - **Depends on:** `monaco-editor` (pinned exact version), `vite`, `typescript`.
 - **Public interface:** the bridge contract in `docs/protocols/editor-bridge.md`.
 - **Rule:** no network access, no direct file access; it only knows documents
@@ -143,14 +186,16 @@ before the task that needs them** (no empty scaffolding).
 
 ## Dependency matrix (allowed edges)
 
-| From ↓ / To → | protocol | rpc | store | workspace | exec | axiomd |
-|---|---|---|---|---|---|---|
-| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ |
-| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ |
-| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ |
-| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ |
-| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ |
-| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| From ↓ / To → | protocol | rpc | store | workspace | exec | desktop-bridge | axiomd |
+|---|---|---|---|---|---|---|---|
+| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
+| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
+| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
+| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
+| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
+| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
+| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 
 Later service crates follow the same rule: they may depend on `protocol` and
 on *lower* service crates listed in their task spec (e.g. `build` → `exec`,
@@ -158,6 +203,11 @@ on *lower* service crates listed in their task spec (e.g. `build` → `exec`,
 `axiomd` populates). `store` deliberately does not depend on `protocol`: it
 stores JSON values and plain rows, which keeps persistence independent of
 wire-format changes.
+
+`desktop-bridge` is a GUI-side client and deliberately does not depend on
+`axiom-rpc` (which serves the *server* side of the same framing); a future task
+may share the codec, which would add one edge and is then an architecture
+change to record here.
 
 `scripts/check.sh` enforces this matrix (`scripts/check_deps.py`, via
 `cargo metadata`).

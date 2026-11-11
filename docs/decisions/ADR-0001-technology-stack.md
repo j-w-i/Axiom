@@ -1,6 +1,8 @@
 # ADR-0001: Technology stack
 
-Status: Accepted (2026-11-11)
+Status: Superseded by ADR-0012 (2026-11-12) for the desktop shell. The
+backend, editor and packaging decisions below still hold; the Qt/CMake shell
+does not.
 
 ## Context
 The brief proposes Qt 6/QML, Rust and Monaco and asks for them to be

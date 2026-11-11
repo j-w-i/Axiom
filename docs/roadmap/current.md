@@ -1,38 +1,47 @@
 # Current state
 
-_Last updated: 2026-11-11 (end of Phase 0, architecture session)._
+_Last updated: 2026-11-12 (M1.5 implementation session)._
 
 ## Where we are
 
-**Phase 0 (architecture and planning) is complete. Milestone M1 has not
-started.** No product code exists yet except the protocol crate.
+**M1 (platform foundation) is complete on the Qt shell; M1.5 (the Qt → Tauri
+migration) is in progress.** ADR-0012 is accepted: the desktop shell becomes
+Tauri 2 + React. The migration is gated — the Qt shell (`apps/desktop`) is
+still the release artifact and stays buildable and tested until task T-14,
+which may only run after the parity gate T-12.
 
 | Area | State |
 |------|-------|
-| Research (`docs/research/`) | Written, sourced; open questions listed per file |
-| Architecture, ADRs 0001–0011 | Accepted |
-| IPC protocol 0.1 | Frozen; `crates/protocol` compiles, 15 tests pass, schemas generated |
-| Editor bridge 1 | Frozen (document only; code in M1-EDITOR-001 / M1-SHELL-003) |
-| Provider / diagnostics / inspection contracts | Draft types + schemas + tests; reference `providers/rust/provider.toml` |
-| Agent contract | Draft document |
-| Experiments E1–E3 | Passed (results in `experiments/README.md`) |
-| `crates/rpc` | M1-RPC-001 tested (24 tests) |
-| `crates/store` | M1-STORE-001 tested (11 tests) |
-| `crates/workspace` | M1-WS-001 tested (42 tests), M1-WS-002 tested (11 watch tests) |
-| `crates/exec` | M1-EXEC-001 tested (23 tests, Linux only; Windows compiles, untested) |
-| `axiomd` | M1-DAEMON-001 + M1-DAEMON-002 tested (all 16 methods wired; 98 tests) |
-| `editor/` | M1-EDITOR-001 tested (43 Vitest tests; dist 14 MB) |
-| `apps/desktop/` | M1-SHELL-001..005 tested (skeleton, design system, DaemonClient, workspace + explorer, Monaco editor, output panel, settings; 9 Qt test executables) |
-| CI | Runs on GitHub (ubuntu/macos/windows Rust + editor). First runs found macOS FSEvents and Windows test-portability bugs, now fixed (see M1-DAEMON-002 handoff) |
+| Architecture, ADRs 0001–0012 | Accepted (0012 supersedes the Qt shell decision) |
+| IPC protocol 0.1 | Frozen; `crates/protocol`, schemas generated and checked |
+| Editor bridge 1 | Frozen; implemented in `editor/` (43 Vitest tests) and shared by both shells |
+| Backend (`crates/{rpc,store,workspace,exec,axiomd}`) | M1, 227 tests, unmodified by M1.5 |
+| `crates/desktop-bridge` | Tested (12 behaviour + 9 framing tests against the real daemon) |
+| `apps/desktop-tauri` | M1.5 shell: root-workspace Rust host + React UI; 5 host-surface tests, 31 Vitest tests, 21 end-to-end checks |
+| CI | `rust`, `editor`, `desktop` (Qt) green on 3 OSes in earlier runs; new `tauri` job written, **never run** (nothing pushed) |
+| Qt shell | M1, 9 Qt test executables / 107 test functions, green; kept until T-15 |
+| M1.5 gate (T-12) | **Not passed**: macOS and Windows unverified — `docs/roadmap/verification/M1.5.md` |
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-11-M1-SHELL-005.md`
+`agents/handoffs/2026-11-12-M1.5.md`
 
 ## Next task
 
-Run `scripts/tasks.py next`. At the time of writing: wave A (RPC, STORE, WS-001, EXEC, EDITOR) is tested and awaiting
-review; next planned: `M1-CI-002` (desktop CI + M1 exit review), `M1-CI-001`, `M1-SHELL-001`.
+Finish the M1.5 gate (T-12), in this order:
+
+1. **Push the branch and read the `tauri` CI job** on ubuntu-latest,
+   macos-latest and windows-latest (T-09 is `implemented`, never run). Expect
+   to fix real platform differences here: the Windows end-to-end script, the
+   macOS compile of the native menu, and the way the crash check finds the
+   webview's content process on each OS.
+2. **Run `agents/MANUAL_VERIFICATION.md`** on one real machine per OS and
+   record the results in `docs/roadmap/verification/M1.5.md`.
+3. **Build the Windows (MSI/NSIS) and macOS (.dmg) packages** in CI; Linux
+   `.deb` already builds (8.5 MiB, daemon inside).
+4. Then T-12 again with the owner: waive or close the 5 open parity rows.
+   Only after that may T-14 (make Tauri the default) and, a milestone later,
+   T-15 (delete the Qt shell) run.
 
 ## Blockers
 
@@ -49,6 +58,30 @@ None.
 - `cargo` is not on the default `PATH`: scripts add `~/.cargo/bin`
   themselves; in an interactive shell run `source scripts/dev-env.sh`.
 - There is no git remote. Commits are local on `main`.
+
+## M1.5 — Qt → Tauri migration (in progress, 2026-11-12)
+
+ADR-0012 is **accepted**: the desktop shell becomes Tauri 2 + React. Tasks:
+`docs/tasks/M1.5/`. Evidence and design: `docs/migration/qt-to-tauri/`.
+Verification record: `docs/roadmap/verification/M1.5.md`.
+
+Done and tested on Linux: T-01 (decisions), T-02 (bridge in
+`crates/desktop-bridge`), T-03 (host in the root workspace, `--version`),
+T-04 (generated wire types), T-05 (test parity, 107 Qt functions mapped),
+T-06 (UI gaps), T-08 (crash recovery).
+
+Written but **not verified here**: T-07 (macOS native menu — compiled only by
+CI), T-09 (CI job — nothing pushed yet), T-10 (manual protocol, not executed),
+T-12 (gate report — **the gate did not pass**), T-13 (.deb builds; Windows and
+macOS packages do not).
+
+Not started: T-11 (editor-isolation spike; analysis in
+`editor-isolation.md`), M5-PRE-001 (preview-engine spike), **T-14 and T-15 are
+held** — the Qt shell remains the release artifact until the gate passes.
+
+Next: push the branch, read the `tauri` CI job on all three OSes, run
+`agents/MANUAL_VERIFICATION.md` on one machine per OS, build the Windows and
+macOS packages, then T-12 again with the owner.
 
 ## Open questions (do not block M1)
 

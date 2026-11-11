@@ -4,8 +4,9 @@
 
 | Process | Language | Started by | Lifetime | Talks to | If it dies |
 |---------|----------|-----------|----------|----------|------------|
-| `axiom` (shell) | C++/QML | user | app session | `axiomd` (stdio), editor surface (QWebChannel) | daemon sees stdin EOF, cancels tasks, exits |
-| WebEngine renderer | Chromium | Qt, per profile | while a web view exists | shell only | shell shows "editor crashed — reload"; reload re-opens documents from last saved content plus the shell's unsaved-text cache (M1-SHELL-003) |
+| `axiom` (shell) | Rust host (Tauri) + React webview | user | app session | `axiomd` (stdio, via `crates/desktop-bridge`), its webview processes | daemon sees stdin EOF, cancels tasks, exits |
+| webview processes | WebKitGTK / WebView2 / WKWebView | the OS webview, per content process | while a window exists | the shell UI only | the host detects termination, reloads the page and replays unsaved-text snapshots (T-08); the daemon is unaffected |
+| `axiom` (Qt shell) | C++/QML | user | app session | `axiomd` (stdio), Qt WebEngine renderer (QWebChannel) | same as the Tauri host; kept until task T-15 |
 | `axiomd` (daemon) | Rust | shell (M1); may be pre-existing from M3 | while ≥1 client is connected | children below | shell shows a blocking banner with *Restart backend*; editor buffers are untouched; on restart the shell re-opens the workspace and re-reads state |
 | task processes | any | daemon `exec` | until exit/cancel | daemon (pipes) | `task/exited` |
 | language servers (M4) | any | daemon | per workspace + language | daemon (LSP over stdio) | restart with backoff (max 5 in 3 min), then surface an error |
@@ -15,7 +16,8 @@
 ## Daemon lifecycle (M1)
 
 1. Shell resolves the daemon binary: `--daemon <path>` argument, then
-   `$AXIOMD`, then a sibling of the shell executable, then `PATH`.
+   `$AXIOMD`, then a sibling of the shell executable, then `PATH`. Both shells
+   use the same order (`crates/desktop-bridge::locate_daemon`).
 2. Shell spawns it with piped stdin/stdout. **stdout carries protocol
    messages only.** stderr is free-form log text which the shell appends to
    its own log; nothing parses it.
@@ -34,9 +36,10 @@ daemon exit by design: they are killed.
 
 ## Threads and async
 
-- **Shell:** one GUI thread. `DaemonClient` uses `QProcess` signals on the GUI
-  thread; parsing one line of JSON per message is cheap. Nothing in the shell
-  calls a blocking wait on the daemon. No worker threads in M1.
+- **Shell:** the Tauri host runs the bridge on a Tokio runtime; the webview's
+  UI thread only receives ordered events on one IPC channel. Nothing in the
+  UI calls a blocking wait on the daemon. (Qt shell: one GUI thread,
+  `DaemonClient` on `QProcess` signals.)
 - **Daemon:** Tokio multi-thread runtime. One reader task and one writer task
   per connection; each request runs in its own task so a slow request never
   blocks the connection. Blocking filesystem and SQLite calls go through

@@ -7,26 +7,29 @@ conversation history: the repository is the source of truth.
 ## What this is
 
 **Axiom** — an open-source, cross-platform, LLM-native development platform:
-a Qt desktop shell over a Rust daemon that manages workspaces, toolchains,
-builds, agents and (its defining feature) inspection of running UIs with
-element→source mapping and verified AI edits. Requirements:
-`docs/product/requirements.md`.
+a Tauri 2 desktop shell (React + Monaco) over a Rust daemon that manages
+workspaces, toolchains, builds, agents and (its defining feature) inspection
+of running UIs with element→source mapping and verified AI edits.
+Requirements: `docs/product/requirements.md`.
 
 ## Current status
 
-**Phase 0 complete; M1 not started.** Always check `docs/roadmap/current.md`
-and `scripts/tasks.py` — they are kept current; this paragraph may lag.
+**M1 complete; M1.5 (Qt → Tauri migration) in progress.** Always check
+`docs/roadmap/current.md` and `scripts/tasks.py` — they are kept current; this
+paragraph may lag. The Qt shell is still the release artifact until task T-14.
 
 ## Architecture in ten lines
 
-- Two processes we own: `axiom` (C++/QML shell) and `axiomd` (Rust daemon).
-  No Rust in the shell, no Qt in the daemon (ADR-0002).
+- Two processes we own: `axiom` (Tauri 2 shell: Rust host + React webview)
+  and `axiomd` (Rust daemon). No Qt in the daemon, no business logic in the
+  shell (ADR-0002, ADR-0012).
 - They speak JSON-RPC 2.0, one JSON document per line, over the daemon's
   stdio (ADR-0003). Contract: `crates/protocol` + `docs/protocols/ipc.md`.
 - `crates/protocol` is the single source of truth for wire types; `schemas/`
   is generated from it (ADR-0005).
-- The editor is Monaco in Qt WebEngine, loaded from `axiom://editor/`,
-  bridged with QWebChannel (`docs/protocols/editor-bridge.md`, ADR-0004).
+- The editor is Monaco in the shell's webview, behind the frozen
+  editor-bridge-1 message set (`docs/protocols/editor-bridge.md`, ADR-0004).
+  `editor/src/documents.ts` is shared by both shells.
 - All platform logic lives in daemon service crates. The shell presents; it
   never touches workspace files or runs processes itself.
 - Later: declarative toolchain providers (ADR-0006), in-house agent loop over
@@ -41,8 +44,10 @@ Start with `docs/architecture/overview.md`; details in `modules.md`,
 | Path | What |
 |------|------|
 | `crates/protocol/` | Wire contract (exists) |
-| `crates/{rpc,store,workspace,exec,axiomd}/` | M1 backend (to be created by their tasks) |
-| `apps/desktop/` | Qt shell (M1) |
+| `crates/{rpc,store,workspace,exec,axiomd}/` | M1 backend (complete) |
+| `apps/desktop-tauri/` | Tauri shell (M1.5): Rust host (`src-tauri/`), React UI (`src/`), bridge tests, E2E, benchmarks |
+| `crates/desktop-bridge/` | `axiom-desktop-bridge`: spawns/supervises `axiomd`, protocol 0.1 client for the GUI |
+| `apps/desktop/` | Qt shell (M1) — kept building and tested until task T-15 |
 | `editor/` | Monaco editor surface (M1) |
 | `providers/` | Toolchain provider manifests |
 | `schemas/` | **Generated** JSON Schemas — never edit by hand |
@@ -61,7 +66,7 @@ Start with `docs/architecture/overview.md`; details in `modules.md`,
 ```sh
 scripts/tasks.py                  # task board
 scripts/tasks.py next             # what to work on
-scripts/check.sh                  # THE quality gate: fmt, clippy, tests, schema freshness (+ editor, desktop when present)
+scripts/check.sh                  # THE quality gate: fmt, clippy, tests, schema freshness (+ editor, desktop, tauri when present)
 scripts/check.sh rust             # Rust only
 cargo run -p axiom-protocol --example export_schema   # regenerate schemas/ after protocol changes
 source scripts/dev-env.sh         # Qt + cargo on PATH; defines axiom_cmake
@@ -95,11 +100,15 @@ Setup from scratch: `docs/contributing/dev-setup.md`.
   Errors: `thiserror` enums in libraries, mapped to `RpcError` at the
   boundary; no `unwrap`/`expect` outside tests and provably-infallible cases
   with a comment. Async: Tokio; blocking work in `spawn_blocking`.
-- **C++:** C++17, Qt naming conventions, `QObject` ownership by parent, no
-  raw `new` without a parent or smart pointer, no blocking calls on the GUI
-  thread, warnings clean.
-- **QML:** views use `Axiom.Ui` tokens/controls only; no literal colours or
-  font sizes in `Axiom.App`; every interactive item has `Accessible.name`.
+- **C++ (Qt shell only):** C++17, Qt naming conventions, `QObject` ownership
+  by parent, no raw `new` without a parent or smart pointer, no blocking calls
+  on the GUI thread, warnings clean.
+- **QML (Qt shell only):** views use `Axiom.Ui` tokens/controls only; no
+  literal colours or font sizes in `Axiom.App`; every interactive item has
+  `Accessible.name`.
+- **CSS/React (Tauri shell):** views and components use design tokens only —
+  no literal colours outside `src/styles/tokens.css` (a guard test enforces
+  it); every interactive element has an accessible name and role.
 - **TypeScript:** `strict`, ES modules, no `any` in exported APIs.
 - **Tests** live next to what they test; integration tests use real
   processes and temp directories, never the user's profile
@@ -111,6 +120,13 @@ Setup from scratch: `docs/contributing/dev-setup.md`.
 - `cargo` may not be on `PATH`: use the scripts or `source scripts/dev-env.sh`.
 - Qt from aqtinstall needs OpenGL/xkbcommon development headers to configure
   (`find_package(Qt6Gui)` fails otherwise) — see `dev-setup.md`.
+- Building the Tauri shell on Linux needs the WebKitGTK 4.1 / GTK 3
+  development packages; without root, `apps/desktop-tauri/scripts/sysroot.sh`
+  extracts them locally.
+- **Never open a window on a developer's desktop from a test or benchmark.**
+  Linux GUI runs go through `apps/desktop-tauri/scripts/headless.sh` (private
+  Xvfb, Wayland removed); the E2E and benchmark scripts refuse to run without
+  it.
 - WebEngine: register the custom URL scheme and call
   `QtWebEngineQuick::initialize()` before creating the application object.
 - Monaco 0.57 worker entry points changed from older guides — see

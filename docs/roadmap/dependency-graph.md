@@ -32,6 +32,43 @@ file explains the shape and the merge order.
 The front matter of each task file is authoritative; `scripts/tasks.py
 check` validates it. Keep this table in step when a dependency changes.
 
+## M1.5 task graph
+
+```
+ T-01 ─┬─▶ T-02 ─▶ T-03 ─┬─▶ T-05 ─▶ T-06 ─┐
+       │                 ├─▶ T-07 ─────────┤
+       │                 ├─▶ T-08 ─▶ T-10 ─┤
+       │                 ├─▶ T-09 ─────────┤
+       │                 └─▶ T-13 ─────────┴─▶ T-12 ─▶ T-14 ─▶ T-15
+       ├─▶ T-04 ─▶ T-05
+       ├─▶ M5-PRE-001 (parallel; gates M5, not M1.5)
+       └─▶ T-11 (after T-08; a decision, not a dependency of the gate)
+```
+
+| Task | Depends on |
+|------|-----------|
+| T-01 | – |
+| T-02, T-04, M5-PRE-001 | T-01 |
+| T-03 | T-02 |
+| T-05 | T-03, T-04 |
+| T-06 | T-05 |
+| T-07, T-08 | T-03 |
+| T-09 | T-03, T-05 |
+| T-10 | T-06, T-08 |
+| T-11 | T-08 |
+| T-13 | T-03 |
+| T-12 | T-06, T-07, T-08, T-09, T-10, T-13 |
+| T-14 | T-12, T-13 |
+| T-15 | T-14 |
+
+**Waves.** A: T-02 · T-04 · M5-PRE-001. B: T-03 · T-05. C: T-06 · T-07 · T-08
+· T-09 · T-13 (T-06/T-07/T-08 all touch `apps/desktop-tauri/src/`: merge T-08
+first, then T-06, then T-07). D: T-10 · T-11. E: T-12 (gate). F: T-14.
+G: T-15.
+
+**Qt is not modified by any of these except T-15**, which is gated. Every wave
+must leave the Qt build and its tests green.
+
 ## Parallel groups
 
 Tasks in the same wave have disjoint scopes and may run concurrently in
@@ -66,7 +103,7 @@ independent verification is pending.
 ## Milestone-level dependencies
 
 ```
-M1 ──▶ M2 ──▶ M3 ──▶ M5 ──▶ M6.1 (QML adapter)
+M1 ──▶ M1.5 ──▶ M2 ──▶ M3 ──▶ M5 ──▶ M6.1 (QML adapter)
  │      │      └───────────▶ M6.7 (multi-agent)
  │      └──▶ M6.2, M6.3 (providers)        M3 + M5 ──▶ M6.8
  └──▶ M4 (needs M1 only; LSP server definitions use M2 manifests when available)

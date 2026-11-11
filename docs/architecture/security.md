@@ -10,7 +10,7 @@
 | Provider manifests | untrusted data, interpreted | a manifest cannot execute anything but its declared argv, each through the permission gate |
 | Provider helper processes, language servers, MCP servers | untrusted code | separate processes; started only after the user enabled that provider/server |
 | Model output, tool results, file contents read by an agent | untrusted data | text can never grant permissions (prompt-injection rule) |
-| Pages shown in the preview (M5) | untrusted | separate WebEngine profile, no bridge object |
+| Pages shown in the preview (M5) | untrusted | isolated webview/profile, no bridge object, no host commands |
 
 ## Paths (M1, enforced in `axiom-workspace`)
 
@@ -29,7 +29,44 @@ There is a time-of-check/time-of-use window between step 3 and the file
 operation; closing it needs `openat2`/`O_NOFOLLOW`-style APIs and is tracked
 as a hardening item, not an M1 requirement.
 
-## Editor surface (M1)
+## Shell webview (Tauri, M1.5)
+
+- Assets are bundled and served by Tauri's asset protocol from `dist/`; there
+  is no custom scheme handler of ours and no filesystem path reaches the page.
+- **CSP** (in `tauri.conf.json`): `default-src 'self'`, `script-src 'self'`,
+  `style-src 'self' 'unsafe-inline'` (Monaco injects styles),
+  `worker-src 'self' blob:` (Monaco workers), `connect-src ipc:
+  http://ipc.localhost`, `object-src 'none'`, `base-uri 'none'`,
+  `frame-src 'none'`. No remote origin is allowed.
+- **Host commands** (capability-gated, `AppManifest::commands` pins the list):
+
+  | Command | Exposes |
+  |---------|---------|
+  | `host_subscribe(channel)` | the ordered event stream (state, notifications, responses, logs, close-requested) |
+  | `daemon_request(key, method, params, timeoutMs?)` | one protocol 0.1 request; `initialize`/`shutdown` are refused (the host owns the lifecycle) |
+  | `daemon_cancel(key)` | `$/cancel` for a forwarded request |
+  | `daemon_restart()` | replace the daemon process |
+  | `app_info()` | versions, data dir, uptime (read-only) |
+  | `open_external(url)` | system browser, `http`/`https` only |
+  | `app_quit()` | confirmed quit |
+  | `host_heartbeat()` | proves the page is alive (crash/hang detection) |
+  | `snapshot_put(path, text)` / `snapshot_clear(path)` | the latest *unsaved* text of a document, held in host memory only (never on disk, never read back into the file by the host) |
+  | `recovery_state()` | those snapshots, for a page that must rebuild after a crash |
+
+  There is **no** command that reads or writes workspace files, spawns a
+  process, opens an arbitrary path, or grants network access.
+- **Wider than Qt by design:** in the Qt shell only C++ could issue protocol
+  requests; here the UI page can issue any protocol method a client may issue
+  (including `fs/writeFile` and `task/start`). The page is our own bundled
+  code with no remote content, which bounds the exposure; spike T-11 evaluates
+  isolating Monaco in its own webview with a narrower capability.
+- `freezePrototype` is disabled because Monaco 0.57 assigns to built-in
+  prototypes at load (observed: `Attempted to assign to readonly property`).
+- Links open in the system browser; navigation away is impossible (single
+  page, no `frame-src`).
+- Webview remote debugging is never enabled by a release build.
+
+## Editor surface (Qt, until T-15)
 
 - Loaded only from `axiom://editor/…`, a custom scheme registered as
   `SecureScheme | CorsEnabled | FetchApiAllowed` (not `LocalAccessAllowed`).
@@ -103,7 +140,8 @@ Axiom uses three distinct words and the UI must too:
 
 - M1 has no isolation at all for tasks: equivalent to a terminal.
 - TOCTOU on path containment (above).
-- WebEngine's Chromium lags upstream (Qt 6.11/6.12 ship Chromium 140 per E1's
-  user agent); the editor surface loads no remote content, which bounds the
-  exposure; the M5 preview does load arbitrary pages and must use an isolated
-  profile and track Qt security releases.
+- The shell now depends on three web engines (WebKitGTK, WebView2, WKWebView)
+  whose patch cadence it does not control. The UI loads no remote content,
+  which bounds the exposure. The M5 preview *does* load arbitrary pages and
+  must use an isolated profile/webview; its engine on Tauri is unresolved
+  (ADR-0012 Consequences, spike M5-PRE-001).
