@@ -7,7 +7,7 @@ on purpose.
 
 1. Read `AGENTS.md`.
 2. Read `docs/roadmap/current.md`.
-3. Read the newest file in `agents/handoffs/` (if any).
+3. Read the handoff named under "Latest handoff" in `current.md`.
 4. `git status` and `git log --oneline -10`. If the tree is dirty with
    someone else's unfinished work, do not discard it: read the handoff; if
    it is unexplained, stash nothing, commit nothing — report it and stop.
@@ -16,8 +16,9 @@ on purpose.
 
 ## 2. Pick a task
 
-- `scripts/tasks.py next` gives the task. Take that one unless the handoff
-  names a task left `in-progress` or `implemented` — finish those first.
+- If the board (`scripts/tasks.py`) shows a task `in-progress` or
+  `implemented`, read its handoff and finish it first. Otherwise
+  `scripts/tasks.py next` gives the task.
 - Read the task file fully, then **only** the documents under its *Context*
   and *Required interfaces*. Do not read all of `docs/`.
 - Claim it: `scripts/tasks.py set <ID> in-progress "<date>"` and create a
@@ -64,11 +65,13 @@ A spec can be wrong; do not work around it silently and do not redesign.
 1. `scripts/tasks.py set <ID> tested "<date>; see handoff"` — or
    `implemented` if some acceptance criterion is unverified, or `blocked`.
    You never set your own task to `verified`.
-2. Update `docs/roadmap/current.md` (status table, next task, blockers).
+2. Update `docs/roadmap/current.md` (status table, next task, blockers, and
+   the "Latest handoff" line → the file you write in step 4).
 3. Do the *Documentation updates* the task lists. Docs must describe what
    the code actually does.
 4. Write the completion report into a handoff file
-   `agents/handoffs/<YYYY-MM-DD>-<ID>.md` using `agents/HANDOFF_TEMPLATE.md`.
+   `agents/handoffs/<YYYY-MM-DD>-<ID>.md` (if that name exists, append
+   `-2`, `-3`, …) using `agents/HANDOFF_TEMPLATE.md`.
 5. Commit.
 
 ## 7. Continue or stop

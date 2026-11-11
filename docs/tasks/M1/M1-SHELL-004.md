@@ -3,7 +3,7 @@ id: M1-SHELL-004
 title: Run commands and show streamed output
 status: planned
 status_note:
-depends_on: [M1-SHELL-002]
+depends_on: [M1-SHELL-003]
 order: 43
 scope: apps/desktop/
 ---

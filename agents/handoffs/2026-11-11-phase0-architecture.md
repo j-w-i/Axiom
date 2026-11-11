@@ -79,3 +79,41 @@ E3 driver (Chrome 155 headless, React 19.3, Vite 8.3)   verified: true, exit 0
 `scripts/tasks.py next` → **M1-RPC-001**. Wave A (RPC-001, STORE-001,
 WS-001, EXEC-001, EDITOR-001) may run in parallel. Start a new session with
 `agents/START_NEXT_SESSION.md`.
+
+## Final architectural review (performed before handoff)
+
+Method: mechanical cross-checks (every method/notification name used in the
+docs exists in the generated schema; error-kind table matches the enum;
+bridge message names consistent; referenced paths exist; task dependency
+graph acyclic), plus two independent cold-start reviews by fresh agents with
+no context (one on contract/task consistency, one walking through
+`START_NEXT_SESSION.md`). They reported 28 findings (several duplicated between the two); all were addressed:
+
+| Finding | Resolution |
+|---------|-----------|
+| `task/start` "response before notifications" not implementable with the RPC API | Added `RequestCtx::after_response` to M1-RPC-001 with an ordering test; M1-DAEMON-001 uses it |
+| Crash recovery needed a dirty reopen the bridge could not express | `openDocument` gained `dirty`; dirty-tracking rules rewritten |
+| Overlapping saves ambiguous | Saves serialised per document; added `saveFailed`; every `saveRequested` answered exactly once |
+| `unsafe_code = "forbid"` made the Windows process-tree module impossible | Workspace lint is now `deny`; one module may `allow` it |
+| `fs/watch` could be advertised but unsupported | M1-DAEMON-001 now depends on M1-WS-002 |
+| Cancellation race stated two ways | Single rule in `ipc.md` and M1-RPC-001 |
+| Watcher ignore filtering differed from `ipc.md`; multi-handle lifetime unclear | Both specified precisely |
+| Scope/remediation mismatches in DAEMON-001/002, CI-001/002 | Scopes widened exactly as far as the remediation needs |
+| `QuickDialogs2`, store/workspace API names, parse-error wording in `modules.md` | Aligned with the task specs |
+| SHELL-003 and SHELL-004 declared parallel with overlapping scope | 004 now depends on 003; wave table rewritten; the one remaining overlap (004/005) is flagged as needing an integrator |
+| Editorial edits to frozen docs vs. "may not change" | Governance now defines and permits editorial rewording |
+| "Newest handoff" ambiguous; prompt/guide priority mismatch; mutation check with < 2 tests | `current.md` carries a "Latest handoff" pointer; prompt and guide agree; guide amended |
+
+Answers to the review questions:
+- Module boundaries coherent, no cycles: yes (matrix in `modules.md`; to be
+  machine-enforced by M1-CI-001).
+- Shared interfaces sufficiently defined for M1: yes for IPC and bridge;
+  drafts for M2/M3/M5 are intentionally not final.
+- Technologies compatible: demonstrated by E1–E3 on Linux only.
+- Licensing addressed: ADR-0011; legal review still required before release.
+- Security boundaries realistic: M1 has path containment and a narrow editor
+  bridge, and no task isolation (stated).
+- First milestone implementable: every risky integration in it was
+  exercised by E1; remaining risk is macOS/Windows.
+- Resumable without conversation history: two cold reviewers navigated it;
+  their friction points were fixed.

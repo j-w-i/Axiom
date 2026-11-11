@@ -26,7 +26,7 @@ user first expands it. On `fs/didChange`, the tree re-lists only the
 user: activates a file in the tree
 shell → daemon   fs/readFile { workspaceId, path }
 daemon → shell   { text, version }
-shell → editor   openDocument { path, text, version, activate: true }
+shell → editor   openDocument { path, text, version, activate: true, dirty: false }
 editor           creates (or reuses) a Monaco model for the path, shows it
 editor → shell   dirtyChanged { path, dirty: true }              (on first edit)
 user: Ctrl/Cmd+S (handled inside Monaco)  — or File ▸ Save (shell → editor requestSave)
@@ -34,6 +34,7 @@ editor → shell   saveRequested { path, text }
 shell → daemon   fs/writeFile { workspaceId, path, text, expectedVersion }
 daemon → shell   { version }                         → shell → editor documentSaved { path, version }
    or error conflict                                  → shell shows Overwrite / Reload / Cancel
+                                                        (Cancel or any other error → shell → editor saveFailed { path })
 ```
 The *editor surface owns unsaved text*; the daemon owns the file on disk; the
 shell owns which documents are open and their saved `version`. Language id is

@@ -3,9 +3,9 @@ id: M1-DAEMON-002
 title: End-to-end protocol behaviour tests against the real daemon
 status: planned
 status_note:
-depends_on: [M1-DAEMON-001, M1-WS-002]
+depends_on: [M1-DAEMON-001]
 order: 31
-scope: crates/axiomd/ (tests and fs/watch wiring), tests/fixtures/
+scope: crates/axiomd/, tests/fixtures/; bug fixes in crates/{rpc,store,workspace,exec}/ limited to defects these tests reveal
 ---
 
 # M1-DAEMON-002: Daemon integration test suite
@@ -30,7 +30,8 @@ pipes (`env!("CARGO_BIN_EXE_axiomd")`).
    `*.log`), `notes/crlf.txt` (CRLF line endings), `data/invalid-utf8.bin`.
    Keep it under 20 KB. Add `tests/fixtures/README.md` describing each
    fixture.
-3. Complete `fs/watch` wiring if M1-DAEMON-001 left it `unsupported`.
+3. Every defect fixed in a service crate gets a regression test in that
+   crate as well, and is listed in the completion report.
 4. Test files and required cases:
    - `lifecycle.rs`: request before initialize; major-version mismatch;
      negotiated version; second initialize; `methods` list; shutdown; EOF.

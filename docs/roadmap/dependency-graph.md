@@ -6,30 +6,31 @@ file explains the shape and the merge order.
 ## M1 task graph
 
 ```
-            ┌─ M1-RPC-001 ────┐
-            ├─ M1-STORE-001 ──┤
- (start) ───┼─ M1-WS-001 ─────┼──▶ M1-DAEMON-001 ──┬──▶ M1-CI-001 ───────────────────────────┐
-            │      └─▶ M1-WS-002 ─────────────┐    │                                         │
-            ├─ M1-EXEC-001 ───┘               ▼    ├──▶ M1-SHELL-001 ─┐                       │
-            │                         M1-DAEMON-002 ──────────────────┴▶ M1-SHELL-002 ─┬▶ M1-SHELL-004 ─┤
-            │                                                                          │                ├▶ M1-CI-002
-            └─ M1-EDITOR-001 ──────────────────────────────────────────────────────────┴▶ M1-SHELL-003 ─┤
-                                                                                              └▶ M1-SHELL-005 ─┘
+ M1-RPC-001 ─────────────┐
+ M1-STORE-001 ───────────┤
+ M1-WS-001 ─▶ M1-WS-002 ─┼─▶ M1-DAEMON-001 ─┬─▶ M1-DAEMON-002 ─┐
+ M1-EXEC-001 ────────────┘                  ├─▶ M1-CI-001 ─────┼──────────────────────────────────────────┐
+                                            └─▶ M1-SHELL-001 ──┴─▶ M1-SHELL-002 ─┐                         │
+ M1-EDITOR-001 ──────────────────────────────────────────────────────────────────┴─▶ M1-SHELL-003 ─┬─▶ M1-SHELL-004 ─┤
+                                                                                                   └─▶ M1-SHELL-005 ─┴─▶ M1-CI-002
 ```
 
 | Task | Depends on |
 |------|-----------|
 | M1-RPC-001, M1-STORE-001, M1-WS-001, M1-EXEC-001, M1-EDITOR-001 | – |
 | M1-WS-002 | M1-WS-001 |
-| M1-DAEMON-001 | M1-RPC-001, M1-STORE-001, M1-WS-001, M1-EXEC-001 |
-| M1-DAEMON-002 | M1-DAEMON-001, M1-WS-002 |
+| M1-DAEMON-001 | M1-RPC-001, M1-STORE-001, M1-WS-002, M1-EXEC-001 |
+| M1-DAEMON-002 | M1-DAEMON-001 |
 | M1-CI-001 | M1-DAEMON-001 |
 | M1-SHELL-001 | M1-DAEMON-001 |
 | M1-SHELL-002 | M1-SHELL-001, M1-DAEMON-002 |
 | M1-SHELL-003 | M1-SHELL-002, M1-EDITOR-001 |
-| M1-SHELL-004 | M1-SHELL-002 |
+| M1-SHELL-004 | M1-SHELL-003 |
 | M1-SHELL-005 | M1-SHELL-003 |
 | M1-CI-002 | M1-SHELL-003, M1-SHELL-004, M1-SHELL-005, M1-CI-001 |
+
+The front matter of each task file is authoritative; `scripts/tasks.py
+check` validates it. Keep this table in step when a dependency changes.
 
 ## Parallel groups
 
@@ -40,15 +41,16 @@ separate branches/worktrees. A single agent working alone simply follows
 | Wave | Tasks (parallel) | Integration checkpoint after the wave |
 |------|------------------|---------------------------------------|
 | A | M1-RPC-001 · M1-STORE-001 · M1-WS-001 · M1-EXEC-001 · M1-EDITOR-001 | All merged; `scripts/check.sh` green on `main`. The only shared file is the root `Cargo.toml` (`members` and `[workspace.dependencies]`): merge additively. |
-| B | M1-WS-002 · M1-DAEMON-001 | Daemon answers the manual session. |
-| C | M1-DAEMON-002 · M1-CI-001 · M1-SHELL-001 | **Backend gate:** the integration suite is green; from here the protocol behaviour is pinned by tests. |
-| D | M1-SHELL-002 | Explorer works against the real daemon. |
-| E | M1-SHELL-003 · M1-SHELL-004 | Both touch `apps/desktop`: 003 owns `src/editor/`, `OpenDocumentsModel`, `EditorArea.qml`; 004 owns `Task*` models and `OutputPanel.qml`. Shared files (`Main.qml`, `CMakeLists.txt`, `main.cpp`) — merge 003 first, then rebase 004. If only one agent is available, do 003 then 004. |
-| F | M1-SHELL-005 | |
-| G | M1-CI-002 | **M1 exit review.** |
+| B | M1-WS-002 | Watcher tests stable over 20 runs. |
+| C | M1-DAEMON-001 | Daemon answers the manual session. |
+| D | M1-DAEMON-002 · M1-CI-001 · M1-SHELL-001 | **Backend gate:** the integration suite is green; from here the protocol behaviour is pinned by tests. (002 may fix service-crate defects; 001-CI and SHELL-001 do not touch those crates.) |
+| E | M1-SHELL-002 | Explorer works against the real daemon. |
+| F | M1-SHELL-003 | Open → edit → save smoke test green. |
+| G | M1-SHELL-004 · M1-SHELL-005 | Both are in `apps/desktop` but own different files: 004 the `Task*` models and `OutputPanel.qml`; 005 `SettingsStore` and `SettingsDialog.qml`. They share `Main.qml`, `CMakeLists.txt` and `main.cpp`, so they are parallel **only** with an integrator who merges 004 first and rebases 005; otherwise run them one after the other. |
+| H | M1-CI-002 | **M1 exit review.** |
 
-Sequential spine (cannot be parallelised): RPC/services → DAEMON-001 →
-SHELL-001 → SHELL-002 → SHELL-003 → SHELL-005 → CI-002.
+Sequential spine (cannot be parallelised): WS-001 → WS-002 → DAEMON-001 →
+SHELL-001 (with DAEMON-002) → SHELL-002 → SHELL-003 → SHELL-004/005 → CI-002.
 
 ## Roles in a multi-agent run
 

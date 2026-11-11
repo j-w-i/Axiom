@@ -14,8 +14,12 @@ on one system. They bind every contributor, human or agent.
 | Agent tools & permissions | `docs/protocols/agents.md` | Draft until M3 starts |
 | Inspection | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | Draft until M5 starts |
 
-**Frozen** means: an implementation task may not change it. If the contract
-is wrong or insufficient, stop and file a change request (below).
+**Frozen** means: an implementation task may not change its meaning. If the
+contract is wrong or insufficient, stop and file a change request (below).
+Rewording a frozen document to remove an ambiguity or record a newly
+verified fact, without changing what an implementation must do, is allowed
+from any task (it counts as within scope) and must be listed in the
+completion report so the reviewer can confirm it is editorial.
 **Draft** means: the first task of that milestone reviews it against reality,
 amends it, and freezes it.
 
@@ -39,8 +43,9 @@ regenerate `schemas/`.
 8. Edit generated files (`schemas/**`) by hand.
 9. Create directories, modules, UI controls or settings that nothing uses yet.
 10. Touch files outside the task's declared scope, except: `Cargo.lock`,
-    lockfiles, the task's own status, `docs/roadmap/current.md`, and its
-    handoff.
+    lockfiles, the task's own status, `docs/roadmap/current.md`, its
+    handoff, the files its *Documentation updates* section names, and
+    editorial rewording of frozen documents as defined above.
 11. Use a Qt module that is not LGPL (see ADR-0011 for the list).
 
 ## Change requests
@@ -96,8 +101,10 @@ and CI is the verifier.
 - One task = one branch `task/<task-id>` (or a git worktree). Never commit to
   `main` directly while other tasks are in flight.
 - A task owns its scope directories for its duration. Two In-Progress tasks
-  must not have overlapping scope; the roadmap's parallel groups guarantee
-  this for M1.
+  must not have overlapping scope (the root `Cargo.toml` member/dependency
+  lists excepted: additive edits, merged by keeping both); the roadmap's
+  parallel waves respect this for M1, with one flagged exception (wave G)
+  that requires an integrator.
 - Merge order follows `docs/roadmap/dependency-graph.md`. After each merge,
   `scripts/check.sh` must pass on `main`.
 - Shared files (`Cargo.toml` workspace members, `scripts/check.sh`, CI) are

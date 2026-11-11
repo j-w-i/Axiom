@@ -14,8 +14,8 @@ from the implementer and must re-run things rather than trust the report.
    (`cargo clean -p <crate>` / remove `build/desktop` for the affected part).
 5. **Tests are real:** read the new tests. They must assert behaviour (not
    just "does not panic"), must not sleep in place of synchronisation, and
-   must fail if the feature is broken — pick two and break the
-   implementation locally to see them fail, then restore.
+   must fail if the feature is broken — pick two (all of them, if the task added fewer than
+   two) and break the implementation locally to see them fail, then restore.
 6. **Acceptance criteria:** verify each one yourself. For GUI criteria, run
    the app (or the offscreen test with a screenshot) and look.
 7. **Contracts:** `git diff <base>.. -- crates/protocol schemas docs/protocols`

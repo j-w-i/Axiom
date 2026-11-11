@@ -72,7 +72,10 @@ Read: `docs/protocols/editor-bridge.md` (the contract; all of it),
 - Unit tests (Vitest, fake host + fake models) cover: open → clean;
   edit → `dirtyChanged(true)`; undo to saved state → `dirtyChanged(false)`;
   `saveRequested` carries current text; typing during a save keeps the
-  document dirty after `documentSaved` (pendingId rule); re-`openDocument`
+  document dirty after `documentSaved` (pendingId rule); a second save
+  trigger while one is pending is ignored; `saveFailed` clears the pending
+  save and keeps the document dirty; `openDocument` with `dirty: true`
+  stays dirty across undo and becomes clean after a successful save; re-`openDocument`
   of an existing path replaces content and marks clean; `closeDocument`
   disposes; snapshot throttling; cursor throttling; language id inference
   for `.rs`, `.ts`, `.json`, `Makefile`, unknown.

@@ -68,8 +68,10 @@ pub enum ExecError { SpawnFailed { program: String, os_error: String }, EmptyCom
    - Windows: create a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`,
      assign the child; `terminate` and `kill` both `TerminateJobObject`
      (use `windows-sys`). This file may use `unsafe`: put it in
-     `src/tree_windows.rs` with `#![allow(unsafe_code)]` scoped to that
-     module and a `// SAFETY:` comment per block.
+     `src/tree_windows.rs` with `#![allow(unsafe_code)]` at the top of that
+     module only (the workspace lint is `deny`, which a module-level `allow`
+     overrides) and a `// SAFETY:` comment per block. No other module may
+     allow it.
 7. `cancel`: mark the task cancelled, `terminate`, and after 3 s `kill` if it
    has not exited. Cancelling a finished task is `Ok`.
 8. Dropping the `Executor` (last clone) kills all running tasks

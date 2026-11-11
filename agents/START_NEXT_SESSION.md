@@ -17,12 +17,14 @@ Do this, in order:
 1. Read `AGENTS.md` completely.
 2. Read `agents/IMPLEMENTATION_GUIDE.md` completely and follow it for
    everything below.
-3. Read `docs/roadmap/current.md` and the newest file in `agents/handoffs/`.
+3. Read `docs/roadmap/current.md` and the handoff file it names under
+   "Latest handoff".
 4. Run `git status`, `git log --oneline -10`, `scripts/tasks.py` and
    `scripts/check.sh`. If the check fails or the tree contains unexplained
    uncommitted work, deal with that first as the guide describes.
-5. Run `scripts/tasks.py next`. Unless a handoff names an unfinished
-   in-progress task (finish that first), take the task it prints.
+5. If `scripts/tasks.py` shows a task that is `in-progress` or
+   `implemented`, read its handoff and finish that task first. Otherwise
+   run `scripts/tasks.py next` and take the task it prints.
 6. Read that task's file in `docs/tasks/`, then only the documents listed
    under its *Context* and *Required interfaces*.
 7. Mark it in progress (`scripts/tasks.py set <ID> in-progress "<date>"`)

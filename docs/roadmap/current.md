@@ -20,6 +20,10 @@ started.** No product code exists yet except the protocol crate.
 | `editor/`, `apps/desktop/` | Not started |
 | CI | Workflow file exists for the Rust job; **never run** (no remote yet) |
 
+## Latest handoff
+
+`agents/handoffs/2026-11-11-phase0-architecture.md`
+
 ## Next task
 
 Run `scripts/tasks.py next`. At the time of writing: **M1-RPC-001**, and

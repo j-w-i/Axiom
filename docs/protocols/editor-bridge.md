@@ -38,11 +38,12 @@ reload the handshake simply happens again.
 | Signal | Payload | Meaning |
 |--------|---------|---------|
 | `configure` | `{ theme: "light"\|"dark", fontSize: number, fontFamily: string, wordWrap: boolean }` | Apply appearance. Sent after `ready` and whenever a relevant setting changes. `theme` is already resolved (never `"system"`). |
-| `openDocument` | `{ path: string, text: string, version: string, activate: boolean }` | Create the model for `path` (a `WorkspacePath`) with this content and mark it clean. If a model for `path` exists, replace its content, keep view state, mark clean. If `activate`, show it. Language is inferred by the page from the file name. |
+| `openDocument` | `{ path: string, text: string, version: string, activate: boolean, dirty: boolean }` | Create the model for `path` (a `WorkspacePath`) with this content. If a model for `path` exists, replace its content and keep view state. `dirty: false` (the normal case): `text` is what is on disk at `version`; mark the document clean. `dirty: true` (crash recovery only): `text` is unsaved content that differs from disk; mark the document dirty (see Dirty tracking). If `activate`, show it. Language is inferred by the page from the file name. |
 | `activateDocument` | `{ path: string }` | Show an already-open document and focus the editor. |
 | `closeDocument` | `{ path: string }` | Dispose the model. If it was active, show nothing (empty state is the shell's job: it hides the web view when no document is open). |
 | `requestSave` | `{ path: string }` | Ask the page to emit `saveRequested` for this document (used by the File ▸ Save menu item and Save All). |
-| `documentSaved` | `{ path: string, version: string }` | The save succeeded: mark the model clean at its *current* alternative version id captured when `saveRequested` was sent (see Dirty tracking). |
+| `documentSaved` | `{ path: string, version: string }` | The pending save succeeded: the content sent in `saveRequested` is now on disk (see Dirty tracking). |
+| `saveFailed` | `{ path: string }` | The pending save did not happen (error, or the user cancelled a conflict dialog). The page clears the pending save and leaves the document dirty. The shell shows the reason; the page shows nothing. |
 | `revealPosition` | `{ path: string, line: number, column: number }` | 1-based. Move the cursor there and centre it. Activates the document. |
 | `runCommand` | `{ command: "undo"\|"redo"\|"find"\|"replace"\|"selectAll"\|"format" }` | Trigger a Monaco action from a shell menu item. |
 
@@ -51,7 +52,7 @@ reload the handshake simply happens again.
 | Slot | Payload | Meaning |
 |------|---------|---------|
 | `ready` | `{ bridgeVersion: 1, monacoVersion: string }` | Handshake. |
-| `saveRequested` | `{ path: string, text: string }` | The user pressed Ctrl/Cmd+S in the editor, or the shell sent `requestSave`. The shell performs `fs/writeFile`. |
+| `saveRequested` | `{ path: string, text: string }` | The user pressed Ctrl/Cmd+S in the editor, or the shell sent `requestSave`. The shell performs `fs/writeFile` and must answer every `saveRequested` with exactly one `documentSaved` or `saveFailed` for that path. |
 | `dirtyChanged` | `{ path: string, dirty: boolean }` | The document's dirty state changed. |
 | `cursorChanged` | `{ path: string, line: number, column: number, selectionLength: number }` | Throttled to at most one per 50 ms. For the status bar. |
 | `textSnapshot` | `{ path: string, text: string }` | Unsaved content, sent at most once per second per dirty document while it is changing. The shell keeps the latest snapshot in memory only, to restore after a renderer crash. |
@@ -63,12 +64,29 @@ processes or sending arbitrary RPC.
 
 ## Dirty tracking
 
-The page records Monaco's `model.getAlternativeVersionId()` as `savedId` when
-a document is opened or reported saved. `dirty = (currentId !== savedId)`.
-Using the alternative version id means undoing back to the saved state makes
-the document clean again. On `saveRequested` the page remembers the id it is
-sending as `pendingId`; on `documentSaved` it sets `savedId = pendingId` (not
-the current id, because the user may have typed during the save).
+Per document the page keeps `savedId` and `pendingId`.
+
+- `openDocument` with `dirty: false`, and `documentSaved`: see below; the
+  document is clean when Monaco's `model.getAlternativeVersionId()` equals
+  `savedId`. Using the alternative version id means undoing back to the
+  saved state makes the document clean again.
+- `openDocument` with `dirty: true`: `savedId = null`, so the document is
+  dirty until a save succeeds (undo cannot make it clean, because the page
+  does not know the on-disk text).
+- `dirty = (savedId === null) || (currentId !== savedId)`; `dirtyChanged` is
+  sent whenever that value changes, and once after every `openDocument`.
+
+Saves are serialised per document:
+
+1. On a save trigger, if `pendingId` is set for that document, the trigger
+   is **ignored** (a save is already in flight).
+2. Otherwise the page sets `pendingId = currentId` and sends
+   `saveRequested` with the current text.
+3. On `documentSaved`: `savedId = pendingId`, `pendingId = null` — not the
+   current id, because the user may have typed during the save, in which
+   case the document stays dirty.
+4. On `saveFailed`: `pendingId = null`; nothing else changes.
+5. `openDocument` and `closeDocument` for the path clear `pendingId`.
 
 ## Keyboard ownership
 
@@ -89,7 +107,7 @@ the current id, because the user may have typed during the save).
 |---------|-----------|-----------|
 | Page fails to load / asset missing | `loadingChanged` with error | Shell replaces the editor area with an error panel naming the asset directory |
 | `ready` not received within 10 s | timer | Same panel, with *Reload* |
-| Renderer process crash | `renderProcessTerminated` | Panel with *Reload editor*; on reload, documents reopen with `textSnapshot` content if newer than saved, and are marked dirty |
+| Renderer process crash | `renderProcessTerminated` | Panel with *Reload editor*; on reload, each document that had a `textSnapshot` reopens with `openDocument { text: <snapshot>, dirty: true }`, the others from disk with `dirty: false` |
 | `saveRequested` for a path the shell does not consider open | lookup fails | Ignored and logged |
 
 ## Tests
@@ -98,3 +116,6 @@ the current id, because the user may have typed during the save).
   object: dirty tracking, pendingId handling, snapshot throttling.
 - The desktop smoke test (`apps/desktop/tests/smoke`) drives the real page:
   open → host edit → key events → Ctrl+S → file on disk (as E1 does).
+- Vitest cases required for the save rules: second trigger while pending is
+  ignored; `saveFailed` re-enables saving and keeps dirty; `dirty: true`
+  open stays dirty across undo and becomes clean after `documentSaved`.

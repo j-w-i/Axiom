@@ -56,8 +56,9 @@ before the task that needs them** (no empty scaffolding).
 - **Depends on:** `axiom-protocol`, `tokio`, `tokio-util`, `serde_json`,
   `tracing`, `thiserror`.
 - **Must not know:** any domain concept.
-- **Failure modes:** malformed line → `parse_error` response with `id: null`,
-  connection stays open; handler panic → caught, `internal` error response;
+- **Failure modes:** a line that is not JSON → `parse_error`, valid JSON that
+  is not a valid message → `invalid_request` (both with `id: null`; the
+  connection stays open); handler panic → caught, `internal` error response;
   peer closes → all in-flight handlers are cancelled.
 - **Spec:** `docs/protocols/ipc.md`; task M1-RPC-001/002.
 
@@ -67,7 +68,8 @@ before the task that needs them** (no empty scaffolding).
 - **Depends on:** `rusqlite` (feature `bundled`), `serde_json`, `thiserror`,
   `directories`.
 - **Public interface:** `Store::open(path)`, `Store::open_in_memory()`,
-  `settings_get/set`, `recent_list/touch`, `workspace_state_get/set`. All
+  `setting_get`, `settings_all`, `settings_set`, `recent_touch/list/remove`,
+  `workspace_state_get/set` (exact signatures: task M1-STORE-001). All
   synchronous; callers wrap in `spawn_blocking`.
 - **Failure modes:** corrupt database → rename to `axiom.db.corrupt-<ts>`,
   start fresh, report once via `$/log` at `error`. Schema newer than the
@@ -81,7 +83,8 @@ before the task that needs them** (no empty scaffolding).
   `thiserror`, `tempfile`.
 - **Public interface:** `Workspaces` (registry) with `open`, `close`, `get`;
   `Workspace` with `resolve(&WorkspacePath) -> Result<PathBuf>`, `list`,
-  `read_text`, `write_text`, `watch(sender)`.
+  `read_text`, `write_text`, `watch() -> WatchHandle` (exact signatures:
+  tasks M1-WS-001, M1-WS-002).
 - **Invariant:** `resolve` is the only way to turn a `WorkspacePath` into a
   host path, and it guarantees containment (see `security.md` §Paths). Every
   other crate that needs a host path for a workspace file calls it.
@@ -115,7 +118,8 @@ before the task that needs them** (no empty scaffolding).
 - **Responsibility:** windows, views, input, theming. Presents daemon state
   and forwards user intent.
 - **Depends on:** Qt 6.8+ modules `Core Gui Qml Quick QuickControls2
-  WebEngineQuick WebChannel` only (all LGPL; see ADR-0011).
+  QuickDialogs2 WebEngineQuick WebChannel`, plus `Test` for tests — nothing
+  else (all LGPL; the full allowed list is in ADR-0011).
 - **Internal structure:**
   - `src/daemon/` — `DaemonClient` (process, framing, id correlation, typed
     notification signals). The only code that knows JSON-RPC.

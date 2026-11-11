@@ -34,7 +34,7 @@ and `scripts/tasks.py` — they are kept current; this paragraph may lag.
   source stamping and objective verification (ADR-0008).
 
 Start with `docs/architecture/overview.md`; details in `modules.md`,
-`processes.md`, `data-flow.md`, `security.md`.
+`processes.md`, `data-flow.md`, `security.md`, `testing.md`.
 
 ## Repository map
 

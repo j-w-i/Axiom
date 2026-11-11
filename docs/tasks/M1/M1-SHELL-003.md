@@ -46,8 +46,10 @@ and its `shell/main.cpp` (scheme handler, bridge object, self-test).
      `unsupported_encoding` / `too_large` → banner "Cannot open <name>: …".
    - save: on `saveRequested` → `fs/writeFile` with `expectedVersion` →
      `documentSaved`. On `conflict` → `AxDialog` "<name> changed on disk"
-     with **Overwrite** (retry with `overwrite: true`), **Reload** (re-read,
-     `openDocument`), **Cancel**.
+     with **Overwrite** (retry with `overwrite: true` → `documentSaved`),
+     **Reload** (re-read, `openDocument` with `dirty: false`), **Cancel**
+     (`saveFailed`). Any other error → banner with the message and
+     `saveFailed`. Every `saveRequested` is answered exactly once.
    - external change (`fs/didChange` for an open path): clean → re-read and
      `openDocument`; dirty → set `changedOnDisk` (tab shows the `warning`
      colour and tooltip).
@@ -68,7 +70,13 @@ and its `shell/main.cpp` (scheme handler, bridge object, self-test).
    skipping files that no longer exist.
 9. Renderer crash: on `renderProcessTerminated`, show the reload panel
    (see contract §Failure modes) and restore documents from the latest
-   `textSnapshot`s on reload.
+   `textSnapshot`s on reload using `openDocument` with `dirty: true`.
+   Test it: `tst_smoke_editor` kills the renderer
+   (`WebEngineView` loads `chrome://crash`, or `QWebEnginePage::killRenderProcess`
+   equivalent available to Qt Quick) after typing, reloads, and asserts the
+   typed text is back and the tab is dirty. If no way to kill the renderer
+   works offscreen, say so and cover the restore path with a model-level
+   test instead.
 10. Smoke test `tst_smoke_editor` (offscreen, real daemon, real bundle;
     modelled on E1's self-test, **fails closed on timeout**): open the
     fixture's `src/main.rs`; wait for `ready` and document open; send key

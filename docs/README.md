@@ -12,6 +12,7 @@ Each document has one purpose. If you are implementing a task, start at
 | `architecture/data-flow.md` | Step-by-step message flows | Normative for M1 |
 | `architecture/security.md` | Trust levels, controls, known gaps | Normative |
 | `architecture/design-system.md` | UI tokens, controls, layout, accessibility rules | Normative |
+| `architecture/testing.md` | Test layers, rules, CI jobs | Normative |
 | `architecture/governance.md` | Frozen/draft contracts, forbidden changes, change requests, task states | Normative |
 | `architecture/open-questions.md` | Unresolved questions and accepted risks | Living |
 | `decisions/` | ADRs (why) | Immutable once accepted |

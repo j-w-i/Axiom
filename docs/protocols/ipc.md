@@ -47,7 +47,8 @@ Why NDJSON rather than LSP's `Content-Length` framing: see ADR-0003.
 ## Cancellation and timeouts
 
 - `$/cancel { id }` asks the receiver to stop working on a request. The
-  receiver still responds: with the result if it completed first, else with a
+  receiver still responds exactly once: with the normal response if that
+  was already produced when the cancel was processed, otherwise with a
   `cancelled` error. Cancelling an unknown or finished id is ignored.
 - The daemon imposes no timeouts on requests in 0.1; clients do. Recommended
   client timeouts: `initialize` 10 s; everything else 30 s, after which the
@@ -142,8 +143,9 @@ root; `.git` itself is always `ignored: true`. Ignored entries are listed.
 ### `fs/didChange`
 Events are debounced 100 ms per workspace and deduplicated per path (a
 create followed by modify within the window is `created`; anything followed
-by remove is `removed`). Changes under ignored directories (and `.git`) are
-dropped. If the OS reports an overflow, the daemon sends one change with
+by remove is `removed`). Changes under ignored directories (and under `.git`) are
+dropped; a change to an individually ignored file in a non-ignored
+directory is reported, because `fs/list` lists such files. If the OS reports an overflow, the daemon sends one change with
 `path: ""`, `kind: "modified"`, meaning "re-list everything you show".
 
 ### Tasks
