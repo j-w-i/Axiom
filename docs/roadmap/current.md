@@ -18,7 +18,7 @@ started.** No product code exists yet except the protocol crate.
 | Experiments E1–E3 | Passed (results in `experiments/README.md`) |
 | `crates/rpc` | M1-RPC-001 tested (24 tests) |
 | `crates/store` | M1-STORE-001 tested (11 tests) |
-| `crates/workspace` | M1-WS-001 tested (42 tests; no watching yet) |
+| `crates/workspace` | M1-WS-001 tested (42 tests), M1-WS-002 tested (11 watch tests) |
 | `crates/exec` | M1-EXEC-001 tested (23 tests, Linux only; Windows compiles, untested) |
 | `axiomd` | Not started |
 | `editor/` | M1-EDITOR-001 tested (43 Vitest tests; dist 14 MB) |
@@ -27,12 +27,12 @@ started.** No product code exists yet except the protocol crate.
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-11-M1-EDITOR-001.md`
+`agents/handoffs/2026-11-11-M1-WS-002.md`
 
 ## Next task
 
 Run `scripts/tasks.py next`. At the time of writing: wave A (RPC, STORE, WS-001, EXEC, EDITOR) is tested and awaiting
-review; next planned: `M1-WS-002`, `M1-DAEMON-001`, `M1-CI-001`, `M1-SHELL-001`.
+review; next planned: `M1-DAEMON-001`, `M1-CI-001`, `M1-SHELL-001`.
 
 ## Blockers
 

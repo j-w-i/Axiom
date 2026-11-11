@@ -8,18 +8,19 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-struct Inner {
+pub(crate) struct Inner {
     id: WorkspaceId,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
     name: String,
-    ignores: IgnoreCache,
+    pub(crate) ignores: IgnoreCache,
     file_locks: Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>,
+    pub(crate) watch: Mutex<std::sync::Weak<crate::watch::WatchShared>>,
 }
 
 /// One open workspace. Cheap to clone.
 #[derive(Clone)]
 pub struct Workspace {
-    inner: Arc<Inner>,
+    pub(crate) inner: Arc<Inner>,
 }
 
 fn version_of(bytes: &[u8]) -> FileVersion {
@@ -48,6 +49,7 @@ impl Workspace {
                 name,
                 ignores: IgnoreCache::default(),
                 file_locks: Mutex::default(),
+                watch: Mutex::new(std::sync::Weak::new()),
             }),
         }
     }

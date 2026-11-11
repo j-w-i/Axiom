@@ -24,6 +24,7 @@ tempfile = "3"
 ignore = "0.4"
 sha2 = "0.10"
 dunce = "1"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 nix = { version = "0.30", default-features = false, features = ["signal"] }
 windows-sys = "0.61"
 
