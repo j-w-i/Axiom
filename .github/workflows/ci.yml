@@ -141,6 +141,28 @@ jobs:
       # Windows only: pin down where a test executable stops. Each function runs on its own
       # with a 15 s cap, writing QtTest's log to a file (stdout is lost when a process is
       # killed). Never fails the job.
+      # Windows: deploy Qt next to the executables (windeployqt) and the newest MSVC runtime
+      # from the Visual Studio redist. Loading Qt6WebEngine*.dll only through PATH fails here
+      # with 0xC0000139 (missing entry point), because the runner's System32 runtime is older
+      # than the one Qt's binaries and our build need.
+      - name: Windows - deploy Qt and the VC runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-translations --no-opengl-sw --qmldir apps/desktop/qml build/desktop/axiom.exe
+          if ($LASTEXITCODE -ne 0) { Write-Host "windeployqt exit=$LASTEXITCODE" }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $vs = & $vswhere -latest -property installationPath
+            $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT" -Directory -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+            if ($crt) {
+              Write-Host "VC runtime: $($crt.FullName)"
+              Copy-Item "$($crt.FullName)\*.dll" build/desktop/ -Force
+              Copy-Item "$($crt.FullName)\*.dll" target/debug/ -Force
+            }
+          }
+          Get-ChildItem build/desktop/*.dll | Select-Object -First 5 Name
+
       - name: Windows per-function diagnostics
         if: runner.os == 'Windows'
         shell: pwsh
