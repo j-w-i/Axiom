@@ -10,6 +10,7 @@ concurrency:
 jobs:
   rust:
     name: Rust (${{ matrix.os }})
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +31,7 @@ jobs:
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: taiki-e/install-action@v2
@@ -39,6 +41,7 @@ jobs:
   editor:
     name: Editor (ubuntu-latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: editor
@@ -55,6 +58,7 @@ jobs:
 
   desktop:
     name: Desktop (${{ matrix.os }})
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +66,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen
-      QT_VERSION: "6.12.0"
+      # Windows uses 6.11.3: for 6.12.0 its qtwebengine extension package was built months
+      # before the base packages and fails to load (0xC0000139, missing entry point).
+      # For 6.11.3 both were built the same day. Linux and macOS use 6.12.0.
+      QT_VERSION: ${{ matrix.os == 'windows-latest' && '6.11.3' || '6.12.0' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -100,15 +107,19 @@ jobs:
           "$env:QT_ROOT_DIR\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
           "QT_MODULE_DLL=$env:QT_ROOT_DIR\bin\Qt6Core.dll" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Linux packages (GL, xkbcommon, WebEngine runtime libraries)
+      # install-qt-action already installs Qt's own Linux dependencies. This adds only the
+      # runtime libraries Qt does not list, and must never sink the job when a mirror is
+      # unreachable: a genuinely missing library then fails loudly in ctest instead.
+      - name: Linux runtime libraries (best effort)
         if: runner.os == 'Linux'
+        continue-on-error: true
         run: |
-          sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
-            libnss3 libnspr4 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxi6 \
-            libasound2t64 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
-            libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 libfontconfig1
+            -o Acquire::Retries=1 -o Acquire::http::Timeout=10 \
+            libnss3 libnspr4 libasound2t64 libxcb-cursor0 libxcb-image0 \
+            libxcb-keysyms1 libxcb-render-util0 libxcb-icccm4 libxcb-xinerama0 \
+            libxkbcommon-x11-0 libfontconfig1
+
       - name: Ninja (macOS)
         if: runner.os == 'macOS'
         run: brew install ninja
