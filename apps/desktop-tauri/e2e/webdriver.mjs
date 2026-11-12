@@ -14,7 +14,7 @@
 // "embedded" elsewhere. Both launch the app with the same arguments and both
 // expose the same commands to the suites.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 
@@ -43,6 +43,38 @@ export function appLogger(suite, extra = () => {}) {
     }
   };
 }
+
+/**
+ * Installed in the page before a suite types: records the last key and input
+ * events (type, key, target, trusted, prevented) so a failure can show what
+ * the page actually received. Bounded; costs nothing when nothing fails.
+ */
+export const INPUT_RECORDER = `
+  if (!window.__axiomInputLog) {
+    window.__axiomInputLog = [];
+    const tag = (el) => el ? (el.tagName + '.' + String(el.className || '').split(' ')[0]) : 'none';
+    const rec = (e) => {
+      const log = window.__axiomInputLog;
+      log.push([e.type, e.key ?? e.data ?? e.inputType ?? '', tag(e.target), e.isTrusted ? 'T' : 's', e.defaultPrevented ? 'P' : ''].join(' '));
+      if (log.length > 80) log.shift();
+    };
+    for (const t of ['keydown', 'keyup', 'beforeinput', 'input', 'textInput', 'compositionend', 'focusin']) {
+      document.addEventListener(t, rec, true);
+    }
+  }
+  return true;`;
+
+/** What the page knows about focus and input, for a failure report. */
+export const INPUT_STATE = `
+  const a = document.activeElement;
+  const me = document.querySelector('.monaco-editor');
+  return {
+    active: a ? a.tagName + '.' + String(a.className || '') : 'none',
+    editContextApi: typeof globalThis.EditContext === 'function',
+    monacoInput: me ? (me.querySelector('.native-edit-context') ? 'native-edit-context' : me.querySelector('textarea.inputarea') ? 'textarea' : 'none') : 'no editor',
+    userAgent: navigator.userAgent,
+    recent: (window.__axiomInputLog || []).slice(-40),
+  };`;
 
 export async function freePort() {
   return new Promise((resolve, reject) => {
@@ -125,6 +157,29 @@ class ForeignProcess {
       if (stat === "Z") this.exitCode = 0;
     } catch {
       this.exitCode = 0;
+    }
+  }
+}
+
+/**
+ * Removes a test directory, tolerating a process that is still letting go of
+ * its files (Windows refuses to delete an open file: EBUSY/EPERM). Retries for
+ * a few seconds, then reports instead of throwing: cleanup must never turn a
+ * suite's real result into a crash.
+ */
+export async function removeDir(dir, log = () => {}) {
+  const { rmSync } = await import("node:fs");
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return true;
+    } catch (e) {
+      if (attempt >= 20) {
+        log(`cleanup: could not remove ${dir}: ${e instanceof Error ? e.message : e}`);
+        console.log(`WARN  could not remove ${dir} (${e && e.code}); left for the OS to clean up`);
+        return false;
+      }
+      await sleep(250);
     }
   }
 }
@@ -309,6 +364,21 @@ export class WebDriver {
     throw new Error(`timed out (${ms} ms) waiting for: ${what}; last=${last}`);
   }
 
+  /**
+   * Writes what the page knows (focus, Monaco's input element, recent key and
+   * input events) to the app log under `label`. Never throws.
+   */
+  async diagnose(label, log = () => {}) {
+    try {
+      const state = await this.exec(INPUT_STATE);
+      log(`DIAG ${label}: ${JSON.stringify(state)}`);
+      return state;
+    } catch (e) {
+      log(`DIAG ${label}: unavailable (${e instanceof Error ? e.message : e})`);
+      return null;
+    }
+  }
+
   /** True while the app process is running. */
   alive() {
     if (this.child instanceof ForeignProcess) this.child.refresh();
@@ -342,8 +412,15 @@ export class WebDriver {
       /* the server is already gone */
     }
     if (!(this.child instanceof ForeignProcess) && !isGone(this.child)) {
-      this.child.kill();
-      if (!(await waitForExit(this.child, 5000))) this.child.kill("SIGKILL");
+      if (process.platform === "win32") {
+        // The app's daemon is its child: end the whole tree, or the daemon
+        // outlives the app holding the database open (EBUSY on cleanup).
+        spawnSync("taskkill", ["/pid", String(this.child.pid), "/T", "/F"], { stdio: "ignore" });
+        await waitForExit(this.child, 5000);
+      } else {
+        this.child.kill();
+        if (!(await waitForExit(this.child, 5000))) this.child.kill("SIGKILL");
+      }
     }
     if (this.child instanceof ForeignProcess && this.alive()) {
       try {

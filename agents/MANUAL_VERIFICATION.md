@@ -72,7 +72,12 @@ Run it on one real machine per OS, on the candidate build, with the app started
 3. Watch memory for two minutes idle with a document open (task manager): it
    must not grow without bound.
 4. Resize the window across its minimum size; the side bar must collapse below
-   900 px without layout breakage.
+   900 px without layout breakage. **Drag a corner inwards as far as it goes:
+   the window must stop at 720 × 480** (content size). The automated suite can
+   only check this on Linux: on macOS and Windows a programmatic resize is not
+   bounded the same way as a user's drag (`e2e/geometry.mjs`, check 2).
+5. Resize the window, quit with `Ctrl/Cmd+Q`, relaunch: the same size and
+   position come back (CI checks this too, `e2e/geometry.mjs` check 4).
 
 ## 6. Sign-off
 

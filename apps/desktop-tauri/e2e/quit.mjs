@@ -8,10 +8,10 @@
 // asks the UI), which then calls the same `requestQuit()` exercised here — one
 // code path, driven from the UI side so the assertions can see it.
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { WebDriver, appLogger } from "./webdriver.mjs";
+import { INPUT_RECORDER, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const here = import.meta.dirname;
 const repo = resolve(here, "../../..");
@@ -20,6 +20,20 @@ const APP = process.env.AXIOM_TAURI_APP ?? join(repo, `target/release/axiom-taur
 const DAEMON = process.env.AXIOMD_UNDER_TEST ?? join(repo, `target/debug/axiomd${EXE}`);
 
 const results = [];
+const log = appLogger("quit");
+
+/** Screenshot + page diagnostics into the artifacts, on failure only. */
+async function failureEvidence(driver, suite) {
+  if (!driver) return;
+  try {
+    const shots = process.env.AXIOM_SCREENSHOT_DIR ?? join(tmpdir(), "axiom-tauri-shots");
+    mkdirSync(shots, { recursive: true });
+    writeFileSync(join(shots, `zz-${suite}-failure.png`), await driver.screenshot());
+  } catch {
+    /* the page may be gone */
+  }
+  await driver.diagnose(`${suite} failure`, log);
+}
 function check(name, ok, detail = "") {
   results.push({ name, ok, detail });
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? " — " + detail : ""}`);
@@ -33,7 +47,7 @@ writeFileSync(join(ws, "src", "main.rs"), "fn main() {}\n");
 
 let wd;
 try {
-  wd = await WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", data], {}, appLogger("quit"));
+  wd = await WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", data], {}, log);
   await wd.waitFor(`return document.querySelector('[data-testid=status]')?.dataset.state === 'ready'`, [], 20000, "connected");
   const alive = () => wd.alive();
 
@@ -41,6 +55,7 @@ try {
   await wd.waitFor(`return document.querySelector('[data-path="README.md"]') !== null`, [], 10000, "tree");
   await wd.click(await wd.find('[data-path="README.md"]'));
   await wd.waitFor(`return document.querySelector('.monaco-editor .view-lines')?.textContent.includes('original')`, [], 20000, "editor");
+  await wd.exec(INPUT_RECORDER);
   await wd.click(await wd.find(".monaco-editor .view-lines"));
   await wd.keys([..."/edited"]);
   await wd.waitFor(`return document.querySelector('[data-path="README.md"][role=tab]')?.dataset.dirty === 'true'`, [], 8000, "dirty");
@@ -68,20 +83,21 @@ try {
   check(
     "5 Save writes the document and the app exits" + (code === undefined ? "" : " cleanly"),
     exited && (code === undefined || code === 0),
-    `exited=${exited} code=${code ?? "n/a (launched by WebKitWebDriver)"}`,
+    `exited=${exited} code=${!exited ? "still running" : code === undefined ? "not observable (WebKitWebDriver launched the app)" : code}`,
   );
   const onDisk = readFileSync(join(ws, "README.md"), "utf8");
   check("6 the saved bytes are on disk", onDisk.includes("/edited"), JSON.stringify(onDisk).slice(0, 40));
 } catch (e) {
   check("unexpected failure", false, e instanceof Error ? e.message : String(e));
+  await failureEvidence(wd, "quit");
 } finally {
   try {
     await wd?.quit();
   } catch {
     /* the app is already gone */
   }
-  rmSync(data, { recursive: true, force: true });
-  rmSync(ws, { recursive: true, force: true });
+  await removeDir(data);
+  await removeDir(ws);
 }
 
 const failed = results.filter((r) => !r.ok);

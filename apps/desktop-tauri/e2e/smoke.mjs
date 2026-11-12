@@ -8,10 +8,10 @@
 //        AXIOM_SCREENSHOT_DIR, AXIOM_E2E_LOG
 
 import { findDescendantsByName, findWebContentProcesses, killNow, readProcessTable } from "./processes.mjs";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Keys, PROVIDER, TRUSTED_INPUT, WebDriver, appLogger } from "./webdriver.mjs";
+import { INPUT_RECORDER, Keys, PROVIDER, TRUSTED_INPUT, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 // The app's command modifier: Cmd on macOS, Ctrl elsewhere (App.tsx IS_MAC;
 // Monaco uses the same rule for Ctrl/Cmd+S and Ctrl/Cmd+Home).
@@ -165,7 +165,17 @@ try {
   // depends on the tokenizer's version, so it is not asserted.
   const coloured = await wd.exec(`return new Set([...document.querySelectorAll('.monaco-editor .view-lines span span')].map(s => s.className)).size`);
   check("4a file opens in Monaco with syntax colouring", coloured >= 2, `${coloured} token classes`);
+  // Record which input path Monaco chose (EditContext vs. textarea) and the
+  // platform it believes it is on: both decide how key events become text.
+  {
+    const env = await wd.exec(
+      `const me = document.querySelector('.monaco-editor'); return { editContextApi: typeof globalThis.EditContext === 'function', input: me?.querySelector('.native-edit-context') ? 'native-edit-context' : me?.querySelector('textarea.inputarea') ? 'textarea' : 'none', ua: navigator.userAgent }`,
+    );
+    onLog(`ENV editor input=${env.input} EditContext=${env.editContextApi} ua=${env.ua}`);
+    console.log(`INFO  editor input path: ${env.input} (EditContext API ${env.editContextApi ? "present" : "absent"})`);
+  }
   await shot(wd, "04-editor-dark");
+  await wd.exec(INPUT_RECORDER);
   await wd.click(await wd.find(".monaco-editor .view-lines"));
   await wd.chord(MOD, "\uE011"); // Ctrl+Home
   // Count how the keystrokes reach the page: trusted (OS-level, WebKitWebDriver)
@@ -346,7 +356,11 @@ try {
   // The session is dead from here on (its page is gone); nothing else may run.
 } catch (e) {
   check("unexpected failure", false, e instanceof Error ? e.message : String(e));
-  if (wd) await shot(wd, "zz-failure").catch(() => {});
+  if (wd) {
+    await shot(wd, "zz-failure").catch(() => {});
+    const state = await wd.diagnose("smoke failure", onLog);
+    if (state) console.log(`DIAG ${JSON.stringify({ active: state.active, monacoInput: state.monacoInput, editContextApi: state.editContextApi })}`);
+  }
 } finally {
   // The crash check leaves a session whose page is dead; try to release it
   // anyway so the driver is not left holding it.
@@ -357,8 +371,8 @@ try {
       /* already gone */
     }
   }
-  rmSync(dataDir, { recursive: true, force: true });
-  rmSync(ws, { recursive: true, force: true });
+  await removeDir(dataDir);
+  await removeDir(ws);
 }
 
 const failed = results.filter((r) => !r.ok);

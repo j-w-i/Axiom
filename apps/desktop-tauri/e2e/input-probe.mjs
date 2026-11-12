@@ -5,10 +5,10 @@
 // server cannot prove "real key events reach Monaco" the way WebKitWebDriver
 // does on Linux. Run through the runner: node e2e/runner.mjs e2e/input-probe.mjs
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Keys, WebDriver, appLogger } from "./webdriver.mjs";
+import { Keys, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const repo = resolve(import.meta.dirname, "../../..");
 const EXE = process.platform === "win32" ? ".exe" : "";
@@ -145,7 +145,7 @@ try {
   }
 } finally {
   await wd?.quit();
-  rmSync(data, { recursive: true, force: true });
-  rmSync(ws, { recursive: true, force: true });
+  await removeDir(data);
+  await removeDir(ws);
 }
 console.log(JSON.stringify({ platform: process.platform, ...results }, null, 2));
