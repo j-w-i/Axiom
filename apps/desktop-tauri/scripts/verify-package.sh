@@ -6,7 +6,7 @@
 # the packaged layout is unpacked to a temporary prefix and run exactly as an
 # installed copy would be, on a private X display.
 #
-#   apps/desktop-tauri/scripts/verify-package.sh [path/to/package.deb]
+#   apps/desktop-tauri/scripts/verify-package.sh [path/to/package.deb|.rpm]
 #
 # Checks, each printed with its evidence:
 #   1. the package contains the app and the daemon sidecar in the same bin dir
@@ -25,7 +25,13 @@ root="$(cd "$here/../.." && pwd)"
 source "$here/scripts/env.sh"
 
 pkg="${1:-$(ls -t "$root"/target/release/bundle/deb/*.deb 2>/dev/null | head -1)}"
-[[ -n "$pkg" && -f "$pkg" ]] || { echo "verify-package: no .deb found (build one with scripts/bundle.sh --bundles deb)" >&2; exit 2; }
+[[ -n "$pkg" && -f "$pkg" ]] || { echo "verify-package: no package found (scripts/bundle.sh --bundles deb,rpm)" >&2; exit 2; }
+# Absolute: the rpm branch extracts from inside the prefix directory.
+pkg="$(readlink -f "$pkg")"
+case "$pkg" in
+  *.deb|*.rpm) ;;
+  *) echo "verify-package: only .deb and .rpm can be verified here ($pkg)" >&2; exit 2 ;;
+esac
 (( $EUID != 0 )) || { echo "verify-package: run as a normal user, not root" >&2; exit 2; }
 
 work="$(mktemp -d)"
@@ -46,7 +52,10 @@ check() { # name, ok, detail
 echo "package: $pkg ($(du -h "$pkg" | cut -f1))"
 
 # ---- 1. layout: app + daemon sidecar in the same bin directory ---------------
-dpkg-deb -x "$pkg" "$work/prefix"
+case "$pkg" in
+  *.deb) dpkg-deb -x "$pkg" "$work/prefix" ;;
+  *.rpm) (mkdir -p "$work/prefix" && cd "$work/prefix" && rpm2cpio "$pkg" | cpio -idm --quiet) ;;
+esac
 mapfile -t bins < <(cd "$work/prefix" && find . -type f -path '*/bin/*' -printf '%P\n' | sort)
 app_rel="$(printf '%s\n' "${bins[@]}" | grep -E 'bin/axiom-tauri$' || true)"
 daemon_rel="$(printf '%s\n' "${bins[@]}" | grep -E 'bin/axiomd$' || true)"

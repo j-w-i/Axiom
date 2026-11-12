@@ -74,10 +74,13 @@ fi
 # --daemon (the packaged sibling lookup must find the sidecar), and watch the
 # protocol handshake on the wire. Opt-in: `scripts/check.sh package`.
 if [[ "$what" == package ]]; then
-  step "tauri shell: package launches, finds its sidecar and connects"
+  step "tauri shell: packages launch, find their sidecar and connect"
   cargo build -q --release -p axiom-desktop-tauri -p axiomd
-  apps/desktop-tauri/scripts/bundle.sh --bundles deb
-  apps/desktop-tauri/scripts/verify-package.sh
+  apps/desktop-tauri/scripts/bundle.sh --bundles deb,rpm
+  for p in apps/desktop-tauri/../../target/release/bundle/deb/*.deb \
+           apps/desktop-tauri/../../target/release/bundle/rpm/*.rpm; do
+    apps/desktop-tauri/scripts/verify-package.sh "$p" || exit 1
+  done
 fi
 
 if [[ ( "$what" == all || "$what" == desktop ) && -f apps/desktop/CMakeLists.txt ]]; then
