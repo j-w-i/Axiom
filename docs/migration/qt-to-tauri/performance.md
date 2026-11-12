@@ -191,6 +191,47 @@ reflects the CPU rasteriser, not either toolkit. The prototype animates only
 opacity/transform (160 ms) and disables motion under reduced-motion. A
 real-GPU frame-time capture per OS is part of roadmap T-10.
 
+### 3.7 Re-measurement after the shell changed (2026-11-12 14:48–14:56)
+
+Run after the end-to-end work, `editContext: false` and crash recovery landed,
+to check the budgets again rather than assume. Same machine and harness; **load
+average 1.7–4.4 during these runs** (the desktop was busier than during §3's
+1.4–2.3), which matters for the two noisy rows below. Files:
+`…-144835` (startup), `…-145019` (both shells: memory/CPU/typing), `…-145308`
+(Tauri, 2 reps), `…-145521` (explorer), `…-145548` (output).
+
+| Metric | Budget | Measured now | §3 measurement | Meets budget |
+|--------|--------|-------------:|---------------:|--------------|
+| Cold start → explorer painted | ≤ Qt, ≤ 1.0 s | **408 ms** (Qt 767) | 421 ms | ✅ |
+| Warm start → explorer painted | ≤ Qt | **404 ms** (Qt 698) | 418 ms | ✅ |
+| Idle PSS, workspace open | ≤ Qt, ≤ 350 MiB | **245** (Qt 479) | 282 | ✅ |
+| PSS with one document | ≤ Qt, ≤ 400 MiB | **356–410** (Qt 530) | 307 | ⚠️ within budget in 3 of 4 samples, see below |
+| Idle CPU, workspace open (10 s) | ≤ 1 % | **0.1–0.2 %** | 0.0 % | ✅ |
+| Idle CPU, document open (10 s) | ≤ 1 % | **1.1–1.2 %** (3 runs) | 0.2 % | ❌ over by 0.1–0.2 pp |
+| Typing p95 / p99 | ≤ 25 / ≤ 50 ms, ≤ Qt+2 | **17.9–18.3 / 18.6–19.7** (Qt p95 24.5) | 18.8 / 22.4 | ✅ |
+| Explorer 5 000 entries, answer → settled | ≤ 300 ms | **35.7 ms** (first paint 2.2) | 203 ms | ✅ |
+| Explorer wheel tick → paint, p95 | ≤ 20 ms | **17.2 ms** | 17.8 ms | ✅ |
+| 50 000-line output settles | ≤ 1 s | **74.8 ms**, 0.14 CPU-s | 1.0 s? (see §3.6) | ✅ |
+
+Two rows do not agree with §3, and neither is attributable to a code change:
+
+- **PSS with a document** measured 356, 356, 360 and 410 MiB across four
+  samples of the *same* build. The spread (54 MiB) exceeds the margin to the
+  400 MiB cap, so a single sample cannot decide this row; §3's 307 was one
+  sample.
+- **Idle CPU with a document** measured 1.2, 1.1 and 1.2 % over three runs.
+  Controlled test: T-08's 2 s recovery heartbeat fires five times in a 10 s
+  window, so it was widened to 60 s, rebuilt, and measured — **1.20 % again**,
+  so the heartbeat is *not* the cause (`…-145623`). The remaining candidates
+  are Monaco's caret/animation repaints under software rendering (the same
+  effect that cost the Qt shell 2.7 % in §3.3) and load on the sampling host.
+
+What this means for the gate: eight of the ten budget rows are met with margin;
+the two above need **three heavy repetitions on a quiescent machine** (load
+below 0.5) before being reported as passing or as a regression, and the same
+procedure is what the macOS and Windows cells need for exit criterion 3. The
+harness reports `loadavg_1m` per sample for exactly this reason.
+
 ## 4. Summary against budgets (Linux, this machine)
 
 | Metric | Budget | Tauri | Pass |

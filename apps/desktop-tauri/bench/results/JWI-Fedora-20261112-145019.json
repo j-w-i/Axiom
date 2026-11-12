@@ -1,0 +1,92 @@
+{
+  "host": {
+    "os": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "7453194",
+    "date": "2026-11-12T14:50:19+1100",
+    "loadavg_at_start": [
+      6.01,
+      2.81,
+      1.63
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 11387296
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6317784
+    }
+  },
+  "qt": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [
+      {
+        "idle_workspace_open_pss_mib": 479.3,
+        "daemon_pss_mib": 12.2,
+        "process_count": 4,
+        "idle_cpu_pct_10s": 0.1,
+        "monaco_document_open_pss_mib": 530.4,
+        "process_count_with_editor": 4,
+        "idle_cpu_pct_10s_with_editor": 3.0,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 19.0,
+          "p95_ms": 24.48,
+          "p99_ms": 26.75,
+          "max_ms": 27.25,
+          "mean_ms": 19.15,
+          "cpu_pct_while_typing": 67.2
+        },
+        "after_typing_pss_mib": 662.6,
+        "loadavg_1m": 2.89
+      }
+    ],
+    "explorer": [],
+    "output": []
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [
+      {
+        "idle_workspace_open_pss_mib": 245.0,
+        "daemon_pss_mib": 12.3,
+        "process_count": 3,
+        "idle_cpu_pct_10s": 0.2,
+        "monaco_document_open_pss_mib": 359.6,
+        "process_count_with_editor": 3,
+        "idle_cpu_pct_10s_with_editor": 1.2,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 17.18,
+          "p95_ms": 18.31,
+          "p99_ms": 19.7,
+          "max_ms": 34.35,
+          "mean_ms": 17.26,
+          "cpu_pct_while_typing": 59.3
+        },
+        "after_typing_pss_mib": 517.0,
+        "loadavg_1m": 1.7
+      }
+    ],
+    "explorer": [],
+    "output": []
+  }
+}

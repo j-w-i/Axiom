@@ -1,0 +1,61 @@
+{
+  "host": {
+    "os": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "7453194",
+    "date": "2026-11-12T14:53:08+1100",
+    "loadavg_at_start": [
+      4.42,
+      2.84,
+      1.81
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 11387296
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6317784
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [
+      {
+        "idle_workspace_open_pss_mib": 242.2,
+        "daemon_pss_mib": 12.2,
+        "process_count": 3,
+        "idle_cpu_pct_10s": 0.2,
+        "monaco_document_open_pss_mib": 355.7,
+        "process_count_with_editor": 3,
+        "idle_cpu_pct_10s_with_editor": 1.1,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 16.78,
+          "p95_ms": 17.95,
+          "p99_ms": 18.59,
+          "max_ms": 32.57,
+          "mean_ms": 16.97,
+          "cpu_pct_while_typing": 56.9
+        },
+        "after_typing_pss_mib": 505.4,
+        "loadavg_1m": 2.71
+      }
+    ],
+    "explorer": [],
+    "output": []
+  }
+}
