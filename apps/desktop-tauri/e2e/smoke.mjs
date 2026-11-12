@@ -16,6 +16,9 @@ import { INPUT_RECORDER, Keys, PROVIDER, TRUSTED_INPUT, WebDriver, appLogger, re
 // The app's command modifier: Cmd on macOS, Ctrl elsewhere (App.tsx IS_MAC;
 // Monaco uses the same rule for Ctrl/Cmd+S and Ctrl/Cmd+Home).
 const MOD = process.platform === "darwin" ? Keys.META : Keys.CTRL;
+// "Go to the start of the document": Ctrl+Home, but Cmd+Up on macOS
+// (Monaco's cursorTop binding; Cmd+Home is not bound there).
+const DOC_START = process.platform === "darwin" ? "\uE013" : "\uE011";
 
 const here = import.meta.dirname;
 const repo = resolve(here, "../../..");
@@ -177,7 +180,7 @@ try {
   await shot(wd, "04-editor-dark");
   await wd.exec(INPUT_RECORDER);
   await wd.click(await wd.find(".monaco-editor .view-lines"));
-  await wd.chord(MOD, "\uE011"); // Ctrl+Home
+  await wd.chord(MOD, DOC_START); // Ctrl+Home / Cmd+Up
   // Count how the keystrokes reach the page: trusted (OS-level, WebKitWebDriver)
   // or synthetic (the embedded driver dispatches them by script).
   await wd.exec(`window.__keyTrust = []; document.addEventListener('keydown', (e) => window.__keyTrust.push(e.isTrusted), true)`);
@@ -195,6 +198,15 @@ try {
   }
 
   // ---- 5. save through the daemon (Ctrl+S inside Monaco) -----------------------
+  // Check 4b passes on the *first* keystroke (the tab turns dirty); the whole
+  // line must be in the model before saving, or check 5 compares a partial
+  // edit. (On macOS the embedded driver's typing lagged behind the request.)
+  await wd.waitFor(
+    `return document.querySelector('.monaco-editor .view-lines')?.textContent.replace(/\u00a0/g, ' ').includes('// edited')`,
+    [],
+    5000,
+    "the typed line is in the editor",
+  );
   await wd.chord(MOD, "s");
   await wd.waitFor(`return document.querySelector('[data-path="src/main.rs"][role=tab]')?.dataset.dirty === 'false'`, [], 5000, "clean after Ctrl+S");
   const onDisk = readFileSync(join(ws, "src", "main.rs"), "utf8");

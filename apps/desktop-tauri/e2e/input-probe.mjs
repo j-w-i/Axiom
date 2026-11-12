@@ -15,6 +15,9 @@ const EXE = process.platform === "win32" ? ".exe" : "";
 const APP = process.env.AXIOM_TAURI_APP ?? join(repo, `target/release/axiom-tauri${EXE}`);
 const DAEMON = process.env.AXIOMD_UNDER_TEST ?? join(repo, `target/debug/axiomd${EXE}`);
 const MOD = process.platform === "darwin" ? Keys.META : Keys.CTRL;
+// "Go to the start of the document": Ctrl+Home, but Cmd+Up on macOS
+// (Monaco's cursorTop binding; Cmd+Home is not bound there).
+const DOC_START = process.platform === "darwin" ? "\uE013" : "\uE011";
 
 const data = mkdtempSync(join(tmpdir(), "axiom-probe-data-"));
 const ws = mkdtempSync(join(tmpdir(), "axiom-probe-ws-"));
@@ -32,7 +35,7 @@ try {
   await wd.waitFor(`return document.querySelector('[data-path="a.txt"][role=tab]') !== null`, [], 10000, "tab");
   await wd.waitFor(`return document.querySelector('.monaco-editor .view-lines')?.textContent.replace(/\u00a0/g, ' ').includes('line one')`, [], 20000, "editor");
   await wd.click(await wd.find(".monaco-editor .view-lines"));
-  await wd.chord(MOD, "\uE011"); // Ctrl/Cmd+Home
+  await wd.chord(MOD, DOC_START); // Ctrl+Home / Cmd+Up
 
   // Monaco renders spaces as U+00A0; compare the text as typed.
   const text = () =>

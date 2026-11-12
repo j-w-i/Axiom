@@ -89,6 +89,9 @@ export async function freePort() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Per-call script timeout on the embedded server (see #startEmbedded). */
+const SCRIPT_TIMEOUT_MS = 8000;
+
 async function waitForStatus(base, ms, gone = () => null) {
   const deadline = Date.now() + ms;
   let last = "no answer";
@@ -236,7 +239,16 @@ export class WebDriver {
         isGone(child) ? `the app exited (${child.exitCode ?? child.signalCode}) before its WebDriver server came up` : null,
       );
       const id = await createSession(base, { alwaysMatch: {} });
-      return new WebDriver(base, id, child);
+      const wd = new WebDriver(base, id, child);
+      // A script evaluated while the webview is still cold can lose its
+      // completion and hang to the script timeout (30 s by default) - seen on
+      // Linux CI in run 43139039703, the same class as upstream #540/#1035.
+      // Bound each call (W3C Set Timeouts) so a lost one is retried by the
+      // caller's polling instead of consuming its whole deadline, then wait
+      // until the page has actually loaded before handing the session out.
+      await wd.cmd("POST", "/timeouts", { script: SCRIPT_TIMEOUT_MS });
+      await wd.waitFor(`return document.readyState === 'complete' && !!window.__axiomHost`, [], 30000, "the page to boot");
+      return wd;
     } catch (e) {
       child.kill();
       throw e;
@@ -334,8 +346,8 @@ export class WebDriver {
     const res = await fetch(`${this.base}/wdio/eval`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ script: wrapped, args, session_id: this.id, timeout_ms: 30000 }),
-      signal: AbortSignal.timeout(35000),
+      body: JSON.stringify({ script: wrapped, args, session_id: this.id, timeout_ms: SCRIPT_TIMEOUT_MS }),
+      signal: AbortSignal.timeout(SCRIPT_TIMEOUT_MS + 5000),
     });
     const data = await res.json().catch(() => null);
     if (!res.ok || !data) throw new Error(`POST /wdio/eval (${kind}): ${res.status} ${JSON.stringify(data)}`);
