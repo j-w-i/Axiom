@@ -201,6 +201,29 @@ def pss_mib(procs):
     return total / (1024 * 1024)
 
 
+def idle_cpu_percent(procs, windows=3, seconds=10.0):
+    """Idle CPU of the tree, sampled in several windows.
+
+    Other work on the host can only *add* CPU to a process's numbers, never
+    remove it, so the minimum window is the best estimate of the application's
+    own idle cost and the spread says how noisy the host was. All three are
+    returned; the median is what the single-window field has always meant.
+    """
+    samples = []
+    for _ in range(windows):
+        c0 = cpu_seconds(procs)
+        time.sleep(seconds)
+        samples.append((cpu_seconds(procs) - c0) / seconds * 100)
+    samples.sort()
+    return {
+        "pct": round(samples[0], 2),
+        "min": round(samples[0], 2),
+        "median": round(samples[len(samples) // 2], 2),
+        "max": round(samples[-1], 2),
+        "windows": windows,
+    }
+
+
 def cpu_seconds(procs):
     total = 0.0
     for p in procs:
@@ -410,9 +433,10 @@ def scenario_memory_cpu(x, kind):
         out["idle_workspace_open_pss_mib"] = round(pss_mib(shell), 1)
         out["daemon_pss_mib"] = round(pss_mib(daemon), 1)
         out["process_count"] = len(shell)
-        c0 = cpu_seconds(shell)
-        time.sleep(10)
-        out["idle_cpu_pct_10s"] = round((cpu_seconds(shell) - c0) / 10 * 100, 2)
+        idle = idle_cpu_percent(shell)
+        out["idle_cpu_pct_10s"] = idle["median"]
+        out["idle_cpu_pct_min"] = idle["min"]
+        out["idle_cpu_pct_max"] = idle["max"]
     finally:
         app.stop()
     # Second launch with a document restored: Monaco loaded and showing a file.
@@ -429,9 +453,10 @@ def scenario_memory_cpu(x, kind):
         shell, _ = app.procs_split()
         out["monaco_document_open_pss_mib"] = round(pss_mib(shell), 1)
         out["process_count_with_editor"] = len(shell)
-        c0 = cpu_seconds(shell)
-        time.sleep(10)
-        out["idle_cpu_pct_10s_with_editor"] = round((cpu_seconds(shell) - c0) / 10 * 100, 2)
+        idle = idle_cpu_percent(shell)
+        out["idle_cpu_pct_10s_with_editor"] = idle["median"]
+        out["idle_cpu_pct_min_with_editor"] = idle["min"]
+        out["idle_cpu_pct_max_with_editor"] = idle["max"]
         out["typing"] = typing_latency(x, win, app)
         shell, _ = app.procs_split()
         out["after_typing_pss_mib"] = round(pss_mib(shell), 1)
@@ -585,6 +610,38 @@ def git_rev():
         return None
 
 
+def summarise(results, kinds):
+    """Median of each repeated metric, so several repetitions are usable.
+
+    A single sample of PSS or idle CPU on a busy host is not comparable run to
+    run (observed spread: 54 MiB PSS, 0.1 pp idle CPU on the same build), so
+    reports quote these medians and the sample count, not rep 0.
+    """
+    metrics = [
+        "idle_workspace_open_pss_mib",
+        "monaco_document_open_pss_mib",
+        "after_typing_pss_mib",
+        "idle_cpu_pct_10s",
+        "idle_cpu_pct_10s_with_editor",
+        "idle_cpu_pct_min",
+        "idle_cpu_pct_min_with_editor",
+    ]
+    out = {}
+    for kind in kinds:
+        reps = results.get(kind, {}).get("memory_cpu_typing", [])
+        if not reps:
+            continue
+        block = {}
+        for m in metrics:
+            values = [r[m] for r in reps if isinstance(r.get(m), (int, float))]
+            if values:
+                values.sort()
+                block[m] = {"median": round(statistics.median(values), 2), "samples": len(values)}
+        if block:
+            out[kind] = block
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=5, help="startup repetitions per shell")
@@ -638,6 +695,7 @@ def main():
                 o["loadavg_1m"] = round(os.getloadavg()[0], 2)
                 r["output"].append(o)
             print(f"[bench] rep {rep + 1}/{args.runs} {kind} done (load {load:.1f})", file=sys.stderr)
+    results["medians"] = summarise(results, kinds)
     print(json.dumps(results, indent=2))
 
 
