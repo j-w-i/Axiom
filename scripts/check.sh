@@ -70,6 +70,16 @@ if [[ "$what" == e2e ]]; then
   apps/desktop-tauri/scripts/e2e.sh --driver all
 fi
 
+# Packaging, as an installed copy behaves: unpack the package, launch it with no
+# --daemon (the packaged sibling lookup must find the sidecar), and watch the
+# protocol handshake on the wire. Opt-in: `scripts/check.sh package`.
+if [[ "$what" == package ]]; then
+  step "tauri shell: package launches, finds its sidecar and connects"
+  cargo build -q --release -p axiom-desktop-tauri -p axiomd
+  apps/desktop-tauri/scripts/bundle.sh --bundles deb
+  apps/desktop-tauri/scripts/verify-package.sh
+fi
+
 if [[ ( "$what" == all || "$what" == desktop ) && -f apps/desktop/CMakeLists.txt ]]; then
   step "desktop: QML literal guard";  python3 scripts/check_qml.py
   step "desktop: build axiomd and the emit test helper (debug) for the tests"
