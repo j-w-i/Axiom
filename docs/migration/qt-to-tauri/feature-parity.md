@@ -12,7 +12,7 @@ Evidence keys:
 - **S:** `apps/desktop-tauri/tests/stores.test.ts` "<test>" (UI stores, real daemon, no webview).
 - **E:** `apps/desktop-tauri/e2e/smoke.mjs` check number (real Tauri app, real daemon, WebDriver, real key events).
 
-Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototype · 🟠 partial / different · ❌ missing.
+Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototype · 🟠 partial / different · ❌ missing · ⚪ waived by the owner (reason recorded in the row).
 
 ## M1 exit criteria
 
@@ -77,7 +77,7 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | E-14 | Tab state restored, missing files skipped | ::tabsAndActiveTabAreRestoredSkippingMissingFiles | same | S, E: 8 | ✅ |
 | E-15 | Switching workspaces closes documents, ignores late answers | ::switchingWorkspacesClosesDocuments… | generation counter ported | S: "switching workspaces closes the documents of the old one" | ✅ (late-answer half not driven) |
 | E-16 | Editor theme follows app theme; font size/family/wrap live | smoke_launch::settingsApplyLive… | Monaco themes generated from CSS tokens | E: 9 | ✅ |
-| E-17 | Asset scheme with path-escape checks | tst_assethandler (7) | Tauri's built-in asset protocol serves only `dist/`; no scheme handler of ours (see PARITY.md) | Tauri-provided | 🟡 (no Axiom test; N/A by design) |
+| E-17 | Asset scheme with path-escape checks | tst_assethandler (7) | Tauri's built-in asset protocol serves only `dist/`; no scheme handler of ours (see PARITY.md) | Tauri-provided; **waived by the owner, 2026-11-12**: there is no Axiom code on this path to test, so the seven Qt tests have nothing to port | ⚪ waived |
 
 ### Tasks and output (R9)
 

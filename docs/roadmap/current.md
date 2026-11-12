@@ -44,9 +44,9 @@ Finish the M1.5 gate (T-12), in this order:
    where trusted keyboard input, IME, clipboard, drag and drop, HiDPI, screen
    readers, the 720x480 drag minimum and installing a package are verified on
    macOS and Windows.
-4. **Owner review**: waive or close the four open parity rows (E-17 needs a
-   waiver; S-8 and S-12 are manual-protocol items; T-4 is the bench's `output`
-   scenario).
+4. **Close the three open parity rows**: S-8's screen reader and S-12's native
+   folder dialog are manual-protocol items; T-4 is the bench's `output`
+   scenario. (E-17 was waived by the owner on 2026-11-12.)
 
 Only after that may T-14 (make Tauri the default) and, a milestone later, T-15
 (delete the Qt shell) run.
