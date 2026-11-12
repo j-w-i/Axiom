@@ -88,6 +88,12 @@ instead, its out-of-band channel with bounded re-dispatch and the one
 the same values and errors for every shape the suites use, and runs before
 the suites wherever the embedded server is used.
 
+**Exercising another platform's channel.** `/wdio/eval` is selected only on
+macOS, so a Linux run normally uses W3C Execute Script. `AXIOM_DIRECT_EVAL=1`
+forces the macOS channel (with the embedded server), which is how the macOS
+script path is kept under test between CI runs:
+`AXIOM_DIRECT_EVAL=1 AXIOM_WEBDRIVER=embedded scripts/e2e.sh`.
+
 **One binary, two builds.** The end-to-end suite drives a release binary built
 with the `e2e` feature; `scripts/bundle.sh` builds the same path *without* it.
 So packaging invalidates the binary the suite needs: run the end-to-end step
