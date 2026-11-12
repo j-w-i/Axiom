@@ -3,7 +3,7 @@
 // parity matrix can cite equivalent evidence for both shells.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DocumentStore, type ModelLike } from "@editor/documents";
@@ -95,6 +95,11 @@ describe("stores against the real daemon", () => {
   });
 
   const names = () => app.workspace.visibleRows().map((r) => r.node.path);
+  // The daemon reports the canonical root: /private/var/... for a macOS temp dir
+  // (/var is a symlink), the long form on Windows (the runner's temp dir is an
+  // 8.3 short name, RUNNER~1). Linux's /tmp is already canonical, which is why
+  // comparing the raw mkdtemp path passes there and nowhere else.
+  const canon = (p: string) => realpathSync.native(p);
 
   it("opens a workspace and lists the root lazily with ignored entries flagged", async () => {
     await app.workspace.openFolder(ws);
@@ -466,7 +471,7 @@ describe("stores against the real daemon", () => {
     expect(app.documents.getSnapshot().prompt?.names).toEqual(["README.md"]);
     app.documents.resolvePrompt("cancel");
     expect(app.workspace.getSnapshot().id).toBe(first);
-    expect(app.workspace.getSnapshot().root).toBe(ws);
+    expect(app.workspace.getSnapshot().root).toBe(canon(ws));
     expect(app.documents.getSnapshot().docs).toHaveLength(1);
     expect(app.documents.getSnapshot().docs[0]!.dirty).toBe(true);
 
@@ -474,7 +479,7 @@ describe("stores against the real daemon", () => {
     await waitFor(() => app.documents.getSnapshot().prompt?.kind === "folder", 3000, "folder prompt again");
     app.documents.resolvePrompt("discard");
     // The root, not the id: the daemon assigns the id (workspace.ts:155).
-    await waitFor(() => app.workspace.getSnapshot().root === other, 5000, "switched to the other folder");
+    await waitFor(() => app.workspace.getSnapshot().root === canon(other), 5000, "switched to the other folder");
     expect(app.workspace.visibleRows().map((r) => r.node.path)).toContain("b.txt");
     expect(app.documents.getSnapshot().docs).toHaveLength(0);
     // Discard writes nothing: the old folder still holds its own bytes.
@@ -550,7 +555,7 @@ describe("stores against the real daemon", () => {
     const closing = app.workspace.close();
     app.documents.requestOpenFolder(other);
     await closing;
-    await waitFor(() => app.workspace.getSnapshot().root === other, 8000, "the deferred open ran");
+    await waitFor(() => app.workspace.getSnapshot().root === canon(other), 8000, "the deferred open ran");
     expect(app.workspace.getSnapshot().id).not.toBe(id);
     expect(app.workspace.visibleRows().map((r) => r.node.path)).toContain("b.txt");
     rmSync(other, { recursive: true, force: true });
