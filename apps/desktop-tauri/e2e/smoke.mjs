@@ -176,6 +176,14 @@ try {
     );
     onLog(`ENV editor input=${env.input} EditContext=${env.editContextApi} ua=${env.ua}`);
     console.log(`INFO  editor input path: ${env.input} (EditContext API ${env.editContextApi ? "present" : "absent"})`);
+    // Parity, not a detail: the editor must take the same input path on every
+    // engine (src/editor/surface.ts sets editContext: false), or the Windows
+    // build's typing differs from the other two and cannot be driven by tests.
+    check(
+      "4a' the editor uses the classic (textarea) input path on every engine",
+      env.input === "textarea",
+      `${env.input}${env.editContextApi ? " (EditContext API present but not used)" : ""}`,
+    );
   }
   await shot(wd, "04-editor-dark");
   await wd.exec(INPUT_RECORDER);

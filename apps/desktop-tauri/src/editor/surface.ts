@@ -84,6 +84,17 @@ export class EditorSurface implements EditorPort {
       padding: { top: 8 },
       renderLineHighlight: "all",
       stickyScroll: { enabled: true },
+      // One input path on all three engines. Monaco 0.53+ defaults to
+      // Chromium's EditContext API where it exists — only WebView2 has it
+      // (Linux WebKitGTK and macOS WKWebView do not) — so the Windows build
+      // would take a different path for every keystroke than the other two.
+      // It also cannot be driven by scripted input, which leaves the Windows
+      // build's typing untestable, and Chromium has shipped regressions that
+      // wedge it mid-session (stablyai/orca#7747: "editors stop accepting
+      // keyboard input until the app is restarted"). The textarea path is the
+      // one both other platforms use and every browser used before 2024.
+      // Reverting is this one line if EditContext is wanted for IME reasons.
+      editContext: false,
     });
     this.store = new DocumentStore(listener, (path, text) =>
       monaco.editor.createModel(

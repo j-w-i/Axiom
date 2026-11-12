@@ -67,6 +67,15 @@ printable ASCII character into Monaco, saves, and compares the bytes on disk.
 character code, so `p` arrived as F1 and opened Monaco's command palette
 mid-typing; fixed upstream in 2.0.0-next.0, which is what the app pins.)
 
+**One editor input path.** `src/editor/surface.ts` sets `editContext: false`,
+so Monaco types through its classic textarea on all three engines. Monaco
+0.53+ would otherwise use Chromium's EditContext API wherever it exists —
+only WebView2 on Windows has it — which makes the Windows build take a
+different path for every keystroke than Linux and macOS, leaves its typing
+undrivable by scripted input, and exposes it to Chromium regressions that
+wedge that path mid-session (stablyai/orca#7747). Smoke check 4a' asserts the
+textarea path on every OS, so losing the option fails the build.
+
 **Script channel.** Suites run page scripts through W3C Execute Script,
 except on macOS with the embedded server: there the plugin's Execute Script
 awaits one `evaluateJavaScript` completion, which WKWebView on macOS 26.4
