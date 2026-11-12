@@ -53,6 +53,17 @@ writeFileSync(join(ws, "README.md"), "# Demo\n\nA small workspace.\n");
 writeFileSync(join(ws, ".gitignore"), "target/\n");
 mkdirSync(join(ws, "target"));
 writeFileSync(join(ws, "Cargo.toml"), '[package]\nname = "demo"\nversion = "0.1.0"\n');
+// Commands for checks 7a/7b run through the *user's* shell, which is `sh -c`
+// on Unix and `cmd /C` on Windows (docs/roadmap/verification/M1.5.md §5b: the
+// shell form is unverified on Windows). A program the workspace holds is the
+// one command line both shells run identically, so the check tests the app's
+// streaming and cancellation and not a shell dialect.
+mkdirSync(join(ws, "tools"), { recursive: true });
+writeFileSync(
+  join(ws, "tools", "emit.js"),
+  `process.stdout.write("out1\\n");\nprocess.stderr.write("err1\\n");\nprocess.stdout.write("out2\\n");\nsetTimeout(() => { process.stderr.write("err2\\n"); process.stdout.write("out3\\n"); process.exit(2); }, 100);\n`,
+);
+writeFileSync(join(ws, "tools", "slow.js"), `setTimeout(() => {}, 30000);\n`);
 
 const S = (sel) => JSON.stringify(sel);
 /** Wait-for snippet for a tab's dirty state. */
@@ -246,8 +257,8 @@ try {
   // ---- 7. run a command with streamed output -----------------------------------
   const input = await wd.find("[data-testid=command-input]");
   await wd.click(input);
-  await wd.keys([..."for i in 1 2 3; do echo out$i; echo err$i >&2; sleep 0.1; done; exit 2", Keys.ENTER]);
-  await wd.waitFor(`return document.querySelector('[data-testid=output]')?.textContent.includes('Failed with exit code 2')`, [], 10000, "task exit");
+  await wd.keys([..."node tools/emit.js", Keys.ENTER]);
+  await wd.waitFor(`return document.querySelector('[data-testid=output]')?.textContent.includes('Failed with exit code 2')`, [], 20000, "task exit");
   const out = await wd.exec(`return [...document.querySelectorAll('[data-testid=output] .output__row')].map(r => (r.dataset.stream||'') + ':' + r.textContent)`);
   const okStreams = out.some((l) => l.startsWith("stdout:") && l.includes("out3")) && out.some((l) => l.startsWith("stderr:") && l.includes("err2"));
   check("7a command streams stdout and stderr distinctly with exit status", okStreams, `${out.length} rows`);
@@ -255,7 +266,7 @@ try {
   await wd.click(input);
   await wd.chord(MOD, "a");
   await wd.keys(["\uE017"]); // Delete: clear the previous command
-  await wd.keys([..."sleep 30 & sleep 30; wait", Keys.ENTER]);
+  await wd.keys([..."node tools/slow.js", Keys.ENTER]);
   await wd.waitFor(`return document.querySelector('[data-testid=stop]') !== null`, [], 5000, "running");
   await new Promise((r) => setTimeout(r, 300));
   const tStop = Date.now();
@@ -311,7 +322,7 @@ try {
   const history = await wd.exec(`return ${appExpr}.tasks.getSnapshot().history`);
   check(
     "8 state restored: last workspace, expanded folders, tabs, active tab, settings, command history",
-    tabs.join(",") === "src/main.rs,README.md" && active === "README.md" && fontSize === 15 && history[0]?.startsWith("sleep 30"),
+    tabs.join(",") === "src/main.rs,README.md" && active === "README.md" && fontSize === 15 && history[0] === "node tools/slow.js",
     `tabs=${tabs} active=${active} fontSize=${fontSize} history[0]=${history[0]}`,
   );
   await shot(wd, "08-restored-dark");

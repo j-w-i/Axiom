@@ -88,13 +88,17 @@ try {
 
   // Quit: app_quit saves the geometry.
   // The app exits while answering, so the script's own result never arrives.
+  const tQuit = Date.now();
   await wd.execAsync(`const cb = arguments[arguments.length-1]; window.__axiomHost.quit().then(() => cb(true))`).catch(() => {});
-  const exited = await wd.waitForExit(10000);
+  // The same budget as the quit suite's own exit check: one operation, one
+  // number. (Windows CI took longer than 10 s here once - the app had already
+  // saved the geometry, so it was exiting, not hung: run 43146126579.)
+  const exited = await wd.waitForExit(15000);
   const code = wd.exitCode;
   check(
     "3 the app exits when asked" + (code === undefined ? "" : " cleanly"),
     exited && (code === undefined || code === 0),
-    `exited=${exited} code=${!exited ? "still running" : code === undefined ? "not observable (WebKitWebDriver launched the app)" : code}`,
+    `exited=${exited} after ${Date.now() - tQuit} ms; code=${!exited ? "still running" : code === undefined ? "not observable (WebKitWebDriver launched the app)" : code}`,
   );
   check("3b the geometry was written to the data directory", existsSync(join(data, "window.json")));
   try {

@@ -18,7 +18,7 @@ which may only run after the parity gate T-12.
 | Backend (`crates/{rpc,store,workspace,exec,axiomd}`) | M1, 227 tests, unmodified by M1.5 |
 | `crates/desktop-bridge` | Tested (12 behaviour + 9 framing tests against the real daemon) |
 | `apps/desktop-tauri` | M1.5 shell: root-workspace Rust host + React UI; 5 host-surface tests, 31 Vitest tests, 21 end-to-end checks |
-| CI | `rust` green on 3 OSes; `editor` green; `tauri` green on Linux and macOS (Windows E2E open, KD-WIN-2); Qt `desktop` green on Linux/macOS (Windows open, KD-WIN-1) — PR #1 |
+| CI | Actions budget for the month is nearly exhausted (owner, 2026-11-12): verification is local on Linux plus one batched run, not a per-change loop. Last run 43146126579: Linux+macOS green, Windows at typing-fixed/commands-pending |
 | Qt shell | M1, 9 Qt test executables / 107 test functions, green; kept until T-15 |
 | M1.5 gate (T-12) | **Closer, not passed**: Linux and macOS verified in CI; Windows has two open defects (KD-WIN-1 Qt-only, KD-WIN-2 end-to-end) — `docs/roadmap/verification/M1.5.md` §5c |
 
