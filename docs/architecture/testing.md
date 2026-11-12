@@ -17,7 +17,8 @@ and in CI. A task is not Tested until it passes.
 | Web design guard | No literal colours, both themes define every token, WCAG AA contrast | `apps/desktop-tauri/tests/tokens.test.ts` | — |
 | Shell component (Qt) | C++ models and `DaemonClient` against the real daemon | `apps/desktop/tests/tst_*.cpp` (Qt Test, offscreen) | a display |
 | GUI smoke (Qt) | The real window, real editor bundle, real daemon: open → type → save → run | `apps/desktop/tests/tst_smoke_*.cpp` (offscreen) | a display |
-| End-to-end (Tauri) | The real Tauri app, real webview, real daemon, real key events, driven over WebDriver: open, edit, save, conflicts, commands, themes, palette, restore, quit with unsaved work, geometry, webview-crash recovery | `apps/desktop-tauri/e2e/{smoke,quit,geometry}.mjs` through `e2e/runner.mjs`; two WebDriver servers, see below | a model; macOS crash kill (see below) |
+| End-to-end parity (Tauri) | The real menus (Edit undo/redo/find/replace/select all, Help ▸ About) and task shortcuts (F5, Shift+F5, Ctrl/Cmd+Shift+R) driven through the real window | `apps/desktop-tauri/e2e/parity.mjs` (10 checks) | a display, a model |
+| End-to-end (Tauri) | The real Tauri app, real webview, real daemon, real key events, driven over WebDriver: open, edit, save, conflicts, commands, themes, palette, restore, quit with unsaved work, geometry, webview-crash recovery | `apps/desktop-tauri/e2e/{smoke,quit,geometry,parity}.mjs` through `e2e/runner.mjs`; two WebDriver servers, see below | a model; macOS crash kill (see below) |
 | Provider contract (M2) | Every manifest under `providers/` | `crates/env/tests/provider_contract.rs` | network (except opt-in install tests) |
 | Agent (M3) | Loop, tools, permissions, checkpoints with a scripted model | `crates/agent/tests/` | network, a real model |
 | Inspection (M5) | Select → source → patch → verify on fixture apps with known element→source maps | `tests/fixtures/inspect-*`, `crates/inspect/tests/` | a real model |

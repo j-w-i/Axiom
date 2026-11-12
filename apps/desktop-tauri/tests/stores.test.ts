@@ -538,6 +538,44 @@ describe("stores against the real daemon", () => {
     expect(app.documents.getSnapshot().docs).toHaveLength(before);
   });
 
+  it("a folder change requested while a close is in flight is deferred, not lost", async () => {
+    // W-10: WorkspaceController's pendingClose/deferredOpen. The two calls are
+    // deliberately adjacent with no await between them: close() increments
+    // pendingClose synchronously before its first await, so the open request
+    // that follows sees a close in flight every time, not sometimes.
+    const other = mkdtempSync(join(tmpdir(), "axiom-ws4-"));
+    writeFileSync(join(other, "b.txt"), "b\n");
+    await app.workspace.openFolder(ws);
+    const id = app.workspace.getSnapshot().id;
+    const closing = app.workspace.close();
+    app.documents.requestOpenFolder(other);
+    await closing;
+    await waitFor(() => app.workspace.getSnapshot().root === other, 8000, "the deferred open ran");
+    expect(app.workspace.getSnapshot().id).not.toBe(id);
+    expect(app.workspace.visibleRows().map((r) => r.node.path)).toContain("b.txt");
+    rmSync(other, { recursive: true, force: true });
+  }, 20_000);
+
+  it("output is capped at 10 000 lines and reports how many were dropped", async () => {
+    // T-3: the Qt shell capped the model and showed a truncation row; the shell
+    // must keep the newest lines and say how many it dropped.
+    await app.workspace.openFolder(ws);
+    app.tasks.runArgv([
+      "node",
+      "-e",
+      "for (let i = 0; i < 12050; i++) process.stdout.write('line ' + i + '\\n');",
+    ]);
+    await waitFor(() => app.tasks.getSnapshot().lastOutcome !== null, 30000, "the command finished");
+    const snap = app.tasks.getSnapshot();
+    // 12 050 output lines + the exit status row = 12 051; the oldest 2 051 go.
+    expect(snap.rows.length).toBe(10_000);
+    expect(snap.dropped).toBe(2_051);
+    expect(snap.rows[0]!.text).toBe("line 2051");
+    expect(snap.rows[0]!.kind).toBe("line");
+    expect(snap.rows.at(-1)!.text).toContain("Succeeded");
+    expect(snap.rows.at(-1)!.kind).toBe("status");
+  }, 45_000);
+
   it("a save requested for a path that is not open is ignored", async () => {
     await app.workspace.openFolder(ws);
     const before = readFileSync(join(ws, "README.md"), "utf8");

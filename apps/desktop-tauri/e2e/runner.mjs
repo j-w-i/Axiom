@@ -9,7 +9,7 @@
 //   Windows  the session's desktop (CI runner)
 //   macOS    the session's GUI (CI runner)
 //
-// Usage: node e2e/runner.mjs [suite.mjs ...]     (default: smoke, quit, geometry)
+// Usage: node e2e/runner.mjs [suite.mjs ...]   (default: smoke, quit, geometry, parity)
 // Env:   AXIOM_TAURI_APP, AXIOMD_UNDER_TEST, AXIOM_SCREENSHOT_DIR, AXIOM_E2E_LOG,
 //        AXIOM_XVFB (path to Xvfb), AXIOM_ALLOW_EXISTING_DISPLAY
 
@@ -25,7 +25,7 @@ const EXE = process.platform === "win32" ? ".exe" : "";
 const customSuites = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const suites = customSuites.length
   ? customSuites
-  : [join(here, "smoke.mjs"), join(here, "quit.mjs"), join(here, "geometry.mjs")];
+  : [join(here, "smoke.mjs"), join(here, "quit.mjs"), join(here, "geometry.mjs"), join(here, "parity.mjs")];
 
 const children = [];
 const log = (msg) => console.error(`[e2e] ${msg}`);

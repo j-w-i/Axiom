@@ -55,7 +55,7 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | W-7 | Reopen last on startup | ::reopenLastOpensTheLastWorkspaceWhenEnabled | `createApp` once-per-launch | S, E: 8 | ✅ |
 | W-8 | Daemon restart drops the workspace | ::daemonRestartDropsTheWorkspace | same | S: "a crashed daemon…" | ✅ |
 | W-9 | Keyboard: arrows, Home/End, Enter, Left to parent | smoke_launch::explorerShowsTreeAndKeyboardNavigationWorks | same + PageUp/PageDown | E: 3b (ArrowDown/ArrowRight) | ✅ partial (not every key tested) |
-| W-10 | Switching workspaces while a close is in flight | WorkspaceController deferred open | ported (`pendingClose`, `deferredOpen`) | code only | 🟡 |
+| W-10 | Switching workspaces while a close is in flight | WorkspaceController deferred open | ported (`pendingClose`, `deferredOpen`) | S: "a folder change requested while a close is in flight is deferred, not lost" (the calls are adjacent, so the race is not luck) | ✅ |
 
 ### Documents and editor (R6–R8, R14)
 
@@ -70,7 +70,7 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | E-7 | Clean doc reloads on disk change; dirty doc flagged | ::cleanDocumentReloads…, ::dirtyDocumentIsMarkedChangedOnDisk… | same + "changed on disk" tab badge | S; E: 6a, 6b | ✅ |
 | E-8 | Unsaved prompt on close tab / folder / quit, each choice | ::closingADirtyDocumentPrompts…, ::quitAndFolderChanges… | same; window close intercepted in Rust and routed to the prompt | S: "closing a dirty tab prompts…" (Discard), "unsaved-work prompt: Save writes then proceeds; Cancel keeps the tab", "opening another folder … Cancel stays, Discard switches"; E quit: 1b/1c (the window's close button), 2–6 (quit: Cancel, Save) | ✅ |
 | E-9 | Tab cycle (Ctrl+Tab / Ctrl+PgUp/PgDn), close (Ctrl+W) | EditorArea.qml Shortcuts | all three implemented in the window key handler (`App.tsx`) | inspected; E 5/10 exercise the same handler | ✅ |
-| E-10 | Edit menu: undo/redo/find/replace/select all | Main.qml | Edit menu → `runCommand` | code | 🟡 |
+| E-10 | Edit menu: undo/redo/find/replace/select all | Main.qml | Edit menu → `runCommand` | E parity: five checks driving the real menu (Undo reverts, Redo restores, Select All reports the selection, Find and Replace open Monaco's widget) | ✅ |
 | E-11 | Cursor position in status bar | ::dirtyAndCursorAreForwardedToTheModel | same | screenshots show it | ✅ |
 | E-12 | Renderer crash → reload with unsaved text from snapshot | smoke_editor::unsavedTextSurvivesARendererCrash | snapshots held in the **host** (`snapshot_put`); engine signal on Linux + heartbeat lease elsewhere; reload replays them through the restore path | S: "unsaved text comes back from the host snapshot after a webview crash", "a clean document leaves nothing to recover"; E: 11a/11b/11c (real web process killed, host detects, reloads, app+daemon survive) | ✅ (text restoration at store level; engine hook verified on Linux only) |
 | E-13 | Links open externally, http/https only | ::linksOnlyOpenForHttpSchemes | `open_external` host command with the same check | S: "links open externally only for http and https" | ✅ |
@@ -85,11 +85,11 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 |----|---------|----|-------|----------|--------|
 | T-1 | seq ordering, duplicates ignored, line split per stream | tst_tasks model tests | `OutputBuffer` | S: "output assembly (pure)" | ✅ |
 | T-2 | ANSI stripped, CR keeps last segment | ::ansiSequencesAreStripped, ::carriageReturnProgress… | same regexes | S (pure) | ✅ |
-| T-3 | 10 000-line cap with truncation row | ::modelCapsAtTenThousandLines… | same cap, notice row | code; bench `output` scenario | 🟡 |
+| T-3 | 10 000-line cap with truncation row | ::modelCapsAtTenThousandLines… | same cap, notice row | S: "output is capped at 10 000 lines and reports how many were dropped" (12 050 lines → 10 000 kept, 2 051 dropped, newest kept); bench `output` | ✅ |
 | T-4 | 50 000 lines without stalling | ::fiftyThousandLinesAreCapped… | rAF-batched publishing + virtualised rows | bench `output` (performance.md) | see performance |
 | T-5 | Command passed verbatim to shell | ::commandLineIsPassedVerbatimToTheShell | same | S | ✅ |
 | T-6 | History: most-recent-first, deduped, capped 20, persisted | ::historyIs… | same; ↑/↓ in the field instead of a combo-box | S, E: 8 | ✅ (interaction differs) |
-| T-7 | Rerun last (F5), Stop (Shift+F5), Run Command (Ctrl+Shift+R) | Main.qml | same shortcuts | code; bench uses Ctrl+Shift+R | 🟡 |
+| T-7 | Rerun last (F5), Stop (Shift+F5), Run Command (Ctrl+Shift+R) | Main.qml | same shortcuts | E parity: F5 reruns the recorded command, Shift+F5 stops a run, Ctrl/Cmd+Shift+R focuses the command field | ✅ |
 | T-8 | Closing the workspace cancels a running task | ::closingTheWorkspaceCancelsARunningTask | daemon does it; store resets | S: "closing the workspace cancels a running command" (same three assertions as Qt) | ✅ |
 | T-9 | Copy selection / Copy all / right-click menu on output | OutputPanel.qml | context menu (Copy selection / Copy all) + "Copy output" button + native text selection | inspected | ✅ |
 | T-10 | stderr marked without colour alone | gutter marker | gutter "▌" + visually-hidden "stderr:" prefix | screenshot | ✅ |
@@ -100,7 +100,7 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 |----|---------|----|-------|----------|--------|
 | S-1 | Settings change only on daemon confirmation; invalid rejected | tst_settings | same | S: "settings change only when…" | ✅ |
 | S-2 | Theme system/light/dark; follows OS | Theme singleton + `Qt.styleHints` | `prefers-color-scheme` + `data-theme` | E: 9 | ✅ (OS-follow untested) |
-| S-3 | About: app, backend, protocol, toolkit versions, data dir | smoke_launch::settingsApplyLiveAndAboutShowsDetails | About sheet (Tauri + webview versions) | code | 🟡 |
+| S-3 | About: app, backend, protocol, toolkit versions, data dir | smoke_launch::settingsApplyLiveAndAboutShowsDetails | About sheet (Tauri + webview versions) | E parity: the Help ▸ About sheet shows the backend, protocol, Tauri and webview versions and the data directory | ✅ |
 | S-4 | Window geometry persisted, never restored off-screen | Shell::restoreGeometry | host `window.json` in the app config dir, same rules | E (geometry suite) 1, 4: resize → quit through the app's path → relaunch restores 1000×700 | ✅ |
 | S-5 | Side bar / panel toggles (Ctrl+B / Ctrl+J), resizable | Main.qml SplitView | splitters + toggles; **sizes persisted** (Qt does not) | screenshots | ✅ (+) |
 | S-6 | Minimum window 720×480; side bar collapsed < 900 px | Main.qml | `minWidth/minHeight`; initial collapse rule | E (geometry suite) 2: a 400×300 request yields 720×480 | ✅ (size); collapse rule inspected |

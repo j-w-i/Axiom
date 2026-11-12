@@ -529,4 +529,14 @@ function killGroup(child) {
   }
 }
 
-export const Keys = { CTRL: "\uE009", SHIFT: "\uE008", ENTER: "\uE007", ESC: "\uE00C", META: "\uE03D" };
+export const Keys = {
+  CTRL: "\uE009",
+  SHIFT: "\uE008",
+  ENTER: "\uE007",
+  ESC: "\uE00C",
+  META: "\uE03D",
+  F5: "\uE035",
+  HOME: "\uE011",
+  UP: "\uE013",
+  DELETE: "\uE017",
+};
