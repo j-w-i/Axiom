@@ -1,6 +1,6 @@
 # Current state
 
-_Last updated: 2026-11-12 (M1.5 implementation session)._
+_Last updated: 2026-11-12 (M1.5 implementation session, local-only rounds while the Actions budget is spent)._
 
 ## Where we are
 
@@ -16,11 +16,11 @@ which may only run after the parity gate T-12.
 | IPC protocol 0.1 | Frozen; `crates/protocol`, schemas generated and checked |
 | Editor bridge 1 | Frozen; implemented in `editor/` (43 Vitest tests) and shared by both shells |
 | Backend (`crates/{rpc,store,workspace,exec,axiomd}`) | M1, 227 tests, unmodified by M1.5 |
-| `crates/desktop-bridge` | Tested (12 behaviour + 9 framing tests against the real daemon) |
-| `apps/desktop-tauri` | M1.5 shell: root-workspace Rust host + React UI; 5 host-surface tests, 31 Vitest tests, 21 end-to-end checks |
+| `crates/desktop-bridge` | Tested: 13 behaviour tests against the real daemon (incl. stderr forwarding) + 12 unit tests (framing, daemon lookup order) |
+| `apps/desktop-tauri` | M1.5 shell: root-workspace Rust host + React UI; 5 host-surface + 3 release-guard tests, 51 Vitest tests, 48 end-to-end checks in 4 suites (smoke 22, quit 8, geometry 5, parity 10) through two WebDriver servers |
 | CI | Actions budget for the month is nearly exhausted (owner, 2026-11-12): verification is local on Linux plus one batched run, not a per-change loop. Last run 43146126579: Linux+macOS green, Windows at typing-fixed/commands-pending |
 | Qt shell | M1, 9 Qt test executables / 107 test functions, green; kept until T-15 |
-| M1.5 gate (T-12) | **Closer, not passed**: Linux and macOS verified in CI; Windows has two open defects (KD-WIN-1 Qt-only, KD-WIN-2 end-to-end) — `docs/roadmap/verification/M1.5.md` §5c |
+| M1.5 gate (T-12) | **Not passed**: on Linux everything is verified (parity 52/56, all ten performance budgets, 48 end-to-end checks, package launches/finds its sidecar/connects) and macOS went green end to end in run 43141643434; Windows still fails at typing-free stages and KD-WIN-1 (Qt) is unchanged; macOS/Windows budgets, the manual protocol and the E-17 waiver are open — `docs/roadmap/verification/M1.5.md` |
 
 ## Latest handoff
 
@@ -30,20 +30,36 @@ which may only run after the parity gate T-12.
 
 Finish the M1.5 gate (T-12), in this order:
 
-1. **Fix KD-WIN-2** (Windows end-to-end): the app must expose a WebView2
-   DevTools endpoint for msedgedriver. Needs a Windows machine to iterate;
-   suspects are listed in `verification/M1.5.md` §5c.
-2. **Run `agents/MANUAL_VERIFICATION.md`** on one real machine per OS and
-   record the results in `docs/roadmap/verification/M1.5.md`.
-3. **Build the Windows (MSI/NSIS) and macOS (.dmg) packages** in CI; Linux
-   `.deb` already builds (8.5 MiB, daemon inside).
-4. Then T-12 again with the owner: waive or close the 5 open parity rows.
-   Only after that may T-14 (make Tauri the default) and, a milestone later,
-   T-15 (delete the Qt shell) run.
+1. **Spend one CI run on the branch as it stands** (`task/m1.5`, 7 commits
+   ahead of origin). It should turn the Windows cell green — typing now works
+   there (`editContext: false`) and the command checks no longer use a POSIX
+   shell — re-confirm macOS (green in run 43141643434), and produce the NSIS
+   package. Expect exactly one known red cell after it: the Qt `desktop` job on
+   Windows (KD-WIN-1), which disappears with T-15.
+2. **Measure the budgets on macOS and Windows** (`bench/run.sh --runs 3
+   --heavy-runs 3`, quoting the `medians` block and the load) — exit criterion
+   3 needs them there, and Linux is done (all ten rows met).
+3. **Run `agents/MANUAL_VERIFICATION.md`** on one real machine per OS and
+   record the results in `docs/roadmap/verification/M1.5.md`. This is also
+   where trusted keyboard input, IME, clipboard, drag and drop, HiDPI, screen
+   readers, the 720x480 drag minimum and installing a package are verified on
+   macOS and Windows.
+4. **Owner review**: waive or close the four open parity rows (E-17 needs a
+   waiver; S-8 and S-12 are manual-protocol items; T-4 is the bench's `output`
+   scenario).
+
+Only after that may T-14 (make Tauri the default) and, a milestone later, T-15
+(delete the Qt shell) run.
 
 ## Blockers
 
-None.
+Two, both outside the code:
+
+- **GitHub Actions budget** for the month is spent (owner, 2026-11-12). CI is
+  not available until it resets, so every local-only item is done and the rest
+  waits for one batched run.
+- **No macOS or Windows machine** in this environment: their budgets, package
+  installs and the manual protocol need real hosts.
 
 ## Things the next agent should know
 
@@ -55,7 +71,8 @@ None.
   extracted locally (`scripts/bootstrap-qt.sh --gl-headers`).
 - `cargo` is not on the default `PATH`: scripts add `~/.cargo/bin`
   themselves; in an interactive shell run `source scripts/dev-env.sh`.
-- There is no git remote. Commits are local on `main`.
+- There *is* a remote: `origin` = github.com/j-w-i/Axiom. M1.5 work lives on
+  `task/m1.5` (draft PR #1); `main` is untouched by the migration.
 
 ## M1.5 — Qt → Tauri migration (in progress, 2026-11-12)
 
@@ -63,23 +80,23 @@ ADR-0012 is **accepted**: the desktop shell becomes Tauri 2 + React. Tasks:
 `docs/tasks/M1.5/`. Evidence and design: `docs/migration/qt-to-tauri/`.
 Verification record: `docs/roadmap/verification/M1.5.md`.
 
-Done and tested on Linux: T-01 (decisions), T-02 (bridge in
-`crates/desktop-bridge`), T-03 (host in the root workspace, `--version`),
-T-04 (generated wire types), T-05 (test parity, 107 Qt functions mapped),
-T-06 (UI gaps), T-08 (crash recovery).
+Done and verified on Linux: T-01 (decisions), T-02 (bridge in
+`crates/desktop-bridge`), T-03 (host in the root workspace, `--version`), T-04
+(generated wire types), T-05 (test parity, 107 Qt functions mapped, 52 of 56
+matrix rows ✅), T-06 (UI gaps), T-07 (in-window menus + macOS menu, the latter
+compiled by cross-check), T-08 (crash recovery; the macOS hook is built but
+never triggered), T-09 (CI wiring plus the end-to-end suites through two
+WebDriver servers), T-13 (deb + rpm + macOS `.app` built in CI; a `.deb` also
+verified as an installed copy: it finds its sidecar and completes the
+handshake).
 
-Written but **not verified here**: T-07 (macOS native menu — compiled only by
-CI), T-09 (CI job — nothing pushed yet), T-10 (manual protocol, not executed),
-T-12 (gate report — **the gate did not pass**), T-13 (.deb builds; Windows and
-macOS packages do not).
+Done as recorded experiments: M5-PRE-001 (E4: preview over CDP, option (a)
+adopted), T-11 (analysis; recommends *not* adopting editor isolation until one
+of three stated triggers occurs).
 
-Not started: T-11 (editor-isolation spike; analysis in
-`editor-isolation.md`), M5-PRE-001 (preview-engine spike), **T-14 and T-15 are
-held** — the Qt shell remains the release artifact until the gate passes.
-
-Next: push the branch, read the `tauri` CI job on all three OSes, run
-`agents/MANUAL_VERIFICATION.md` on one machine per OS, build the Windows and
-macOS packages, then T-12 again with the owner.
+Open: T-10 and T-12 (manual protocol and the gate — macOS and Windows need real
+hosts), and **T-14 and T-15 are held**: the Qt shell remains the release
+artifact until the gate passes.
 
 ## Open questions (do not block M1)
 

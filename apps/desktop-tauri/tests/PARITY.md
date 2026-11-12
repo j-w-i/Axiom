@@ -46,7 +46,7 @@ or has no equivalent in the new architecture.
 | `callWithoutProcessReportsBackendStopped` | B `crash_fails_pending_and_restart_recovers` (request after death) |
 | `callTimesOutAndSendsCancel` | B `timeout_answers_with_timeout_and_sends_cancel` |
 | `shutdownIsOrderlyAndStopsTheProcess` | B `shutdown_is_bounded_and_the_process_exits` |
-| `stderrLinesAreForwardedWithPrefix` | B `connects_and_reports_ready` + the host's `[axiomd]` prefix (`EventSink`); covered indirectly, not asserted line-by-line |
+| `stderrLinesAreForwardedWithPrefix` | B `daemon_stderr_is_forwarded_as_log_events`: a real daemon (data dir that is a file) writes a real `axiomd:` line, the bridge forwards it as a `Log` event, and the failure message quotes it. The host's `[axiomd]` prefix is `EventSink` |
 
 ## tst_workspace (15) — explorer and workspace state
 
@@ -111,7 +111,7 @@ or has no equivalent in the new architecture.
 | `modelFlushesTrailingPartialLineOnFinish` | S same |
 | `ansiSequencesAreStripped` | S same |
 | `carriageReturnProgressKeepsTheLastSegment` | S same |
-| `modelCapsAtTenThousandLinesWithATruncationRow` | `TasksStore` caps at `MAX_LINES`; not separately asserted (the cap is a constant in the same reducer the pure test covers) |
+| `modelCapsAtTenThousandLinesWithATruncationRow` | S `output is capped at 10 000 lines and reports how many were dropped`: 12 050 lines + the exit row → 10 000 kept, 2 051 dropped, the newest kept |
 | `resetClearsEverything` | S `clear empties the output, rerunLast repeats the last command, and a run is refused while running` |
 | `stdoutStderrAndFailedStatus` | S same; E 7a |
 | `successStatusRow` | E 7a (exit status row) |
@@ -156,8 +156,8 @@ reloads from the bundle after a crash). Feature-parity row E-17 records this.
 | `failedBackendShowsBannerAndRestartRecovers` | S `a crashed daemon fails requests cleanly and restart recovers` (store level) + the banner is the same code path; not driven in E |
 | `explorerShowsTreeAndKeyboardNavigationWorks` | E 3a/3b |
 | `outputPanelRunsCommandsAndStops` | E 7a/7b |
-| `settingsApplyLiveAndAboutShowsDetails` | E 9 (live theme), E 10b; About sheet asserted by inspection |
-| `aboutShowsDefaultLocationWithoutDataDir` | About sheet shows "default location" when `dataDir` is null — same code as the Qt shell, not driven in E |
+| `settingsApplyLiveAndAboutShowsDetails` | E 9 (live theme), E 10b; About sheet driven by E parity `S-3` (backend, protocol, Tauri and webview versions, data directory) |
+| `aboutShowsDefaultLocationWithoutDataDir` | The About sheet renders the literal "default location" when `app_info` has no data dir (`Dialogs.tsx`); the E parity check runs with `--data-dir`, so the null branch rests on that one line — stated, not asserted |
 | `missingDaemonShowsFailureNotACrash` | B `missing_program_fails_clearly` + the host's `failed` state → banner (screenshot in the first E2E runs) |
 
 ## tst_smoke_editor (2) — the real editor
@@ -172,13 +172,13 @@ reloads from the bundle after a crash). Feature-parity row E-17 records this.
 | Suite | Functions | Mapped | N/A (reason given) | Not separately asserted |
 |-------|----------:|-------:|-------------------:|------------------------:|
 | linebuffer | 9 | 8 | 1 | 0 |
-| daemonclient | 13 | 13 | 0 | 0 (stderr prefix: indirect) |
+| daemonclient | 13 | 13 | 0 | 0 |
 | workspace | 15 | 15 | 1 (row signals) | 1 (rename) |
-| documents | 29 | 29 | 1 (`runCommand`/`reveal`) | 1 (cursor text: asserted in E, not unit-tested) |
-| tasks | 19 | 19 | 0 | 3 (reducer constants / workspace-close cancel) |
+| documents | 29 | 29 | 1 (`runCommand`/`reveal`) | 1 (cursor text: asserted in E parity `E-10`, not unit-tested) |
+| tasks | 19 | 19 | 0 | 2 (the two reducer constants: history dedupe/cap and rerunLast) |
 | settings | 6 | 6 | 0 | 0 |
 | assethandler | 7 | 0 | 7 (Tauri asset protocol) | 0 |
-| smoke_launch | 7 | 7 | 0 | 1 (About text) |
+| smoke_launch | 7 | 7 | 0 | 0 |
 | smoke_editor | 2 | 2 | 0 | 0 |
 
 No test was deleted, skipped or weakened. The "not separately asserted" column
