@@ -142,3 +142,33 @@ component libraries that render host elements on the app's behalf (those
 elements carry the *library's* absence of stamps, so they resolve to the
 nearest stamped ancestor). Stamps are plain attributes: visible in the DOM
 and present only in dev builds.
+
+## E4 — Preview rendering + CDP inspection without Qt WebEngine
+
+**Hypothesis.** M5's preview can render a running UI into the Tauri app while
+being inspected over CDP, using an external Chromium captured frame by frame
+rather than a Qt WebEngine page.
+
+**Setup.** `e4-preview-cdp/`: one dependency-free Node 22 script. Headless
+Google Chrome 155.0.8059.84 with `--remote-debugging-port=0` and a temp
+profile, a fixture page served over loopback, `Page.captureScreenshot` for the
+frames, `DOM.getBoxModel` + `Runtime.evaluate` for the element → source lookup.
+
+```sh
+node experiments/e4-preview-cdp/probe.mjs      # writes results.json (~5 s)
+```
+
+**Observed.** First painted frame 148–150 ms after navigation; 60 PNG captures
+at p50 33.9 ms / p95 50.7–51.2 ms (≈20–29 fps); JPEG p50 34.4 ms; browser group
+318 MiB PSS in 12 processes; the stamped element's `data-source` read back over
+CDP in both modes (`src/App.tsx:42:7`, nested `src/Button.tsx:11:3`).
+
+**Decision.** Adopt **option (a)** as the preview mechanism to prototype
+against: it meets its pre-stated criterion (< 1 s first frame, < 100 ms p95
+capture, element lookup reachable). Option (b), WebView2 CDP, is **not run — no
+Windows host** and is not estimated. Open risks, all recorded in the
+experiment's README: the ~318 MiB / 12-process browser group against a 250 MiB
+shell; bundled-browser licensing (this used installed Chrome, which cannot be
+redistributed, so the product needs a redistributable Chromium/CEF/WebView2);
+Linux display stack under software rendering; and the unmeasured cost of
+decoding and drawing each frame inside the Tauri window.
