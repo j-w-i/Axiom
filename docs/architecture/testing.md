@@ -67,6 +67,16 @@ printable ASCII character into Monaco, saves, and compares the bytes on disk.
 character code, so `p` arrived as F1 and opened Monaco's command palette
 mid-typing; fixed upstream in 2.0.0-next.0, which is what the app pins.)
 
+**Script channel.** Suites run page scripts through W3C Execute Script,
+except on macOS with the embedded server: there the plugin's Execute Script
+awaits one `evaluateJavaScript` completion, which WKWebView on macOS 26.4
+runners intermittently reclaims (the call then hangs to its timeout; seen in
+CI run 43135274089, upstream #540). macOS uses the plugin's `/wdio/eval`
+instead, its out-of-band channel with bounded re-dispatch and the one
+@wdio/tauri-service uses. `e2e/eval-contract.mjs` proves both channels return
+the same values and errors for every shape the suites use, and runs before
+the suites wherever the embedded server is used.
+
 The crash check (11) kills the webview's content process. Linux and Windows
 find it as a descendant of the app (`e2e/processes.mjs`, unit-tested for all
 three OSes in `tests/processes.test.ts`). On macOS WebContent is a

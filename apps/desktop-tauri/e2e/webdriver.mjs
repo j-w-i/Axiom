@@ -293,11 +293,64 @@ export class WebDriver {
     return body.value;
   }
 
+  /**
+   * True when scripts go through the plugin's `/wdio/eval` instead of W3C
+   * Execute Script. On macOS the plugin's Execute Script awaits a single
+   * `evaluateJavaScript` completion, which WKWebView on macOS 26.4 runners
+   * intermittently reclaims, so the call hangs to the script timeout (seen in
+   * CI run 43135274089). `/wdio/eval` is the plugin's out-of-band path with
+   * bounded re-dispatch for exactly that (upstream #540), and it is what
+   * @wdio/tauri-service itself uses for the embedded driver.
+   */
+  get usesDirectEval() {
+    if (process.env.AXIOM_DIRECT_EVAL === "1") return PROVIDER === "embedded"; // tests of this path on any OS
+    return PROVIDER === "embedded" && process.platform === "darwin";
+  }
+
+  /**
+   * Runs a script through /wdio/eval. `kind` is "sync" (the body's return value
+   * is the result) or "async" (W3C async script: the body calls the last
+   * argument). The plugin's contract: the script reports to the callback with
+   * `{ ok: true, value, undef }` or `{ ok: false, error }`, so errors come back
+   * as errors instead of hanging to the timeout.
+   */
+  async #directEval(kind, script, args) {
+    const body =
+      kind === "sync"
+        ? `return (function () { ${script}\n }).apply(null, __args);`
+        : `return new Promise(function (resolve, reject) {
+             try { (function () { ${script}\n }).apply(null, __args.concat([resolve])); } catch (e) { reject(e); }
+           });`;
+    const wrapped = `var __cb = arguments[arguments.length - 1];
+      var __args = Array.prototype.slice.call(arguments, 0, -1);
+      (async function () {
+        try {
+          var __r = await (async function () { ${body} })();
+          __cb({ ok: true, value: __r === undefined ? null : __r, undef: __r === undefined });
+        } catch (e) {
+          __cb({ ok: false, error: (e && e.message) || String(e) });
+        }
+      })();`;
+    const res = await fetch(`${this.base}/wdio/eval`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ script: wrapped, args, session_id: this.id, timeout_ms: 30000 }),
+      signal: AbortSignal.timeout(35000),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) throw new Error(`POST /wdio/eval (${kind}): ${res.status} ${JSON.stringify(data)}`);
+    if (data.error) throw new Error(`POST /wdio/eval (${kind}): ${data.error}`);
+    // W3C Execute Script returns null for undefined; match it exactly.
+    return data.undef ? null : data.value;
+  }
+
   exec(script, args = []) {
+    if (this.usesDirectEval) return this.#directEval("sync", script, args);
     return this.cmd("POST", "/execute/sync", { script, args });
   }
 
   execAsync(script, args = []) {
+    if (this.usesDirectEval) return this.#directEval("async", script, args);
     return this.cmd("POST", "/execute/async", { script, args });
   }
 

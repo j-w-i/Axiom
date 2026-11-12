@@ -38,6 +38,13 @@ if [[ $build == 1 ]]; then
 fi
 
 run() {
+  # Before the suites, the script-channel contract (e2e/eval-contract.mjs): if
+  # the channel this platform uses misbehaves, that is reported as itself and
+  # not as 30 unrelated-looking suite failures.
+  if [[ ${#suites[@]} -eq 0 && "${AXIOM_WEBDRIVER:-}" != external ]] \
+     && [[ "${AXIOM_WEBDRIVER:-}" == embedded || "$(uname -s)" != Linux ]]; then
+    node "$here/e2e/runner.mjs" "$here/e2e/eval-contract.mjs" || return 1
+  fi
   # `${suites[@]+...}`: an empty array is an "unbound variable" under `set -u`
   # in bash 3.2, which is what macOS ships.
   node "$here/e2e/runner.mjs" ${suites[@]+"${suites[@]}"}
