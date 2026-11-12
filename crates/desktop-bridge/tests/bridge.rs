@@ -106,6 +106,50 @@ async fn connects_and_reports_ready() {
     assert_eq!(h.bridge.state().1, DaemonState::Stopped);
 }
 
+/// D-6: the daemon's stderr is forwarded as log events (the host prints them
+/// with a `[axiomd]` prefix), not swallowed. A file where the database should
+/// be makes axiomd write one deterministic line and exit.
+#[tokio::test(flavor = "multi_thread")]
+async fn daemon_stderr_is_forwarded_as_log_events() {
+    let file = tempfile::NamedTempFile::new().expect("temp file");
+    let not_a_dir = file.path().to_path_buf();
+    let h = harness_with(Some(daemon_path()), |c| {
+        c.args = vec![
+            "--data-dir".into(),
+            not_a_dir.to_string_lossy().into_owned(),
+        ];
+    });
+    // The daemon exits at once, so start() may return before the exit is
+    // observed: wait for the signal instead of racing it.
+    let _ = h.bridge.start().await;
+    let forwarded = wait_until(&h, Duration::from_secs(5), |events| {
+        events
+            .iter()
+            .any(|e| matches!(e, BridgeEvent::Log { line } if line.starts_with("axiomd:")))
+    })
+    .await;
+    assert!(
+        forwarded,
+        "no `axiomd:` stderr line among {:?}",
+        h.events.lock().unwrap()
+    );
+    let lines: Vec<String> = h
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            BridgeEvent::Log { line } => Some(line.clone()),
+            _ => None,
+        })
+        .collect();
+    // The same line is what a failure message quotes back to the user.
+    assert!(
+        lines.iter().any(|l| l.contains("cannot open the database")),
+        "{lines:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn missing_program_fails_clearly() {
     let h = harness_with(Some(PathBuf::from("/nonexistent/axiomd")), |_| {});

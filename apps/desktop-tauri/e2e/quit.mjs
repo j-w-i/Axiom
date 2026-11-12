@@ -11,7 +11,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { INPUT_RECORDER, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
+import { INPUT_RECORDER, PROVIDER, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const here = import.meta.dirname;
 const repo = resolve(here, "../../..");
@@ -20,6 +20,12 @@ const APP = process.env.AXIOM_TAURI_APP ?? join(repo, `target/release/axiom-taur
 const DAEMON = process.env.AXIOMD_UNDER_TEST ?? join(repo, `target/debug/axiomd${EXE}`);
 
 const results = [];
+const skipped = [];
+/** A check this driver cannot perform: reported, never counted as passed. */
+function notRun(name, reason) {
+  skipped.push({ name, reason });
+  console.log(`N/A   ${name} — ${reason}`);
+}
 const log = appLogger("quit");
 
 /** Screenshot + page diagnostics into the artifacts, on failure only. */
@@ -61,6 +67,29 @@ try {
   await wd.waitFor(`return document.querySelector('[data-path="README.md"][role=tab]')?.dataset.dirty === 'true'`, [], 8000, "dirty");
   check("1 unsaved work is on screen", true);
 
+  // ---- The OS close button (E-8): the host intercepts CloseRequested and asks
+  // the UI, so the window must survive Cancel. DELETE /window runs the app's
+  // own close path (the plugin's close_window calls window.close(), which fires
+  // CloseRequested), which no other check drives.
+  if (PROVIDER === "embedded") {
+    await wd.cmd("DELETE", "/window").catch(() => {});
+    // The session is bound to the webview, so closing the window ends it even
+    // when the host prevents the close; a fresh session proves the app is
+    // still there. (Under WebKitWebDriver the session cannot be re-created for
+    // a running app: it would launch a new one.)
+    await new Promise((r) => setTimeout(r, 500));
+    await wd.renew();
+    await wd.waitFor(`return document.querySelector('[data-testid=unsaved-dialog]') !== null`, [], 8000, "the close button asks first");
+    const closeNames = await wd.exec(`return document.querySelector('[data-testid=unsaved-dialog]').textContent`);
+    check("1b the window's close button asks about unsaved work", closeNames.includes("README.md"), JSON.stringify(closeNames).slice(0, 80));
+    await wd.click(await wd.find('[data-testid=unsaved-dialog] [data-action=cancel]'));
+    await new Promise((r) => setTimeout(r, 400));
+    const survived = alive() && (await wd.exec(`return document.querySelector('[data-path="README.md"][role=tab]')?.dataset.dirty`)) === "true";
+    check("1c Cancel on the close button keeps the window, the tab and the text", survived, `alive=${alive()}`);
+  } else {
+    notRun("1b/1c the window's close button", `the ${PROVIDER} driver's session ends with the window; covered on the embedded driver`);
+  }
+
   // ---- Cancel: the app must stay, the text must stay
   await wd.exec(`window.__axiom.documents.requestQuit()`);
   await wd.waitFor(`return document.querySelector('[data-testid=unsaved-dialog]') !== null`, [], 8000, "unsaved dialog");
@@ -101,5 +130,8 @@ try {
 }
 
 const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} quit checks passed`);
+console.log(
+  `\n${results.length - failed.length}/${results.length} quit checks passed` +
+    (skipped.length ? `, ${skipped.length} not run on ${process.platform}` : ""),
+);
 process.exit(failed.length ? 1 : 0);

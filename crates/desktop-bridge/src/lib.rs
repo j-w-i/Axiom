@@ -26,7 +26,8 @@ use axiom_protocol::{ErrorKind, Message, RequestId, RpcError};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -701,28 +702,138 @@ pub fn ui_callable(method: &str) -> bool {
 /// installs sidecars next to the app binary without the target-triple
 /// suffix), then `PATH`.
 pub fn locate_daemon(explicit: Option<PathBuf>) -> Option<PathBuf> {
+    let exe_name = format!("axiomd{}", std::env::consts::EXE_SUFFIX);
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(PathBuf::from));
+    locate_daemon_from(
+        explicit,
+        std::env::var_os("AXIOMD").map(PathBuf::from),
+        exe_dir.as_deref(),
+        std::env::var_os("PATH").as_deref(),
+        &exe_name,
+    )
+}
+
+/// [`locate_daemon`]'s order, over values passed in rather than read from the
+/// environment, so the order itself is testable (see the tests below; the
+/// process environment is shared and cannot be changed safely in a test).
+fn locate_daemon_from(
+    explicit: Option<PathBuf>,
+    env: Option<PathBuf>,
+    exe_dir: Option<&Path>,
+    path_var: Option<&OsStr>,
+    exe_name: &str,
+) -> Option<PathBuf> {
     if let Some(p) = explicit.filter(|p| p.is_file()) {
         return Some(p);
     }
-    if let Some(p) = std::env::var_os("AXIOMD").map(PathBuf::from) {
-        if p.is_file() {
-            return Some(p);
-        }
+    if let Some(p) = env.filter(|p| p.is_file()) {
+        return Some(p);
     }
-    let exe_name = format!("axiomd{}", std::env::consts::EXE_SUFFIX);
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(PathBuf::from))
-    {
-        let sibling = dir.join(&exe_name);
+    if let Some(sibling) = exe_dir.map(|d| d.join(exe_name)) {
         if sibling.is_file() {
             return Some(sibling);
         }
     }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|d| d.join(&exe_name))
+    let path = path_var?;
+    std::env::split_paths(path)
+        .map(|d| d.join(exe_name))
         .find(|p| p.is_file())
+}
+
+#[cfg(test)]
+mod locate {
+    use super::locate_daemon_from;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// A directory with a file called `name` in it.
+    fn dir_with(root: &std::path::Path, name: &str, sub: &str) -> PathBuf {
+        let dir = root.join(sub);
+        fs::create_dir_all(&dir).expect("mkdir");
+        let file = dir.join(name);
+        fs::write(&file, b"#!/bin/sh\n").expect("write");
+        dir
+    }
+
+    #[test]
+    fn precedence_is_explicit_then_env_then_sibling_then_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let name = "axiomd";
+        let explicit_dir = dir_with(tmp.path(), name, "explicit");
+        let env_dir = dir_with(tmp.path(), name, "env");
+        let exe_dir = dir_with(tmp.path(), name, "sibling");
+        let path_dir = dir_with(tmp.path(), name, "path");
+        let path_var: OsString = std::env::join_paths([&path_dir]).expect("join paths");
+
+        let explicit = explicit_dir.join(name);
+        let env = env_dir.join(name);
+        let sibling = exe_dir.join(name);
+        let from_path = path_dir.join(name);
+
+        // Every source present: the earliest one wins, at each step.
+        assert_eq!(
+            locate_daemon_from(
+                Some(explicit.clone()),
+                Some(env.clone()),
+                Some(&exe_dir),
+                Some(&path_var),
+                name
+            ),
+            Some(explicit.clone())
+        );
+        assert_eq!(
+            locate_daemon_from(
+                None,
+                Some(env.clone()),
+                Some(&exe_dir),
+                Some(&path_var),
+                name
+            ),
+            Some(env.clone())
+        );
+        assert_eq!(
+            locate_daemon_from(None, None, Some(&exe_dir), Some(&path_var), name),
+            Some(sibling.clone())
+        );
+        assert_eq!(
+            locate_daemon_from(None, None, None, Some(&path_var), name),
+            Some(from_path)
+        );
+        assert_eq!(locate_daemon_from(None, None, None, None, name), None);
+    }
+
+    #[test]
+    fn a_source_that_does_not_exist_is_skipped_not_returned() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let name = "axiomd";
+        let missing = tmp.path().join("nope").join(name);
+        let path_dir = dir_with(tmp.path(), name, "path");
+        let path_var = std::env::join_paths([&path_dir]).expect("join paths");
+        // The explicit path is not a file: fall through to PATH, do not fail.
+        assert_eq!(
+            locate_daemon_from(
+                Some(missing.clone()),
+                Some(missing),
+                None,
+                Some(&path_var),
+                name
+            ),
+            Some(path_dir.join(name))
+        );
+    }
+
+    #[test]
+    fn an_empty_path_variable_finds_nothing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let empty = OsString::new();
+        assert_eq!(
+            locate_daemon_from(None, None, Some(tmp.path()), Some(&empty), "axiomd"),
+            None
+        );
+    }
 }
 
 #[cfg(test)]

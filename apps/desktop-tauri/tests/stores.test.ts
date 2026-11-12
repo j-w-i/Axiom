@@ -429,6 +429,59 @@ describe("stores against the real daemon", () => {
     expect(readFileSync(join(ws, "README.md"), "utf8")).toBe("# keep me\n");
   });
 
+  it("closing the workspace cancels a running command", async () => {
+    // T-8: the daemon ends a workspace's tasks when the workspace closes; the
+    // store must report the command as cancelled rather than leaving it
+    // "running" against a workspace that no longer exists.
+    await app.workspace.openFolder(ws);
+    app.tasks.runArgv(["node", "-e", "setTimeout(() => {}, 30000)"]);
+    await waitFor(() => app.tasks.getSnapshot().running, 5000, "running");
+    await app.workspace.close();
+    // State dropped at once (the daemon cancels the process), output cleared.
+    expect(app.tasks.getSnapshot().running).toBe(false);
+    expect(app.tasks.getSnapshot().rows).toHaveLength(0);
+    // The daemon really killed it: a new workspace runs tasks normally, with
+    // nothing left running against the old one.
+    await app.workspace.openFolder(ws);
+    app.tasks.runArgv(["node", "-e", "process.stdout.write('alive\\n')"]);
+    await waitFor(() => app.tasks.getSnapshot().lastOutcome !== null, 10000, "the new task finished");
+    expect(app.tasks.getSnapshot().lastOutcome).toBe("succeeded");
+    expect(app.tasks.getSnapshot().rows.some((r) => r.text === "alive")).toBe(true);
+  }, 20_000);
+
+  it("opening another folder with unsaved work asks first: Cancel stays, Discard switches", async () => {
+    // E-8's "folder" case: the shell defers the folder change behind the prompt
+    // instead of dropping the edits (the Qt shell had the same order).
+    const other = mkdtempSync(join(tmpdir(), "axiom-ws2-"));
+    writeFileSync(join(other, "b.txt"), "b\n");
+    await app.workspace.openFolder(ws);
+    const first = app.workspace.getSnapshot().id;
+    app.documents.open("README.md");
+    await waitFor(() => editor.text("README.md") !== undefined);
+    editor.type("README.md", "# draft\n");
+    await waitFor(() => app.documents.getSnapshot().docs[0]!.dirty);
+
+    app.documents.requestOpenFolder(other);
+    await waitFor(() => app.documents.getSnapshot().prompt?.kind === "folder", 3000, "folder prompt");
+    expect(app.documents.getSnapshot().prompt?.names).toEqual(["README.md"]);
+    app.documents.resolvePrompt("cancel");
+    expect(app.workspace.getSnapshot().id).toBe(first);
+    expect(app.workspace.getSnapshot().root).toBe(ws);
+    expect(app.documents.getSnapshot().docs).toHaveLength(1);
+    expect(app.documents.getSnapshot().docs[0]!.dirty).toBe(true);
+
+    app.documents.requestOpenFolder(other);
+    await waitFor(() => app.documents.getSnapshot().prompt?.kind === "folder", 3000, "folder prompt again");
+    app.documents.resolvePrompt("discard");
+    // The root, not the id: the daemon assigns the id (workspace.ts:155).
+    await waitFor(() => app.workspace.getSnapshot().root === other, 5000, "switched to the other folder");
+    expect(app.workspace.visibleRows().map((r) => r.node.path)).toContain("b.txt");
+    expect(app.documents.getSnapshot().docs).toHaveLength(0);
+    // Discard writes nothing: the old folder still holds its own bytes.
+    expect(readFileSync(join(ws, "README.md"), "utf8")).toBe("# hi\n");
+    rmSync(other, { recursive: true, force: true });
+  }, 15_000);
+
   it("a save that fails for a non-conflict reason shows a banner and answers saveFailed", async () => {
     await app.workspace.openFolder(ws);
     app.documents.open("src/main.rs");

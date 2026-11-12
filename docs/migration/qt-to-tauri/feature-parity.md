@@ -34,12 +34,12 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 
 | ID | Feature | Qt | Tauri | Evidence | Status |
 |----|---------|----|-------|----------|--------|
-| D-1 | Daemon lookup order (flag, env, sibling, PATH) | `locateDaemon` | `bridge::locate_daemon`, same order | code | 🟡 |
+| D-1 | Daemon lookup order (flag, env, sibling, PATH) | `locateDaemon` | `bridge::locate_daemon`, same order | `locate::precedence_is_explicit_then_env_then_sibling_then_path`, `locate::a_source_that_does_not_exist_is_skipped_not_returned` (Rust unit tests) | ✅ |
 | D-2 | `initialize` within 10 s or fail with message | DaemonClient | same | B: missing_program_fails_clearly | ✅ |
 | D-3 | Request timeout 30 s → `$/cancel` + `timeout` | tst_daemonclient::callTimesOutAndSendsCancel | same | B: timeout_answers_with_timeout_and_sends_cancel | ✅ |
 | D-4 | Crash → all pending answered "Backend stopped", banner with Restart | tst_daemonclient, smoke_launch::failedBackendShowsBannerAndRestartRecovers | same; banner in UI | B: crash_fails_pending_and_restart_recovers; S: "a crashed daemon…" | ✅ (banner not screenshot-tested) |
 | D-5 | Bounded shutdown (3 s / 2 s / kill) | tst_daemonclient::shutdownIsOrderlyAndStopsTheProcess | same | B: shutdown_is_bounded_and_the_process_exits | ✅ |
-| D-6 | stderr forwarded to shell log | tst_daemonclient::stderrLinesAreForwardedWithPrefix | `[axiomd]` lines on host stderr | code | 🟡 |
+| D-6 | stderr forwarded to shell log | tst_daemonclient::stderrLinesAreForwardedWithPrefix | `[axiomd]` lines on host stderr | B: `daemon_stderr_is_forwarded_as_log_events` | ✅ |
 | D-7 | Results/ids correlated under concurrency | tst_daemonclient::resultsAndIdsAreCorrelated | same | B: concurrent_requests_each_answered_once (200) | ✅ |
 
 ### Workspace and explorer (R4, R5)
@@ -49,8 +49,8 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | W-1 | Protocol order of root entries; kinds; ignored flag | tst_workspace | same data; dimmed via `--text-faint` | S, E: 3a | ✅ |
 | W-2 | Lazy expansion; re-list on re-expand | tst_workspace::expandingListsChildrenLazily, ::collapsedDirectoriesAreRelistedWhenExpandedAgain | same | S; E: 3b | ✅ |
 | W-3 | Minimal updates on `fs/didChange`, expansion preserved | ::newFileAppearsWithoutCollapsingOtherDirectories, ::changesUseMinimalRowSignals | node map keeps unchanged nodes; React re-renders visible rows only | S: "re-lists an expanded directory…" | ✅ (no "minimal signal" equivalent needed) |
-| W-4 | Inline error row for an unreadable directory | ::unreadableDirectoryShowsInlineErrorRow | `node.error` rendered under the directory | code only | 🟡 |
-| W-5 | Missing path / file → error message | ::openingAMissingPathEmitsError, ::openingAFileEmitsError | same messages in banner | code only | 🟡 |
+| W-4 | Inline error row for an unreadable directory | ::unreadableDirectoryShowsInlineErrorRow | `node.error` rendered under the directory | S: "an unreadable directory shows an inline error under it" (POSIX only: chmod cannot deny reads on Windows) | ✅ |
+| W-5 | Missing path / file → error message | ::openingAMissingPathEmitsError, ::openingAFileEmitsError | same messages in banner | S: "opening a folder that does not exist reports it", "opening a file instead of a folder reports an error" | ✅ |
 | W-6 | Recent list newest first; Open Recent menu | ::recentListIsPopulatedAndNewestFirst | File menu "Recent" section + Welcome list + palette | E screenshots | ✅ |
 | W-7 | Reopen last on startup | ::reopenLastOpensTheLastWorkspaceWhenEnabled | `createApp` once-per-launch | S, E: 8 | ✅ |
 | W-8 | Daemon restart drops the workspace | ::daemonRestartDropsTheWorkspace | same | S: "a crashed daemon…" | ✅ |
@@ -62,20 +62,20 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | ID | Feature | Qt | Tauri | Evidence | Status |
 |----|---------|----|-------|----------|--------|
 | E-1 | Bridge-1 handshake: configure → documents → activate | tst_documents::handshakeSends… | `DocumentsStore.ready()` same order | S (FakeEditor runs the real `DocumentStore`) | ✅ |
-| E-2 | Wrong bridge version refused | ::wrongBridgeVersionIsRefused… | same check | code | 🟡 |
-| E-3 | CRLF round-trip byte-exact | ::crlfSurvivesTheRoundTrip | same path (text passed verbatim) | not tested | 🟡 |
-| E-4 | Non-UTF-8 / too-large banners | ::unsupportedEncoding…, ::tooLargeFiles… | same messages | S: "refuses a non-UTF-8 file…" | ✅ (too-large untested) |
+| E-2 | Wrong bridge version refused | ::wrongBridgeVersionIsRefused… | same check | S: "a page speaking the wrong bridge version is refused and gets no messages" | ✅ |
+| E-3 | CRLF round-trip byte-exact | ::crlfSurvivesTheRoundTrip | same path (text passed verbatim) | S: "CRLF line endings survive a round trip" | ✅ |
+| E-4 | Non-UTF-8 / too-large banners | ::unsupportedEncoding…, ::tooLargeFiles… | same messages | S: "refuses a non-UTF-8 file…", "a file over 16 MiB is refused…" | ✅ |
 | E-5 | Save answers exactly once; unknown path ignored | ::saveWritesWithExpectedVersionAndAnswersExactlyOnce | same | S, E: 5 | ✅ |
-| E-6 | Conflict: Overwrite / Reload / Cancel | ::conflictOverwrite…, ::conflictReload…, ::conflictCancel… | same | S + E: 6b (Overwrite only) | 🟠 Reload/Cancel untested |
+| E-6 | Conflict: Overwrite / Reload / Cancel | ::conflictOverwrite…, ::conflictReload…, ::conflictCancel… | same | S: "…a dirty one conflicts and Overwrite wins", "conflict → Reload…", "conflict → Cancel…"; E: 6b/6b' | ✅ |
 | E-7 | Clean doc reloads on disk change; dirty doc flagged | ::cleanDocumentReloads…, ::dirtyDocumentIsMarkedChangedOnDisk… | same + "changed on disk" tab badge | S; E: 6a, 6b | ✅ |
-| E-8 | Unsaved prompt on close tab / folder / quit, each choice | ::closingADirtyDocumentPrompts…, ::quitAndFolderChanges… | same; window close intercepted in Rust and routed to the prompt | S: "closing a dirty tab prompts…" (Discard) | 🟠 Save/Cancel + window-close path untested |
+| E-8 | Unsaved prompt on close tab / folder / quit, each choice | ::closingADirtyDocumentPrompts…, ::quitAndFolderChanges… | same; window close intercepted in Rust and routed to the prompt | S: "closing a dirty tab prompts…" (Discard), "unsaved-work prompt: Save writes then proceeds; Cancel keeps the tab", "opening another folder … Cancel stays, Discard switches"; E quit: 1b/1c (the window's close button), 2–6 (quit: Cancel, Save) | ✅ |
 | E-9 | Tab cycle (Ctrl+Tab / Ctrl+PgUp/PgDn), close (Ctrl+W) | EditorArea.qml Shortcuts | all three implemented in the window key handler (`App.tsx`) | inspected; E 5/10 exercise the same handler | ✅ |
 | E-10 | Edit menu: undo/redo/find/replace/select all | Main.qml | Edit menu → `runCommand` | code | 🟡 |
 | E-11 | Cursor position in status bar | ::dirtyAndCursorAreForwardedToTheModel | same | screenshots show it | ✅ |
 | E-12 | Renderer crash → reload with unsaved text from snapshot | smoke_editor::unsavedTextSurvivesARendererCrash | snapshots held in the **host** (`snapshot_put`); engine signal on Linux + heartbeat lease elsewhere; reload replays them through the restore path | S: "unsaved text comes back from the host snapshot after a webview crash", "a clean document leaves nothing to recover"; E: 11a/11b/11c (real web process killed, host detects, reloads, app+daemon survive) | ✅ (text restoration at store level; engine hook verified on Linux only) |
-| E-13 | Links open externally, http/https only | ::linksOnlyOpenForHttpSchemes | `open_external` host command with the same check | code | 🟡 |
+| E-13 | Links open externally, http/https only | ::linksOnlyOpenForHttpSchemes | `open_external` host command with the same check | S: "links open externally only for http and https" | ✅ |
 | E-14 | Tab state restored, missing files skipped | ::tabsAndActiveTabAreRestoredSkippingMissingFiles | same | S, E: 8 | ✅ |
-| E-15 | Switching workspaces closes documents, ignores late answers | ::switchingWorkspacesClosesDocuments… | generation counter ported | code | 🟡 |
+| E-15 | Switching workspaces closes documents, ignores late answers | ::switchingWorkspacesClosesDocuments… | generation counter ported | S: "switching workspaces closes the documents of the old one" | ✅ (late-answer half not driven) |
 | E-16 | Editor theme follows app theme; font size/family/wrap live | smoke_launch::settingsApplyLive… | Monaco themes generated from CSS tokens | E: 9 | ✅ |
 | E-17 | Asset scheme with path-escape checks | tst_assethandler (7) | Tauri's built-in asset protocol serves only `dist/`; no scheme handler of ours (see PARITY.md) | Tauri-provided | 🟡 (no Axiom test; N/A by design) |
 
@@ -90,7 +90,7 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | T-5 | Command passed verbatim to shell | ::commandLineIsPassedVerbatimToTheShell | same | S | ✅ |
 | T-6 | History: most-recent-first, deduped, capped 20, persisted | ::historyIs… | same; ↑/↓ in the field instead of a combo-box | S, E: 8 | ✅ (interaction differs) |
 | T-7 | Rerun last (F5), Stop (Shift+F5), Run Command (Ctrl+Shift+R) | Main.qml | same shortcuts | code; bench uses Ctrl+Shift+R | 🟡 |
-| T-8 | Closing the workspace cancels a running task | ::closingTheWorkspaceCancelsARunningTask | daemon does it; store resets | code | 🟡 |
+| T-8 | Closing the workspace cancels a running task | ::closingTheWorkspaceCancelsARunningTask | daemon does it; store resets | S: "closing the workspace cancels a running command" (same three assertions as Qt) | ✅ |
 | T-9 | Copy selection / Copy all / right-click menu on output | OutputPanel.qml | context menu (Copy selection / Copy all) + "Copy output" button + native text selection | inspected | ✅ |
 | T-10 | stderr marked without colour alone | gutter marker | gutter "▌" + visually-hidden "stderr:" prefix | screenshot | ✅ |
 

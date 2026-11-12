@@ -294,6 +294,16 @@ export class WebDriver {
     }
   }
 
+  /**
+   * Opens a new session for the same app on the same server. Needed after an
+   * action that ends the current session but not the app: closing the window
+   * (the host may prevent the close and ask about unsaved work).
+   */
+  async renew() {
+    this.id = await createSession(this.base, { alwaysMatch: {} });
+    return this;
+  }
+
   async cmd(method, path, payload) {
     const res = await fetch(`${this.base}/session/${this.id}${path}`, {
       method,
