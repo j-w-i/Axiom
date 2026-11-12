@@ -123,6 +123,13 @@ jobs:
             *) echo "unknown runner OS $RUNNER_OS" >&2; exit 1 ;;
           esac
           scripts/bundle.sh --bundles "$bundles"
+      # macOS: the bundle cannot be launched on the runner headlessly, but its
+      # structure decides whether locate_daemon finds the sidecar on a user's Mac.
+      - name: Verify the macOS bundle's structure
+        if: runner.os == 'macOS'
+        shell: bash
+        run: scripts/verify-package.sh --app "$(ls -d ../../target/release/bundle/macos/*.app)"
+
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:

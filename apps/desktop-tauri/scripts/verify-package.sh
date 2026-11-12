@@ -7,6 +7,12 @@
 # installed copy would be, on a private X display.
 #
 #   apps/desktop-tauri/scripts/verify-package.sh [path/to/package.deb|.rpm]
+#   apps/desktop-tauri/scripts/verify-package.sh --app path/to/Axiom.app
+#
+# With --app, a macOS bundle is checked structurally (it cannot be launched
+# anywhere but macOS): the sidecar sits next to CFBundleExecutable, where
+# locate_daemon looks for it, the identifier and version match tauri.conf.json,
+# and the icon is present. Runs on any OS.
 #
 # Checks, each printed with its evidence:
 #   1. the package contains the app and the daemon sidecar in the same bin dir
@@ -23,6 +29,49 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 root="$(cd "$here/../.." && pwd)"
 # shellcheck disable=SC1091
 source "$here/scripts/env.sh"
+
+# ---- macOS bundle: structure only (needs macOS to run) -----------------------
+if [[ "${1:-}" == "--app" ]]; then
+  app="${2:?--app needs a .app path}"
+  conf="$here/src-tauri/tauri.conf.json"
+  exec python3 - "$app" "$conf" <<'PY'
+import json, plistlib, sys
+from pathlib import Path
+
+app, conf = Path(sys.argv[1]), Path(sys.argv[2])
+fail = 0
+def check(name, ok, detail=""):
+    global fail
+    print(f"{'PASS' if ok else 'FAIL'}  {name}{' — ' + detail if detail else ''}")
+    fail = 0 if ok else 1
+
+info_path = app / "Contents" / "Info.plist"
+check("the bundle has Contents/Info.plist", info_path.is_file(), str(info_path))
+if not info_path.is_file():
+    sys.exit(1)
+info = plistlib.loads(info_path.read_bytes())
+executable = info.get("CFBundleExecutable", "")
+macos = app / "Contents" / "MacOS"
+check("CFBundleExecutable names a binary in Contents/MacOS",
+      bool(executable) and (macos / executable).is_file(), executable or "(none)")
+# locate_daemon looks for a sibling of the running executable: that is MacOS/.
+sidecar = macos / "axiomd"
+check("the daemon sidecar sits next to the executable (the sibling lookup)",
+      sidecar.is_file(), f"{sidecar.name} {sidecar.stat().st_size if sidecar.is_file() else 0} bytes")
+config = json.loads(conf.read_text())
+check("the bundle identifier matches tauri.conf.json",
+      info.get("CFBundleIdentifier") == config["identifier"],
+      f"{info.get('CFBundleIdentifier')} vs {config['identifier']}")
+check("the bundle version matches the package version",
+      info.get("CFBundleShortVersionString") == config["version"],
+      f"{info.get('CFBundleShortVersionString')} vs {config['version']}")
+icon = app / "Contents" / "Resources" / "icon.icns"
+check("the icon is in Contents/Resources", icon.is_file(), icon.name)
+print()
+print("bundle verification: all checks passed" if not fail else "bundle verification: FAILED")
+sys.exit(fail)
+PY
+fi
 
 pkg="${1:-$(ls -t "$root"/target/release/bundle/deb/*.deb 2>/dev/null | head -1)}"
 [[ -n "$pkg" && -f "$pkg" ]] || { echo "verify-package: no package found (scripts/bundle.sh --bundles deb,rpm)" >&2; exit 2; }
