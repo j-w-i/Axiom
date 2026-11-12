@@ -18,7 +18,7 @@ and in CI. A task is not Tested until it passes.
 | Shell component (Qt) | C++ models and `DaemonClient` against the real daemon | `apps/desktop/tests/tst_*.cpp` (Qt Test, offscreen) | a display |
 | GUI smoke (Qt) | The real window, real editor bundle, real daemon: open → type → save → run | `apps/desktop/tests/tst_smoke_*.cpp` (offscreen) | a display |
 | Packaged app (Tauri) | A macOS `.app` checked structurally (sidecar beside `CFBundleExecutable`, identifier/version against `tauri.conf.json`, icon) — the part that decides whether `locate_daemon` works on a user's Mac. A `.deb` **or** `.rpm` unpacked to a prefix and run as an installed copy: it finds its sidecar daemon with no `--daemon`, the initialize handshake is observed on the wire through `bench/daemon_tap.py`, and its window is on the private display | `apps/desktop-tauri/scripts/verify-package.sh` (7 checks, `scripts/check.sh package`) | a display |
-| End-to-end parity (Tauri) | The real menus (Edit undo/redo/find/replace/select all, Help ▸ About) and task shortcuts (F5, Shift+F5, Ctrl/Cmd+Shift+R) driven through the real window | `apps/desktop-tauri/e2e/parity.mjs` (10 checks) | a display, a model |
+| End-to-end parity (Tauri) | The real menus (Edit undo/redo/find/replace/select all, Help ▸ About), task shortcuts (F5, Shift+F5, Ctrl/Cmd+Shift+R) and the accessibility guard (accessible names, region roles, visible focus ring) driven through the real window | `apps/desktop-tauri/e2e/parity.mjs` (13 checks) | a display, a model |
 | End-to-end (Tauri) | The real Tauri app, real webview, real daemon, real key events, driven over WebDriver: open, edit, save, conflicts, commands, themes, palette, restore, quit with unsaved work, geometry, webview-crash recovery | `apps/desktop-tauri/e2e/{smoke,quit,geometry,parity}.mjs` through `e2e/runner.mjs`; two WebDriver servers, see below | a model; macOS crash kill (see below) |
 | Provider contract (M2) | Every manifest under `providers/` | `crates/env/tests/provider_contract.rs` | network (except opt-in install tests) |
 | Agent (M3) | Loop, tools, permissions, checkpoints with a scripted model | `crates/agent/tests/` | network, a real model |
@@ -87,6 +87,13 @@ instead, its out-of-band channel with bounded re-dispatch and the one
 @wdio/tauri-service uses. `e2e/eval-contract.mjs` proves both channels return
 the same values and errors for every shape the suites use, and runs before
 the suites wherever the embedded server is used.
+
+**One binary, two builds.** The end-to-end suite drives a release binary built
+with the `e2e` feature; `scripts/bundle.sh` builds the same path *without* it.
+So packaging invalidates the binary the suite needs: run the end-to-end step
+before packaging (CI does), and rebuild with `--features e2e` if you ran
+`scripts/check.sh package` first. The symptom is a suite that cannot reach a
+WebDriver server at all.
 
 The crash check (11) kills the webview's content process. Linux and Windows
 find it as a descendant of the app (`e2e/processes.mjs`, unit-tested for all

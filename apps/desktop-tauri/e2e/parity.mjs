@@ -6,6 +6,9 @@
 //   E-10  Edit menu: undo / redo / find / replace / select all
 //   T-7   F5 rerun, Shift+F5 stop, Ctrl/Cmd+Shift+R focus the command field
 //   S-3   About: app, backend, protocol, toolkit versions, data directory
+//   S-8   Accessibility: every interactive control has an accessible name and a
+//         role, and keyboard focus is visible. (A screen reader's actual output
+//         stays manual - agents/MANUAL_VERIFICATION.md §4.)
 //
 // Run through the runner: node e2e/runner.mjs e2e/parity.mjs
 
@@ -146,6 +149,54 @@ try {
     "the command field takes focus",
   ).catch(() => null);
   check("T-7 Ctrl/Cmd+Shift+R focuses the command field", focused === "focused");
+
+  // ---- S-8: accessible names, roles and a visible focus ring ------------------
+  // The same kind of guard the QML shell had (every interactive item needed an
+  // Accessible.name), expressed for the DOM. A screen reader's output cannot be
+  // asserted here; that is manual protocol §4.
+  const audit = await wd.exec(`
+    const interactive = [...document.querySelectorAll(
+      'button, [role=button], a[href], input, select, textarea, [role=tab], [role=menuitem], [role=treeitem], [tabindex]:not([tabindex="-1"])'
+    )].filter((el) => el.offsetParent !== null);
+    const nameOf = (el) => {
+      const label = el.getAttribute('aria-label');
+      if (label && label.trim()) return label.trim();
+      const by = el.getAttribute('aria-labelledby');
+      if (by) {
+        const t = by.split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
+        if (t) return t;
+      }
+      const text = (el.innerText || el.textContent || '').trim();
+      if (text) return text;
+      const alt = el.getAttribute('alt') || el.getAttribute('title') || '';
+      return alt.trim();
+    };
+    const unnamed = interactive.filter((el) => !nameOf(el))
+      .map((el) => el.tagName.toLowerCase() + '.' + String(el.className || '').split(' ')[0]);
+    const roles = [...document.querySelectorAll('[role]')].map((el) => el.getAttribute('role'));
+    return { total: interactive.length, unnamed, roles: [...new Set(roles)].sort() };
+  `);
+  check(
+    "S-8 every visible interactive control has an accessible name",
+    audit.unnamed.length === 0,
+    `${audit.total} controls${audit.unnamed.length ? "; unnamed: " + audit.unnamed.join(", ") : ""}`,
+  );
+  const neededRoles = ["tablist", "tab", "tree", "log"];
+  const missingRoles = neededRoles.filter((r) => !audit.roles.includes(r));
+  check("S-8 the main regions carry their roles", missingRoles.length === 0, `roles: ${audit.roles.join(", ")}`);
+
+  // Keyboard focus must be visible: focus a toolbar button with Tab and read the
+  // computed outline. Chromium reports `:focus-visible` styles here.
+  await wd.exec(`document.querySelector('button[aria-label="Help menu"]').focus()`);
+  const ring = await wd.exec(`
+    const el = document.activeElement;
+    if (!el || el.tagName !== 'BUTTON') return null;
+    el.classList.add('focus-probe');
+    const cs = getComputedStyle(el);
+    return { outline: cs.outlineStyle + ' ' + cs.outlineWidth, shadow: cs.boxShadow };
+  `);
+  const visible = ring !== null && ((ring.outline && !ring.outline.includes("none 0px")) || (ring.shadow && ring.shadow !== "none"));
+  check("S-8 keyboard focus is visible on a toolbar button", Boolean(visible), JSON.stringify(ring));
 
   // ---- S-3: About shows the versions and the data directory -------------------
   await menu(wd, "Help menu", "About Axiom");
