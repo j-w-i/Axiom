@@ -8,6 +8,7 @@
 #
 #   apps/desktop-tauri/scripts/verify-package.sh [path/to/package.deb|.rpm]
 #   apps/desktop-tauri/scripts/verify-package.sh --app path/to/Axiom.app
+#   apps/desktop-tauri/scripts/verify-package.sh --nsis path/to/setup.exe
 #
 # With --app, a macOS bundle is checked structurally (it cannot be launched
 # anywhere but macOS): the sidecar sits next to CFBundleExecutable, where
@@ -71,6 +72,36 @@ print()
 print("bundle verification: all checks passed" if not fail else "bundle verification: FAILED")
 sys.exit(fail)
 PY
+fi
+
+# ---- Windows installer: contents only (needs Windows to run) ------------------
+if [[ "${1:-}" == "--nsis" ]]; then
+  exe="${2:?--nsis needs an installer path}"
+  [[ -f "$exe" ]] || { echo "verify-package: $exe not found" >&2; exit 2; }
+  command -v 7z >/dev/null || { echo "verify-package: 7z is needed to read an NSIS installer" >&2; exit 2; }
+  out="$(mktemp -d)"; trap 'rm -rf "$out"' EXIT
+  7z x -y "-o$out" "$exe" >/dev/null 2>&1 || { echo "FAIL  the installer could not be unpacked" ; exit 1; }
+  nfail=0
+  chk() { if [[ "$2" == 1 ]]; then echo "PASS  $1${3:+ — $3}"; else echo "FAIL  $1${3:+ — $3}"; nfail=1; fi; }
+  app="$(find "$out" -maxdepth 2 -type f -iname 'axiom-tauri.exe' | head -1)"
+  dmn="$(find "$out" -maxdepth 2 -type f -iname 'axiomd.exe' | head -1)"
+  chk "the installer ships the app" "$([[ -n "$app" ]] && echo 1 || echo 0)" "${app:+$(basename "$app") $(stat -c%s "$app") bytes}"
+  chk "the installer ships the daemon sidecar" "$([[ -n "$dmn" ]] && echo 1 || echo 0)" "${dmn:+$(basename "$dmn") $(stat -c%s "$dmn") bytes}"
+  chk "both are installed into the same directory (the sibling lookup can find it)" \
+    "$([[ -n "$app" && -n "$dmn" && "$(dirname "$app")" == "$(dirname "$dmn")" ]] && echo 1 || echo 0)"
+  # PE files start with "MZ": a truncated or mis-built payload would not.
+  for f in "$app" "$dmn"; do
+    [[ -n "$f" ]] && chk "$(basename "$f") is a Windows executable (MZ header)" \
+      "$([[ "$(head -c2 "$f")" == "MZ" ]] && echo 1 || echo 0)"
+  done
+  # The end-to-end WebDriver server must not ship (the same guard bundle.sh applies).
+  if [[ -n "$app" ]]; then
+    chk "the installed app does not contain the end-to-end WebDriver server" \
+      "$(grep -q 'tauri-plugin-webdriver is ready' "$app" && echo 0 || echo 1)"
+  fi
+  echo
+  if [[ "$nfail" == 0 ]]; then echo "installer verification: all checks passed"; else echo "installer verification: FAILED"; fi
+  exit "$nfail"
 fi
 
 pkg="${1:-$(ls -t "$root"/target/release/bundle/deb/*.deb 2>/dev/null | head -1)}"

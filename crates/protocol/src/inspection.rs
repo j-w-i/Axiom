@@ -281,7 +281,9 @@ method!(
 );
 notification!(
     /// Adapter to daemon: the tree changed; previous snapshots are stale.
-    DidMutate, "inspect/didMutate", DidMutateParams
+    DidMutate,
+    "inspect/didMutate",
+    DidMutateParams
 );
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

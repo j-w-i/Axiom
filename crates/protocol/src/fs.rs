@@ -37,7 +37,9 @@ notification!(
     /// Daemon to client. Coalesced (at most one per 100 ms per workspace)
     /// set of paths that changed on disk, from any cause including this
     /// client's own writes. Paths under ignored directories are not reported.
-    DidChange, "fs/didChange", DidChangeParams
+    DidChange,
+    "fs/didChange",
+    DidChangeParams
 );
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
