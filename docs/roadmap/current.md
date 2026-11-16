@@ -72,11 +72,21 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-12-M1.5.md`
+`agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval). Earlier: `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 
-Finish the M1.5 gate (T-12), in this order:
+**M1.6 wave B**, on branch `task/m1.6` (see the M1.6 section at the top). Take the
+first `READY` task whose id starts with `M1.6-`, in `order`:
+`scripts/tasks.py | grep '^M1.6-' | grep READY`. Do **not** use `scripts/tasks.py
+next` for this: it prints T-11 (an M1.5 spike with a lower `order` that is still
+READY and is not part of M1.6). Wave B is M1.6-QA-001, M1.6-QA-002, M1.6-SYSTEM-001
+and M1.6-SHELL-001. Both QA baselines must be captured before any restyle merges.
+
+## M1.5 follow-ups (open by owner waiver; not blocking M1.6)
+
+These need macOS/Windows hardware or a CI run. T-14 and T-15 already ran by
+waiver; the items stay open as evidence for the M1.5 record:
 
 1. **Spend one CI run on the branch as it stands** (`task/m1.5`, 7 commits
    ahead of origin). It should turn the Windows cell green — typing now works
@@ -96,8 +106,7 @@ Finish the M1.5 gate (T-12), in this order:
    folder dialog are manual-protocol items; T-4 is the bench's `output`
    scenario. (E-17 was waived by the owner on 2026-11-12.)
 
-Only after that may T-14 (make Tauri the default) and, a milestone later, T-15
-(delete the Qt shell) run.
+(T-14 and T-15 ran on 2026-11-17 by owner waiver; see the top of this file.)
 
 ## Blockers
 
