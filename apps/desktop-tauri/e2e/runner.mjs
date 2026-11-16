@@ -9,9 +9,11 @@
 //   Windows  the session's desktop (CI runner)
 //   macOS    the session's GUI (CI runner)
 //
-// Usage: node e2e/runner.mjs [suite.mjs ...]   (default: smoke, quit, geometry, parity)
+// Usage: node e2e/runner.mjs [suite.mjs ...]   (default: smoke, quit, geometry, parity;
+//        a bare name such as shots.mjs is looked up in e2e/; shots.mjs is not in the default set)
 // Env:   AXIOM_TAURI_APP, AXIOMD_UNDER_TEST, AXIOM_SCREENSHOT_DIR, AXIOM_E2E_LOG,
-//        AXIOM_XVFB (path to Xvfb), AXIOM_ALLOW_EXISTING_DISPLAY
+//        AXIOM_XVFB (path to Xvfb), AXIOM_XVFB_SCREEN (e.g. 1440x900x24),
+//        AXIOM_ALLOW_EXISTING_DISPLAY
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -22,7 +24,9 @@ const here = import.meta.dirname;
 const repo = resolve(here, "../../..");
 const EXE = process.platform === "win32" ? ".exe" : "";
 
-const customSuites = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+/** A suite named as `shots.mjs` is looked up in e2e/ when it is not a path that exists. */
+const resolveSuite = (s) => (existsSync(s) ? resolve(s) : existsSync(join(here, s)) ? join(here, s) : s);
+const customSuites = process.argv.slice(2).filter((a) => !a.startsWith("--")).map(resolveSuite);
 const suites = customSuites.length
   ? customSuites
   : [join(here, "smoke.mjs"), join(here, "quit.mjs"), join(here, "geometry.mjs"), join(here, "parity.mjs")];
@@ -84,7 +88,10 @@ async function linuxDisplay() {
     }
   }
   if (n === undefined) throw new Error("no free X display number");
-  const x = spawn(xvfb, [`:${n}`, "-screen", "0", "1440x900x24", "-nolisten", "tcp", "-extension", "RANDR"], {
+  // The screenshot suite also takes a 200% pass (GDK_SCALE=2): a 1440x900
+  // window then needs 2880x1800 device pixels. Other suites keep 1440x900.
+  const screen = process.env.AXIOM_XVFB_SCREEN ?? (suites.some((s) => s.endsWith("shots.mjs")) ? "2880x1800x24" : "1440x900x24");
+  const x = spawn(xvfb, [`:${n}`, "-screen", "0", screen, "-nolisten", "tcp", "-extension", "RANDR"], {
     stdio: "ignore",
   });
   children.push(x);

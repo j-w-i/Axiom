@@ -35,6 +35,28 @@ review below._
    locally without a new dependency) with a threshold of 0.1% changed pixels per
    state, and writes an HTML report of before / after / diff.
 
+**As built (M1.6-QA-001).** Differences from the plan above:
+
+- Run it as `scripts/e2e.sh shots.mjs` (a bare suite name is looked up in `e2e/`);
+  it is not in the default suite set. Compare with the separate
+  `node e2e/shots-compare.mjs <before> <after> [--threshold] [--out]`, not a `--compare` flag.
+- File names are lowercase state ids: `s4-dark.png`, `s4-light@2x.png`.
+  S1 and S3 use stand-in backends (a process that never answers / exits at
+  once), so their theme is set on the document instead of through a setting.
+- Animations are disabled by injected CSS (there is no `appearance.motion`
+  until M1.6-INTERACTION-001). Durations in finished-run texts are replaced by
+  `1.2 s` in the page, because they are the only wall-clock text; the shell shows
+  no elapsed time for a running task yet, so no clock hook exists.
+- The 200% pass is S4 in both themes with `GDK_SCALE=2`; the runner gives its
+  Xvfb a 2880x1800 screen for this suite.
+- Independent stdout/stderr pipes interleave differently from run to run, so the
+  stand-in build tool writes one line per 40 ms; a harness that lets that vary
+  fails the two-run determinism check.
+- Not yet capturable, listed `pending` in the manifest: S1b-S1d (SHELL-007), S11b
+  (SURFACES-002), S16 (SHELL-005), S17 (SYSTEM-003) and the focused-region rule.
+  S11 is the single current Settings sheet.
+- The pre-redesign baseline is in `docs/roadmap/verification/M1.6/baseline/linux/`.
+
 Baselines are **not** committed for every run. The approved set for each task is
 attached to its handoff, and the milestone set lives in
 `docs/roadmap/verification/M1.6/` (PNG, 100% only, for size).

@@ -27,8 +27,10 @@ lives on branch `task/m1.6`.
   `experiments/e5-visual-concepts/`. Reference screenshots: `docs/design/concepts/r-*.png`.
 - Milestone: `docs/roadmap/milestones.md` §M1.6; 27 tasks in `docs/tasks/M1.6/`;
   graph and waves: `dependency-graph.md` §M1.6.
-- **Next (wave B, parallel, disjoint scopes):** M1.6-QA-001 (screenshot harness and
-  visual baseline), M1.6-QA-002 (performance baseline and new scenarios),
+- **M1.6-QA-001 is tested (2026-11-17):** screenshot harness (`scripts/e2e.sh shots.mjs`,
+  `e2e/shots-compare.mjs`) and the Linux visual baseline in
+  `docs/roadmap/verification/M1.6/baseline/linux/`.
+- **Next (wave B, parallel, disjoint scopes):** M1.6-QA-002 (performance baseline and new scenarios),
   M1.6-SYSTEM-001 (generated tokens), M1.6-SHELL-001 (split `App.tsx`, no visual
   change). The QA baselines must be captured before the first restyle merges.
 - **Inherited blocker:** M1.6-QA-005 (macOS/Windows review) needs real hosts or a
@@ -72,7 +74,7 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval). Earlier: `agents/handoffs/2026-11-12-M1.5.md`.
+`agents/handoffs/2026-11-17-M1.6-QA-001.md`. Earlier: `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 
@@ -80,7 +82,7 @@ gone (tag `qt-shell-final`).
 first `READY` task whose id starts with `M1.6-`, in `order`:
 `scripts/tasks.py | grep '^M1.6-' | grep READY`. Do **not** use `scripts/tasks.py
 next` for this: it prints T-11 (an M1.5 spike with a lower `order` that is still
-READY and is not part of M1.6). Wave B is M1.6-QA-001, M1.6-QA-002, M1.6-SYSTEM-001
+READY and is not part of M1.6). Wave B is M1.6-QA-001 (done), M1.6-QA-002, M1.6-SYSTEM-001
 and M1.6-SHELL-001. Both QA baselines must be captured before any restyle merges.
 
 ## M1.5 follow-ups (open by owner waiver; not blocking M1.6)
