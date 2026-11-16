@@ -86,6 +86,8 @@ Decision: ADR-0012. Design, parity matrix, budgets and evaluation:
 6. Packages for each OS install, launch and connect.
 7. T-15 ran only after the removal conditions in
    `docs/migration/qt-to-tauri/implementation-roadmap.md` §5.
+   *Recorded exception:* T-15 ran on 2026-11-17 with §5.1, §5.2 and §5.5 waived by
+   the owner (`verification/M1.5.md` §6b).
 
 M2's backend epics (2.0–2.6, 2.8) do not touch the shell and may run in
 parallel with M1.5; M2 epic 2.7 (UI) starts only after T-12 and is built in the

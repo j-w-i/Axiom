@@ -2,27 +2,29 @@
 
 _Last updated: 2026-11-17._
 
-## Default shell switched (T-14), 2026-11-17
+## Qt shell retired (T-15), 2026-11-17
 
-At the owner's instruction the **Tauri shell is now the default**: `scripts/check.sh`
-runs the Tauri gates, `scripts/run.sh` launches it, and the Qt shell is reached with
-`scripts/check.sh desktop-qt` (alias `desktop`, `everything` = default + Qt) and
-`scripts/run.sh --shell qt`. The Qt shell is not removed and stays in CI. The
-owner **waived T-14's precondition that T-12 be recorded as passed**: T-12 has not
-passed (open parity rows S-8/S-12/T-4, manual verification and macOS/Windows
-budgets and installs unrun). The risk accepted is the one roadmap §4 names: a
-revert after M2 UI work lands on Tauri. T-15 (retire Qt) remains gated on all six
-§5 conditions; the 30-day CI window started 2026-11-16 (`verification/M1.5.md` §7).
-There is no separate release workflow: `ci.yml` already builds and uploads the
-Tauri packages, so nothing points at Qt as a release artifact.
+At the owner's instruction the **Qt shell is removed**. `apps/desktop/`, its CI
+job, `bootstrap-qt.sh`, `check_qml.py`, `smoke.sh` and `dev-env.sh` are deleted;
+`scripts/check.sh` has no Qt branch and `scripts/run.sh` launches the Tauri shell.
+Recovery: tag `qt-shell-final` (`c9f3d82`), e.g.
+`git checkout qt-shell-final -- apps/desktop scripts`. Earlier the same day T-14
+made Tauri the default.
+
+**Owner waivers** (recorded in `verification/M1.5.md` §6b): T-14's precondition
+that T-12 be passed; §5.1 (a milestone as default), §5.2 (30 days of green CI;
+the window started 2026-11-16 and keeps running as evidence) and §5.5 (the manual
+accessibility run). Risk accepted: no real macOS or Windows launch of the
+installers and no screen-reader pass preceded the removal; those remain the first
+things to do (`agents/MANUAL_VERIFICATION.md`). The `emit` test helper and the Qt-vs-Tauri
+comparison in `apps/desktop-tauri/bench/` are left in place and are now dead weight.
 
 ## Where we are
 
-**M1 (platform foundation) is complete on the Qt shell; M1.5 (the Qt → Tauri
-migration) is in progress.** ADR-0012 is accepted: the desktop shell becomes
-Tauri 2 + React. The migration is gated — the Qt shell (`apps/desktop`) is
-still the release artifact and stays buildable and tested until task T-14,
-which may only run after the parity gate T-12.
+**M1 (platform foundation) is complete; M1.5 (the Qt → Tauri migration) is
+closed by owner decision with the T-12 parity gate not formally passed.**
+ADR-0012 is accepted: the desktop shell is Tauri 2 + React and the Qt shell is
+gone (tag `qt-shell-final`).
 
 | Area | State |
 |------|-------|
@@ -33,8 +35,8 @@ which may only run after the parity gate T-12.
 | `crates/desktop-bridge` | Tested: 13 behaviour tests against the real daemon (incl. stderr forwarding) + 12 unit tests (framing, daemon lookup order) |
 | `apps/desktop-tauri` | M1.5 shell: root-workspace Rust host + React UI; 5 host-surface + 3 release-guard tests, 51 Vitest tests, 51 end-to-end checks in 4 suites (smoke 22, quit 8, geometry 5, parity 13) through two WebDriver servers |
 | CI | Actions budget for the month is nearly exhausted (owner, 2026-11-12): verification is local on Linux plus one batched run, not a per-change loop. Last run 43146126579: Linux+macOS green, Windows at typing-fixed/commands-pending |
-| Qt shell | M1, 9 Qt test executables / 107 test functions, green; kept until T-15 |
-| M1.5 gate (T-12) | **Not passed**: on Linux everything is verified (parity 52/56, all ten performance budgets, 48 end-to-end checks, package launches/finds its sidecar/connects) and macOS went green end to end in run 43141643434; Windows still fails at typing-free stages and KD-WIN-1 (Qt) is unchanged; macOS/Windows budgets, the manual protocol and the E-17 waiver are open — `docs/roadmap/verification/M1.5.md` |
+| Qt shell | Retired by T-15 (2026-11-17); recover from tag `qt-shell-final` |
+| M1.5 gate (T-12) | **Not passed** (superseded by the owner's T-14/T-15 decisions above): on Linux everything is verified (parity 52/56, all ten performance budgets, 48 end-to-end checks, package launches/finds its sidecar/connects) and macOS went green end to end in run 43141643434; Windows still fails at typing-free stages and KD-WIN-1 (Qt) is unchanged; macOS/Windows budgets, the manual protocol and the E-17 waiver are open — `docs/roadmap/verification/M1.5.md` |
 
 ## Latest handoff
 
@@ -109,8 +111,7 @@ adopted), T-11 (analysis; recommends *not* adopting editor isolation until one
 of three stated triggers occurs).
 
 Open: T-10 and T-12 (manual protocol and the gate — macOS and Windows need real
-hosts), and **T-14 and T-15 are held**: the Qt shell remains the release
-artifact until the gate passes.
+hosts). T-14 and T-15 are done by owner waiver (see the top of this file).
 
 ## Open questions (do not block M1)
 
