@@ -139,6 +139,7 @@ async fn git_and_ignored_directories_are_not_reported() {
     let fx = d.open_fixture().await;
     set_watch(&d, &fx, true).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
+    d.drain_until_quiet(Duration::from_millis(500)).await;
     std::fs::write(fx.path(".git/HEAD"), "ref").unwrap();
     std::fs::write(fx.path("target/new.o"), "o").unwrap();
     assert!(

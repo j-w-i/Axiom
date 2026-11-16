@@ -146,6 +146,19 @@ impl Daemon {
     }
 
     /// True if no notification with this method arrives within `window`.
+    /// Discard notifications until none has arrived for `quiet`. Lets a test
+    /// separate what the fixture's own setup caused (macOS FSEvents may report
+    /// writes made just before the watcher started) from what the test does.
+    pub async fn drain_until_quiet(&self, quiet: Duration) {
+        let mut rx = self.rx.lock().await;
+        let give_up = tokio::time::Instant::now() + Duration::from_secs(10);
+        while tokio::time::Instant::now() < give_up {
+            if tokio::time::timeout(quiet, rx.recv()).await.is_err() {
+                return;
+            }
+        }
+    }
+
     pub async fn no_notification(&self, method: &str, window: Duration) -> bool {
         let mut rx = self.rx.lock().await;
         let end = tokio::time::Instant::now() + window;
