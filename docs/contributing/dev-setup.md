@@ -33,13 +33,17 @@ Debian/Ubuntu `sudo apt install libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-de
 ## Build and check
 
 ```sh
-scripts/check.sh          # everything that exists: fmt, clippy, tests, schema freshness, editor, desktop
-scripts/check.sh rust     # Rust only
-scripts/check.sh editor   # editor only: install --frozen-lockfile, check, build, test
+scripts/check.sh              # default: fmt, clippy, tests, schema freshness, editor, Tauri shell
+scripts/check.sh rust         # Rust only
+scripts/check.sh editor       # editor only: install --frozen-lockfile, check, build, test
+scripts/check.sh tauri        # the Tauri shell only (Linux needs WebKitGTK 4.1 / GTK 3 dev packages)
+scripts/check.sh desktop-qt   # the legacy Qt shell (needs the Qt setup above; `desktop` is an alias)
+scripts/check.sh everything   # the default plus the Qt shell
+scripts/run.sh                # launch the Tauri shell; `--shell qt` launches the Qt shell
 ```
 Editor development in a plain browser (fake host, sample document, no Qt):
 `cd editor && pnpm install && pnpm dev`.
-`check.sh` skips the desktop section until `apps/desktop` exists. It is the gate for every task and for CI.
+The Qt setup above is needed only for `desktop-qt` / `everything`. `check.sh` is the gate for every task and for CI.
 
 ## Running the app
 

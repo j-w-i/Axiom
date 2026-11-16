@@ -16,7 +16,7 @@ Requirements: `docs/product/requirements.md`.
 
 **M1 complete; M1.5 (Qt → Tauri migration) in progress.** Always check
 `docs/roadmap/current.md` and `scripts/tasks.py` — they are kept current; this
-paragraph may lag. The Qt shell is still the release artifact until task T-14.
+paragraph may lag. The Tauri shell became the default on 2026-11-17 (T-14); the Qt shell is a flagged fallback until T-15.
 
 ## Architecture in ten lines
 
@@ -66,7 +66,9 @@ Start with `docs/architecture/overview.md`; details in `modules.md`,
 ```sh
 scripts/tasks.py                  # task board
 scripts/tasks.py next             # what to work on
-scripts/check.sh                  # THE quality gate: fmt, clippy, tests, schema freshness (+ editor, desktop, tauri when present)
+scripts/check.sh                  # THE quality gate: fmt, clippy, tests, schema freshness, editor, Tauri shell
+scripts/check.sh desktop-qt       # the legacy Qt shell's gate (`everything` = default + Qt)
+scripts/run.sh [--shell qt]       # launch the Tauri shell (default) or the Qt shell
 scripts/check.sh rust             # Rust only
 cargo run -p axiom-protocol --example export_schema   # regenerate schemas/ after protocol changes
 source scripts/dev-env.sh         # Qt + cargo on PATH; defines axiom_cmake

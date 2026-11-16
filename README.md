@@ -1,7 +1,8 @@
 # Axiom
 
-An open-source, cross-platform, LLM-native development platform: a Qt
-desktop application over a Rust service daemon that manages workspaces,
+An open-source, cross-platform, LLM-native development platform: a Tauri 2
+desktop application (React + Monaco; the Qt shell is the legacy fallback, see
+below) over a Rust service daemon that manages workspaces,
 toolchains and builds, hosts AI agents with structured tools and
 permissions, and can map elements of a running UI back to their source so
 that AI-made changes are verified rather than assumed.
@@ -16,9 +17,16 @@ usable yet. See [`docs/roadmap/current.md`](docs/roadmap/current.md).
 - Setup: [`docs/contributing/dev-setup.md`](docs/contributing/dev-setup.md).
 
 ```sh
-scripts/check.sh      # build, lint and test everything that exists
-scripts/tasks.py      # task board
+scripts/check.sh               # default gate: Rust, editor and the Tauri shell
+scripts/run.sh                 # launch the Tauri shell (the default since T-14)
+scripts/run.sh --shell qt      # launch the legacy Qt shell (kept for one milestone)
+scripts/check.sh desktop-qt    # test the legacy Qt shell (`desktop` is an alias)
+scripts/tasks.py               # task board
 ```
+
+On Linux the Tauri shell needs the WebKitGTK 4.1 / GTK 3 development packages
+(`apps/desktop-tauri/scripts/sysroot.sh` extracts them locally without root).
+The Qt shell stays buildable and tested until task T-15 retires it.
 
 ## Licence
 

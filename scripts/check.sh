@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # The single quality gate. Every task must leave this passing.
-# Usage: scripts/check.sh            (everything that exists in the repo)
+# Usage: scripts/check.sh            (the default: Rust + editor + the Tauri shell)
 #        scripts/check.sh rust       (only the Rust workspace + repository guards)
-#        scripts/check.sh editor | tauri | desktop   (one part)
+#        scripts/check.sh editor | tauri   (one part)
+#        scripts/check.sh desktop-qt (the legacy Qt shell; `desktop` is an alias
+#                                     kept for one milestone, T-14)
+#        scripts/check.sh everything (the default plus the Qt shell)
 #        scripts/check.sh e2e        (Tauri end-to-end test, headless, ~2 min)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 what="${1:-all}"
+[[ "$what" == desktop ]] && what=desktop-qt   # alias, removed with T-15
 
 step() { printf '\n==> %s\n' "$*"; }
 
@@ -83,11 +87,16 @@ if [[ "$what" == package ]]; then
   done
 fi
 
-if [[ ( "$what" == all || "$what" == desktop ) && -f apps/desktop/CMakeLists.txt ]]; then
-  step "desktop: QML literal guard";  python3 scripts/check_qml.py
-  step "desktop: build axiomd and the emit test helper (debug) for the tests"
+if [[ "$what" == everything ]]; then
+  "$0" all
+  exec "$0" desktop-qt
+fi
+
+if [[ "$what" == desktop-qt && -f apps/desktop/CMakeLists.txt ]]; then
+  step "desktop-qt: QML literal guard";  python3 scripts/check_qml.py
+  step "desktop-qt: build axiomd and the emit test helper (debug) for the tests"
   cargo build -p axiomd -p emit
-  step "desktop: configure, build, test"
+  step "desktop-qt: configure, build, test"
   # shellcheck disable=SC1091
   source scripts/dev-env.sh
   axiom_cmake -S apps/desktop -B build/desktop

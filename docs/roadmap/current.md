@@ -1,6 +1,20 @@
 # Current state
 
-_Last updated: 2026-11-12 (M1.5 implementation session, local-only rounds while the Actions budget is spent)._
+_Last updated: 2026-11-17._
+
+## Default shell switched (T-14), 2026-11-17
+
+At the owner's instruction the **Tauri shell is now the default**: `scripts/check.sh`
+runs the Tauri gates, `scripts/run.sh` launches it, and the Qt shell is reached with
+`scripts/check.sh desktop-qt` (alias `desktop`, `everything` = default + Qt) and
+`scripts/run.sh --shell qt`. The Qt shell is not removed and stays in CI. The
+owner **waived T-14's precondition that T-12 be recorded as passed**: T-12 has not
+passed (open parity rows S-8/S-12/T-4, manual verification and macOS/Windows
+budgets and installs unrun). The risk accepted is the one roadmap §4 names: a
+revert after M2 UI work lands on Tauri. T-15 (retire Qt) remains gated on all six
+§5 conditions; the 30-day CI window started 2026-11-16 (`verification/M1.5.md` §7).
+There is no separate release workflow: `ci.yml` already builds and uploads the
+Tauri packages, so nothing points at Qt as a release artifact.
 
 ## Where we are
 
