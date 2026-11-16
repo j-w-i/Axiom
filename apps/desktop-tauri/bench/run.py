@@ -28,6 +28,20 @@ Scenarios
                window repaint (DAMAGE).
   output       a task printing 50 000 lines: task/exited → first DAMAGE after
                it ("output caught up") and CPU used meanwhile.
+
+M1.6 scenarios (M1.6-QA-002, docs/design/performance.md §4.2). These drive the
+e2e-mode build (`axiom-tauri-e2e`: WebDriver server + src/e2e-probe.ts) with the
+same real X input, and read key→frame times, frame intervals and React commit
+counts from the page through the WebDriver:
+  tab-switch   Ctrl+Tab x20 over 4 documents: key → first frame after Monaco's
+               model change.
+  palette      Ctrl+K x20: key → first frame with the palette painted.
+  panel-toggle Ctrl+B and Ctrl+J x10 each: frame intervals for 400 ms after each.
+  splitter-drag 40 pointer moves on the side-bar splitter: frame intervals and
+               the number of React commits.
+  idle-running `sleep 30` running: CPU of the app, WebKitWebProcess and
+               WebKitNetworkProcess for 10 s focused and 10 s unfocused.
+  typing-under-stream  ~2 000 lines/s into the console while 200 characters are typed.
 """
 import argparse
 import json
@@ -38,8 +52,10 @@ import signal
 import statistics
 import subprocess
 import sys
+import socket
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 import psutil
@@ -54,6 +70,8 @@ DAEMON = Path(os.environ.get("AXIOMD_UNDER_TEST", REPO / "target/release/axiomd"
 QT_APP = Path(os.environ.get("AXIOM_QT_APP", REPO / "build/desktop/axiom"))
 QT_ASSETS = Path(os.environ.get("AXIOM_QT_EDITOR_ASSETS", REPO / "build/desktop/editor"))
 TAURI_APP = Path(os.environ.get("AXIOM_TAURI_APP", REPO / "target/release/axiom-tauri"))
+# The e2e-mode build (WebDriver server + probe) for the M1.6 scenarios; see run.sh.
+TAURI_E2E_APP = Path(os.environ.get("AXIOM_TAURI_E2E_APP", REPO / "target/release/axiom-tauri-e2e"))
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +274,7 @@ def tap_time(events, event, method=None, nth=0):
 # ---------------------------------------------------------------------------
 
 class App:
-    def __init__(self, kind, data_dir, tap_log):
+    def __init__(self, kind, data_dir, tap_log, binary=None, extra_env=None):
         self.kind = kind
         self.data_dir = data_dir
         self.tap_log = tap_log
@@ -270,10 +288,11 @@ class App:
             cmd = [str(QT_APP), "--daemon", str(wrapper), "--data-dir", data_dir, "--editor-assets", str(QT_ASSETS)]
             env["XDG_CONFIG_HOME"] = str(Path(data_dir) / "config")
         else:
-            cmd = [str(TAURI_APP), "--daemon", str(wrapper), "--data-dir", data_dir]
+            cmd = [str(binary or TAURI_APP), "--daemon", str(wrapper), "--data-dir", data_dir]
             env["XDG_CONFIG_HOME"] = str(Path(data_dir) / "config")
             env["XDG_DATA_HOME"] = str(Path(data_dir) / "share")
             env["XDG_CACHE_HOME"] = str(Path(data_dir) / "cache")
+        env.update(extra_env or {})
         self.t_launch = time.monotonic()
         self.proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
@@ -466,7 +485,7 @@ def scenario_memory_cpu(x, kind):
     return out
 
 
-def typing_latency(x, win, app, n=200):
+def typing_latency(x, win, app, n=200, keep=False):
     g = win.get_geometry()
     # Click into the editor body, go to the end of a line in view.
     x.click(win, int(g.width * 0.55), int(g.height * 0.20))
@@ -478,6 +497,7 @@ def typing_latency(x, win, app, n=200):
     c0 = cpu_seconds(shell)
     t_start = time.monotonic()
     lat = []
+    kept = []
     letters = "abcdefghijklmnopqrstuvwxyz"
     for i in range(n):
         before = x.grab(region)
@@ -486,6 +506,8 @@ def typing_latency(x, win, app, n=200):
         td = x.wait_change(region, before, 1.0)
         if td is not None:
             lat.append((td - t) * 1000)
+            if keep:
+                kept.append((time.time(), (td - t) * 1000))
         time.sleep(0.03)  # ~25-30 keys/s including the wait: faster than most typists
     cpu = cpu_seconds(shell) - c0
     elapsed = time.monotonic() - t_start
@@ -493,9 +515,12 @@ def typing_latency(x, win, app, n=200):
         return {"samples": 0, "of": n}
     lat.sort()
     q = lambda p: round(lat[min(len(lat) - 1, int(p * len(lat)))], 2)
-    return {"samples": len(lat), "of": n, "p50_ms": q(0.5), "p95_ms": q(0.95), "p99_ms": q(0.99),
-            "max_ms": round(lat[-1], 2), "mean_ms": round(statistics.mean(lat), 2),
-            "cpu_pct_while_typing": round(cpu / elapsed * 100, 1)}
+    out = {"samples": len(lat), "of": n, "p50_ms": q(0.5), "p95_ms": q(0.95), "p99_ms": q(0.99),
+           "max_ms": round(lat[-1], 2), "mean_ms": round(statistics.mean(lat), 2),
+           "cpu_pct_while_typing": round(cpu / elapsed * 100, 1)}
+    if keep:
+        out["_kept"] = kept  # (wall time, ms) per keystroke; callers drop it before reporting
+    return out
 
 
 def scenario_explorer(x, kind):
@@ -603,6 +628,341 @@ def scenario_output(x, kind):
         shutil.rmtree(base, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# M1.6 scenarios (M1.6-QA-002): real X input, page-side measurements
+# ---------------------------------------------------------------------------
+
+class WebDriver:
+    """The smallest W3C WebDriver client that does the job (standard library only).
+
+    Talks to the server embedded in the e2e-mode build (TAURI_WEBDRIVER_PORT).
+    Used to read what the page measured (src/e2e-probe.ts) and to start tasks;
+    all *input* is real X input, as in the other scenarios.
+    """
+
+    def __init__(self, port):
+        self.base = f"http://127.0.0.1:{port}"
+        self.sid = None
+
+    def _req(self, method, path, body=None, timeout=30):
+        data = None if body is None else json.dumps(body).encode()
+        req = urllib.request.Request(self.base + path, data=data, method=method, headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"{}").get("value")
+
+    def connect(self, timeout=30):
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                self._req("GET", "/status", timeout=2)
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise TimeoutError("the WebDriver server did not come up")
+                time.sleep(0.1)
+        self.sid = self._req("POST", "/session", {"capabilities": {"alwaysMatch": {}}})["sessionId"]
+        self._req("POST", f"/session/{self.sid}/timeouts", {"script": 15000})
+
+    def exec(self, script, args=()):
+        return self._req("POST", f"/session/{self.sid}/execute/sync", {"script": script, "args": list(args)}, timeout=30)
+
+    def exec_async(self, script, args=()):
+        return self._req("POST", f"/session/{self.sid}/execute/async", {"script": script, "args": list(args)}, timeout=30)
+
+    def wait(self, body, what, timeout=30):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                if self.exec(body):
+                    return
+            except Exception:
+                pass
+            time.sleep(0.05)
+        raise TimeoutError(f"timed out waiting for {what}")
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def quantile(sorted_vals, q):
+    return sorted_vals[min(len(sorted_vals) - 1, int(q * len(sorted_vals)))]
+
+
+def frame_stats(intervals, prefix="frame"):
+    """p50/p95/max of rAF intervals and how many exceeded 20 ms and 25 ms."""
+    if not intervals:
+        return {f"{prefix}s": 0}
+    v = sorted(intervals)
+    return {
+        f"{prefix}s": len(v),
+        f"{prefix}_p50_ms": round(quantile(v, 0.5), 2),
+        f"{prefix}_p95_ms": round(quantile(v, 0.95), 2),
+        f"{prefix}_max_ms": round(v[-1], 2),
+        f"{prefix}s_gt_20ms": sum(1 for i in v if i > 20),
+        f"{prefix}s_gt_25ms": sum(1 for i in v if i > 25),
+    }
+
+
+def latency_stats(values, prefix):
+    if not values:
+        return {f"{prefix}_samples": 0}
+    v = sorted(values)
+    return {
+        f"{prefix}_samples": len(v),
+        f"{prefix}_p50_ms": round(quantile(v, 0.5), 2),
+        f"{prefix}_p95_ms": round(quantile(v, 0.95), 2),
+        f"{prefix}_max_ms": round(v[-1], 2),
+    }
+
+
+class ProbeSession:
+    """One app launch (e2e-mode build) with a workspace, optional open documents and a WebDriver."""
+
+    def __init__(self, x, name, open_files=()):
+        if not TAURI_E2E_APP.exists():
+            raise SystemExit(f"{TAURI_E2E_APP} is missing: build it with bench/run.sh (it builds the e2e-mode app)")
+        self.x = x
+        self.base = Path(tempfile.mkdtemp(prefix=f"bench-{name}-"))
+        ws = make_workspace(self.base / "ws")
+        data = self.base / "data"
+        data.mkdir()
+        seed_state(str(data), ws, open_files=list(open_files))
+        port = free_port()
+        self.app = App("tauri", str(data), data / "tap.jsonl", binary=TAURI_E2E_APP, extra_env={"TAURI_WEBDRIVER_PORT": str(port)})
+        try:
+            self.win = x.wait_window(self.app.pids, 30)
+            self.wd = WebDriver(port)
+            self.wd.connect()
+            self.wd.wait("return !!window.__axiomFrames && document.querySelector('[data-testid=status]')?.dataset.state === 'ready'", "the app and the probe")
+            if open_files:
+                self.wd.wait("return !!document.querySelector('.monaco-editor .view-lines')?.textContent", "Monaco showing a document", 40)
+            x.wait_stable(x.region(self.win, 0, 0, 1, 1), 1.0, 20)
+            time.sleep(2)
+            self.focus_editor()
+        except Exception:
+            self.close()
+            raise
+
+    def focus_editor(self):
+        g = self.win.get_geometry()
+        self.x.click(self.win, int(g.width * 0.55), int(g.height * 0.20))
+        time.sleep(0.4)
+        if not self.wd.exec("return document.hasFocus()"):
+            raise RuntimeError("the page has no keyboard focus after a click")
+
+    def close(self):
+        self.app.stop()
+        shutil.rmtree(self.base, ignore_errors=True)
+
+
+FOUR_DOCS = ["main.rs", "src/module_000.rs", "src/module_001.rs", "src/module_002.rs"]
+CTRL = ("Control_L",)
+
+
+def scenario_tab_switch(x):
+    s = ProbeSession(x, "tab", FOUR_DOCS)
+    try:
+        wd = s.wd
+        wd.exec("window.__axiomFrames.start()")
+        for _ in range(20):
+            wd.exec_async("const cb = arguments[arguments.length - 1]; window.__axiomMarks.expectModelChange('tab').then(() => cb(true))")
+            x.key("Tab", CTRL)
+            time.sleep(0.3)
+        frames = wd.exec("return window.__axiomFrames.stop()")
+        ms = wd.exec("return window.__axiomMarks.take('tab')")
+        return {"documents": 4, "switches": 20, **latency_stats(ms, "key_to_frame"), **frame_stats(frames)}
+    finally:
+        s.close()
+
+
+def scenario_palette(x):
+    s = ProbeSession(x, "palette", FOUR_DOCS[:1])
+    try:
+        wd = s.wd
+        wd.exec("window.__axiomFrames.start()")
+        for _ in range(20):
+            wd.exec("window.__axiomMarks.expect('palette', '[data-testid=palette]')")
+            x.key("k", CTRL)
+            time.sleep(0.35)
+            x.key("Down")
+            x.key("Down")
+            time.sleep(0.1)
+            x.key("Escape")
+            time.sleep(0.35)
+        frames = wd.exec("return window.__axiomFrames.stop()")
+        ms = wd.exec("return window.__axiomMarks.take('palette')")
+        return {"opens": 20, **latency_stats(ms, "key_to_frame"), **frame_stats(frames)}
+    finally:
+        s.close()
+
+
+def scenario_panel_toggle(x):
+    s = ProbeSession(x, "panel", FOUR_DOCS[:1])
+    try:
+        wd = s.wd
+        out = {}
+        for name, key in (("sidebar", "b"), ("panel", "j")):
+            all_frames = []
+            for _ in range(10):
+                wd.exec("window.__axiomFrames.start()")
+                x.key(key, CTRL)
+                time.sleep(0.4)
+                all_frames += wd.exec("return window.__axiomFrames.stop()")
+                time.sleep(0.1)
+            out.update({f"{name}_{k}": v for k, v in frame_stats(all_frames).items()})
+        return {"toggles_each": 10, **out}
+    finally:
+        s.close()
+
+
+def scenario_splitter_drag(x):
+    s = ProbeSession(x, "splitter", FOUR_DOCS[:1])
+    try:
+        wd = s.wd
+        cx, cy = wd.exec(
+            "const r = document.querySelector('[aria-label=\"Resize side bar\"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]"
+        )
+        ox, oy = x.origin(s.win)
+        ax, ay = int(ox + cx), int(oy + cy + 100)
+        xtest.fake_input(x.d, X.MotionNotify, x=ax, y=ay)
+        x.d.sync()
+        time.sleep(0.3)
+        c0 = wd.exec("return window.__axiomCommits()")
+        wd.exec("window.__axiomFrames.start()")
+        xtest.fake_input(x.d, X.ButtonPress, 1)
+        x.d.sync()
+        for i in range(1, 41):
+            xtest.fake_input(x.d, X.MotionNotify, x=ax + i * 3, y=ay)
+            x.d.sync()
+            time.sleep(0.016)
+        xtest.fake_input(x.d, X.ButtonRelease, 1)
+        x.d.sync()
+        time.sleep(0.3)
+        frames = wd.exec("return window.__axiomFrames.stop()")
+        commits = wd.exec("return window.__axiomCommits()") - c0
+        width = wd.exec("return Math.round(document.querySelector('.sidebar').getBoundingClientRect().width)")
+        return {"pointer_moves": 40, "react_commits": commits, "sidebar_width_after_px": width, **frame_stats(frames)}
+    finally:
+        s.close()
+
+
+def cpu_window(procs, seconds):
+    """% of one core over `seconds` for the process set, in total and by executable name."""
+    def times(p):
+        try:
+            t = p.cpu_times()
+            return t.user + t.system
+        except psutil.NoSuchProcess:
+            return None
+    def name(p):
+        try:
+            return Path(p.cmdline()[0]).name
+        except (psutil.NoSuchProcess, IndexError):
+            return "?"
+    before = {p.pid: (name(p), times(p)) for p in procs}
+    time.sleep(seconds)
+    by = {}
+    for p in procs:
+        n, t0 = before[p.pid]
+        t1 = times(p)
+        if t0 is not None and t1 is not None:
+            by[n] = by.get(n, 0.0) + (t1 - t0) / seconds * 100
+    return round(sum(by.values()), 2), {k: round(v, 2) for k, v in sorted(by.items())}
+
+
+def scenario_idle_running(x):
+    s = ProbeSession(x, "idle", FOUR_DOCS[:1])
+    try:
+        wd = s.wd
+        shell, _ = s.app.procs_split()
+        quiet, _ = cpu_window(shell, 10)  # same session, no task: the reference for P8/P9
+        wd.exec("window.__axiom.tasks.run('sleep 30')")
+        wd.wait("return window.__axiom.tasks.getSnapshot().running", "the task to start", 10)
+        time.sleep(1)
+        shell, _ = s.app.procs_split()
+        focused, focused_by = cpu_window(shell, 10)
+        focus_ok = wd.exec("return document.hasFocus()")
+        # Move keyboard focus to another X window: the page is now "unfocused".
+        other = x.root.create_window(0, 0, 200, 200, 0, x.d.screen().root_depth, X.InputOutput, X.CopyFromParent)
+        other.map()
+        x.d.sync()
+        x.d.set_input_focus(other, X.RevertToParent, X.CurrentTime)
+        x.d.sync()
+        time.sleep(1)
+        page_unfocused = not wd.exec("return document.hasFocus()")
+        shell, _ = s.app.procs_split()
+        unfocused, unfocused_by = cpu_window(shell, 10)
+        still_running = wd.exec("return window.__axiom.tasks.getSnapshot().running")
+        other.destroy()
+        x.d.sync()
+        wd.exec("window.__axiom.tasks.stop()")
+        return {
+            "no_task_cpu_pct_10s": quiet,
+            "task_focused_cpu_pct_10s": focused,
+            "task_unfocused_cpu_pct_10s": unfocused,
+            "task_focused_by_process": focused_by,
+            "task_unfocused_by_process": unfocused_by,
+            "page_had_focus_when_focused": bool(focus_ok),
+            "page_lost_focus_when_unfocused": bool(page_unfocused),
+            "task_still_running_at_end": bool(still_running),
+        }
+    finally:
+        s.close()
+
+
+STREAM_CMD = "python3 -c \"import time,sys;[(print('x'*80),sys.stdout.flush(),time.sleep(0.0005)) for _ in range(10000)]\""
+
+
+def scenario_typing_under_stream(x):
+    s = ProbeSession(x, "stream", FOUR_DOCS[:1])
+    try:
+        wd = s.wd
+        # The stream lasts about 5-7 s and typing 200 characters takes about 8 s: the page
+        # stamps the moment the task stops, so keystrokes made after it can be told apart.
+        wd.exec(
+            "window.__streamEnd = 0; const t = window.__axiom.tasks;"
+            "t.subscribe(() => { const s = t.getSnapshot(); if (!window.__streamEnd && !s.running && s.rows.length > 0) window.__streamEnd = performance.timeOrigin + performance.now(); });"
+        )
+        wd.exec("window.__axiom.tasks.run(arguments[0])", [STREAM_CMD])
+        wd.wait("return window.__axiom.tasks.getSnapshot().running", "the stream to start", 10)
+        time.sleep(0.5)
+        t0 = time.monotonic()
+        wd.exec("window.__axiomFrames.start()")
+        typing = typing_latency(x, s.win, s.app, keep=True)
+        elapsed = time.monotonic() - t0
+        stream_end_ms = wd.exec("return window.__streamEnd")  # epoch ms; 0 = still running
+        kept = typing.pop("_kept", [])
+        under = sorted(ms for t, ms in kept if not stream_end_ms or t * 1000 < stream_end_ms)
+        frames = wd.exec("return window.__axiomFrames.stop()")
+        snap = wd.exec("const t = window.__axiom.tasks.getSnapshot(); return { running: t.running, rows: t.rows.length, dropped: t.dropped }")
+        wd.exec("window.__axiom.tasks.stop()")
+        out = {"stream_lines_per_s_target": 2000, "typing_seconds": round(elapsed, 1),
+               "stream_running_at_end": bool(snap["running"]), "console_rows_at_end": snap["rows"] + snap["dropped"]}
+        out.update({f"typing_{k}": v for k, v in typing.items()})
+        # Only the keystrokes made while the stream was still running (P12).
+        out["typing_under_stream_samples"] = len(under)
+        if under:
+            out.update({"typing_under_stream_p50_ms": round(quantile(under, 0.5), 2), "typing_under_stream_p95_ms": round(quantile(under, 0.95), 2),
+                        "typing_under_stream_p99_ms": round(quantile(under, 0.99), 2)})
+        out.update(frame_stats(frames))
+        return out
+    finally:
+        s.close()
+
+
+M16_SCENARIOS = {
+    "tab-switch": scenario_tab_switch,
+    "palette": scenario_palette,
+    "panel-toggle": scenario_panel_toggle,
+    "splitter-drag": scenario_splitter_drag,
+    "idle-running": scenario_idle_running,
+    "typing-under-stream": scenario_typing_under_stream,
+}
+
+
 def git_rev():
     try:
         return subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], text=True).strip()
@@ -610,33 +970,51 @@ def git_rev():
         return None
 
 
+def _stat(values):
+    values = sorted(v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool))
+    if not values:
+        return None
+    return {"median": round(statistics.median(values), 2), "min": round(values[0], 2), "max": round(values[-1], 2), "samples": len(values)}
+
+
 def summarise(results, kinds):
-    """Median of each repeated metric, so several repetitions are usable.
+    """Median (with min, max and sample count) of each repeated metric.
 
     A single sample of PSS or idle CPU on a busy host is not comparable run to
     run (observed spread: 54 MiB PSS, 0.1 pp idle CPU on the same build), so
-    reports quote these medians and the sample count, not rep 0.
+    reports quote these medians and the sample count, not rep 0. The existing
+    rows are flat keys; each M1.6 scenario is a nested block named after it
+    (`medians.tauri["tab-switch"]`).
     """
-    metrics = [
-        "idle_workspace_open_pss_mib",
-        "monaco_document_open_pss_mib",
-        "after_typing_pss_mib",
-        "idle_cpu_pct_10s",
-        "idle_cpu_pct_10s_with_editor",
-        "idle_cpu_pct_min",
-        "idle_cpu_pct_min_with_editor",
-    ]
     out = {}
     for kind in kinds:
-        reps = results.get(kind, {}).get("memory_cpu_typing", [])
-        if not reps:
-            continue
+        r = results.get(kind, {})
         block = {}
-        for m in metrics:
-            values = [r[m] for r in reps if isinstance(r.get(m), (int, float))]
-            if values:
-                values.sort()
-                block[m] = {"median": round(statistics.median(values), 2), "samples": len(values)}
+
+        def put(name, values, into=block):
+            st = _stat(values)
+            if st:
+                into[name] = st
+
+        mem = r.get("memory_cpu_typing", [])
+        for m in ("idle_workspace_open_pss_mib", "monaco_document_open_pss_mib", "after_typing_pss_mib", "idle_cpu_pct_10s",
+                  "idle_cpu_pct_10s_with_editor", "idle_cpu_pct_min", "idle_cpu_pct_min_with_editor"):
+            put(m, [x.get(m) for x in mem])
+        for q in ("p50_ms", "p95_ms", "p99_ms"):
+            put(f"typing_{q}", [x.get("typing", {}).get(q) for x in mem])
+        for mode in ("cold", "warm"):
+            put(f"startup_{mode}_explorer_painted_ms", [x.get("explorer_painted_ms") for x in r.get("startup", {}).get(mode, [])])
+        put("explorer_5000_list_answer_to_last_change_ms", [x.get("list_answer_to_last_change_ms") for x in r.get("explorer", [])])
+        put("explorer_wheel_to_paint_p95_ms", [x.get("wheel_to_paint_p95_ms") for x in r.get("explorer", [])])
+        put("output_50000_lines_settled_ms", [x.get("enter_to_output_settled_ms") for x in r.get("output", [])])
+        for name in M16_SCENARIOS:
+            reps = [x for x in r.get(name, []) if "error" not in x]
+            keys = sorted({k for x in reps for k, v in x.items() if isinstance(v, (int, float)) and not isinstance(v, bool) and k != "loadavg_1m"})
+            sub = {}
+            for k in keys:
+                put(k, [x.get(k) for x in reps], sub)
+            if sub:
+                block[name] = sub
         if block:
             out[kind] = block
     return out
@@ -647,12 +1025,13 @@ def main():
     ap.add_argument("--runs", type=int, default=5, help="startup repetitions per shell")
     ap.add_argument("--heavy-runs", type=int, default=3, help="repetitions of memory/explorer/output per shell")
     ap.add_argument("--only", choices=["qt", "tauri"])
-    ap.add_argument("--scenario", default="all", choices=["all", "startup", "memory", "explorer", "output"])
+    ap.add_argument("--scenario", default="all", choices=["all", "startup", "memory", "explorer", "output", "m16", *M16_SCENARIOS])
     args = ap.parse_args()
     if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("GDK_BACKEND") != "x11":
         raise SystemExit("refusing to run: not inside scripts/headless.sh (would open windows on the desktop)")
     x = XSession()
-    kinds = [args.only] if args.only else ["qt", "tauri"]
+    # The Qt shell was retired (T-15): compare against it only where its binary still exists.
+    kinds = [args.only] if args.only else (["qt", "tauri"] if QT_APP.exists() else ["tauri"])
     results = {
         "host": {
             "os": platform.platform(),
@@ -666,12 +1045,12 @@ def main():
         },
         "binaries": {},
     }
-    for k, p in (("qt", QT_APP), ("tauri", TAURI_APP), ("axiomd", DAEMON)):
+    for k, p in (("qt", QT_APP), ("tauri", TAURI_APP), ("tauri-e2e", TAURI_E2E_APP), ("axiomd", DAEMON)):
         results["binaries"][k] = {"path": str(p), "bytes": p.stat().st_size if p.exists() else None}
     # Interleaved: every repetition runs each shell back to back, so both see
     # the same background load. The 1-minute load average is recorded per sample.
     for kind in kinds:
-        results[kind] = {"startup": {"cold": [], "warm": []}, "memory_cpu_typing": [], "explorer": [], "output": []}
+        results[kind] = {"startup": {"cold": [], "warm": []}, "memory_cpu_typing": [], "explorer": [], "output": [], **{n: [] for n in M16_SCENARIOS}}
     for rep in range(args.runs):
         for kind in (kinds if rep % 2 == 0 else list(reversed(kinds))):
             r = results[kind]
@@ -694,6 +1073,17 @@ def main():
                 o = scenario_output(x, kind)
                 o["loadavg_1m"] = round(os.getloadavg()[0], 2)
                 r["output"].append(o)
+            if kind == "tauri" and rep < args.heavy_runs:
+                for name, fn in M16_SCENARIOS.items():
+                    if args.scenario not in ("all", "m16", name):
+                        continue
+                    try:
+                        row = fn(x)
+                    except Exception as e:  # a scenario that cannot run is reported as not measured, never dropped silently
+                        row = {"error": f"{type(e).__name__}: {e}"}
+                        print(f"[bench] {name} FAILED: {row['error']}", file=sys.stderr)
+                    row["loadavg_1m"] = round(os.getloadavg()[0], 2)
+                    r[name].append(row)
             print(f"[bench] rep {rep + 1}/{args.runs} {kind} done (load {load:.1f})", file=sys.stderr)
     results["medians"] = summarise(results, kinds)
     print(json.dumps(results, indent=2))

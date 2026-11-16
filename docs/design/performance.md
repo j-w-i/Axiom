@@ -6,25 +6,55 @@ the budgets the redesign introduces and says how each is measured._
 
 ## 1. Baseline (current shell, before any M1.6 change)
 
-The shell's UI code is unchanged since these runs (`git log -- apps/desktop-tauri/src
-editor/src` is empty after 2026-11-16), so they are the provisional baseline.
-**M1.6-QA-002 re-runs them on the M1.6 branch before the first restyle merges** and
-replaces this table with its results.
+Measured by M1.6-QA-002 on branch `task/m1.6` at `90e195e` plus the QA-001/QA-002
+tooling (no UI change), with `AXIOM_BENCH_NO_BUILD=1 bench/run.sh --only tauri --runs 3
+--heavy-runs 3`. Source: **`apps/desktop-tauri/bench/results/JWI-Fedora-20261117-061550.json`**
+(`medians` block). Median of three runs, with min–max.
 
-Reference machine: Fedora 44, x86_64, WebKitGTK, Xvfb via `scripts/headless.sh`.
+Reference machine: Fedora 44, x86_64, WebKitGTK 2.54, Xvfb 1440x900 via
+`scripts/headless.sh` (software raster, no GPU). Load average at start 0.29; it rose
+to ~2.3 during repetition 2 from unrelated desktop activity (a first full run,
+`DISCARDED-under-load-JWI-Fedora-20261117-054812.json`, was discarded because its
+repetition 1 ran at load 1.2-2.0 right after a build). Rows whose spread exceeds 15% of
+the median are marked †; they are counts of rare long frames or tail percentiles, which
+one loaded repetition moves. The ten pre-existing rows agree with the previous run
+(`JWI-Fedora-20261116-223103.json`: PSS 185/298/448 MiB, idle CPU 0.1/1.0%).
 
-| Metric | Value | Source |
-|--------|------:|--------|
-| Cold start → explorer painted | 408 ms | migration `performance.md` §3.6 (2026-11-12) |
-| Warm start → explorer painted | 404 ms | same |
-| Typing p95 / p99 (keystroke → pixels) | 17.9–18.3 / 18.6–19.7 ms | same |
-| Explorer 5,000 entries, answer → settled | 35.7 ms | same |
-| Explorer wheel tick → paint p95 | 17.2 ms | same |
-| 50,000-line output settles | 74.8 ms | same |
-| PSS, workspace open / one document / after typing | 185 / 298 / 448 MiB | `bench/results/JWI-Fedora-20261116-223103.json` |
-| Idle CPU, workspace open / with editor (10 s) | 0.1% / 1.0% | same |
-| Bundle (UI JS, excluding Monaco chunk) | to be recorded by QA-002 | |
-| Tab switch, palette open, panel toggle, splitter drag | **not measured yet** (new scenarios, QA-002) | |
+| Metric | Median | Min–max | Budget it feeds |
+|--------|-------:|--------:|-----------------|
+| Cold start → explorer painted | 418 ms † | 365–437 | P2 |
+| Warm start → explorer painted | 383 ms † | 360–421 | P2 |
+| Typing p50 / p95 / p99 (keystroke → pixels) | 17.4 / 18.5 / 20.9 ms † | p95 18.3–19.4; p99 19.5–33.9 | P1 |
+| Explorer 5,000 entries, answer → settled | 48.4 ms † | 37–56 | P11 |
+| Explorer wheel tick → paint p95 | 17.4 ms | 17.3–18.0 | P11 |
+| 50,000-line output settles | 79.2 ms | 76–80 | P11 |
+| PSS: workspace open / one document / after typing | 183.2 / 294.2 / 445.0 MiB | 180–185 / 294.0–294.3 / 445–451 | P10 |
+| Idle CPU: workspace open / with editor (10 s windows) | 0.1 / 1.0% | 0.1–0.2 / 0.9–1.2 | P7 |
+| Bundle: UI JS (`index-*.js`, Monaco chunks excluded) | 377.0 kB | n/a | |
+| Bundle: CSS, app / all (all includes Monaco's) | 16.6 / 202.6 kB | n/a | |
+| **Tab switch** (4 documents, Ctrl+Tab x20): key → frame p50 / p95 | 24 / 36 ms | p95 34–41 | P5 (≤ 32) |
+| **Palette** (Ctrl+K x20): key → first frame with palette p50 / p95 | 16 / 45 ms † | p95 43–58 | P6 |
+| **Side bar toggle** (Ctrl+B x10): frame p95 / max, frames > 25 ms | 17 / 17 ms, 0 | 17 / 17 | P3 |
+| **Panel toggle** (Ctrl+J x10): frame p95 / max, frames > 25 ms | 17 / 23 ms, 0 | max 20–23 | P3 |
+| **Splitter drag** (40 pointer moves): frame p95, React commits | 19 ms, **68** | commits 66–69 | P4 (one commit) |
+| **Idle, `sleep 30` running, window focused** (CPU of the app + WebKit processes) | **8.0%** † | 6.9–8.2 | P8 (≤ 3%) |
+| **Idle, `sleep 30` running, window unfocused** | 7.0% | 6.1–7.0 | P9 |
+| Idle, no task, same session | 1.0% | 0.9–1.4 | P7 |
+| **Typing under streaming output** (~1,500-2,000 lines/s): p50 / p95, keystrokes made while streaming | 16.5 / 18.4 ms, 82 | p95 18.4–19.0 | P12 |
+
+What the baseline already says about the budgets (for the redesign, not a failure of
+this task):
+
+- **P4:** the splitter commits React once per pointer move (68 commits for 40 moves)
+  against a budget of one. SHELL-002 has to change that.
+- **P5:** the unchanged shell's tab switch p95 (36 ms) is already above the 32 ms budget.
+- **P8 / P9:** a running task costs about 7-8% of a core, and **the cost is the same with
+  the window unfocused** (7.0%) as focused: nothing pauses. (WebKitWebProcess ~4.2%,
+  the app process ~3%.) Whatever animates while a task runs today is the thing the
+  loop-gating work has to remove; P9's "baseline + 0.2" must be read against the
+  no-task 1.0%, not this 7.0%.
+- This WebKitGTK reports `requestAnimationFrame` timestamps in whole milliseconds, so the
+  frame statistics are too ("p95 17" is a 16-17 ms interval).
 
 ## 2. Prototype measurements (indicative)
 
@@ -69,12 +99,17 @@ block and the load average). Results go to `bench/results/` with the host name.
 | `tab-switch` | 4 documents open; Ctrl+Tab ×20; for each, `keydown.timeStamp` → the first `requestAnimationFrame` after Monaco's `onDidChangeModel` |
 | `palette` | Ctrl+K ×20 (open, ArrowDown ×2, Escape); key → the first frame with `.palette` painted; rAF intervals during open/close |
 | `panel-toggle` | Ctrl+B and Ctrl+J ×10 each; rAF intervals for 400 ms |
-| `splitter-drag` | 40 pointer moves via WebDriver actions; rAF intervals and the React commit count (dev-only profiler hook) |
+| `splitter-drag` | 40 pointer moves of 3 px each, 16 ms apart, as **real X input** (XTEST) on the side-bar splitter; rAF intervals and the React commit count (read through the React DevTools hook the probe installs; a `<Profiler>`'s `onRender` does not fire in a production React build) |
 | `idle-running` | run `sleep 30`; sample `/proc/<pid>/stat` of the app plus WebKit web and network processes for 10 s, focused and unfocused |
-| `typing-under-stream` | run a command printing 2,000 lines/s; type 200 characters; existing typing probe |
+| `typing-under-stream` | run `python3 -c "import time,sys;[(print('x'*80),sys.stdout.flush(),time.sleep(0.0005)) for _ in range(10000)]"`; type 200 characters with the existing typing probe. The stream ends before the typing does (about 6 s against 8 s), so the page stamps the moment the task stops and `typing_under_stream_*` counts only keystrokes made before it |
 
-rAF intervals are collected by an e2e-only script (`window.__axiomFrames`) compiled
-into the `e2e` Cargo-feature build only.
+rAF intervals are collected by an e2e-only script (`window.__axiomFrames`, with
+`__axiomMarks` and `__axiomCommits`; `src/e2e-probe.ts`) compiled into the e2e-mode build
+only (`pnpm run build:e2e` + `--features e2e`, kept as `target/release/axiom-tauri-e2e`);
+`tests/probe-absent.test.ts` fails if any of it reaches the production bundle. All input is
+real X input; the WebDriver only starts tasks and reads what the page measured.
+`AXIOM_BENCH_NO_BUILD=1` skips `run.sh`'s builds (a build leaves the load average high
+for minutes).
 
 ### 4.3 Reporting
 

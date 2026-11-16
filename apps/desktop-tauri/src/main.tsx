@@ -1,3 +1,4 @@
+import "./e2e-probe"; // benchmark hooks: an empty module outside `vite build --mode e2e`; must run before React loads
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
