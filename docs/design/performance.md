@@ -1,6 +1,6 @@
 # M1.6 performance: baseline, budgets, procedures
 
-_Status: proposal, 2026-11-17. Existing budgets
+_Status: **approved by ADR-0013** (2026-11-17); budgets P1–P12 adopted unchanged. Existing budgets
 (`docs/migration/qt-to-tauri/performance.md` §2) stay in force; this document adds
 the budgets the redesign introduces and says how each is measured._
 

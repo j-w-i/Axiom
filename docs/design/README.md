@@ -1,18 +1,18 @@
 # Axiom visual design (M1.6)
 
-_Status: **proposal awaiting owner approval** (2026-11-17). Nothing here is
-implemented in the production shell. Phase B tasks (`docs/tasks/M1.6/`) start
-only after `M1.6-DESIGN-001` records the approved direction._
+_Status: **approved by ADR-0013** (2026-11-17): the "Precision Instrument"
+synthesis, with decisions D2–D10 as recommended. Nothing is implemented in the
+production shell yet; Phase B tasks (`docs/tasks/M1.6/`) start now._
 
 Milestone M1.6, **Axiom Visual Experience**, gives the Tauri shell its own
 visual identity and interaction system. This directory holds the design
-evidence, the proposal and the specifications that implementation tasks follow.
+evidence, the approved proposal and the specifications that implementation tasks follow.
 
 | Document | What it holds |
 |----------|---------------|
 | [creative-brief.md](creative-brief.md) | Goals, constraints, anti-patterns, success criteria |
 | [research.md](research.md) | Sourced study of FL Studio, Resolve, Blender, Zed, Ableton, Bitwig (+ Islands, Linear); adopt/adapt/reject |
-| [concepts.md](concepts.md) | Audit of the current shell; three concepts; weighted evaluation; the recommended synthesis; **decisions for approval** |
+| [concepts.md](concepts.md) | Audit of the current shell; three concepts; weighted evaluation; the recommended synthesis; decisions D1–D10 (decided: ADR-0013) |
 | [design-system.md](design-system.md) | Foundations (colour, material grammar, type, density, focus), tokens, components |
 | [motion-system.md](motion-system.md) | Durations, curves, choreography, looping-animation policy, reduced motion |
 | [workspace-spec.md](workspace-spec.md) | Every surface: workspace, console, palette, settings, states; M2/M3 surfaces prepared but not built |

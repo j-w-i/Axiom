@@ -2,26 +2,37 @@
 
 _Last updated: 2026-11-17._
 
-## M1.6 — Axiom Visual Experience: Phase A done, awaiting approval (2026-11-17)
+## M1.6 — Axiom Visual Experience: approved, Phase B ready (2026-11-17)
 
-The design and planning phase of M1.6 is complete and **waiting for the owner**.
-Nothing in the production shell has changed.
+The owner approved the recommended direction, **"Precision Instrument"**, and
+accepted decisions D2–D10 as recommended. **ADR-0013** records them, together with the
+material grammar, the motion policy and the scope rule, and amends ADR-0011 to allow
+OFL-1.1 font assets (IBM's unmodified files only). M1.6-DESIGN-001 is tested. Work
+lives on branch `task/m1.6`.
 
-- Design package: `docs/design/` — start with `concepts.md` (audit of the current
-  shell, three concepts, weighted evaluation, the recommended synthesis "Precision
-  Instrument", and **decisions D1–D10 for approval** in §6).
-- Prototypes (isolated): `experiments/e5-visual-concepts/` (React + Monaco, real
-  repository content; `?c=r|a|b|c`). Screenshots: `docs/design/concepts/`.
-- Milestone: `docs/roadmap/milestones.md` §M1.6; tasks `docs/tasks/M1.6/`
-  (27 tasks, all `planned`); graph and waves: `dependency-graph.md` §M1.6.
-- Measured in the prototypes (headless Chrome, indicative): every shell motion holds
-  60 Hz with no frame over 20 ms; looping "running" indicators cost 18% of a core
-  smooth vs 4.4% under the stepped policy, which is now a motion rule.
-- **Next:** the owner reviews `docs/design/concepts.md` and decides D1–D10;
-  M1.6-DESIGN-001 records the decision (ADR-0013). Then wave B (QA-001, QA-002,
-  SHELL-001, SYSTEM-001) can start.
+| # | Decision |
+|---|----------|
+| D1 | Synthesis "Precision Instrument" (A + B's signals + C's restraint) |
+| D2 | Bundle IBM Plex Sans/Mono (IBM's unmodified Latin1 subsets) |
+| D3 | macOS overlay title bar; Windows/Linux native decorations themed with the setting |
+| D4 | No activity rail until M2 |
+| D5 | `appearance.motion` Standard/Reduced/Off |
+| D6 | Stderr not painted red |
+| D7 | Drag-to-reorder tabs in M1.6 |
+| D8 | Radix Tooltip |
+| D9 | Restyle in place, task by task; no feature flag |
+| D10 | Light theme with equal care |
+
+- Design package: `docs/design/` (normative for M1.6). Prototypes:
+  `experiments/e5-visual-concepts/`. Reference screenshots: `docs/design/concepts/r-*.png`.
+- Milestone: `docs/roadmap/milestones.md` §M1.6; 27 tasks in `docs/tasks/M1.6/`;
+  graph and waves: `dependency-graph.md` §M1.6.
+- **Next (wave B, parallel, disjoint scopes):** M1.6-QA-001 (screenshot harness and
+  visual baseline), M1.6-QA-002 (performance baseline and new scenarios),
+  M1.6-SYSTEM-001 (generated tokens), M1.6-SHELL-001 (split `App.tsx`, no visual
+  change). The QA baselines must be captured before the first restyle merges.
 - **Inherited blocker:** M1.6-QA-005 (macOS/Windows review) needs real hosts or a
-  CI run, like the M1.5 gate.
+  CI run, as the M1.5 gate did.
 
 ## Qt shell retired (T-15), 2026-11-17
 

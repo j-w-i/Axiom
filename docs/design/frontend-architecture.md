@@ -1,6 +1,6 @@
 # Frontend architecture for M1.6
 
-_Status: proposal, 2026-11-17. Applies to `apps/desktop-tauri/src/`. Governing
+_Status: **approved by ADR-0013** (2026-11-17). Applies to `apps/desktop-tauri/src/`. Governing
 documents: ADR-0012, `docs/architecture/modules.md` §apps/desktop-tauri,
 `governance.md`._
 

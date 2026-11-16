@@ -1,6 +1,6 @@
 # Surface specifications
 
-_Status: proposal for the recommended direction, 2026-11-17. Tokens and
+_Status: **approved by ADR-0013** (2026-11-17). Tokens and
 components: `design-system.md`. Motion: `motion-system.md`. Every number is a token
 value at 100% zoom. Screens: `concepts/r-*.png`._
 

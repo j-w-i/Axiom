@@ -1,6 +1,6 @@
 # Axiom motion and interaction system
 
-_Status: proposal for the recommended direction, 2026-11-17. Measurements:
+_Status: **approved by ADR-0013** (2026-11-17). Measurements:
 `concepts.md` §4 and `performance.md`. Reference implementation:
 `experiments/e5-visual-concepts/src/base.css` (presence choreography) and
 `src/shared.tsx` (`usePresence`)._

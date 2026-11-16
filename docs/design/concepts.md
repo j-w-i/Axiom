@@ -1,6 +1,6 @@
 # M1.6 visual concepts, evaluation and recommendation
 
-_Status: **for owner approval** (2026-11-17). Prototypes:
+_Status: **approved by ADR-0013** (2026-11-17); the owner chose the recommended synthesis (§5) and accepted D2–D10 as written (§6). Prototypes:
 `experiments/e5-visual-concepts/` (run instructions in `README.md`). Every
 screenshot below is from those prototypes in headless Chrome at 1440×900, with real
 repository content (`crates/exec/src/executor.rs`, real `cargo test` output
@@ -266,6 +266,11 @@ generator is ready for user theming (M7). See `workspace-spec.md` §5.
 ---
 
 ## 6. Decisions requiring the owner's approval
+
+**Decided 2026-11-17 (ADR-0013):** D1 = the recommended synthesis; D2–D10 accepted
+as recommended below. Refinement in D2: Plex's licence reserves the name "Plex", so the
+bundled files are IBM's own unmodified split subsets, not locally subset fonts
+(ADR-0013 §6).
 
 | # | Decision | Recommendation | Alternatives |
 |---|----------|----------------|--------------|

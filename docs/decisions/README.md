@@ -15,5 +15,6 @@ changes from implementation tasks go in `proposed/` as change requests.
 | [0008](ADR-0008-visual-inspection.md) | Build-time source stamping + adapter protocol + objective verification | Accepted |
 | [0009](ADR-0009-persistence.md) | SQLite for app state, TOML for project config, JSONL for transcripts | Accepted |
 | [0010](ADR-0010-isolation.md) | Three named isolation tiers; never overstate | Accepted |
-| [0011](ADR-0011-licensing.md) | MIT OR Apache-2.0; LGPL Qt modules only, dynamically linked | Accepted (amended by 0012) |
+| [0011](ADR-0011-licensing.md) | MIT OR Apache-2.0; LGPL Qt modules only, dynamically linked | Accepted (amended by 0012, 0013) |
 | [0012](ADR-0012-desktop-shell-tauri.md) | Desktop shell on Tauri 2 + React; Qt retired after a gated migration | Accepted |
+| [0013](ADR-0013-visual-identity.md) | Visual identity "Precision Instrument": material grammar, generated themes, motion policy, M1.6 scope rule; OFL font assets | Accepted |

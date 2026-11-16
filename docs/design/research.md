@@ -1,6 +1,6 @@
 # M1.6 design research: creative-tool and editor UIs
 
-Status: research draft, 2026-11-17. Desk research only: no application was installed or run for this document. All observations come from vendor manuals, release notes, official blogs and, where marked, forums or third-party sources. This document records what those tools do. It does not design Axiom.
+Status: research record, 2026-11-17 (input to ADR-0013). Desk research only: no application was installed or run for this document. All observations come from vendor manuals, release notes, official blogs and, where marked, forums or third-party sources. This document records what those tools do. It does not design Axiom.
 
 **Conventions**
 

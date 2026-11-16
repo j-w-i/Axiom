@@ -1,7 +1,6 @@
 # M1.6 creative brief
 
-_Status: proposal, 2026-11-17. Becomes "approved" when M1.6-DESIGN-001 records
-the owner's decision._
+_Status: **approved by ADR-0013** (2026-11-17)._
 
 ## 1. The one-sentence goal
 

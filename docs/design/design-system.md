@@ -1,7 +1,6 @@
 # Axiom design system — "Precision Instrument"
 
-_Status: proposal for the recommended direction (`concepts.md` §5), 2026-11-17.
-Becomes normative when M1.6-DESIGN-001 records approval. It supersedes
+_Status: **approved by ADR-0013** (2026-11-17); normative for M1.6. It supersedes
 `docs/migration/qt-to-tauri/design-system.md` §1–§2 (goals and palette); that
 document's component accessibility table (§3) and library evaluation (§4) remain in
 force except where this one says otherwise. Reference implementation:
