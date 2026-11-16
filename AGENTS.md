@@ -55,6 +55,7 @@ Start with `docs/architecture/overview.md`; details in `modules.md`,
 | `docs/decisions/` | ADRs; `proposed/` for change requests |
 | `docs/protocols/` | Behavioural specs of each contract |
 | `docs/research/` | Sourced technology research behind the decisions |
+| `docs/design/` | M1.6 visual design (proposal awaiting approval): concepts, design system, motion, surfaces |
 | `docs/roadmap/` | `current.md`, `milestones.md`, `dependency-graph.md` |
 | `docs/tasks/` | One file per task; status lives in its front matter |
 | `agents/` | Guides, templates, handoffs, next-session prompt |

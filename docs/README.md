@@ -27,6 +27,7 @@ Each document has one purpose. If you are implementing a task, start at
 | `roadmap/dependency-graph.md` | Task/milestone dependencies, parallel waves, merge order | Living |
 | `roadmap/verification/` | Recorded milestone exit verifications | Append-only |
 | `tasks/` | Task specifications and their status | Living |
+| `design/` | M1.6 visual design: brief, research, concepts and evaluation, design system, motion, surface specs, front-end architecture, performance budgets, visual QA | Proposal — normative for M1.6 once ADR-0013 records approval (M1.6-DESIGN-001) |
 | `migration/qt-to-tauri/` | Qt → Tauri evaluation: audit, parity, performance, design system, prototype, recommendation, proposed M1.5 roadmap | Proposal — not normative until ADR-0012 is accepted |
 | `contributing/dev-setup.md` | Toolchain setup and commands | Living |
 

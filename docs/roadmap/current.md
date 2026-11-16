@@ -2,6 +2,27 @@
 
 _Last updated: 2026-11-17._
 
+## M1.6 — Axiom Visual Experience: Phase A done, awaiting approval (2026-11-17)
+
+The design and planning phase of M1.6 is complete and **waiting for the owner**.
+Nothing in the production shell has changed.
+
+- Design package: `docs/design/` — start with `concepts.md` (audit of the current
+  shell, three concepts, weighted evaluation, the recommended synthesis "Precision
+  Instrument", and **decisions D1–D10 for approval** in §6).
+- Prototypes (isolated): `experiments/e5-visual-concepts/` (React + Monaco, real
+  repository content; `?c=r|a|b|c`). Screenshots: `docs/design/concepts/`.
+- Milestone: `docs/roadmap/milestones.md` §M1.6; tasks `docs/tasks/M1.6/`
+  (27 tasks, all `planned`); graph and waves: `dependency-graph.md` §M1.6.
+- Measured in the prototypes (headless Chrome, indicative): every shell motion holds
+  60 Hz with no frame over 20 ms; looping "running" indicators cost 18% of a core
+  smooth vs 4.4% under the stepped policy, which is now a motion rule.
+- **Next:** the owner reviews `docs/design/concepts.md` and decides D1–D10;
+  M1.6-DESIGN-001 records the decision (ADR-0013). Then wave B (QA-001, QA-002,
+  SHELL-001, SYSTEM-001) can start.
+- **Inherited blocker:** M1.6-QA-005 (macOS/Windows review) needs real hosts or a
+  CI run, like the M1.5 gate.
+
 ## Qt shell retired (T-15), 2026-11-17
 
 At the owner's instruction the **Qt shell is removed**. `apps/desktop/`, its CI

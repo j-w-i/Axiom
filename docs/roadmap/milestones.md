@@ -91,7 +91,61 @@ Decision: ADR-0012. Design, parity matrix, budgets and evaluation:
 
 M2's backend epics (2.0–2.6, 2.8) do not touch the shell and may run in
 parallel with M1.5; M2 epic 2.7 (UI) starts only after T-12 and is built in the
-Tauri shell only.
+Tauri shell only, on the M1.6 design system (after M1.6-SYSTEM-004 at the
+earliest; designed in `docs/design/workspace-spec.md` §5.1).
+
+---
+
+## M1.6 — Axiom Visual Experience
+
+**Outcome.** The Tauri shell has a distinctive, coherent and approved visual
+identity ("Precision Instrument", subject to approval): a generated token system
+with a material grammar (raised = pressable, recessed = holds a value or accepts
+input, flat = content), bundled typography, a task transport and hint line for
+readable machine state, purposeful motion with a measured looping policy, and
+light and dark themes. All M1/M1.5 behaviour, the IPC protocol and the daemon are
+unchanged.
+
+Design: `docs/design/` (brief, research, concepts with the evaluation and
+**decisions D1–D10 for approval**, design system, motion, surfaces, front-end
+architecture, performance, visual QA). Prototypes:
+`experiments/e5-visual-concepts/`. Tasks: `docs/tasks/M1.6/`.
+
+**Scope rule.** Only surfaces backed by M1 functionality are built. The AI
+workspace (M3), Environment Manager (M2), activity rail (from M2), Problems
+and Terminal views (M2/M4) are designed and prototyped here but built by their
+own milestones (governance rule 9).
+
+| Epic | Tasks |
+|------|-------|
+| 1.6.1 DESIGN — research, concepts, approval | M1.6-DESIGN-001 (records the owner's decision; Phase A already produced `docs/design/`) |
+| 1.6.2 SYSTEM — tokens and component foundations | M1.6-SYSTEM-001 … 004 |
+| 1.6.3 SHELL — main workspace and application chrome | M1.6-SHELL-001 … 007 |
+| 1.6.4 EDITOR — editor integration and surrounding UI | M1.6-EDITOR-001, 002 |
+| 1.6.5 INTERACTION — motion, panels, microinteractions | M1.6-INTERACTION-001 … 004 |
+| 1.6.6 SURFACES — palette, settings, light theme | M1.6-SURFACES-001 … 003 |
+| 1.6.7 QA — visual, accessibility, performance, platforms | M1.6-QA-001 … 006 |
+
+**Exit criteria** (recorded in `verification/M1.6.md` by M1.6-QA-006):
+1. ADR-0013 records the approved visual direction and decisions D1–D10.
+2. The production shell uses only the new tokens (legacy aliases deleted; guard
+   test green), with both themes generated from `themes.json`.
+3. Every surface in `docs/design/workspace-spec.md` §2–§4 and §6 matches its
+   specification; deviations are listed and approved.
+4. Controls follow the material grammar and the state table of
+   `design-system.md` §8 (gallery screenshots, both themes).
+5. Motion follows `motion-system.md`; reduced and off modes verified; no
+   running animations when idle with motion off.
+6. Performance budgets P1–P12 (`docs/design/performance.md` §3) met on the
+   reference Linux machine against the QA-002 baseline; any regression is quantified
+   and accepted in writing.
+7. All M1 and M1.5 Vitest, e2e and host tests pass; `scripts/check.sh` green.
+8. Accessibility: keyboard traversal of every surface, visible focus, contrast
+   pairs, Orca pass on Linux, forced-colours check (QA-003).
+9. Screenshots of states S1–S17 reviewed on Linux, macOS and Windows (QA-005;
+   macOS/Windows need hardware or CI, the same blocker as M1.5).
+10. The component system's designs for M2–M7 surfaces (`workspace-spec.md` §5)
+    need no new region or foundation (reviewed in QA-006).
 
 ---
 

@@ -1,0 +1,212 @@
+{
+  "date": "2026-11-16T16:10:06.858Z",
+  "host": "JWI-Fedora",
+  "cpu": "AMD Ryzen 5 5600X 6-Core Processor",
+  "engine": "Chrome 157.0.8103.78 headless (software raster)",
+  "concepts": {
+    "r": {
+      "idleCpuPctRunning": {
+        "n": 3,
+        "p50": 0.44,
+        "p95": 0.47,
+        "max": 0.47,
+        "over20": 0
+      },
+      "idleCpuPctReducedMotion": {
+        "n": 3,
+        "p50": 0.01,
+        "p95": 0.01,
+        "max": 0.01,
+        "over20": 0
+      },
+      "paletteFrameMs": {
+        "n": 141,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "over20": 0
+      },
+      "sidebarFrameMs": {
+        "n": 296,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "over20": 0
+      },
+      "tabFrameMs": {
+        "n": 438,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "over20": 0
+      },
+      "resizeFrameMs": {
+        "n": 159,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "over20": 0
+      },
+      "typingKeyToSecondFrameMs": {
+        "n": 141,
+        "p50": 24.5,
+        "p95": 32.6,
+        "max": 33.2,
+        "over20": 111
+      }
+    },
+    "a": {
+      "idleCpuPctRunning": {
+        "n": 3,
+        "p50": 0.47,
+        "p95": 0.48,
+        "max": 0.48,
+        "over20": 0
+      },
+      "idleCpuPctReducedMotion": {
+        "n": 3,
+        "p50": 0.01,
+        "p95": 0.01,
+        "max": 0.01,
+        "over20": 0
+      },
+      "paletteFrameMs": {
+        "n": 141,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "over20": 0
+      },
+      "sidebarFrameMs": {
+        "n": 244,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "over20": 0
+      },
+      "tabFrameMs": {
+        "n": 386,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "over20": 0
+      },
+      "resizeFrameMs": {
+        "n": 159,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "over20": 0
+      },
+      "typingKeyToSecondFrameMs": {
+        "n": 141,
+        "p50": 25.3,
+        "p95": 32.1,
+        "max": 33.2,
+        "over20": 111
+      }
+    },
+    "b": {
+      "idleCpuPctRunning": {
+        "n": 3,
+        "p50": 0.34,
+        "p95": 0.36,
+        "max": 0.36,
+        "over20": 0
+      },
+      "idleCpuPctReducedMotion": {
+        "n": 3,
+        "p50": 0.01,
+        "p95": 0.01,
+        "max": 0.01,
+        "over20": 0
+      },
+      "paletteFrameMs": {
+        "n": 140,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "over20": 0
+      },
+      "sidebarFrameMs": {
+        "n": 296,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "over20": 0
+      },
+      "tabFrameMs": {
+        "n": 435,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "over20": 0
+      },
+      "resizeFrameMs": {
+        "n": 157,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "over20": 0
+      },
+      "typingKeyToSecondFrameMs": {
+        "n": 141,
+        "p50": 22.2,
+        "p95": 32.5,
+        "max": 33.2,
+        "over20": 103
+      }
+    },
+    "c": {
+      "idleCpuPctRunning": {
+        "n": 3,
+        "p50": 0.29,
+        "p95": 0.29,
+        "max": 0.29,
+        "over20": 0
+      },
+      "idleCpuPctReducedMotion": {
+        "n": 3,
+        "p50": 0.01,
+        "p95": 0.01,
+        "max": 0.01,
+        "over20": 0
+      },
+      "paletteFrameMs": {
+        "n": 138,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "over20": 0
+      },
+      "sidebarFrameMs": {
+        "n": 294,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "over20": 0
+      },
+      "tabFrameMs": {
+        "n": 438,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "over20": 0
+      },
+      "resizeFrameMs": {
+        "n": 156,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "over20": 0
+      },
+      "typingKeyToSecondFrameMs": {
+        "n": 141,
+        "p50": 24.3,
+        "p95": 32.4,
+        "max": 33.2,
+        "over20": 110
+      }
+    }
+  }
+}

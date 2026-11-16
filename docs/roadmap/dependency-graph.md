@@ -69,6 +69,44 @@ G: T-15.
 **Qt is not modified by any of these except T-15**, which is gated. Every wave
 must leave the Qt build and its tests green.
 
+## M1.6 task graph
+
+```
+ DESIGN-001 (owner approval) ─┬─▶ QA-001 (screenshot harness, visual baseline) ─────────────────────────────┐
+                              ├─▶ QA-002 (perf baseline, new scenarios) ──────────────────────────────┐     │
+                              ├─▶ SHELL-001 (split App.tsx, no visual change) ──┐                     │     │
+                              └─▶ SYSTEM-001 (tokens) ─┬─▶ SYSTEM-002 (fonts) ─▶ EDITOR-002            │     │
+                                                       ├─▶ SYSTEM-003 (controls) ─▶ SYSTEM-004 (overlays)    │
+                                                       └─▶ INTERACTION-001 (motion foundation)         │     │
+ SHELL-001 + SYSTEM-003 + INTERACTION-001 ─▶ SHELL-002 (workbench frame) ─┬─▶ SHELL-003 (title row)*   │     │
+                                                                          ├─▶ SHELL-004 (explorer)     │     │
+                                                                          ├─▶ SHELL-005 (status, hint)*│     │
+                                                                          ├─▶ SHELL-006 (console)      │     │
+                                                                          ├─▶ SHELL-007 (states)*      │     │
+                                                                          ├─▶ EDITOR-001 (tabs) ─▶ INTERACTION-003* ─▶ INTERACTION-004
+                                                                          └─▶ INTERACTION-002 (panel motion)
+ SYSTEM-004 + INTERACTION-001 ─▶ SURFACES-001 (palette), SURFACES-002 (settings)          (* also needs SYSTEM-004)
+ SHELL-003..007 + EDITOR-001 + SURFACES-001/002 ─▶ SURFACES-003 (light theme, title-bar sync)
+ SURFACES-003 ─▶ QA-003 (a11y) · QA-004 (perf, + QA-002, INTERACTION-002/003) · QA-005 (macOS/Windows, + QA-001)
+ QA-003 + QA-004 + QA-005 + INTERACTION-004 ─▶ QA-006 (exit review)
+```
+
+(Ids abbreviated: every task is `M1.6-<EPIC>-<NNN>`; the front matter in
+`docs/tasks/M1.6/` is authoritative.)
+
+**Waves.** A: DESIGN-001 (owner). B: QA-001 · QA-002 · SHELL-001 · SYSTEM-001
+(disjoint scopes). C: SYSTEM-002 · SYSTEM-003 · INTERACTION-001 (all touch
+`src/styles/`; merge in that order). D: SYSTEM-004 · EDITOR-002 · SHELL-002.
+E: SHELL-003 … SHELL-007 · EDITOR-001 · INTERACTION-002 · SURFACES-001 ·
+SURFACES-002. Each owns its component files; the shared `shell.css` and
+`Workbench.tsx` are edited additively, so an integrator merges E in table order.
+F: INTERACTION-003 → INTERACTION-004 · SURFACES-003. G: QA-003 · QA-004 ·
+QA-005 (macOS/Windows hardware or CI). H: QA-006 (exit review).
+
+**Spine:** DESIGN-001 → SYSTEM-001 → SYSTEM-003 → SHELL-002 → (E) →
+SURFACES-003 → QA-004 → QA-006. **External blocker:** QA-005 needs real macOS
+and Windows hosts or a CI run, as M1.5's gate did.
+
 ## Parallel groups
 
 Tasks in the same wave have disjoint scopes and may run concurrently in
@@ -103,7 +141,8 @@ independent verification is pending.
 ## Milestone-level dependencies
 
 ```
-M1 ──▶ M1.5 ──▶ M2 ──▶ M3 ──▶ M5 ──▶ M6.1 (QML adapter)
+M1 ──▶ M1.5 ──▶ M1.6 ──▶ M2 epic 2.7 (UI) and every later UI epic
+        └──▶ M2 ──▶ M3 ──▶ M5 ──▶ M6.1 (QML adapter)
  │      │      └───────────▶ M6.7 (multi-agent)
  │      └──▶ M6.2, M6.3 (providers)        M3 + M5 ──▶ M6.8
  └──▶ M4 (needs M1 only; LSP server definitions use M2 manifests when available)
@@ -116,5 +155,9 @@ M4 ──▶ M7.1 (extensions)     everything ──▶ M7.2–7.7
 - **M5 needs M3** only for the agent-driven half (epics 5.7 and the loop
   test); epics 5.1–5.6 and 5.8 need M1 (+ M2 for launching dev servers
   inside an environment) and can begin while M3 is in progress.
+- **M1.6 touches only `apps/desktop-tauri`** (plus docs): M2's backend epics
+  (2.0–2.6, 2.8) run in parallel with it. M2 epic 2.7 (Environment Manager UI)
+  and M3 epic 3.8 (AI workspace) build on M1.6's design system and start after
+  M1.6-SYSTEM-004 at the earliest; their designs are in `docs/design/workspace-spec.md` §5.
 - Contract freeze points: IPC 0.1 and editor bridge 1 are frozen now;
   provider/diagnostics at M2 epic 2.0; agents at 3.0; inspection at 5.0.

@@ -1,0 +1,19 @@
+# node scripts/idle-cpu.mjs  — whole-browser CPU (% of one core), 3 x 5 s samples, headless Chrome, software raster
+# Fedora 44 reference machine, load average 0.71 at start; ?still (agent stream finished), task-running indicators on
+r  running-indicators: 18.2 18.2 17.6   reduced-motion: 0 0 3.2
+a  running-indicators: 18.4 18.4 17.8   reduced-motion: 0.2 0 2.4
+b  running-indicators: 23.3 25.3 23.1   reduced-motion: 0 0 2.6
+c  running-indicators: 8.6 8.6 8.8      reduced-motion: 0 0.2 2.6
+
+# node scripts/idle-isolate.mjs  — concept r, 2 x 5 s samples per variant
+all on                          18.2  17.6
+led off                         16.2  16.5
+sweep off                       18.2  19.8
+spin off                         9.2   9.2
+caret off                       18.2  18.4
+only led (opacity)               6.0   8.2
+only led, steps(6) at 1.6s       1.8   1.4
+only spin                        9.6   9.8
+only sweep                       2.4   5.0
+all off                          0.6   0.0
+POLICY: stepped led+spin, no sweep  4.4  4.4

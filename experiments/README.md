@@ -172,3 +172,35 @@ shell; bundled-browser licensing (this used installed Chrome, which cannot be
 redistributed, so the product needs a redistributable Chromium/CEF/WebView2);
 Linux display stack under software rendering; and the unmeasured cost of
 decoding and drawing each frame inside the Tauri window.
+
+## E5 — M1.6 visual concepts (design prototypes)
+
+**Purpose.** Not an architectural spike: isolated, reviewable prototypes of three
+visual directions for the Tauri shell plus the recommended synthesis, used to decide
+M1.6's direction (`docs/design/concepts.md`). Nothing in the product depends on them.
+
+**Setup.** `e5-visual-concepts/`: React 19 + Monaco 0.57 + Vite 8, fonts from
+`@fontsource` (OFL-1.1), `playwright-core` driving the installed Google Chrome for
+screenshots and measurements. Editor content is read from the repository (`?raw`
+imports of `crates/exec/src/*.rs`, `docs/protocols/ipc.md`); M2/M3 surfaces use mock
+data labelled on screen.
+
+```sh
+cd experiments/e5-visual-concepts && pnpm install && pnpm dev   # http://localhost:5190/
+node scripts/shots.mjs          # screenshots/ (git-ignored; curated copies in docs/design/concepts/)
+node scripts/perf.mjs           # rAF frame intervals per motion + typing probe -> results/
+node scripts/idle-cpu.mjs       # whole-browser CPU, looping indicators on vs reduced motion
+node scripts/idle-isolate.mjs   # cost of each looping animation
+```
+
+**Observed** (2026-11-17, Fedora 44, headless Chrome, software raster). Palette,
+side bar, tab and splitter motions: p95 frame 16.7–16.8 ms, max 16.8 ms, 0 frames
+> 20 ms, in all four variants. Idle whole-browser CPU with the "task running"
+indicators: R 18%, A 18%, B 24%, C 9% of a core; ≈0% with reduced motion. Isolated
+on R: spinners ≈ 9%, smooth LED pulse 6–8%, the same pulse with `steps(6)` 1.6%,
+sweep 2–5%; the stepped policy, everything on: 4.4%.
+
+**Decision.** Input to the owner's M1.6 direction decision. The looping-animation
+policy (`docs/design/motion-system.md` §5) is adopted from these numbers. Not
+evidence for production performance: the engine differs (Blink, not WebKitGTK), so
+M1.6-QA-002/QA-004 measure the real app.
