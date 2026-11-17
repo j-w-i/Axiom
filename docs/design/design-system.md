@@ -185,8 +185,9 @@ full-width, and icon buttons are 26). Splitters have a 1 px visible seam and a
 fills except play/stop; `currentColor`; `aria-hidden` (the control carries the
 name). File types are shown as **glyph chips** (two-letter mono label on a
 12–17% tint of a syntax hue: `rs` clay, `md` steel, `tm`/`lk` verdigris,
-others neutral). The Axiom mark is a precision triangle with a crossbar notch,
-drawn in brass. M1.6 adds only icons used by M1 surfaces; the set lives in
+others neutral). The Axiom mark is a drafting divider (pivot, two legs, arc of
+travel) that reads as an A, drawn in brass at a 1.5 px stroke (`Icon.Logo`;
+app-icon sources in `src-tauri/icons/source/`, owner choice 2026-11-17). M1.6 adds only icons used by M1 surfaces; the set lives in
 `src/ui/icons.tsx` (no icon library).
 
 ## 8. Focus and interaction states
