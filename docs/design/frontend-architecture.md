@@ -53,6 +53,16 @@ src/
 gallery/                 NEW  dev-only component gallery (vite entry `gallery.html`, not in `dist`)
 ```
 
+**Shell split: done (M1.6-SHELL-001, 2026-11-17).** `App.tsx` is the composition root
+(117 lines) and `src/shell/` holds `TitleRow.tsx`, `StatusBar.tsx`, `Workbench.tsx`,
+`shortcuts.ts`, `commands.ts`, plus `actions.ts` and `platform.ts`. Deviations from the
+tree above: `actions.ts` (the `ShellContext` interface, `runMenuAction` and the
+`axiom://menu` hook) and `platform.ts` (`IS_MAC`, `MOD`, `useSystemDark`) are additional
+modules; `Workbench.tsx` also exports `useLayout()` (the layout state, shared with the
+title row and the shortcuts) and `Banners` (the strip above the workbench);
+`commands.ts` exports `allCommands` (with enabled flags), `buildCommands`,
+`buildFileCommands` and the memoising `usePaletteCommands`.
+
 **Dependency direction** (enforced by a Vitest import-graph test in
 SYSTEM-003): `ui/` imports nothing from `state/`, `shell/`, `components/` or
 `@tauri-apps/*`; `components/` and `shell/` may import `ui/` and `state/`; only

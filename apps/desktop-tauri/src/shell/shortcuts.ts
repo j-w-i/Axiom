@@ -1,0 +1,44 @@
+// Application shortcuts (Monaco keeps its own while focused): one capture-phase
+// handler on window, so they win over focused controls.
+
+import { useEffect } from "react";
+import type { ShellContext } from "./actions";
+import { IS_MAC } from "./platform";
+
+export function useAppShortcuts(ctx: ShellContext): void {
+  const { documents, tasks } = ctx.app;
+  const { ready, hasDoc, openFolder } = ctx;
+  const wsId = ctx.ws.id;
+  const activePath = ctx.docs.activePath;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+      const k = e.key.toLowerCase();
+      let handled = true;
+      if (mod && !e.shiftKey && k === "k") ctx.setPalette("commands");
+      else if (mod && !e.shiftKey && k === "p") ctx.setPalette("files");
+      else if (mod && !e.shiftKey && k === "o") { if (ready) void openFolder(); }
+      else if (mod && !e.shiftKey && k === "b") ctx.toggleSidebar();
+      else if (mod && !e.shiftKey && k === "j") ctx.togglePanel();
+      else if (mod && !e.shiftKey && k === ",") ctx.setSettingsOpen(true);
+      else if (mod && e.shiftKey && k === "r") { if (wsId) ctx.focusRun(); }
+      else if (mod && !e.shiftKey && k === "s") { if (hasDoc) documents.save(activePath); }
+      else if (mod && !e.shiftKey && k === "w") { if (activePath) documents.close(activePath); }
+      else if (mod && e.key === "PageUp") documents.cycle(-1);
+      else if (mod && e.key === "PageDown") documents.cycle(1);
+      else if (mod && !e.shiftKey && k === "q") documents.requestQuit();
+      else if (mod && k === "tab") documents.cycle(e.shiftKey ? -1 : 1);
+      else if (e.key === "F5" && !e.shiftKey) { if (tasks.canRun) tasks.rerunLast(); }
+      else if (e.key === "F5" && e.shiftKey) tasks.stop();
+      else handled = false;
+      if (handled) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // Same dependencies as before the split: the setters and toggles are stable in effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, wsId, hasDoc, activePath, documents, tasks, openFolder]);
+}
