@@ -31,3 +31,9 @@ Dual-licensed under MIT or Apache-2.0, at your option
 ([`LICENSE-MIT`](LICENSE-MIT), [`LICENSE-APACHE`](LICENSE-APACHE)). Dependency
 licensing: [`docs/decisions/ADR-0012-desktop-shell-tauri.md`](docs/decisions/ADR-0012-desktop-shell-tauri.md)
 and [`ADR-0011`](docs/decisions/ADR-0011-licensing.md).
+
+Bundled fonts: IBM Plex Sans and IBM Plex Mono, © 2017 IBM Corp. with Reserved Font
+Name "Plex", under the SIL Open Font License 1.1
+([`OFL.txt`](apps/desktop-tauri/src/assets/fonts/ibm-plex/OFL.txt); IBM's unmodified files,
+source and checksums in [`SOURCE.md`](apps/desktop-tauri/src/assets/fonts/ibm-plex/SOURCE.md);
+ADR-0013 §6).

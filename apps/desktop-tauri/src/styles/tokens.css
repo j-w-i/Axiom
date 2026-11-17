@@ -15,9 +15,9 @@
  */
 
 :root {
-  /* ---- type (design-system.md §5) ---- */
-  --font-ui: "IBM Plex Sans", system-ui, "Segoe UI", "Cantarell", "Noto Sans", sans-serif;
-  --font-code: "IBM Plex Mono", ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  /* ---- type (design-system.md §5); faces bundled by fonts.css ---- */
+  --font-ui: "Axiom Plex Sans", system-ui, "Segoe UI", "Cantarell", "Noto Sans", sans-serif;
+  --font-code: "Axiom Plex Mono", ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   --text-title: 15px;
   --leading-title: 20px;
   --text-body: 13px;

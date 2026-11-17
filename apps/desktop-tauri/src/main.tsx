@@ -4,10 +4,14 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { host, TauriTransport } from "./daemon/tauri-transport";
 import { createApp } from "./state/app";
+import "./styles/fonts.css";
 import "./styles/tokens.css";
 import "./styles/app.css";
 
 performance.mark("axiom:script-start");
+// Per-OS text rendering (fonts.css): grey-scale smoothing on macOS only.
+const platform = navigator.platform.toLowerCase();
+document.documentElement.dataset.os = platform.includes("mac") ? "mac" : platform.includes("win") ? "windows" : "linux";
 const app = createApp(new TauriTransport());
 // Diagnostics, end-to-end tests and benchmarks (read-only handles).
 (window as unknown as { __axiom?: unknown; __axiomHost?: unknown }).__axiom = app;

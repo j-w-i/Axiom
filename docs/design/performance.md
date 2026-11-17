@@ -92,6 +92,17 @@ unless the owner accepts it in writing in the verification record.
 `apps/desktop-tauri/bench/run.sh --runs 3 --heavy-runs 3` (quote the `medians`
 block and the load average). Results go to `bench/results/` with the host name.
 
+**Comparing two builds on a busy machine (`--ab`).** `AXIOM_BENCH_NO_BUILD=1 bench/run.sh
+--only tauri --ab <baseline binary> --runs N --heavy-runs N --scenario startup|memory|…` runs
+the baseline as a second kind, interleaved with the current build repetition by repetition
+(alternating which goes first), and adds a `paired` block: per metric, the distribution of
+(current − baseline) over the repetitions. Both builds see the same background load within a
+repetition, so the paired difference is the verdict for a before/after check and there is no
+need to wait for an idle machine; absolute values still carry the load and are not a baseline.
+Build the baseline binary from the previous commit's frontend (`vite build` in a temporary
+worktree, embedded by `cargo build --release -p axiom-desktop-tauri`, copied to
+`target/release/axiom-tauri-base`).
+
 ### 4.2 New scenarios (QA-002 adds them to `bench/run.py`, driving the real app through the e2e WebDriver)
 
 | Scenario | Method |

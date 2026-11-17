@@ -222,6 +222,48 @@ try {
     await setTheme(wd, "dark");
     check("4c every legacy token alias resolves on .shell, .tab, .tree-row and .statusbar (dark and light)", aliases.length > 30 && empty.length === 0, `${aliases.length} aliases; empty: ${JSON.stringify(empty.slice(0, 8))}`);
   }
+  // 4d/4e: the bundled IBM Plex faces (M1.6-SYSTEM-002) are active, and Monaco
+  // measured the code face after it swapped in (caret at the end of typed text).
+  {
+    const fonts = await wd.execAsync(
+      `const cb = arguments[arguments.length - 1];
+       document.fonts.ready.then(() => cb({
+         ui: document.fonts.check('13px "Axiom Plex Sans"'),
+         code: document.fonts.check('13px "Axiom Plex Mono"'),
+         loaded: [...document.fonts].filter((f) => f.family.replace(/"/g, '').startsWith('Axiom Plex') && f.status === 'loaded').length,
+         tree: getComputedStyle(document.querySelector('.tree-row')).fontFamily,
+         lines: getComputedStyle(document.querySelector('.monaco-editor .view-lines')).fontFamily,
+       }));`,
+    );
+    const starts = (f, fam) => f.replace(/"/g, "").startsWith(fam);
+    check(
+      "4d bundled UI and code fonts are active",
+      fonts.ui && fonts.code && fonts.loaded >= 2 && starts(fonts.tree, "Axiom Plex Sans") && starts(fonts.lines, "Axiom Plex Mono"),
+      JSON.stringify(fonts),
+    );
+    await wd.click(await wd.find(".monaco-editor .view-lines"));
+    await wd.chord(MOD, DOC_START);
+    await wd.keys(["\uE010", ..."abc"]); // End, then type
+    await wd.waitFor(`return document.querySelector('.monaco-editor .view-lines').textContent.includes('abc')`, [], 5000, "abc typed");
+    await new Promise((r) => setTimeout(r, 200));
+    const caret = await wd.exec(
+      `const ed = document.querySelector('.monaco-editor');
+       const lines = [...ed.querySelectorAll('.view-line')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+       const first = lines[0];
+       const spans = first.querySelectorAll('span span');
+       const textRight = spans.length ? spans[spans.length - 1].getBoundingClientRect().right : first.getBoundingClientRect().left;
+       const cursor = ed.querySelector('.cursors-layer .cursor');
+       return { textRight, caretLeft: cursor ? cursor.getBoundingClientRect().left : null, line: first.textContent };`,
+    );
+    check(
+      "4e caret aligns after font swap",
+      caret.caretLeft !== null && Math.abs(caret.caretLeft - caret.textRight) <= 1 && caret.line.endsWith("abc"),
+      `caret x ${caret.caretLeft?.toFixed(1)}, end of text ${caret.textRight.toFixed(1)}, line ${JSON.stringify(caret.line)}`,
+    );
+    // Undo, so the later checks see the file as it was.
+    await wd.chord(MOD, "z");
+    await wd.waitFor(`return !document.querySelector('.monaco-editor .view-lines').textContent.includes('abc')`, [], 5000, "abc undone");
+  }
   await wd.exec(INPUT_RECORDER);
   await wd.click(await wd.find(".monaco-editor .view-lines"));
   await wd.chord(MOD, DOC_START); // Ctrl+Home / Cmd+Up

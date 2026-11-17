@@ -154,6 +154,16 @@ popover shadow (`0 12px 32px rgb(0 0 0/.55), 0 2px 6px rgb(0 0 0/.35)`) plus
 | `--code-size` / `--code-leading` | Plex Mono | 13 / 20 (user setting overrides size) | 400 | Editor |
 | `--out-size` / `--out-leading` | Plex Mono | 12 / 18 | 400 | Console, diffs, paths in chrome |
 
+**As built (M1.6-SYSTEM-002).** The faces are bundled as `"Axiom Plex Sans"` (400, 500, 600 and
+400 italic) and `"Axiom Plex Mono"` (400, 500 and 400 italic): IBM's own unmodified `Latin1`
+split WOFF2 files (Plex Sans 1.1.0, Plex Mono 2.5.0; 143,096 bytes in all; provenance and
+checksums in `apps/desktop-tauri/src/assets/fonts/ibm-plex/SOURCE.md`), declared in
+`src/styles/fonts.css` with IBM's own `unicode-range`. The UI face uses `font-display: block`
+and the code face `swap`, after which Monaco remeasures. The `Pi` split (arrows, maths
+symbols) is not bundled; those characters (e.g. ✔ ✖ in the console) come from the system
+fallback. `--font-ui` and `--font-code` are the families above followed by the fallback
+stacks below.
+
 Rules: sentence case everywhere (no all-caps labels); `font-variant-numeric:
 tabular-nums` for times, counts and line/column; paths and commands in mono;
 truncation with an ellipsis plus `title`/tooltip; the user's editor font

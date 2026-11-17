@@ -72,6 +72,8 @@ QT_ASSETS = Path(os.environ.get("AXIOM_QT_EDITOR_ASSETS", REPO / "build/desktop/
 TAURI_APP = Path(os.environ.get("AXIOM_TAURI_APP", REPO / "target/release/axiom-tauri"))
 # The e2e-mode build (WebDriver server + probe) for the M1.6 scenarios; see run.sh.
 TAURI_E2E_APP = Path(os.environ.get("AXIOM_TAURI_E2E_APP", REPO / "target/release/axiom-tauri-e2e"))
+# --ab: a baseline build measured as kind "base", interleaved with "tauri" repetition by repetition.
+BASE_APP = None
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +290,7 @@ class App:
             cmd = [str(QT_APP), "--daemon", str(wrapper), "--data-dir", data_dir, "--editor-assets", str(QT_ASSETS)]
             env["XDG_CONFIG_HOME"] = str(Path(data_dir) / "config")
         else:
-            cmd = [str(binary or TAURI_APP), "--daemon", str(wrapper), "--data-dir", data_dir]
+            cmd = [str(binary or (BASE_APP if kind == "base" else TAURI_APP)), "--daemon", str(wrapper), "--data-dir", data_dir]
             env["XDG_CONFIG_HOME"] = str(Path(data_dir) / "config")
             env["XDG_DATA_HOME"] = str(Path(data_dir) / "share")
             env["XDG_CACHE_HOME"] = str(Path(data_dir) / "cache")
@@ -370,6 +372,7 @@ LAYOUT = {
     "qt": {"command_field": (0.57, 0.676), "output": (0.25, 0.72, 0.97, 0.94)},
     "tauri": {"command_field": (0.585, 0.704), "output": (0.23, 0.74, 0.97, 0.95)},
 }
+LAYOUT["base"] = LAYOUT["tauri"]
 # Regions (fractions of the window): the explorer column and the editor body.
 EXPLORER = (0.0, 0.08, 0.20, 0.60)
 EDITOR = (0.25, 0.10, 0.95, 0.60)
@@ -977,6 +980,39 @@ def _stat(values):
     return {"median": round(statistics.median(values), 2), "min": round(values[0], 2), "max": round(values[-1], 2), "samples": len(values)}
 
 
+def rep_values(r):
+    """Per-repetition values of the flat (pre-M1.6) rows, in repetition order."""
+    out = {}
+    mem = r.get("memory_cpu_typing", [])
+    for m in ("idle_workspace_open_pss_mib", "monaco_document_open_pss_mib", "after_typing_pss_mib", "idle_cpu_pct_10s", "idle_cpu_pct_10s_with_editor"):
+        out[m] = [x.get(m) for x in mem]
+    for q in ("p50_ms", "p95_ms", "p99_ms"):
+        out[f"typing_{q}"] = [x.get("typing", {}).get(q) for x in mem]
+    for mode in ("cold", "warm"):
+        out[f"startup_{mode}_explorer_painted_ms"] = [x.get("explorer_painted_ms") for x in r.get("startup", {}).get(mode, [])]
+    out["explorer_5000_list_answer_to_last_change_ms"] = [x.get("list_answer_to_last_change_ms") for x in r.get("explorer", [])]
+    out["explorer_wheel_to_paint_p95_ms"] = [x.get("wheel_to_paint_p95_ms") for x in r.get("explorer", [])]
+    out["output_50000_lines_settled_ms"] = [x.get("enter_to_output_settled_ms") for x in r.get("output", [])]
+    return out
+
+
+def paired(results):
+    """--ab: per metric, the differences tauri - base of the repetitions run back to back.
+
+    Both builds see the same background load within a repetition, so the paired
+    difference measures the change even on a busy machine; absolute values do not.
+    """
+    a, b = rep_values(results.get("tauri", {})), rep_values(results.get("base", {}))
+    out = {}
+    for name in a:
+        diffs = [x - y for x, y in zip(a[name], b.get(name, [])) if isinstance(x, (int, float)) and isinstance(y, (int, float))]
+        if diffs:
+            st = _stat(diffs)
+            st["base_median"] = _stat(b[name])["median"]
+            out[name] = st
+    return out
+
+
 def summarise(results, kinds):
     """Median (with min, max and sample count) of each repeated metric.
 
@@ -1025,6 +1061,7 @@ def main():
     ap.add_argument("--runs", type=int, default=5, help="startup repetitions per shell")
     ap.add_argument("--heavy-runs", type=int, default=3, help="repetitions of memory/explorer/output per shell")
     ap.add_argument("--only", choices=["qt", "tauri"])
+    ap.add_argument("--ab", metavar="BASELINE_APP", help="also measure this build (kind \"base\"), interleaved with the current one, and report paired differences")
     ap.add_argument("--scenario", default="all", choices=["all", "startup", "memory", "explorer", "output", "m16", *M16_SCENARIOS])
     args = ap.parse_args()
     if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("GDK_BACKEND") != "x11":
@@ -1032,6 +1069,12 @@ def main():
     x = XSession()
     # The Qt shell was retired (T-15): compare against it only where its binary still exists.
     kinds = [args.only] if args.only else (["qt", "tauri"] if QT_APP.exists() else ["tauri"])
+    if args.ab:
+        global BASE_APP
+        BASE_APP = Path(args.ab).resolve()
+        if not BASE_APP.exists():
+            raise SystemExit(f"--ab: {BASE_APP} does not exist")
+        kinds = ["tauri", "base"]
     results = {
         "host": {
             "os": platform.platform(),
@@ -1045,7 +1088,7 @@ def main():
         },
         "binaries": {},
     }
-    for k, p in (("qt", QT_APP), ("tauri", TAURI_APP), ("tauri-e2e", TAURI_E2E_APP), ("axiomd", DAEMON)):
+    for k, p in (("qt", QT_APP), ("tauri", TAURI_APP), ("tauri-e2e", TAURI_E2E_APP), ("base", BASE_APP or Path("/nonexistent")), ("axiomd", DAEMON)):
         results["binaries"][k] = {"path": str(p), "bytes": p.stat().st_size if p.exists() else None}
     # Interleaved: every repetition runs each shell back to back, so both see
     # the same background load. The 1-minute load average is recorded per sample.
@@ -1086,6 +1129,8 @@ def main():
                     r[name].append(row)
             print(f"[bench] rep {rep + 1}/{args.runs} {kind} done (load {load:.1f})", file=sys.stderr)
     results["medians"] = summarise(results, kinds)
+    if args.ab:
+        results["paired"] = paired(results)
     print(json.dumps(results, indent=2))
 
 
