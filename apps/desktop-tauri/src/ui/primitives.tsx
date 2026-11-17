@@ -6,8 +6,6 @@
 // ui/ imports nothing from state/, shell/, components/, daemon/ or @tauri-apps
 // (tests/ui-imports.test.ts).
 
-import * as RDialog from "@radix-ui/react-dialog";
-import * as RMenu from "@radix-ui/react-dropdown-menu";
 import {
   useCallback,
   useEffect,
@@ -30,6 +28,7 @@ import "../styles/components/field.css";
 import "../styles/components/switch.css";
 import "../styles/components/segmented.css";
 import "../styles/components/stepper.css";
+import { Tooltip } from "./overlays";
 
 const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 
@@ -104,18 +103,22 @@ export function Button({
   );
 }
 
-/** Icon-only button: `label` is mandatory (aria-label, and the tooltip until SYSTEM-004).
- * `pressed` makes it a toggle (aria-pressed, recessed when engaged). */
+/** Icon-only button: `label` is mandatory; it is the aria-label and the tooltip (shown on
+ * hover and on keyboard focus, with `shortcut` as keycaps). `pressed` makes it a toggle
+ * (aria-pressed, recessed when engaged). */
 export function IconButton({
   label,
+  shortcut,
   pressed,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; pressed?: boolean; children: ReactNode }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; shortcut?: string; pressed?: boolean; children: ReactNode }) {
   return (
-    <button type="button" className="icon-btn" aria-label={label} title={label} aria-pressed={pressed} {...rest}>
-      {children}
-    </button>
+    <Tooltip label={label} shortcut={shortcut}>
+      <button type="button" className="icon-btn" aria-label={label} aria-pressed={pressed} {...rest}>
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -337,150 +340,9 @@ export function Stepper({
 
 // ---- unchanged in SYSTEM-003 (SYSTEM-004 / SHELL-002) -----------------------------
 
-export function Banner({
-  variant,
-  children,
-  action,
-  onAction,
-}: {
-  variant: "info" | "warning" | "danger";
-  children: ReactNode;
-  action?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className={`banner banner--${variant}`} role={variant === "danger" ? "alert" : "status"}>
-      <span className="banner__text">{children}</span>
-      {action && (
-        <Button size="sm" onClick={onAction}>
-          {action}
-        </Button>
-      )}
-    </div>
-  );
-}
-
-export interface DialogButton {
-  text: string;
-  variant?: ButtonVariant;
-  action: string;
-}
-
-/** Modal dialog with explicit buttons; Escape / outside click = `dismissAction`. */
-export function Dialog({
-  open,
-  title,
-  description,
-  children,
-  buttons,
-  dismissAction,
-  onChoose,
-  testId,
-}: {
-  open: boolean;
-  title: string;
-  description?: ReactNode;
-  children?: ReactNode;
-  buttons: DialogButton[];
-  dismissAction: string;
-  onChoose: (action: string) => void;
-  testId?: string;
-}) {
-  return (
-    <RDialog.Root open={open} onOpenChange={(o) => !o && onChoose(dismissAction)}>
-      <RDialog.Portal>
-        <RDialog.Overlay className="overlay" />
-        <RDialog.Content className="dialog" data-testid={testId} aria-describedby={undefined}>
-          <RDialog.Title className="dialog__title">{title}</RDialog.Title>
-          {description && <RDialog.Description className="dialog__body">{description}</RDialog.Description>}
-          {children}
-          <div className="dialog__actions">
-            {buttons.map((b) => (
-              <Button
-                key={b.action}
-                variant={b.variant}
-                data-action={b.action}
-                autoFocus={b.variant === "primary"}
-                onClick={() => onChoose(b.action)}
-              >
-                {b.text}
-              </Button>
-            ))}
-          </div>
-        </RDialog.Content>
-      </RDialog.Portal>
-    </RDialog.Root>
-  );
-}
-
-/** Non-blocking sheet (settings, about) closed with Escape or its button. */
-export function Sheet({
-  open,
-  onOpenChange,
-  title,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <RDialog.Root open={open} onOpenChange={onOpenChange}>
-      <RDialog.Portal>
-        <RDialog.Overlay className="overlay" />
-        <RDialog.Content className="dialog" aria-describedby={undefined}>
-          <RDialog.Title className="dialog__title">{title}</RDialog.Title>
-          {children}
-          <div className="dialog__actions">
-            <RDialog.Close asChild>
-              <Button variant="primary">Done</Button>
-            </RDialog.Close>
-          </div>
-        </RDialog.Content>
-      </RDialog.Portal>
-    </RDialog.Root>
-  );
-}
-
-export interface MenuEntry {
-  label?: string;
-  shortcut?: string;
-  disabled?: boolean;
-  onSelect?: () => void;
-  separator?: boolean;
-  heading?: string;
-}
-
-export function Menu({ trigger, items, label }: { trigger: ReactNode; items: MenuEntry[]; label: string }) {
-  return (
-    <RMenu.Root>
-      <RMenu.Trigger asChild>
-        <button type="button" className="btn btn--quiet btn--sm" aria-label={label}>
-          {trigger}
-        </button>
-      </RMenu.Trigger>
-      <RMenu.Portal>
-        <RMenu.Content className="menu" align="start" sideOffset={4}>
-          {items.map((it, i) =>
-            it.separator ? (
-              <RMenu.Separator key={i} className="menu__sep" />
-            ) : it.heading ? (
-              <RMenu.Label key={i} className="menu__label">
-                {it.heading}
-              </RMenu.Label>
-            ) : (
-              <RMenu.Item key={i} className="menu__item" disabled={it.disabled} onSelect={it.onSelect}>
-                <span>{it.label}</span>
-                {it.shortcut && <span className="menu__shortcut">{it.shortcut}</span>}
-              </RMenu.Item>
-            ),
-          )}
-        </RMenu.Content>
-      </RMenu.Portal>
-    </RMenu.Root>
-  );
-}
+// Dialog, Sheet, Menu and Banner live in overlays.tsx (SYSTEM-004); re-exported here for
+// the existing imports until M1.6-QA-006.
+export { Banner, Dialog, Menu, Sheet, type DialogButton, type MenuEntry } from "./overlays";
 
 /** A draggable divider; reports the new size of the pane it controls. */
 export function Splitter({

@@ -1,5 +1,9 @@
 # Qt → Tauri: design system
 
+_Overlays (M1.6-SYSTEM-004): Radix Tooltip 1.4.1 is adopted (D8) next to the existing Radix
+Dialog and DropdownMenu; the output context menu is a local `ContextMenu` (`src/ui/overlays.tsx`),
+not Radix ContextMenu._
+
 _**Superseded for tokens** by `docs/design/design-system.md` (M1.6, ADR-0013): since
 M1.6-SYSTEM-001 `tokens.css` is generated from `src/styles/themes.json`, and the names
 below survive only as legacy aliases until M1.6-QA-006._

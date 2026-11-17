@@ -5,6 +5,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import type { TasksStore } from "../state/tasks";
 import type { WorkspaceStore } from "../state/workspace";
 import * as Icon from "../ui/icons";
+import { ContextMenu } from "../ui/overlays";
 import { IconButton } from "../ui/primitives";
 
 const ROW_H = 18;
@@ -32,21 +33,8 @@ export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; wo
       if (text) void navigator.clipboard.writeText(text);
     }, []);
 
-    // Context menu on the output: same two actions as the Qt panel (copy the
-    // selection, copy everything). Escape and a click elsewhere close it.
-    useEffect(() => {
-      if (!menuAt) return;
-      const close = () => setMenuAt(null);
-      const onKey = (e: KeyboardEvent) => {
-        if (e.key === "Escape") close();
-      };
-      window.addEventListener("pointerdown", close);
-      window.addEventListener("keydown", onKey);
-      return () => {
-        window.removeEventListener("pointerdown", close);
-        window.removeEventListener("keydown", onKey);
-      };
-    }, [menuAt]);
+    // Context menu on the output: the same two actions as the Qt panel (copy the
+    // selection, copy everything), through ui/ContextMenu (Escape, outside click, arrows).
 
     useEffect(() => {
       const el = scroller.current;
@@ -165,39 +153,16 @@ export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; wo
             </div>
           )}
         </div>
-        {menuAt && (
-          <div
-            className="menu"
-            role="menu"
-            aria-label="Output menu"
-            data-testid="output-menu"
-            style={{ position: "fixed", left: menuAt.x, top: menuAt.y, minWidth: 180 }}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <button
-              type="button"
-              role="menuitem"
-              className="menu__item"
-              onClick={() => {
-                copySelection();
-                setMenuAt(null);
-              }}
-            >
-              Copy selection
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="menu__item"
-              onClick={() => {
-                void navigator.clipboard.writeText(tasks.allText());
-                setMenuAt(null);
-              }}
-            >
-              Copy all
-            </button>
-          </div>
-        )}
+        <ContextMenu
+          at={menuAt}
+          label="Output menu"
+          testId="output-menu"
+          onClose={() => setMenuAt(null)}
+          items={[
+            { label: "Copy selection", onSelect: copySelection },
+            { label: "Copy all", onSelect: () => void navigator.clipboard.writeText(tasks.allText()) },
+          ]}
+        />
       </section>
     );
   },

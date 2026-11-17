@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { host, TauriTransport } from "./daemon/tauri-transport";
 import { createApp } from "./state/app";
+import { toast, ToastStack, TooltipProvider } from "./ui/overlays";
 import "./styles/fonts.css";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -16,12 +17,16 @@ const app = createApp(new TauriTransport());
 // Diagnostics, end-to-end tests and benchmarks (read-only handles).
 (window as unknown as { __axiom?: unknown; __axiomHost?: unknown }).__axiom = app;
 (window as unknown as { __axiomHost?: unknown }).__axiomHost = host;
+(window as unknown as { __axiomToast?: unknown }).__axiomToast = toast;
 
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("#root missing");
 createRoot(rootEl).render(
   <StrictMode>
-    <App app={app} />
+    <TooltipProvider>
+      <App app={app} />
+      <ToastStack />
+    </TooltipProvider>
   </StrictMode>,
 );
 void app.client.connect().then(() => performance.mark("axiom:connected-subscribe"));

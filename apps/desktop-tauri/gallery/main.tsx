@@ -24,6 +24,7 @@ import {
   Stepper,
   Switch,
 } from "../src/ui/primitives";
+import { Banner, ContextMenu, Dialog, Menu, Tooltip, ToastView } from "../src/ui/overlays";
 import "./gallery.css";
 
 const STATES = ["rest", "hover", "pressed", "focus", "disabled", "loading"] as const;
@@ -202,6 +203,86 @@ function Inputs() {
   );
 }
 
+function Host({ title, children }: { title: string; children: (container: HTMLElement | null) => ReactNode }) {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  return (
+    <div className="g__host">
+      <span className="g__head">{title}</span>
+      <div ref={setEl}>{el && children(el)}</div>
+    </div>
+  );
+}
+
+function Overlays() {
+  const menu = [
+    { label: "Open Folder…", shortcut: "Ctrl+O" },
+    { separator: true },
+    { heading: "Recent" },
+    { label: "axiom", shortcut: "…/src/axiom" },
+    { separator: true },
+    { label: "Save", shortcut: "Ctrl+S" },
+    { label: "Save All", disabled: true },
+    { label: "Rerun Last", shortcut: "F5" },
+  ];
+  return (
+    <Section title="Overlays: Menu, ContextMenu, Tooltip, Dialog, Toast, Banner">
+      <div className="g__hosts">
+        <Host title="menu (open)">{(c) => <Menu label="File menu" trigger="File" items={menu} open container={c} />}</Host>
+        <Host title="context menu">
+          {() => (
+            <ContextMenu
+              at={{ x: 0, y: 0 }}
+              label="Output menu"
+              onClose={noop}
+              items={[{ label: "Copy selection", onSelect: noop }, { label: "Copy all", onSelect: noop }, { label: "Clear", onSelect: noop, disabled: true }]}
+            />
+          )}
+        </Host>
+        <Host title="tooltip (open)">
+          {(c) => (
+            <Tooltip label="Toggle panel" shortcut="Ctrl+J" open container={c}>
+              <button type="button" className="icon-btn" aria-label="Toggle panel">
+                <Icon.Panel />
+              </button>
+            </Tooltip>
+          )}
+        </Host>
+        <Host title="dialog (open)">
+          {(c) => (
+            <Dialog
+              open
+              modal={false}
+              container={c}
+              title="executor.rs changed on disk"
+              description="Someone else changed this file after you opened it. Overwrite replaces their version with yours; Reload discards your changes and shows theirs."
+              dismissAction="cancel"
+              buttons={[{ text: "Cancel", variant: "quiet", action: "cancel" }, { text: "Reload", action: "reload" }, { text: "Overwrite", variant: "primary", action: "overwrite" }]}
+              onChoose={noop}
+            />
+          )}
+        </Host>
+        <Host title="toasts">
+          {() => (
+            <div className="g__toasts">
+              <ToastView item={{ id: 1, tone: "ok", text: "cargo test finished: 24 passed" }} />
+              <ToastView item={{ id: 2, tone: "err", text: "Could not save executor.rs: permission denied", action: { label: "Retry", run: noop } }} />
+            </div>
+          )}
+        </Host>
+        <Host title="banners">
+          {() => (
+            <div>
+              <Banner variant="danger" action="Restart backend" onAction={noop}>The backend exited unexpectedly (exit code 3).</Banner>
+              <Banner variant="warning" action="Dismiss" onAction={noop}>Could not list target/: permission denied.</Banner>
+              <Banner variant="info">Settings are stored by the backend.</Banner>
+            </div>
+          )}
+        </Host>
+      </div>
+    </Section>
+  );
+}
+
 function Type() {
   const rows: [string, CSSProperties][] = [
     ["--text-title / 600", { fontSize: "var(--text-title)", lineHeight: "var(--leading-title)", fontWeight: 600 }],
@@ -258,6 +339,7 @@ function Gallery({ initialTheme, initialMotion }: { initialTheme: "dark" | "ligh
       <IconButtons />
       <Indicators />
       <Inputs />
+      <Overlays />
       <Type />
     </main>
   );

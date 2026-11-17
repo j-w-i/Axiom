@@ -344,6 +344,58 @@ try {
   await wd.waitFor(`return document.querySelector('[data-testid=output]')?.textContent.includes('Could not start no-such-program-axiom')`, [], 5000, "spawn_failed");
   check("7c a non-existent program produces a structured error", true);
 
+  // ---- 12. overlays (M1.6-SYSTEM-004): tooltip on focus, Escape and focus return, toasts --
+  {
+    // 12a: a focused icon button shows its tooltip, which repeats its accessible name.
+    const tip = await wd.execAsync(
+      `const cb = arguments[arguments.length - 1];
+       const b = document.querySelector('button[aria-label^="Toggle panel"]');
+       b.focus();
+       setTimeout(() => cb({ name: b.getAttribute('aria-label'), title: b.getAttribute('title'), tip: document.querySelector('.tooltip')?.textContent ?? null }), 900);`,
+    );
+    check("12a icon button focus shows its tooltip with the name (and keeps the name as aria-label)", !!tip.tip && tip.tip.includes("Toggle panel") && tip.title === null, JSON.stringify(tip));
+    await wd.exec(`document.activeElement?.blur()`);
+
+    // 12b: Escape closes a menu and returns focus to its trigger.
+    await wd.click(await wd.find('button[aria-label="File menu"]'));
+    await wd.waitFor(`return document.querySelectorAll('.menu__item').length > 0`, [], 5000, "File menu open");
+    await wd.keys([Keys.ESC]);
+    await wd.waitFor(`return document.querySelectorAll('.menu__item').length === 0`, [], 5000, "File menu closed");
+    const menuFocus = await wd.exec(`return document.activeElement?.getAttribute('aria-label')`);
+    check("12b Escape closes the menu and focus returns to its trigger", menuFocus === "File menu", `focus on ${JSON.stringify(menuFocus)}`);
+
+    // 12c: the output context menu: focus on its first item, arrows move, Escape closes and restores focus.
+    await wd.exec(`document.querySelector('[data-testid=command-input]').focus()`);
+    await wd.exec(
+      `const el = document.querySelector('[data-testid=output]'); const r = el.getBoundingClientRect();
+       el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: Math.round(r.left + 120), clientY: Math.round(r.top + 30) }));`,
+    );
+    await wd.waitFor(`return document.querySelector('[data-testid=output-menu]') !== null`, [], 5000, "context menu");
+    const first = await wd.exec(`return document.activeElement?.textContent`);
+    await wd.keys(["\uE015"]); // ArrowDown
+    const second = await wd.exec(`return document.activeElement?.textContent`);
+    await wd.keys([Keys.ESC]);
+    await wd.waitFor(`return document.querySelector('[data-testid=output-menu]') === null`, [], 5000, "context menu closed");
+    const back = await wd.exec(`return document.activeElement?.dataset.testid`);
+    check(
+      "12c context menu: arrows move, Escape closes, focus returns",
+      first === "Copy selection" && second === "Copy all" && back === "command-input",
+      `first=${JSON.stringify(first)} second=${JSON.stringify(second)} focus back on ${JSON.stringify(back)}`,
+    );
+
+    // 12d: toasts announce as status (ok) / alert (error) and never move focus.
+    await wd.exec(`document.querySelector('[data-testid=command-input]').focus()`);
+    await wd.exec(`window.__axiomToast({ tone: 'ok', text: 'smoke toast ok' }); window.__axiomToast({ tone: 'err', text: 'smoke toast err' });`);
+    const toasts = await wd.waitFor(
+      `const s = document.querySelector('.toast[role=status]'), a = document.querySelector('.toast[role=alert]');
+       return s && a ? { status: s.textContent, alert: a.textContent, focus: document.activeElement?.dataset.testid } : null;`,
+      [],
+      5000,
+      "toasts",
+    );
+    check("12d toasts use role status/alert and do not take focus", toasts.status.includes("smoke toast ok") && toasts.alert.includes("smoke toast err") && toasts.focus === "command-input", JSON.stringify(toasts));
+  }
+
   // ---- 9. themes ---------------------------------------------------------------
   await wd.click(await wd.find('[data-path="README.md"]'));
   await wd.waitFor(`return document.querySelector('[data-path="README.md"][role=tab]') !== null`, [], 5000, "README tab");

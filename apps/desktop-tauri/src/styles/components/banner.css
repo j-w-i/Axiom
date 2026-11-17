@@ -1,0 +1,26 @@
+/* Banner: a persistent problem in context; tint, a 2 px rule in the tone colour, text in --text. */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 32px;
+  padding: 4px var(--s-3);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: var(--text-body);
+}
+.banner__text {
+  flex: 1;
+}
+.banner[data-variant="danger"] {
+  background: var(--danger-soft);
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+.banner[data-variant="warning"] {
+  background: var(--warning-soft);
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+.banner[data-variant="info"] {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}

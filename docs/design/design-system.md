@@ -239,12 +239,12 @@ M1 surface uses it. The others are specified here and prototyped in
 | `Segmented` | 2–4 exclusive options | gliding thumb | radiogroup; arrow keys move and select | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/segmented.css` |
 | `Select` | Choice from a list | button + listbox | Radix Select only if a surface needs it | ❌ (no M1 use) |
 | `Stepper` | Numeric setting | − field + | buttons named; field typeable; Up/Down | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/stepper.css` |
-| `Menu`, `ContextMenu` | Commands in a popup | items, shortcut, heading, separator, disabled | Radix DropdownMenu (existing); output context menu ported to the same styling | ✅ SYSTEM-004 |
-| `Tooltip` | Names and shortcuts for icon controls | 500 ms delay, instant when moving between tooltips | Radix Tooltip (D8); also shown on focus | ✅ SYSTEM-004 |
-| `Dialog` | Blocking decision | explicit buttons, dismiss action | Radix Dialog: focus trap, Escape, initial focus on the safe default | ✅ SYSTEM-004 |
+| `Menu`, `ContextMenu` | Commands in a popup | items, shortcut, heading, separator, disabled | Radix DropdownMenu (existing); output context menu ported to the same styling | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/menu.css` (Radix DropdownMenu 2.2.1; ContextMenu is local, no Radix ContextMenu: only one context menu in M1.6) |
+| `Tooltip` | Names and shortcuts for icon controls | 500 ms delay, instant when moving between tooltips | Radix Tooltip (D8); also shown on focus | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/tooltip.css` (Radix Tooltip 1.4.1, D8) |
+| `Dialog` | Blocking decision | explicit buttons, dismiss action | Radix Dialog: focus trap, Escape, initial focus on the safe default | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/dialog.css` (Radix Dialog 1.3.1) |
 | `Sheet` / settings dialog | Non-blocking configuration | two-pane (sections and body) | as Dialog; section nav is a tablist | ✅ SURFACES-002 |
-| `Toast` | Transient confirmation or result | ok, error, with an action | `role="status"`/`alert`; never steals focus; 4 s, paused on hover or focus | ✅ (task finished while console hidden; save failed) SYSTEM-004 |
-| `Banner` | Persistent problem in context | danger, warning, info + action | `role="alert"`/`status` | ✅ restyle |
+| `Toast` | Transient confirmation or result | ok, error, with an action | `role="status"`/`alert`; never steals focus; 4 s, paused on hover or focus | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/toast.css` (local queue, no dependency) |
+| `Banner` | Persistent problem in context | danger, warning, info + action | `role="alert"`/`status` | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/banner.css` |
 | `Panel` | Region frame | header (title, meta, tools), body | `<section aria-label>`; header marks focused region | ✅ SHELL-002 |
 | `Splitter` | Resize regions | vertical, horizontal | `role="separator"`, arrow keys ±16 (Shift ±48), Home resets; double-click resets | ✅ SHELL-002 |
 | `Tree` | Explorer | rows, guides, glyphs, ignored, selected, focused, dirty dot | full tree keyboard model (existing) | ✅ SHELL-003 |

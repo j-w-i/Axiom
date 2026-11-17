@@ -484,69 +484,7 @@ button {
 }
 
 /* ---- banners ---- */
-.banner {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: var(--border-w) solid var(--border);
-  font-size: var(--text-body);
-}
-.banner__text {
-  flex: 1;
-}
-.banner--danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-.banner--warning {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-.banner--info {
-  background: var(--accent-soft);
-  color: var(--text);
-}
 
-/* ---- dialogs & menus (Radix) ---- */
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--scrim);
-  animation: fade-in var(--dur-normal) var(--ease);
-}
-.dialog {
-  position: fixed;
-  top: 18%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(460px, calc(100vw - 32px));
-  max-height: 70vh;
-  overflow: auto;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-popover);
-  padding: var(--space-5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  animation: dialog-in var(--dur-normal) var(--ease);
-}
-.dialog__title {
-  margin: 0;
-  font-size: var(--text-title);
-  font-weight: var(--weight-strong);
-}
-.dialog__body {
-  margin: 0;
-  color: var(--text-muted);
-}
-.dialog__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
 .dialog ul {
   margin: 0;
   padding-left: var(--space-4);
@@ -574,46 +512,6 @@ button {
   text-overflow: ellipsis;
 }
 
-.menu {
-  min-width: 220px;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-m);
-  box-shadow: var(--shadow-popover);
-  padding: var(--space-1);
-  animation: fade-in var(--dur-fast) var(--ease);
-  z-index: 50;
-}
-.menu__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  height: 28px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-s);
-  outline: none;
-  color: var(--text);
-}
-.menu__item[data-highlighted] {
-  background: var(--bg-hover);
-}
-.menu__item[data-disabled] {
-  color: var(--text-faint);
-}
-.menu__shortcut {
-  margin-left: auto;
-  color: var(--text-faint);
-  font-size: var(--text-caption);
-}
-.menu__sep {
-  height: 1px;
-  background: var(--border);
-  margin: var(--space-1) 0;
-}
-.menu__label {
-  padding: var(--space-1) var(--space-2);
-  color: var(--text-faint);
-  font-size: var(--text-caption);
-}
 
 /* ---- command palette ---- */
 .palette {

@@ -1,0 +1,16 @@
+/* Tooltip: names a control and its shortcut (D8, Radix Tooltip). */
+.tooltip {
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  max-width: 280px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-overlay);
+  box-shadow: var(--overlay-shadow);
+  color: var(--text);
+  font-size: var(--text-small);
+  line-height: var(--leading-small);
+}

@@ -27,7 +27,7 @@ body {
   border-radius: var(--r-3);
   padding: var(--s-4);
 }
-.g__section h2 {
+.g__section > h2 {
   margin: 0 0 var(--s-3);
   font-size: var(--text-small);
   font-weight: var(--weight-strong);
@@ -69,4 +69,35 @@ body {
 .g__stack {
   display: grid;
   gap: var(--s-4);
+}
+/* Overlays shown in place: portalled content flows inside its host box. */
+.g__hosts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--s-4);
+}
+.g__host {
+  display: grid;
+  gap: var(--s-2);
+  align-content: start;
+  min-height: 120px;
+}
+.g__host .g__head {
+  margin-bottom: 2px;
+}
+.g__host [data-radix-popper-content-wrapper],
+.g__host .dialog,
+.g__host .menu[role="menu"] {
+  position: static !important;
+  transform: none !important;
+  min-width: 0;
+}
+.g__host .dialog {
+  width: auto;
+  max-height: none;
+}
+.g__toasts {
+  display: grid;
+  gap: var(--s-2);
+  justify-items: start;
 }
