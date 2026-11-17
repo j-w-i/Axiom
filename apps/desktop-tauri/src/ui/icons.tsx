@@ -30,4 +30,6 @@ export const Gear = (p: P) => (<svg {...base(p)}><circle cx="8" cy="8" r="2" /><
 export const Search = (p: P) => (<svg {...base(p)}><circle cx="7" cy="7" r="4" /><path d="M10 10l3.5 3.5" /></svg>);
 export const Refresh = (p: P) => (<svg {...base(p)}><path d="M13 4v3h-3" /><path d="M12.6 7A5 5 0 103 9" /></svg>);
 export const Collapse = (p: P) => (<svg {...base(p)}><path d="M5 7l3-3 3 3M5 12l3-3 3 3" /></svg>);
-export const Logo = (p: P) => (<svg {...base(p)} strokeWidth={1.6}><path d="M8 2l5.5 11h-11z" /><path d="M5.2 10h5.6" /></svg>);
+// The Axiom mark, a drafting divider (pivot, two legs, arc of travel) that reads
+// as an A. Source of the app icons: src-tauri/icons/source/ (keep in sync).
+export const Logo = (p: P) => (<svg {...base(p)} strokeWidth={1.5}><circle cx="8" cy="3" r="1.5" /><path d="M7.3 4.35L3.25 14M8.7 4.35l4.05 9.65" /><path d="M4.6 10.75Q8 12.4 11.4 10.75" /></svg>);

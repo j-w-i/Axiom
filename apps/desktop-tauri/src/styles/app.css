@@ -74,7 +74,7 @@ button {
 .titlebar__logo {
   width: 18px;
   height: 18px;
-  color: var(--accent-line);
+  color: var(--accent);
 }
 .titlebar__crumb {
   color: var(--text-muted);
