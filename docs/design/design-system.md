@@ -29,7 +29,7 @@ reproduced by the generator within ΔE2000 < 2.
 
 | Scale | Steps (dark use → light use) |
 |-------|------------------------------|
-| `graphite-0…1000` | 13 steps, hue 70°, chroma 0.004–0.008 OKLCH. Key dark stops: 50 `#0b0c0d` canvas, 100 `#111213` well, 150 `#141517` chrome, 175 `#17181a` editor, 200 `#1e1f22` panel, 250 `#26272a` overlay, 300 `#2b2c30` hairline, 350 `#303135` raised, 400 `#3a3b3f` strong line, 600 `#6f6c66`, 700 `#a3a097`, 900 `#e6e3dc` |
+| `graphite-0…900` | 15 role steps shared by both themes (`0` seam, `50` canvas, `100` well, `150` chrome, `175` editor, `200` panel, `250` overlay, `275` raised bottom, `300` hairline, `350` raised top, `400` strong line, `500` input boundary, `600`/`700`/`900` text tiers; light values in the light block). Chroma 0.002–0.013 OKLCH. As built (SYSTEM-001): the approved dark *surfaces* sit at OKLCH hue 248–286 (slightly cool), the text tiers at 85–92 (warm); the generator keeps both as hue offsets from the base input. Key dark stops: 50 `#0b0c0d` canvas, 100 `#111213` well, 150 `#141517` chrome, 175 `#17181a` editor, 200 `#1e1f22` panel, 250 `#26272a` overlay, 300 `#2b2c30` hairline, 350 `#303135` raised, 400 `#3a3b3f` strong line, 600 `#6f6c66`, 700 `#a3a097`, 900 `#e6e3dc` |
 | `brass-300…800` | hue 80°, chroma 0.09–0.11: 300 `#ddb96f`, 400 `#d9b672`, 500 `#c9a35b`, 600 `#b88a3a`, 700 `#9a722c`, 800 `#85601c` |
 | `sage` (ok) | dark `#8fbf7f` / text `#9fca90`; light `#4f8f45` / text `#3f7a36` |
 | `ember` (warn) | dark `#e8904f`; light `#a8520f` (**darkened from the prototype's `#c2621d`, 4.0:1, to ≥ 4.5:1**) |
@@ -50,6 +50,7 @@ reproduced by the generator within ΔE2000 < 2.
 | `--line` | seam: structural boundary, control outline | `#0a0a0b` | `#c3c0ba` |
 | `--line-mid` | hairline inside a surface | `#2b2c30` | `#dcd9d3` |
 | `--line-strong` | dashed/emphasised outline | `#3a3b3f` | `#bdb9b2` |
+| `--line-input` | border of value-holding controls (fields, command field, console prompt); solved at ≥ 3:1 (CR-M1.6-SYSTEM-001) | `#6c6962` | `#86827c` |
 | `--edge`, `--edge-strong` | lit edge on raised controls only | white 5.5% / 8.5% | white 90% / 100% |
 | `--hover`, `--selected`, `--press` | state overlays | white 4.5% / 7.5%, black 28% | ink 5% / 8% / 10% |
 | `--text`, `--text-muted`, `--text-faint` | text tiers | `#e6e3dc` / `#a3a097` / `#75726b` | `#1e1d1b` / `#5b5852` / `#84807a` |
@@ -76,7 +77,7 @@ separate tokens so they can diverge.
 | `--accent-text`, `--ok-text`, `--warn`, `--danger` on editor and panel | 4.5:1 | 9.2, 9.6, 7.2, 5.3 / 5.5, 5.0, ≥4.5 (after fix), 5.0 |
 | `--on-accent` on `--accent` | 4.5:1 | 7.8 / 5.8 |
 | `--focus` against both adjacent surfaces | 3:1 | |
-| `--line` (control outline) against the surface it sits on | 3:1 for inputs (WCAG 1.4.11); hairlines are decorative | |
+| `--line-input` (input boundary) against editor, panel, chrome and well | 3:1 (WCAG 1.4.11); `--line` and hairlines are seams, decorative (CR-M1.6-SYSTEM-001, owner 2026-11-17) | 3.0–3.4 / 3.0–3.8 |
 
 ## 3. Theme generation
 
@@ -98,6 +99,29 @@ contrast against the worst surface they appear on. State hues are fixed per them
 and only lightness-clamped. A `--check` mode fails when `tokens.css` is stale, and
 `scripts/check.sh` runs it, like schema freshness.
 
+**As built (M1.6-SYSTEM-001).** `gen-themes.mjs` expresses each tier as an offset from
+the inputs (neutral: absolute OKLCH lightness, chroma × base chroma, hue offset; brass:
+offsets from the accent input), solves the text tiers and `--line-input` by contrast, and
+clamps the state hues used as text to 4.5:1 on the editor and panel. Calibration against
+§2.2 (`tests/tokens.test.ts` asserts ΔE2000 < 2 for every documented value): dark
+reproduces all of them exactly; light differs only where contrast moved it:
+
+| Token (light) | Generated | Documented | ΔE2000 | Why |
+|---------------|-----------|------------|-------:|-----|
+| `--text` | `#1d1d1b` | `#1e1d1b` | 0.74 | solved to its contrast target |
+| `--text-muted` | `#5a5852` | `#5b5852` | 0.62 | solved |
+| `--text-faint` | `#83807a` | `#84807a` | 0.57 | solved |
+| `--ok-text` | `#3e7935` | `#3f7a36` | 0.37 | clamped: the documented value is 4.44:1 on the panel |
+| `--danger` | `#c23a34` | `#c43c35` | 0.65 | clamped: 4.44:1 on the panel |
+
+Recorded exceptions and choices: `--warn` (light) is seeded with the documented
+`#a8520f`, not the prototype's `#c2621d`; `--run` is `var(--accent)` in both themes
+(§2.2 says so; the prototype's dark `--run` was the focus brass `#d2ac63`); the brass
+scale has steps 300–800 in dark and 500–800 in light (light needs no lighter steps);
+until M1.6-QA-006 the legacy alias `--accent-line: var(--accent)` shadows the
+generated translucent `--accent-line`, and `--bg-hover`/`--scrollbar` alias opaque
+tiers because `src/editor/surface.ts` appends an alpha byte to their hex.
+
 M1.6 ships two themes. User theming (FL's hue/saturation/brightness/contrast,
 Bitwig's midtone/black level) becomes a later task that edits these inputs. **No
 theme editor UI in M1.6.**
@@ -110,7 +134,7 @@ that mixes them.
 | Material | Means | Recipe (dark) | Used by |
 |----------|-------|---------------|---------|
 | **Raised** | You can press it | `linear-gradient(--surface-raised-1, --surface-raised-2)`, 1 px `--line` border, `inset 0 1px 0 --edge-strong`, `0 1px 1px rgb(0 0 0/.22)` | Buttons, keycaps (`Kbd`), the active tab, switch thumbs, the segmented glide |
-| **Recessed** | It holds a value or accepts input | `--surface-well`, 1 px `--line` border, `inset 0 1px 2px rgb(0 0 0/.28)`, outer `0 1px 0 --edge` | Fields, the command field, the task transport, the console prompt, the editor (by tone), **engaged toggles**, the switch track, meters |
+| **Recessed** | It holds a value or accepts input | `--surface-well`, 1 px `--line-input` border on fields that accept input (`--line` on meters and other displays), `inset 0 1px 2px rgb(0 0 0/.28)`, outer `0 1px 0 --edge` | Fields, the command field, the task transport, the console prompt, the editor (by tone), **engaged toggles**, the switch track, meters |
 | **Flat** | Content or structure | Surface tone only; separated by `--line` (between regions) or `--line-mid` (inside) | Panels, headers, lists, rows, the status bar, menus' items |
 
 Pressing a raised control moves it toward recessed: the gradient inverts, the inset

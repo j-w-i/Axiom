@@ -197,6 +197,31 @@ try {
     );
   }
   await shot(wd, "04-editor-dark");
+  // 4c: the legacy token aliases (M1.6-SYSTEM-001) resolve on real elements in both
+  // themes: a missing alias would leave a property empty and a component uncoloured.
+  {
+    const tokensCss = readFileSync(join(here, "../src/styles/tokens.css"), "utf8");
+    const legacy = tokensCss.slice(tokensCss.indexOf("legacy: removed by M1.6-QA-006"));
+    const aliases = [...new Set([...legacy.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]))];
+    const empty = [];
+    for (const theme of ["dark", "light"]) {
+      await setTheme(wd, theme);
+      const missing = await wd.exec(
+        `const out = [];
+         for (const sel of ['.shell', '.tab', '.tree-row', '.statusbar']) {
+           const el = document.querySelector(sel);
+           if (!el) { out.push(sel + ' (no element)'); continue; }
+           const cs = getComputedStyle(el);
+           for (const name of arguments[0]) if (!cs.getPropertyValue(name).trim()) out.push(sel + ' ' + name);
+         }
+         return out;`,
+        [aliases],
+      );
+      empty.push(...missing.map((m) => `${theme}: ${m}`));
+    }
+    await setTheme(wd, "dark");
+    check("4c every legacy token alias resolves on .shell, .tab, .tree-row and .statusbar (dark and light)", aliases.length > 30 && empty.length === 0, `${aliases.length} aliases; empty: ${JSON.stringify(empty.slice(0, 8))}`);
+  }
   await wd.exec(INPUT_RECORDER);
   await wd.click(await wd.find(".monaco-editor .view-lines"));
   await wd.chord(MOD, DOC_START); // Ctrl+Home / Cmd+Up

@@ -1,5 +1,9 @@
 # Qt → Tauri: design system
 
+_**Superseded for tokens** by `docs/design/design-system.md` (M1.6, ADR-0013): since
+M1.6-SYSTEM-001 `tokens.css` is generated from `src/styles/themes.json`, and the names
+below survive only as legacy aliases until M1.6-QA-006._
+
 _Status: evaluation. Implemented in the prototype at
 `apps/desktop-tauri/src/styles/tokens.css`, `src/styles/app.css`,
 `src/ui/primitives.tsx`, `src/ui/icons.tsx`; guarded by

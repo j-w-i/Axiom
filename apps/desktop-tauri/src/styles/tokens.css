@@ -1,159 +1,371 @@
-/* Axiom design tokens (docs/migration/qt-to-tauri/design-system.md).
+/* Axiom design tokens (docs/design/design-system.md, approved by ADR-0013).
  *
- * Three layers:
- *   1. primitives  — raw scales (--gray-*, --indigo-*, sizes). Never used by components.
- *   2. semantic    — roles (--bg, --text-muted, --accent …), themed per [data-theme].
- *   3. component   — a few component-scoped aliases (--row-h, --tab-h …).
- * Components and views reference semantic/component tokens only; a guard test
- * (tests/tokens.test.ts) rejects literal colours outside this file.
- *
- * The semantic names are a superset of the Qt Theme singleton
- * (docs/architecture/design-system.md) so both shells share one vocabulary.
+ * Layers:
+ *   1. primitives   --graphite-*, --brass-*, --sage, --ember, --brick, --steel.
+ *                   Only this file may use them.
+ *   2. semantic     roles (--surface-*, --text*, --accent*, --line*, --syn-* …),
+ *                   per [data-theme]. Components use these.
+ *   3. hand-written type, space, size, shape, material and motion tokens.
+ * The colour blocks between the <generated:…> markers are written by
+ * scripts/gen-themes.mjs from themes.json: edit the inputs and regenerate, never
+ * the values (scripts/check.sh fails when they are stale).
+ * Guards (tests/tokens.test.ts): no literal colours outside this file; both
+ * themes define the same tokens; the §2.3 contrast pairs; every referenced token
+ * is defined; no animated layout properties or filters; durations use tokens.
  */
 
 :root {
-  /* ---- primitives: neutral scale (cool, low-chroma, Linear-like) ---- */
-  --gray-0: #ffffff;
-  --gray-25: #fbfbfc;
-  --gray-50: #f6f7f9;
-  --gray-100: #eef0f3;
-  --gray-150: #e5e7ec;
-  --gray-200: #d9dce3;
-  --gray-300: #c3c7d0;
-  --gray-500: #6b7180;
-  --gray-600: #555b69;
-  --gray-700: #3a3d46;
-  --gray-750: #2e3038;
-  --gray-800: #24262c;
-  --gray-850: #1d1e23;
-  --gray-900: #17181c;
-  --gray-950: #111215;
-  --gray-text-dark: #e6e7eb;
-  --gray-muted-dark: #9a9fab;
-  --gray-faint-dark: #6b707c;
-  --gray-text-light: #1b1d22;
-
-  --indigo-400: #8b9cff;
-  --indigo-500: #6e7ff3;
-  --indigo-600: #5563de;
-  --indigo-700: #4652c9;
-  --red-400: #f0717b;
-  --red-600: #c62f3b;
-  --amber-400: #e0b34f;
-  --amber-700: #9a6700;
-  --green-400: #57c08a;
-  --green-700: #1a7f4b;
-
-  /* ---- spacing (4 px grid; same values as Qt space1..6) ---- */
-  --space-0-5: 2px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-
-  /* ---- radius ---- */
-  --radius-s: 4px;
-  --radius-m: 6px;
-  --radius-l: 10px;
-
-  /* ---- typography ---- */
-  --font-ui: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", "Cantarell", "Noto Sans", sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-  --text-caption: 11px;
-  --text-body: 13px;
+  /* ---- type (design-system.md §5) ---- */
+  --font-ui: "IBM Plex Sans", system-ui, "Segoe UI", "Cantarell", "Noto Sans", sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   --text-title: 15px;
-  --text-heading: 20px;
+  --leading-title: 20px;
+  --text-body: 13px;
+  --leading-body: 18px;
+  --text-small: 12px;
+  --leading-small: 16px;
+  --text-tiny: 11px;
+  --leading-tiny: 14px;
+  --code-size: 13px;
+  --code-leading: 20px;
+  --out-size: 12px;
+  --out-leading: 18px;
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-strong: 600;
-  --leading: 1.45;
 
-  /* ---- sizes ---- */
-  --control-h: 28px;
-  --row-h: 24px;
-  --tab-h: 34px;
-  --titlebar-h: 38px;
-  --statusbar-h: 24px;
+  /* ---- space, size, shape (§6) ---- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --control-h: 26px;
+  --control-h-sm: 22px;
+  --title-h: 38px;
+  --head-h: 30px;
+  --status-h: 24px;
+  --ibtn: 26px;
+  --row-h: 22px;
+  --indent: 14px;
+  --tab-h: 32px;
+  --crumb-h: 24px;
+  --prompt-h: 30px;
   --icon: 16px;
-  --border-w: 1px;
+  --icon-rail: 18px;
+  --r-1: 3px;
+  --r-2: 4px;
+  --r-3: 6px;
   --focus-w: 2px;
+  --led: 7px;
 
-  /* ---- motion (Qt: durationFast 80, durationNormal 160) ---- */
-  --dur-fast: 80ms;
-  --dur-normal: 160ms;
-  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* ---- motion (motion-system.md §2; standard column) ---- */
+  --dur-press: 60ms;
+  --dur-1: 90ms;
+  --dur-2: 140ms;
+  --dur-3: 200ms;
+  --travel: 8px;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.2, 1);
 }
 
-/* ---- semantic: dark (default) ---- */
+/* Reduced: entrances become short fades with no travel; micro motion stays. */
+[data-motion="reduced"] {
+  --dur-2: 80ms;
+  --dur-3: 80ms;
+  --travel: 0px;
+}
+
+[data-motion="off"] {
+  --dur-press: 0ms;
+  --dur-1: 0ms;
+  --dur-2: 0ms;
+  --dur-3: 0ms;
+  --travel: 0px;
+}
+
+/* The OS preference forces at least "reduced". */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="off"]) {
+    --dur-2: 80ms;
+    --dur-3: 80ms;
+    --travel: 0px;
+  }
+}
+
+/* <generated:dark> written by scripts/gen-themes.mjs from themes.json: do not edit */
 :root,
 [data-theme="dark"] {
+  /* primitives: only tokens.css may use these */
+  --graphite-0: #0a0a0b;
+  --graphite-50: #0b0c0d;
+  --graphite-100: #111213;
+  --graphite-150: #141517;
+  --graphite-175: #17181a;
+  --graphite-200: #1e1f22;
+  --graphite-250: #26272a;
+  --graphite-275: #28292c;
+  --graphite-300: #2b2c30;
+  --graphite-350: #303135;
+  --graphite-400: #3a3b3f;
+  --graphite-500: #6c6962;
+  --graphite-600: #75726b;
+  --graphite-700: #a3a097;
+  --graphite-900: #e6e3dc;
+  --brass-300: #ddb96f;
+  --brass-400: #d9b672;
+  --brass-500: #c9a35b;
+  --brass-600: #b88a3a;
+  --brass-700: #9a722c;
+  --brass-800: #85601c;
+  --sage: #8fbf7f;
+  --sage-text: #9fca90;
+  --ember: #e8904f;
+  --brick: #e5645d;
+  --steel: #9fb8d8;
+  /* semantic */
   color-scheme: dark;
-  --bg: var(--gray-900);
-  --bg-subtle: var(--gray-950);
-  --bg-elevated: var(--gray-850);
-  --bg-hover: var(--gray-800);
-  --bg-active: var(--gray-750);
-  --bg-selected: color-mix(in srgb, var(--indigo-500) 22%, transparent);
-  --bg-input: var(--gray-950);
-  --border: var(--gray-800);
-  --border-strong: var(--gray-700);
-  --text: var(--gray-text-dark);
-  --text-muted: var(--gray-muted-dark);
-  --text-faint: var(--gray-faint-dark);
-  --text-on-accent: var(--gray-0);
-  /* Filled accent (primary buttons, white text): AA 4.5:1 needs the deeper
-     indigo; focus rings and markers use --accent-line, which is brighter. */
-  --accent: var(--indigo-600);
-  --accent-hover: var(--indigo-700);
-  --accent-line: var(--indigo-500);
-  --accent-soft: color-mix(in srgb, var(--indigo-500) 16%, transparent);
-  --danger: var(--red-400);
-  --danger-soft: color-mix(in srgb, var(--red-400) 14%, transparent);
-  --warning: var(--amber-400);
-  --warning-soft: color-mix(in srgb, var(--amber-400) 14%, transparent);
-  --success: var(--green-400);
-  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px var(--gray-750);
-  --scrollbar: var(--gray-750);
-  --scrim: rgb(0 0 0 / 0.45);
-  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.35);
+  --surface-canvas: var(--graphite-50);
+  --surface-chrome: var(--graphite-150);
+  --surface-panel: var(--graphite-200);
+  --surface-editor: var(--graphite-175);
+  --surface-well: var(--graphite-100);
+  --surface-raised-1: var(--graphite-350);
+  --surface-raised-2: var(--graphite-275);
+  --surface-overlay: var(--graphite-250);
+  --line: var(--graphite-0);
+  --line-mid: var(--graphite-300);
+  --line-strong: var(--graphite-400);
+  --line-input: var(--graphite-500);
+  --text: var(--graphite-900);
+  --text-muted: var(--graphite-700);
+  --text-faint: var(--graphite-600);
+  --accent: var(--brass-500);
+  --accent-hi: var(--brass-300);
+  --accent-text: var(--brass-400);
+  --editor-cursor: var(--brass-300);
+  --accent-lo: #a8853f;
+  --focus: #d2ac63;
+  --on-accent: #1a1307;
+  --ok: var(--sage);
+  --ok-text: var(--sage-text);
+  --run: var(--accent);
+  --warn: var(--ember);
+  --danger: var(--brick);
+  --attention: var(--warn);
+  --icon-folder: #8e8a82;
+  --editor-bg: var(--surface-editor);
+  --editor-gutter: var(--surface-editor);
+  --editor-lnum: #4f4d49;
+  --editor-lnum-active: var(--text-muted);
+  --syn-text: #dcd8d0;
+  --syn-comment: #77736c;
+  --syn-keyword: #d18e6e;
+  --syn-type: #8ec2b2;
+  --syn-string: #a9c47f;
+  --syn-number: #c4a7de;
+  --syn-punct: #9d998f;
+  --syn-macro: #9fb8d8;
+  --glyph-rs: #dd9e80;
+  --glyph-md: #a9c1df;
+  --glyph-toml: #95c6b6;
+  --glyph-other: #a3a097;
+  --edge: rgb(255 255 255 / 0.055);
+  --edge-strong: rgb(255 255 255 / 0.085);
+  --hover: rgb(255 255 255 / 0.045);
+  --selected: rgb(255 255 255 / 0.075);
+  --press: rgb(0 0 0 / 0.28);
+  --accent-soft: rgb(201 163 91 / 0.13);
+  --accent-line: rgb(201 163 91 / 0.55);
+  --danger-soft: rgb(229 100 93 / 0.12);
+  --scrim: rgb(6 6 7 / 0.5);
+  --scroll-thumb: rgb(255 255 255 / 0.11);
+  --scroll-thumb-hover: rgb(255 255 255 / 0.2);
+  --tree-guide: rgb(255 255 255 / 0.05);
+  --editor-line: rgb(255 255 255 / 0.028);
+  --editor-selection: rgb(201 163 91 / 0.2);
+  --editor-guide: rgb(255 255 255 / 0.045);
+  --editor-guide-active: rgb(255 255 255 / 0.14);
+  --glyph-rs-bg: rgb(209 142 110 / 0.17);
+  --glyph-md-bg: rgb(159 184 216 / 0.16);
+  --glyph-toml-bg: rgb(142 194 178 / 0.15);
+  --glyph-other-bg: rgb(255 255 255 / 0.07);
 }
+/* </generated:dark> */
 
-/* ---- semantic: light ---- */
+/* <generated:light> written by scripts/gen-themes.mjs from themes.json: do not edit */
 [data-theme="light"] {
+  /* primitives: only tokens.css may use these */
+  --graphite-0: #c3c0ba;
+  --graphite-50: #c4c1bb;
+  --graphite-100: #ffffff;
+  --graphite-150: #e6e4df;
+  --graphite-175: #fcfbf9;
+  --graphite-200: #efede9;
+  --graphite-250: #fcfbf9;
+  --graphite-275: #f1efeb;
+  --graphite-300: #dcd9d3;
+  --graphite-350: #ffffff;
+  --graphite-400: #bdb9b2;
+  --graphite-500: #86827c;
+  --graphite-600: #83807a;
+  --graphite-700: #5a5852;
+  --graphite-900: #1d1d1b;
+  --brass-500: #c99a49;
+  --brass-600: #b88a3a;
+  --brass-700: #9a722c;
+  --brass-800: #85601c;
+  --sage: #4f8f45;
+  --sage-text: #3e7935;
+  --ember: #a8520f;
+  --brick: #c23a34;
+  --steel: #3b6a9e;
+  /* semantic */
   color-scheme: light;
-  --bg: var(--gray-0);
-  --bg-subtle: var(--gray-50);
-  --bg-elevated: var(--gray-0);
-  --bg-hover: var(--gray-100);
-  --bg-active: var(--gray-150);
-  --bg-selected: color-mix(in srgb, var(--indigo-600) 13%, transparent);
-  --bg-input: var(--gray-0);
-  --border: var(--gray-150);
-  --border-strong: var(--gray-200);
-  --text: var(--gray-text-light);
-  --text-muted: var(--gray-600);
-  --text-faint: var(--gray-500);
-  --text-on-accent: var(--gray-0);
-  --accent: var(--indigo-600);
-  --accent-hover: var(--indigo-700);
-  --accent-line: var(--indigo-600);
-  --accent-soft: color-mix(in srgb, var(--indigo-600) 10%, transparent);
-  --danger: var(--red-600);
-  --danger-soft: color-mix(in srgb, var(--red-600) 9%, transparent);
-  --warning: var(--amber-700);
-  --warning-soft: color-mix(in srgb, var(--amber-700) 10%, transparent);
-  --success: var(--green-700);
-  --shadow-popover: 0 8px 24px rgb(20 22 30 / 0.14), 0 0 0 1px var(--gray-150);
-  --scrollbar: var(--gray-200);
-  --scrim: rgb(20 22 30 / 0.25);
-  --shadow-raised: 0 1px 2px rgb(20 22 30 / 0.12);
+  --surface-canvas: var(--graphite-50);
+  --surface-chrome: var(--graphite-150);
+  --surface-panel: var(--graphite-200);
+  --surface-editor: var(--graphite-175);
+  --surface-well: var(--graphite-100);
+  --surface-raised-1: var(--graphite-350);
+  --surface-raised-2: var(--graphite-275);
+  --surface-overlay: var(--graphite-250);
+  --line: var(--graphite-0);
+  --line-mid: var(--graphite-300);
+  --line-strong: var(--graphite-400);
+  --line-input: var(--graphite-500);
+  --text: var(--graphite-900);
+  --text-muted: var(--graphite-700);
+  --text-faint: var(--graphite-600);
+  --accent: var(--brass-600);
+  --accent-hi: var(--brass-500);
+  --accent-lo: var(--brass-700);
+  --accent-text: var(--brass-800);
+  --focus: var(--brass-700);
+  --editor-cursor: var(--brass-700);
+  --on-accent: #1d1505;
+  --ok: var(--sage);
+  --ok-text: var(--sage-text);
+  --run: var(--accent);
+  --warn: var(--ember);
+  --danger: var(--brick);
+  --attention: var(--warn);
+  --icon-folder: #7a766e;
+  --editor-bg: var(--surface-editor);
+  --editor-gutter: var(--surface-editor);
+  --editor-lnum: #b5b1a9;
+  --editor-lnum-active: var(--text-muted);
+  --syn-text: #2b2925;
+  --syn-comment: #8d887f;
+  --syn-keyword: #a8502e;
+  --syn-type: #2f7a68;
+  --syn-string: #557a25;
+  --syn-number: #7a4ea8;
+  --syn-punct: #6d6961;
+  --syn-macro: #3b6a9e;
+  --glyph-rs: #a8502e;
+  --glyph-md: #3b6a9e;
+  --glyph-toml: #2f7a68;
+  --glyph-other: #5b5852;
+  --edge: rgb(255 255 255 / 0.9);
+  --edge-strong: #ffffff;
+  --hover: rgb(40 30 10 / 0.05);
+  --selected: rgb(40 30 10 / 0.08);
+  --press: rgb(40 30 10 / 0.1);
+  --accent-soft: rgb(184 138 58 / 0.14);
+  --accent-line: rgb(150 110 40 / 0.55);
+  --danger-soft: rgb(194 58 52 / 0.1);
+  --scrim: rgb(60 55 45 / 0.18);
+  --scroll-thumb: rgb(0 0 0 / 0.14);
+  --scroll-thumb-hover: rgb(0 0 0 / 0.26);
+  --tree-guide: rgb(0 0 0 / 0.07);
+  --editor-line: rgb(60 45 20 / 0.035);
+  --editor-selection: rgb(184 138 58 / 0.22);
+  --editor-guide: rgb(0 0 0 / 0.06);
+  --editor-guide-active: rgb(0 0 0 / 0.18);
+  --glyph-rs-bg: rgb(168 80 46 / 0.12);
+  --glyph-md-bg: rgb(59 106 158 / 0.12);
+  --glyph-toml-bg: rgb(47 122 104 / 0.12);
+  --glyph-other-bg: rgb(0 0 0 / 0.06);
+}
+/* </generated:light> */
+
+/* ---- materials (design-system.md §4): one recipe per material ---- */
+:root,
+[data-theme="dark"] {
+  --raised-bg: linear-gradient(var(--surface-raised-1), var(--surface-raised-2));
+  --raised-shadow: inset 0 1px 0 var(--edge-strong), 0 1px 1px rgb(0 0 0 / 0.22);
+  --recessed-bg: var(--surface-well);
+  --recessed-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28), 0 1px 0 var(--edge);
+  --overlay-shadow: 0 12px 32px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.35), inset 0 1px 0 var(--edge-strong);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --dur-fast: 0ms;
-    --dur-normal: 0ms;
-  }
+[data-theme="light"] {
+  --raised-bg: linear-gradient(var(--surface-raised-1), var(--surface-raised-2));
+  --raised-shadow: inset 0 1px 0 var(--edge-strong), 0 1px 1px rgb(0 0 0 / 0.22);
+  --recessed-bg: var(--surface-well);
+  --recessed-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28), 0 1px 0 var(--edge);
+  --overlay-shadow: 0 12px 32px rgb(40 34 22 / 0.18), 0 2px 6px rgb(40 34 22 / 0.1), inset 0 1px 0 var(--edge-strong);
+}
+
+/* legacy: removed by M1.6-QA-006 ------------------------------------------------
+ * The pre-M1.6 names, pointed at the new tokens so every existing component keeps
+ * rendering while it is restyled task by task (D9). Declared on every theme
+ * selector, not only :root, so an element with its own data-theme (the editor's
+ * Monaco theme probe) resolves them against its own theme. */
+:root,
+[data-theme] {
+  --bg: var(--surface-editor);
+  --bg-subtle: var(--surface-chrome);
+  --bg-elevated: var(--surface-overlay);
+  --bg-active: var(--press);
+  --bg-selected: var(--selected);
+  --bg-input: var(--surface-well);
+  --border: var(--line-mid);
+  --border-strong: var(--line-strong);
+  /* Shadows the generated translucent --accent-line until QA-006 (recorded exception). */
+  --accent-line: var(--accent);
+  --accent-hover: var(--accent-lo);
+  --text-on-accent: var(--on-accent);
+  --warning: var(--warn);
+  --warning-soft: color-mix(in srgb, var(--warn) 14%, transparent);
+  --success: var(--ok);
+  --shadow-popover: var(--overlay-shadow);
+  --shadow-raised: var(--raised-shadow);
+  --space-0-5: 2px;
+  --space-1: var(--s-1);
+  --space-2: var(--s-2);
+  --space-3: var(--s-3);
+  --space-4: var(--s-4);
+  --space-5: var(--s-5);
+  --space-6: 32px;
+  --radius-s: var(--r-1);
+  --radius-m: var(--r-2);
+  --radius-l: var(--r-3);
+  --dur-fast: var(--dur-1);
+  --dur-normal: var(--dur-2);
+  --ease: var(--ease-out);
+  --font-mono: var(--font-code);
+  --text-caption: var(--text-tiny);
+  --text-heading: 20px;
+  --leading: 1.45;
+  --border-w: 1px;
+  --titlebar-h: var(--title-h);
+  --statusbar-h: var(--status-h);
+}
+
+/* Opaque on purpose: src/editor/surface.ts converts these to #rrggbb and appends an
+ * alpha byte for Monaco, which a translucent value would break. Each is the opaque
+ * tier closest to the translucent token it stands for (--hover over the panel,
+ * --scroll-thumb over the editor). */
+:root,
+[data-theme="dark"] {
+  --bg-hover: var(--surface-raised-2);
+  --scrollbar: var(--line-strong);
+}
+
+[data-theme="light"] {
+  --bg-hover: var(--surface-chrome);
+  --scrollbar: var(--line-mid);
 }

@@ -23,6 +23,7 @@ if [[ "$what" == all || "$what" == rust ]]; then
   cargo build -p axiomd
   step "cargo test";                   cargo test --workspace --exclude axiom-desktop-tauri
   step "schema files are current";     cargo run -q -p axiom-protocol --example export_schema -- --check
+  step "theme tokens are current";     node apps/desktop-tauri/scripts/gen-themes.mjs --check
   step "task board is consistent";     python3 scripts/tasks.py check
   step "dependency matrix";            python3 scripts/check_deps.py
   step "CI workflow syntax"

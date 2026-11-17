@@ -31,6 +31,7 @@ lives on branch `task/m1.6`.
   `e2e/shots-compare.mjs`) and the Linux visual baseline in
   `docs/roadmap/verification/M1.6/baseline/linux/`.
 - **M1.6-QA-002 is tested (2026-11-17):** performance baseline `bench/results/JWI-Fedora-20261117-061550.json`; six new bench scenarios; `docs/design/performance.md` §1 is now measured. Both baselines exist.
+- **M1.6-SYSTEM-001 is tested (2026-11-17):** generated theme tokens (`scripts/gen-themes.mjs` + `themes.json`, freshness step in `check.sh`), legacy aliases until QA-006, extended guard tests. Owner accepted CR-M1.6-SYSTEM-001-line-contrast (option A: `--line-input` for field borders).
 - **Next (wave B, parallel, disjoint scopes):** M1.6-QA-002 (performance baseline and new scenarios),
   M1.6-SYSTEM-001 (generated tokens), M1.6-SHELL-001 (split `App.tsx`, no visual
   change). The QA baselines must be captured before the first restyle merges.
@@ -75,7 +76,7 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-17-M1.6-QA-002.md`. Earlier: `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
+`agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`. Earlier: `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 
@@ -83,7 +84,7 @@ gone (tag `qt-shell-final`).
 first `READY` task whose id starts with `M1.6-`, in `order`:
 `scripts/tasks.py | grep '^M1.6-' | grep READY`. Do **not** use `scripts/tasks.py
 next` for this: it prints T-11 (an M1.5 spike with a lower `order` that is still
-READY and is not part of M1.6). Wave B is M1.6-QA-001 and M1.6-QA-002 (done), M1.6-SYSTEM-001
+READY and is not part of M1.6). Wave B is M1.6-QA-001, M1.6-QA-002 and M1.6-SYSTEM-001 (done)
 and M1.6-SHELL-001. Both QA baselines must be captured before any restyle merges.
 
 ## M1.5 follow-ups (open by owner waiver; not blocking M1.6)
