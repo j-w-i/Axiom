@@ -276,6 +276,11 @@ describe("design tokens", () => {
     // @media bodies hold nested rules: read their declarations too.
     for (const k of vars(stripComments(tokens)).keys()) defined.add(k);
     const texts = Object.fromEntries(files(src).filter((f) => /\.(css|tsx?)$/.test(f)).map((f) => [f, readFileSync(f, "utf8")]));
+    // Component-local properties are defined where a component sets them inline
+    // (e.g. Segmented's `"--seg-n": options.length`), not in tokens.css.
+    for (const [f, text] of Object.entries(texts)) {
+      if (f.endsWith(".tsx")) for (const [, name] of text.matchAll(/["'](--[\w-]+)["']\s*:/g)) defined.add(name!);
+    }
     expect(undefinedRefs(texts, defined)).toEqual([]);
     expect(undefinedRefs({ "fixture.css": ".x { color: var(--no-such-token); }" }, defined)).toEqual(["fixture.css: --no-such-token"]);
   });

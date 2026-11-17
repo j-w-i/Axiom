@@ -29,6 +29,7 @@
   "include": [
     "src",
     "tests",
+    "gallery",
     "vite.config.ts"
   ]
 }

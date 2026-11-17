@@ -299,6 +299,26 @@
   --recessed-bg: var(--surface-well);
   --recessed-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28), 0 1px 0 var(--edge);
   --overlay-shadow: 0 12px 32px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.35), inset 0 1px 0 var(--edge-strong);
+  /* control recipes (SYSTEM-003): states of the materials above */
+  --raised-bg-hover: linear-gradient(color-mix(in srgb, var(--surface-raised-1) 88%, white), color-mix(in srgb, var(--surface-raised-2) 90%, white));
+  --raised-bg-pressed: linear-gradient(var(--surface-raised-2), var(--surface-raised-1));
+  --pressed-shadow: inset 0 1px 2px rgb(0 0 0 / 0.4);
+  --engaged-shadow: inset 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 0 var(--edge);
+  --primary-bg: linear-gradient(var(--accent-hi), var(--accent-lo));
+  --primary-bg-hover: linear-gradient(color-mix(in srgb, var(--accent-hi) 85%, white), var(--accent));
+  --primary-bg-pressed: linear-gradient(var(--accent-lo), var(--accent));
+  --primary-border: color-mix(in srgb, var(--accent-lo) 60%, black);
+  --primary-shadow: inset 0 1px 0 rgb(255 255 255 / 0.32), 0 1px 1px rgb(0 0 0 / 0.3);
+  --primary-shadow-pressed: inset 0 1px 2px rgb(0 0 0 / 0.35);
+  --keycap-shadow: inset 0 1px 0 var(--edge-strong), 0 1px 0 var(--line);
+  --track-shadow: inset 0 1px 2px rgb(0 0 0 / 0.3);
+  --thumb-bg: linear-gradient(#e2ded6, #b7b2a8);
+  --thumb-shadow: 0 1px 2px rgb(0 0 0 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.6);
+  --glide-shadow: inset 0 1px 0 var(--edge-strong), 0 1px 2px rgb(0 0 0 / 0.35);
+  --meter-shadow: inset 0 1px 1px rgb(0 0 0 / 0.4);
+  --led-off: #2f3034;
+  --led-off-shadow: inset 0 1px 1px rgb(0 0 0 / 0.6);
+  --led-ring: 0 0 0 1px rgb(0 0 0 / 0.35);
 }
 
 [data-theme="light"] {
@@ -307,6 +327,25 @@
   --recessed-bg: var(--surface-well);
   --recessed-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28), 0 1px 0 var(--edge);
   --overlay-shadow: 0 12px 32px rgb(40 34 22 / 0.18), 0 2px 6px rgb(40 34 22 / 0.1), inset 0 1px 0 var(--edge-strong);
+  --raised-bg-hover: linear-gradient(color-mix(in srgb, var(--surface-raised-1) 88%, white), color-mix(in srgb, var(--surface-raised-2) 90%, white));
+  --raised-bg-pressed: linear-gradient(var(--surface-raised-2), var(--surface-raised-1));
+  --pressed-shadow: inset 0 1px 2px rgb(0 0 0 / 0.4);
+  --engaged-shadow: inset 0 1px 2px rgb(0 0 0 / 0.14), 0 1px 0 var(--edge);
+  --primary-bg: linear-gradient(var(--accent-hi), var(--accent-lo));
+  --primary-bg-hover: linear-gradient(color-mix(in srgb, var(--accent-hi) 85%, white), var(--accent));
+  --primary-bg-pressed: linear-gradient(var(--accent-lo), var(--accent));
+  --primary-border: color-mix(in srgb, var(--accent-lo) 60%, black);
+  --primary-shadow: inset 0 1px 0 rgb(255 255 255 / 0.32), 0 1px 1px rgb(0 0 0 / 0.3);
+  --primary-shadow-pressed: inset 0 1px 2px rgb(0 0 0 / 0.35);
+  --keycap-shadow: inset 0 1px 0 var(--edge-strong), 0 1px 0 var(--line);
+  --track-shadow: inset 0 1px 2px rgb(0 0 0 / 0.3);
+  --thumb-bg: linear-gradient(#e2ded6, #b7b2a8);
+  --thumb-shadow: 0 1px 2px rgb(0 0 0 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.6);
+  --glide-shadow: inset 0 1px 0 var(--edge-strong), 0 1px 2px rgb(0 0 0 / 0.35);
+  --meter-shadow: inset 0 1px 1px rgb(0 0 0 / 0.4);
+  --led-off: #cfccc6;
+  --led-off-shadow: inset 0 1px 1px rgb(0 0 0 / 0.2);
+  --led-ring: 0 0 0 1px rgb(0 0 0 / 0.12);
 }
 
 /* legacy: removed by M1.6-QA-006 ------------------------------------------------

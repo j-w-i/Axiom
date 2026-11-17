@@ -34,7 +34,8 @@ lives on branch `task/m1.6`.
 - **M1.6-SYSTEM-001 is tested (2026-11-17):** generated theme tokens (`scripts/gen-themes.mjs` + `themes.json`, freshness step in `check.sh`), legacy aliases until QA-006, extended guard tests. Owner accepted CR-M1.6-SYSTEM-001-line-contrast (option A: `--line-input` for field borders).
 - **M1.6-SHELL-001 is tested (2026-11-17):** `App.tsx` 433 → 117 lines, shell modules in `src/shell/`, 0 px change. **Wave B is complete.**
 - **M1.6-SYSTEM-002 is tested (2026-11-17):** IBM Plex bundled (143 kB, unmodified IBM files). `bench/run.sh --ab <baseline>` now compares two builds interleaved, so before/after checks no longer need an idle machine.
-- **Next (wave C):** M1.6-SYSTEM-003 and M1.6-INTERACTION-001 are READY (`scripts/tasks.py | grep '^M1.6-' | grep READY`).
+- **M1.6-SYSTEM-003 is tested (2026-11-17):** control primitives in the material grammar, component gallery (`pnpm run gallery`, S17 in the shots harness), `ui/` import guard.
+- **Next (wave C):** M1.6-INTERACTION-001 is READY (`scripts/tasks.py | grep '^M1.6-' | grep READY`).
 - _(Wave B history:)_ M1.6-QA-002 (performance baseline and new scenarios),
   M1.6-SYSTEM-001 (generated tokens), M1.6-SHELL-001 (split `App.tsx`, no visual
   change). The QA baselines must be captured before the first restyle merges.
@@ -79,7 +80,7 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`. Earlier: `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
+`agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`. Earlier: `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 

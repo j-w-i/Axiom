@@ -23,9 +23,10 @@
 // on the Welcome screen) and is a fresh copy of tests/fixtures/visual/.
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { extname, join, normalize, resolve } from "node:path";
 import { Keys, PROVIDER, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const here = import.meta.dirname;
@@ -73,7 +74,7 @@ const CATALOGUE = [
   ["s14", "Window at its 720x480 minimum"],
   ["s15", "Focus on the tree (keyboard focus ring)"],
   ["s16", "Hint line showing the Rerun hint", "SHELL-005: there is no hint line yet"],
-  ["s17", "Gallery page, each section", "SYSTEM-003: there is no component gallery yet"],
+  ["s17", "Gallery page, each section (dev-only gallery served locally, opened in the app's own webview, motion off)"],
   ["focused-region", "Focused-region rule", "SHELL-002 / EDITOR-002: no focused-region treatment yet"],
 ];
 const states = new Map(
@@ -346,6 +347,66 @@ async function passingRun(wd) {
   await runCommand(wd, "node ../sim.js test", OUTCOME("succeeded"));
 }
 
+
+// ---- S17: the component gallery ---------------------------------------------------
+
+const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png" };
+
+/** A static file server for one directory on 127.0.0.1 (the built gallery). */
+function serveDir(dir) {
+  const server = createServer((req, res) => {
+    const path = normalize(decodeURIComponent((req.url ?? "/").split("?")[0])).replace(/^([/\\])+/, "");
+    const file = join(dir, path || "gallery.html");
+    if (!file.startsWith(dir) || !existsSync(file)) {
+      res.writeHead(404).end();
+      return;
+    }
+    res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" }).end(readFileSync(file));
+  });
+  return new Promise((ok) => server.listen(0, "127.0.0.1", () => ok({ port: server.address().port, close: () => server.close() })));
+}
+
+/** Opens the gallery in the app's webview and saves one PNG per section and theme. */
+async function captureGallery(scale) {
+  const appDir = resolve(here, "..");
+  const dist = join(appDir, "dist-gallery");
+  const build = spawnSync("pnpm", ["-s", "run", "build:gallery"], { cwd: appDir, encoding: "utf8" });
+  if (build.status !== 0) throw new Error(`build:gallery failed: ${build.stderr || build.stdout}`);
+  const srv = await serveDir(dist);
+  const env = scale === 2 ? { GDK_SCALE: "2", GDK_DPI_SCALE: "1" } : {};
+  const { wd, data } = await launchPlain(["--daemon", DAEMON], env);
+  try {
+    await wd.cmd("POST", "/window/rect", { x: 0, y: 0, ...WINDOW });
+    for (const theme of ["dark", "light"]) {
+      await wd.cmd("POST", "/url", { url: `http://127.0.0.1:${srv.port}/gallery.html?theme=${theme}&motion=off` });
+      await wd.waitFor(`return !!document.querySelector('[data-gallery]') && document.documentElement.dataset.theme === arguments[0]`, [theme], 20000, `gallery (${theme})`);
+      await installFreeze(wd);
+      const sections = await wd.exec(`return [...document.querySelectorAll('[data-gallery-section]')].map((s) => s.dataset.gallerySection)`);
+      for (const name of sections) {
+        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        const el = await wd.find(`[data-gallery-section="${name}"]`);
+        await wd.exec(`document.querySelector('[data-gallery-section="' + arguments[0] + '"]').scrollIntoView({ block: "start" })`, [name]);
+        await settle(wd);
+        await parkPointer(wd);
+        let bytes;
+        try {
+          bytes = Buffer.from(await wd.cmd("GET", `/element/${el}/screenshot`), "base64");
+        } catch {
+          bytes = await wd.screenshot(); // a server without element screenshots: the viewport, section at the top
+        }
+        const file = `s17-${slug}-${theme}${scale === 2 ? "@2x" : ""}.png`;
+        writeFileSync(join(OUT, file), bytes);
+        states.get("s17").files.push(file);
+        console.log(`SHOT  ${file} (${bytes.length} bytes)`);
+      }
+    }
+  } finally {
+    await wd.quit().catch(() => {});
+    await removeDir(data);
+    srv.close();
+  }
+}
+
 // ---- the run ----------------------------------------------------------------------
 
 async function launchPlain(extraArgs, env = {}) {
@@ -553,6 +614,19 @@ async function main() {
     } finally {
       await wd.quit().catch(() => {});
       await removeDir(data);
+    }
+  }
+
+  // ---- S17: gallery, 100% and (Linux) 200% -------------------------------------------
+  for (const scale of process.platform === "linux" ? [1, 2] : [1]) {
+    try {
+      await captureGallery(scale);
+      mark("s17", { status: "captured" });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      failures.push(`s17${scale === 2 ? "@2x" : ""}: ${msg}`);
+      mark("s17", { status: "failed", note: msg });
+      console.log(`FAIL  s17 — ${msg}`);
     }
   }
 

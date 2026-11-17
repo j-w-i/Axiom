@@ -1,0 +1,40 @@
+/* IconButton: 26x26, icon 16; engaged (aria-pressed) is recessed (design-system.md §8). */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--ibtn);
+  height: var(--ibtn);
+  padding: 0;
+  border: none;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--text-muted);
+  transition: color var(--dur-1) linear, box-shadow var(--dur-1) linear;
+}
+.icon-btn svg {
+  width: var(--icon);
+  height: var(--icon);
+}
+.icon-btn:hover:not(:disabled),
+.icon-btn[data-force="hover"] {
+  background: var(--hover);
+  color: var(--text);
+}
+.icon-btn:active:not(:disabled),
+.icon-btn[data-force="pressed"] {
+  background: var(--press);
+}
+.icon-btn[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--recessed-bg);
+  box-shadow: var(--engaged-shadow);
+}
+.icon-btn:focus-visible,
+.icon-btn[data-force="focus"] {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: 1px;
+}
+.icon-btn:disabled {
+  opacity: 0.42;
+}

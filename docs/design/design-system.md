@@ -227,18 +227,18 @@ M1 surface uses it. The others are specified here and prototyped in
 
 | Component | Purpose | Variants / states | Keyboard and a11y | Built in M1.6 (task) |
 |-----------|---------|-------------------|-------------------|----------------------|
-| `Button` | Commands | default, primary, quiet, danger, danger-quiet; sm; all §8 states; loading | native `<button>`; primary is the dialog default | ✅ SYSTEM-003 |
-| `IconButton` | Icon-only commands and toggles | plain, toggle (`aria-pressed`) | label mandatory (type-enforced) → `aria-label` + Tooltip | ✅ SYSTEM-003 |
-| `Kbd` / `Keys` | Shortcut display | single, chord | `<kbd>`; platform-aware (`⌘`/`Ctrl`) | ✅ SYSTEM-003 |
-| `Badge`, `Count` | Labels, counts | neutral, accent, **mock** (prototype only) | text, never colour only | ✅ (`Count` for console problems is M2: not built) |
-| `Led` | Live state | off, on (ok), run, warn, err | `role="img"` + `aria-label`, or decorative next to text | ✅ SYSTEM-003 |
-| `Meter` | Proportion or rate | determinate bar; **rate meter** (16 bars) | `role="progressbar"`/`img` with label | ✅ rate meter (transport), SYSTEM-003 |
-| `Spinner`, `Activity` | Indeterminate progress | stepped spinner; no sweep in production | `aria-busy` on the owner | ✅ spinner |
-| `Field` | Text input | default, mono, invalid, disabled | label or `aria-label`; error via `aria-describedby` | ✅ SYSTEM-003 |
-| `Switch` | Boolean setting | on/off/disabled | `role="switch"`, `aria-checked`, Space toggles | ✅ settings |
-| `Segmented` | 2–4 exclusive options | gliding thumb | radiogroup; arrow keys move and select | ✅ settings |
+| `Button` | Commands | default, primary, quiet, danger, danger-quiet; sm; all §8 states; loading | native `<button>`; primary is the dialog default | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/button.css` |
+| `IconButton` | Icon-only commands and toggles | plain, toggle (`aria-pressed`) | label mandatory (type-enforced) → `aria-label` + Tooltip | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/icon-button.css` |
+| `Kbd` / `Keys` | Shortcut display | single, chord | `<kbd>`; platform-aware (`⌘`/`Ctrl`) | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/kbd.css` |
+| `Badge`, `Count` | Labels, counts | neutral, accent, **mock** (prototype only) | text, never colour only | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/badge.css` |
+| `Led` | Live state | off, on (ok), run, warn, err | `role="img"` + `aria-label`, or decorative next to text | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/led.css` |
+| `Meter` | Proportion or rate | determinate bar; **rate meter** (16 bars) | `role="progressbar"`/`img` with label | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/meter.css` |
+| `Spinner`, `Activity` | Indeterminate progress | stepped spinner; no sweep in production | `aria-busy` on the owner | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/spinner.css` |
+| `Field` | Text input | default, mono, invalid, disabled | label or `aria-label`; error via `aria-describedby` | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/field.css` |
+| `Switch` | Boolean setting | on/off/disabled | `role="switch"`, `aria-checked`, Space toggles | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/switch.css` |
+| `Segmented` | 2–4 exclusive options | gliding thumb | radiogroup; arrow keys move and select | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/segmented.css` |
 | `Select` | Choice from a list | button + listbox | Radix Select only if a surface needs it | ❌ (no M1 use) |
-| `Stepper` | Numeric setting | − field + | buttons named; field typeable; Up/Down | ✅ font size |
+| `Stepper` | Numeric setting | − field + | buttons named; field typeable; Up/Down | ✅ built (SYSTEM-003): `src/ui/primitives.tsx`, `src/styles/components/stepper.css` |
 | `Menu`, `ContextMenu` | Commands in a popup | items, shortcut, heading, separator, disabled | Radix DropdownMenu (existing); output context menu ported to the same styling | ✅ SYSTEM-004 |
 | `Tooltip` | Names and shortcuts for icon controls | 500 ms delay, instant when moving between tooltips | Radix Tooltip (D8); also shown on focus | ✅ SYSTEM-004 |
 | `Dialog` | Blocking decision | explicit buttons, dismiss action | Radix Dialog: focus trap, Escape, initial focus on the safe default | ✅ SYSTEM-004 |

@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "build:e2e": "vite build --mode e2e",
+    "gallery": "vite --mode gallery",
+    "build:gallery": "vite build --mode gallery --outDir dist-gallery",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "tauri": "tauri",
