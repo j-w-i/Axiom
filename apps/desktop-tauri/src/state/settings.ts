@@ -7,10 +7,13 @@ import { RpcError } from "../daemon/types";
 import { Observable } from "./observable";
 
 export type ThemeSetting = "system" | "light" | "dark";
+/** `appearance.motion`: a shell-side key the daemon stores unchanged (no protocol change). */
+export type MotionSetting = "standard" | "reduced" | "off";
 
 export interface SettingsState {
   loaded: boolean;
   theme: ThemeSetting;
+  motion: MotionSetting;
   editorFontSize: number;
   editorFontFamily: string;
   editorWordWrap: boolean;
@@ -20,6 +23,7 @@ export interface SettingsState {
 
 const KEYS: Record<string, keyof SettingsState> = {
   "appearance.theme": "theme",
+  "appearance.motion": "motion",
   "editor.fontSize": "editorFontSize",
   "editor.fontFamily": "editorFontFamily",
   "editor.wordWrap": "editorWordWrap",
@@ -29,7 +33,7 @@ const KEYS: Record<string, keyof SettingsState> = {
 export class SettingsStore extends Observable<SettingsState> {
   constructor(private readonly client: DaemonClient) {
     // Defaults mirror the table in ipc.md; real values arrive from the daemon.
-    super({ loaded: false, theme: "system", editorFontSize: 13, editorFontFamily: "", editorWordWrap: false, reopenLast: true, error: "" });
+    super({ loaded: false, theme: "system", motion: "standard", editorFontSize: 13, editorFontFamily: "", editorWordWrap: false, reopenLast: true, error: "" });
     client.onNotification<{ values: Record<string, unknown> }>("settings/didChange", (p) => this.apply(p.values));
     client.onState((s) => {
       if (s.state === "ready") void this.load();
@@ -67,7 +71,9 @@ export class SettingsStore extends Observable<SettingsState> {
     const patch: Partial<SettingsState> = {};
     for (const [wire, field] of Object.entries(KEYS)) {
       if (!(wire in values)) continue;
-      const v = values[wire];
+      let v = values[wire];
+      // Any value other than the three levels (or none) reads as "standard".
+      if (wire === "appearance.motion" && v !== "reduced" && v !== "off") v = "standard";
       const current = this.state[field];
       if (typeof v === typeof current && v !== current) (patch as Record<string, unknown>)[field] = v;
     }

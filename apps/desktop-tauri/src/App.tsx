@@ -11,6 +11,7 @@ import { StatusBar } from "./shell/StatusBar";
 import { TitleRow } from "./shell/TitleRow";
 import { Banners, useLayout, Workbench } from "./shell/Workbench";
 import type { AppStores } from "./state/app";
+import { useMotion } from "./ui/motion";
 
 /** Composition root: store subscriptions, app-wide effects, dialog state; the shell is in shell/. */
 export function App({ app }: { app: AppStores }) {
@@ -29,7 +30,8 @@ export function App({ app }: { app: AppStores }) {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const ready = daemon.state === "ready";
 
-  // ---- theme & editor appearance --------------------------------------------
+  // ---- theme, motion level & editor appearance -------------------------------
+  useMotion(prefs.motion);
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
   }, [dark]);

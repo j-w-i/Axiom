@@ -396,6 +396,42 @@ try {
     check("12d toasts use role status/alert and do not take focus", toasts.status.includes("smoke toast ok") && toasts.alert.includes("smoke toast err") && toasts.focus === "command-input", JSON.stringify(toasts));
   }
 
+  // ---- 13. motion foundation (M1.6-INTERACTION-001) --------------------------------
+  {
+    const RUNNING = `return document.getAnimations().filter((a) => a.playState === 'running').length`;
+    // 13a: motion "off" applies without a restart, and an idle app with a task running animates nothing.
+    await wd.exec(`${appExpr}.settings.setValue("appearance.motion", "off")`);
+    await wd.waitFor(`return document.documentElement.dataset.motion === 'off'`, [], 5000, "data-motion off");
+    await wd.exec(`${appExpr}.tasks.runArgv(["sleep", "5"])`);
+    await wd.waitFor(`return ${appExpr}.tasks.getSnapshot().running && !!document.querySelector('.statusbar .spinner')`, [], 5000, "a task running");
+    await new Promise((r) => setTimeout(r, 300));
+    const offRunning = await wd.exec(RUNNING);
+    const probe = await wd.exec(`return window.__axiomMotion ? window.__axiomMotion.running() : null`);
+    check("13a motion off leaves no running animations", offRunning === 0 && (probe === null || probe === 0), `running=${offRunning}, __axiomMotion=${probe === null ? "absent (production bundle)" : probe}`);
+
+    // 13b: standard: the spinner runs, stepped; a window blur pauses it (synthetic events: the gate listens to window blur/focus).
+    await wd.exec(`${appExpr}.settings.setValue("appearance.motion", "standard")`);
+    await wd.waitFor(`return document.documentElement.dataset.motion === 'standard'`, [], 5000, "data-motion standard");
+    await wd.exec(`window.dispatchEvent(new Event('focus'))`);
+    await new Promise((r) => setTimeout(r, 200));
+    const stepped = await wd.exec(
+      `const led = document.createElement('span'); led.className = 'led'; led.dataset.state = 'run'; document.body.appendChild(led);
+       const out = { spinner: getComputedStyle(document.querySelector('.statusbar .spinner')).animationTimingFunction, led: getComputedStyle(led).animationTimingFunction };
+       led.remove(); return out;`,
+    );
+    check("13b' the spinner and the LED pulse are stepped", /steps\(8/.test(stepped.spinner) && /steps\(6/.test(stepped.led), JSON.stringify(stepped));
+    const before = await wd.exec(RUNNING);
+    await wd.exec(`window.dispatchEvent(new Event('blur'))`);
+    await new Promise((r) => setTimeout(r, 200));
+    const paused = await wd.exec(`const a = document.getAnimations(); return { total: a.length, paused: a.filter((x) => x.playState === 'paused').length, idle: document.documentElement.dataset.idle ?? null }`);
+    check("13b blur pauses loops", before > 0 && paused.total > 0 && paused.paused === paused.total && paused.idle === "true", `running before blur=${before}; after: ${JSON.stringify(paused)}`);
+    await wd.exec(`window.dispatchEvent(new Event('focus'))`);
+    await wd.exec(`${appExpr}.tasks.stop()`);
+    // Left at "reduced" so step 8 can check that it survives a restart.
+    await wd.exec(`${appExpr}.settings.setValue("appearance.motion", "reduced")`);
+    await wd.waitFor(`return document.documentElement.dataset.motion === 'reduced'`, [], 5000, "data-motion reduced");
+  }
+
   // ---- 9. themes ---------------------------------------------------------------
   await wd.click(await wd.find('[data-path="README.md"]'));
   await wd.waitFor(`return document.querySelector('[data-path="README.md"][role=tab]') !== null`, [], 5000, "README tab");
@@ -445,6 +481,13 @@ try {
     `tabs=${tabs} active=${active} fontSize=${fontSize} history[0]=${history[0]}`,
   );
   await shot(wd, "08-restored-dark");
+  const motionAfter = await wd.waitFor(
+    `const m = ${appExpr}.settings.getSnapshot().motion; return m === 'reduced' && document.documentElement.dataset.motion === m ? m : null`,
+    [],
+    5000,
+    "motion restored",
+  ).catch(() => null);
+  check("13c appearance.motion persists across a restart (stored by the daemon as an unknown key)", motionAfter === "reduced", `after restart: ${motionAfter}`);
 
   // ---- 11. webview crash recovery (T-08) ---------------------------------------
   // Killing the content process also kills the WebDriver session (it is bound to

@@ -1,0 +1,43 @@
+/* Motion switches (motion-system.md §2, §5, §6; M1.6-INTERACTION-001).
+ * The token columns for data-motion standard / reduced / off live in tokens.css; the
+ * stepped loops (spinner .8s steps(8), LED run 1.6s steps(6)) and their static form under
+ * reduced/off live in components/spinner.css and components/led.css. */
+
+/* Loops pause while the window is hidden or unfocused (ui/motion.ts startLoopGate). */
+[data-idle="true"] *,
+[data-idle="true"] *::before,
+[data-idle="true"] *::after {
+  animation-play-state: paused !important;
+}
+
+/* Presence (ui/motion.ts usePresence drives data-phase): entrances --dur-2 --ease-out,
+ * exits --dur-1 --ease-in; transform and opacity only. */
+.motion-in-left[data-phase="in"] { animation: in-left var(--dur-2) var(--ease-out) both; }
+.motion-in-left[data-phase="out"] { animation: out-left var(--dur-1) var(--ease-in) both; }
+.motion-in-right[data-phase="in"] { animation: in-right var(--dur-2) var(--ease-out) both; }
+.motion-in-right[data-phase="out"] { animation: out-right var(--dur-1) var(--ease-in) both; }
+.motion-in-up[data-phase="in"] { animation: in-up var(--dur-2) var(--ease-out) both; }
+.motion-in-up[data-phase="out"] { animation: out-up var(--dur-1) var(--ease-in) both; }
+.motion-pop[data-phase="in"] { animation: pop-in var(--dur-2) var(--ease-out) both; }
+.motion-pop[data-phase="out"] { animation: pop-out var(--dur-1) var(--ease-in) both; }
+.motion-fade[data-phase="in"] { animation: fade-in var(--dur-2) var(--ease-out) both; }
+.motion-fade[data-phase="out"] { animation: fade-out var(--dur-1) var(--ease-in) both; }
+.motion-toast[data-phase="in"] { animation: toast-in var(--dur-3) var(--ease-out) both; }
+.motion-toast[data-phase="out"] { animation: fade-out var(--dur-1) var(--ease-in) both; }
+/* Reduced: entrances become fades (no travel); off: --dur-* are 0 (tokens.css). */
+[data-motion="reduced"] .motion-pop[data-phase="in"],
+[data-motion="reduced"] .motion-toast[data-phase="in"] {
+  animation-name: fade-in;
+}
+
+@keyframes in-left { from { opacity: 0; transform: translateX(calc(var(--travel) * -1)); } }
+@keyframes out-left { to { opacity: 0; transform: translateX(calc(var(--travel) * -1)); } }
+@keyframes in-right { from { opacity: 0; transform: translateX(var(--travel)); } }
+@keyframes out-right { to { opacity: 0; transform: translateX(var(--travel)); } }
+@keyframes in-up { from { opacity: 0; transform: translateY(var(--travel)); } }
+@keyframes out-up { to { opacity: 0; transform: translateY(var(--travel)); } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-6px) scale(0.985); } }
+@keyframes pop-out { to { opacity: 0; transform: translateY(-4px) scale(0.99); } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }

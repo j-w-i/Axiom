@@ -576,11 +576,6 @@ button {
   white-space: nowrap;
 }
 
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-}
 @keyframes dialog-in {
   from {
     opacity: 0;
