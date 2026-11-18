@@ -875,8 +875,10 @@ try {
       );
 
       await wd.exec(`${appExpr}.documents.requestCloseFolder()`);
-      await wd.waitFor(`return document.querySelector(\`.welcome__item[title="${ws}"]\`) !== null`, [], 8000, "the workspace in Recent");
-      await wd.click(await wd.find(`.welcome__item[title="${ws}"]`));
+      // By name: the row's title is the canonical root (/private/var/… on macOS, long names on Windows).
+      const wsName = ws.split(/[\\/]/).pop();
+      await wd.waitFor(`const b = [...document.querySelectorAll('.welcome__item')].find(b => b.querySelector('.welcome__item-name')?.textContent === arguments[0]); if (b) b.dataset.smokeTarget = ''; return !!b`, [wsName], 8000, "the workspace in Recent");
+      await wd.click(await wd.find(`.welcome__item[data-smoke-target]`));
       await wd.waitFor(`return document.querySelector('[data-path="src"]') !== null`, [], 8000, "workspace reopened from Recent");
       await wd.waitFor(`return document.querySelectorAll('[role=tab]').length === 2`, [], 8000, "its tabs restored");
       check("16c a Welcome recent row opens its workspace", true, ws);

@@ -279,7 +279,9 @@ try {
       `forward ${t.forward.join(" → ")}; reverse ${t.reverse.join(" → ")}`,
       fwd.monacoStops ? [`the editor keeps Tab (indentation): traversal steps past it with Mod+\` (EDITOR-002) — ${fwd.monacoStops} stop(s)`] : [],
     );
-    const all = [...fwd.seen, ...back.seen].filter((d, i, a) => a.findIndex((x) => x.region === d.region && x.name === d.name && x.role === d.role) === i);
+    // <body>: where focus rests between the last control and the wrap to the first (WKWebView,
+    // WebView2): the webview's own chrome, not a control.
+    const all = [...fwd.seen, ...back.seen].filter((d) => d.region !== "body").filter((d, i, a) => a.findIndex((x) => x.region === d.region && x.name === d.name && x.role === d.role) === i);
     const noFocus = all.filter((d) => !d.focus).map((d) => `${d.region} ${d.role} "${d.name}"`);
     const clippedEls = all.filter((d) => d.clipped).map((d) => `${d.region} ${d.role} "${d.name}": ${d.clipped}`);
     check(`2 focus visible (${theme}): every element reached shows focus and is not clipped`, noFocus.length === 0 && clippedEls.length === 0, `${all.length} elements`, [...noFocus.map((v) => "no focus indicator: " + v), ...clippedEls.map((v) => "clipped: " + v)]);

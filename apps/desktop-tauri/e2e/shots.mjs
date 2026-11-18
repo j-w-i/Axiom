@@ -299,8 +299,13 @@ async function focusEditor(wd) {
 async function commentOutFirstLine(wd) {
   await focusEditor(wd);
   for (let attempt = 0; ; attempt++) {
-    // Document start: Ctrl+Home on Linux and Windows, ⌘↑ on macOS.
-    await wd.chord(MOD, process.platform === "darwin" ? "\uE013" : Keys.HOME);
+    // Document start without a modifier chord (⌘↑ through the embedded WebDriver did not move the
+    // caret on macOS, CI run 44247752618): click the first line, then plain Home.
+    const first = await wd.exec(
+      `const ls = [...document.querySelectorAll('.monaco-editor .view-line')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); ls[0]?.setAttribute('data-shots-first', ''); return !!ls[0]`,
+    );
+    if (first) await wd.click(await wd.find(".monaco-editor .view-line[data-shots-first]"));
+    await wd.keys([Keys.HOME]);
     try {
       await waitFor(wd, `return ${STORES}.documents.getSnapshot().cursorText.startsWith('Ln 1, Col 1')`, "the cursor at the document start", 2500);
       break;
