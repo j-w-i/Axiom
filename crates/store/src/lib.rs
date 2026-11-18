@@ -17,6 +17,11 @@ const MIGRATIONS: &[(u32, &str)] = &[(
     "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
      CREATE TABLE recent_workspace (root TEXT PRIMARY KEY, name TEXT NOT NULL, last_opened_ms INTEGER NOT NULL);
      CREATE TABLE workspace_state (root TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (root, key));",
+), (
+    2,
+    // M2-ENV-001: workspaces whose own providers (`.axiom/providers/`) the user trusts. Kept
+    // apart from `workspace_state`, which clients write freely through `workspace/setState`.
+    "CREATE TABLE workspace_trust (root TEXT PRIMARY KEY, trusted_ms INTEGER NOT NULL);",
 )];
 
 fn latest_version() -> u32 {
@@ -245,6 +250,36 @@ impl Store {
     pub fn recent_remove(&self, root: &str) -> Result<(), StoreError> {
         self.conn()
             .execute("DELETE FROM recent_workspace WHERE root = ?1", [root])?;
+        Ok(())
+    }
+
+    /// Whether the user trusts this workspace's own providers.
+    pub fn workspace_trusted(&self, root: &str) -> Result<bool, StoreError> {
+        let n: i64 = self.conn().query_row(
+            "SELECT COUNT(*) FROM workspace_trust WHERE root = ?1",
+            [root],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Records (or withdraws) trust in this workspace's own providers.
+    pub fn set_workspace_trusted(
+        &self,
+        root: &str,
+        trusted: bool,
+        now_ms: u64,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn();
+        if trusted {
+            conn.execute(
+                "INSERT INTO workspace_trust (root, trusted_ms) VALUES (?1, ?2)
+                 ON CONFLICT(root) DO UPDATE SET trusted_ms = excluded.trusted_ms",
+                params![root, now_ms as i64],
+            )?;
+        } else {
+            conn.execute("DELETE FROM workspace_trust WHERE root = ?1", [root])?;
+        }
         Ok(())
     }
 

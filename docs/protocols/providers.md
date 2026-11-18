@@ -32,6 +32,31 @@ A manifest that fails schema validation is reported in the Environment view
 with the validation error and is otherwise ignored. Unknown fields are
 errors (`deny_unknown_fields`), so typos never silently disable something.
 
+As built (M2-ENV-001, `crates/env`):
+- Built-in manifests are compiled into `axiomd`; a test keeps them byte-identical to
+  `providers/*/provider.toml`. A provider's `id` equals its directory name.
+- An invalid manifest never overrides a valid one with the same id; it is listed with its
+  `errors` (for one that did not parse, `id` is the directory name).
+- Validation beyond serde: `schema`, id format, unique tool and task ids, bare `program` names,
+  `version_regex` with exactly one capture group, only `${version}`/`${root}`/`${workspace}` in
+  templates, 64-hex digests or a checksum URL on every archive artifact, `bin_dirs` inside the
+  root, a delegate's `using` naming one of the tools, and no `process` (not supported yet).
+- Trust is stored per workspace (`env/trust`); untrusted workspace manifests are parsed for
+  listing but never applied.
+
+### Detection (as built)
+- **Project:** a provider applies when any `project.any_file` pattern (`*` and `?`, matched
+  against names) matches an entry of the workspace root or of one of its non-hidden
+  first-level directories.
+- **Tools:** managed installs first, newest version first
+  (`<data dir>/toolchains/<id>/<version>/<bin_dir>/<program>`, with the `bin_dirs` of the
+  manifest's archive methods; directories starting with `.` are staging and ignored), then each
+  absolute `PATH` entry (`program`, or `program.exe|.cmd|.bat` on Windows). The first candidate
+  whose `version_args` output (stdout, else stderr) matches `version_regex` wins.
+- The version command runs with its absolute path, no shell, stdin closed, a 5 s limit, and the
+  system temp directory as working directory, so a project-local toolchain file (for example
+  `rust-toolchain.toml`) cannot make a proxy install anything during detection.
+
 ## Operations
 
 The conceptual operations from the brief map onto this split:

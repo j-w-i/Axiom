@@ -13,7 +13,7 @@ enum Level {
     Debug,
 }
 
-/// The Axiom daemon. Speaks protocol 0.1 on stdin/stdout; logs to stderr.
+/// The Axiom daemon. Speaks protocol 0.2 on stdin/stdout; logs to stderr.
 #[derive(Parser)]
 #[command(name = "axiomd", version)]
 struct Cli {
@@ -43,6 +43,10 @@ fn main() {
         Some(d) => d.join("axiom.db"),
         None => default_db_path(),
     };
+    let data_dir = db_path
+        .parent()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
     let store = match Store::open(&db_path) {
         Ok(s) => s,
         Err(e @ StoreError::SchemaTooNew { .. }) => {
@@ -72,7 +76,7 @@ fn main() {
         }
     };
     let code = rt.block_on(async {
-        let app = App::new(store);
+        let app = App::with_data_dir(store, data_dir);
         let router = Arc::new(build_router(app));
         let info = ServerInfo {
             name: "axiomd".into(),

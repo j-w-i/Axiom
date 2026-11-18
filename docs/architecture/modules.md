@@ -188,6 +188,7 @@ before the task that needs them** (no empty scaffolding).
 ## M2 modules
 
 ### `crates/env` — `axiom-env` (M2-ENV-001…005)
+- **Status:** registry, validation and detection (M2-ENV-001); installs and environments follow.
 - **Responsibility:** providers (load, validate, trust), tool detection, version listing,
   install plans and their execution into managed storage, uninstall, and resolving a
   project's `Environment` from `.axiom/project.toml` / `.axiom/project.lock`.

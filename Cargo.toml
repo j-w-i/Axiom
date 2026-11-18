@@ -6,6 +6,7 @@ members = [
     "crates/store",
     "crates/workspace",
     "crates/exec",
+    "crates/env",
     "crates/axiomd",
     "crates/desktop-bridge",
     "apps/desktop-tauri/src-tauri",
@@ -33,6 +34,9 @@ directories = "6"
 tempfile = "3"
 ignore = "0.4"
 sha2 = "0.10"
+# M2 (ADR-0014 §3).
+toml = "1.2.1"
+regex = "1.13"
 dunce = "1"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = "0.3"

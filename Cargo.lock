@@ -172,6 +172,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-env"
+version = "0.1.0"
+dependencies = [
+ "axiom-protocol",
+ "regex",
+ "tempfile",
+ "tokio",
+ "toml 1.2.1+spec-1.1.0",
+ "tracing",
+]
+
+[[package]]
 name = "axiom-exec"
 version = "0.1.0"
 dependencies = [
@@ -238,6 +250,7 @@ dependencies = [
 name = "axiomd"
 version = "0.1.0"
 dependencies = [
+ "axiom-env",
  "axiom-exec",
  "axiom-protocol",
  "axiom-rpc",

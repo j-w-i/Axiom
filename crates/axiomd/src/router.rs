@@ -1,6 +1,6 @@
 use crate::app::App;
-use crate::handlers::{fs, settings, task, workspace};
-use axiom_protocol::{fs as pfs, settings as pset, task as ptask, workspace as pws};
+use crate::handlers::{env, fs, settings, task, workspace};
+use axiom_protocol::{env as penv, fs as pfs, settings as pset, task as ptask, workspace as pws};
 use axiom_rpc::Router;
 use std::sync::Arc;
 
@@ -35,6 +35,9 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(ptask::ListTasks, task::list);
     wire!(pset::Get, settings::get);
     wire!(pset::Set, settings::set, ctx);
+    wire!(penv::Providers, env::providers);
+    wire!(penv::Detect, env::detect_tools);
+    wire!(penv::Trust, env::trust);
 
     let a = app;
     r.on_shutdown(move || {
@@ -53,14 +56,11 @@ pub fn build_router(app: Arc<App>) -> Router {
 /// check the daemon serves exactly the registry.
 #[doc(hidden)]
 pub const NOT_YET_SERVED: &[&str] = &[
-    "env/providers",
-    "env/detect",
     "env/versions",
     "env/planInstall",
     "env/install",
     "env/uninstall",
     "env/resolve",
-    "env/trust",
     "build/tasks",
     "build/run",
 ];

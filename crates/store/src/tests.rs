@@ -216,3 +216,38 @@ fn sqlite_version_is_reported() {
     eprintln!("sqlite_version={v}");
     assert!(!v.is_empty());
 }
+
+#[test]
+fn workspace_trust_set_clear_and_isolation() {
+    let s = Store::open_in_memory().unwrap();
+    assert!(!s.workspace_trusted("/a").unwrap());
+    s.set_workspace_trusted("/a", true, 1).unwrap();
+    s.set_workspace_trusted("/a", true, 2).unwrap();
+    assert!(s.workspace_trusted("/a").unwrap());
+    assert!(!s.workspace_trusted("/b").unwrap());
+    s.set_workspace_trusted("/a", false, 3).unwrap();
+    assert!(!s.workspace_trusted("/a").unwrap());
+}
+
+/// A version-1 database (M1) migrates to the trust table and keeps its data.
+#[test]
+fn version_1_database_migrates() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("axiom.db");
+    {
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch(MIGRATIONS[0].1).unwrap();
+        c.execute_batch(
+            "PRAGMA user_version = 1;
+             INSERT INTO settings (key, value) VALUES ('editor.fontSize', '14');",
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    assert_eq!(
+        s.setting_get("editor.fontSize").unwrap(),
+        Some(Value::from(14))
+    );
+    s.set_workspace_trusted("/w", true, 1).unwrap();
+    assert!(s.workspace_trusted("/w").unwrap());
+}

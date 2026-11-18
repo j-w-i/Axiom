@@ -1,5 +1,5 @@
-# Reference provider manifest (DRAFT contract, see docs/protocols/providers.md).
-# Validated against the schema by crates/protocol/tests/drafts.rs.
+# Built-in provider (contract: docs/protocols/providers.md, frozen for M2).
+# Checked by crates/env/tests/provider_contract.rs and crates/protocol/tests/drafts.rs.
 schema = "axiom.provider/1"
 id = "rust"
 name = "Rust"
