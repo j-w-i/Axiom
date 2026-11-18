@@ -98,7 +98,7 @@ earliest; designed in `docs/design/workspace-spec.md` §5.1).
 
 ## M1.6 — Axiom Visual Experience
 
-**Status (2026-11-18):** built and verified on Linux and macOS; exit review recorded in `verification/M1.6.md` §Exit review — criteria met or met with the owner's written waivers; open: the owner's approval of the deviations list, and Windows (deferred). PR j-w-i/Axiom#2.
+**Status (2026-11-18): complete** on Linux and macOS — every exit criterion met or met with the owner's written waivers (`verification/M1.6.md` §Exit review); Windows deferred by the owner. PR j-w-i/Axiom#2.
 
 **Outcome.** The Tauri shell has a distinctive, coherent and approved visual
 identity ("Precision Instrument", subject to approval): a generated token system

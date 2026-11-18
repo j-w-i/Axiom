@@ -290,6 +290,8 @@ material grammar"). Until then, no production code changes.
 
 ## Deviations at exit (M1.6-QA-006, 2026-11-18)
 
+**Approved by the owner, 2026-11-18** (asked to approve this list, answered "approved").
+
 Where the shipped shell differs from this document, `design-system.md`, `workspace-spec.md` or the
 reference screenshots. Each is recorded in its task's handoff; owner decisions are quoted in
 `docs/roadmap/verification/M1.6.md`.
