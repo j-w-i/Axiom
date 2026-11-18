@@ -288,8 +288,7 @@ pub fn digest_from_checksum_file(text: &str, file_name: &str) -> Option<String> 
         // `*` marks binary mode; the name may carry a directory (`*./rustup-init`).
         let name = t.get(1).map(|n| n.trim_start_matches('*'));
         let base = name.map(|n| n.rsplit(['/', '\\']).next().unwrap_or(n));
-        (t.len() >= 2 && is_hex(t[0]) && base == Some(file_name))
-            .then(|| t[0].to_ascii_lowercase())
+        (t.len() >= 2 && is_hex(t[0]) && base == Some(file_name)).then(|| t[0].to_ascii_lowercase())
     })
 }
 
@@ -322,7 +321,10 @@ mod tests {
         assert_eq!(digest_from_checksum_file(&sums, "other"), None);
         // static.rust-lang.org's format.
         let rustup = format!("{d} *./rustup-init\n");
-        assert_eq!(digest_from_checksum_file(&rustup, "rustup-init"), Some(d.clone()));
+        assert_eq!(
+            digest_from_checksum_file(&rustup, "rustup-init"),
+            Some(d.clone())
+        );
         assert_eq!(
             digest_from_checksum_file(&format!("{d}\n"), "anything"),
             Some(d)

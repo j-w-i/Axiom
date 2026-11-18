@@ -233,7 +233,8 @@ async fn detect_found_and_missing() {
         found.location,
         ToolLocation::Managed {
             root: toolchains
-                .join("demo/1.10.0")
+                .join("demo")
+                .join("1.10.0")
                 .to_string_lossy()
                 .into_owned()
         }
