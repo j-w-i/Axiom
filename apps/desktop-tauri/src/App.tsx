@@ -5,7 +5,7 @@ import { ConflictDialog, SettingsDialog, UnsavedDialog } from "./components/Dial
 import { host, type AppInfo } from "./daemon/tauri-transport";
 import { useNativeMenu, type ShellContext } from "./shell/actions";
 import { usePaletteCommands } from "./shell/commands";
-import { useSystemDark } from "./shell/platform";
+import { useNativeTitleBarTheme, useSystemDark } from "./shell/platform";
 import { useAppShortcuts } from "./shell/shortcuts";
 import { StatusBar } from "./shell/StatusBar";
 import { TitleRow } from "./shell/TitleRow";
@@ -32,6 +32,7 @@ export function App({ app }: { app: AppStores }) {
 
   // ---- theme, motion level & editor appearance -------------------------------
   useMotion(prefs.motion);
+  useNativeTitleBarTheme(prefs.theme);
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
   }, [dark]);

@@ -7,6 +7,7 @@
 // broken fixture, so a guard that silently stops detecting anything fails too.
 
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { contrast, deltaE2000 } from "../scripts/gen-themes.mjs";
@@ -248,6 +249,31 @@ describe("design tokens", () => {
 
   it.each(THEMES)("§2.3 contrast pairs (%s)", (theme) => {
     expect(contrastFailures(themeVars(theme), PAIRS)).toEqual([]);
+  });
+
+  it("light contrast matrix", () => {
+    // The §2.3 matrix for "Aluminium" (M1.6-SURFACES-003), with the overlay added for text and
+    // muted text and focus checked on every surface. State texts on --surface-chrome are not in
+    // §2.3 and miss 4.5:1 in light (see the SURFACES-003 handoff: owner decision pending).
+    const surfaces = ["--surface-editor", "--surface-panel", "--surface-chrome", "--surface-overlay"];
+    const light: [string, string[], number][] = [
+      ["--text", surfaces, 7],
+      ["--text-muted", surfaces, 4.5],
+      ["--text-faint", ["--surface-editor", "--surface-panel"], 3],
+      ["--accent-text", ["--surface-editor", "--surface-panel"], 4.5],
+      ["--ok-text", ["--surface-editor", "--surface-panel"], 4.5],
+      ["--warn", ["--surface-editor", "--surface-panel"], 4.5], // up from the prototype's 4.0:1
+      ["--danger", ["--surface-editor", "--surface-panel"], 4.5],
+      ["--on-accent", ["--accent"], 4.5],
+      ["--focus", ["--surface-editor", "--surface-panel", "--surface-chrome", "--surface-overlay"], 3],
+    ];
+    expect(contrastFailures(themeVars("light"), light)).toEqual([]);
+  });
+
+  it("dark generator output unchanged", () => {
+    // SURFACES-003 must not move a dark value: the generated dark block is pinned byte for byte.
+    const block = /\/\* <generated:dark>[\s\S]*?\/\* <\/generated:dark> \*\//.exec(tokens)?.[0] ?? "";
+    expect(createHash("sha256").update(block).digest("hex")).toBe("cdf1639b0303549a56b58724d3e2ac11450d1218f0aedc9cdd38fdcc6d65bd98");
   });
 
   it("§2.3 contrast pairs detect a failing pair (fixture)", () => {

@@ -53,6 +53,15 @@ as a hardening item, not an M1 requirement.
   | `snapshot_put(path, text)` / `snapshot_clear(path)` | the latest *unsaved* text of a document, held in host memory only (never on disk, never read back into the file by the host) |
   | `recovery_state()` | those snapshots, for a page that must rebuild after a crash |
 
+  Besides these, the capability (`capabilities/main.json`, pinned by
+  `src-tauri/tests/surface.rs`) grants these Tauri core/plugin permissions:
+  `dialog:allow-open` (the folder picker), `core:event:allow-listen` (host
+  events), `core:app:allow-version`, and since M1.6-SURFACES-003
+  `core:window:allow-set-theme`: the page may set **its own window's**
+  title-bar theme (light, dark or follow the system) so the native title bar
+  matches the app on Windows and Linux (D3). It reads nothing and affects only
+  that window's decorations.
+
   There is **no** command that reads or writes workspace files, spawns a
   process, opens an arbitrary path, or grants network access.
 - **Wider than Qt by design:** in the Qt shell only C++ could issue protocol

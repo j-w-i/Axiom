@@ -50,6 +50,8 @@ fn capability_grants_exactly_the_pinned_commands() {
     // macOS menu actions arrive as events (T-07); listening is the only event
     // permission the page has, and it can only hear what the host emits.
     expected.push("core:event:allow-listen".into());
+    // The native title bar follows the theme setting on Windows and Linux (D3, M1.6-SURFACES-003).
+    expected.push("core:window:allow-set-theme".into());
     let mut actual = permissions_in_capability();
     actual.sort();
     expected.sort();

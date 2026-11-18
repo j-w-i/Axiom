@@ -604,6 +604,20 @@ try {
   await shot(wd, "09-workbench-dark");
   const editorBgDark = await wd.exec(`return getComputedStyle(document.querySelector('.monaco-editor-background')).backgroundColor`);
   check("9 light and dark themes apply to shell and editor", editorBgLight !== editorBgDark, `${editorBgLight} vs ${editorBgDark}`);
+  {
+    // M1.6-SURFACES-003 (D3): the native title bar follows the theme setting on Windows and Linux.
+    const native = async (theme) => {
+      await wd.exec(`${appExpr}.settings.setValue("appearance.theme", arguments[0])`, [theme]);
+      return wd.waitFor(`return document.documentElement.dataset.nativeTheme === arguments[0] ? arguments[0] : null`, [theme], 3000, `native ${theme}`).catch(() => wd.exec(`return document.documentElement.dataset.nativeTheme ?? null`));
+    };
+    if (process.platform === "darwin") {
+      notRun("9b theme switch calls setTheme", "macOS uses the overlay title bar (SHELL-003); no call is made");
+    } else {
+      const seen = [await native("light"), await native("system"), await native("dark")];
+      check("9b theme switch calls setTheme (native title bar: light, system, dark; no capability error)", seen.join() === "light,system,dark", seen.join());
+    }
+    await setTheme(wd, "dark");
+  }
 
   // command palette screenshot (10: polish evidence)
   await wd.click(await wd.find(".monaco-editor .view-lines"));
