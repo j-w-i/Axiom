@@ -270,7 +270,7 @@ try {
     for (const [region, focus, header] of [
       ["files", `document.querySelector('[data-testid=explorer]').focus()`, `[data-region="files"] > .panel__head`],
       ["editor", `document.querySelector('.monaco-editor textarea')?.focus()`, `[data-region="editor"] .tabs`],
-      ["console", `document.querySelector('[data-testid=command-input]').focus()`, `[data-region="console"] .panel__bar`],
+      ["console", `document.querySelector('[data-testid=command-input]').focus()`, `[data-region="console"] .panel__head`],
     ]) {
       await wd.exec(focus);
       await new Promise((r) => setTimeout(r, 100));

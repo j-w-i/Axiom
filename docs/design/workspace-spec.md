@@ -113,6 +113,15 @@ window is idle (the loop gate's `data-idle`); the meter renders only when its ba
   (quiet). Focus-within draws an inset accent hairline.
 - Context menu: Copy selection / Copy all (existing), restyled.
 
+**As built (M1.6-SHELL-006).** The header has no view strip (Output is the only view); its meta
+appears only when there is a task: while running, LED · label · elapsed (`mm:ss`, 1 s steps,
+skipped while the window is idle); afterwards the last command with an on/err LED. The header
+LED is static: the transport's LED is the one running indicator that pulses (motion-system.md
+§5.3). Tools: Copy all output, Clear, Hide console (Mod+J). Empty output reads "Run a command in
+this workspace". The header and its tools are memoised so an output batch re-renders only the
+rows (P12). D6 adopted: stderr `--text-muted`, gutter `▏` in `--warn` at 55%; `--danger` is used
+only by the failure status line and error rows. CSS in `styles/components/console.css`.
+
 ### 2.5 Status bar (SHELL-004)
 
 Segments separated by `--line-mid` hairlines, 12 px muted text, hover overlay on

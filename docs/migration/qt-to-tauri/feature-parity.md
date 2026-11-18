@@ -91,8 +91,8 @@ Status: ✅ parity (tested) · 🟡 parity by design, not tested in the prototyp
 | T-6 | History: most-recent-first, deduped, capped 20, persisted | ::historyIs… | same; ↑/↓ in the field instead of a combo-box | S, E: 8 | ✅ (interaction differs) |
 | T-7 | Rerun last (F5), Stop (Shift+F5), Run Command (Ctrl+Shift+R) | Main.qml | same shortcuts | E parity: F5 reruns the recorded command, Shift+F5 stops a run, Ctrl/Cmd+Shift+R focuses the command field | ✅ |
 | T-8 | Closing the workspace cancels a running task | ::closingTheWorkspaceCancelsARunningTask | daemon does it; store resets | S: "closing the workspace cancels a running command" (same three assertions as Qt) | ✅ |
-| T-9 | Copy selection / Copy all / right-click menu on output | OutputPanel.qml | context menu (Copy selection / Copy all) + "Copy output" button + native text selection | inspected | ✅ |
-| T-10 | stderr marked without colour alone | gutter marker | gutter "▌" + visually-hidden "stderr:" prefix | screenshot | ✅ |
+| T-9 | Copy selection / Copy all / right-click menu on output | OutputPanel.qml | context menu (Copy selection / Copy all) + "Copy all output" button in the console header (M1.6-SHELL-006) + native text selection | inspected | ✅ |
+| T-10 | stderr marked without colour alone | gutter marker | gutter "▏" + visually-hidden "stderr:" prefix; since M1.6-SHELL-006 (D6) stderr text is muted, not red, and the glyph is `--warn` at 55% (presentation only) | S: console "stderr row has gutter and hidden prefix"; screenshot | ✅ |
 
 ### Settings, chrome, platform (R10–R18)
 

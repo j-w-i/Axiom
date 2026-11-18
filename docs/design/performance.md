@@ -42,6 +42,14 @@ one loaded repetition moves. The ten pre-existing rows agree with the previous r
 | Idle, no task, same session | 1.0% | 0.9–1.4 | P7 |
 | **Typing under streaming output** (~1,500-2,000 lines/s): p50 / p95, keystrokes made while streaming | 16.5 / 18.4 ms, 82 | p95 18.4–19.0 | P12 |
 
+**P11 output scenario repaired (M1.6-SHELL-006).** The `output` scenario clicked the command
+field at a fixed window fraction; SHELL-002 moved the console, the click landed in the editor,
+`seq` never ran, and the scenario reported ~1 ms "settled" for both builds without failing. It
+now focuses the field from the keyboard (Ctrl+Shift+R, parity T-7) and reports no value when the
+output region never changed. The 79.2 ms baseline above predates SHELL-002 and is valid; under
+the 2026-11-18 load the repaired scenario measures ~100 ms for both the SHELL-005 and the
+SHELL-006 build (10 interleaved pairs, paired delta −1.5 ms).
+
 What the baseline already says about the budgets (for the redesign, not a failure of
 this task):
 

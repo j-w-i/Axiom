@@ -141,7 +141,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
               onCommit={(panel) => store.update((l) => ({ ...l, panel }))}
             />
             <div className="console-host" data-region="console">
-              <OutputPanel ref={panelRef} tasks={tasks} workspace={workspace} ready={ready} />
+              <OutputPanel ref={panelRef} tasks={tasks} workspace={workspace} ready={ready} onHide={ctx.togglePanel} />
             </div>
           </>
         )}

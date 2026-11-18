@@ -370,7 +370,9 @@ def seed_state(data_dir, workspace, open_files=(), expanded=()):
 # screenshots of each app at its default size (Qt 1100x720, Tauri 1180x760).
 LAYOUT = {
     "qt": {"command_field": (0.57, 0.676), "output": (0.25, 0.72, 0.97, 0.94)},
-    "tauri": {"command_field": (0.585, 0.704), "output": (0.23, 0.74, 0.97, 0.95)},
+    # Tauri's output region covers the rows under both console layouts (M1.5 header field,
+    # M1.6 bottom prompt); its command field is focused from the keyboard (scenario_output).
+    "tauri": {"output": (0.23, 0.77, 0.97, 0.93)},
 }
 LAYOUT["base"] = LAYOUT["tauri"]
 # Regions (fractions of the window): the explorer column and the editor body.
@@ -604,11 +606,19 @@ def scenario_output(x, kind):
         wait_tap(tap, "fs/list")
         g = win.get_geometry()
         x.wait_stable(x.region(win, 0, 0, 1, 1), 1.0, 20)
-        # The command field sits in the output panel's bar (bottom area); click it, type, Enter.
-        # Click the command field (in Qt, Ctrl+Shift+R typed into Monaco instead
-        # of focusing the field during calibration, so input is by pointer for both).
-        fx, fy = LAYOUT[kind]["command_field"]
-        x.click(win, int(g.width * fx), int(g.height * fy))
+        if kind == "qt":
+            # In Qt, Ctrl+Shift+R typed into Monaco instead of focusing the field during
+            # calibration, so Qt's command field is clicked.
+            fx, fy = LAYOUT[kind]["command_field"]
+            x.click(win, int(g.width * fx), int(g.height * fy))
+        else:
+            # Tauri: the field moved with the console (the header in M1.5, the prompt since
+            # M1.6-SHELL-006), so it is focused from the keyboard, Run ▸ Run Command (parity T-7),
+            # after a click in the editor gives the window focus.
+            ex, ey = EDITOR[0] + (EDITOR[2] - EDITOR[0]) / 2, EDITOR[1] + (EDITOR[3] - EDITOR[1]) / 2
+            x.click(win, int(g.width * ex), int(g.height * ey))
+            time.sleep(0.2)
+            x.key("r", ("Control_L", "Shift_L"))
         time.sleep(0.4)
         cmd = "seq 1 50000"
         for ch in cmd:
@@ -616,10 +626,13 @@ def scenario_output(x, kind):
         region = x.region(win, *LAYOUT[kind]["output"])
         shell, _ = app.procs_split()
         c0 = cpu_seconds(shell)
+        before = x.grab(region)
         t0 = time.monotonic()
         x.key("Return")
         settled = x.wait_stable(region, 1.0, 60)
         cpu = cpu_seconds(shell) - c0
+        if x.grab(region) == before:
+            settled = None  # the output never changed: the command did not run (not a 0 ms settle)
         return {
             "lines": 50000,
             "enter_to_output_settled_ms": round((settled - t0) * 1000, 1) if settled else None,

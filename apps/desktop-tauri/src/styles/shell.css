@@ -43,7 +43,7 @@
 
 /* The region that holds keyboard focus: a 2 px brass rule on its header's top edge. */
 .workbench[data-focused-region="files"] [data-region="files"] > .panel__head,
-.workbench[data-focused-region="console"] [data-region="console"] .panel__bar {
+.workbench[data-focused-region="console"] [data-region="console"] .panel__head {
   box-shadow: inset 0 2px 0 var(--accent), inset 0 -1px 0 var(--line-mid);
 }
 .workbench[data-focused-region="editor"] [data-region="editor"] .tabs {

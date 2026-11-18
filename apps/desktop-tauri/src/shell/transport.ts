@@ -5,11 +5,7 @@ export const METER_BARS = 16;
 export const METER_MIN_SCALE = 8;
 export const METER_SAMPLE_MS = 250;
 
-/** Elapsed time as mm:ss (minutes keep counting past 59: 75:02). */
-export function formatElapsed(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
+export { formatElapsed } from "../ui/clock";
 
 /**
  * Bar levels 0–1 for the rate meter: the last 16 samples of "rows appended in 250 ms",

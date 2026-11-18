@@ -222,53 +222,6 @@ button {
   align-items: center;
 }
 
-/* ---- output panel ---- */
-.output {
-  flex: 1;
-  overflow: auto;
-  padding: var(--space-1) 0 var(--space-2);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 18px;
-  user-select: text;
-  cursor: text;
-}
-.output__row {
-  display: flex;
-  white-space: pre;
-  padding: 0 var(--space-3) 0 0;
-  height: 18px;
-}
-.output__gutter {
-  flex: none;
-  width: 20px;
-  text-align: center;
-  color: var(--danger);
-  user-select: none;
-}
-.output__row[data-stream="stderr"] {
-  color: var(--danger);
-}
-.output__row[data-kind="status"] {
-  color: var(--success);
-  margin-top: var(--space-1);
-}
-.output__row[data-kind="statusFailed"],
-.output__row[data-kind="error"] {
-  color: var(--danger);
-  margin-top: var(--space-1);
-}
-.output__notice {
-  color: var(--text-faint);
-  padding-left: 20px;
-}
-.output__empty {
-  color: var(--text-faint);
-  padding: var(--space-2) var(--space-3);
-  font-family: var(--font-ui);
-}
-
-
 /* ---- status bar ---- */
 
 /* ---- banners ---- */

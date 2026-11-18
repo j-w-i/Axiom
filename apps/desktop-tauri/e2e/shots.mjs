@@ -187,8 +187,8 @@ const FREEZE_TEXT = `
     if (re.test(n.nodeValue)) { n.nodeValue = n.nodeValue.replace(re, ' in 1.2 s'); replaced++; }
     re.lastIndex = 0;
   }
-  // The task transport's elapsed time is the only other clock on screen (visual-qa.md §1: frozen).
-  for (const t of document.querySelectorAll('.transport__time')) { t.textContent = '00:12'; replaced++; }
+  // The elapsed times of the task transport and the console header are the other clocks (visual-qa.md §1: frozen).
+  for (const t of document.querySelectorAll('.transport__time, .console__time')) { t.textContent = '00:12'; replaced++; }
   return replaced;`;
 
 async function parkPointer(wd) {
