@@ -12,9 +12,10 @@
   white-space: nowrap;
   min-width: 0;
 }
-/* macOS overlay title bar (D3): room for the traffic lights. */
+/* macOS overlay title bar (D3): room for the traffic lights, which tauri.conf.json places at
+   x 13 (16 pt buttons, 23 pt apart, ending at 74) and centres on this 38 px row; 12 px clear. */
 .titlerow[data-mac] {
-  padding-left: 72px;
+  padding-left: 86px;
 }
 .titlerow__brand {
   display: flex;

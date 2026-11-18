@@ -117,7 +117,7 @@ every 250 ms.
 
 | Concern | Approach |
 |---------|----------|
-| Window chrome (D3) | macOS: `titleBarStyle: "Overlay"`, `hiddenTitle: true` in `tauri.conf.json`; title row gets `data-tauri-drag-region` on its non-interactive parts and a 72 px left inset when `navigator.platform` is Mac. Windows/Linux: native decorations; `Window.setTheme(dark/light/null)` follows `appearance.theme` (needs the `core:window:allow-set-theme` capability: a capability change, recorded in `security.md`) |
+| Window chrome (D3) | macOS: `titleBarStyle: "Overlay"`, `hiddenTitle: true`, `trafficLightPosition` {13, 21} (centred on the 38 px row) in `tauri.conf.json`; title row gets `data-tauri-drag-region` on its non-interactive parts and an 86 px left inset when `navigator.platform` is Mac. Windows/Linux: native decorations; `Window.setTheme(dark/light/null)` follows `appearance.theme` (needs the `core:window:allow-set-theme` capability: a capability change, recorded in `security.md`) |
 | Fonts per OS | bundled faces make metrics identical; `-webkit-font-smoothing: antialiased` only on macOS (`data-os="mac"`), because WebKitGTK and WebView2 ignore or misapply it |
 | Scaling | everything in CSS px, so the OS scale factor applies; screenshots are reviewed at 100% and 200% (`visual-qa.md`) |
 | Shortcuts | `MOD` = ⌘ on macOS, Ctrl elsewhere (existing); keycaps render per OS |

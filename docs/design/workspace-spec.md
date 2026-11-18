@@ -67,7 +67,7 @@ milestone. Nothing marked Designed may appear in the production shell before the
 | Command field | recessed, `min(380px, 32vw)`, placeholder "Search files, run commands", `Ctrl K` keycaps; click opens the palette (commands) | palette |
 | Task transport | recessed display: LED · mono label (ellipsis at 220) · elapsed (brass, tabular) · rate meter (16 × 2 px bars, 4 Hz) · Rerun · Stop. Idle: LED off, label "No task", elapsed hidden, Rerun shows the last command in its tooltip; Stop disabled | `tasks` store: `running`, `label`, `lastOutcome`, `history`; **new store fields** `startedAt` (from `TaskInfo.started_ms` of `task/run`) and `outputSeq` (row counter) — no protocol change |
 | Layout toggles | IconButtons (toggle): side bar Ctrl+B, console Ctrl+J; engaged = recessed | layout state |
-| macOS (D3) | `titleBarStyle: "Overlay"`, `hiddenTitle: true`; 72 px left inset for the traffic lights; the title row is the drag region (`data-tauri-drag-region` on non-interactive parts) | host config |
+| macOS (D3) | `titleBarStyle: "Overlay"`, `hiddenTitle: true`; `trafficLightPosition` {13, 21} centres the lights on the 38 px row; 86 px left inset for them; the title row is the drag region (`data-tauri-drag-region` on non-interactive parts) | host config |
 | Windows/Linux (D3) | native decorations; native title bar themed to match (Tauri `set_theme`) | host config |
 
 **As built (M1.6-SHELL-003).** `startedAt` comes from `task/list`'s `TaskInfo.startedMs`
