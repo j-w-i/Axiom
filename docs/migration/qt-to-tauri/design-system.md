@@ -70,6 +70,8 @@ the editor gutter, widgets and focus border match the shell exactly.
 | `Segmented` | `role="radiogroup"` + `role="radio"` | checked state |
 | `Splitter` | `role="separator"`, arrow keys resize | value now/min/max |
 | `Explorer` tree | `role="tree"`/`treeitem`, `aria-level/expanded/selected`, `aria-activedescendant` | full keyboard model (arrows, Home/End, PgUp/PgDn, Enter/Space, Left→parent) |
+
+_Explorer rows (look, glyph chips, guides, unsaved dot): see `docs/design/workspace-spec.md` §2.2 and `src/styles/components/tree.css` (M1.6-SHELL-004); the ARIA model above is unchanged._
 | Tabs | `role="tablist"`/`tab`, `aria-selected`, close buttons named "Close X (unsaved)" | dirty state not by colour alone |
 | Output | `role="log"`, `aria-live="polite"`; stderr has a gutter glyph and a visually-hidden "stderr:" prefix | not by colour alone |
 | Command palette | Radix Dialog + `combobox`/`listbox` with `aria-activedescendant` | keyboard only |

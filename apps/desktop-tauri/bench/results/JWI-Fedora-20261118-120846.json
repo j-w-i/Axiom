@@ -1,0 +1,246 @@
+{
+  "host": {
+    "os": "Linux-7.3.3-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "649abc5",
+    "date": "2026-11-18T12:08:47+1100",
+    "loadavg_at_start": [
+      4.07,
+      3.53,
+      3.01
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 11481984
+    },
+    "tauri-e2e": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-e2e",
+      "bytes": 13737400
+    },
+    "base": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-base",
+      "bytes": 11481408
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6328456
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [
+        {
+          "window_mapped_ms": 102.7,
+          "connected_ms": 144.8,
+          "first_list_answer_ms": 373.1,
+          "explorer_painted_ms": 398.2,
+          "sample_period_ms": 0.63,
+          "loadavg_1m": 4.07
+        },
+        {
+          "window_mapped_ms": 74.4,
+          "connected_ms": 137.9,
+          "first_list_answer_ms": 362.9,
+          "explorer_painted_ms": 379.7,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 3.6
+        },
+        {
+          "window_mapped_ms": 72.0,
+          "connected_ms": 130.9,
+          "first_list_answer_ms": 340.0,
+          "explorer_painted_ms": 353.8,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 3.13
+        },
+        {
+          "window_mapped_ms": 73.7,
+          "connected_ms": 134.4,
+          "first_list_answer_ms": 345.1,
+          "explorer_painted_ms": 352.2,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 2.42
+        }
+      ],
+      "warm": [
+        {
+          "window_mapped_ms": 77.7,
+          "connected_ms": 155.1,
+          "first_list_answer_ms": 424.2,
+          "explorer_painted_ms": 447.0,
+          "sample_period_ms": 0.62,
+          "loadavg_1m": 4.07
+        },
+        {
+          "window_mapped_ms": 72.6,
+          "connected_ms": 131.0,
+          "first_list_answer_ms": 355.5,
+          "explorer_painted_ms": 372.7,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 3.6
+        },
+        {
+          "window_mapped_ms": 73.4,
+          "connected_ms": 132.7,
+          "first_list_answer_ms": 346.2,
+          "explorer_painted_ms": 351.4,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 3.13
+        },
+        {
+          "window_mapped_ms": 72.1,
+          "connected_ms": 133.1,
+          "first_list_answer_ms": 339.8,
+          "explorer_painted_ms": 351.9,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 2.42
+        }
+      ]
+    },
+    "memory_cpu_typing": [],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [],
+    "panel-toggle": [],
+    "splitter-drag": [],
+    "idle-running": [],
+    "typing-under-stream": []
+  },
+  "base": {
+    "startup": {
+      "cold": [
+        {
+          "window_mapped_ms": 74.4,
+          "connected_ms": 133.8,
+          "first_list_answer_ms": 366.1,
+          "explorer_painted_ms": 369.0,
+          "sample_period_ms": 0.6,
+          "loadavg_1m": 3.68
+        },
+        {
+          "window_mapped_ms": 75.1,
+          "connected_ms": 145.6,
+          "first_list_answer_ms": 369.3,
+          "explorer_painted_ms": 386.9,
+          "sample_period_ms": 0.61,
+          "loadavg_1m": 3.42
+        },
+        {
+          "window_mapped_ms": 73.3,
+          "connected_ms": 131.1,
+          "first_list_answer_ms": 347.7,
+          "explorer_painted_ms": 349.6,
+          "sample_period_ms": 0.58,
+          "loadavg_1m": 2.8
+        },
+        {
+          "window_mapped_ms": 71.6,
+          "connected_ms": 129.9,
+          "first_list_answer_ms": 340.4,
+          "explorer_painted_ms": 347.5,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 2.68
+        }
+      ],
+      "warm": [
+        {
+          "window_mapped_ms": 74.2,
+          "connected_ms": 130.7,
+          "first_list_answer_ms": 340.9,
+          "explorer_painted_ms": 348.8,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 3.68
+        },
+        {
+          "window_mapped_ms": 76.0,
+          "connected_ms": 141.2,
+          "first_list_answer_ms": 354.0,
+          "explorer_painted_ms": 358.2,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 3.42
+        },
+        {
+          "window_mapped_ms": 73.0,
+          "connected_ms": 130.4,
+          "first_list_answer_ms": 344.1,
+          "explorer_painted_ms": 354.5,
+          "sample_period_ms": 0.59,
+          "loadavg_1m": 2.8
+        },
+        {
+          "window_mapped_ms": 72.3,
+          "connected_ms": 131.4,
+          "first_list_answer_ms": 342.7,
+          "explorer_painted_ms": 354.4,
+          "sample_period_ms": 0.58,
+          "loadavg_1m": 2.68
+        }
+      ]
+    },
+    "memory_cpu_typing": [],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [],
+    "panel-toggle": [],
+    "splitter-drag": [],
+    "idle-running": [],
+    "typing-under-stream": []
+  },
+  "medians": {
+    "tauri": {
+      "startup_cold_explorer_painted_ms": {
+        "median": 366.75,
+        "min": 352.2,
+        "max": 398.2,
+        "samples": 4
+      },
+      "startup_warm_explorer_painted_ms": {
+        "median": 362.3,
+        "min": 351.4,
+        "max": 447.0,
+        "samples": 4
+      }
+    },
+    "base": {
+      "startup_cold_explorer_painted_ms": {
+        "median": 359.3,
+        "min": 347.5,
+        "max": 386.9,
+        "samples": 4
+      },
+      "startup_warm_explorer_painted_ms": {
+        "median": 354.45,
+        "min": 348.8,
+        "max": 358.2,
+        "samples": 4
+      }
+    }
+  },
+  "paired": {
+    "startup_cold_explorer_painted_ms": {
+      "median": 4.45,
+      "min": -7.2,
+      "max": 29.2,
+      "samples": 4,
+      "base_median": 359.3
+    },
+    "startup_warm_explorer_painted_ms": {
+      "median": 6.0,
+      "min": -3.1,
+      "max": 98.2,
+      "samples": 4,
+      "base_median": 354.45
+    }
+  }
+}

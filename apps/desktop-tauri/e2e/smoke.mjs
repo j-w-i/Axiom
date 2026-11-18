@@ -313,8 +313,16 @@ try {
     5000,
     "the typed line is in the editor",
   );
+  const ROW_DIRTY = `const r = document.querySelector('.tree-row[data-path="src/main.rs"]'); return r ? { dot: !!r.querySelector('.tree-row__dot'), name: r.getAttribute('aria-label') } : null;`;
+  const dirtyRow = await wd.waitFor(`const v = (() => { ${ROW_DIRTY} })(); return v && v.dot ? v : null`, [], 3000, "unsaved dot").catch(() => null);
   await wd.chord(MOD, "s");
   await wd.waitFor(`return document.querySelector('[data-path="src/main.rs"][role=tab]')?.dataset.dirty === 'false'`, [], 5000, "clean after Ctrl+S");
+  const savedRow = await wd.waitFor(`const v = (() => { ${ROW_DIRTY} })(); return v && !v.dot ? v : null`, [], 3000, "dot gone").catch(() => null);
+  check(
+    "5b explorer shows unsaved marker for dirty document (and drops it on save)",
+    dirtyRow?.dot === true && dirtyRow.name === "main.rs, unsaved" && savedRow?.dot === false && savedRow.name === null,
+    JSON.stringify({ dirtyRow, savedRow }),
+  );
   const onDisk = readFileSync(join(ws, "src", "main.rs"), "utf8");
   check("5 Ctrl+S saves through fs/writeFile; bytes on disk match", onDisk === '// edited\nfn main() {\n    println!("hello");\n}\n', JSON.stringify(onDisk.slice(0, 30)));
 

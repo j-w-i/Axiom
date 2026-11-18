@@ -2,14 +2,36 @@
 // Only the rows in view are rendered, so a 10 000-entry expanded tree costs
 // the same DOM as a 40-entry one.
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { WorkspaceStore } from "../state/workspace";
 import * as Icon from "../ui/icons";
+import "../styles/components/tree.css";
 
-const ROW_H = 24;
+/** Row height, px: fixed, because virtualisation computes positions from it (--row-h). */
+const ROW_H = 22;
+
+/** The glyph chip of a file: a two-letter label and the hue family (design-system.md §7). */
+export function glyphFor(name: string): { label: string; kind: "rs" | "md" | "toml" | "other" } {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  if (ext === "rs") return { label: "rs", kind: "rs" };
+  if (ext === "md") return { label: "md", kind: "md" };
+  if (ext === "toml") return { label: "tm", kind: "toml" };
+  if (ext === "lock") return { label: "lk", kind: "toml" };
+  return { label: ext.slice(0, 2), kind: "other" };
+}
 const OVERSCAN = 8;
 
-export function Explorer({ workspace, onOpenFile }: { workspace: WorkspaceStore; onOpenFile: (path: string) => void }) {
+export function Explorer({
+  workspace,
+  onOpenFile,
+  dirty,
+}: {
+  workspace: WorkspaceStore;
+  onOpenFile: (path: string) => void;
+  /** Paths of documents open and dirty in the editor (the unsaved dot). */
+  dirty?: ReadonlySet<string>;
+}) {
   const s = useSyncExternalStore(workspace.subscribe, workspace.getSnapshot);
   const rows = useMemo(() => workspace.visibleRows(), [workspace, s.treeVersion]);
   const [focused, setFocused] = useState<string>("");
@@ -113,6 +135,8 @@ export function Explorer({ workspace, onOpenFile }: { workspace: WorkspaceStore;
         {rows.slice(first, last).map(({ node, depth }, k) => {
           const i = first + k;
           const isDir = node.kind === "directory";
+          const unsaved = !isDir && !!dirty?.has(node.path);
+          const glyph = glyphFor(node.name);
           return (
             <div key={node.path} style={{ position: "absolute", top: i * ROW_H, left: 0, right: 0 }}>
               <div
@@ -122,30 +146,43 @@ export function Explorer({ workspace, onOpenFile }: { workspace: WorkspaceStore;
                 aria-level={depth + 1}
                 aria-expanded={isDir ? node.expanded : undefined}
                 aria-selected={selected === node.path}
+                aria-label={unsaved ? `${node.name}, unsaved` : undefined}
                 data-focused={focused === node.path}
                 data-ignored={node.ignored}
                 data-path={node.path}
                 title={node.path}
-                style={{ paddingLeft: 4 + depth * 14 }}
+                style={{ "--depth": depth } as CSSProperties}
                 onClick={() => activate(node.path)}
               >
+                {Array.from({ length: depth }, (_, g) => (
+                  <span key={g} className="tree-row__guide" style={{ "--g": g } as CSSProperties} aria-hidden="true" />
+                ))}
+                <span className="tree-row__chevron" data-open={isDir ? node.expanded : undefined} aria-hidden="true">
+                  {isDir && <Icon.Chevron />}
+                </span>
                 {isDir ? (
-                  <Icon.Chevron className="tree-row__chevron" data-open={node.expanded} />
-                ) : (
-                  <span className="tree-row__chevron" />
-                )}
-                {isDir ? (
-                  node.expanded ? <Icon.FolderOpen className="tree-row__icon" /> : <Icon.Folder className="tree-row__icon" />
+                  <span className="tree-row__icon" aria-hidden="true">
+                    {node.expanded ? <Icon.FolderOpen /> : <Icon.Folder />}
+                  </span>
                 ) : node.kind === "symlink" ? (
-                  <Icon.Link className="tree-row__icon" />
+                  <span className="tree-row__icon" aria-hidden="true">
+                    <Icon.Link />
+                  </span>
                 ) : (
-                  <Icon.File className="tree-row__icon" />
+                  <span className="glyph" data-kind={glyph.kind} aria-hidden="true">
+                    {glyph.label}
+                  </span>
                 )}
                 <span className="tree-row__name">{node.name}</span>
                 {node.loading && !node.loaded && <span className="spinner" aria-label="Loading" />}
+                {unsaved && (
+                  <span className="tree-row__dot" aria-hidden="true">
+                    ●
+                  </span>
+                )}
               </div>
               {node.error && (
-                <div className="tree-row tree-row--error" style={{ paddingLeft: 24 + (depth + 1) * 14 }}>
+                <div className="tree-row tree-row--error" style={{ "--depth": depth + 1 } as CSSProperties}>
                   {node.error}
                 </div>
               )}

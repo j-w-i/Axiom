@@ -39,6 +39,7 @@ lives on branch `task/m1.6`.
 - **M1.6-INTERACTION-001 is tested (2026-11-17):** motion level setting, presence, loop gate; idle CPU with a task running 8.0% → ~2.8% focused, 7.0% → ~0.3% unfocused.
 - **M1.6-SHELL-002 is tested (2026-11-18):** workbench frame (Panel, Splitter, layout v2 + Reset Layout, focused region); one React commit per splitter drag (was 63–68).
 - **M1.6-SHELL-003 is tested (2026-11-18):** title row with menus, workspace switcher, command field and task transport; macOS overlay title bar configured (drag permission pending, see handoff).
+- **M1.6-SHELL-004 is tested (2026-11-18):** explorer tree restyle (guides, glyph chips, focus marker, unsaved dot); S15 harness now captures real keyboard focus.
 - **Next:** see `scripts/tasks.py | grep '^M1.6-' | grep READY` (`scripts/tasks.py | grep '^M1.6-' | grep READY`).
 - _(Wave B history:)_ M1.6-QA-002 (performance baseline and new scenarios),
   M1.6-SYSTEM-001 (generated tokens), M1.6-SHELL-001 (split `App.tsx`, no visual
@@ -84,7 +85,7 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-18-M1.6-SHELL-003.md`. Earlier: `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
+`agents/handoffs/2026-11-18-M1.6-SHELL-004.md`. Earlier: `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 

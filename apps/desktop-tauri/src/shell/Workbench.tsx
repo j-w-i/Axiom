@@ -1,7 +1,7 @@
 // The workbench: side bar, splitters, main column (editor or Welcome) and the
 // console, with the per-machine layout state; and the banner strip above it.
 
-import { useRef, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
+import { useMemo, useRef, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
 import { EditorArea } from "../components/EditorArea";
 import { Explorer } from "../components/Explorer";
 import { OutputPanel, type OutputPanelHandle } from "../components/OutputPanel";
@@ -74,6 +74,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
   const { workspace, documents, tasks } = ctx.app;
   const { ws, ready } = ctx;
   const root = useRef<HTMLDivElement>(null);
+  const dirtyPaths = useMemo(() => new Set(ctx.docs.docs.filter((d) => d.dirty).map((d) => d.path)), [ctx.docs.docs]);
   const layout = clampLayout(useSyncExternalStore(store.subscribe, store.get), windowSize());
   const max = maxSizes(windowSize());
   const style = { "--side-w": `${layout.sidebar}px`, "--panel-h": `${layout.panel}px` } as CSSProperties;
@@ -102,7 +103,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
               ) : undefined
             }
           >
-            <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} />
+            <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} />
           </Panel>
           <Splitter
             orientation="vertical"

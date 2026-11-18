@@ -304,6 +304,34 @@ async function commentOutFirstLine(wd) {
   await wd.keys([..."// "]);
 }
 
+
+/**
+ * Gives the app's X window input focus (Linux). A bare Xvfb has no window manager, so no
+ * window is ever focused and :focus-within / :focus-visible never match; WebDriver delivers
+ * keys regardless. Uses python-xlib from the bench's virtualenv (bench/run.sh); false when
+ * that is not installed.
+ */
+function focusAppWindow(pid) {
+  if (process.platform !== "linux") return false;
+  const py = join(repo, ".toolchains/bench-venv/bin/python");
+  if (!existsSync(py)) return false;
+  const script = `
+import sys
+from Xlib import X, display
+d = display.Display(); atom = d.intern_atom("_NET_WM_PID"); pid = int(sys.argv[1]); hit = []
+def walk(w):
+    try:
+        p = w.get_full_property(atom, X.AnyPropertyType)
+        if p and p.value and int(p.value[0]) == pid and w.get_attributes().map_state == X.IsViewable: hit.append(w)
+        for c in w.query_tree().children: walk(c)
+    except Exception: pass
+walk(d.screen().root)
+if not hit: sys.exit(1)
+d.set_input_focus(hit[0], X.RevertToParent, X.CurrentTime); d.sync()
+`;
+  return spawnSync(py, ["-I", "-c", script, String(pid)], { stdio: "ignore" }).status === 0;
+}
+
 // ---- state builders ---------------------------------------------------------------
 
 /** Opens the fixture, expands src/, opens four tabs (backend.rs dirty), executor.rs active. */
@@ -562,10 +590,18 @@ async function main() {
       });
 
       await state(wd, "s15", async () => {
-        await wd.exec(`document.querySelector('[data-testid=explorer]').focus()`);
-        // A keyboard move makes the focus ring visible (:focus-visible) and lands on a row.
+        // Selected row: executor.rs (S13 remounted the explorer, which forgets its selection).
+        await wd.click(await wd.find(treeRow("src/executor.rs")));
+        // Keyboard focus, so :focus-visible matches (focus by script after a click does not):
+        // focus the header's Refresh button, Tab into the tree, then move down one row.
+        // The window must have input focus for :focus-* to match.
+        const focusedWindow = focusAppWindow(wd.pid);
+        await sleep(200);
+        await wd.exec(`document.querySelector('button[aria-label="Refresh explorer"]').focus()`);
+        await wd.keys(["\uE004"]); // Tab
         await wd.keys([DOWN]);
-        await waitFor(wd, `return document.querySelector('[data-testid=explorer] .tree-row[data-focused=true]') !== null`, "a focused tree row");
+        if (!focusedWindow) mark("s15", { note: "the app window could not be given X input focus (no python-xlib): the focus ring may be missing" });
+        await waitFor(wd, `return document.activeElement?.dataset.testid === 'explorer' && document.querySelector('[data-testid=explorer]').matches(':focus-visible') && document.querySelector('[data-testid=explorer] .tree-row[data-focused=true]') !== null`, "keyboard focus on a tree row");
         await bothThemes(wd, "s15");
       });
 
