@@ -702,11 +702,12 @@ try {
       await new Promise((r) => setTimeout(r, 320)); // --dur-3 (200 ms) and a margin
       landings.push(await edge());
     }
-    const rect = await wd.cmd("GET", "/window/rect");
-    await wd.cmd("POST", "/window/rect", { ...rect, width: rect.width - 160 });
+    // The size from the page: GET /window/rect returns zeros under the embedded WebDriver on Linux.
+    const [w0, h0] = await wd.exec(`return [Math.round(outerWidth), Math.round(outerHeight)]`);
+    await wd.cmd("POST", "/window/rect", { x: 40, y: 40, width: w0 - 160, height: h0 });
     await new Promise((r) => setTimeout(r, 400));
     landings.push(await edge());
-    await wd.cmd("POST", "/window/rect", rect);
+    await wd.cmd("POST", "/window/rect", { x: 40, y: 40, width: w0, height: h0 });
     await new Promise((r) => setTimeout(r, 400));
     landings.push(await edge());
     check("21a tab glide lands on the active tab (Ctrl+Tab x4, then a resize and back; ±0.5 px)", landings.every((l) => l.dx <= 0.5 && l.dw <= 0.5), JSON.stringify(landings));
