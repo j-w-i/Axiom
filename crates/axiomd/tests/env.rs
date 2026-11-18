@@ -2,7 +2,7 @@
 
 mod common;
 use axiom_protocol::env::{
-    Detect, ProviderSource, Providers, ProvidersParams, ToolLocation, Trust, TrustParams,
+    Detect, ProviderSource, Providers, ProvidersParams, Resolve, ToolLocation, Trust, TrustParams,
 };
 use axiom_protocol::workspace::WorkspaceRef;
 use axiom_protocol::ErrorKind;
@@ -227,4 +227,149 @@ async fn unknown_workspace_is_workspace_not_open() {
         .await
         .unwrap_err();
     assert_eq!(kind(&e), ErrorKind::WorkspaceNotOpen);
+}
+
+// ------------------------------------------------------------ env/resolve (M2-ENV-005)
+
+/// A user provider `demo` with a managed 1.2.3 install (a scripted `demotool`).
+fn demo_install(data: &Path) -> PathBuf {
+    let p = data.join("providers/demo");
+    std::fs::create_dir_all(&p).unwrap();
+    std::fs::write(
+        p.join("provider.toml"),
+        "schema = \"axiom.provider/1\"\nid = \"demo\"\nname = \"Demo\"\ndescription = \"d\"\nversion = \"0.1.0\"\n\
+         [project]\nany_file = [\"demo.txt\"]\n\
+         [[tools]]\nid = \"demotool\"\nprogram = \"demotool\"\nversion_regex = 'demo-tool (\\d+\\.\\d+\\.\\d+)'\n\
+         [[install]]\nkind = \"archive\"\nversions = { kind = \"static\", versions = [\"1.2.3\"] }\nbin_dirs = [\"bin\"]\nenv = { DEMO_HOME = \"${root}\" }\n\
+         [[install.artifacts]]\nplatform = { os = \"linux\" }\nurl = \"https://example.invalid/d.tar.gz\"\nformat = \"tar.gz\"\nchecksum = { kind = \"sha256_url\", url = \"https://example.invalid/s\" }\n",
+    )
+    .unwrap();
+    let root = data.join("toolchains").join("demo").join("1.2.3");
+    let bin = root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(
+            bin.join("demotool"),
+            "#!/bin/sh\necho \"demo-tool 1.2.3\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(bin.join("demotool"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    #[cfg(windows)]
+    std::fs::write(bin.join("demotool.bat"), "@echo demo-tool 1.2.3\r\n").unwrap();
+    root
+}
+
+fn project_ws(toml: &str) -> TempDir {
+    let d = TempDir::new().unwrap();
+    std::fs::create_dir_all(d.path().join(".axiom")).unwrap();
+    std::fs::write(d.path().join(".axiom/project.toml"), toml).unwrap();
+    std::fs::write(d.path().join("demo.txt"), "").unwrap();
+    d
+}
+
+#[tokio::test]
+async fn resolve_writes_the_lock_once_and_detect_shows_the_selection() {
+    let data = TempDir::new().unwrap();
+    let root = demo_install(data.path());
+    let d = Daemon::ready_in(data.path()).await;
+    let ws = d
+        .open_dir(project_ws("[environment]\ndemo = \"1.2.3\"\n"))
+        .await;
+    let wsref = || WorkspaceRef {
+        workspace_id: ws.id.clone(),
+    };
+
+    let env = d.client.request::<Resolve>(wsref()).await.unwrap();
+    assert_eq!(
+        env.path_prepend,
+        [root.join("bin").to_string_lossy().into_owned()]
+    );
+    assert_eq!(env.vars["DEMO_HOME"], root.to_string_lossy());
+    assert_eq!(env.toolchains[0].version, "1.2.3");
+    let lock_path = ws.root.join(".axiom/project.lock");
+    let lock = std::fs::read_to_string(&lock_path).unwrap();
+    assert!(
+        lock.contains("provider = \"demo\"") && lock.contains("version = \"1.2.3\""),
+        "{lock}"
+    );
+    let first = std::fs::metadata(&lock_path).unwrap().modified().unwrap();
+
+    // Unchanged resolution: the lock is not rewritten.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    d.client.request::<Resolve>(wsref()).await.unwrap();
+    assert_eq!(
+        std::fs::metadata(&lock_path).unwrap().modified().unwrap(),
+        first
+    );
+    // No temp files left next to it (the write is temp file + rename).
+    let names: Vec<_> = std::fs::read_dir(ws.root.join(".axiom"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+
+    let det = d.client.request::<Detect>(wsref()).await.unwrap();
+    let demo = det
+        .providers
+        .iter()
+        .find(|p| p.provider_id == "demo")
+        .unwrap();
+    assert_eq!(demo.selected_version.as_deref(), Some("1.2.3"));
+    assert_eq!(demo.tools[0].found.as_ref().unwrap().version, "1.2.3");
+}
+
+#[tokio::test]
+async fn resolve_errors_name_the_line_or_the_missing_tools() {
+    let data = TempDir::new().unwrap();
+    demo_install(data.path());
+    let d = Daemon::ready_in(data.path()).await;
+
+    let ws = d
+        .open_dir(project_ws("[environment]\ndemo = \"9.9.9\"\n"))
+        .await;
+    let e = d
+        .client
+        .request::<Resolve>(WorkspaceRef {
+            workspace_id: ws.id.clone(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::PrerequisiteMissing);
+    assert_eq!(
+        e.data.details.unwrap()["missing"],
+        serde_json::json!(["demotool"])
+    );
+    assert!(
+        !ws.root.join(".axiom/project.lock").exists(),
+        "no lock for a failed resolution"
+    );
+
+    let ws = d
+        .open_dir(project_ws("[environment]\ndemo = \"1.2.3\"\nextra = [1]\n"))
+        .await;
+    let e = d
+        .client
+        .request::<Resolve>(WorkspaceRef {
+            workspace_id: ws.id.clone(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::InvalidParams);
+    assert_eq!(e.data.details.unwrap()["line"], 3);
+
+    // No project file: an empty environment, and nothing written.
+    let ws = d.open_dir(TempDir::new().unwrap()).await;
+    let env = d
+        .client
+        .request::<Resolve>(WorkspaceRef {
+            workspace_id: ws.id.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(env.toolchains.is_empty() && env.path_prepend.is_empty());
+    assert!(!ws.root.join(".axiom").exists());
 }

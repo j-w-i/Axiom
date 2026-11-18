@@ -1,9 +1,10 @@
 use crate::app::{internal, App};
+use axiom_env::project::{self, ProjectFile};
 use axiom_env::{detect, HostPaths, Registry, Sources};
 use axiom_protocol::env::{
-    DetectResult, InstallParams, InstallPlan, InstallResult, Installed, PlanInstallParams,
-    Progress, ProvidersParams, ProvidersResult, TrustParams, UninstallParams, VersionsParams,
-    VersionsResult,
+    DetectResult, Environment, InstallParams, InstallPlan, InstallResult, Installed,
+    PlanInstallParams, Progress, ProvidersParams, ProvidersResult, TrustParams, UninstallParams,
+    VersionsParams, VersionsResult,
 };
 use axiom_protocol::lifecycle::Empty;
 use axiom_protocol::provider::ProviderManifest;
@@ -51,7 +52,51 @@ pub async fn detect_tools(app: Arc<App>, p: WorkspaceRef) -> Result<DetectResult
     let root = ws.0.clone();
     let r = registry(&app, Some(ws)).await?;
     let host = HostPaths::from_env(app.env.data_dir.join("toolchains"));
-    Ok(detect(&r, &root, &host).await)
+    let mut d = detect(&r, &root, &host).await;
+    // What `.axiom/project.toml` selects; a malformed file is reported by `env/resolve`.
+    if let Ok(Some(selection)) = project_file(&app, &p.workspace_id).await {
+        for pd in &mut d.providers {
+            pd.selected_version = selection.environment.get(&pd.provider_id).cloned();
+        }
+    }
+    Ok(d)
+}
+
+/// `.axiom/project.toml`, read through the workspace (containment); `None` if absent.
+async fn project_file(app: &App, id: &WorkspaceId) -> Result<Option<ProjectFile>, RpcError> {
+    let ws = app.workspaces.get(id)?;
+    let path = axiom_protocol::WorkspacePath(project::PROJECT_FILE.into());
+    match ws.read_text(&path).await {
+        Ok(f) => Ok(Some(project::parse(&f.text)?)),
+        Err(axiom_workspace::WsError::NotFound(_)) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// `env/resolve`. Without a project file the environment is empty. The lock is written
+/// (atomically, inside the workspace) only when its content changes.
+pub async fn resolve(app: Arc<App>, p: WorkspaceRef) -> Result<Environment, RpcError> {
+    let ws = workspace(&app, &p.workspace_id).await?;
+    let Some(selection) = project_file(&app, &p.workspace_id).await? else {
+        return Ok(Environment::default());
+    };
+    let r = registry(&app, Some(ws)).await?;
+    let path = std::env::var_os("PATH");
+    let (env, lock) = project::resolve(
+        &r,
+        &selection,
+        &app.env.data_dir.join("toolchains"),
+        path.as_deref(),
+    )
+    .await?;
+    let text = lock.to_text();
+    let w = app.workspaces.get(&p.workspace_id)?;
+    let lock_path = axiom_protocol::WorkspacePath(project::LOCK_FILE.into());
+    let current = w.read_text(&lock_path).await.ok().map(|f| f.text);
+    if current.as_deref() != Some(text.as_str()) {
+        w.write_text(&lock_path, &text, None, true).await?;
+    }
+    Ok(env)
 }
 
 pub async fn trust(app: Arc<App>, p: TrustParams) -> Result<Empty, RpcError> {

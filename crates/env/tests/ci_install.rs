@@ -74,6 +74,29 @@ async fn rust_managed_install_roundtrip() {
         .unwrap();
     assert_eq!(found.version, version);
 
+    // M2-ENV-005: a project selecting this version resolves to it, and a process started in
+    // the environment runs the managed cargo, first on PATH.
+    let project =
+        axiom_env::project::parse(&format!("[environment]\nrust = \"{version}\"\n")).unwrap();
+    let (env, lock) = axiom_env::project::resolve(
+        &r,
+        &project,
+        &data.path().join("toolchains"),
+        std::env::var_os("PATH").as_deref(),
+    )
+    .await
+    .unwrap();
+    println!("environment: {env:#?}\nlock:\n{}", lock.to_text());
+    assert!(std::path::Path::new(&env.path_prepend[0]).starts_with(&root));
+    let vars = axiom_env::project::process_env(&env, std::env::var_os("PATH"));
+    let out = std::process::Command::new("cargo")
+        .arg("--version")
+        .envs(&vars)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.starts_with(&format!("cargo {version}")), "{text}");
+
     inst.uninstall("rust", &version, Some(&m)).await.unwrap();
     assert!(!root.exists());
     assert!(

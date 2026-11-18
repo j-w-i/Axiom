@@ -46,6 +46,8 @@ pub const PLAN_LIFETIME: Duration = Duration::from_secs(10 * 60);
 pub const VERSIONS_TTL: Duration = Duration::from_secs(60 * 60);
 /// At most this many progress notifications per second.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+/// File in each managed root recording how it was made (read into `.axiom/project.lock`).
+pub const RECEIPT: &str = ".axiom-install.toml";
 /// How much of a failed command's output an error carries.
 const OUTPUT_TAIL: usize = 2000;
 
@@ -671,6 +673,7 @@ impl Installer {
 
         let mut archive_path: Option<PathBuf> = None;
         let mut download_name = String::new();
+        let mut downloads = Vec::new();
         let mut verified = Vec::new();
         for (i, step) in plan.steps.iter().enumerate() {
             if cancel.is_cancelled() {
@@ -680,6 +683,13 @@ impl Installer {
                 Step::Download { url, sha256, .. } => {
                     report(i, format!("Downloading {}", file_name_of(url)), None, None);
                     let path = self.download(plan, i, url, sha256, cancel, &report).await?;
+                    downloads.push(crate::project::LockedDownload {
+                        url: url.clone(),
+                        sha256: path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    });
                     archive_path = Some(path);
                     download_name = file_name_of(url);
                 }
@@ -745,6 +755,16 @@ impl Installer {
         if cancel.is_cancelled() {
             return Err(EnvError::Cancelled);
         }
+        let receipt = crate::project::Receipt {
+            provider: m.id.clone(),
+            version: plan.version.clone(),
+            downloads,
+        };
+        std::fs::write(
+            staging.join(RECEIPT),
+            toml::to_string(&receipt).unwrap_or_default(),
+        )
+        .map_err(EnvError::io("Cannot write the install receipt"))?;
         // Publish: one rename, so a version directory is either complete or absent.
         if final_root.exists() {
             return Err(EnvError::AlreadyExists(format!(

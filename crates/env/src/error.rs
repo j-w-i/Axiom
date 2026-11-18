@@ -42,6 +42,8 @@ pub enum EnvError {
         code: Option<i32>,
         output: String,
     },
+    #[error("{reason}")]
+    ProjectFile { line: Option<u32>, reason: String },
     #[error("{0}")]
     Unsupported(String),
     #[error("Cancelled.")]
@@ -83,6 +85,11 @@ impl From<EnvError> for RpcError {
             EnvError::CommandFailed { code, output, .. } => RpcError::new(ErrorKind::Io, msg)
                 .with_details(json!({ "exitCode": code, "output": output })),
             EnvError::Unsupported(_) => RpcError::new(ErrorKind::Unsupported, msg),
+            EnvError::ProjectFile { line, reason } => RpcError::new(
+                ErrorKind::InvalidParams,
+                format!(".axiom/project.toml: {msg}"),
+            )
+            .with_details(json!({ "line": line, "reason": reason })),
             EnvError::Cancelled => RpcError::new(ErrorKind::Cancelled, msg),
         }
     }

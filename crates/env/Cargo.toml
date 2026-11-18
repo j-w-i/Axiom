@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 axiom-protocol = { path = "../protocol" }
 regex.workspace = true
+serde.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
 hex.workspace = true

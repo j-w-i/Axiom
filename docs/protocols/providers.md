@@ -160,6 +160,55 @@ Additive manifest fields (all optional; older manifests are unchanged):
   characters of its output).
 - Security rules and their tests: `docs/architecture/security.md` §Managed installs.
 
+### Project files (as built, M2-ENV-005)
+`.axiom/project.toml` (human-written, committed). Grammar, as parsed:
+
+```toml
+[environment]               # the only table; any other key or table is an error
+<provider-id> = "<version>" # provider id: [a-z0-9][a-z0-9-]*
+                            # version: an installed managed version ([A-Za-z0-9._+-], not
+                            # starting with "."), or "system" for the host's own PATH
+```
+
+- Errors are `invalid_params` with details `{ "line": n, "reason": s }` (line is 1-based; for
+  TOML syntax errors it is where the parser stopped).
+- Resolution, per entry in key order:
+  - `"system"`: each required tool must be found on the daemon's `PATH`. Nothing is
+    prepended and no variables are set.
+  - a version: `<data dir>/toolchains/<provider>/<version>` must exist, and each required tool
+    must run from it with its method's `env`. `pathPrepend` gets every `bin_dirs` entry that
+    exists, in manifest order. `vars` gets every method's `env` with `${root}` and
+    `${version}` expanded; a later provider's variable wins.
+  - Anything missing (an unknown provider, an uninstalled version, a tool that does not run)
+    is collected and reported once as `prerequisite_missing` with
+    `details.missing = [toolId or providerId]`.
+- `.axiom/project.lock` is written by `env/resolve` through the workspace's contained, atomic
+  write (temp file + rename), only when its text changes, and never for a failed resolution or
+  a workspace without `project.toml`. It holds no host paths. Example:
+
+  ```toml
+  # Written by Axiom from .axiom/project.toml. Do not edit.
+  version = 1
+
+  [[toolchain]]
+  provider = "rust"
+  selected = "1.84.0"
+  tool = "cargo"
+  version = "1.84.0"
+  location = "managed"
+
+  [[toolchain.downloads]]
+  url = "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"
+  sha256 = "…"
+  ```
+
+  The digests come from the install receipt (`<root>/.axiom-install.toml`, written at publish).
+- `env/detect` reports each provider's selected version from `project.toml`.
+- A process runs inside the environment with `vars` plus `PATH = pathPrepend + inherited PATH`
+  in its env overlay (`axiom_env::project::process_env`). The overlay's `PATH` also decides
+  which program an argv names (`axiom-exec` test `env_overlay_path_selects_the_program`).
+  M2-BUILD-001 starts provider tasks this way. `task/start` (0.1) is unchanged.
+
 ## Template variables
 
 Only these expand, and only in the fields documented as templates:

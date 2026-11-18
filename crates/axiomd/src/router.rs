@@ -42,6 +42,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(penv::PlanInstall, env::plan_install);
     wire!(penv::Install, env::install, ctx);
     wire!(penv::Uninstall, env::uninstall);
+    wire!(penv::Resolve, env::resolve);
 
     let a = app;
     r.on_shutdown(move || {
@@ -59,7 +60,7 @@ pub fn build_router(app: Arc<App>) -> Router {
 /// `initialize.methods` (ADR-0014 §1), which lists only served methods. Used by the tests that
 /// check the daemon serves exactly the registry.
 #[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &["env/resolve", "build/tasks", "build/run"];
+pub const NOT_YET_SERVED: &[&str] = &["build/tasks", "build/run"];
 
 #[cfg(test)]
 mod tests {

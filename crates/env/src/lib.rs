@@ -6,6 +6,7 @@
 //! - [`detect`]: which providers apply to a workspace and which of their tools are present.
 //! - [`install`]: install plans, managed archive installs, uninstall; [`fetch`] (HTTPS) and
 //!   [`archive`] (safe extraction) beneath it; [`system`] for host package managers.
+//! - [`project`]: `.axiom/project.toml`, resolution to an `Environment`, the lock.
 
 pub mod archive;
 pub mod detect;
@@ -13,6 +14,7 @@ pub mod error;
 pub mod fetch;
 pub mod install;
 pub mod manifest;
+pub mod project;
 pub mod registry;
 pub mod system;
 
