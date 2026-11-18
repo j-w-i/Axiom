@@ -126,6 +126,26 @@ interactive segments:
 | Cursor | Ln, Col | (M4: go to line) |
 | Encoding, language | "UTF-8" (as today) and the Monaco language of the active document; an EOL segment needs line-ending data the documents store does not expose yet, so it is omitted (no new store field in M1.6) | — |
 
+**As built (M1.6-SHELL-005).** EOL and language segments are omitted: the documents store
+exposes neither (no store change). The backend segment's accessible text keeps the prefix
+"Connected — " (visually hidden) before "axiomd <version>". Only the backend and task segments
+carry `role="status"`. Hints are written with `Mod` and rendered per platform (`ui/hint.ts`);
+an `IconButton` without an explicit hint shows "Label — Shortcut". Final hint texts:
+
+| Control | Hint |
+|---------|------|
+| File / Edit / View / Run / Help menus | "Open, save and close; settings" / "Undo, find and select in the editor" / "Panels, layout and theme" / "Run, rerun and stop commands" / "About Axiom; restart the backend" |
+| Workspace switcher | "Switch to a recent folder or open another — Mod+O" |
+| Command field (and its compact icon) | "Search files, run commands — Mod+K" |
+| Transport Rerun / Stop | "Rerun the last command — F5" / "Stop the task — Shift+F5" |
+| Layout toggles, Settings | "Toggle side bar — Ctrl+B", "Toggle panel — Ctrl+J", "Settings — Ctrl+," (⌘ on macOS) |
+| Status: backend (stopped / ready), task | "Restart the backend" / "The Axiom backend is connected", "Show the console" |
+| Panel tools | "Refresh explorer"; console "Copy all output", "Clear output" |
+| Splitters | "Drag to resize — double-click resets" |
+| Tabs, tab close | "<path> (unsaved) — Mod+Tab", "Close the document — Mod+W" |
+| Console prompt, Run, Stop | "Run a command in the workspace — Enter", "Run the command — Enter", "Stop the task — Shift+F5" |
+| Monaco | none (the hint clears while typing) |
+
 The task segment shows only what the store knows; parsing test counts out of
 output is **not** done (that is M2 diagnostics).
 

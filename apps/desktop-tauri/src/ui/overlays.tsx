@@ -174,6 +174,7 @@ export function Menu({
   open,
   container,
   triggerClassName = "btn btn--quiet btn--sm",
+  hint,
 }: {
   trigger: ReactNode;
   items: MenuEntry[];
@@ -182,11 +183,13 @@ export function Menu({
   open?: boolean;
   container?: HTMLElement | null;
   triggerClassName?: string;
+  /** The status bar hint of the trigger (SHELL-005). */
+  hint?: string;
 }) {
   return (
     <RMenu.Root open={open} modal={open === undefined}>
       <RMenu.Trigger asChild>
-        <button type="button" className={triggerClassName} aria-label={label}>
+        <button type="button" className={triggerClassName} aria-label={label} data-hint={hint ?? label}>
           {trigger}
         </button>
       </RMenu.Trigger>

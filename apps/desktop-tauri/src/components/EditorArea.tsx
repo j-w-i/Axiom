@@ -33,6 +33,7 @@ export function EditorArea({ documents, mod }: { documents: DocumentsStore; mod:
               title={d.path + (d.changedOnDisk ? " — changed on disk" : "")}
               data-path={d.path}
               data-dirty={d.dirty}
+              data-hint={`${d.path}${d.dirty ? " (unsaved)" : ""} — Mod+Tab`}
               onClick={() => documents.activate(d.path)}
               onAuxClick={(e) => e.button === 1 && documents.close(d.path)}
               onKeyDown={(e) => {
@@ -45,6 +46,7 @@ export function EditorArea({ documents, mod }: { documents: DocumentsStore; mod:
               <span
                 className="tab__close"
                 role="button"
+                data-hint="Close the document — Mod+W"
                 aria-label={`Close ${d.title}${d.dirty ? " (unsaved)" : ""}`}
                 onClick={(e) => {
                   e.stopPropagation();

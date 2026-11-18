@@ -85,6 +85,7 @@ export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; wo
             value={command}
             disabled={!w.id}
             data-testid="command-input"
+            data-hint="Run a command in the workspace — Enter"
             onChange={(e) => setCommand(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") run();
@@ -103,15 +104,15 @@ export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; wo
             }}
           />
           {s.running ? (
-            <button type="button" className="btn btn--sm btn--danger" onClick={() => tasks.stop()} data-testid="stop">
+            <button type="button" className="btn btn--sm btn--danger" onClick={() => tasks.stop()} data-testid="stop" data-hint="Stop the task — Shift+F5">
               <Icon.Stop /> Stop
             </button>
           ) : (
-            <button type="button" className="btn btn--sm btn--primary" onClick={run} disabled={!canRun || !command.trim()} data-testid="run">
+            <button type="button" className="btn btn--sm btn--primary" onClick={run} disabled={!canRun || !command.trim()} data-testid="run" data-hint="Run the command — Enter">
               <Icon.Play /> Run
             </button>
           )}
-          <IconButton label="Copy output" onClick={() => void navigator.clipboard.writeText(tasks.allText())} disabled={s.rows.length === 0}>
+          <IconButton label="Copy output" hint="Copy all output" onClick={() => void navigator.clipboard.writeText(tasks.allText())} disabled={s.rows.length === 0}>
             <Icon.Copy />
           </IconButton>
           <IconButton label="Clear output" onClick={() => tasks.clear()} disabled={s.rows.length === 0}>

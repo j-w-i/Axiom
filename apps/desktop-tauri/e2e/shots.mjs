@@ -73,7 +73,7 @@ const CATALOGUE = [
   ["s13", "Side bar hidden, console hidden (compact)"],
   ["s14", "Window at its 720x480 minimum"],
   ["s15", "Focus on the tree (keyboard focus ring)"],
-  ["s16", "Hint line showing the Rerun hint", "SHELL-005: there is no hint line yet"],
+  ["s16", "Hint line showing the Rerun hint (Rerun focused)"],
   ["s17", "Gallery page, each section (dev-only gallery served locally, opened in the app's own webview, motion off)"],
   ["focused-region", "Focused-region rule", "SHELL-002 / EDITOR-002: no focused-region treatment yet"],
 ];
@@ -603,6 +603,14 @@ async function main() {
         if (!focusedWindow) mark("s15", { note: "the app window could not be given X input focus (no python-xlib): the focus ring may be missing" });
         await waitFor(wd, `return document.activeElement?.dataset.testid === 'explorer' && document.querySelector('[data-testid=explorer]').matches(':focus-visible') && document.querySelector('[data-testid=explorer] .tree-row[data-focused=true]') !== null`, "keyboard focus on a tree row");
         await bothThemes(wd, "s15");
+      });
+
+      await state(wd, "s16", async () => {
+        // The hint follows focus as well as hover; focus survives the pointer being parked for the shot.
+        await parkPointer(wd);
+        await wd.exec(`document.querySelector('[data-testid=transport] [data-hint^="Rerun"]').focus()`);
+        await waitFor(wd, `return document.querySelector('.sb__hint')?.textContent.startsWith('Rerun the last command')`, "the Rerun hint");
+        await bothThemes(wd, "s16");
       });
 
       await state(wd, "s12", async () => {

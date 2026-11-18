@@ -121,6 +121,7 @@ export function Splitter({
       aria-valuemin={g.min}
       aria-valuemax={g.max}
       tabIndex={0}
+      data-hint="Drag to resize — double-click resets"
       onPointerDown={onPointerDown}
       onDoubleClick={() => onCommit(Math.max(g.min, Math.min(g.max, g.defaultValue)))}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {

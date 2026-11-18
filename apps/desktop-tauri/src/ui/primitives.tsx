@@ -106,13 +106,16 @@ export function Button({
 export function IconButton({
   label,
   shortcut,
+  hint,
   pressed,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; shortcut?: string; pressed?: boolean; children: ReactNode }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; shortcut?: string; hint?: string; pressed?: boolean; children: ReactNode }) {
+  // The status bar's hint line (SHELL-005): "Label — Shortcut" unless a hint is given.
+  const dataHint = hint ?? (shortcut ? `${label} — ${shortcut}` : label);
   return (
     <Tooltip label={label} shortcut={shortcut}>
-      <button type="button" className="icon-btn" aria-label={label} aria-pressed={pressed} {...rest}>
+      <button type="button" className="icon-btn" aria-label={label} aria-pressed={pressed} data-hint={dataHint} {...rest}>
         {children}
       </button>
     </Tooltip>

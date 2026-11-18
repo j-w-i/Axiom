@@ -372,6 +372,34 @@ try {
   await wd.waitFor(`return document.querySelector('[data-testid=output]')?.textContent.includes('Could not start no-such-program-axiom')`, [], 5000, "spawn_failed");
   check("7c a non-existent program produces a structured error", true);
 
+  // ---- 15. hint line (M1.6-SHELL-005): follows hover and focus; every shell control has a hint.
+  // Here a command has run, so Rerun is enabled (a disabled button cannot take focus).
+  {
+    const HINT = `const h = document.querySelector('.sb__hint'); return { text: h.childNodes[0]?.textContent ?? '', keys: [...h.querySelectorAll('.kbd')].map((k) => k.textContent) };`;
+    const rerun = `document.querySelector('[data-testid=transport] [data-hint^="Rerun"]')`;
+    await wd.exec(`${rerun}.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`);
+    const hovered = await wd.exec(HINT);
+    await wd.exec(`document.body.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`);
+    await wd.exec(`${rerun}.focus()`);
+    const focused = await wd.exec(HINT);
+    await wd.exec(`document.querySelector('.monaco-editor textarea').focus()`);
+    const editor = await wd.exec(HINT);
+    check(
+      "15 hint line follows hover and focus",
+      hovered.text === "Rerun the last command" && hovered.keys.join() === "F5" && focused.text === "Rerun the last command" && focused.keys.join() === "F5" && editor.text === "" && editor.keys.length === 0,
+      JSON.stringify({ hovered, focused, editor }),
+    );
+    const missing = await wd.exec(
+      `const scopes = document.querySelectorAll('.titlerow, .statusbar, .panel__tools, .tabs, [data-region=console], .workbench > [role=separator], .main > [role=separator]');
+       const out = [];
+       for (const scope of scopes) {
+         const els = scope.matches('[role=separator]') ? [scope] : scope.querySelectorAll('button, input, [role=tab], [role=button], [role=separator]');
+         for (const el of els) if (!el.getAttribute('data-hint')) out.push(el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0] + ' ' + (el.getAttribute('aria-label') ?? el.textContent.trim().slice(0, 20)));
+       }
+       return out;`,
+    );
+    check("15b every shell control has a hint (title row, status bar, panel tools, tabs, console, splitters)", missing.length === 0, JSON.stringify(missing));
+  }
   // ---- 12. overlays (M1.6-SYSTEM-004): tooltip on focus, Escape and focus return, toasts --
   {
     // 12a: a focused icon button shows its tooltip, which repeats its accessible name.

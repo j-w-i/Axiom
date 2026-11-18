@@ -270,42 +270,6 @@ button {
 
 
 /* ---- status bar ---- */
-.statusbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: 0 var(--space-3);
-  background: var(--bg-subtle);
-  border-top: var(--border-w) solid var(--border);
-  color: var(--text-muted);
-  font-size: var(--text-caption);
-  white-space: nowrap;
-}
-.statusbar__spacer {
-  flex: 1;
-}
-.status-dot {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-.status-dot::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-faint);
-}
-.status-dot[data-state="ready"]::before {
-  background: var(--success);
-}
-.status-dot[data-state="failed"]::before,
-.status-dot[data-state="stopped"]::before {
-  background: var(--danger);
-}
-.statusbar__failed {
-  color: var(--danger);
-}
 
 /* ---- banners ---- */
 

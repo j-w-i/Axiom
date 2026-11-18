@@ -47,11 +47,12 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layo
         <span>Axiom</span>
       </div>
       <nav className="titlerow__menus" aria-label="Menus">
-        <Menu label="File menu" trigger="File" triggerClassName="titlerow__menu" items={fileMenu} />
+        <Menu label="File menu" trigger="File" triggerClassName="titlerow__menu" hint="Open, save and close; settings" items={fileMenu} />
         <Menu
           label="Edit menu"
           trigger="Edit"
           triggerClassName="titlerow__menu"
+          hint="Undo, find and select in the editor"
           items={[
             { label: "Undo", disabled: !hasDoc, onSelect: () => documents.runCommand("undo") },
             { label: "Redo", disabled: !hasDoc, onSelect: () => documents.runCommand("redo") },
@@ -66,6 +67,7 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layo
           label="View menu"
           trigger="View"
           triggerClassName="titlerow__menu"
+          hint="Panels, layout and theme"
           items={[
             { label: "Toggle Side Bar", shortcut: `${MOD}+B`, onSelect: ctx.toggleSidebar },
             { label: "Toggle Panel", shortcut: `${MOD}+J`, onSelect: ctx.togglePanel },
@@ -80,6 +82,7 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layo
           label="Run menu"
           trigger="Run"
           triggerClassName="titlerow__menu"
+          hint="Run, rerun and stop commands"
           items={[
             { label: "Run Command…", shortcut: `${MOD}+Shift+R`, disabled: !ws.id, onSelect: ctx.focusRun },
             { label: "Rerun Last", shortcut: "F5", disabled: !tasks.canRun || task.history.length === 0, onSelect: () => tasks.rerunLast() },
@@ -90,6 +93,7 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layo
           label="Help menu"
           trigger="Help"
           triggerClassName="titlerow__menu"
+          hint="About Axiom; restart the backend"
           items={[
             { label: "About Axiom", onSelect: () => ctx.setAboutOpen(true) },
             { separator: true },
@@ -103,6 +107,7 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layo
           <Menu
             label={`Workspace ${ws.name}: switch folder`}
             triggerClassName="titlerow__ws"
+            hint="Switch to a recent folder or open another — Mod+O"
             trigger={
               <>
                 <span className="titlerow__ws-name">{ws.name}</span>
@@ -115,13 +120,13 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layo
         </>
       )}
       <span className="titlerow__spacer" {...drag} />
-      <button type="button" className="titlerow__cmd" onClick={() => ctx.setPalette("commands")} aria-label="Command palette">
+      <button type="button" className="titlerow__cmd" onClick={() => ctx.setPalette("commands")} aria-label="Command palette" data-hint="Search files, run commands — Mod+K">
         <Icon.Search className="titlerow__cmd-icon" />
         <span className="titlerow__cmd-text">Search files, run commands</span>
         <Keys keys={`${IS_MAC ? "⌘" : "Ctrl"} K`} />
       </button>
       <span className="titlerow__cmd-compact">
-        <IconButton label="Command palette" shortcut={`${MOD}+K`} onClick={() => ctx.setPalette("commands")}>
+        <IconButton label="Command palette" shortcut={`${MOD}+K`} hint="Search files, run commands — Mod+K" onClick={() => ctx.setPalette("commands")}>
           <Icon.Search />
         </IconButton>
       </span>
@@ -196,10 +201,10 @@ function Transport({ ctx }: { ctx: ShellContext }) {
       </span>
       {task.running && task.startedAt !== null && <span className="transport__time">{formatElapsed(now - task.startedAt)}</span>}
       <RateMeter levels={levels} label="Output rate" />
-      <IconButton label={last ? `Rerun: ${last}` : "Rerun"} shortcut="F5" disabled={!tasks.canRun || !last} onClick={() => tasks.rerunLast()}>
+      <IconButton label={last ? `Rerun: ${last}` : "Rerun"} shortcut="F5" hint="Rerun the last command — F5" disabled={!tasks.canRun || !last} onClick={() => tasks.rerunLast()}>
         <Icon.Refresh />
       </IconButton>
-      <IconButton label="Stop" shortcut="Shift+F5" disabled={!task.running} onClick={() => tasks.stop()}>
+      <IconButton label="Stop" shortcut="Shift+F5" hint="Stop the task — Shift+F5" disabled={!task.running} onClick={() => tasks.stop()}>
         <Icon.Stop />
       </IconButton>
     </div>
