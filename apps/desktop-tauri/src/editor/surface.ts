@@ -103,8 +103,13 @@ export class EditorSurface implements EditorPort {
       ),
     );
 
-    // Bundled fonts may finish loading after Monaco measured its glyphs.
+    // Bundled fonts may finish loading after Monaco measured its glyphs. A face loads lazily, when
+    // first used, so `fonts.ready` alone can resolve before it (seen on macOS and Windows: the caret
+    // drifted 1.2 px from the text in CI run 44239034330); remeasure whenever loading finishes.
     void document.fonts?.ready.then(() => monaco.editor.remeasureFonts());
+    const onFontsLoaded = () => monaco.editor.remeasureFonts();
+    document.fonts?.addEventListener("loadingdone", onFontsLoaded);
+    this.disposables.push({ dispose: () => document.fonts?.removeEventListener("loadingdone", onFontsLoaded) });
     // Tokens change with the appearance (and in development on a stylesheet update): the
     // themes are regenerated then, never on the typing path.
     const retheme = () => {
