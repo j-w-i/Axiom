@@ -301,8 +301,18 @@ async function commentOutFirstLine(wd) {
   for (let attempt = 0; ; attempt++) {
     // Document start without a modifier chord (⌘↑ through the embedded WebDriver did not move the
     // caret on macOS, CI run 44247752618): click the first line, then plain Home.
+    // The view may be scrolled (it was on macOS and Windows CI): wheel it to the top first, until the
+    // first line number shown is 1.
+    for (let i = 0; i < 20; i++) {
+      const top = await wd.exec(
+        `const ns = [...document.querySelectorAll('.monaco-editor .line-numbers')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); return ns[0]?.textContent.trim() ?? null`,
+      );
+      if (top === "1") break;
+      await wd.exec(`document.querySelector('.monaco-editor .view-lines')?.dispatchEvent(new WheelEvent('wheel', { deltaY: -100000, deltaMode: 0, bubbles: true, cancelable: true }))`);
+      await sleep(100);
+    }
     const first = await wd.exec(
-      `const ls = [...document.querySelectorAll('.monaco-editor .view-line')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); ls[0]?.setAttribute('data-shots-first', ''); return !!ls[0]`,
+      `const ls = [...document.querySelectorAll('.monaco-editor .view-line')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); document.querySelectorAll('[data-shots-first]').forEach((e) => e.removeAttribute('data-shots-first')); ls[0]?.setAttribute('data-shots-first', ''); return !!ls[0]`,
     );
     if (first) await wd.click(await wd.find(".monaco-editor .view-line[data-shots-first]"));
     await wd.keys([Keys.HOME]);
