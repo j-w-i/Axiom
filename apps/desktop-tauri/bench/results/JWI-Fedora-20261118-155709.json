@@ -1,0 +1,404 @@
+{
+  "host": {
+    "os": "Linux-7.3.3-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "3c8fee2",
+    "date": "2026-11-18T15:57:09+1100",
+    "loadavg_at_start": [
+      4.73,
+      4.21,
+      4.31
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 13585136
+    },
+    "tauri-e2e": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-e2e",
+      "bytes": 13745144
+    },
+    "base": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-q2",
+      "bytes": 11328208
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6328456
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [
+      {
+        "idle_workspace_open_pss_mib": 218.1,
+        "daemon_pss_mib": 12.0,
+        "process_count": 3,
+        "idle_cpu_pct_10s": 0.2,
+        "idle_cpu_pct_min": 0.0,
+        "idle_cpu_pct_max": 0.4,
+        "monaco_document_open_pss_mib": 325.3,
+        "process_count_with_editor": 3,
+        "idle_cpu_pct_10s_with_editor": 1.2,
+        "idle_cpu_pct_min_with_editor": 1.2,
+        "idle_cpu_pct_max_with_editor": 1.2,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 17.27,
+          "p95_ms": 19.1,
+          "p99_ms": 23.55,
+          "max_ms": 36.42,
+          "mean_ms": 17.08,
+          "cpu_pct_while_typing": 71.4
+        },
+        "after_typing_pss_mib": 481.2,
+        "loadavg_1m": 3.54
+      },
+      {
+        "idle_workspace_open_pss_mib": 213.8,
+        "daemon_pss_mib": 12.0,
+        "process_count": 3,
+        "idle_cpu_pct_10s": 0.1,
+        "idle_cpu_pct_min": 0.1,
+        "idle_cpu_pct_max": 0.2,
+        "monaco_document_open_pss_mib": 324.7,
+        "process_count_with_editor": 3,
+        "idle_cpu_pct_10s_with_editor": 1.2,
+        "idle_cpu_pct_min_with_editor": 1.1,
+        "idle_cpu_pct_max_with_editor": 1.3,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 17.29,
+          "p95_ms": 18.63,
+          "p99_ms": 19.97,
+          "max_ms": 42.52,
+          "mean_ms": 17.4,
+          "cpu_pct_while_typing": 69.0
+        },
+        "after_typing_pss_mib": 471.7,
+        "loadavg_1m": 4.06
+      },
+      {
+        "idle_workspace_open_pss_mib": 216.7,
+        "daemon_pss_mib": 12.0,
+        "process_count": 3,
+        "idle_cpu_pct_10s": 0.2,
+        "idle_cpu_pct_min": 0.0,
+        "idle_cpu_pct_max": 0.3,
+        "monaco_document_open_pss_mib": 324.3,
+        "process_count_with_editor": 3,
+        "idle_cpu_pct_10s_with_editor": 1.2,
+        "idle_cpu_pct_min_with_editor": 1.1,
+        "idle_cpu_pct_max_with_editor": 1.2,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 17.39,
+          "p95_ms": 18.9,
+          "p99_ms": 20.18,
+          "max_ms": 45.07,
+          "mean_ms": 17.44,
+          "cpu_pct_while_typing": 65.7
+        },
+        "after_typing_pss_mib": 475.9,
+        "loadavg_1m": 4.06
+      }
+    ],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [],
+    "panel-toggle": [],
+    "splitter-drag": [],
+    "idle-running": [],
+    "typing-under-stream": []
+  },
+  "base": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [
+      {
+        "idle_workspace_open_pss_mib": 217.2,
+        "daemon_pss_mib": 12.0,
+        "process_count": 3,
+        "idle_cpu_pct_10s": 0.1,
+        "idle_cpu_pct_min": 0.0,
+        "idle_cpu_pct_max": 0.4,
+        "monaco_document_open_pss_mib": 324.0,
+        "process_count_with_editor": 3,
+        "idle_cpu_pct_10s_with_editor": 1.1,
+        "idle_cpu_pct_min_with_editor": 1.0,
+        "idle_cpu_pct_max_with_editor": 1.3,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 17.33,
+          "p95_ms": 18.59,
+          "p99_ms": 19.74,
+          "max_ms": 39.9,
+          "mean_ms": 17.35,
+          "cpu_pct_while_typing": 65.1
+        },
+        "after_typing_pss_mib": 467.6,
+        "loadavg_1m": 2.89
+      },
+      {
+        "idle_workspace_open_pss_mib": 216.5,
+        "daemon_pss_mib": 12.0,
+        "process_count": 3,
+        "idle_cpu_pct_10s": 0.1,
+        "idle_cpu_pct_min": 0.1,
+        "idle_cpu_pct_max": 0.2,
+        "monaco_document_open_pss_mib": 322.9,
+        "process_count_with_editor": 3,
+        "idle_cpu_pct_10s_with_editor": 1.1,
+        "idle_cpu_pct_min_with_editor": 1.1,
+        "idle_cpu_pct_max_with_editor": 1.2,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 17.34,
+          "p95_ms": 18.81,
+          "p99_ms": 21.82,
+          "max_ms": 37.82,
+          "mean_ms": 17.37,
+          "cpu_pct_while_typing": 67.6
+        },
+        "after_typing_pss_mib": 474.6,
+        "loadavg_1m": 3.27
+      },
+      {
+        "idle_workspace_open_pss_mib": 215.2,
+        "daemon_pss_mib": 12.0,
+        "process_count": 3,
+        "idle_cpu_pct_10s": 0.1,
+        "idle_cpu_pct_min": 0.0,
+        "idle_cpu_pct_max": 0.2,
+        "monaco_document_open_pss_mib": 322.6,
+        "process_count_with_editor": 3,
+        "idle_cpu_pct_10s_with_editor": 1.1,
+        "idle_cpu_pct_min_with_editor": 1.0,
+        "idle_cpu_pct_max_with_editor": 1.1,
+        "typing": {
+          "samples": 200,
+          "of": 200,
+          "p50_ms": 17.31,
+          "p95_ms": 19.01,
+          "p99_ms": 23.94,
+          "max_ms": 34.01,
+          "mean_ms": 17.53,
+          "cpu_pct_while_typing": 64.5
+        },
+        "after_typing_pss_mib": 467.1,
+        "loadavg_1m": 3.46
+      }
+    ],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [],
+    "panel-toggle": [],
+    "splitter-drag": [],
+    "idle-running": [],
+    "typing-under-stream": []
+  },
+  "medians": {
+    "tauri": {
+      "idle_workspace_open_pss_mib": {
+        "median": 216.7,
+        "min": 213.8,
+        "max": 218.1,
+        "samples": 3
+      },
+      "monaco_document_open_pss_mib": {
+        "median": 324.7,
+        "min": 324.3,
+        "max": 325.3,
+        "samples": 3
+      },
+      "after_typing_pss_mib": {
+        "median": 475.9,
+        "min": 471.7,
+        "max": 481.2,
+        "samples": 3
+      },
+      "idle_cpu_pct_10s": {
+        "median": 0.2,
+        "min": 0.1,
+        "max": 0.2,
+        "samples": 3
+      },
+      "idle_cpu_pct_10s_with_editor": {
+        "median": 1.2,
+        "min": 1.2,
+        "max": 1.2,
+        "samples": 3
+      },
+      "idle_cpu_pct_min": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.1,
+        "samples": 3
+      },
+      "idle_cpu_pct_min_with_editor": {
+        "median": 1.1,
+        "min": 1.1,
+        "max": 1.2,
+        "samples": 3
+      },
+      "typing_p50_ms": {
+        "median": 17.29,
+        "min": 17.27,
+        "max": 17.39,
+        "samples": 3
+      },
+      "typing_p95_ms": {
+        "median": 18.9,
+        "min": 18.63,
+        "max": 19.1,
+        "samples": 3
+      },
+      "typing_p99_ms": {
+        "median": 20.18,
+        "min": 19.97,
+        "max": 23.55,
+        "samples": 3
+      }
+    },
+    "base": {
+      "idle_workspace_open_pss_mib": {
+        "median": 216.5,
+        "min": 215.2,
+        "max": 217.2,
+        "samples": 3
+      },
+      "monaco_document_open_pss_mib": {
+        "median": 322.9,
+        "min": 322.6,
+        "max": 324.0,
+        "samples": 3
+      },
+      "after_typing_pss_mib": {
+        "median": 467.6,
+        "min": 467.1,
+        "max": 474.6,
+        "samples": 3
+      },
+      "idle_cpu_pct_10s": {
+        "median": 0.1,
+        "min": 0.1,
+        "max": 0.1,
+        "samples": 3
+      },
+      "idle_cpu_pct_10s_with_editor": {
+        "median": 1.1,
+        "min": 1.1,
+        "max": 1.1,
+        "samples": 3
+      },
+      "idle_cpu_pct_min": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.1,
+        "samples": 3
+      },
+      "idle_cpu_pct_min_with_editor": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.1,
+        "samples": 3
+      },
+      "typing_p50_ms": {
+        "median": 17.33,
+        "min": 17.31,
+        "max": 17.34,
+        "samples": 3
+      },
+      "typing_p95_ms": {
+        "median": 18.81,
+        "min": 18.59,
+        "max": 19.01,
+        "samples": 3
+      },
+      "typing_p99_ms": {
+        "median": 21.82,
+        "min": 19.74,
+        "max": 23.94,
+        "samples": 3
+      }
+    }
+  },
+  "paired": {
+    "idle_workspace_open_pss_mib": {
+      "median": 0.9,
+      "min": -2.7,
+      "max": 1.5,
+      "samples": 3,
+      "base_median": 216.5
+    },
+    "monaco_document_open_pss_mib": {
+      "median": 1.7,
+      "min": 1.3,
+      "max": 1.8,
+      "samples": 3,
+      "base_median": 322.9
+    },
+    "after_typing_pss_mib": {
+      "median": 8.8,
+      "min": -2.9,
+      "max": 13.6,
+      "samples": 3,
+      "base_median": 467.6
+    },
+    "idle_cpu_pct_10s": {
+      "median": 0.1,
+      "min": 0.0,
+      "max": 0.1,
+      "samples": 3,
+      "base_median": 0.1
+    },
+    "idle_cpu_pct_10s_with_editor": {
+      "median": 0.1,
+      "min": 0.1,
+      "max": 0.1,
+      "samples": 3,
+      "base_median": 1.1
+    },
+    "typing_p50_ms": {
+      "median": -0.05,
+      "min": -0.06,
+      "max": 0.08,
+      "samples": 3,
+      "base_median": 17.33
+    },
+    "typing_p95_ms": {
+      "median": -0.11,
+      "min": -0.18,
+      "max": 0.51,
+      "samples": 3,
+      "base_median": 18.81
+    },
+    "typing_p99_ms": {
+      "median": -1.85,
+      "min": -3.76,
+      "max": 3.81,
+      "samples": 3,
+      "base_median": 21.82
+    }
+  }
+}

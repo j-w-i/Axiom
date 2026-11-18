@@ -93,6 +93,12 @@ unless the owner accepts it in writing in the verification record.
 | P11 | Explorer settle / wheel / 50k output | existing budgets unchanged | restyle must keep row virtualisation |
 | P12 | Output streaming while typing (agent-like load: 2,000 lines/s into the console) | typing p95 within P1 | streaming must not starve input |
 
+**Measured at M1.6 exit (M1.6-QA-004, 2026-11-18, interleaved against the QA-002 build):** P1, P2,
+P6 (median and filter), P7, P9, P10, P11 and P12 (p95) met; P3 (palette/menu exits, one toggle frame),
+P4 frame p95, P5, P6 cold first open and P8 (4.1 %, Motion Off 2.2–2.5 %) not met — P4, P5 and the
+P6 cold open equally in the pre-redesign build. Numbers, causes and owners:
+`docs/roadmap/verification/M1.6.md` §Performance. No budget was changed.
+
 ## 4. Procedures
 
 ### 4.1 Existing harness

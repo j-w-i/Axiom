@@ -358,6 +358,12 @@ def seed_state(data_dir, workspace, open_files=(), expanded=()):
         "editor.openPaths": list(open_files), "editor.activePath": open_files[0] if open_files else None, "explorer.expanded": list(expanded)}}}) + "\n").encode())
     proc.stdin.flush()
     json.loads(proc.stdout.readline())
+    # AXIOM_BENCH_MOTION=standard|reduced|off seeds the motion level (M1.6-QA-004: P7/P8 with motion off).
+    motion = os.environ.get("AXIOM_BENCH_MOTION")
+    if motion:
+        proc.stdin.write((json.dumps({"jsonrpc": "2.0", "id": 4, "method": "settings/set", "params": {"values": {"appearance.motion": motion}}}) + "\n").encode())
+        proc.stdin.flush()
+        json.loads(proc.stdout.readline())
     proc.stdin.close()
     proc.wait(5)
 
