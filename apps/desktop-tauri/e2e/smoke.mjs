@@ -513,6 +513,29 @@ try {
   // ---- 9. themes ---------------------------------------------------------------
   await wd.click(await wd.find('[data-path="README.md"]'));
   await wd.waitFor(`return document.querySelector('[data-path="README.md"][role=tab]') !== null`, [], 5000, "README tab");
+  {
+    // M1.6-EDITOR-001: breadcrumbs show the active document's path; the lit edge sits over the active tab.
+    const crumbs = () => wd.exec(`return [...document.querySelectorAll('[data-testid=breadcrumbs] .crumbs__text')].map(e => e.textContent).join('/')`);
+    const edge = () =>
+      wd.exec(
+        `const t = document.querySelector('[role=tab][aria-selected=true]').getBoundingClientRect(); const g = document.querySelector('.tabs__glide').getBoundingClientRect(); return { dx: Math.abs(t.left - g.left), dw: Math.abs(t.width - g.width) }`,
+      );
+    const readme = await crumbs();
+    const edgeReadme = await edge();
+    await wd.click(await wd.find('[role=tab][data-path="src/main.rs"]'));
+    await wd.waitFor(`return document.querySelector('[role=tab][data-path="src/main.rs"]')?.getAttribute('aria-selected') === 'true'`, [], 5000, "main.rs active");
+    const main = await crumbs();
+    const edgeMain = await edge();
+    const current = await wd.exec(`return document.querySelector('[data-testid=breadcrumbs] [aria-current]')?.textContent`);
+    await wd.click(await wd.find('[role=tab][data-path="README.md"]'));
+    await wd.waitFor(`return document.querySelector('[role=tab][data-path="README.md"]')?.getAttribute('aria-selected') === 'true'`, [], 5000, "README active again");
+    const near = (e) => e.dx < 0.5 && e.dw < 0.5;
+    check(
+      "17 breadcrumbs follow the active tab; the lit edge sits over it",
+      readme === "README.md" && main === "src/main.rs" && current === "main.rs" && near(edgeReadme) && near(edgeMain),
+      `README → ${readme}; main.rs → ${main} (current ${current}); edge ${JSON.stringify(edgeReadme)} ${JSON.stringify(edgeMain)}`,
+    );
+  }
   await setTheme(wd, "light");
   await shot(wd, "09-workbench-light");
   const editorBgLight = await wd.exec(`return getComputedStyle(document.querySelector('.monaco-editor-background')).backgroundColor`);

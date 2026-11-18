@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSPro
 import type { WorkspaceStore } from "../state/workspace";
 import * as Icon from "../ui/icons";
 import { Button } from "../ui/primitives";
+import "../styles/components/glyph.css";
 import "../styles/components/tree.css";
 import "../styles/components/states.css";
 

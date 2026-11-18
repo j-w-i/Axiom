@@ -98,6 +98,16 @@ window is idle (the loop gate's `data-idle`); the meter renders only when its ba
   syntax from `--syn-*`. Font: the user's setting, or Plex Mono 13/20.
 - **Empty editor** (workspace open, no document): §6.
 
+**As built (M1.6-EDITOR-001).** Tabs carry the explorer's glyph chip (shared `glyph.css`). The
+title ellipsis is at 220 px (tab max 260 px). The lit edge is one `.tabs__glide` element inside
+the scrolling strip, placed by `translateX/scaleX` written straight to the DOM in a layout effect
+and on `ResizeObserver` callbacks (strip and active tab): no React state, so placing it costs no
+commit. It is static until INTERACTION-003. A vertical wheel scrolls the strip sideways; the
+active tab is scrolled into view (`inline: "nearest"`). The dirty dot and the close glyph share
+the 18 px slot; the dot gives way to the glyph on hover of the slot or keyboard focus of the tab.
+Breadcrumbs are an `<ol>` in `nav aria-label="Location"`, the last segment `aria-current`. The
+focused-region rule on the strip keeps its bottom seam.
+
 ### 2.4 Console (SHELL-006)
 
 - Header (30): view tabs. **Output** is the only view in M1, and the strip is

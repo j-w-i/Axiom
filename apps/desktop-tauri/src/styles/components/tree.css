@@ -94,31 +94,3 @@
   color: var(--text-muted);
   font-size: 9px;
 }
-/* File-type glyph chips: two-letter mono label on a tint of a syntax hue. */
-.glyph {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 15px;
-  height: 15px;
-  border-radius: 3px;
-  background: var(--glyph-other-bg);
-  color: var(--glyph-other);
-  font-family: var(--font-code);
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1;
-}
-.glyph[data-kind="rs"] {
-  background: var(--glyph-rs-bg);
-  color: var(--glyph-rs);
-}
-.glyph[data-kind="md"] {
-  background: var(--glyph-md-bg);
-  color: var(--glyph-md);
-}
-.glyph[data-kind="toml"] {
-  background: var(--glyph-toml-bg);
-  color: var(--glyph-toml);
-}
