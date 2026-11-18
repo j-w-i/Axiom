@@ -34,19 +34,31 @@ export class SettingsStore extends Observable<SettingsState> {
   constructor(private readonly client: DaemonClient) {
     // Defaults mirror the table in ipc.md; real values arrive from the daemon.
     super({ loaded: false, theme: "system", motion: "standard", editorFontSize: 13, editorFontFamily: "", editorWordWrap: false, reopenLast: true, error: "" });
-    client.onNotification<{ values: Record<string, unknown> }>("settings/didChange", (p) => this.apply(p.values));
+    client.onNotification<{ values: Record<string, unknown> }>("settings/didChange", (p) => {
+      for (const k of Object.keys(p.values)) for (const seen of this.inFlight) seen.add(k);
+      this.apply(p.values);
+    });
     client.onState((s) => {
       if (s.state === "ready") void this.load();
     });
   }
 
+  /** Keys changed (settings/didChange) while each load is in flight. Requests are answered in any
+   * order (IPC 0.1), so a load's answer can be older than a change that arrived before it: those
+   * keys keep the newer value. (Seen as a flaky store test right after a restart, 2026-11-18.) */
+  private readonly inFlight = new Set<Set<string>>();
+
   async load(): Promise<void> {
+    const changed = new Set<string>();
+    this.inFlight.add(changed);
     try {
       const r = await this.client.request<{ values: Record<string, unknown> }>("settings/get", {});
-      this.apply(r.values);
+      this.apply(Object.fromEntries(Object.entries(r.values).filter(([k]) => !changed.has(k))));
       if (!this.state.loaded) this.set({ loaded: true });
     } catch (e) {
       this.set({ error: `Could not read the settings: ${(e as RpcError).message}` });
+    } finally {
+      this.inFlight.delete(changed);
     }
   }
 
