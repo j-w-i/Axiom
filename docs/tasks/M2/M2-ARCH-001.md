@@ -1,8 +1,8 @@
 ---
 id: M2-ARCH-001
 title: Freeze the M2 contracts: env/* and build/* protocol additions
-status: planned
-status_note:
+status: tested
+status_note: 
 depends_on: []
 order: 301
 scope: crates/protocol/, schemas/ (regenerated), docs/protocols/{ipc,providers}.md, docs/architecture/modules.md

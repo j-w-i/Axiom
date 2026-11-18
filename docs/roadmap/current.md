@@ -55,6 +55,7 @@ lives on branch `task/m1.6`.
 - **M1.6-QA-004 is tested (2026-11-18):** performance measured against the QA-002 build (interleaved): P1, P2, P6, P7, P9–P12 met; P3, P4 frame p95, P5, P6 cold open and P8 (4.1 %) not met and waived by the owner in writing (`M1.6.md` §Performance).
 - **M1.6-QA-005 is tested (2026-11-18):** the automated half passes on macOS and Windows in GitHub Actions (run 44250978913; screenshot sets in `verification/M1.6/{macos,windows}/`); two platform defects (D-X-1 caret drift, D-X-2 Windows localStorage on quit) and the manual hardware items (VoiceOver, NVDA, High Contrast, title bar, HiDPI) remain. Record: `M1.6.md` §Cross-platform. Since then the owner's Mac session fixed D-X-1 (a test measurement), the traffic lights, drag, zoom and the full-screen inset; screen-reader passes waived; Windows deferred.
 - **M2 planned (2026-11-18):** 14 task files in `docs/tasks/M2/` (contracts, env registry/detection, archive/delegate/system installs, environments, build engine and diagnostics, rail + Environment page, install-plan dialog, Problems view, node/cmake+ninja/python providers, exit QA). Decisions in `docs/decisions/ADR-0014-environments-and-builds.md` — **accepted 2026-11-18**; M2 in progress. Work branch `task/m2`.
+- **M2-ARCH-001 tested (2026-11-18):** protocol 0.2 defined (`crates/protocol/src/{env,build}.rs`, four error kinds, `ipc.md` §Protocol 0.2); provider manifest and diagnostics frozen for M2; `env`/`build` edges in `modules.md`. The daemon reports 0.2 but serves none of the additions yet: `axiomd::NOT_YET_SERVED` lists them, and each M2 task removes what it wires.
 - **M1.6-QA-006 is tested (2026-11-18): M1.6 is complete** on Linux and macOS (deviations approved by the owner); legacy aliases removed (pixel-identical); every exit criterion in `M1.6.md` §Exit review. Windows is deferred. Merged to main (PR j-w-i/Axiom#2, 2026-11-18).
 - **Next:** see `scripts/tasks.py | grep '^M1.6-' | grep READY` (`scripts/tasks.py | grep '^M1.6-' | grep READY`).
 - _(Wave B history:)_ M1.6-QA-002 (performance baseline and new scenarios),
@@ -91,6 +92,7 @@ gone (tag `qt-shell-final`).
 |------|-------|
 | Architecture, ADRs 0001–0012 | Accepted (0012 supersedes the Qt shell decision) |
 | IPC protocol 0.1 | Frozen; `crates/protocol`, schemas generated and checked |
+| IPC protocol 0.2 (M2 additions) | Types frozen by M2-ARCH-001; handlers land task by task (`axiomd::NOT_YET_SERVED`) |
 | Editor bridge 1 | Frozen; implemented in `editor/` (43 Vitest tests) and shared by both shells |
 | Backend (`crates/{rpc,store,workspace,exec,axiomd}`) | M1, 227 tests, unmodified by M1.5 |
 | `crates/desktop-bridge` | Tested: 13 behaviour tests against the real daemon (incl. stderr forwarding) + 12 unit tests (framing, daemon lookup order) |
@@ -101,16 +103,12 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-18-M1.6.md` (milestone). Earlier: `agents/handoffs/2026-11-18-M1.6-QA-004.md`, `agents/handoffs/2026-11-18-M1.6-QA-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-004.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-003.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-002.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-001.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
+`agents/handoffs/2026-11-18-M2-ARCH-001.md`. Earlier: `agents/handoffs/2026-11-18-M1.6.md` (milestone), `agents/handoffs/2026-11-18-M1.6-QA-004.md`, `agents/handoffs/2026-11-18-M1.6-QA-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-004.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-003.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-002.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-001.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 
-**M1.6 wave B**, on branch `task/m1.6` (see the M1.6 section at the top). Take the
-first `READY` task whose id starts with `M1.6-`, in `order`:
-`scripts/tasks.py | grep '^M1.6-' | grep READY`. Do **not** use `scripts/tasks.py
-next` for this: it prints T-11 (an M1.5 spike with a lower `order` that is still
-READY and is not part of M1.6). Wave B (M1.6-QA-001, M1.6-QA-002, M1.6-SYSTEM-001, M1.6-SHELL-001) is done; wave C is next
-and M1.6-SHELL-001. Both QA baselines must be captured before any restyle merges.
+**M2**, on branch `task/m2`: take the first `READY` task whose id starts with `M2-`, in `order`
+(`scripts/tasks.py | grep '^M2-'`). After M2-ARCH-001 that is M2-ENV-001.
 
 ## M1.5 follow-ups (open by owner waiver; not blocking M1.6)
 

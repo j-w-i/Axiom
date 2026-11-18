@@ -275,7 +275,8 @@ async fn initialize_negotiates_minor_and_rejects_major_mismatch() {
         .request::<axiom_protocol::lifecycle::Initialize>(p)
         .await
         .unwrap();
-    assert_eq!(ok.protocol_version, "0.1");
+    // Down to the server's minor (0.2 since M2-ARCH-001).
+    assert_eq!(ok.protocol_version, axiom_protocol::PROTOCOL_VERSION);
 }
 
 #[tokio::test]

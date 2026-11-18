@@ -1,7 +1,7 @@
 # Toolchain providers
 
-**State: draft.** Frozen by the first task of M2 (M2-ENV-001) after it has
-implemented detection for the reference manifest. Types:
+**State: frozen for M2** (M2-ARCH-001, 2026-11-18; ADR-0014). Changes from here on are additive
+and go through a task spec (`governance.md`). Types:
 `crates/protocol/src/provider.rs`. Schema:
 `schemas/provider/manifest.schema.json`. Reference:
 `providers/rust/provider.toml` (parsed in `crates/protocol/tests/drafts.rs`).
@@ -52,20 +52,25 @@ The conceptual operations from the brief map onto this split:
 A provider with no `process` is fully declarative. If `process` is present,
 the helper's answer replaces the declarative one for the methods it lists in
 its `provider/capabilities` response. Helper protocol = same JSON-RPC/NDJSON
-framing as `ipc.md`, methods above; it is specified in detail by M2-ENV-004
-when the first provider needs it (expected: `apple-xtool`, because xtool's
-state cannot be probed with a version regex alone — see
-`docs/research/xtool.md`).
+framing as `ipc.md`, methods above. **Not enabled in M2** (ADR-0014 §5): no M2 provider needs
+one, so M2 reports a manifest with `process` in `env/providers` with an error ("helper processes
+are not supported yet") and does not load it. The helper protocol is specified when the first
+provider needs it (expected: `apple-xtool`, because xtool's state cannot be probed with a
+version regex alone — see `docs/research/xtool.md`).
 
-## Core data (to be added to the protocol in M2)
+## Core data (protocol 0.2, `crates/protocol/src/env.rs`)
 
 ```text
 Toolchain   { providerId, toolId, version, location: Managed{root} | System{path}, verifiedMs }
-Environment { id, toolchains: [Toolchain], pathPrepend: [dir], vars: {K: V} }
-InstallPlan { providerId, version, scope, steps: [Step], downloadBytes?, requiresApproval: [Effect] }
-Step        = Download{url, sha256} | Extract{format, stripComponents} | Run{argv, env}
-            | SystemPackages{manager, packages} | Verify{toolId}
+Environment { toolchains: [Toolchain], pathPrepend: [dir], vars: {K: V} }
+InstallPlan { planId, providerId, version, scope, steps: [Step], downloadBytes?, effects: [Effect],
+              expiresMs }
+Step        = Download{url, bytes?, sha256: Digest{value} | Url{url}} | Extract{format, stripComponents}
+            | Run{argv, env} | SystemPackages{manager, packages, argv} | Verify{toolId}
+Effect      = network | writeManaged | runPrograms | systemChange | elevation
 ```
+
+Methods and their errors: `ipc.md` §Protocol 0.2.
 
 - An **InstallPlan is shown to the user before anything runs.** It lists
   every URL, every command and every system change. Approval is per plan.
@@ -91,9 +96,9 @@ evaluation, no nested expansion. An unknown `${…}` is a validation error.
 
 ## Errors
 
-Provider operations return the IPC error model. Additional kinds reserved for
-M2: `checksum_mismatch`, `unsupported_platform`, `approval_denied`,
-`prerequisite_missing` (details: `{ "missing": [toolId] }`).
+Provider operations return the IPC error model. Kinds added in protocol 0.2:
+`checksum_mismatch`, `unsupported_platform`, `approval_denied`,
+`prerequisite_missing` (details: `{ "missing": [toolId] }`); see `ipc.md` §Errors.
 
 ## Contract tests (M2)
 

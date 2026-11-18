@@ -1,6 +1,7 @@
-# IPC protocol 0.1 (shell/CLI/agents ↔ daemon)
+# IPC protocol 0.2 (shell/CLI/agents ↔ daemon)
 
-**State: frozen for M1.** Source of truth for types: `crates/protocol`.
+**State: 0.1 frozen for M1; the 0.2 additions (§Protocol 0.2) frozen for M2 by M2-ARCH-001.**
+Source of truth for types: `crates/protocol`.
 Machine-readable form: `schemas/ipc/protocol.schema.json` (generated). This
 document specifies the behaviour the types cannot express.
 
@@ -84,6 +85,10 @@ Why NDJSON rather than LSP's `Content-Length` framing: see ADR-0003.
 | `too_large` | file > 16 MiB, state value > 1 MiB |
 | `workspace_not_open` | unknown `workspaceId` |
 | `spawn_failed` | process could not be started |
+| `checksum_mismatch` (0.2) | a download's SHA-256 differs from the plan's (details: `{ "url", "expected", "actual" }`) |
+| `unsupported_platform` (0.2) | the provider has no install method or artifact for this OS/arch |
+| `approval_denied` (0.2) | `env/install` with an unknown, expired or already-used `planId`; or the user declined the OS elevation prompt |
+| `prerequisite_missing` (0.2) | a required tool or system package is absent (details: `{ "missing": [toolId] }`) |
 
 ## Methods
 
@@ -116,6 +121,50 @@ Signatures and field docs are in the Rust modules; this is the index.
 | `task/output` | daemon → client | `task` |
 | `task/exited` | daemon → client | `task` |
 | `settings/didChange` | daemon → client | `settings` |
+
+## Protocol 0.2 (M2, ADR-0014)
+
+Additive only: every 0.1 method, notification and meaning is unchanged, and a 0.1 client keeps
+working (it negotiates 0.1 and never sees the additions it does not call). The daemon reports
+`0.2`; clients feature-detect each addition from `initialize.methods` (a method appears there only
+once the daemon serves it). Types: `crates/protocol/src/{env,build}.rs`.
+
+| Method | Params → Result | Errors (besides the generic ones) |
+|--------|-----------------|-----------------------------------|
+| `env/providers` | `ProvidersParams → ProvidersResult` | — |
+| `env/detect` | `WorkspaceRef → DetectResult` | `workspace_not_open` |
+| `env/versions` | `VersionsParams → VersionsResult` | `not_found` |
+| `env/planInstall` | `PlanInstallParams → InstallPlan` | `not_found`, `unsupported_platform`, `prerequisite_missing` |
+| `env/install` | `InstallParams → InstallResult` | `approval_denied`, `checksum_mismatch`, `io`, `spawn_failed`, `cancelled` |
+| `env/uninstall` | `UninstallParams → {}` | `not_found` |
+| `env/resolve` | `WorkspaceRef → Environment` | `workspace_not_open`, `prerequisite_missing`, `invalid_params` (malformed `.axiom/project.toml`) |
+| `env/trust` | `TrustParams → {}` | `workspace_not_open` |
+| `build/tasks` | `WorkspaceRef → TasksResult` | `workspace_not_open` |
+| `build/run` | `RunParams → RunResult` | `workspace_not_open`, `not_found`, `prerequisite_missing`, `spawn_failed` |
+
+| Notification | Direction | Module |
+|--------------|-----------|--------|
+| `env/installProgress` | daemon → client | `env` |
+| `env/installed` | daemon → client (broadcast) | `env` |
+| `build/diagnostics` | daemon → client | `build` |
+
+- **Install approval.** `env/planInstall` runs nothing and returns an immutable `InstallPlan`
+  (every URL with size and checksum source, every command, every system change, and the
+  `effects` summary). `env/install` takes only the `planId`, executes exactly that plan and
+  accepts each `planId` once, within 10 minutes (`expiresMs`). A client must show the whole plan
+  before calling it; a `Step` kind the client does not know fails deserialization, so it can
+  never approve a step it cannot show.
+- **Install progress and end.** `env/installProgress` at most 10 per second. A successful install
+  sends `env/installed` (to every client, so other views refresh) and then the `env/install`
+  response with the same `InstallResult`. `$/cancel` on the request stops the install, removes the
+  staging directory and answers `cancelled`; nothing is published.
+- **`env/trust`.** Workspace providers (`.axiom/providers/`) are listed with `trusted: false` and
+  never loaded until the workspace is trusted (ADR-0014 §5); the flag is stored per workspace.
+  Not in ADR-0014's table; it is the "store flag set from the UI" of §5.
+- **Builds are tasks.** `build/run` returns a `TaskId`; output, exit and cancellation are the 0.1
+  `task/*` methods and notifications. `build/diagnostics` carries only the diagnostics new since
+  the previous notification for that task; the last one has `complete: true` and precedes
+  `task/exited`.
 
 ## Behavioural details
 
@@ -182,6 +231,8 @@ it to this table and the daemon's registry.
 - MINOR bump: new methods, notifications, optional fields, settings keys.
 - MAJOR bump: anything that could break an existing client. Needs an ADR.
 - The daemon must keep serving every method listed for the MAJOR it speaks.
+- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 added methods only, so a
+  0.1 client talking to a 0.2 daemon gets `"0.1"` and unchanged behaviour.
 
 ## Example session
 
@@ -198,7 +249,7 @@ it to this table and the daemon's registry.
 
 ## Contract tests
 
-- Shape: `crates/protocol/tests/contract.rs` (exists).
+- Shape: `crates/protocol/tests/contract.rs` (0.1) and `tests/m2_contract.rs` (0.2 additions).
 - Behaviour: `crates/axiomd/tests/` spawns the real binary and exercises every
   row of every table in this document (task M1-DAEMON-002). A behaviour stated
   here without a test there is a defect in the test suite.

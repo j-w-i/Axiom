@@ -1,7 +1,7 @@
 //! Toolchain provider manifest (`provider.toml`). Normative prose:
 //! `docs/protocols/providers.md`.
 //!
-//! DRAFT 0.1: frozen when milestone M2 starts. A manifest is pure data: the
+//! Frozen for M2 (M2-ARCH-001; `axiom.provider/1`). A manifest is pure data: the
 //! daemon interprets it; a manifest can never run code other than the
 //! commands it declares, and each such command passes the permission gate.
 

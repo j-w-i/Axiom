@@ -1,4 +1,4 @@
-//! Axiom wire protocol, version 0.1.
+//! Axiom wire protocol, version 0.2.
 //!
 //! This crate is the single source of truth for the contract between the
 //! daemon (`axiomd`) and every client (desktop shell, CLI, agents, tests).
@@ -12,8 +12,10 @@
 //! - [`method`]: the [`Method`]/[`Notification`] traits binding names to types.
 //! - one module per service domain: [`lifecycle`], [`workspace`], [`fs`],
 //!   [`task`], [`settings`]. These make up protocol 0.1 (milestone M1).
+//! - [`env`] and [`build`]: the protocol 0.2 additions (milestone M2, ADR-0014).
 //! - DRAFT contracts for later milestones, compiled and schema-exported but
-//!   not served yet: [`diagnostics`], [`provider`], [`inspection`].
+//!   not served yet: [`inspection`]. [`diagnostics`] and [`provider`] were drafts and are
+//!   frozen for M2 (used by [`env`] and [`build`]).
 //!
 //! Change rules (see `docs/architecture/governance.md`):
 //! - Adding an optional field, a method, a notification, or an enum variant
@@ -21,7 +23,9 @@
 //! - Removing or renaming anything, or changing a type, is a MAJOR change and
 //!   needs an ADR.
 
+pub mod build;
 pub mod diagnostics;
+pub mod env;
 pub mod envelope;
 pub mod fs;
 pub mod inspection;
@@ -39,7 +43,7 @@ pub use envelope::{
 pub use method::{Method, Notification};
 
 /// Protocol version implemented by this crate. `MAJOR.MINOR`.
-pub const PROTOCOL_VERSION: &str = "0.1";
+pub const PROTOCOL_VERSION: &str = "0.2";
 
 /// A path inside a workspace: relative to the workspace root, `/`-separated,
 /// UTF-8, with no `.`/`..` segments, no leading `/`, and no trailing `/`.
