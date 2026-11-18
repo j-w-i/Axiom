@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { host, TauriTransport } from "./daemon/tauri-transport";
+import { watchFullscreen } from "./shell/platform";
 import { createApp } from "./state/app";
 import { toast, ToastStack, TooltipProvider } from "./ui/overlays";
 import "./styles/fonts.css";
@@ -15,6 +16,7 @@ performance.mark("axiom:script-start");
 // Per-OS text rendering (fonts.css): grey-scale smoothing on macOS only.
 const platform = navigator.platform.toLowerCase();
 document.documentElement.dataset.os = platform.includes("mac") ? "mac" : platform.includes("win") ? "windows" : "linux";
+watchFullscreen();
 const app = createApp(new TauriTransport());
 // Diagnostics, end-to-end tests and benchmarks (read-only handles).
 (window as unknown as { __axiom?: unknown; __axiomHost?: unknown }).__axiom = app;

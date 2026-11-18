@@ -726,6 +726,19 @@ pub fn run() {
             }
         })
         .on_window_event(move |window, event| {
+            // macOS overlay title bar: in full screen the traffic lights are hidden, so the title
+            // row drops their inset. Full screen changes arrive as resizes; only changes are sent.
+            #[cfg(target_os = "macos")]
+            if let WindowEvent::Resized(_) = event {
+                use tauri::Emitter;
+                static FULLSCREEN: AtomicBool = AtomicBool::new(false);
+                let now = window.is_fullscreen().unwrap_or(false);
+                if FULLSCREEN.swap(now, Ordering::SeqCst) != now {
+                    if let Err(e) = window.emit("axiom://fullscreen", now) {
+                        eprintln!("[window] could not deliver the full screen state: {e}");
+                    }
+                }
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<HostState>();
                 if !state.quitting.load(Ordering::SeqCst) {

@@ -17,6 +17,10 @@
 .titlerow[data-mac] {
   padding-left: 86px;
 }
+/* Full screen hides the traffic lights: the row starts at its usual left padding. */
+:root[data-fullscreen] .titlerow[data-mac] {
+  padding-left: var(--s-3);
+}
 .titlerow__brand {
   display: flex;
   align-items: center;
