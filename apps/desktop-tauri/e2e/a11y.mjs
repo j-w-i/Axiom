@@ -365,6 +365,29 @@ try {
     await wd.click(await wd.find('.rail [data-destination="files"]'));
     await wd.waitFor(`return document.querySelector('.editor-column__files')?.hidden === false`, [], 3000, "back to files");
 
+    // ---- S19: the console's Problems view (M2-UI-003) --------------------------------------
+    await wd.exec(`window.__axiom.problems.begin("rust/build", "a11y", "Build: cargo build");
+      window.__axiom.problems.set({ byTask: { a11y: { complete: true, diagnostics: [
+        { severity: "error", message: "mismatched types", code: "E0308", source: "rustc", related: [], location: { file: "src/main.rs", line: 2, column: 18 } },
+        { severity: "warning", message: "unused variable: x", code: "unused_variables", source: "rustc", related: [], location: { file: "src/main.rs", line: 3, column: 9 } } ] } } })`);
+    await wd.click(await wd.find('[data-view=problems]'));
+    await wd.waitFor(`return document.querySelectorAll('[data-testid=problems] .problem').length === 2`, [], 5000, "problems");
+    await sleep(200);
+    contrast[`S19 ${theme}`] = await wd.exec(`return window.__a11y.contrastScan()`);
+    await wd.exec(`document.activeElement?.blur()`);
+    const probTrav = await traverse(wd, false);
+    const strip = await wd.exec(`const l = document.querySelector('[role=tablist][aria-label="Console views"]'); return { tabs: [...l.querySelectorAll('[role=tab]')].map(t => t.getAttribute('aria-label') + ':' + t.getAttribute('aria-selected')), panel: document.querySelector('[role=tabpanel]#console-problems')?.getAttribute('aria-label') }`);
+    const probEls = probTrav.seen.filter((x) => x.cls.startsWith("problem") || x.cls.startsWith("console__view"));
+    const badProb = probEls.filter((x) => !x.name || !x.role || !x.focus).map((x) => `${x.role} "${x.name}" focus=${x.focus}`);
+    check(
+      `S19 problems view (${theme}): named tabs and panel, rows reachable by Tab with names that carry severity and position, visible focus`,
+      strip.tabs.join() === "Output:false,Problems, 2:true" && strip.panel === "Problems" && probEls.some((x) => /^Error: mismatched types \(E0308\) at src\/main\.rs:2:18$/.test(x.name)) && badProb.length === 0,
+      `${JSON.stringify(strip)}; reached ${probEls.length}`,
+      badProb,
+    );
+    await wd.click(await wd.find('[data-view=output]'));
+    await wd.exec(`window.__axiom.problems.set({ runs: {}, byTask: {} })`);
+
     // ---- 5: not by colour alone ----------------------------------------------------------
     const marks = await wd.exec(`
       const dirty = document.querySelector('[role=tab][data-dirty=true] .tab__close')?.getAttribute('aria-label') ?? '';
@@ -382,7 +405,7 @@ try {
     t.targets = await wd.exec(`return window.__a11y.targets()`);
   }
 
-  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d in both themes ----------
+  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d, S19 in both themes -----
   for (const [state, fails] of Object.entries(contrast)) {
     check(`4 rendered contrast ${state}`, fails.length === 0, `${fails.length} text node(s) below the minimum`, fails.map((f) => `${f.region} .${f.cls} "${f.text}" ${f.ratio}:1 < ${f.need} (${f.color})`));
   }

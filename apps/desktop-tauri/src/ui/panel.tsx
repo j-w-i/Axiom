@@ -10,6 +10,7 @@ import "../styles/components/panel.css";
 /** A region: <section aria-label=title data-region> with a 30 px header (title, meta, tools). */
 export function Panel({
   title,
+  heading,
   meta,
   tools,
   region,
@@ -19,6 +20,8 @@ export function Panel({
   children,
 }: {
   title: string;
+  /** Shown instead of the title text (e.g. the console's view tabs); `title` stays the name. */
+  heading?: ReactNode;
   meta?: ReactNode;
   tools?: ReactNode;
   region?: string;
@@ -31,7 +34,7 @@ export function Panel({
   return (
     <section className={className ? `panel ${className}` : "panel"} aria-label={title} data-region={region} data-testid={testId} data-phase={phase}>
       <header className="panel__head">
-        <span className="panel__title">{title}</span>
+        {heading ?? <span className="panel__title">{title}</span>}
         {meta && <span className="panel__meta">{meta}</span>}
         {tools && <span className="panel__tools">{tools}</span>}
       </header>

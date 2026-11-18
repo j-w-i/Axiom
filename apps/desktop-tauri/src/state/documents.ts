@@ -204,6 +204,18 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     void this.openInternal(path, false);
   }
 
+  /** Opens (or activates) a document and puts the cursor at 1-based line and column, centred
+   * (bridge-1 `revealPosition`, which also activates). Used by the Problems view. */
+  openAt(path: string, line: number, column: number): void {
+    const reveal = () => {
+      if (this.index(path) < 0) return;
+      this.activate(path);
+      if (this.editorUp) this.port?.revealPosition({ path, line, column });
+    };
+    if (this.index(path) >= 0) return reveal();
+    void this.openInternal(path, false).then(reveal);
+  }
+
   private async openInternal(path: string, silent: boolean): Promise<void> {
     if (!this.workspace.isOpen || this.opening.has(path)) return;
     this.opening.add(path);

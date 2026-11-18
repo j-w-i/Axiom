@@ -390,13 +390,23 @@ try {
     check("4f the focused region's header carries the brass rule (files, editor, console)", regions.every((r) => r.got === r.want && r.rule), JSON.stringify(regions));
   }
   await wd.exec(INPUT_RECORDER);
+  // Diagnostic (M2-UI-001 handoff): focus moves and what is under the click, printed if typing
+  // does not reach the editor. Seen when smoke shared an e2e.sh run with shots.mjs: the runner
+  // then uses a 2880x1800 Xvfb, the pointer starts outside the window, and with no window manager
+  // X keyboard focus follows the pointer. Run shots on its own.
+  await wd.exec(`window.__dbg = []; const d = (t) => t ? (t.tagName + '.' + String(t.className?.baseVal ?? t.className).slice(0, 40)) : 'null';
+    for (const ev of ['focusin', 'focusout', 'mousedown', 'pointerdown', 'click']) document.addEventListener(ev, (e) => window.__dbg.push(performance.now().toFixed(0) + ' ' + ev + ' ' + d(e.target) + (e.relatedTarget ? ' rel=' + d(e.relatedTarget) : '')), true);
+    const r = document.querySelector('.monaco-editor .view-lines').getBoundingClientRect(); window.__dbg.push('view-lines ' + JSON.stringify(r) + ' at-center ' + d(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) + ' active ' + d(document.activeElement));`);
   await wd.click(await wd.find(".monaco-editor .view-lines"));
   await wd.chord(MOD, DOC_START); // Ctrl+Home / Cmd+Up
   // Count how the keystrokes reach the page: trusted (OS-level, WebKitWebDriver)
   // or synthetic (the embedded driver dispatches them by script).
   await wd.exec(`window.__keyTrust = []; document.addEventListener('keydown', (e) => window.__keyTrust.push(e.isTrusted), true)`);
   await wd.keys([..."// edited", "\uE007"]);
-  await wd.waitFor(`return document.querySelector('[data-path="src/main.rs"][role=tab]')?.dataset.dirty === 'true'`, [], 5000, "dirty tab");
+  await wd.waitFor(`return document.querySelector('[data-path="src/main.rs"][role=tab]')?.dataset.dirty === 'true'`, [], 5000, "dirty tab").catch(async (e) => {
+    console.log("focus log:\n  " + (await wd.exec(`return (window.__dbg || []).join('\\n  ')`)));
+    throw e;
+  });
   const trust = await wd.exec(`return window.__keyTrust`);
   const allTrusted = trust.length > 0 && trust.every(Boolean);
   if (TRUSTED_INPUT) {
@@ -941,8 +951,66 @@ try {
 
     // Back to Files: the editor and its tabs are as they were.
     await wd.click(await wd.find('.rail [data-destination="files"]'));
-    const back = await wd.exec(`return { hidden: document.querySelector('.editor-column__files')?.hidden, tabs: document.querySelectorAll('[role=tab]').length, side: document.querySelector('[data-region=files] .panel__title')?.textContent }`);
+    const back = await wd.exec(`return { hidden: document.querySelector('.editor-column__files')?.hidden, tabs: document.querySelectorAll('[role=tab][data-path]').length, side: document.querySelector('[data-region=files] .panel__title')?.textContent }`);
     check("24e the Files destination returns to the explorer and the editor with its tabs", back.hidden === false && back.tabs > 0 && back.side === "Files", JSON.stringify(back));
+  }
+
+  // ---- 25. provider tasks and the Problems view (M2-UI-003) ---------------------------
+  {
+    const broken = mkdtempSync(join(tmpdir(), "axiom-tauri-e2e-broken-"));
+    writeFileSync(join(broken, "Cargo.toml"), '[package]\nname = "broken"\nversion = "0.1.0"\nedition = "2021"\n\n[workspace]\n');
+    mkdirSync(join(broken, "src"));
+    writeFileSync(join(broken, "src", "main.rs"), 'fn main() {\n    let x: i32 = "text";\n    println!("{x}");\n}\n');
+    try {
+      await wd.exec(`${appExpr}.documents.requestOpenFolder(arguments[0])`, [broken]);
+      await wd.waitFor(`return !!document.querySelector('[data-path="src"]') && ${appExpr}.tasks.getSnapshot().providerTasks.some(t => t.id === 'build')`, [], 15000, "broken crate + provider tasks");
+      await wd.click(await wd.find('[data-path="Cargo.toml"]'));
+      await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 1`, [], 10000, "Cargo.toml open");
+      await wd.chord(MOD, "k");
+      await wd.waitFor(`return !!document.querySelector('[data-testid=palette] [role=option]')`, [], 3000, "palette");
+      await wd.keys([..."Build: cargo"]);
+      const options = await wd.exec(`return [...document.querySelectorAll('[data-testid=palette] [role=option]')].map(o => o.textContent)`);
+      await wd.keys(["\uE007"]);
+      const ran = await wd
+        .waitFor(`const s = ${appExpr}.tasks.getSnapshot(); return !s.running && s.lastOutcome ? s.lastOutcome : null`, [], 120000, "cargo build finished")
+        .catch(() => null);
+      const count = await wd.waitFor(`return document.querySelector('[data-view=problems] .count')?.textContent ?? null`, [], 5000, "problem count").catch(() => null);
+      const transport = await wd.exec(`return document.querySelector('[data-testid=transport] .icon-btn')?.getAttribute('aria-label')`);
+      check(
+        "25a provider tasks are palette commands; Build runs through the transport, which then offers it as Rerun",
+        options.some((o) => o.includes("Build: cargo build")) && ran === "failed" && transport === "Rerun: Build: cargo build" && Number(count) >= 1,
+        `options=${JSON.stringify(options.slice(0, 4))} outcome=${ran} rerun="${transport}" problems=${count}`,
+      );
+
+      await wd.click(await wd.find('[data-view=problems]'));
+      await wd.waitFor(`return !!document.querySelector('[data-testid=problems] .problem')`, [], 5000, "problems listed");
+      const row = await wd.exec(
+        `const p = document.querySelector('[data-testid=problems] .problem[data-severity=error]');
+         return { name: p?.getAttribute('aria-label'), file: p?.closest('section')?.getAttribute('aria-label'), selected: document.querySelector('[data-view=problems]')?.getAttribute('aria-selected') }`,
+      );
+      await shot(wd, "25-problems-dark");
+      await wd.exec(`document.querySelector('[data-testid=problems] .problem[data-severity=error]').focus()`);
+      await wd.keys(["\uE007"]);
+      const opened = await wd
+        .waitFor(
+          `const t = document.querySelector('[role=tab][aria-selected=true][data-path]')?.dataset.path; const c = ${appExpr}.documents.getSnapshot().cursorText; return t === 'src/main.rs' && c.startsWith('Ln 2, Col 18') ? t + ' ' + c : null`,
+          [],
+          10000,
+          "src/main.rs at 2:18",
+        )
+        .catch(() => null);
+      check(
+        "25b problems click to source: Enter on the E0308 row opens src/main.rs at line 2, column 18",
+        /^Error: mismatched types \(E0308\) at src\/main\.rs:2:18$/.test(row.name ?? "") && row.file === "src/main.rs" && row.selected === "true" && opened !== null,
+        `${JSON.stringify(row)} → ${opened}`,
+      );
+      await wd.click(await wd.find('[data-view=output]'));
+    } finally {
+      // Back to the smoke workspace (and its tabs) for the restart checks.
+      await wd.exec(`${appExpr}.documents.requestOpenFolder(arguments[0])`, [ws]);
+      await wd.waitFor(`return !!document.querySelector('[data-path="src"]') && document.querySelectorAll('[role=tab][data-path]').length === 2`, [], 15000, "smoke workspace reopened");
+      await removeDir(broken);
+    }
   }
 
   // ---- 8. restore state after restart --------------------------------------------
@@ -956,8 +1024,8 @@ try {
 
   wd = await launch();
   await wd.waitFor(`return document.querySelector('[data-path="src/nested"]') !== null`, [], 15000, "last workspace + expanded folders restored");
-  await wd.waitFor(`return document.querySelectorAll('[role=tab]').length === 2`, [], 8000, "tabs restored");
-  const tabs = await wd.exec(`return [...document.querySelectorAll('[role=tab]')].map(t => t.dataset.path)`);
+  await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 2`, [], 8000, "tabs restored");
+  const tabs = await wd.exec(`return [...document.querySelectorAll('[role=tab][data-path]')].map(t => t.dataset.path)`);
   const active = await wd.exec(`return document.querySelector('[role=tab][aria-selected=true]')?.dataset.path`);
   const fontSize = await wd.exec(`return ${appExpr}.settings.getSnapshot().editorFontSize`);
   const history = await wd.exec(`return ${appExpr}.tasks.getSnapshot().history`);
@@ -983,7 +1051,9 @@ try {
     const first = await wd.exec(`return document.querySelector('[data-testid=palette] [role=option]').id`);
     await wd.keys([Keys.ESC]);
     await wd.waitFor(`return document.querySelector('[data-testid=palette]') === null`, [], 3000, "palette closed");
-    check("19b recent commands come first across a restart (axiom.palette.mru.v1)", first === "pal-theme", `first option ${first}`);
+    // The most recent palette command before the restart is section 25's "Build: cargo build"
+    // (M2-UI-003; before M2 it was 10b's theme command).
+    check("19b recent commands come first across a restart (axiom.palette.mru.v1)", first === "pal-task:rust:build", `first option ${first}`);
   }
 
   // ---- 16. non-content states (M1.6-SHELL-007) -----------------------------------
@@ -1020,7 +1090,7 @@ try {
       await wd.waitFor(`const b = [...document.querySelectorAll('.welcome__item')].find(b => b.querySelector('.welcome__item-name')?.textContent === arguments[0]); if (b) b.dataset.smokeTarget = ''; return !!b`, [wsName], 8000, "the workspace in Recent");
       await wd.click(await wd.find(`.welcome__item[data-smoke-target]`));
       await wd.waitFor(`return document.querySelector('[data-path="src"]') !== null`, [], 8000, "workspace reopened from Recent");
-      await wd.waitFor(`return document.querySelectorAll('[role=tab]').length === 2`, [], 8000, "its tabs restored");
+      await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 2`, [], 8000, "its tabs restored");
       check("16c a Welcome recent row opens its workspace", true, ws);
     } finally {
       await removeDir(empty);

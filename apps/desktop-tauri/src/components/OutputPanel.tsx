@@ -4,6 +4,8 @@
 // glyph and a hidden "stderr:" prefix, not painted red (D6).
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { Diagnostic } from "../daemon/protocol.gen";
+import { counts, type ProblemsStore } from "../state/problems";
 import type { TasksStore } from "../state/tasks";
 import type { WorkspaceStore } from "../state/workspace";
 import { formatElapsed, useClock } from "../ui/clock";
@@ -11,7 +13,8 @@ import { substituteMod } from "../ui/hint";
 import * as Icon from "../ui/icons";
 import { ContextMenu } from "../ui/overlays";
 import { Panel } from "../ui/panel";
-import { IconButton, Led, type LedState } from "../ui/primitives";
+import { Count, IconButton, Led, type LedState } from "../ui/primitives";
+import { ProblemsView } from "./Problems";
 import "../styles/components/console.css";
 
 const ROW_H = 18;
@@ -20,8 +23,20 @@ export interface OutputPanelHandle {
   focusCommand(): void;
 }
 
-export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; workspace: WorkspaceStore; ready: boolean; onHide: () => void }>(
-  function OutputPanel({ tasks, workspace, ready, onHide }, ref) {
+export type ConsoleView = "output" | "problems";
+
+/** Where ←/→/Home/End move between the view tabs. */
+export function viewTarget(key: string): ConsoleView | null {
+  if (key === "ArrowLeft" || key === "Home") return "output";
+  if (key === "ArrowRight" || key === "End") return "problems";
+  return null;
+}
+
+export const OutputPanel = forwardRef<
+  OutputPanelHandle,
+  { tasks: TasksStore; workspace: WorkspaceStore; problems: ProblemsStore; ready: boolean; onHide: () => void; onOpenProblem: (d: Diagnostic) => void }
+>(
+  function OutputPanel({ tasks, workspace, problems, ready, onHide, onOpenProblem }, ref) {
     const s = useSyncExternalStore(tasks.subscribe, tasks.getSnapshot, tasks.getSnapshot);
     const w = useSyncExternalStore(workspace.subscribe, workspace.getSnapshot, workspace.getSnapshot);
     const [command, setCommand] = useState("");
@@ -31,6 +46,10 @@ export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; wo
     const stick = useRef(true);
     const [view, setView] = useState({ top: 0, height: 200 });
     const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+    // The view strip (Output / Problems, M2-UI-003). The count re-renders only the strip.
+    const [consoleView, setConsoleView] = useState<ConsoleView>("output");
+    const problemCount = useSyncExternalStore(problems.subscribe, () => counts(problems.all()).total, () => 0);
+    const tabRefs = useRef<Record<ConsoleView, HTMLButtonElement | null>>({ output: null, problems: null });
 
     useImperativeHandle(ref, () => ({ focusCommand: () => input.current?.focus() }), []);
 
@@ -84,7 +103,7 @@ export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; wo
     const empty = s.rows.length === 0;
     const hide = useRef(onHide);
     hide.current = onHide;
-    const last0 = s.history[0] ?? "";
+    const last0 = tasks.lastLabel;
     const meta = useMemo(
       () => <TaskMeta running={s.running} label={s.label} last={last0} outcome={s.lastOutcome} startedAt={s.startedAt} />,
       [s.running, s.label, last0, s.lastOutcome, s.startedAt],
@@ -105,11 +124,47 @@ export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; wo
       ),
       [empty, tasks],
     );
+    const heading = (
+      <div className="console__views" role="tablist" aria-label="Console views">
+        {(["output", "problems"] as const).map((v) => (
+          <button
+            key={v}
+            ref={(el) => {
+              tabRefs.current[v] = el;
+            }}
+            type="button"
+            role="tab"
+            className="console__view"
+            id={`console-tab-${v}`}
+            aria-selected={consoleView === v}
+            aria-controls={v === "output" ? "console-output" : "console-problems"}
+            tabIndex={consoleView === v ? 0 : -1}
+            data-view={v}
+            aria-label={v === "output" ? "Output" : problemCount > 0 ? `Problems, ${problemCount}` : "Problems"}
+            data-hint={v === "output" ? "Show the command output" : "Show problems from the last build"}
+            onClick={() => setConsoleView(v)}
+            onKeyDown={(e) => {
+              const to = viewTarget(e.key);
+              if (!to) return;
+              e.preventDefault();
+              setConsoleView(to);
+              tabRefs.current[to]?.focus();
+            }}
+          >
+            {v === "output" ? "Output" : "Problems"}
+            {v === "problems" && problemCount > 0 && <Count value={problemCount} />}
+          </button>
+        ))}
+      </div>
+    );
     return (
-      <Panel title="Console" className="console" testId="output-panel" meta={meta} tools={tools}
+      <Panel title="Console" heading={heading} className="console" testId="output-panel" meta={meta} tools={tools}
       >
+        {consoleView === "problems" && <ProblemsView store={problems} onOpen={onOpenProblem} id="console-problems" />}
         <div
           ref={scroller}
+          id="console-output"
+          hidden={consoleView !== "output"}
           className="output"
           role="log"
           aria-live="polite"

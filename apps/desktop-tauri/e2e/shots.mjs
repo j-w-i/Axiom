@@ -79,6 +79,7 @@ const CATALOGUE = [
   ["s18b", "Environments page, an install in progress (meter and current step; the store's own progress set from the harness)"],
   ["s18c", "Environments page, a failed install (the store's own failure set from the harness)"],
   ["s18d", "Install plan dialog (M2-UI-002) for a managed Rust install (the plan the daemon returns for rust 1.84.0 on Linux)"],
+  ["s19", "Console Problems view (M2-UI-003): a failing build's diagnostics grouped by file (the store's own state set from the harness)"],
   ["focused-region", "Focused-region rule", "SHELL-002 / EDITOR-002: no focused-region treatment yet"],
 ];
 const states = new Map(
@@ -738,6 +739,25 @@ async function main() {
         await wd.exec(`${ENV}.dismissPlan()`);
         await waitFor(wd, `return document.querySelector('[data-testid=install-plan]') === null`, "plan dialog closed");
         await wd.click(await wd.find('.rail [data-destination="files"]'));
+      });
+
+      await state(wd, "s19", async () => {
+        const diag = (severity, file, line, column, message, code) => ({ severity, message, code, source: "rustc", related: [], location: { file, line, column } });
+        await wd.exec(
+          `${STORES}.problems.begin("rust/build", "shots", "Build: cargo build");
+           ${STORES}.problems.set({ byTask: { shots: { complete: true, diagnostics: arguments[0] } } })`,
+          [[
+            diag("error", "src/executor.rs", 41, 9, "mismatched types: expected `Duration`, found `u64`", "E0308"),
+            diag("warning", "src/executor.rs", 214, 13, "unused variable: `grace`", "unused_variables"),
+            diag("warning", "src/backend.rs", 12, 5, "function `legacy_spawn` is never used", "dead_code"),
+          ]],
+        );
+        await wd.click(await wd.find('[data-view=problems]'));
+        await waitFor(wd, `return document.querySelectorAll('[data-testid=problems] .problem').length === 3`, "problems listed");
+        await parkPointer(wd);
+        await bothThemes(wd, "s19");
+        await wd.click(await wd.find('[data-view=output]'));
+        await wd.exec(`${STORES}.problems.set({ runs: {}, byTask: {} })`);
       });
 
       await state(wd, "s12", async () => {

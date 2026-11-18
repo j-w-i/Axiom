@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { PaletteCommand } from "../components/CommandPalette";
 import type { DocumentsStore } from "../state/documents";
+import { providerTaskTitle } from "../state/tasks";
 import type { WorkspaceStore } from "../state/workspace";
 import type { ShellContext } from "./actions";
 import { MOD } from "./platform";
@@ -27,7 +28,15 @@ export function allCommands(ctx: ShellContext): CommandEntry[] {
     { id: "resetLayout", group: "View", label: "Reset Layout", run: ctx.resetLayout },
     { id: "theme", group: "View", label: dark ? "Switch to Light Theme" : "Switch to Dark Theme", run: () => void settings.setValue("appearance.theme", dark ? "light" : "dark") },
     { id: "run", group: "Run", label: "Run Command…", shortcut: `${MOD}+Shift+R`, run: ctx.focusRun, enabled: !!ws.id },
-    { id: "rerun", group: "Run", label: task.history[0] ? `Rerun: ${task.history[0]}` : "Rerun Last", shortcut: "F5", run: () => tasks.rerunLast(), enabled: tasks.canRun && task.history.length > 0 },
+    { id: "rerun", group: "Run", label: tasks.lastLabel ? `Rerun: ${tasks.lastLabel}` : "Rerun Last", shortcut: "F5", run: () => tasks.rerunLast(), enabled: tasks.canRun && !!tasks.lastLabel },
+    // Provider tasks (M2-UI-003): "Build: cargo build", "Test: cargo test"…
+    ...task.providerTasks.map((t) => ({
+      id: `task:${t.providerId}:${t.id}`,
+      group: "Run",
+      label: providerTaskTitle(t),
+      run: () => tasks.runProvider(t),
+      enabled: tasks.canRun,
+    })),
     { id: "stop", group: "Run", label: "Stop", shortcut: "Shift+F5", run: () => tasks.stop(), enabled: task.running },
     { id: "restart", group: "Backend", label: "Restart Backend", run: () => void client.restart() },
     { id: "about", group: "Help", label: "About Axiom", run: () => ctx.setAboutOpen(true) },
@@ -57,7 +66,7 @@ export function usePaletteCommands(ctx: ShellContext, palette: "commands" | "fil
     () => buildCommands(ctx),
     // Same dependencies as before the split.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ctx.ready, ctx.hasDoc, ctx.ws.id, ctx.ws.recent, ctx.dark, ctx.task.running, ctx.task.history, ctx.docs.activePath, documents, tasks, settings, client, ctx.openFolder],
+    [ctx.ready, ctx.hasDoc, ctx.ws.id, ctx.ws.recent, ctx.dark, ctx.task.running, ctx.task.history, ctx.task.providerTasks, ctx.task.lastProvider, ctx.docs.activePath, documents, tasks, settings, client, ctx.openFolder],
   );
   const files = useMemo(
     () => (palette === "files" ? buildFileCommands(workspace, documents) : []),

@@ -35,6 +35,19 @@ export interface TasksState {
   startedAt: number | null;
   /** Monotonic count of output rows appended (dropped ones included); the transport's rate meter samples it. */
   outputSeq: number;
+  /** The open workspace's provider tasks (`build/tasks`, M2-UI-003). */
+  providerTasks: ProviderTask[];
+  /** Set when the last run was a provider task: Rerun repeats it (cleared by a command run). */
+  lastProvider: ProviderTask | null;
+}
+
+export type ProviderTask = import("../daemon/protocol.gen").TaskInfo2;
+
+/** The provider task's palette and transport name: "Build: cargo build". */
+export function providerTaskTitle(t: ProviderTask): string {
+  const names: Record<string, string> = { build: "Build", run: "Run", test: "Test", clean: "Clean", other: "Task" };
+  const kind = names[t.kind] ?? "Task";
+  return `${kind}: ${t.label}`;
 }
 
 const ANSI = /\x1B\[[0-?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B[@-Z\\-_]/g;
@@ -128,7 +141,7 @@ export class TasksStore extends Observable<TasksState> {
     private readonly client: DaemonClient,
     private readonly workspace: WorkspaceStore,
   ) {
-    super({ running: false, label: "", statusText: "", lastOutcome: null, history: [], rows: [], dropped: 0, startedAt: null, outputSeq: 0 });
+    super({ running: false, label: "", statusText: "", lastOutcome: null, history: [], rows: [], dropped: 0, startedAt: null, outputSeq: 0, providerTasks: [], lastProvider: null });
     client.onNotification<OutputParams>("task/output", (p) => {
       if (!this.taskId && this.starting) return void this.early.push({ kind: "output", p });
       if (!this.taskId || p.taskId !== this.taskId) return;
@@ -140,10 +153,13 @@ export class TasksStore extends Observable<TasksState> {
       if (!this.taskId || p.taskId !== this.taskId) return;
       this.onExited(p);
     });
-    workspace.on("opened", () => void this.loadHistory());
+    workspace.on("opened", () => {
+      void this.loadHistory();
+      void this.loadProviderTasks();
+    });
     workspace.on("closed", () => {
       this.resetState();
-      this.set({ history: [] });
+      this.set({ history: [], providerTasks: [], lastProvider: null });
     });
     client.onState((s) => {
       if (s.state !== "ready" && this.state.running) this.resetState();
@@ -222,15 +238,37 @@ export class TasksStore extends Observable<TasksState> {
     }
   }
 
+  /** The workspace's provider tasks, for the palette. */
+  async loadProviderTasks(): Promise<void> {
+    if (!this.workspace.isOpen) return;
+    const gen = this.generation;
+    try {
+      const r = await this.client.request<{ tasks: ProviderTask[] }>("build/tasks", { workspaceId: this.workspace.getSnapshot().id });
+      if (gen === this.generation) this.set({ providerTasks: r.tasks });
+    } catch {
+      /* no provider tasks (an older daemon, or none apply) */
+    }
+  }
+
   // ---- running ---------------------------------------------------------------
+
+  /** Called with each provider run's task id as soon as it is known (the Problems store). */
+  onProviderStart: ((key: string, taskId: string, label: string) => void) | null = null;
 
   run(commandLine: string): void {
     const cmd = commandLine.trim();
     if (!cmd || !this.canRun) return;
-    void this.start({ shell: commandLine }, cmd, true);
+    this.set({ lastProvider: null });
+    void this.start(() => this.startCommand({ shell: commandLine }, cmd), cmd, true);
+  }
+
+  /** The last command, or the last provider task when that ran last. */
+  get lastLabel(): string {
+    return this.state.lastProvider ? providerTaskTitle(this.state.lastProvider) : (this.state.history[0] ?? "");
   }
 
   rerunLast(): void {
+    if (this.state.lastProvider) return this.runProvider(this.state.lastProvider);
     const last = this.state.history[0];
     if (last) this.run(last);
   }
@@ -238,10 +276,39 @@ export class TasksStore extends Observable<TasksState> {
   /** Runs an explicit argv (no shell); used to exercise `spawn_failed`. */
   runArgv(argv: string[]): void {
     if (!this.canRun) return;
-    void this.start({ argv }, argv.join(" "), false);
+    void this.start(() => this.startCommand({ argv }, argv.join(" ")), argv.join(" "), false);
   }
 
-  private async start(command: unknown, label: string, record: boolean): Promise<void> {
+  /** A provider task (`build/run`): same output, transport and Stop as a command; its
+   * diagnostics go to the Problems view. Not recorded in the command history. */
+  runProvider(t: ProviderTask): void {
+    if (!this.canRun) return;
+    this.set({ lastProvider: t });
+    const key = `${t.providerId}/${t.id}`;
+    void this.start(
+      async () => {
+        const r = await this.client.request<{ taskId: string }>("build/run", {
+          workspaceId: this.workspace.getSnapshot().id,
+          providerId: t.providerId,
+          task: t.id,
+        });
+        this.onProviderStart?.(key, r.taskId, providerTaskTitle(t));
+        return r;
+      },
+      t.label,
+      false,
+    );
+  }
+
+  private startCommand(command: unknown, label: string): Promise<{ taskId: string }> {
+    return this.client.request<{ taskId: string }>("task/start", {
+      workspaceId: this.workspace.getSnapshot().id,
+      command,
+      label,
+    });
+  }
+
+  private async start(launch: () => Promise<{ taskId: string }>, label: string, record: boolean): Promise<void> {
     this.resetOutput();
     this.early = [];
     this.starting = true;
@@ -250,11 +317,7 @@ export class TasksStore extends Observable<TasksState> {
     if (record) this.pushHistory(label);
     const gen = this.generation;
     try {
-      const r = await this.client.request<{ taskId: string }>("task/start", {
-        workspaceId: this.workspace.getSnapshot().id,
-        command,
-        label,
-      });
+      const r = await launch();
       if (gen !== this.generation) return;
       this.starting = false;
       this.taskId = r.taskId;

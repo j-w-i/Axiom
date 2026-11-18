@@ -6,15 +6,17 @@ import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { OutputPanel } from "../src/components/OutputPanel";
+import type { ProblemsStore } from "../src/state/problems";
 import type { TasksStore } from "../src/state/tasks";
 import type { WorkspaceStore } from "../src/state/workspace";
 
 function render(state: Record<string, unknown>) {
   const snap = { running: false, label: "", statusText: "", lastOutcome: null, history: [], rows: [], dropped: 0, startedAt: null, outputSeq: 0, ...state };
-  const tasks = { subscribe: () => () => {}, getSnapshot: () => snap, allText: () => "" } as unknown as TasksStore;
+  const tasks = { subscribe: () => () => {}, getSnapshot: () => snap, allText: () => "", lastLabel: (snap.history as string[])[0] ?? "" } as unknown as TasksStore;
+  const problems = { subscribe: () => () => {}, getSnapshot: () => ({ runs: {}, byTask: {} }), all: () => [] } as unknown as ProblemsStore;
   const ws = { id: "w1", name: "axiom", root: "/w", recent: [] };
   const workspace = { subscribe: () => () => {}, getSnapshot: () => ws } as unknown as WorkspaceStore;
-  return renderToStaticMarkup(<OutputPanel tasks={tasks} workspace={workspace} ready onHide={() => {}} />);
+  return renderToStaticMarkup(<OutputPanel tasks={tasks} workspace={workspace} problems={problems} ready onHide={() => {}} onOpenProblem={() => {}} />);
 }
 
 const rows = [
@@ -43,12 +45,15 @@ describe("console", () => {
     expect(rules.find((r) => r.sel === '.output__row[data-stream="stderr"]')?.body).toContain("--text-muted");
   });
 
-  it("the prompt shows Run while idle and Stop while running; the header has no view strip", () => {
+  it("the prompt shows Run while idle and Stop while running; the header's view strip has Output and Problems", () => {
     const idle = render({});
     expect(idle).toContain('data-testid="run"');
     expect(idle).not.toContain('data-testid="stop"');
     expect(idle).toContain("Run a command in this workspace");
-    expect(idle).not.toContain('role="tab"');
+    // M2-UI-003: two views, so the strip exists (spec §2.4: it was hidden while Output was the only one).
+    expect(idle).toContain('role="tablist" aria-label="Console views"');
+    expect(idle.match(/role="tab"/g)).toHaveLength(2);
+    expect(idle).toMatch(/aria-selected="true"[^>]*data-view="output"/);
     const running = render({ running: true, label: "cargo test", startedAt: Date.now() - 12_000 });
     expect(running).toContain('data-testid="stop"');
     expect(running).toContain('class="btn btn--sm btn--danger-quiet"');

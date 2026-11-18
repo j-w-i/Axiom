@@ -34,9 +34,7 @@ export function railTarget(key: string, index: number, count: number): number | 
   }
 }
 
-/** The badge count is subscribed here, not in the workbench: a workbench re-render when
- * detection finishes (shortly after a workspace opens) could land on a click into the editor
- * and lose its focus (seen in smoke; M2-UI-001 handoff). */
+/** The badge count is subscribed here, so only the rail re-renders when detection finishes. */
 export function Rail({
   current,
   onSelect,

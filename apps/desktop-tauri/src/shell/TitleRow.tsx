@@ -217,8 +217,9 @@ function Transport({ ctx }: { ctx: ShellContext }) {
   }
 
   const led: LedState = task.running ? "run" : task.lastOutcome === "succeeded" ? "on" : task.lastOutcome === "failed" ? "err" : "off";
-  const label = task.running ? task.label : task.lastOutcome ? task.history[0] ?? "" : "";
-  const last = task.history[0];
+  // The last run: a command, or a provider task (M2-UI-003) when that ran last.
+  const last = tasks.lastLabel;
+  const label = task.running ? task.label : task.lastOutcome ? last : "";
   return (
     <div className="transport" data-testid="transport" data-state={led} role="group" aria-label="Task">
       <Led state={led} label={task.running ? "Task running" : led === "on" ? "Last task succeeded" : led === "err" ? "Last task failed" : "No task"} />
@@ -227,7 +228,7 @@ function Transport({ ctx }: { ctx: ShellContext }) {
       </span>
       {task.running && task.startedAt !== null && <span className="transport__time">{formatElapsed(now - task.startedAt)}</span>}
       <RateMeter levels={levels} label="Output rate" />
-      <IconButton label={last ? `Rerun: ${last}` : "Rerun"} shortcut="F5" hint="Rerun the last command — F5" disabled={!tasks.canRun || !last} onClick={() => tasks.rerunLast()}>
+      <IconButton label={last ? `Rerun: ${last}` : "Rerun"} shortcut="F5" hint={task.lastProvider ? "Rerun the last task — F5" : "Rerun the last command — F5"} disabled={!tasks.canRun || !last} onClick={() => tasks.rerunLast()}>
         <Icon.Refresh />
       </IconButton>
       <IconButton label="Stop" shortcut="Shift+F5" hint="Stop the task — Shift+F5" disabled={!task.running} onClick={() => tasks.stop()}>

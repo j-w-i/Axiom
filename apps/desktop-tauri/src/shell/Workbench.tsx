@@ -182,7 +182,15 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             />
             <div className="console-host" data-region="console">
               <div className="console-motion motion-in-up" data-phase={panel.phase}>
-                <OutputPanel ref={panelRef} tasks={tasks} workspace={workspace} ready={ready} onHide={ctx.togglePanel} />
+                <OutputPanel
+                  ref={panelRef}
+                  tasks={tasks}
+                  workspace={workspace}
+                  problems={ctx.app.problems}
+                  ready={ready}
+                  onHide={ctx.togglePanel}
+                  onOpenProblem={(d) => d.location && documents.openAt(d.location.file, d.location.line, d.location.column ?? 1)}
+                />
               </div>
             </div>
           </>

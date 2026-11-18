@@ -1,6 +1,9 @@
 /* The window grid and the workbench regions (SHELL-002; workspace-spec.md §1). */
 .shell {
   display: grid;
+  /* One column that never grows past the window: a region's min-content (a wide console
+     header, a table) cannot push the title row and status bar off-screen. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--title-h) auto 1fr var(--status-h);
   height: 100%;
   background: var(--surface-canvas);
