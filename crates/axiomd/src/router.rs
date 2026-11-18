@@ -1,6 +1,8 @@
 use crate::app::App;
-use crate::handlers::{env, fs, settings, task, workspace};
-use axiom_protocol::{env as penv, fs as pfs, settings as pset, task as ptask, workspace as pws};
+use crate::handlers::{build, env, fs, settings, task, workspace};
+use axiom_protocol::{
+    build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask, workspace as pws,
+};
 use axiom_rpc::Router;
 use std::sync::Arc;
 
@@ -43,6 +45,8 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(penv::Install, env::install, ctx);
     wire!(penv::Uninstall, env::uninstall);
     wire!(penv::Resolve, env::resolve);
+    wire!(pbuild::Tasks, build::tasks);
+    wire!(pbuild::Run, build::run, ctx);
 
     let a = app;
     r.on_shutdown(move || {
@@ -55,20 +59,13 @@ pub fn build_router(app: Arc<App>) -> Router {
     r
 }
 
-/// Protocol 0.2 methods registered by M2-ARCH-001 whose handlers later M2 tasks add. Each task
-/// that wires one removes it here; M2-BUILD-001 leaves this empty. Clients feature-detect from
-/// `initialize.methods` (ADR-0014 §1), which lists only served methods. Used by the tests that
-/// check the daemon serves exactly the registry.
-#[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &["build/tasks", "build/run"];
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use axiom_store::Store;
     use std::collections::BTreeSet;
 
-    /// A protocol method can never be left unwired (beyond the explicit `NOT_YET_SERVED`).
+    /// A protocol method can never be left unwired.
     #[tokio::test]
     async fn router_serves_exactly_the_registry_methods() {
         let app = App::new(Store::open_in_memory().unwrap());
@@ -76,15 +73,8 @@ mod tests {
         let served: BTreeSet<String> = router.method_names().into_iter().collect();
         let expected: BTreeSet<String> = axiom_protocol::registry::method_names()
             .into_iter()
-            .filter(|m| !NOT_YET_SERVED.contains(m))
             .map(String::from)
             .collect();
         assert_eq!(served, expected);
-        for m in NOT_YET_SERVED {
-            assert!(
-                axiom_protocol::registry::method_names().contains(m),
-                "{m} is not a protocol method"
-            );
-        }
     }
 }

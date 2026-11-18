@@ -1,8 +1,8 @@
 ---
 id: M2-BUILD-001
 title: crates/build: provider tasks and diagnostics parsers
-status: planned
-status_note:
+status: tested
+status_note: 
 depends_on: [M2-ENV-005]
 order: 307
 scope: crates/build/ (new), crates/axiomd/ (build/tasks, build/run, build/diagnostics), Cargo.toml

@@ -7,4 +7,4 @@ mod router;
 pub mod settings;
 
 pub use app::App;
-pub use router::{build_router, NOT_YET_SERVED};
+pub use router::build_router;

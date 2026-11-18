@@ -21,6 +21,7 @@ axiom-store = { path = "../store" }
 axiom-workspace = { path = "../workspace" }
 axiom-exec = { path = "../exec" }
 axiom-env = { path = "../env" }
+axiom-build = { path = "../build" }
 tokio = { version = "1", features = ["full"] }
 clap.workspace = true
 tracing.workspace = true

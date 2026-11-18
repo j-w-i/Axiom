@@ -7,6 +7,7 @@ members = [
     "crates/workspace",
     "crates/exec",
     "crates/env",
+    "crates/build",
     "crates/axiomd",
     "crates/desktop-bridge",
     "apps/desktop-tauri/src-tauri",

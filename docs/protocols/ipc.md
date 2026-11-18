@@ -166,6 +166,28 @@ once the daemon serves it). Types: `crates/protocol/src/{env,build}.rs`.
   the previous notification for that task; the last one has `complete: true` and precedes
   `task/exited`.
 
+### Builds as built (M2-BUILD-001)
+- `build/tasks` lists the tasks of every trusted provider whose project detection matches the
+  workspace, in registry order, then manifest order.
+- `build/run` resolves the environment from `.axiom/project.toml` when there is one (a failed
+  resolution is its error: `prerequisite_missing` or `invalid_params`; the task does not
+  start), expands `${workspace}` in the task's argv (any other variable is `invalid_params`),
+  and starts it through the same executor as `task/start` with the workspace root as working
+  directory and the environment as env overlay (`PATH` = prepend + the daemon's `PATH`).
+  `task/list` and `task/cancel` see it like any task.
+- Diagnostics: batches at most every 100 ms while output arrives, each with only the new ones;
+  then one batch with `complete: true` (possibly empty) carrying the rest; then `task/exited`.
+  The union of all batches is the parser's whole output for the run.
+- Parsers (`crates/build/src/parse.rs`, pure): `cargo_json` (stdout, `compiler-message`; the
+  primary span is the location, secondary spans and children with spans are `related`, ANSI
+  stripped from `rendered`, "aborting due to …" skipped), `gcc_text` (`file:line[:col]:
+  severity: message [-Wflag]`; a following `note:` with a location becomes `related`; excerpt
+  lines join `rendered`), `regex` (named groups `file`, `line`, `column`, `severity`, `code`,
+  `message`), `sarif` (2.1.0 `runs[].results[]`, file URIs decoded). Paths are made
+  workspace-relative; one outside the workspace drops the location, never the diagnostic.
+- The daemon keeps the last 20 runs per workspace in its store (provider, task, start,
+  duration, outcome, error and warning counts); not exposed through the protocol yet.
+
 ## Behavioural details
 
 ### `fs/writeFile` decision table

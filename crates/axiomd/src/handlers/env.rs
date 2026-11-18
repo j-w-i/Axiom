@@ -17,14 +17,14 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The workspace's root (as stored) and its trust flag.
-async fn workspace(app: &App, id: &WorkspaceId) -> Result<(PathBuf, bool), RpcError> {
+pub(crate) async fn workspace(app: &App, id: &WorkspaceId) -> Result<(PathBuf, bool), RpcError> {
     let root = app.workspaces.get(id)?.root().to_path_buf();
     let key = root.to_string_lossy().into_owned();
     let trusted = app.store_call(move |s| s.workspace_trusted(&key)).await?;
     Ok((root, trusted))
 }
 
-async fn registry(app: &App, ws: Option<(PathBuf, bool)>) -> Result<Registry, RpcError> {
+pub(crate) async fn registry(app: &App, ws: Option<(PathBuf, bool)>) -> Result<Registry, RpcError> {
     let sources = Sources {
         builtin: app.env.builtin.clone(),
         user_dir: Some(app.env.data_dir.join("providers")),
@@ -63,7 +63,10 @@ pub async fn detect_tools(app: Arc<App>, p: WorkspaceRef) -> Result<DetectResult
 }
 
 /// `.axiom/project.toml`, read through the workspace (containment); `None` if absent.
-async fn project_file(app: &App, id: &WorkspaceId) -> Result<Option<ProjectFile>, RpcError> {
+pub(crate) async fn project_file(
+    app: &App,
+    id: &WorkspaceId,
+) -> Result<Option<ProjectFile>, RpcError> {
     let ws = app.workspaces.get(id)?;
     let path = axiom_protocol::WorkspacePath(project::PROJECT_FILE.into());
     match ws.read_text(&path).await {

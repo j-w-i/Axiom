@@ -251,3 +251,26 @@ fn version_1_database_migrates() {
     s.set_workspace_trusted("/w", true, 1).unwrap();
     assert!(s.workspace_trusted("/w").unwrap());
 }
+
+#[test]
+fn build_history_keeps_the_newest_twenty_per_workspace() {
+    let s = Store::open_in_memory().unwrap();
+    let run = |i: u64| BuildRun {
+        provider: "rust".into(),
+        task: "build".into(),
+        started_ms: i,
+        duration_ms: 10,
+        outcome: "succeeded".into(),
+        errors: 0,
+        warnings: i as u32,
+    };
+    for i in 0..25 {
+        s.build_history_add("/a", &run(i)).unwrap();
+    }
+    s.build_history_add("/b", &run(99)).unwrap();
+    let a = s.build_history("/a").unwrap();
+    assert_eq!(a.len(), BUILD_HISTORY_LIMIT);
+    assert_eq!(a[0].started_ms, 24, "newest first");
+    assert_eq!(a.last().unwrap().started_ms, 5);
+    assert_eq!(s.build_history("/b").unwrap(), [run(99)]);
+}

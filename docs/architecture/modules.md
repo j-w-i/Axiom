@@ -200,6 +200,7 @@ before the task that needs them** (no empty scaffolding).
   managed root except the workspace's `.axiom/project.lock`.
 
 ### `crates/build` — `axiom-build` (M2-BUILD-001)
+- **Status:** built (M2-BUILD-001).
 - **Responsibility:** provider tasks: list them, start them through `exec` in the resolved
   environment, and parse their output into `Diagnostic`s (`build/diagnostics`).
 - **Depends on:** `protocol`, `exec`, `env`; `regex`.

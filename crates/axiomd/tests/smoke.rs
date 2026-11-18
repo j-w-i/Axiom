@@ -56,7 +56,6 @@ fn manual_session_prints_two_responses_and_exits_zero() {
         .collect();
     let expected: BTreeSet<String> = axiom_protocol::registry::method_names()
         .into_iter()
-        .filter(|m| !axiomd::NOT_YET_SERVED.contains(m))
         .map(String::from)
         .collect();
     assert_eq!(methods, expected);
