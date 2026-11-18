@@ -103,7 +103,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
               ) : undefined
             }
           >
-            <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} />
+            <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} onReopen={() => documents.requestOpenFolder(ws.root)} />
           </Panel>
           <Splitter
             orientation="vertical"

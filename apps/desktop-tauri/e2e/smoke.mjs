@@ -567,6 +567,45 @@ try {
   ).catch(() => null);
   check("13c appearance.motion persists across a restart (stored by the daemon as an unknown key)", motionAfter === "reduced", `after restart: ${motionAfter}`);
 
+  // ---- 16. non-content states (M1.6-SHELL-007) -----------------------------------
+  {
+    await wd.exec(`${appExpr}.documents.requestCloseFolder()`);
+    await wd.waitFor(`return document.querySelector('[data-testid=welcome] .welcome__item') !== null`, [], 8000, "Welcome with a recent folder");
+    await new Promise((r) => setTimeout(r, 600)); // let presence transitions finish
+    const anims = await wd.exec(
+      `return document.getAnimations().filter(a => a.playState === 'running').map(a => (a.animationName || a.transitionProperty || 'animation') + ' on ' + (a.effect?.target?.className || a.effect?.target?.tagName || '?'))`,
+    );
+    check("16a Welcome and the connected status bar run no animation", anims.length === 0, anims.length ? JSON.stringify(anims) : "document.getAnimations(): none running");
+
+    const empty = mkdtempSync(join(tmpdir(), "axiom-tauri-e2e-empty-"));
+    try {
+      await wd.exec(`${appExpr}.documents.requestOpenFolder(arguments[0])`, [empty]);
+      await wd.waitFor(`return document.querySelector('[data-testid=tree-empty]') !== null`, [], 8000, "empty-folder state");
+      const state = await wd.exec(
+        `const e = document.querySelector('[data-testid=tree-empty]'); return { text: e.querySelector('.tree-state__text')?.textContent, buttons: [...e.querySelectorAll('button')].map(b => b.textContent.trim()) }`,
+      );
+      writeFileSync(join(empty, "new.txt"), "x");
+      await wd.click(await wd.find("[data-testid=tree-empty] button"));
+      const listed = await wd
+        .waitFor(`return document.querySelector('[data-path="new.txt"]') !== null`, [], 8000, "the new file after Refresh")
+        .then(() => true, () => false);
+      check(
+        "16b empty folder state shows Refresh, and Refresh lists the folder again",
+        state.text === "This folder is empty" && state.buttons.join() === "Refresh" && listed,
+        `${JSON.stringify(state)}; new file listed=${listed}`,
+      );
+
+      await wd.exec(`${appExpr}.documents.requestCloseFolder()`);
+      await wd.waitFor(`return document.querySelector(\`.welcome__item[title="${ws}"]\`) !== null`, [], 8000, "the workspace in Recent");
+      await wd.click(await wd.find(`.welcome__item[title="${ws}"]`));
+      await wd.waitFor(`return document.querySelector('[data-path="src"]') !== null`, [], 8000, "workspace reopened from Recent");
+      await wd.waitFor(`return document.querySelectorAll('[role=tab]').length === 2`, [], 8000, "its tabs restored");
+      check("16c a Welcome recent row opens its workspace", true, ws);
+    } finally {
+      await removeDir(empty);
+    }
+  }
+
   // ---- 11. webview crash recovery (T-08) ---------------------------------------
   // Killing the content process also kills the WebDriver session (it is bound to
   // that process), so recovery is verified from outside: the host must notice the

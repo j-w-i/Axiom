@@ -19,7 +19,4 @@ export function rateLevels(deltas: number[], bars = METER_BARS, minScale = METER
   return padded.map((d) => Math.max(0, Math.min(1, d / scale)));
 }
 
-/** Home directory shortened to ~ (Linux, macOS, Windows user folders). */
-export function shortenHome(path: string): string {
-  return path.replace(/^(\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?=[/\\]|$)/, "~");
-}
+export { shortenHome } from "../ui/paths";

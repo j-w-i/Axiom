@@ -9,6 +9,27 @@
   color: var(--text);
   font-size: var(--text-body);
 }
+/* The tone glyph (SHELL-007). Generated content with empty alt text: not announced, the
+   banner's role (alert / status) and its message carry the meaning. */
+.banner::before {
+  flex: none;
+  font-size: var(--text-small);
+}
+.banner[data-variant="danger"]::before {
+  content: "✖";
+  content: "✖" / "";
+  color: var(--danger);
+}
+.banner[data-variant="warning"]::before {
+  content: "▲";
+  content: "▲" / "";
+  color: var(--warn);
+}
+.banner[data-variant="info"]::before {
+  content: "●";
+  content: "●" / "";
+  color: var(--accent);
+}
 .banner__text {
   flex: 1;
 }

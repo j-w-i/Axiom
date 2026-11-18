@@ -254,3 +254,17 @@ generator inputs (M7). None needs a new region.
 
 All error copy states what happened, what it affects and the one action that fixes
 it, without exclamation marks.
+
+**As built (M1.6-SHELL-007).** Final copy and behaviour:
+
+| State | Shipped |
+|-------|---------|
+| Welcome | mark 32 px; "Open a folder to start"; "Axiom opens folders through its backend, axiomd."; primary **Open Folder…** with `Ctrl`/`⌘` `O` keycaps; "Recent" (12/600 muted) and ≤ 8 rows of 28 px (name, home-shortened mono path). Column top at 22% of the area's height. |
+| Backend starting | Open Folder… is `aria-disabled` (still focusable) with the tooltip and hint "Waiting for the backend"; recent rows are disabled. No overlay. |
+| Backend failed | danger banner with a ✖ glyph (generated content, not announced), the backend's message and **Restart backend**; `role="alert"`. All banners carry a tone glyph (✖ danger, ▲ warning, ● info). |
+| Opening workspace | six static skeleton bars (`--hover`, 40–70% wide) for 1 s, then "Still listing…" (faint); `role="status"`. |
+| Empty folder | "This folder is empty" + quiet **Refresh** (re-lists the folder). |
+| Root listing error | ✖ "The folder could not be listed, so its files are not shown." + quiet **Retry** (opens the folder again); the daemon's message stays in the warning banner above. |
+| Folder listing error | a tree row: ✖, the daemon's message (full text in its tooltip), **Retry** (re-expands the folder, which lists it). The row takes its own 22 px slot; before SHELL-007 it was drawn over the next row. |
+| No document | four rows, label faint 13 px, keycaps right: Command palette, Go to file, Run command, Toggle console. |
+| Existing banners | copy unchanged (none had exclamation marks). |

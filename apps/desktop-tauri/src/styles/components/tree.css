@@ -122,12 +122,3 @@
   background: var(--glyph-toml-bg);
   color: var(--glyph-toml);
 }
-/* Error row and empty state: logic unchanged; restyled by SHELL-007. */
-.tree-row--error {
-  color: var(--danger);
-  font-size: var(--text-tiny);
-}
-.tree-empty {
-  padding: var(--s-3);
-  color: var(--text-muted);
-}

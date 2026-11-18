@@ -54,9 +54,9 @@ if (process.platform === "linux" && !process.env.DISPLAY) {
 /** id → title, and for states the current shell cannot show, why and which task adds them. */
 const CATALOGUE = [
   ["s1", "Welcome, backend connecting"],
-  ["s1b", "Workspace opening (tree skeleton rows)", "SHELL-007: the shell has no skeleton rows yet"],
-  ["s1c", "Workspace empty folder", "SHELL-007: no empty-folder state yet"],
-  ["s1d", "Workspace listing error row", "SHELL-007: no restyled listing-error row yet"],
+  ["s1b", "Workspace opening (tree skeleton rows)"],
+  ["s1c", "Workspace empty folder"],
+  ["s1d", "Workspace listing error row"],
   ["s2", "Welcome, backend connected, 3 recent folders"],
   ["s3", "Backend failed banner"],
   ["s4", "Workspace, 4 tabs (one dirty), executor.rs active, console with a passing run"],
@@ -146,11 +146,17 @@ if (mode === "test") {
 })();
 `;
 
+/** S1d: a folder whose subfolder cannot be listed (mode 000; restored before removal). */
+const LOCKED = join(BASE, "errors", "locked");
+
 function prepareWorld() {
+  if (existsSync(LOCKED)) chmodSync(LOCKED, 0o755);
   rmSync(BASE, { recursive: true, force: true });
   mkdirSync(BASE, { recursive: true });
   cpSync(join(repo, "tests/fixtures/visual"), WS, { recursive: true });
-  for (const name of ["notes", "scratch"]) mkdirSync(join(BASE, name), { recursive: true });
+  for (const name of ["notes", "scratch", "empty"]) mkdirSync(join(BASE, name), { recursive: true });
+  mkdirSync(LOCKED, { recursive: true });
+  writeFileSync(join(BASE, "errors", "README.md"), "# errors\n");
   writeFileSync(join(BASE, "sim.js"), SIM);
   // Backends that never answer / die at once, for S1 and S3 (POSIX only: they are scripts).
   writeFileSync(
@@ -246,9 +252,10 @@ async function shot(wd, id, theme, scale) {
 }
 
 /** The current state in both themes; leaves the app in dark. */
-async function bothThemes(wd, id, { scale = 1, viaDaemon = true } = {}) {
+async function bothThemes(wd, id, { scale = 1, viaDaemon = true, prepare } = {}) {
   for (const theme of ["dark", "light"]) {
     await setTheme(wd, theme, viaDaemon);
+    if (prepare) await prepare();
     await shot(wd, id, theme, scale);
   }
   await setTheme(wd, "dark", viaDaemon);
@@ -489,6 +496,46 @@ async function main() {
       await waitFor(wd, `return document.querySelector('[data-testid=welcome] .welcome__item') !== null`, "Welcome with recents");
       await waitFor(wd, `return document.querySelectorAll('[data-testid=welcome] .welcome__item').length === 3`, "three recents");
       await bothThemes(wd, "s2");
+    });
+
+    // ---- S1b-S1d: the explorer's non-content states (SHELL-007) ----------------------
+    await state(wd, "s1c", async () => {
+      await wd.exec(`${STORES}.documents.requestOpenFolder(arguments[0])`, [join(BASE, "empty")]);
+      await waitFor(wd, `return document.querySelector('[data-testid=tree-empty]') !== null`, "empty-folder state");
+      await bothThemes(wd, "s1c");
+    });
+    await state(wd, "s1d", async () => {
+      if (process.platform === "win32") {
+        mark("s1d", { status: "skipped", note: "an unlistable folder is made with POSIX permissions" });
+        return;
+      }
+      chmodSync(LOCKED, 0o000);
+      try {
+        await wd.exec(`${STORES}.documents.requestOpenFolder(arguments[0])`, [join(BASE, "errors")]);
+        await waitFor(wd, `return document.querySelector('[data-path="locked"]') !== null`, "root listing");
+        await wd.click(await wd.find(treeRow("locked")));
+        await waitFor(wd, `return document.querySelector('.tree-row--error') !== null`, "listing error row");
+        await parkPointer(wd);
+        await bothThemes(wd, "s1d");
+      } finally {
+        chmodSync(LOCKED, 0o755);
+      }
+    });
+    await state(wd, "s1b", async () => {
+      // The opening state lasts milliseconds on a real folder: it is held by setting the
+      // store's own `opening` flag (no workspace, no listing), restarted before each theme so
+      // the skeleton (shown for its first second) is what is captured.
+      await wd.exec(`${STORES}.documents.requestCloseFolder()`);
+      await waitFor(wd, `return document.querySelector('[data-testid=welcome]') !== null`, "Welcome");
+      const hold = async () => {
+        await wd.exec(`${STORES}.workspace.set({ opening: false }); ${STORES}.workspace.set({ opening: true })`);
+        await waitFor(wd, `return document.querySelector('.tree-skeleton') !== null`, "skeleton rows");
+      };
+      try {
+        await bothThemes(wd, "s1b", { prepare: hold });
+      } finally {
+        await wd.exec(`${STORES}.workspace.set({ opening: false })`);
+      }
     });
 
     let workbench = false;

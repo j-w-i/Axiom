@@ -3,6 +3,7 @@ import type { DocumentsStore } from "../state/documents";
 import * as Icon from "../ui/icons";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Kbd } from "../ui/primitives";
+import "../styles/components/states.css";
 
 // Monaco is ~4 MB of JS: it loads when the first workspace opens, not at
 // startup, so cold start and idle memory do not pay for it.
@@ -66,16 +67,32 @@ export function EditorArea({ documents, mod }: { documents: DocumentsStore; mod:
           </Suspense>
         </ErrorBoundary>
         {s.docs.length === 0 && (
-          <div className="empty-editor">
-            <div className="empty-editor__keys">
-              <span>Command palette</span><span><Kbd>{mod}</Kbd> <Kbd>K</Kbd></span>
-              <span>Go to file</span><span><Kbd>{mod}</Kbd> <Kbd>P</Kbd></span>
-              <span>Run command</span><span><Kbd>{mod}</Kbd> <Kbd>⇧</Kbd> <Kbd>R</Kbd></span>
-              <span>Toggle panel</span><span><Kbd>{mod}</Kbd> <Kbd>J</Kbd></span>
-            </div>
+          <div className="empty-editor" data-testid="empty-editor">
+            <dl className="empty-editor__keys">
+              {emptyShortcuts(mod).map(([label, keys]) => (
+                <div key={label} className="empty-editor__row">
+                  <dt>{label}</dt>
+                  <dd className="keys">
+                    {keys.map((k) => (
+                      <Kbd key={k}>{k}</Kbd>
+                    ))}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </div>
         )}
       </div>
     </>
   );
+}
+
+/** The no-document shortcuts (workspace-spec.md §6): label and keycaps. */
+export function emptyShortcuts(mod: string): [string, string[]][] {
+  return [
+    ["Command palette", [mod, "K"]],
+    ["Go to file", [mod, "P"]],
+    ["Run command", [mod, mod === "⌘" ? "⇧" : "Shift", "R"]],
+    ["Toggle console", [mod, "J"]],
+  ];
 }
