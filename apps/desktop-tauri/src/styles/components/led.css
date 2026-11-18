@@ -1,0 +1,36 @@
+/* Led: off, on (ok), run (stepped pulse, motion-system.md §5), warn, err. */
+.led {
+  display: inline-block;
+  flex: none;
+  width: var(--led);
+  height: var(--led);
+  border-radius: 50%;
+  background: var(--led-off);
+  box-shadow: var(--led-off-shadow);
+}
+.led[data-state="on"] {
+  background: var(--ok);
+  box-shadow: var(--led-ring), 0 0 6px color-mix(in srgb, var(--ok) 45%, transparent);
+}
+.led[data-state="run"] {
+  background: var(--run);
+  box-shadow: var(--led-ring), 0 0 7px color-mix(in srgb, var(--run) 55%, transparent);
+  animation: led-pulse 1.6s steps(6) infinite;
+}
+.led[data-state="warn"] {
+  background: var(--warn);
+  box-shadow: var(--led-ring), 0 0 6px color-mix(in srgb, var(--warn) 50%, transparent);
+}
+.led[data-state="err"] {
+  background: var(--danger);
+  box-shadow: var(--led-ring), 0 0 6px color-mix(in srgb, var(--danger) 50%, transparent);
+}
+[data-motion="reduced"] .led,
+[data-motion="off"] .led {
+  animation: none;
+}
+@keyframes led-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}

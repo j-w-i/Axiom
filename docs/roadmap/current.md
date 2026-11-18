@@ -1,42 +1,150 @@
 # Current state
 
-_Last updated: 2026-11-11 (end of Phase 0, architecture session)._
+_Last updated: 2026-11-17._
+
+## M1.6 — Axiom Visual Experience: approved, Phase B ready (2026-11-17)
+
+The owner approved the recommended direction, **"Precision Instrument"**, and
+accepted decisions D2–D10 as recommended. **ADR-0013** records them, together with the
+material grammar, the motion policy and the scope rule, and amends ADR-0011 to allow
+OFL-1.1 font assets (IBM's unmodified files only). M1.6-DESIGN-001 is tested. Work
+lives on branch `task/m1.6`.
+
+| # | Decision |
+|---|----------|
+| D1 | Synthesis "Precision Instrument" (A + B's signals + C's restraint) |
+| D2 | Bundle IBM Plex Sans/Mono (IBM's unmodified Latin1 subsets) |
+| D3 | macOS overlay title bar; Windows/Linux native decorations themed with the setting |
+| D4 | No activity rail until M2 |
+| D5 | `appearance.motion` Standard/Reduced/Off |
+| D6 | Stderr not painted red |
+| D7 | Drag-to-reorder tabs in M1.6 |
+| D8 | Radix Tooltip |
+| D9 | Restyle in place, task by task; no feature flag |
+| D10 | Light theme with equal care |
+
+- Design package: `docs/design/` (normative for M1.6). Prototypes:
+  `experiments/e5-visual-concepts/`. Reference screenshots: `docs/design/concepts/r-*.png`.
+- Milestone: `docs/roadmap/milestones.md` §M1.6; 27 tasks in `docs/tasks/M1.6/`;
+  graph and waves: `dependency-graph.md` §M1.6.
+- **M1.6-QA-001 is tested (2026-11-17):** screenshot harness (`scripts/e2e.sh shots.mjs`,
+  `e2e/shots-compare.mjs`) and the Linux visual baseline in
+  `docs/roadmap/verification/M1.6/baseline/linux/`.
+- **M1.6-QA-002 is tested (2026-11-17):** performance baseline `bench/results/JWI-Fedora-20261117-061550.json`; six new bench scenarios; `docs/design/performance.md` §1 is now measured. Both baselines exist.
+- **M1.6-SYSTEM-001 is tested (2026-11-17):** generated theme tokens (`scripts/gen-themes.mjs` + `themes.json`, freshness step in `check.sh`), legacy aliases until QA-006, extended guard tests. Owner accepted CR-M1.6-SYSTEM-001-line-contrast (option A: `--line-input` for field borders).
+- **M1.6-SHELL-001 is tested (2026-11-17):** `App.tsx` 433 → 117 lines, shell modules in `src/shell/`, 0 px change. **Wave B is complete.**
+- **M1.6-SYSTEM-002 is tested (2026-11-17):** IBM Plex bundled (143 kB, unmodified IBM files). `bench/run.sh --ab <baseline>` now compares two builds interleaved, so before/after checks no longer need an idle machine.
+- **M1.6-SYSTEM-003 is tested (2026-11-17):** control primitives in the material grammar, component gallery (`pnpm run gallery`, S17 in the shots harness), `ui/` import guard.
+- **M1.6-SYSTEM-004 is tested (2026-11-17):** overlays (Menu, ContextMenu, Tooltip via Radix Tooltip 1.4.1, Dialog, Sheet, Toast, Banner) in `src/ui/overlays.tsx`.
+- **M1.6-INTERACTION-001 is tested (2026-11-17):** motion level setting, presence, loop gate; idle CPU with a task running 8.0% → ~2.8% focused, 7.0% → ~0.3% unfocused.
+- **M1.6-SHELL-002 is tested (2026-11-18):** workbench frame (Panel, Splitter, layout v2 + Reset Layout, focused region); one React commit per splitter drag (was 63–68).
+- **M1.6-SHELL-003 is tested (2026-11-18):** title row with menus, workspace switcher, command field and task transport; macOS overlay title bar configured (drag permission pending, see handoff).
+- **M1.6-SHELL-004 is tested (2026-11-18):** explorer tree restyle (guides, glyph chips, focus marker, unsaved dot); S15 harness now captures real keyboard focus.
+- **M1.6-SHELL-005 is tested (2026-11-18):** status bar segments and the hint line (data-hint on every shell control).
+- **M1.6-SHELL-006 is tested (2026-11-18):** the Console (header meta and tools, recessed `$` prompt, stderr muted not red, D6). The bench `output` scenario had silently measured nothing since SHELL-002 and is repaired.
+- **M1.6-SHELL-007 is tested (2026-11-18):** Welcome, backend, opening, empty-folder, listing-error and no-document states; the explorer's error row no longer overlaps the next row.
+- **M1.6-EDITOR-001 is tested (2026-11-18):** tab strip (raised active key, transform-placed lit edge, glyph chips, dirty dot/close slot) and path breadcrumbs.
+- **M1.6-EDITOR-002 is tested (2026-11-18):** Monaco themes generated from `--syn-*`/`--editor-*`, Plex Mono 13/20 default, region focus Mod+0/1/\`; fixed a load-dependent race in a stores test (likely the unexplained SYSTEM-003 gate failure).
+- **M1.6-INTERACTION-002 is tested (2026-11-18):** side bar / console show-hide motion (content slides and fades, column changes once, Monaco lays out once per toggle). E2E and bench runs on Linux now use a private webview profile per suite/run (they wrote the developer's real localStorage before).
+- **M1.6-SURFACES-001 is tested (2026-11-18):** command palette redesign (mode chip, gliding selection, keycaps, file match highlight, footer, recent-first commands, empty states). Found: WebKit loses a localStorage write made < ~1 s before quit (host follow-up).
+- **M1.6-SURFACES-002 is tested (2026-11-18):** two-pane Settings dialog (Appearance with the Motion control, Editor, Workspace, About folded in; AboutSheet removed); modal overlays now layer above the workbench (the console and splitters had painted over the scrim).
+- **M1.6-INTERACTION-003 is tested (2026-11-18):** tab lit edge glides; menus, dialogs, palette, settings, tooltips and toasts enter and exit (Radix data-state); focus returns to the opener as an overlay starts closing. Resting screens unchanged (68/68).
+- **M1.6-SURFACES-003 is tested (2026-11-18):** light contrast matrix in the guard (dark output pinned), light press depth, native title bar follows the theme on Windows/Linux (`core:window:allow-set-theme`). Open for the owner: light state texts on `--surface-chrome` are 4.1–4.5:1 (not in §2.3; proposed values in the handoff).
+- **M1.6-INTERACTION-004 is tested (2026-11-18):** editor tabs reorder by drag (lift, siblings make room, brass slot line, settle) and by Mod+Shift+PageUp/PageDown (announced); the order persists with the tab state (D7).
+- **M1.6-QA-003 is tested (2026-11-18):** the accessibility suite `e2e/a11y.mjs` exists and runs (15/19 on Linux); 4 defects (D-A11Y-1..4, light primary button and chrome state-text contrast, Tab in the editor, small targets) await the owner, and the Orca manual pass needs a person. Record: `docs/roadmap/verification/M1.6.md` §A11y.
+- **M1.6-QA-004 is tested (2026-11-18):** performance measured against the QA-002 build (interleaved): P1, P2, P6, P7, P9–P12 met; P3, P4 frame p95, P5, P6 cold open and P8 (4.1 %) not met and waived by the owner in writing (`M1.6.md` §Performance).
+- **M1.6-QA-005 is tested (2026-11-18):** the automated half passes on macOS and Windows in GitHub Actions (run 44250978913; screenshot sets in `verification/M1.6/{macos,windows}/`); two platform defects (D-X-1 caret drift, D-X-2 Windows localStorage on quit) and the manual hardware items (VoiceOver, NVDA, High Contrast, title bar, HiDPI) remain. Record: `M1.6.md` §Cross-platform. Since then the owner's Mac session fixed D-X-1 (a test measurement), the traffic lights, drag, zoom and the full-screen inset; screen-reader passes waived; Windows deferred.
+- **M1.6-QA-006 is tested (2026-11-18): M1.6 is complete** on Linux and macOS (deviations approved by the owner); legacy aliases removed (pixel-identical); every exit criterion in `M1.6.md` §Exit review. Windows is deferred. Next milestone: M2 (see `milestones.md`).
+- **Next:** see `scripts/tasks.py | grep '^M1.6-' | grep READY` (`scripts/tasks.py | grep '^M1.6-' | grep READY`).
+- _(Wave B history:)_ M1.6-QA-002 (performance baseline and new scenarios),
+  M1.6-SYSTEM-001 (generated tokens), M1.6-SHELL-001 (split `App.tsx`, no visual
+  change). The QA baselines must be captured before the first restyle merges.
+- **Inherited blocker:** M1.6-QA-005 (macOS/Windows review) needs real hosts or a
+  CI run, as the M1.5 gate did.
+
+## Qt shell retired (T-15), 2026-11-17
+
+At the owner's instruction the **Qt shell is removed**. `apps/desktop/`, its CI
+job, `bootstrap-qt.sh`, `check_qml.py`, `smoke.sh` and `dev-env.sh` are deleted;
+`scripts/check.sh` has no Qt branch and `scripts/run.sh` launches the Tauri shell.
+Recovery: tag `qt-shell-final` (`c9f3d82`), e.g.
+`git checkout qt-shell-final -- apps/desktop scripts`. Earlier the same day T-14
+made Tauri the default.
+
+**Owner waivers** (recorded in `verification/M1.5.md` §6b): T-14's precondition
+that T-12 be passed; §5.1 (a milestone as default), §5.2 (30 days of green CI;
+the window started 2026-11-16 and keeps running as evidence) and §5.5 (the manual
+accessibility run). Risk accepted: no real macOS or Windows launch of the
+installers and no screen-reader pass preceded the removal; those remain the first
+things to do (`agents/MANUAL_VERIFICATION.md`). The `emit` test helper and the Qt-vs-Tauri
+comparison in `apps/desktop-tauri/bench/` are left in place and are now dead weight.
 
 ## Where we are
 
-**Phase 0 (architecture and planning) is complete. Milestone M1 has not
-started.** No product code exists yet except the protocol crate.
+**M1 (platform foundation) is complete; M1.5 (the Qt → Tauri migration) is
+closed by owner decision with the T-12 parity gate not formally passed.**
+ADR-0012 is accepted: the desktop shell is Tauri 2 + React and the Qt shell is
+gone (tag `qt-shell-final`).
 
 | Area | State |
 |------|-------|
-| Research (`docs/research/`) | Written, sourced; open questions listed per file |
-| Architecture, ADRs 0001–0011 | Accepted |
-| IPC protocol 0.1 | Frozen; `crates/protocol` compiles, 15 tests pass, schemas generated |
-| Editor bridge 1 | Frozen (document only; code in M1-EDITOR-001 / M1-SHELL-003) |
-| Provider / diagnostics / inspection contracts | Draft types + schemas + tests; reference `providers/rust/provider.toml` |
-| Agent contract | Draft document |
-| Experiments E1–E3 | Passed (results in `experiments/README.md`) |
-| `crates/rpc` | M1-RPC-001 tested (24 tests) |
-| `crates/store` | M1-STORE-001 tested (11 tests) |
-| `crates/workspace` | M1-WS-001 tested (42 tests), M1-WS-002 tested (11 watch tests) |
-| `crates/exec` | M1-EXEC-001 tested (23 tests, Linux only; Windows compiles, untested) |
-| `axiomd` | M1-DAEMON-001 + M1-DAEMON-002 tested (all 16 methods wired; 98 tests) |
-| `editor/` | M1-EDITOR-001 tested (43 Vitest tests; dist 14 MB) |
-| `apps/desktop/` | M1-SHELL-001..005 tested (skeleton, design system, DaemonClient, workspace + explorer, Monaco editor, output panel, settings; 9 Qt test executables) |
-| CI | Runs on GitHub (ubuntu/macos/windows Rust + editor). First runs found macOS FSEvents and Windows test-portability bugs, now fixed (see M1-DAEMON-002 handoff) |
+| Architecture, ADRs 0001–0012 | Accepted (0012 supersedes the Qt shell decision) |
+| IPC protocol 0.1 | Frozen; `crates/protocol`, schemas generated and checked |
+| Editor bridge 1 | Frozen; implemented in `editor/` (43 Vitest tests) and shared by both shells |
+| Backend (`crates/{rpc,store,workspace,exec,axiomd}`) | M1, 227 tests, unmodified by M1.5 |
+| `crates/desktop-bridge` | Tested: 13 behaviour tests against the real daemon (incl. stderr forwarding) + 12 unit tests (framing, daemon lookup order) |
+| `apps/desktop-tauri` | M1.5 shell: root-workspace Rust host + React UI; 5 host-surface + 3 release-guard tests, 51 Vitest tests, 51 end-to-end checks in 4 suites (smoke 22, quit 8, geometry 5, parity 13) through two WebDriver servers |
+| CI | The repository is public (checked 2026-11-18), so GitHub-hosted runners, macOS and Windows included, have no minute cap; the 2026-11-12 "budget nearly exhausted" note no longer constrains runs. `.github/workflows/qa-cross-platform.yml` runs QA-005's automated half on pushes to `qa/**`. Last run 43146126579: Linux+macOS green, Windows at typing-fixed/commands-pending |
+| Qt shell | Retired by T-15 (2026-11-17); recover from tag `qt-shell-final` |
+| M1.5 gate (T-12) | **Not passed** (superseded by the owner's T-14/T-15 decisions above): on Linux everything is verified (parity 52/56, all ten performance budgets, 48 end-to-end checks, package launches/finds its sidecar/connects) and macOS went green end to end in run 43141643434; Windows still fails at typing-free stages and KD-WIN-1 (Qt) is unchanged; macOS/Windows budgets, the manual protocol and the E-17 waiver are open — `docs/roadmap/verification/M1.5.md` |
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-11-M1-SHELL-005.md`
+`agents/handoffs/2026-11-18-M1.6.md` (milestone). Earlier: `agents/handoffs/2026-11-18-M1.6-QA-004.md`, `agents/handoffs/2026-11-18-M1.6-QA-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-004.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-003.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-002.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-001.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 
-Run `scripts/tasks.py next`. At the time of writing: wave A (RPC, STORE, WS-001, EXEC, EDITOR) is tested and awaiting
-review; next planned: `M1-CI-002` (desktop CI + M1 exit review), `M1-CI-001`, `M1-SHELL-001`.
+**M1.6 wave B**, on branch `task/m1.6` (see the M1.6 section at the top). Take the
+first `READY` task whose id starts with `M1.6-`, in `order`:
+`scripts/tasks.py | grep '^M1.6-' | grep READY`. Do **not** use `scripts/tasks.py
+next` for this: it prints T-11 (an M1.5 spike with a lower `order` that is still
+READY and is not part of M1.6). Wave B (M1.6-QA-001, M1.6-QA-002, M1.6-SYSTEM-001, M1.6-SHELL-001) is done; wave C is next
+and M1.6-SHELL-001. Both QA baselines must be captured before any restyle merges.
+
+## M1.5 follow-ups (open by owner waiver; not blocking M1.6)
+
+These need macOS/Windows hardware or a CI run. T-14 and T-15 already ran by
+waiver; the items stay open as evidence for the M1.5 record:
+
+1. **Spend one CI run on the branch as it stands** (`task/m1.5`, 7 commits
+   ahead of origin). It should turn the Windows cell green — typing now works
+   there (`editContext: false`) and the command checks no longer use a POSIX
+   shell — re-confirm macOS (green in run 43141643434), and produce the NSIS
+   package. Expect exactly one known red cell after it: the Qt `desktop` job on
+   Windows (KD-WIN-1), which disappears with T-15.
+2. **Measure the budgets on macOS and Windows** (`bench/run.sh --runs 3
+   --heavy-runs 3`, quoting the `medians` block and the load) — exit criterion
+   3 needs them there, and Linux is done (all ten rows met).
+3. **Run `agents/MANUAL_VERIFICATION.md`** on one real machine per OS and
+   record the results in `docs/roadmap/verification/M1.5.md`. This is also
+   where trusted keyboard input, IME, clipboard, drag and drop, HiDPI, screen
+   readers, the 720x480 drag minimum and installing a package are verified on
+   macOS and Windows.
+4. **Close the three open parity rows**: S-8's screen reader and S-12's native
+   folder dialog are manual-protocol items; T-4 is the bench's `output`
+   scenario. (E-17 was waived by the owner on 2026-11-12.)
+
+(T-14 and T-15 ran on 2026-11-17 by owner waiver; see the top of this file.)
 
 ## Blockers
 
-None.
+Two, both outside the code:
+
+- **GitHub Actions budget** for the month is spent (owner, 2026-11-12). CI is
+  not available until it resets, so every local-only item is done and the rest
+  waits for one batched run.
+- **No macOS or Windows machine** in this environment: their budgets, package
+  installs and the manual protocol need real hosts.
 
 ## Things the next agent should know
 
@@ -48,7 +156,31 @@ None.
   extracted locally (`scripts/bootstrap-qt.sh --gl-headers`).
 - `cargo` is not on the default `PATH`: scripts add `~/.cargo/bin`
   themselves; in an interactive shell run `source scripts/dev-env.sh`.
-- There is no git remote. Commits are local on `main`.
+- There *is* a remote: `origin` = github.com/j-w-i/Axiom. M1.5 work lives on
+  `task/m1.5` (draft PR #1); `main` is untouched by the migration.
+
+## M1.5 — Qt → Tauri migration (in progress, 2026-11-12)
+
+ADR-0012 is **accepted**: the desktop shell becomes Tauri 2 + React. Tasks:
+`docs/tasks/M1.5/`. Evidence and design: `docs/migration/qt-to-tauri/`.
+Verification record: `docs/roadmap/verification/M1.5.md`.
+
+Done and verified on Linux: T-01 (decisions), T-02 (bridge in
+`crates/desktop-bridge`), T-03 (host in the root workspace, `--version`), T-04
+(generated wire types), T-05 (test parity, 107 Qt functions mapped, 52 of 56
+matrix rows ✅), T-06 (UI gaps), T-07 (in-window menus + macOS menu, the latter
+compiled by cross-check), T-08 (crash recovery; the macOS hook is built but
+never triggered), T-09 (CI wiring plus the end-to-end suites through two
+WebDriver servers), T-13 (deb + rpm + macOS `.app` built in CI; a `.deb` also
+verified as an installed copy: it finds its sidecar and completes the
+handshake).
+
+Done as recorded experiments: M5-PRE-001 (E4: preview over CDP, option (a)
+adopted), T-11 (analysis; recommends *not* adopting editor isolation until one
+of three stated triggers occurs).
+
+Open: T-10 and T-12 (manual protocol and the gate — macOS and Windows need real
+hosts). T-14 and T-15 are done by owner waiver (see the top of this file).
 
 ## Open questions (do not block M1)
 

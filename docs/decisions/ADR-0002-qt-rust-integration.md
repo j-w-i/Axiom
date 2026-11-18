@@ -1,6 +1,8 @@
 # ADR-0002: Qt and Rust run in separate processes
 
-Status: Accepted (2026-11-11)
+Status: Amended by ADR-0012 (2026-11-12). The process split below is
+unchanged and still applies; only the clause "the shell contains no Rust" is
+superseded — the Tauri shell is a Rust host plus a TypeScript webview.
 
 ## Context
 Rust services and a Qt GUI can be combined in-process through FFI (CXX-Qt

@@ -1,0 +1,59 @@
+{
+  "experiment": "E4 — preview rendering + CDP inspection",
+  "ran_at": "2026-11-12T04:17:49.443Z",
+  "env": {
+    "os": "linux x64",
+    "chrome": "/opt/google/chrome/chrome",
+    "node": "v22.23.1",
+    "user_data_dir": "/tmp/e4-chrome-profile-gYRmXD",
+    "display": ":0",
+    "headless": true,
+    "chrome_version": "Google Chrome 155.0.8059.84",
+    "remote_debugging_port": 40995,
+    "target": "00D7747F4DC8A387A504B03ADDB13C1D",
+    "fixture_url": "http://127.0.0.1:45751/"
+  },
+  "pass_criterion": {
+    "stated_before_running": "recommend option (a) only if first frame < 1000 ms, p95 frame-capture latency < 100 ms, and a stamped element's source is readable over CDP"
+  },
+  "stage": "done",
+  "transient_capture_errors_before_first_frame": 1,
+  "navigation_to_first_frame_ms": 150,
+  "first_frame_png_bytes": 14259,
+  "frame_capture_ms": {
+    "frames": 60,
+    "p50": 33.9,
+    "p95": 50.7,
+    "max": 52.2
+  },
+  "frame_capture_jpeg_ms": {
+    "frames": 20,
+    "p50": 33.6
+  },
+  "element_to_source": {
+    "selector": "#stamped",
+    "box_model": {
+      "width": 1100,
+      "height": 198
+    },
+    "stamped_source": "src/App.tsx:42:7",
+    "reachable_over_cdp": true
+  },
+  "nested_element": {
+    "source": "src/Button.tsx:11:3",
+    "w": 58,
+    "h": 39
+  },
+  "browser_rss_mib": 1341,
+  "browser_pss_mib": 318,
+  "browser_process_count": 13,
+  "verdict": {
+    "first_frame_under_1s": true,
+    "p95_under_100ms": true,
+    "element_source_reachable": true,
+    "recommend_option_a": true,
+    "criterion": "recommend option (a) only if first frame < 1000 ms, p95 frame-capture latency < 100 ms, and a stamped element's source is readable over CDP",
+    "option_b": "not run: no Windows host for WebView2's CDP"
+  },
+  "option_b": "not run: no Windows host in this environment"
+}

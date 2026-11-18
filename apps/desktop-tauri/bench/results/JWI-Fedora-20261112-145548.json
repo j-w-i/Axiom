@@ -1,0 +1,47 @@
+{
+  "host": {
+    "os": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "7453194",
+    "date": "2026-11-12T14:55:48+1100",
+    "loadavg_at_start": [
+      5.15,
+      3.12,
+      2.04
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 11387296
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6317784
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [],
+    "explorer": [],
+    "output": [
+      {
+        "lines": 50000,
+        "enter_to_output_settled_ms": 74.8,
+        "cpu_s": 0.14,
+        "pss_mib_after": 263.9,
+        "loadavg_1m": 5.15
+      }
+    ]
+  }
+}

@@ -19,6 +19,10 @@ ALLOWED = {
     "axiom-workspace": {"axiom-protocol"},
     "axiom-exec": {"axiom-protocol"},
     "axiomd": {"axiom-protocol", "axiom-rpc", "axiom-store", "axiom-workspace", "axiom-exec"},
+    # The GUI's daemon client (ADR-0012): protocol only.
+    "axiom-desktop-bridge": {"axiom-protocol"},
+    # Tauri shell host: bridge only (plus third-party crates).
+    "axiom-desktop-tauri": {"axiom-desktop-bridge"},
     # Test helper binary (tests/helpers/emit): depends on nothing in the workspace.
     "emit": set(),
 }

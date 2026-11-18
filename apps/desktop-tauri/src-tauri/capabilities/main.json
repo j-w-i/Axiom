@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The only window. Grants the shell's own commands, a folder picker, the native title bar's theme and (macOS overlay title bar) dragging the window by its title row and zooming it with a double-click there; nothing that touches workspace files, processes or arbitrary URLs.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:app:allow-version",
+    "allow-host-subscribe",
+    "allow-daemon-request",
+    "allow-daemon-cancel",
+    "allow-daemon-restart",
+    "allow-app-info",
+    "allow-open-external",
+    "allow-app-quit",
+    "allow-host-heartbeat",
+    "allow-snapshot-put",
+    "allow-snapshot-clear",
+    "allow-recovery-state",
+    "core:event:allow-listen",
+    "dialog:allow-open",
+    "core:window:allow-set-theme",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize"
+  ]
+}

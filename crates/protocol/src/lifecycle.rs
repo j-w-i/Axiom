@@ -19,11 +19,15 @@ notification!(
     /// Either direction. Requests cancellation of an in-flight request. The
     /// receiver still sends exactly one response: the result if it finished
     /// first, otherwise an error of kind `cancelled`.
-    Cancel, "$/cancel", CancelParams
+    Cancel,
+    "$/cancel",
+    CancelParams
 );
 notification!(
     /// Daemon to client. Diagnostic log line; not for end-user display.
-    Log, "$/log", LogParams
+    Log,
+    "$/log",
+    LogParams
 );
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]

@@ -23,7 +23,9 @@ method!(
 notification!(
     /// Daemon to every connected client (including the one that made the
     /// change) after settings change.
-    DidChange, "settings/didChange", GetResult
+    DidChange,
+    "settings/didChange",
+    GetResult
 );
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

@@ -1,0 +1,211 @@
+{
+  "host": {
+    "os": "Linux-7.3.3-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "19817f6",
+    "date": "2026-11-18T13:01:56+1100",
+    "loadavg_at_start": [
+      1.79,
+      1.95,
+      2.22
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 13739192
+    },
+    "tauri-e2e": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-e2e",
+      "bytes": 13739192
+    },
+    "base": {
+      "path": "/nonexistent",
+      "bytes": null
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6328456
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [],
+    "panel-toggle": [],
+    "splitter-drag": [],
+    "idle-running": [],
+    "typing-under-stream": [
+      {
+        "stream_lines_per_s_target": 2000,
+        "typing_seconds": 8.1,
+        "stream_running_at_end": false,
+        "console_rows_at_end": 10001,
+        "typing_samples": 200,
+        "typing_of": 200,
+        "typing_p50_ms": 2.58,
+        "typing_p95_ms": 12.96,
+        "typing_p99_ms": 17.71,
+        "typing_max_ms": 56.36,
+        "typing_mean_ms": 4.3,
+        "typing_cpu_pct_while_typing": 108.4,
+        "typing_under_stream_samples": 110,
+        "typing_under_stream_p50_ms": 3.42,
+        "typing_under_stream_p95_ms": 16.51,
+        "typing_under_stream_p99_ms": 17.71,
+        "frames": 469,
+        "frame_p50_ms": 17,
+        "frame_p95_ms": 21,
+        "frame_max_ms": 46,
+        "frames_gt_20ms": 37,
+        "frames_gt_25ms": 3,
+        "loadavg_1m": 1.57
+      }
+    ]
+  },
+  "medians": {
+    "tauri": {
+      "typing-under-stream": {
+        "console_rows_at_end": {
+          "median": 10001,
+          "min": 10001,
+          "max": 10001,
+          "samples": 1
+        },
+        "frame_max_ms": {
+          "median": 46,
+          "min": 46,
+          "max": 46,
+          "samples": 1
+        },
+        "frame_p50_ms": {
+          "median": 17,
+          "min": 17,
+          "max": 17,
+          "samples": 1
+        },
+        "frame_p95_ms": {
+          "median": 21,
+          "min": 21,
+          "max": 21,
+          "samples": 1
+        },
+        "frames": {
+          "median": 469,
+          "min": 469,
+          "max": 469,
+          "samples": 1
+        },
+        "frames_gt_20ms": {
+          "median": 37,
+          "min": 37,
+          "max": 37,
+          "samples": 1
+        },
+        "frames_gt_25ms": {
+          "median": 3,
+          "min": 3,
+          "max": 3,
+          "samples": 1
+        },
+        "stream_lines_per_s_target": {
+          "median": 2000,
+          "min": 2000,
+          "max": 2000,
+          "samples": 1
+        },
+        "typing_cpu_pct_while_typing": {
+          "median": 108.4,
+          "min": 108.4,
+          "max": 108.4,
+          "samples": 1
+        },
+        "typing_max_ms": {
+          "median": 56.36,
+          "min": 56.36,
+          "max": 56.36,
+          "samples": 1
+        },
+        "typing_mean_ms": {
+          "median": 4.3,
+          "min": 4.3,
+          "max": 4.3,
+          "samples": 1
+        },
+        "typing_of": {
+          "median": 200,
+          "min": 200,
+          "max": 200,
+          "samples": 1
+        },
+        "typing_p50_ms": {
+          "median": 2.58,
+          "min": 2.58,
+          "max": 2.58,
+          "samples": 1
+        },
+        "typing_p95_ms": {
+          "median": 12.96,
+          "min": 12.96,
+          "max": 12.96,
+          "samples": 1
+        },
+        "typing_p99_ms": {
+          "median": 17.71,
+          "min": 17.71,
+          "max": 17.71,
+          "samples": 1
+        },
+        "typing_samples": {
+          "median": 200,
+          "min": 200,
+          "max": 200,
+          "samples": 1
+        },
+        "typing_seconds": {
+          "median": 8.1,
+          "min": 8.1,
+          "max": 8.1,
+          "samples": 1
+        },
+        "typing_under_stream_p50_ms": {
+          "median": 3.42,
+          "min": 3.42,
+          "max": 3.42,
+          "samples": 1
+        },
+        "typing_under_stream_p95_ms": {
+          "median": 16.51,
+          "min": 16.51,
+          "max": 16.51,
+          "samples": 1
+        },
+        "typing_under_stream_p99_ms": {
+          "median": 17.71,
+          "min": 17.71,
+          "max": 17.71,
+          "samples": 1
+        },
+        "typing_under_stream_samples": {
+          "median": 110,
+          "min": 110,
+          "max": 110,
+          "samples": 1
+        }
+      }
+    }
+  }
+}

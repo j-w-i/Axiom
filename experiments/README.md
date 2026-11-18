@@ -142,3 +142,70 @@ component libraries that render host elements on the app's behalf (those
 elements carry the *library's* absence of stamps, so they resolve to the
 nearest stamped ancestor). Stamps are plain attributes: visible in the DOM
 and present only in dev builds.
+
+## E4 — Preview rendering + CDP inspection without Qt WebEngine
+
+**Hypothesis.** M5's preview can render a running UI into the Tauri app while
+being inspected over CDP, using an external Chromium captured frame by frame
+rather than a Qt WebEngine page.
+
+**Setup.** `e4-preview-cdp/`: one dependency-free Node 22 script. Headless
+Google Chrome 155.0.8059.84 with `--remote-debugging-port=0` and a temp
+profile, a fixture page served over loopback, `Page.captureScreenshot` for the
+frames, `DOM.getBoxModel` + `Runtime.evaluate` for the element → source lookup.
+
+```sh
+node experiments/e4-preview-cdp/probe.mjs      # writes results.json (~5 s)
+```
+
+**Observed.** First painted frame 148–150 ms after navigation; 60 PNG captures
+at p50 33.9 ms / p95 50.7–51.2 ms (≈20–29 fps); JPEG p50 34.4 ms; browser group
+318 MiB PSS in 12 processes; the stamped element's `data-source` read back over
+CDP in both modes (`src/App.tsx:42:7`, nested `src/Button.tsx:11:3`).
+
+**Decision.** Adopt **option (a)** as the preview mechanism to prototype
+against: it meets its pre-stated criterion (< 1 s first frame, < 100 ms p95
+capture, element lookup reachable). Option (b), WebView2 CDP, is **not run — no
+Windows host** and is not estimated. Open risks, all recorded in the
+experiment's README: the ~318 MiB / 12-process browser group against a 250 MiB
+shell; bundled-browser licensing (this used installed Chrome, which cannot be
+redistributed, so the product needs a redistributable Chromium/CEF/WebView2);
+Linux display stack under software rendering; and the unmeasured cost of
+decoding and drawing each frame inside the Tauri window.
+
+## E5 — M1.6 visual concepts (design prototypes)
+
+**Purpose.** Not an architectural spike: isolated, reviewable prototypes of three
+visual directions for the Tauri shell plus the recommended synthesis, used to decide
+M1.6's direction (`docs/design/concepts.md`). Nothing in the product depends on them.
+
+**Setup.** `e5-visual-concepts/`: React 19 + Monaco 0.57 + Vite 8, fonts from
+`@fontsource` (OFL-1.1), `playwright-core` driving the installed Google Chrome for
+screenshots and measurements. Editor content is read from the repository (`?raw`
+imports of `crates/exec/src/*.rs`, `docs/protocols/ipc.md`); M2/M3 surfaces use mock
+data labelled on screen.
+
+```sh
+cd experiments/e5-visual-concepts && pnpm install && pnpm dev   # http://localhost:5190/
+node scripts/shots.mjs          # screenshots/ (git-ignored; curated copies in docs/design/concepts/)
+node scripts/perf.mjs           # rAF frame intervals per motion + typing probe -> results/
+node scripts/idle-cpu.mjs       # whole-browser CPU, looping indicators on vs reduced motion
+node scripts/idle-isolate.mjs   # cost of each looping animation
+```
+
+**Observed** (2026-11-17, Fedora 44, headless Chrome, software raster). Palette,
+side bar, tab and splitter motions: p95 frame 16.7–16.8 ms, max 16.8 ms, 0 frames
+> 20 ms, in all four variants. Idle whole-browser CPU with the "task running"
+indicators: R 18%, A 18%, B 24%, C 9% of a core; ≈0% with reduced motion. Isolated
+on R: spinners ≈ 9%, smooth LED pulse 6–8%, the same pulse with `steps(6)` 1.6%,
+sweep 2–5%; the stepped policy, everything on: 4.4%.
+
+**Decision.** Input to the owner's M1.6 direction decision. The looping-animation
+policy (`docs/design/motion-system.md` §5) is adopted from these numbers. Not
+evidence for production performance: the engine differs (Blink, not WebKitGTK), so
+M1.6-QA-002/QA-004 measure the real app.
+
+**`e5-visual-concepts/` after M1.6 (2026-11-18):** still reference only. The production shell
+(`apps/desktop-tauri/src/`) implements the approved synthesis; where the two differ, the shell and
+`docs/design/concepts.md` §"Deviations at exit" are authoritative. Nothing imports the prototypes.
+

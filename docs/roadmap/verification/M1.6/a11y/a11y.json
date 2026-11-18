@@ -1,0 +1,256 @@
+{
+  "results": [
+    {
+      "name": "1 tab traversal (dark): forward and reverse reach every region in order",
+      "ok": true,
+      "detail": "forward title → files → other → tabs → editor → console → status; reverse status → console → other → editor → tabs → files → title; the editor was left with Ctrl+M (Tab moves focus) — 1 time(s)",
+      "violations": []
+    },
+    {
+      "name": "2 focus visible (dark): every element reached shows focus and is not clipped",
+      "ok": true,
+      "detail": "22 elements",
+      "violations": []
+    },
+    {
+      "name": "3 names and roles (dark)",
+      "ok": true,
+      "detail": "22 elements",
+      "violations": []
+    },
+    {
+      "name": "5 not by colour alone (dark): dirty, stderr, LEDs, failed status carry text",
+      "ok": true,
+      "detail": "{\"stderr\":true,\"failed\":[\"✖ Failed with exit code 3 in 87 ms\"],\"dirty\":\"Close main.rs (unsaved)\",\"leds\":3,\"unlabeled\":0}",
+      "violations": []
+    },
+    {
+      "name": "1 tab traversal (light): forward and reverse reach every region in order",
+      "ok": true,
+      "detail": "forward title → files → other → tabs → editor → console → status; reverse status → console → other → editor → tabs → files → title; the editor was left with Ctrl+M (Tab moves focus) — 0 time(s)",
+      "violations": []
+    },
+    {
+      "name": "2 focus visible (light): every element reached shows focus and is not clipped",
+      "ok": true,
+      "detail": "22 elements",
+      "violations": []
+    },
+    {
+      "name": "3 names and roles (light)",
+      "ok": true,
+      "detail": "22 elements",
+      "violations": []
+    },
+    {
+      "name": "5 not by colour alone (light): dirty, stderr, LEDs, failed status carry text",
+      "ok": true,
+      "detail": "{\"stderr\":true,\"failed\":[\"✖ Failed with exit code 3 in 87 ms\"],\"dirty\":\"Close main.rs (unsaved)\",\"leds\":3,\"unlabeled\":0}",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S2 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S2 light",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S4 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S7 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S11 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S12 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S4 light",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S7 light",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S11 light",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S12 light",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "6 reduced motion: Off leaves nothing running once settled; Reduced presence ≤ 80 ms",
+      "ok": true,
+      "detail": "Off running []; Reduced palette/scrim durations [80,80] (the setting; the OS media query cannot be emulated in WebKitGTK)",
+      "violations": []
+    }
+  ],
+  "record": {
+    "themes": {
+      "dark": {
+        "forward": [
+          "title",
+          "files",
+          "other",
+          "tabs",
+          "editor",
+          "console",
+          "status"
+        ],
+        "reverse": [
+          "status",
+          "console",
+          "other",
+          "editor",
+          "tabs",
+          "files",
+          "title"
+        ],
+        "targets": [
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "src",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "main.rs, unsaved",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "target",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": ".gitignore",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "mdREADME.md",
+            "h": 22
+          }
+        ]
+      },
+      "light": {
+        "forward": [
+          "title",
+          "files",
+          "other",
+          "tabs",
+          "editor",
+          "console",
+          "status"
+        ],
+        "reverse": [
+          "status",
+          "console",
+          "other",
+          "editor",
+          "tabs",
+          "files",
+          "title"
+        ],
+        "targets": [
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "src",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "main.rs, unsaved",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "target",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": ".gitignore",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "mdREADME.md",
+            "h": 22
+          }
+        ]
+      }
+    }
+  }
+}

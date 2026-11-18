@@ -1,0 +1,59 @@
+/* Recommended synthesis — "Precision Instrument".
+ * Base: Concept A (graphite & brass, density, conventional IDE topology).
+ * From B: instrument signals — LEDs, the task transport with an output-rate
+ *         meter, the hint line with keycaps, pressed-in toggles.
+ * From C: depth from tone and hairlines, not bevels, for structure.
+ * Material grammar (the rule every component follows):
+ *   raised   = you can press it      (buttons, keys, active tab, thumbs)
+ *   recessed = it holds a value or accepts input (fields, displays, editor, pressed toggles)
+ *   flat     = content and structure  (panels, headers, lists)                       */
+
+.ca.cr, .ca.cr[data-theme="dark"] {
+  --surface-canvas: #0b0c0d;
+  --surface-chrome: #141517;
+  --surface-panel: #1e1f22;
+  --surface-head-1: #1e1f22; --surface-head-2: #1e1f22;
+  --surface-editor: #17181a;
+  --surface-well: #111213;
+  --line-mid: #2b2c30;
+  --text-faint: #75726b;
+}
+.ca.cr[data-theme="light"] {
+  --surface-canvas: #c4c1bb;
+  --surface-chrome: #e6e4df;
+  --surface-panel: #efede9;
+  --surface-head-1: #efede9; --surface-head-2: #efede9;
+  --surface-editor: #fcfbf9;
+  --line-mid: #dcd9d3;
+  --text-faint: #84807a;
+}
+
+/* flat structure: headers are part of their panel; one hairline below */
+.cr .panel__head { background: var(--surface-panel); box-shadow: inset 0 -1px 0 var(--line-mid); }
+.cr .a-dock .panel__head { box-shadow: inset 0 -1px 0 var(--line-mid); }
+.cr .a-dock { box-shadow: inset 1px 0 0 var(--line); }
+.cr .split--v { box-shadow: none; }
+.cr .a-title { background: var(--surface-chrome); box-shadow: inset 0 -1px 0 var(--line); }
+.cr .statusbar { box-shadow: inset 0 1px 0 var(--line); }
+.cr .sb__seg + .sb__seg, .cr .sb__hint + .sb__seg { box-shadow: inset 1px 0 0 var(--line-mid); }
+.cr .palette__foot { box-shadow: inset 0 1px 0 var(--line); }
+.cr .envs__row--head, .cr .diff__head { background: var(--surface-panel); box-shadow: inset 0 -1px 0 var(--line) !important; }
+
+/* tabs: the strip is flat chrome, the active tab is a raised key with the lit brass edge */
+.cr .tabs { background: var(--surface-chrome); }
+.cr .tab { box-shadow: inset -1px 0 0 var(--line-mid); }
+.cr .tab[aria-selected="true"] { box-shadow: inset -1px 0 0 var(--line), inset 1px 0 0 var(--line); }
+
+/* transport: a recessed display with an output-rate meter */
+.r-meter { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 14px; padding: 0 2px; }
+.r-meter span { width: 2px; height: 100%; border-radius: 1px; background: linear-gradient(to top, var(--accent) 0 calc(var(--v) * 100%), var(--line-mid) 0); opacity: .9; }
+
+/* hint line: "Action — Shortcut", shortcut as keycaps */
+.cr .sb__hint { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.r-hint__what { overflow: hidden; text-overflow: ellipsis; }
+.r-hint__keys { display: inline-flex; gap: 3px; }
+.r-hint__more { color: var(--text-faint); }
+.cr .sb__hint .kbd { line-height: 14px; font-size: 10px; }
+
+/* user message and tool rows: flat content, not raised */
+.cr .step[data-kind="user"] { background: var(--surface-well); box-shadow: none; border-color: var(--line); }

@@ -1,0 +1,81 @@
+name: QA cross-platform (M1.6-QA-005)
+# The automated half of M1.6-QA-005 on real macOS and Windows runners: the screenshot set
+# (QA-001 harness), the accessibility suite (QA-003) and the default end-to-end suites, uploaded
+# for review against the Linux set. Manual items (VoiceOver, NVDA, forced colours, Snap Layouts,
+# title-bar dragging, real HiDPI displays) still need a person on the hardware.
+#
+# Run it by pushing to a qa/** branch, or (once this file is on main) from the Actions tab.
+on:
+  push: { branches: ["qa/**"] }
+  workflow_dispatch:
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    name: QA (${{ matrix.os }})
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/desktop-tauri
+        shell: bash
+    env:
+      AXIOMD_UNDER_TEST: ${{ github.workspace }}/target/release/axiomd${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+      AXIOM_SCREENSHOT_DIR: ${{ github.workspace }}/qa-artifacts/e2e-screenshots
+      AXIOM_E2E_LOG: ${{ github.workspace }}/qa-artifacts/app.log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: apps/desktop-tauri/pnpm-lock.yaml }
+
+      - run: cargo build --release -p axiomd
+      - run: pnpm install --frozen-lockfile
+      - name: Editor package dependencies
+        working-directory: editor
+        run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      # The e2e build embeds the WebDriver server (Windows and macOS need no driver binary).
+      - run: cargo build --release -p axiom-desktop-tauri --features e2e
+
+      # Each step reports on its own; a failing suite does not hide the others' results.
+      - name: Default end-to-end suites (smoke, quit, geometry, parity)
+        id: e2e
+        continue-on-error: true
+        run: scripts/e2e.sh --no-build
+      - name: Screenshot set (shots.mjs)
+        id: shots
+        continue-on-error: true
+        env:
+          AXIOM_SHOTS_DIR: ${{ github.workspace }}/qa-artifacts/shots
+        run: scripts/e2e.sh --no-build shots.mjs
+      - name: Accessibility suite (a11y.mjs)
+        id: a11y
+        continue-on-error: true
+        env:
+          AXIOM_A11Y_OUT: ${{ github.workspace }}/qa-artifacts/a11y
+          AXIOM_A11Y_SKIP_200: "1"
+        run: scripts/e2e.sh --no-build a11y.mjs
+
+      - name: Upload QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-${{ matrix.os }}
+          path: qa-artifacts/
+          if-no-files-found: warn
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "e2e: ${{ steps.e2e.outcome }}, shots: ${{ steps.shots.outcome }}, a11y: ${{ steps.a11y.outcome }}" | tee -a "$GITHUB_STEP_SUMMARY"

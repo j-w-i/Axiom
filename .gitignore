@@ -11,3 +11,7 @@ dist/
 /experiments/**/target/
 /experiments/**/tmp/
 /experiments/**/*.png
+
+# screenshot sets from apps/desktop-tauri/e2e/shots.mjs (the approved baseline is committed under docs/roadmap/verification/)
+/apps/desktop-tauri/e2e/shots/*
+!/apps/desktop-tauri/e2e/shots/README.md

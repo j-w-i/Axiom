@@ -2,7 +2,11 @@
 
 Concrete walkthroughs of the M1 paths. Method names are wire names from
 `crates/protocol`; bridge message names are from
-`docs/protocols/editor-bridge.md`.
+`docs/protocols/editor-bridge.md`. The flows are identical for both shells;
+"shell → daemon" means, in the Tauri shell, a store calling the Tauri host's
+`daemon_request` command, which forwards one protocol request through
+`crates/desktop-bridge`. "shell → editor" means, in the Tauri shell, a direct
+call on the in-process `EditorPort` (same message names and payloads).
 
 ## Open a workspace
 
@@ -65,7 +69,8 @@ styling, and shows a final status line from `task/exited`.
 | Theme, font size, last workspace | `settings/set` → SQLite `settings` | on change |
 | Recent workspaces | daemon, on `workspace/open` | automatically |
 | Open tabs, active tab, expanded directories, panel sizes | `workspace/setState` → SQLite `workspace_state` | debounced 500 ms after change, and on close |
-| Window geometry | shell-local `QSettings` | on close (it is per-machine UI state, not platform state) |
+| Window geometry | shell-local (`QSettings` in Qt; `window.json` in the Tauri app config dir) | on close (it is per-machine UI state, not platform state) |
+| Side-bar and panel sizes | shell-local (`localStorage`, Tauri shell only) | on change |
 
 ## The closed loop (M5, for orientation)
 

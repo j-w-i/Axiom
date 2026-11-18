@@ -1,0 +1,154 @@
+{
+  "host": {
+    "os": "Linux-7.3.3-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "3c8fee2",
+    "date": "2026-11-18T16:31:25+1100",
+    "loadavg_at_start": [
+      5.55,
+      4.08,
+      3.73
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 13585136
+    },
+    "tauri-e2e": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-e2e",
+      "bytes": 13745144
+    },
+    "base": {
+      "path": "/nonexistent",
+      "bytes": null
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6328456
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [],
+    "panel-toggle": [
+      {
+        "toggles_each": 10,
+        "sidebar_frames": 253,
+        "sidebar_frame_p50_ms": 16,
+        "sidebar_frame_p95_ms": 17,
+        "sidebar_frame_max_ms": 18,
+        "sidebar_frames_gt_20ms": 0,
+        "sidebar_frames_gt_25ms": 0,
+        "panel_frames": 255,
+        "panel_frame_p50_ms": 16,
+        "panel_frame_p95_ms": 17,
+        "panel_frame_max_ms": 17,
+        "panel_frames_gt_20ms": 0,
+        "panel_frames_gt_25ms": 0,
+        "loadavg_1m": 5.46
+      }
+    ],
+    "splitter-drag": [],
+    "idle-running": [],
+    "typing-under-stream": []
+  },
+  "medians": {
+    "tauri": {
+      "panel-toggle": {
+        "panel_frame_max_ms": {
+          "median": 17,
+          "min": 17,
+          "max": 17,
+          "samples": 1
+        },
+        "panel_frame_p50_ms": {
+          "median": 16,
+          "min": 16,
+          "max": 16,
+          "samples": 1
+        },
+        "panel_frame_p95_ms": {
+          "median": 17,
+          "min": 17,
+          "max": 17,
+          "samples": 1
+        },
+        "panel_frames": {
+          "median": 255,
+          "min": 255,
+          "max": 255,
+          "samples": 1
+        },
+        "panel_frames_gt_20ms": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "samples": 1
+        },
+        "panel_frames_gt_25ms": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "samples": 1
+        },
+        "sidebar_frame_max_ms": {
+          "median": 18,
+          "min": 18,
+          "max": 18,
+          "samples": 1
+        },
+        "sidebar_frame_p50_ms": {
+          "median": 16,
+          "min": 16,
+          "max": 16,
+          "samples": 1
+        },
+        "sidebar_frame_p95_ms": {
+          "median": 17,
+          "min": 17,
+          "max": 17,
+          "samples": 1
+        },
+        "sidebar_frames": {
+          "median": 253,
+          "min": 253,
+          "max": 253,
+          "samples": 1
+        },
+        "sidebar_frames_gt_20ms": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "samples": 1
+        },
+        "sidebar_frames_gt_25ms": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "samples": 1
+        },
+        "toggles_each": {
+          "median": 10,
+          "min": 10,
+          "max": 10,
+          "samples": 1
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,12 @@
 # ADR-0011: Licensing
 
-Status: Accepted (2026-11-11). Not legal advice; a legal review is required
-before the first binary release (tracked in M7).
+Status: Accepted (2026-11-11); amended by ADR-0012 (2026-11-12) for the
+Tauri shell (Tauri MIT/Apache-2.0; WebKitGTK LGPL-2.1 linked dynamically;
+WebView2 runtime terms); amended by ADR-0013 §6 (2026-11-17) to allow OFL-1.1
+font assets. Not legal advice; a legal review is required before
+the first binary release (tracked in M7). The Qt clauses (§2–§4) are
+superseded by ADR-0012: `apps/desktop` was removed by task T-15 (2026-11-17;
+tag `qt-shell-final`).
 
 ## Decision
 1. Axiom's own code is dual-licensed **MIT OR Apache-2.0**.

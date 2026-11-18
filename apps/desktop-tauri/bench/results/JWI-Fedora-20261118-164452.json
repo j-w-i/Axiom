@@ -1,0 +1,99 @@
+{
+  "host": {
+    "os": "Linux-7.3.3-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "3c8fee2",
+    "date": "2026-11-18T16:44:52+1100",
+    "loadavg_at_start": [
+      2.79,
+      3.09,
+      3.44
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 13585136
+    },
+    "tauri-e2e": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-e2e",
+      "bytes": 13745144
+    },
+    "base": {
+      "path": "/nonexistent",
+      "bytes": null
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6328456
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [],
+    "panel-toggle": [],
+    "splitter-drag": [],
+    "idle-running": [
+      {
+        "no_task_cpu_pct_10s": 1.0,
+        "task_focused_cpu_pct_10s": 2.2,
+        "task_unfocused_cpu_pct_10s": 0.1,
+        "task_focused_by_process": {
+          "WebKitNetworkProcess": 0.0,
+          "WebKitWebProcess": 1.9,
+          "axiom-tauri-e2e": 0.3,
+          "sleep": 0.0
+        },
+        "task_unfocused_by_process": {
+          "WebKitNetworkProcess": 0.0,
+          "WebKitWebProcess": 0.1,
+          "axiom-tauri-e2e": 0.0,
+          "sleep": 0.0
+        },
+        "page_had_focus_when_focused": true,
+        "page_lost_focus_when_unfocused": true,
+        "task_still_running_at_end": true,
+        "loadavg_1m": 2.62
+      }
+    ],
+    "typing-under-stream": []
+  },
+  "medians": {
+    "tauri": {
+      "idle-running": {
+        "no_task_cpu_pct_10s": {
+          "median": 1.0,
+          "min": 1.0,
+          "max": 1.0,
+          "samples": 1
+        },
+        "task_focused_cpu_pct_10s": {
+          "median": 2.2,
+          "min": 2.2,
+          "max": 2.2,
+          "samples": 1
+        },
+        "task_unfocused_cpu_pct_10s": {
+          "median": 0.1,
+          "min": 0.1,
+          "max": 0.1,
+          "samples": 1
+        }
+      }
+    }
+  }
+}

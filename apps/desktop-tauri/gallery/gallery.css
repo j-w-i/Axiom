@@ -1,0 +1,103 @@
+/* Layout of the dev-only component gallery (tokens only). */
+body {
+  margin: 0;
+  background: var(--surface-canvas);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+}
+.g {
+  padding: var(--s-5);
+  display: grid;
+  gap: var(--s-4);
+}
+.g__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.g__bar h1 {
+  font-size: var(--text-title);
+  font-weight: var(--weight-strong);
+  margin: 0 auto 0 0;
+}
+.g__section {
+  background: var(--surface-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  padding: var(--s-4);
+}
+.g__section > h2 {
+  margin: 0 0 var(--s-3);
+  font-size: var(--text-small);
+  font-weight: var(--weight-strong);
+  color: var(--text-muted);
+}
+.g__grid {
+  display: grid;
+  grid-template-columns: 140px repeat(var(--cols), minmax(0, max-content));
+  gap: var(--s-3) var(--s-4);
+  align-items: center;
+}
+.g__head {
+  font-size: var(--text-tiny);
+  color: var(--text-faint);
+}
+.g__row-label {
+  font-size: var(--text-small);
+  color: var(--text-muted);
+}
+.g__type {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--s-2) var(--s-4);
+  align-items: baseline;
+}
+.g__type code {
+  font-family: var(--font-code);
+  font-size: var(--text-tiny);
+  color: var(--text-faint);
+}
+.g__editor {
+  background: var(--surface-editor);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-2);
+}
+.g__grid > * {
+  justify-self: start;
+}
+.g__stack {
+  display: grid;
+  gap: var(--s-4);
+}
+/* Overlays shown in place: portalled content flows inside its host box. */
+.g__hosts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--s-4);
+}
+.g__host {
+  display: grid;
+  gap: var(--s-2);
+  align-content: start;
+  min-height: 120px;
+}
+.g__host .g__head {
+  margin-bottom: 2px;
+}
+.g__host [data-radix-popper-content-wrapper],
+.g__host .dialog,
+.g__host .menu[role="menu"] {
+  position: static !important;
+  transform: none !important;
+  min-width: 0;
+}
+.g__host .dialog {
+  width: auto;
+  max-height: none;
+}
+.g__toasts {
+  display: grid;
+  gap: var(--s-2);
+  justify-items: start;
+}

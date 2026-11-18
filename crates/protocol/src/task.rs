@@ -33,12 +33,16 @@ notification!(
     /// Daemon to client. A chunk of output. Chunks of one task carry strictly
     /// increasing `seq` starting at 0; chunk boundaries are arbitrary (not
     /// line-aligned). Invalid UTF-8 is replaced with U+FFFD.
-    Output, "task/output", OutputParams
+    Output,
+    "task/output",
+    OutputParams
 );
 notification!(
     /// Daemon to client. Sent exactly once per started task, after its final
     /// `task/output`.
-    Exited, "task/exited", ExitedParams
+    Exited,
+    "task/exited",
+    ExitedParams
 );
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

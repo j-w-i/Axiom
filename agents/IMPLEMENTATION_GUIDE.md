@@ -18,12 +18,16 @@ on purpose.
 
 - If the board (`scripts/tasks.py`) shows a task `in-progress` or
   `implemented`, read its handoff and finish it first. Otherwise
-  `scripts/tasks.py next` gives the task.
+  `scripts/tasks.py next` gives the task, unless `docs/roadmap/current.md`
+  ("Next task") gives a selection rule for the current milestone; that rule
+  wins (M1.6: the first READY `M1.6-*` task by `order`).
 - Read the task file fully, then **only** the documents under its *Context*
   and *Required interfaces*. Do not read all of `docs/`.
 - Claim it: `scripts/tasks.py set <ID> in-progress "<date>"` and create a
-  branch `task/<ID>` (when working alone on `main` with no other agents,
-  committing directly to `main` is acceptable; say so in the handoff).
+  branch `task/<ID>` (when working alone with no other agents, committing
+  directly to the milestone branch named in `docs/roadmap/current.md`, e.g.
+  `task/m1.6`, or to `main` if none is named, is acceptable; say so in the
+  handoff).
 
 ## 3. Implement
 
