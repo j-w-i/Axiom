@@ -702,12 +702,16 @@ try {
       await new Promise((r) => setTimeout(r, 320)); // --dur-3 (200 ms) and a margin
       landings.push(await edge());
     }
-    // The size from the page: GET /window/rect returns zeros under the embedded WebDriver on Linux.
-    const [w0, h0] = await wd.exec(`return [Math.round(outerWidth), Math.round(outerHeight)]`);
-    await wd.cmd("POST", "/window/rect", { x: 40, y: 40, width: w0 - 160, height: h0 });
+    // GET /window/rect where it reports a size (external driver, macOS, Windows); the page's own size
+    // where it returns zeros (the embedded WebDriver on Linux, CI run 44283678787).
+    const got = await wd.cmd("GET", "/window/rect");
+    const rect = got && got.width > 0
+      ? got
+      : { x: 40, y: 40, ...Object.fromEntries((await wd.exec(`return [Math.round(outerWidth), Math.round(outerHeight)]`)).map((v, i) => [i ? "height" : "width", v])) };
+    await wd.cmd("POST", "/window/rect", { ...rect, width: rect.width - 160 });
     await new Promise((r) => setTimeout(r, 400));
     landings.push(await edge());
-    await wd.cmd("POST", "/window/rect", { x: 40, y: 40, width: w0, height: h0 });
+    await wd.cmd("POST", "/window/rect", rect);
     await new Promise((r) => setTimeout(r, 400));
     landings.push(await edge());
     check("21a tab glide lands on the active tab (Ctrl+Tab x4, then a resize and back; ±0.5 px)", landings.every((l) => l.dx <= 0.5 && l.dw <= 0.5), JSON.stringify(landings));
