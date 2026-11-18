@@ -114,6 +114,10 @@ export class OutputBuffer {
 export class TasksStore extends Observable<TasksState> {
   private taskId = "";
   private starting = false;
+  /** Notifications that arrived while `task/start` was in flight: a fast task's output can be
+   * dispatched before the start's response is handled (the response resolves a promise, whose
+   * continuation runs after the lines read with it). Replayed once the id is known. */
+  private early: ({ kind: "output"; p: OutputParams } | { kind: "exited"; p: ExitedParams })[] = [];
   private stopRequested = false;
   private generation = 0;
   private buffer = new OutputBuffer();
@@ -126,11 +130,13 @@ export class TasksStore extends Observable<TasksState> {
   ) {
     super({ running: false, label: "", statusText: "", lastOutcome: null, history: [], rows: [], dropped: 0, startedAt: null, outputSeq: 0 });
     client.onNotification<OutputParams>("task/output", (p) => {
+      if (!this.taskId && this.starting) return void this.early.push({ kind: "output", p });
       if (!this.taskId || p.taskId !== this.taskId) return;
       this.buffer.append(p.seq, p.stream, p.data);
       this.scheduleFlush();
     });
     client.onNotification<ExitedParams>("task/exited", (p) => {
+      if (!this.taskId && this.starting) return void this.early.push({ kind: "exited", p });
       if (!this.taskId || p.taskId !== this.taskId) return;
       this.onExited(p);
     });
@@ -237,6 +243,7 @@ export class TasksStore extends Observable<TasksState> {
 
   private async start(command: unknown, label: string, record: boolean): Promise<void> {
     this.resetOutput();
+    this.early = [];
     this.starting = true;
     this.stopRequested = false;
     this.set({ running: true, label, statusText: `Running: ${label}`, lastOutcome: null, startedAt: null });
@@ -251,6 +258,20 @@ export class TasksStore extends Observable<TasksState> {
       if (gen !== this.generation) return;
       this.starting = false;
       this.taskId = r.taskId;
+      const early = this.early;
+      this.early = [];
+      let exited = false;
+      for (const e of early) {
+        if (e.p.taskId !== r.taskId) continue;
+        if (e.kind === "output") {
+          this.buffer.append(e.p.seq, e.p.stream, e.p.data);
+          this.scheduleFlush();
+        } else {
+          this.onExited(e.p);
+          exited = true;
+        }
+      }
+      if (exited) return;
       if (this.stopRequested) this.stop();
       void this.loadStartedAt(r.taskId, gen);
     } catch (e) {
@@ -323,6 +344,7 @@ export class TasksStore extends Observable<TasksState> {
     ++this.generation;
     this.taskId = "";
     this.starting = false;
+    this.early = [];
     this.stopRequested = false;
     this.resetOutput();
     this.set({ running: false, label: "", statusText: "", lastOutcome: null, startedAt: null });
