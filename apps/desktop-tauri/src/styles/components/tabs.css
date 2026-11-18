@@ -121,6 +121,45 @@
   display: none;
 }
 
+/* Reorder by drag (D7, INTERACTION-004): the lifted tab carries the overlay shadow and follows
+   the pointer; siblings make room over --dur-2; a 2 px brass line marks the slot. Reduced and
+   Off: no lift scale (set in JS) and no travel. */
+.tabs[data-dragging] {
+  cursor: grabbing;
+}
+.tabs[data-dragging] .tab:not([data-lifted]),
+.tab[data-settling] {
+  transition: transform var(--dur-2) var(--ease-out), color var(--dur-1) linear, background-color var(--dur-1) linear;
+}
+.tab[data-lifted] {
+  z-index: 4;
+  background: var(--surface-editor);
+  color: var(--text);
+  box-shadow: var(--overlay-shadow);
+}
+[data-motion="reduced"] .tabs[data-dragging] .tab,
+[data-motion="off"] .tabs[data-dragging] .tab,
+[data-motion="reduced"] .tab[data-settling],
+[data-motion="off"] .tab[data-settling] {
+  transition: none;
+}
+.tabs[data-dragging] .tabs__glide {
+  opacity: 0;
+}
+.tabs__drop {
+  position: absolute;
+  z-index: 5;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.tabs__drop[hidden] {
+  display: none;
+}
+
 /* Breadcrumbs: path segments only. */
 .crumbs {
   display: flex;

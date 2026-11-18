@@ -254,6 +254,19 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     if (next) this.setActive(next.path);
   }
 
+  /** Moves a tab to `toIndex` (clamped) in the tab order; saved with the tab state (D7, INTERACTION-004). */
+  move(path: string, toIndex: number): void {
+    const from = this.index(path);
+    if (from < 0) return;
+    const to = Math.max(0, Math.min(this.state.docs.length - 1, Math.round(toIndex)));
+    if (to === from) return;
+    const docs = [...this.state.docs];
+    const [d] = docs.splice(from, 1);
+    docs.splice(to, 0, d!);
+    this.set({ docs });
+    this.scheduleTabSave();
+  }
+
   close(path: string): void {
     const d = this.state.docs.find((x) => x.path === path);
     if (!d) return;

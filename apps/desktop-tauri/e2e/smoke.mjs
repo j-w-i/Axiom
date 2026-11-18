@@ -734,6 +734,58 @@ try {
     check("21c motion off: dialogs have no animations and close at once", anims === 0 && gone && running.length === 0, `animations on palette/scrim ${anims}; closed ${gone}; running anywhere after close: ${JSON.stringify(running)}`);
   }
 
+  // ---- 22. reorder tabs (M1.6-INTERACTION-004, D7) ------------------------------------
+  {
+    const order = () => wd.exec(`return [...document.querySelectorAll('.tabs [role=tab]')].map(t => t.dataset.path).join(',')`);
+    const centre = (path) => wd.exec(`const b = document.querySelector('.tabs [role=tab][data-path="' + arguments[0] + '"]').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }`, [path]);
+    const drag = async (path, dx, { cancel = false } = {}) => {
+      const c = await centre(path);
+      const steps = Array.from({ length: 10 }, (_, i) => ({ type: "pointerMove", duration: 16, x: c.x + Math.round(((i + 1) * dx) / 10), y: c.y, origin: "viewport" }));
+      await wd.cmd("POST", "/actions", { actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", duration: 0, x: c.x, y: c.y, origin: "viewport" }, { type: "pointerDown", button: 0 }, ...steps] }] });
+      if (cancel) {
+        const lifted = await wd.exec(`return document.querySelector('.tabs')?.dataset.dragging === 'true'`);
+        await wd.keys([Keys.ESC]);
+        await wd.cmd("POST", "/actions", { actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerUp", button: 0 }] }] });
+        return lifted;
+      }
+      await wd.cmd("POST", "/actions", { actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerUp", button: 0 }] }] });
+      return true;
+    };
+    const before = await order(); // src/main.rs,README.md
+    const width = await wd.exec(`return document.querySelector('.tabs [role=tab][data-path="src/main.rs"]').getBoundingClientRect().width`);
+    // Frame intervals during the drag (P3): a rAF recorder in the page.
+    await wd.exec(`window.__dragFrames = []; let last = performance.now(); window.__dragRec = true; const tick = (t) => { window.__dragFrames.push(t - last); last = t; if (window.__dragRec) requestAnimationFrame(tick); }; requestAnimationFrame(tick);`);
+    await drag("README.md", -Math.round(width) - 16); // past the neighbour's midpoint
+    await new Promise((r) => setTimeout(r, 400));
+    const frames = await wd.exec(`window.__dragRec = false; const f = window.__dragFrames.slice(1).sort((a, b) => a - b); return { n: f.length, p95: +f[Math.floor(f.length * 0.95)]?.toFixed(1), max: +f[f.length - 1]?.toFixed(1), over25: f.filter(x => x > 25).length }`);
+    console.log(`INFO  tab drag frame intervals: ${JSON.stringify(frames)}`);
+    const dragged = await order();
+    const clean = await wd.exec(`return [...document.querySelectorAll('.tabs [role=tab]')].every(t => !t.style.transform) && document.querySelector('.tabs').dataset.dragging === undefined`);
+    check("22a drag tab reorders (transforms cleared after the drop)", before === "src/main.rs,README.md" && dragged === "README.md,src/main.rs" && clean, `${before} → ${dragged}; clean ${clean}`);
+
+    const lifted = await drag("src/main.rs", Math.round(width) + 16, { cancel: true });
+    await new Promise((r) => setTimeout(r, 400));
+    const afterCancel = await order();
+    check("22b escape cancels tab drag (order unchanged, no lost or duplicated tab)", lifted && afterCancel === "README.md,src/main.rs", `lifted ${lifted}; ${afterCancel}`);
+
+    await wd.exec(`document.querySelector('.tabs [role=tab][data-path="README.md"]').focus()`);
+    await wd.chord(MOD, Keys.SHIFT, "\uE00F"); // Mod+Shift+PageDown
+    await new Promise((r) => setTimeout(r, 200));
+    const down = await order();
+    const said = await wd.exec(`return document.querySelector('.tabs__announce')?.textContent ?? ''`);
+    const focusKept = await wd.exec(`return document.activeElement?.dataset.path`);
+    await wd.chord(MOD, Keys.SHIFT, "\uE00E"); // Mod+Shift+PageUp
+    await new Promise((r) => setTimeout(r, 200));
+    const up = await order();
+    check(
+      "22c ctrl+shift+pagedown/pageup moves the focused tab and announces it",
+      down === "src/main.rs,README.md" && said === "README.md moved to position 2 of 2" && focusKept === "README.md" && up === "README.md,src/main.rs",
+      `↓ ${down} ("${said}", focus ${focusKept}); ↑ ${up}`,
+    );
+    // The reordered strip (README first) is what check 8 must find after the restart.
+    await new Promise((r) => setTimeout(r, 1500)); // the tab save debounce (500 ms) and WebKit's storage
+  }
+
   // ---- 8. restore state after restart --------------------------------------------
   await wd.exec(`${appExpr}.settings.setValue("editor.fontSize", 15)`);
   await wd.waitFor(`return ${appExpr}.settings.getSnapshot().editorFontSize === 15`, [], 3000, "font size");
@@ -752,7 +804,8 @@ try {
   const history = await wd.exec(`return ${appExpr}.tasks.getSnapshot().history`);
   check(
     "8 state restored: last workspace, expanded folders, tabs, active tab, settings, command history",
-    tabs.join(",") === "src/main.rs,README.md" && active === "README.md" && fontSize === 15 && history[0] === "node tools/slow.js",
+    // README.md first: the order section 22 (tab reorder, D7) left behind, restored from the tab state.
+    tabs.join(",") === "README.md,src/main.rs" && active === "README.md" && fontSize === 15 && history[0] === "node tools/slow.js",
     `tabs=${tabs} active=${active} fontSize=${fontSize} history[0]=${history[0]}`,
   );
   await shot(wd, "08-restored-dark");

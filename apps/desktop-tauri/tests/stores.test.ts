@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DocumentStore, type ModelLike } from "@editor/documents";
 import { createApp, type AppStores } from "../src/state/app";
-import type { EditorPort } from "../src/state/documents";
+import { OPEN_PATHS_KEY, type EditorPort } from "../src/state/documents";
 import { OutputBuffer, stripAnsi } from "../src/state/tasks";
 import { daemonPath, NodeTransport, waitFor } from "./support/node-transport";
 
@@ -156,6 +156,44 @@ describe("stores against the real daemon", () => {
     await waitFor(() => app.documents.getSnapshot().docs.length === 2, 3000, "tabs restored");
     expect(app.documents.getSnapshot().docs.map((d) => d.path)).toEqual(["README.md", "src/main.rs"]);
     await waitFor(() => app.documents.getSnapshot().activePath === "README.md", 3000, "active tab");
+  });
+
+  it("documents.move reorders and saves tab state", async () => {
+    await app.workspace.openFolder(ws);
+    app.workspace.setExpanded("src", true);
+    await waitFor(() => !!app.workspace.node("src/main.rs"));
+    for (const p of ["README.md", "src/main.rs", ".gitignore"]) {
+      app.documents.open(p);
+      await waitFor(() => app.documents.getSnapshot().docs.some((d) => d.path === p));
+    }
+    app.documents.move(".gitignore", 0);
+    expect(app.documents.getSnapshot().docs.map((d) => d.path)).toEqual([".gitignore", "README.md", "src/main.rs"]);
+    app.documents.move("README.md", 99); // clamped to the end
+    expect(app.documents.getSnapshot().docs.map((d) => d.path)).toEqual([".gitignore", "src/main.rs", "README.md"]);
+    // The existing debounced tab save carries the order to the daemon.
+    const saved = async () =>
+      (await app.client.request<{ values: Record<string, unknown> }>("workspace/getState", { workspaceId: app.workspace.getSnapshot().id, keys: [OPEN_PATHS_KEY] })).values[OPEN_PATHS_KEY];
+    let order: unknown = null;
+    await waitFor(() => {
+      void saved().then((v) => (order = v));
+      return JSON.stringify(order) === JSON.stringify([".gitignore", "src/main.rs", "README.md"]);
+    }, 5000, "the reordered tabs saved");
+  });
+
+  it("cycle follows reordered tabs", async () => {
+    await app.workspace.openFolder(ws);
+    app.workspace.setExpanded("src", true);
+    await waitFor(() => !!app.workspace.node("src/main.rs"));
+    for (const p of ["README.md", "src/main.rs", ".gitignore"]) {
+      app.documents.open(p);
+      await waitFor(() => app.documents.getSnapshot().docs.some((d) => d.path === p));
+    }
+    app.documents.move(".gitignore", 0); // .gitignore, README, main
+    app.documents.activate(".gitignore");
+    app.documents.cycle(1);
+    expect(app.documents.getSnapshot().activePath).toBe("README.md");
+    app.documents.cycle(-2);
+    expect(app.documents.getSnapshot().activePath).toBe("src/main.rs");
   });
 
   it("edits, saves through the daemon, and the bytes on disk match", async () => {

@@ -24,8 +24,9 @@ export function useAppShortcuts(ctx: ShellContext): void {
       else if (mod && e.shiftKey && k === "r") { if (wsId) ctx.focusRun(); }
       else if (mod && !e.shiftKey && k === "s") { if (hasDoc) documents.save(activePath); }
       else if (mod && !e.shiftKey && k === "w") { if (activePath) documents.close(activePath); }
-      else if (mod && e.key === "PageUp") documents.cycle(-1);
-      else if (mod && e.key === "PageDown") documents.cycle(1);
+      // Mod+Shift+PageUp/PageDown reorder the focused tab (INTERACTION-004): left to the tab.
+      else if (mod && !e.shiftKey && e.key === "PageUp") documents.cycle(-1);
+      else if (mod && !e.shiftKey && e.key === "PageDown") documents.cycle(1);
       else if (mod && !e.shiftKey && k === "q") documents.requestQuit();
       else if (mod && k === "tab") documents.cycle(e.shiftKey ? -1 : 1);
       // Region focus (EDITOR-002; workspace-spec.md §1). Physical keys (e.code), so the chords
