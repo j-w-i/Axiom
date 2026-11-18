@@ -1,5 +1,5 @@
 // The command palette list after the App.tsx split (M1.6-SHELL-001) must equal the
-// M1.5 list: same ids, groups, labels, shortcuts, order and enabled rules. The
+// M1.5 list (plus SHELL-002's "Reset Layout", marked below): same ids, groups, labels, shortcuts, order and enabled rules. The
 // expected tables below were written from the pre-split App.tsx (commit 75201b8),
 // not generated from the new code.
 
@@ -40,6 +40,7 @@ function ctx(f: Fixture): ShellContext {
     openFolder: async () => {},
     toggleSidebar: noop,
     togglePanel: noop,
+    resetLayout: noop,
     focusRun: noop,
     setSettingsOpen: noop,
     setAboutOpen: noop,
@@ -66,6 +67,7 @@ describe("shell commands", () => {
       ["format", "Edit", "Format Document", undefined, false],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
+      ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Light Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", false],
       ["rerun", "Run", "Rerun Last", "F5", false],
@@ -87,6 +89,7 @@ describe("shell commands", () => {
       ["format", "Edit", "Format Document", undefined, false],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
+      ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Dark Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", false],
       ["rerun", "Run", "Rerun Last", "F5", false],
@@ -109,6 +112,7 @@ describe("shell commands", () => {
       ["format", "Edit", "Format Document", undefined, true],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
+      ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Light Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", true],
       ["rerun", "Run", "Rerun: cargo test", "F5", false],

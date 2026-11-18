@@ -8,6 +8,7 @@ import { toast, ToastStack, TooltipProvider } from "./ui/overlays";
 import "./styles/fonts.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
+import "./styles/shell.css";
 import "./styles/app.css";
 
 performance.mark("axiom:script-start");

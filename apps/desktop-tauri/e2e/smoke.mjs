@@ -264,6 +264,26 @@ try {
     await wd.chord(MOD, "z");
     await wd.waitFor(`return !document.querySelector('.monaco-editor .view-lines').textContent.includes('abc')`, [], 5000, "abc undone");
   }
+  // 4f: the region holding keyboard focus marks its header with the 2 px brass rule (SHELL-002).
+  {
+    const regions = [];
+    for (const [region, focus, header] of [
+      ["files", `document.querySelector('[data-testid=explorer]').focus()`, `[data-region="files"] > .panel__head`],
+      ["editor", `document.querySelector('.monaco-editor textarea')?.focus()`, `[data-region="editor"] .tabs`],
+      ["console", `document.querySelector('[data-testid=command-input]').focus()`, `[data-region="console"] .panel__bar`],
+    ]) {
+      await wd.exec(focus);
+      await new Promise((r) => setTimeout(r, 100));
+      regions.push(
+        await wd.exec(
+          `const wb = document.querySelector('.workbench'); const h = document.querySelector(arguments[0]);
+           return { want: arguments[1], got: wb.dataset.focusedRegion ?? null, rule: h ? /0px 2px 0px[^,]*inset|inset 0px 2px 0px/.test(getComputedStyle(h).boxShadow) : false, shadow: h ? getComputedStyle(h).boxShadow : null };`,
+          [header, region],
+        ),
+      );
+    }
+    check("4f the focused region's header carries the brass rule (files, editor, console)", regions.every((r) => r.got === r.want && r.rule), JSON.stringify(regions));
+  }
   await wd.exec(INPUT_RECORDER);
   await wd.click(await wd.find(".monaco-editor .view-lines"));
   await wd.chord(MOD, DOC_START); // Ctrl+Home / Cmd+Up

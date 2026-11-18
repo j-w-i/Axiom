@@ -24,6 +24,7 @@ export function allCommands(ctx: ShellContext): CommandEntry[] {
     { id: "format", group: "Edit", label: "Format Document", run: () => documents.runCommand("format"), enabled: hasDoc },
     { id: "sidebar", group: "View", label: "Toggle Side Bar", shortcut: `${MOD}+B`, run: ctx.toggleSidebar },
     { id: "panel", group: "View", label: "Toggle Panel", shortcut: `${MOD}+J`, run: ctx.togglePanel },
+    { id: "resetLayout", group: "View", label: "Reset Layout", run: ctx.resetLayout },
     { id: "theme", group: "View", label: dark ? "Switch to Light Theme" : "Switch to Dark Theme", run: () => void settings.setValue("appearance.theme", dark ? "light" : "dark") },
     { id: "run", group: "Run", label: "Run Command…", shortcut: `${MOD}+Shift+R`, run: ctx.focusRun, enabled: !!ws.id },
     { id: "rerun", group: "Run", label: task.history[0] ? `Rerun: ${task.history[0]}` : "Rerun Last", shortcut: "F5", run: () => tasks.rerunLast(), enabled: tasks.canRun && task.history.length > 0 },

@@ -50,11 +50,6 @@ button {
 }
 
 /* ---- shell layout ---- */
-.shell {
-  display: grid;
-  grid-template-rows: var(--titlebar-h) auto 1fr var(--statusbar-h);
-  height: 100%;
-}
 
 .titlebar {
   display: flex;
@@ -83,69 +78,6 @@ button {
   flex: 1;
 }
 
-.workbench {
-  display: flex;
-  min-height: 0;
-}
-
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-subtle);
-  border-right: var(--border-w) solid var(--border);
-  min-width: 160px;
-  max-width: 600px;
-}
-
-.main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 240px;
-  min-height: 0;
-}
-
-.splitter {
-  flex: none;
-  background: transparent;
-  position: relative;
-  z-index: 2;
-}
-.splitter--v {
-  width: 5px;
-  margin: 0 -3px;
-  cursor: col-resize;
-}
-.splitter--h {
-  height: 5px;
-  margin: -3px 0;
-  cursor: row-resize;
-}
-.splitter:hover,
-.splitter[data-dragging="true"] {
-  background: var(--accent-soft);
-}
-
-/* ---- section headers ---- */
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 34px;
-  padding: 0 var(--space-2) 0 var(--space-3);
-  font-size: var(--text-caption);
-  font-weight: var(--weight-strong);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  flex: none;
-}
-.section-header__title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 
 /* ---- explorer tree ---- */
@@ -374,31 +306,6 @@ button {
 }
 
 /* ---- output panel ---- */
-.panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 100px;
-  background: var(--bg);
-  border-top: var(--border-w) solid var(--border);
-}
-.panel__bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
-  flex: none;
-}
-.panel__title {
-  font-size: var(--text-caption);
-  font-weight: var(--weight-strong);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-right: var(--space-2);
-}
-.panel__bar .input {
-  flex: 1;
-}
 .output {
   flex: 1;
   overflow: auto;

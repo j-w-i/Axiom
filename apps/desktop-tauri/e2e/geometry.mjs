@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { WebDriver, appLogger, removeDir } from "./webdriver.mjs";
+import { Keys, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const here = import.meta.dirname;
 const repo = resolve(here, "../../..");
@@ -116,6 +116,31 @@ try {
     Math.abs(restored.width - beforeQuit.width) <= 2 && Math.abs(restored.height - beforeQuit.height) <= 2,
     `${restored.width}x${restored.height} (before quit: ${beforeQuit.width}x${beforeQuit.height})`,
   );
+
+  // ---- splitters (M1.6-SHELL-002): keyboard resize and double-click reset ----------
+  const SPLIT = '[aria-label="Resize side bar"]';
+  const now = () => wd.exec(`return Number(document.querySelector('${SPLIT}').getAttribute('aria-valuenow'))`);
+  const width = () => wd.exec(`return Math.round(document.querySelector('.sidebar').getBoundingClientRect().width)`);
+  await wd.waitFor(`return !!document.querySelector('${SPLIT}')`, [], 10000, "the side bar splitter");
+  await wd.exec(`document.querySelector('${SPLIT}').focus()`);
+  await wd.keys([Keys.HOME]);
+  await wd.waitFor(`return document.querySelector('${SPLIT}').getAttribute('aria-valuenow') === '252'`, [], 3000, "Home resets to 252");
+  await wd.keys(["\uE014"]); // ArrowRight
+  const afterArrow = await now();
+  await wd.chord(Keys.SHIFT, "\uE014");
+  const afterShift = await now();
+  await wd.keys(["\uE012"]); // ArrowLeft
+  const afterLeft = await now();
+  const shown = await width();
+  check(
+    "5 splitter keyboard resize (arrows ±16, Shift ±48, Home = default)",
+    afterArrow === 268 && afterShift === 316 && afterLeft === 300 && shown === 300,
+    `Home 252 → → ${afterArrow} → Shift+→ ${afterShift} → ← ${afterLeft}; side bar ${shown}px`,
+  );
+  await wd.exec(`document.querySelector('${SPLIT}').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await wd.waitFor(`return document.querySelector('${SPLIT}').getAttribute('aria-valuenow') === '252'`, [], 3000, "double-click reset").catch(() => {});
+  const afterDbl = await now();
+  check("6 splitter double-click reset", afterDbl === 252 && (await width()) === 252, `aria-valuenow ${afterDbl}`);
 } catch (e) {
   check("unexpected failure", false, e instanceof Error ? e.message : String(e));
   await failureEvidence(wd, "geometry");

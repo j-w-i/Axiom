@@ -4,10 +4,10 @@
 import * as Icon from "../ui/icons";
 import { IconButton, Menu } from "../ui/primitives";
 import type { ShellContext } from "./actions";
-import type { Layout } from "./Workbench";
+import type { Layout } from "./layout";
 import { MOD } from "./platform";
 
-export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Layout }) {
+export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layout, "sidebarVisible" | "panelVisible"> }) {
   const { client, documents, tasks, settings } = ctx.app;
   const { ready, hasDoc, dark, ws, docs, task, prefs, openFolder } = ctx;
 
@@ -55,6 +55,7 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Layout })
         items={[
           { label: "Toggle Side Bar", shortcut: `${MOD}+B`, onSelect: ctx.toggleSidebar },
           { label: "Toggle Panel", shortcut: `${MOD}+J`, onSelect: ctx.togglePanel },
+          { label: "Reset Layout", onSelect: ctx.resetLayout },
           { separator: true },
           { label: "Light Theme", disabled: !dark, onSelect: () => void settings.setValue("appearance.theme", "light") },
           { label: "Dark Theme", disabled: dark, onSelect: () => void settings.setValue("appearance.theme", "dark") },

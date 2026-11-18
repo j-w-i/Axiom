@@ -22,6 +22,7 @@ export interface ShellContext {
   openFolder: () => Promise<void>;
   toggleSidebar: () => void;
   togglePanel: () => void;
+  resetLayout: () => void;
   focusRun: () => void;
   setSettingsOpen: (open: boolean) => void;
   setAboutOpen: (open: boolean) => void;

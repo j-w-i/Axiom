@@ -246,8 +246,8 @@ M1 surface uses it. The others are specified here and prototyped in
 | `Sheet` / settings dialog | Non-blocking configuration | two-pane (sections and body) | as Dialog; section nav is a tablist | ✅ SURFACES-002 |
 | `Toast` | Transient confirmation or result | ok, error, with an action | `role="status"`/`alert`; never steals focus; 4 s, paused on hover or focus | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/toast.css` (local queue, no dependency) |
 | `Banner` | Persistent problem in context | danger, warning, info + action | `role="alert"`/`status` | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/banner.css` |
-| `Panel` | Region frame | header (title, meta, tools), body | `<section aria-label>`; header marks focused region | ✅ SHELL-002 |
-| `Splitter` | Resize regions | vertical, horizontal | `role="separator"`, arrow keys ±16 (Shift ±48), Home resets; double-click resets | ✅ SHELL-002 |
+| `Panel` | Region frame | header (title, meta, tools), body | `<section aria-label>`; header marks focused region | ✅ built (SHELL-002): `src/ui/panel.tsx`, `src/styles/components/panel.css` |
+| `Splitter` | Resize regions | vertical, horizontal | `role="separator"`, arrow keys ±16 (Shift ±48), Home resets; double-click resets | ✅ built (SHELL-002): `src/ui/panel.tsx`, `src/styles/components/panel.css` |
 | `Tree` | Explorer | rows, guides, glyphs, ignored, selected, focused, dirty dot | full tree keyboard model (existing) | ✅ SHELL-003 |
 | `Tabs` (editor) | Open documents | recessed strip, raised active key, lit-edge glide, dirty, hover close | tablist; Ctrl+Tab, Ctrl+PgUp/PgDn, Ctrl+W, middle-click | ✅ EDITOR-001 |
 | `Breadcrumbs` | Path of the active document | path segments (symbols need LSP: M4) | `nav` + `aria-label` | ✅ EDITOR-001 |

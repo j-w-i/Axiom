@@ -39,7 +39,15 @@ export const OutputPanel = forwardRef<OutputPanelHandle, { tasks: TasksStore; wo
     useEffect(() => {
       const el = scroller.current;
       if (!el) return;
-      const ro = new ResizeObserver(() => setView({ top: el.scrollTop, height: el.clientHeight }));
+      const seen = { top: -1, height: -1 };
+      const ro = new ResizeObserver(() => {
+        // Only height and scroll position matter: a width-only resize (a side-bar drag) must not
+        // even call setState (right after a commit React cannot always bail out of an equal update).
+        if (el.scrollTop === seen.top && el.clientHeight === seen.height) return;
+        seen.top = el.scrollTop;
+        seen.height = el.clientHeight;
+        setView({ top: el.scrollTop, height: el.clientHeight });
+      });
       ro.observe(el);
       return () => ro.disconnect();
     }, []);

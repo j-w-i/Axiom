@@ -32,6 +32,13 @@ milestone. Nothing marked Designed may appear in the production shell before the
   the dock) stays **shell-local** in `localStorage` key `axiom.layout.v1`, extended
   additively (`axiom.layout.v2` with migration if keys change). "Reset Layout"
   (palette, View menu) restores defaults.
+- **As built (M1.6-SHELL-002).** Limits unchanged: side bar 180–480 (default 252), console
+  120–520 (default 232), both also clamped to the window (side bar ≤ window − 400, console ≤
+  window height − 260). `axiom.layout.v2` holds the same four keys as v1; v1 is migrated once and
+  removed. Splitters: arrows ±16, Shift ±48, Home and double-click reset to the default. The
+  layout lives in a small store (`shell/layout.ts`) so a resize commit re-renders only the
+  workbench (one React commit per drag). The focused-region rule marks the side bar header,
+  the editor's tab strip and the console header.
 - One region owns keyboard focus. Its header shows the 2 px brass top rule
   (`design-system.md` §8). Ctrl+0 focuses the side bar (if visible), Ctrl+1 the
   editor, and Ctrl+\` the console prompt. These are new, conflict-checked against

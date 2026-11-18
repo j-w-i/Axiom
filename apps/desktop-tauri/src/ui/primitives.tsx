@@ -7,9 +7,6 @@
 // (tests/ui-imports.test.ts).
 
 import {
-  useCallback,
-  useEffect,
-  useRef,
   type ButtonHTMLAttributes,
   type CSSProperties,
   type InputHTMLAttributes,
@@ -344,68 +341,4 @@ export function Stepper({
 // the existing imports until M1.6-QA-006.
 export { Banner, Dialog, Menu, Sheet, type DialogButton, type MenuEntry } from "./overlays";
 
-/** A draggable divider; reports the new size of the pane it controls. */
-export function Splitter({
-  orientation,
-  size,
-  min,
-  max,
-  invert = false,
-  onResize,
-  label,
-}: {
-  orientation: "vertical" | "horizontal";
-  size: number;
-  min: number;
-  max: number;
-  invert?: boolean;
-  onResize: (size: number) => void;
-  label: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const start = useRef<{ pos: number; size: number } | null>(null);
-  const clamp = useCallback((v: number) => Math.max(min, Math.min(max, v)), [min, max]);
-  useEffect(() => {
-    const move = (e: PointerEvent) => {
-      if (!start.current) return;
-      const pos = orientation === "vertical" ? e.clientX : e.clientY;
-      const delta = (pos - start.current.pos) * (invert ? -1 : 1);
-      onResize(clamp(start.current.size + delta));
-    };
-    const up = () => {
-      start.current = null;
-      if (ref.current) ref.current.dataset.dragging = "false";
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [orientation, invert, onResize, clamp]);
-  return (
-    <div
-      ref={ref}
-      className={`splitter splitter--${orientation === "vertical" ? "v" : "h"}`}
-      role="separator"
-      aria-orientation={orientation}
-      aria-label={label}
-      aria-valuenow={Math.round(size)}
-      aria-valuemin={min}
-      aria-valuemax={max}
-      tabIndex={0}
-      onPointerDown={(e) => {
-        start.current = { pos: orientation === "vertical" ? e.clientX : e.clientY, size };
-        if (ref.current) ref.current.dataset.dragging = "true";
-        e.preventDefault();
-      }}
-      onKeyDown={(e) => {
-        const step = e.shiftKey ? 48 : 16;
-        const dec = orientation === "vertical" ? "ArrowLeft" : "ArrowUp";
-        const inc = orientation === "vertical" ? "ArrowRight" : "ArrowDown";
-        if (e.key === dec) onResize(clamp(size + (invert ? step : -step)));
-        if (e.key === inc) onResize(clamp(size + (invert ? -step : step)));
-      }}
-    />
-  );
-}
+// Splitter moved to ui/panel.tsx (SHELL-002).

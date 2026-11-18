@@ -90,9 +90,7 @@ export function App({ app }: { app: AppStores }) {
   const ctx: ShellContext = {
     app, ready, dark, ws, docs, task, prefs, openFolder, setSettingsOpen, setAboutOpen, setPalette,
     hasDoc: docs.docs.length > 0 && docs.editorReady,
-    toggleSidebar: layout.toggleSidebar,
-    togglePanel: layout.togglePanel,
-    focusRun: layout.focusRun,
+    toggleSidebar: layout.toggleSidebar, togglePanel: layout.togglePanel, resetLayout: layout.resetLayout, focusRun: layout.focusRun,
   };
   useNativeMenu(ctx);
   useAppShortcuts(ctx);
