@@ -662,7 +662,7 @@ try {
     await wd.waitFor(`return !!document.querySelector('[data-testid=settings] [role=tablist]')`, [], 3000, "settings open");
     await new Promise((r) => setTimeout(r, 200));
     const landing = await wd.exec(
-      `const a = document.activeElement; return { section: document.querySelector('[data-testid=settings] [role=tab][aria-selected=true]')?.textContent, focus: a?.closest('[role=radiogroup]')?.getAttribute('aria-label') ?? a?.tagName }`,
+      `const a = document.activeElement; return { section: document.querySelector('[data-testid=settings] [role=tab][aria-selected=true]')?.textContent, focus: a?.closest('[role=radiogroup]')?.getAttribute('aria-label') ?? a?.tagName, checked: a?.getAttribute('aria-checked') }`,
     );
     // Shift+Tab from the first control reaches the selected section tab; arrows move between sections.
     await wd.chord(Keys.SHIFT, "\uE004"); // Shift+Tab
@@ -675,7 +675,7 @@ try {
     const wrapped = await wd.exec(`return document.activeElement?.textContent`);
     check(
       "20a settings sections keyboard navigation (lands on Appearance's first control; Shift+Tab to the tabs; arrows move and wrap)",
-      landing.section === "Appearance" && landing.focus === "Theme" && onTab === "tab" && editor.tab === "Editor" && editor.fontSize && wrapped === "Appearance",
+      landing.section === "Appearance" && landing.focus === "Theme" && landing.checked === "true" && onTab === "tab" && editor.tab === "Editor" && editor.fontSize && wrapped === "Appearance",
       JSON.stringify({ landing, onTab, editor, wrapped }),
     );
     check("20b about section shows versions", /axiomd \d/.test(about) && /Tauri/.test(about) && /Webview/.test(about), about.slice(0, 100));

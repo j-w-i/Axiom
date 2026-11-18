@@ -162,7 +162,11 @@ export function SettingsDialog({
           onOpenAutoFocus={(e) => {
             // Land on the section's first control (Appearance: the theme choice).
             e.preventDefault();
-            requestAnimationFrame(() => body.current?.querySelector<HTMLElement>('[tabindex="0"], button:not([disabled]), input')?.focus());
+            // A radio group's focus stop is its checked option (tabindex 0), not its first button.
+            requestAnimationFrame(() => {
+              const panel = body.current;
+              (panel?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ?? panel?.querySelector<HTMLElement>('button:not([disabled]), input'))?.focus();
+            });
           }}
         >
           <RDialog.Title className="visually-hidden">Settings</RDialog.Title>
