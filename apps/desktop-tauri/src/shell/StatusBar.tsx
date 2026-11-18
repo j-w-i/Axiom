@@ -17,7 +17,7 @@ export function StatusBar({ ctx, daemon }: { ctx: ShellContext; daemon: DaemonSt
       <span className="statusbar__spacer" />
       {task.statusText && (
         <span className={task.lastOutcome === "failed" ? "statusbar__failed" : undefined} data-testid="task-status">
-          {task.running && <span className="spinner" style={{ display: "inline-block", verticalAlign: "-2px", marginRight: 6 }} />}
+          {task.running && <span className="spinner" data-static={ctx.ws.id ? "" : undefined} style={{ display: "inline-block", verticalAlign: "-2px", marginRight: 6 }} />}
           {task.statusText}
         </span>
       )}

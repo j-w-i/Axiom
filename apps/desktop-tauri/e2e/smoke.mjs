@@ -436,8 +436,10 @@ try {
     await new Promise((r) => setTimeout(r, 200));
     const stepped = await wd.exec(
       `const led = document.createElement('span'); led.className = 'led'; led.dataset.state = 'run'; document.body.appendChild(led);
-       const out = { spinner: getComputedStyle(document.querySelector('.statusbar .spinner')).animationTimingFunction, led: getComputedStyle(led).animationTimingFunction };
-       led.remove(); return out;`,
+       // A detached spinner: the status bar's own is static while the title row's transport is visible (SHELL-003).
+       const sp = document.createElement('span'); sp.className = 'spinner'; document.body.appendChild(sp);
+       const out = { spinner: getComputedStyle(sp).animationTimingFunction, led: getComputedStyle(led).animationTimingFunction };
+       led.remove(); sp.remove(); return out;`,
     );
     check("13b' the spinner and the LED pulse are stepped", /steps\(8/.test(stepped.spinner) && /steps\(6/.test(stepped.led), JSON.stringify(stepped));
     const before = await wd.exec(RUNNING);
@@ -450,6 +452,26 @@ try {
     // Left at "reduced" so step 8 can check that it survives a restart.
     await wd.exec(`${appExpr}.settings.setValue("appearance.motion", "reduced")`);
     await wd.waitFor(`return document.documentElement.dataset.motion === 'reduced'`, [], 5000, "data-motion reduced");
+  }
+
+  // ---- 14. task transport (M1.6-SHELL-003) ------------------------------------------
+  {
+    const T = `const t = document.querySelector('[data-testid=transport]');
+      return t ? { state: t.dataset.state, label: t.querySelector('.transport__label')?.textContent, time: t.querySelector('.transport__time')?.textContent ?? null,
+                   bars: t.querySelectorAll('.rate-meter__bar').length, stop: t.querySelector('button[aria-label="Stop"]')?.disabled } : null;`;
+    // runArgv: not recorded in the command history (check 8 asserts on it).
+    await wd.exec(`${appExpr}.tasks.runArgv(["sh", "-c", "sleep 3; echo done"])`);
+    const running = await wd.waitFor(`const r = (() => { ${T} })(); return r && r.state === 'run' && r.time ? r : null`, [], 5000, "transport running");
+    const later = await wd.waitFor(`const r = (() => { ${T} })(); return r && r.time && r.time !== arguments[0] ? r : null`, [running.time], 4000, "elapsed time advances").catch(() => null);
+    const done = await wd.waitFor(`const r = (() => { ${T} })(); return r && r.state === 'on' ? r : null`, [], 8000, "transport success");
+    await wd.exec(`${appExpr}.tasks.runArgv(["sh", "-c", "exit 3"])`);
+    const failed = await wd.waitFor(`const r = (() => { ${T} })(); return r && r.state === 'err' ? r : null`, [], 8000, "transport failure");
+    check(
+      "14 transport shows running state and returns to idle",
+      running.label === "sh -c sleep 3; echo done" && running.bars === 16 && running.stop === false && !!later && /^00:0\d$/.test(later.time) &&
+        done.time === null && done.stop === true && failed.stop === true,
+      JSON.stringify({ running, later, done, failed }),
+    );
   }
 
   // ---- 9. themes ---------------------------------------------------------------

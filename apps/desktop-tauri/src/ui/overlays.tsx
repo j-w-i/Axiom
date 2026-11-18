@@ -173,6 +173,7 @@ export function Menu({
   phase = "in",
   open,
   container,
+  triggerClassName = "btn btn--quiet btn--sm",
 }: {
   trigger: ReactNode;
   items: MenuEntry[];
@@ -180,11 +181,12 @@ export function Menu({
   phase?: Phase;
   open?: boolean;
   container?: HTMLElement | null;
+  triggerClassName?: string;
 }) {
   return (
     <RMenu.Root open={open} modal={open === undefined}>
       <RMenu.Trigger asChild>
-        <button type="button" className="btn btn--quiet btn--sm" aria-label={label}>
+        <button type="button" className={triggerClassName} aria-label={label}>
           {trigger}
         </button>
       </RMenu.Trigger>

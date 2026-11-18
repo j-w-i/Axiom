@@ -187,6 +187,8 @@ const FREEZE_TEXT = `
     if (re.test(n.nodeValue)) { n.nodeValue = n.nodeValue.replace(re, ' in 1.2 s'); replaced++; }
     re.lastIndex = 0;
   }
+  // The task transport's elapsed time is the only other clock on screen (visual-qa.md §1: frozen).
+  for (const t of document.querySelectorAll('.transport__time')) { t.textContent = '00:12'; replaced++; }
   return replaced;`;
 
 async function parkPointer(wd) {
@@ -472,6 +474,8 @@ async function main() {
     if (workbench) {
       await state(wd, "s5", async () => {
         await runCommand(wd, "node ../sim.js hold", RUNNING_WITH_OUTPUT);
+        // The transport's rate meter shows the last 4 s of output: let it settle to a fixed (empty) state.
+        await sleep(4500);
         await bothThemes(wd, "s5");
         await wd.exec(`${STORES}.tasks.stop()`);
         await waitFor(wd, OUTCOME("cancelled"), "the held run stops");

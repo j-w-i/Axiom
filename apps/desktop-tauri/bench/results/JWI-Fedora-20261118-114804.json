@@ -1,0 +1,141 @@
+{
+  "host": {
+    "os": "Linux-7.3.3-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "2854fd3",
+    "date": "2026-11-18T11:48:05+1100",
+    "loadavg_at_start": [
+      7.77,
+      4.58,
+      3.28
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 11481408
+    },
+    "tauri-e2e": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-e2e",
+      "bytes": 13737400
+    },
+    "base": {
+      "path": "/nonexistent",
+      "bytes": null
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6328456
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [],
+    "panel-toggle": [],
+    "splitter-drag": [],
+    "idle-running": [
+      {
+        "no_task_cpu_pct_10s": 0.9,
+        "task_focused_cpu_pct_10s": 3.5,
+        "task_unfocused_cpu_pct_10s": 0.5,
+        "task_focused_by_process": {
+          "WebKitNetworkProcess": 0.0,
+          "WebKitWebProcess": 2.6,
+          "axiom-tauri-e2e": 0.9,
+          "sleep": 0.0
+        },
+        "task_unfocused_by_process": {
+          "WebKitNetworkProcess": 0.0,
+          "WebKitWebProcess": 0.4,
+          "axiom-tauri-e2e": 0.1,
+          "sleep": 0.0
+        },
+        "page_had_focus_when_focused": true,
+        "page_lost_focus_when_unfocused": true,
+        "task_still_running_at_end": true,
+        "loadavg_1m": 4.14
+      },
+      {
+        "no_task_cpu_pct_10s": 1.1,
+        "task_focused_cpu_pct_10s": 3.0,
+        "task_unfocused_cpu_pct_10s": 0.2,
+        "task_focused_by_process": {
+          "WebKitNetworkProcess": 0.0,
+          "WebKitWebProcess": 2.1,
+          "axiom-tauri-e2e": 0.9,
+          "sleep": 0.0
+        },
+        "task_unfocused_by_process": {
+          "WebKitNetworkProcess": 0.0,
+          "WebKitWebProcess": 0.1,
+          "axiom-tauri-e2e": 0.1,
+          "sleep": 0.0
+        },
+        "page_had_focus_when_focused": true,
+        "page_lost_focus_when_unfocused": true,
+        "task_still_running_at_end": true,
+        "loadavg_1m": 2.05
+      },
+      {
+        "no_task_cpu_pct_10s": 0.9,
+        "task_focused_cpu_pct_10s": 2.7,
+        "task_unfocused_cpu_pct_10s": 0.1,
+        "task_focused_by_process": {
+          "WebKitNetworkProcess": 0.0,
+          "WebKitWebProcess": 1.9,
+          "axiom-tauri-e2e": 0.8,
+          "sleep": 0.0
+        },
+        "task_unfocused_by_process": {
+          "WebKitNetworkProcess": 0.0,
+          "WebKitWebProcess": 0.1,
+          "axiom-tauri-e2e": 0.0,
+          "sleep": 0.0
+        },
+        "page_had_focus_when_focused": true,
+        "page_lost_focus_when_unfocused": true,
+        "task_still_running_at_end": true,
+        "loadavg_1m": 1.37
+      }
+    ],
+    "typing-under-stream": []
+  },
+  "medians": {
+    "tauri": {
+      "idle-running": {
+        "no_task_cpu_pct_10s": {
+          "median": 0.9,
+          "min": 0.9,
+          "max": 1.1,
+          "samples": 3
+        },
+        "task_focused_cpu_pct_10s": {
+          "median": 3.0,
+          "min": 2.7,
+          "max": 3.5,
+          "samples": 3
+        },
+        "task_unfocused_cpu_pct_10s": {
+          "median": 0.2,
+          "min": 0.1,
+          "max": 0.5,
+          "samples": 3
+        }
+      }
+    }
+  }
+}

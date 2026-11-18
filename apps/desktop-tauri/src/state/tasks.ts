@@ -31,6 +31,10 @@ export interface TasksState {
   history: string[];
   rows: OutputRow[];
   dropped: number;
+  /** Epoch ms the running task started (TaskInfo.startedMs via task/list); null when idle. */
+  startedAt: number | null;
+  /** Monotonic count of output rows appended (dropped ones included); the transport's rate meter samples it. */
+  outputSeq: number;
 }
 
 const ANSI = /\x1B\[[0-?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B[@-Z\\-_]/g;
@@ -120,7 +124,7 @@ export class TasksStore extends Observable<TasksState> {
     private readonly client: DaemonClient,
     private readonly workspace: WorkspaceStore,
   ) {
-    super({ running: false, label: "", statusText: "", lastOutcome: null, history: [], rows: [], dropped: 0 });
+    super({ running: false, label: "", statusText: "", lastOutcome: null, history: [], rows: [], dropped: 0, startedAt: null, outputSeq: 0 });
     client.onNotification<OutputParams>("task/output", (p) => {
       if (!this.taskId || p.taskId !== this.taskId) return;
       this.buffer.append(p.seq, p.stream, p.data);
@@ -169,7 +173,7 @@ export class TasksStore extends Observable<TasksState> {
       dropped += rows.length - MAX_LINES;
       rows = rows.slice(rows.length - MAX_LINES);
     }
-    this.set({ rows, dropped });
+    this.set({ rows, dropped, outputSeq: this.state.outputSeq + batch.length });
   }
 
   private resetOutput(): void {
@@ -235,7 +239,7 @@ export class TasksStore extends Observable<TasksState> {
     this.resetOutput();
     this.starting = true;
     this.stopRequested = false;
-    this.set({ running: true, label, statusText: `Running: ${label}`, lastOutcome: null });
+    this.set({ running: true, label, statusText: `Running: ${label}`, lastOutcome: null, startedAt: null });
     if (record) this.pushHistory(label);
     const gen = this.generation;
     try {
@@ -248,6 +252,7 @@ export class TasksStore extends Observable<TasksState> {
       this.starting = false;
       this.taskId = r.taskId;
       if (this.stopRequested) this.stop();
+      void this.loadStartedAt(r.taskId, gen);
     } catch (e) {
       if (gen !== this.generation) return;
       this.starting = false;
@@ -258,7 +263,20 @@ export class TasksStore extends Observable<TasksState> {
           : `Could not run the command: ${err.message}`;
       this.buffer.push({ text, stream: "stderr", kind: "error" });
       this.flushNow();
-      this.set({ running: false, label: "", statusText: "Failed to start" });
+      this.set({ running: false, label: "", statusText: "Failed to start", startedAt: null });
+    }
+  }
+
+  /** task/start answers with the id only (IPC 0.1); the start time is in task/list's TaskInfo. */
+  private async loadStartedAt(taskId: string, gen: number): Promise<void> {
+    try {
+      const r = await this.client.request<{ tasks: { taskId: string; startedMs: number }[] }>("task/list", {
+        workspaceId: this.workspace.getSnapshot().id,
+      });
+      const info = r.tasks.find((t) => t.taskId === taskId);
+      if (info && gen === this.generation && this.taskId === taskId && this.state.running) this.set({ startedAt: info.startedMs });
+    } catch {
+      /* no elapsed time for this run */
     }
   }
 
@@ -291,6 +309,7 @@ export class TasksStore extends Observable<TasksState> {
     this.set({
       running: false,
       label: "",
+      startedAt: null,
       lastOutcome: p.outcome,
       statusText:
         p.outcome === "succeeded" ? `${label}: succeeded`
@@ -306,6 +325,6 @@ export class TasksStore extends Observable<TasksState> {
     this.starting = false;
     this.stopRequested = false;
     this.resetOutput();
-    this.set({ running: false, label: "", statusText: "", lastOutcome: null });
+    this.set({ running: false, label: "", statusText: "", lastOutcome: null, startedAt: null });
   }
 }

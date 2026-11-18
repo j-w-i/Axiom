@@ -59,6 +59,16 @@ milestone. Nothing marked Designed may appear in the production shell before the
 | macOS (D3) | `titleBarStyle: "Overlay"`, `hiddenTitle: true`; 72 px left inset for the traffic lights; the title row is the drag region (`data-tauri-drag-region` on non-interactive parts) | host config |
 | Windows/Linux (D3) | native decorations; native title bar themed to match (Tauri `set_theme`) | host config |
 
+**As built (M1.6-SHELL-003).** `startedAt` comes from `task/list`'s `TaskInfo.startedMs`
+(`task/start` answers with the task id only in IPC 0.1; no protocol change). The elapsed time
+shows `mm:ss` in 1 s steps (tenths would need a faster timer than the loop policy allows). The
+menus are ordered File, Edit, View, Run, Help. The Settings icon button stays next to the layout
+toggles. Narrow windows: at ≤ 1040 px the command field becomes an icon button and the
+workspace path is hidden; at ≤ 860 px the rate meter is hidden and the task label shortens to
+110 px, so every control stays reachable at the 720 px minimum. The status bar's spinner is static
+while the transport is visible (one running indicator). Both timers skip their updates while the
+window is idle (the loop gate's `data-idle`); the meter renders only when its bars change.
+
 ### 2.2 Side bar and explorer (SHELL-002, SHELL-003)
 
 - Panel header: "Files" (12/600) + workspace name (muted) + tools (Collapse All,

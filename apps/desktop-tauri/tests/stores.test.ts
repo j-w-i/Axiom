@@ -262,6 +262,35 @@ describe("stores against the real daemon", () => {
     expect(Date.now() - t0).toBeLessThan(8000);
   }, 20_000);
 
+  it("startedAt follows task/run response", async () => {
+    await app.workspace.openFolder(ws);
+    expect(app.tasks.getSnapshot().startedAt).toBeNull();
+    const before = Date.now();
+    app.tasks.runArgv(["node", "-e", "setTimeout(() => {}, 30000)"]);
+    await waitFor(() => app.tasks.getSnapshot().startedAt !== null, 5000, "startedAt");
+    const startedAt = app.tasks.getSnapshot().startedAt!;
+    // It is the daemon's own TaskInfo.startedMs (task/start answers with the id only; task/list has the time).
+    const list = await app.client.request<{ tasks: { taskId: string; startedMs: number; exit?: unknown }[] }>("task/list", { workspaceId: app.workspace.getSnapshot().id });
+    expect(list.tasks.some((t) => t.startedMs === startedAt && !t.exit)).toBe(true);
+    expect(startedAt).toBeGreaterThanOrEqual(before - 1000);
+    expect(startedAt).toBeLessThanOrEqual(Date.now() + 1000);
+    app.tasks.stop();
+    await waitFor(() => !app.tasks.getSnapshot().running, 8000, "stopped");
+    expect(app.tasks.getSnapshot().startedAt).toBeNull();
+  }, 20_000);
+
+  it("outputSeq counts appended and dropped rows", async () => {
+    await app.workspace.openFolder(ws);
+    const seq0 = app.tasks.getSnapshot().outputSeq;
+    // 10 050 lines: past the 10 000-row cap, so some are dropped from view.
+    app.tasks.runArgv(["node", "-e", "for (let i = 0; i < 10050; i++) console.log('line ' + i)"]);
+    await waitFor(() => !app.tasks.getSnapshot().running && app.tasks.getSnapshot().lastOutcome !== null, 15000, "finished");
+    const s = app.tasks.getSnapshot();
+    expect(s.dropped).toBeGreaterThan(0);
+    expect(s.outputSeq - seq0).toBe(s.rows.length + s.dropped); // every appended row, the dropped ones too
+    expect(s.outputSeq - seq0).toBe(10051); // 10 050 lines + the status row
+  }, 30_000);
+
   it("clear empties the output, rerunLast repeats the last command, and a run is refused while running", async () => {
     await app.workspace.openFolder(ws);
     app.tasks.run("echo one");
