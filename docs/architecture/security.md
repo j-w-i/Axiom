@@ -29,6 +29,25 @@ There is a time-of-check/time-of-use window between step 3 and the file
 operation; closing it needs `openat2`/`O_NOFOLLOW`-style APIs and is tracked
 as a hardening item, not an M1 requirement.
 
+## Managed installs (M2, enforced in `axiom-env`; as built by M2-ENV-002)
+
+Layout under the data directory: `cache/<sha256>` (verified downloads, content-addressed;
+`cache/.part-<planId>` while downloading) and `toolchains/<provider>/<version>/` (published
+installs; `toolchains/<provider>/.staging-<version>-<planId>/` while extracting). Nothing else
+is written.
+
+| Rule | How | Test (`crates/env/tests/install.rs` unless noted) |
+|------|-----|------|
+| Approval is a protocol fact | `env/install` takes only a `planId`; the daemon executes its own stored copy of the plan, once, within 10 minutes, and only if the provider's manifest is unchanged; otherwise `approval_denied` | `plan_immutable_and_expiring`; `axiomd/tests/install.rs` (spent plan) |
+| HTTPS only | URLs come only from a validated manifest; non-HTTPS URLs and redirects to them are refused; the OS trust store (rustls, no native TLS). The test-only `AXIOM_TEST_INSECURE_LOOPBACK_HTTP=1` allows plain HTTP to loopback hosts only | `fetch::tests::only_https_unless_testing`; `axiomd/tests/install.rs` (refused without the switch) |
+| Verify before use | The download is hashed while streaming and compared with the manifest's digest (or the checksum file's entry) before it is renamed into the cache; nothing is extracted or run before that. A cached file is re-hashed before reuse | `checksum_mismatch_cleans_up` |
+| Safe extraction | Our own path logic, never the library's unpacker: absolute paths, drive prefixes and `..` rejected; no entry written through a symbolic link; link targets relative and inside the root (lexically, from the link's directory); hard links only to earlier regular files; special files skipped; only `rwx` mode bits kept | `traversal_rejected`, `symlink_escape_rejected`, `archive::tests` |
+| Atomic publish | Extract and verify in the staging directory, then one `rename`; any failure or cancellation removes staging and the partial download | `install_publishes_atomically`, `cancel_removes_staging`; `axiomd/tests/install.rs` (cancel through `$/cancel`) |
+| Uninstall removes exactly one directory | Provider id and version validated as names; the version path must be a real directory whose canonical parent is the provider directory under the toolchains root (a link out of the root is refused, its target kept) | `uninstall_removes_only_root` (before/after snapshot) |
+
+Installs run as their own task in the daemon, so a cancelled request that the RPC layer stops
+waiting for still completes its own cleanup.
+
 ## Shell webview (Tauri, M1.5)
 
 - Assets are bundled and served by Tauri's asset protocol from `dist/`; there

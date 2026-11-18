@@ -203,8 +203,28 @@ fn managed_candidates(
     out
 }
 
+/// The version of `tool` inside an install root (its `bin_dirs`), if it runs and matches.
+pub async fn tool_version_in_root(
+    tool: &ToolSpec,
+    root: &Path,
+    bin_dirs: &[String],
+) -> Option<String> {
+    let re = manifest::version_regex(&tool.version_regex).ok()?;
+    for d in bin_dirs {
+        for name in executable_names(&tool.program) {
+            let p = root.join(d).join(&name);
+            if p.is_file() {
+                if let Some(v) = run_version(&p, &tool.version_args, &re).await {
+                    return Some(v);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Directories under a managed root that hold executables: each archive method's `bin_dirs`.
-fn managed_bin_dirs(m: &ProviderManifest) -> Vec<String> {
+pub fn managed_bin_dirs(m: &ProviderManifest) -> Vec<String> {
     let mut dirs: Vec<String> = Vec::new();
     for i in &m.install {
         if let InstallMethod::Archive { bin_dirs, .. } = i {

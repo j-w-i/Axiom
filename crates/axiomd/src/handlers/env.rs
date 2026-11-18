@@ -1,9 +1,16 @@
 use crate::app::{internal, App};
 use axiom_env::{detect, HostPaths, Registry, Sources};
-use axiom_protocol::env::{DetectResult, ProvidersParams, ProvidersResult, TrustParams};
+use axiom_protocol::env::{
+    DetectResult, InstallParams, InstallPlan, InstallResult, Installed, PlanInstallParams,
+    Progress, ProvidersParams, ProvidersResult, TrustParams, UninstallParams, VersionsParams,
+    VersionsResult,
+};
 use axiom_protocol::lifecycle::Empty;
+use axiom_protocol::provider::ProviderManifest;
 use axiom_protocol::workspace::WorkspaceRef;
+use axiom_protocol::ErrorKind;
 use axiom_protocol::{RpcError, WorkspaceId};
+use axiom_rpc::RequestCtx;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -59,5 +66,75 @@ pub async fn trust(app: Arc<App>, p: TrustParams) -> Result<Empty, RpcError> {
         .map_or(0, |d| d.as_millis() as u64);
     app.store_call(move |s| s.set_workspace_trusted(&key, p.trusted, now))
         .await?;
+    Ok(Empty {})
+}
+
+/// The effective built-in or user provider with this id (installs use no workspace providers).
+async fn provider(app: &App, id: &str) -> Result<Option<ProviderManifest>, RpcError> {
+    Ok(registry(app, None).await?.get(id).cloned())
+}
+
+async fn known_provider(app: &App, id: &str) -> Result<ProviderManifest, RpcError> {
+    provider(app, id).await?.ok_or_else(|| {
+        RpcError::new(
+            ErrorKind::NotFound,
+            format!("There is no provider \"{id}\"."),
+        )
+    })
+}
+
+pub async fn versions(app: Arc<App>, p: VersionsParams) -> Result<VersionsResult, RpcError> {
+    let m = known_provider(&app, &p.provider_id).await?;
+    Ok(app.env.installer.versions(&m).await?)
+}
+
+pub async fn plan_install(app: Arc<App>, p: PlanInstallParams) -> Result<InstallPlan, RpcError> {
+    let m = known_provider(&app, &p.provider_id).await?;
+    Ok(app.env.installer.plan(&m, &p.version, p.method).await?)
+}
+
+/// Runs the install as its own task: when the request is cancelled the router stops waiting
+/// after a short grace period, but the install still sees the cancellation, removes its
+/// staging directory and partial download, and only then ends.
+pub async fn install(
+    app: Arc<App>,
+    p: InstallParams,
+    ctx: RequestCtx,
+) -> Result<InstallResult, RpcError> {
+    let current = match app.env.installer.plan_provider(&p.plan_id) {
+        Some(id) => provider(&app, &id).await?,
+        None => None,
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let notifier = ctx.notifier.clone();
+    let forward = tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = notifier.notify::<Progress>(progress).await;
+        }
+    });
+    let installer = app.env.installer.clone();
+    let cancel = ctx.cancel.clone();
+    let result = tokio::spawn(async move {
+        let report = move |progress| {
+            let _ = tx.send(progress);
+        };
+        installer
+            .install(&p.plan_id, current.as_ref(), &cancel, &report)
+            .await
+    })
+    .await
+    .map_err(|_| internal())?;
+    // Every progress notification is queued before `env/installed` and the response.
+    let _ = forward.await;
+    let r = result?;
+    let _ = ctx.notifier.notify::<Installed>(r.clone()).await;
+    Ok(r)
+}
+
+pub async fn uninstall(app: Arc<App>, p: UninstallParams) -> Result<Empty, RpcError> {
+    let installer = app.env.installer.clone();
+    tokio::task::spawn_blocking(move || installer.uninstall(&p.provider_id, &p.version))
+        .await
+        .map_err(|_| internal())??;
     Ok(Empty {})
 }

@@ -113,6 +113,21 @@ Methods and their errors: `ipc.md` §Protocol 0.2.
   (`[environment] rust = "1.84.0"`), which is human-readable and committed.
   The resolved lock (exact versions + digests) is `.axiom/project.lock`.
 
+### Installs (as built, M2-ENV-002)
+- `env/versions` reads the first `archive` method's version source (`static`, `json` with a
+  `*`-wildcard pointer, `github_releases` without drafts and pre-releases, tag prefix stripped),
+  keeps names usable as directory names, sorts newest first and caches the list for an hour.
+- `env/planInstall` picks the first archive method with an artifact for this OS/arch (or the
+  given `method`), expands `${version}` in the artifact and checksum URLs, asks the server for
+  the size (`HEAD`; absent if unknown), and lists `download → extract → verify` for each
+  required tool. Effects: `network`, `writeManaged`, `runPrograms` (verification runs the new
+  tool). Delegate and system-package methods come with M2-ENV-003/005 (`unsupported` until
+  then). Installs use built-in and user providers; workspace providers are not installable
+  (the 0.2 params name no workspace).
+- A checksum file is either one bare digest or `sha256sum` lines; the entry whose name equals
+  the artifact URL's last segment is used.
+- Security rules and their tests: `docs/architecture/security.md` §Managed installs.
+
 ## Template variables
 
 Only these expand, and only in the fields documented as templates:
