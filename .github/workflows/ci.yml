@@ -29,6 +29,9 @@ jobs:
       # crates/desktop-bridge's tests spawn the real daemon binary.
       - run: cargo build -p axiomd
       - run: cargo test --workspace --exclude axiom-desktop-tauri
+      # M2-ENV-003: a real managed Rust install (rustup-init + a minimal toolchain) into a
+      # temp data dir with a temp HOME, then uninstall. Needs the internet.
+      - run: cargo test -p axiom-env --features ci-install --test ci_install -- --nocapture
       - run: cargo run -q -p axiom-protocol --example export_schema -- --check
       - run: python3 scripts/tasks.py check
       - run: python3 scripts/check_deps.py

@@ -124,8 +124,40 @@ Methods and their errors: `ipc.md` §Protocol 0.2.
   tool). Delegate and system-package methods come with M2-ENV-003/005 (`unsupported` until
   then). Installs use built-in and user providers; workspace providers are not installable
   (the 0.2 params name no workspace).
-- A checksum file is either one bare digest or `sha256sum` lines; the entry whose name equals
-  the artifact URL's last segment is used.
+- A checksum file is either one bare digest or `sha256sum` lines; the entry whose base name
+  equals the artifact URL's last segment is used (`*./rustup-init` matches `rustup-init`).
+
+### Delegate installs (as built, M2-ENV-003)
+Additive manifest fields (all optional; older manifests are unchanged):
+
+| Field | On | Meaning |
+|-------|----|---------|
+| `format = "file"` | artifact | the download is the executable itself, placed at `${root}/<URL's last segment>` and made executable |
+| `provides = [toolId]` | `archive` | this method installs that tool for another method (a bootstrap); it is not offered on its own |
+| `setup = [argv]` | `archive` | run once after extraction inside the new root, with the method's `env` |
+| `bin_dirs` | `delegate` | where the delegate's installed executables live, relative to the root |
+| `versions` | `delegate` | the installable versions; absent = `list_versions` through the delegate on `PATH` |
+
+- A delegate plan is: the bootstrap archive's steps when an `archive` method `provides` the
+  `using` tool for this host (download, place, `setup`), else the delegate from `PATH`
+  (absent → `prerequisite_missing`); then `install` with argv[0] replaced by that delegate's
+  absolute path; then `verify` for each required tool, run with the delegate's `env`.
+- `install`, `uninstall` and `list_versions` must start with the `using` tool's program
+  (validated): a delegate method can only ever run its delegate.
+- Each managed version root is self-contained. For Rust: `${root}/rustup` (RUSTUP_HOME),
+  `${root}/cargo` (CARGO_HOME, with rustup's proxies in `cargo/bin`) and
+  `RUSTUP_TOOLCHAIN=${version}`. A rustup on the user's `PATH` is not used: its proxies would
+  not exist in the root. `~/.rustup`, `~/.cargo` and shell profiles are never written
+  (`rustup-init -y --no-modify-path --default-toolchain none`; the CI test runs with an empty
+  temporary HOME and asserts it stays empty).
+- Plans show `${root}` as the final root; execution runs in the staging directory with every
+  occurrence of the final root rewritten, then renames it into place.
+- Uninstall runs the delegate's `uninstall` command with the delegate from inside the root
+  (a failure is logged, not fatal), then removes the root.
+- Detection runs a managed tool with its method's `env` expanded for that root (rustup's
+  proxies need `RUSTUP_HOME` and `RUSTUP_TOOLCHAIN`).
+- A failing command is `io` with details `{ "exitCode", "output" }` (the last 2,000
+  characters of its output).
 - Security rules and their tests: `docs/architecture/security.md` §Managed installs.
 
 ## Template variables

@@ -36,6 +36,12 @@ pub enum EnvError {
     },
     #[error("{0}")]
     Spawn(String),
+    #[error("`{command}` failed (exit code {code:?}).")]
+    CommandFailed {
+        command: String,
+        code: Option<i32>,
+        output: String,
+    },
     #[error("{0}")]
     Unsupported(String),
     #[error("Cancelled.")]
@@ -74,6 +80,8 @@ impl From<EnvError> for RpcError {
             EnvError::Io { source, .. } => RpcError::new(ErrorKind::Io, msg)
                 .with_details(json!({ "osError": source.to_string() })),
             EnvError::Spawn(_) => RpcError::new(ErrorKind::SpawnFailed, msg),
+            EnvError::CommandFailed { code, output, .. } => RpcError::new(ErrorKind::Io, msg)
+                .with_details(json!({ "exitCode": code, "output": output })),
             EnvError::Unsupported(_) => RpcError::new(ErrorKind::Unsupported, msg),
             EnvError::Cancelled => RpcError::new(ErrorKind::Cancelled, msg),
         }

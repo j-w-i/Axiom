@@ -497,7 +497,7 @@ async fn uninstall_removes_only_root() {
     // A sibling outside the toolchains root, and a link that points at it.
     std::fs::write(data.path().join("keep.txt"), "k").unwrap();
     let before = snapshot(data.path());
-    inst.uninstall("demo", "1.2.3").unwrap();
+    inst.uninstall("demo", "1.2.3", None).await.unwrap();
     let after = snapshot(data.path());
     let removed: Vec<_> = before.iter().filter(|p| !after.contains(p)).collect();
     assert!(!removed.is_empty());
@@ -512,15 +512,15 @@ async fn uninstall_removes_only_root() {
     assert!(data.path().join("toolchains/demo/1.10.0").is_dir());
 
     assert!(matches!(
-        inst.uninstall("demo", "1.2.3"),
+        inst.uninstall("demo", "1.2.3", None).await,
         Err(EnvError::NotFound(_))
     ));
     assert!(matches!(
-        inst.uninstall("demo", ".."),
+        inst.uninstall("demo", "..", None).await,
         Err(EnvError::InvalidParams(_))
     ));
     assert!(matches!(
-        inst.uninstall("../demo", "1.10.0"),
+        inst.uninstall("../demo", "1.10.0", None).await,
         Err(EnvError::InvalidParams(_))
     ));
     #[cfg(unix)]
@@ -531,7 +531,7 @@ async fn uninstall_removes_only_root() {
         std::fs::write(outside.join("f"), "f").unwrap();
         std::os::unix::fs::symlink(&outside, data.path().join("toolchains/demo/9.9.9")).unwrap();
         assert!(matches!(
-            inst.uninstall("demo", "9.9.9"),
+            inst.uninstall("demo", "9.9.9", None).await,
             Err(EnvError::UnsafeArchive(_))
         ));
         assert!(outside.join("f").is_file());
@@ -587,7 +587,7 @@ async fn plan_immutable_and_expiring() {
     inst.install(&plan.plan_id, Some(&m), &tok, &p)
         .await
         .unwrap();
-    inst.uninstall("demo", "1.2.3").unwrap();
+    inst.uninstall("demo", "1.2.3", None).await.unwrap();
     assert!(matches!(
         inst.install(&plan.plan_id, Some(&m), &tok, &p).await,
         Err(EnvError::ApprovalDenied(_))

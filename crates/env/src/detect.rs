@@ -9,6 +9,7 @@ use crate::manifest;
 use crate::registry::Registry;
 use axiom_protocol::env::{DetectResult, ProviderDetection, ToolLocation, ToolStatus, Toolchain};
 use axiom_protocol::provider::{InstallMethod, ProviderManifest, ToolSpec};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -126,8 +127,8 @@ pub async fn detect_tool(
     let Ok(re) = manifest::version_regex(&tool.version_regex) else {
         return None;
     };
-    for (version_root, bin) in managed_candidates(m, &tool.program, host) {
-        if let Some(version) = run_version(&bin, &tool.version_args, &re).await {
+    for (version_root, bin, env) in managed_candidates(m, &tool.program, host) {
+        if let Some(version) = run_version(&bin, &tool.version_args, &env, &re).await {
             return Some(toolchain(
                 m,
                 tool,
@@ -139,7 +140,7 @@ pub async fn detect_tool(
         }
     }
     for bin in path_candidates(&tool.program, host.path.as_deref()) {
-        if let Some(version) = run_version(&bin, &tool.version_args, &re).await {
+        if let Some(version) = run_version(&bin, &tool.version_args, &BTreeMap::new(), &re).await {
             return Some(toolchain(
                 m,
                 tool,
@@ -175,7 +176,7 @@ fn managed_candidates(
     m: &ProviderManifest,
     program: &str,
     host: &HostPaths,
-) -> Vec<(PathBuf, PathBuf)> {
+) -> Vec<(PathBuf, PathBuf, BTreeMap<String, String>)> {
     let provider_dir = host.toolchains_dir.join(&m.id);
     let Ok(read) = std::fs::read_dir(&provider_dir) else {
         return Vec::new();
@@ -188,14 +189,14 @@ fn managed_candidates(
         .filter(|(n, _)| !n.starts_with('.'))
         .collect();
     versions.sort_by(|a, b| compare_versions(&b.0, &a.0));
-    let bin_dirs = managed_bin_dirs(m);
+    let layouts = managed_layouts(m);
     let mut out = Vec::new();
-    for (_, root) in versions {
-        for d in &bin_dirs {
+    for (version, root) in versions {
+        for (d, env) in &layouts {
             for name in executable_names(program) {
                 let p = root.join(d).join(&name);
                 if p.is_file() {
-                    out.push((root.clone(), p));
+                    out.push((root.clone(), p, expand_env(env, &version, &root)));
                 }
             }
         }
@@ -203,18 +204,32 @@ fn managed_candidates(
     out
 }
 
+/// `env` with `${version}` and `${root}` expanded for one managed root.
+pub fn expand_env(
+    env: &BTreeMap<String, String>,
+    version: &str,
+    root: &Path,
+) -> BTreeMap<String, String> {
+    let root = root.to_string_lossy();
+    env.iter()
+        .map(|(k, v)| (k.clone(), manifest::expand(v, version, &root)))
+        .collect()
+}
+
 /// The version of `tool` inside an install root (its `bin_dirs`), if it runs and matches.
+/// `env` is set for the version command (already expanded for this root).
 pub async fn tool_version_in_root(
     tool: &ToolSpec,
     root: &Path,
     bin_dirs: &[String],
+    env: &BTreeMap<String, String>,
 ) -> Option<String> {
     let re = manifest::version_regex(&tool.version_regex).ok()?;
     for d in bin_dirs {
         for name in executable_names(&tool.program) {
             let p = root.join(d).join(&name);
             if p.is_file() {
-                if let Some(v) = run_version(&p, &tool.version_args, &re).await {
+                if let Some(v) = run_version(&p, &tool.version_args, env, &re).await {
                     return Some(v);
                 }
             }
@@ -223,19 +238,23 @@ pub async fn tool_version_in_root(
     None
 }
 
-/// Directories under a managed root that hold executables: each archive method's `bin_dirs`.
-pub fn managed_bin_dirs(m: &ProviderManifest) -> Vec<String> {
-    let mut dirs: Vec<String> = Vec::new();
+/// Where a managed root keeps executables, and the variables they need: each archive and
+/// delegate method's `bin_dirs` with that method's `env` (unexpanded).
+pub fn managed_layouts(m: &ProviderManifest) -> Vec<(String, BTreeMap<String, String>)> {
+    let mut out: Vec<(String, BTreeMap<String, String>)> = Vec::new();
     for i in &m.install {
-        if let InstallMethod::Archive { bin_dirs, .. } = i {
-            for d in bin_dirs {
-                if !dirs.contains(d) {
-                    dirs.push(d.clone());
-                }
+        let (dirs, env) = match i {
+            InstallMethod::Archive { bin_dirs, env, .. } => (bin_dirs, env),
+            InstallMethod::Delegate { bin_dirs, env, .. } => (bin_dirs, env),
+            InstallMethod::SystemPackage { .. } => continue,
+        };
+        for d in dirs {
+            if !out.iter().any(|(x, _)| x == d) {
+                out.push((d.clone(), env.clone()));
             }
         }
     }
-    dirs
+    out
 }
 
 /// Dotted numeric comparison (`1.10.0` > `1.9.2`); non-numeric parts compare as text.
@@ -254,7 +273,7 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     pa.len().cmp(&pb.len())
 }
 
-fn executable_names(program: &str) -> Vec<String> {
+pub fn executable_names(program: &str) -> Vec<String> {
     if cfg!(windows) {
         ["exe", "cmd", "bat"]
             .iter()
@@ -265,7 +284,7 @@ fn executable_names(program: &str) -> Vec<String> {
     }
 }
 
-fn path_candidates(program: &str, path: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
+pub fn path_candidates(program: &str, path: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
     let Some(path) = path else {
         return Vec::new();
     };
@@ -285,9 +304,15 @@ fn path_candidates(program: &str, path: Option<&std::ffi::OsStr>) -> Vec<PathBuf
 }
 
 /// Runs `bin args…` and extracts the version from stdout, else stderr.
-async fn run_version(bin: &Path, args: &[String], re: &regex::Regex) -> Option<String> {
+async fn run_version(
+    bin: &Path,
+    args: &[String],
+    env: &BTreeMap<String, String>,
+    re: &regex::Regex,
+) -> Option<String> {
     let mut cmd = tokio::process::Command::new(bin);
     cmd.args(args)
+        .envs(env)
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

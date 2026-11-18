@@ -17,16 +17,32 @@ use std::path::{Component, Path, PathBuf};
 
 /// Extracts `archive` into the existing, empty directory `root`, dropping the first
 /// `strip_components` path components of every entry. `cancelled` is polled between entries.
-/// Returns the number of entries written.
+/// For [`ArchiveFormat::File`] the download itself is copied to `root/<file_name>` and made
+/// executable. Returns the number of entries written.
 pub fn extract(
     archive: &Path,
     format: ArchiveFormat,
     strip_components: u32,
+    file_name: &str,
     root: &Path,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<u64, EnvError> {
     let file = File::open(archive).map_err(EnvError::io("Cannot open the downloaded archive"))?;
     match format {
+        ArchiveFormat::File => {
+            let Some(rel) = entry_path(file_name, 0)? else {
+                return Err(EnvError::UnsafeArchive(
+                    "the download has no file name".into(),
+                ));
+            };
+            if rel.components().count() != 1 {
+                return Err(EnvError::UnsafeArchive(format!(
+                    "unusable file name `{file_name}`"
+                )));
+            }
+            write_file(&root.join(rel), file, Some(0o755))?;
+            Ok(1)
+        }
         ArchiveFormat::TarGz => extract_tar(
             flate2::read::GzDecoder::new(file),
             strip_components,

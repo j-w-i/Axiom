@@ -110,6 +110,15 @@ pub enum InstallMethod {
         /// Extra environment variables; `${root}` expands to the install root.
         #[serde(default)]
         env: BTreeMap<String, String>,
+        /// Tool ids this method installs for another method to use (e.g. `rustup` for the
+        /// `delegate` method). Such a method only bootstraps: it is not offered on its own.
+        /// Added in M2-ENV-003.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        provides: Vec<String>,
+        /// argv run once after extraction, inside the new root, with `env`; `${root}` and
+        /// `${version}` expand. Never through a shell. Added in M2-ENV-003.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        setup: Vec<String>,
     },
     /// Delegate to the ecosystem's own installer (rustup, swiftly, uv...).
     /// Runs with managed HOME-style variables so nothing global is modified
@@ -126,6 +135,14 @@ pub enum InstallMethod {
         list_versions: Vec<String>,
         #[serde(default)]
         env: BTreeMap<String, String>,
+        /// Directories (relative to the install root) holding the installed executables.
+        /// Added in M2-ENV-003.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bin_dirs: Vec<String>,
+        /// Where installable versions come from; absent = run `list_versions` through the
+        /// delegate. Added in M2-ENV-003.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        versions: Option<VersionSource>,
     },
     /// Install through the host's package manager. Always `system` scope and
     /// always requires explicit user approval.
@@ -182,6 +199,10 @@ pub enum ArchiveFormat {
     TarXz,
     #[serde(rename = "zip")]
     Zip,
+    /// The download is the file itself (a single executable, e.g. `rustup-init`), placed at
+    /// the root under its URL's last path segment, executable. Added in M2-ENV-003.
+    #[serde(rename = "file")]
+    File,
 }
 
 /// Integrity is mandatory: an artifact without a verifiable SHA-256 is not

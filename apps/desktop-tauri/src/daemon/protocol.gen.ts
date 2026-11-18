@@ -4,7 +4,7 @@
 //   cargo run -p axiom-protocol --example export_schema
 // then regenerate this file. `pnpm run check:types` fails when it is stale (ADR-0005).
 
-export type ArchiveFormat = "tar.gz" | "tar.xz" | "zip";
+export type ArchiveFormat = ("tar.gz" | "tar.xz" | "zip") | "file";
 /**
  * A path inside a workspace: relative to the workspace root, `/`-separated,
  * UTF-8, with no `.`/`..` segments, no leading `/`, and no trailing `/`.

@@ -79,7 +79,19 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                 artifacts,
                 bin_dirs,
                 env,
+                provides,
+                setup,
             } => {
+                for t in provides {
+                    if !m.tools.iter().any(|x| &x.id == t) {
+                        errors.push(format!(
+                            "{at}: provides \"{t}\", which is not one of the tools"
+                        ));
+                    }
+                }
+                for s in setup {
+                    check_template(s, &format!("{at} setup"), &mut errors);
+                }
                 match versions {
                     VersionSource::Static { versions } if versions.is_empty() => {
                         errors.push(format!("{at}: the static version list is empty"));
@@ -94,6 +106,19 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                 }
                 for a in artifacts {
                     check_template(&a.url, &format!("{at} artifact url"), &mut errors);
+                    if a.format == axiom_protocol::provider::ArchiveFormat::File {
+                        if a.strip_components != 0 {
+                            errors.push(format!(
+                                "{at}: a \"file\" artifact has no components to strip"
+                            ));
+                        }
+                        let name = a.url.rsplit('/').next().unwrap_or_default();
+                        if name.is_empty() || name.contains("${") || name.starts_with('.') {
+                            errors.push(format!(
+                                "{at}: a \"file\" artifact URL must end in a fixed file name"
+                            ));
+                        }
+                    }
                     match &a.checksum {
                         Checksum::Sha256 { values } => {
                             if values.is_empty() {
@@ -115,11 +140,7 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                         }
                     }
                 }
-                for d in bin_dirs {
-                    if d.starts_with(['/', '\\']) || d.split(['/', '\\']).any(|c| c == "..") {
-                        errors.push(format!("{at}: bin_dir \"{d}\" must stay inside the root"));
-                    }
-                }
+                check_bin_dirs(bin_dirs, &at, &mut errors);
                 for (k, v) in env {
                     check_template(v, &format!("{at} env {k}"), &mut errors);
                 }
@@ -130,12 +151,31 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                 uninstall,
                 list_versions,
                 env,
+                bin_dirs,
+                versions,
                 ..
             } => {
-                if !m.tools.iter().any(|t| &t.id == using) {
+                let program = m.tools.iter().find(|t| &t.id == using).map(|t| &t.program);
+                if program.is_none() {
                     errors.push(format!(
                         "{at}: `using = \"{using}\"` is not one of the tools"
                     ));
+                }
+                // A delegate method can only ever run its delegate.
+                for (what, argv) in [
+                    ("install", install),
+                    ("uninstall", uninstall),
+                    ("list_versions", list_versions),
+                ] {
+                    if let (Some(first), Some(p)) = (argv.first(), program) {
+                        if first != p {
+                            errors.push(format!("{at}: {what} must start with \"{p}\""));
+                        }
+                    }
+                }
+                check_bin_dirs(bin_dirs, &at, &mut errors);
+                if let Some(VersionSource::Json { url, .. }) = versions {
+                    check_template(url, &at, &mut errors);
                 }
                 for (what, argv) in [
                     ("install", install),
@@ -163,6 +203,15 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
     errors
 }
 
+fn check_bin_dirs(dirs: &[String], at: &str, errors: &mut Vec<String>) {
+    for d in dirs {
+        if d.starts_with(['/', '\\']) || d.contains(':') || d.split(['/', '\\']).any(|c| c == "..")
+        {
+            errors.push(format!("{at}: bin_dir \"{d}\" must stay inside the root"));
+        }
+    }
+}
+
 /// `[a-z0-9][a-z0-9-]*`.
 pub fn valid_id(id: &str) -> bool {
     let mut chars = id.chars();
@@ -184,6 +233,11 @@ pub fn version_regex(pattern: &str) -> Result<Regex, String> {
             "version_regex must have exactly one capture group, it has {n}"
         )),
     }
+}
+
+/// Expands `${version}` and `${root}` (the only variables available outside a workspace).
+pub fn expand(s: &str, version: &str, root: &str) -> String {
+    s.replace("${version}", version).replace("${root}", root)
 }
 
 /// The `${name}` variables a string uses, or an error for a malformed `${`.

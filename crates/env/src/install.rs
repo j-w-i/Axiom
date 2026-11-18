@@ -10,6 +10,16 @@
 //! A plan is issued once, lives 10 minutes, executes at most once, and only while the
 //! provider's manifest is unchanged. Install executes the plan's own steps; nothing is
 //! extracted or run before its download's SHA-256 matches.
+//!
+//! Methods (M2-ENV-002, M2-ENV-003):
+//! - `archive`: download → extract → optional `setup` run → verify.
+//! - `delegate`: the ecosystem installer runs with its home variables inside the new root.
+//!   When an `archive` method `provides` the delegate tool, the plan first installs it into
+//!   the same root (rustup-init for rustup); otherwise the delegate must be on `PATH`.
+//!
+//! Plans show `${root}` expanded to the final root. Execution happens in the staging
+//! directory: every argv element and variable naming the final root is rewritten to the
+//! staging root, and the finished staging directory is renamed into place.
 
 use crate::archive;
 use crate::detect::{self, compare_versions};
@@ -23,7 +33,7 @@ use axiom_protocol::env::{
 use axiom_protocol::lifecycle::HostOs;
 use axiom_protocol::provider::{Checksum, InstallMethod, InstallScope, Platform, ProviderManifest};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -35,13 +45,26 @@ pub const PLAN_LIFETIME: Duration = Duration::from_secs(10 * 60);
 pub const VERSIONS_TTL: Duration = Duration::from_secs(60 * 60);
 /// At most this many progress notifications per second.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+/// How much of a failed command's output an error carries.
+const OUTPUT_TAIL: usize = 2000;
 
 struct Issued {
     plan: InstallPlan,
     /// The manifest the plan was made from; the install is refused if it changed.
     manifest: ProviderManifest,
-    method: usize,
+    /// The final root as it appears in the plan's steps.
+    final_root: String,
+    /// Where `Verify` looks, and the variables it sets (expanded for the final root).
+    verify_bin_dirs: Vec<String>,
+    verify_env: BTreeMap<String, String>,
     expires: Instant,
+}
+
+/// Steps and verification layout for one method.
+struct Built {
+    steps: Vec<Step>,
+    bin_dirs: Vec<String>,
+    env: BTreeMap<String, String>,
 }
 
 /// Plans and executes installs. One per daemon.
@@ -163,39 +186,87 @@ impl Installer {
         v
     }
 
-    /// `env/versions`: the first archive method's version source (cached for an hour), and
-    /// what is installed.
+    /// `env/versions`: from the first offered method (an archive's version source, a delegate's
+    /// `versions`, else the delegate's `list_versions` run from `PATH`), cached for an hour;
+    /// and what is installed.
     pub async fn versions(&self, m: &ProviderManifest) -> Result<VersionsResult, EnvError> {
-        let source = m.install.iter().find_map(|i| match i {
-            InstallMethod::Archive { versions, .. } => Some(versions),
-            _ => None,
-        });
-        let available = match source {
-            None => Vec::new(),
-            Some(src) => {
-                let key = format!(
-                    "{}\n{}",
-                    m.id,
-                    serde_json::to_string(src).unwrap_or_default()
-                );
-                let cached = lock(&self.versions)
-                    .get(&key)
-                    .filter(|(at, _)| at.elapsed() < VERSIONS_TTL)
-                    .map(|(_, v)| v.clone());
-                match cached {
-                    Some(v) => v,
-                    None => {
-                        let v = self.http.versions(src).await?;
-                        lock(&self.versions).insert(key, (Instant::now(), v.clone()));
-                        v
-                    }
+        let mut available = Vec::new();
+        for i in &m.install {
+            match i {
+                InstallMethod::Archive { provides, .. } if !provides.is_empty() => continue,
+                InstallMethod::Archive { versions, .. }
+                | InstallMethod::Delegate {
+                    versions: Some(versions),
+                    ..
+                } => {
+                    available = self.cached_versions(&m.id, versions).await?;
+                    break;
                 }
+                InstallMethod::Delegate {
+                    using,
+                    list_versions,
+                    ..
+                } => {
+                    available = self.delegate_versions(m, using, list_versions).await?;
+                    break;
+                }
+                InstallMethod::SystemPackage { .. } => continue,
             }
-        };
+        }
         Ok(VersionsResult {
             available,
             installed: self.installed(&m.id),
         })
+    }
+
+    async fn cached_versions(
+        &self,
+        provider_id: &str,
+        src: &axiom_protocol::provider::VersionSource,
+    ) -> Result<Vec<String>, EnvError> {
+        let key = format!(
+            "{provider_id}\n{}",
+            serde_json::to_string(src).unwrap_or_default()
+        );
+        let cached = lock(&self.versions)
+            .get(&key)
+            .filter(|(at, _)| at.elapsed() < VERSIONS_TTL)
+            .map(|(_, v)| v.clone());
+        if let Some(v) = cached {
+            return Ok(v);
+        }
+        let v = self.http.versions(src).await?;
+        lock(&self.versions).insert(key, (Instant::now(), v.clone()));
+        Ok(v)
+    }
+
+    /// Runs `list_versions` with the delegate found on `PATH`; the first word of each line
+    /// that is a usable version, newest first.
+    async fn delegate_versions(
+        &self,
+        m: &ProviderManifest,
+        using: &str,
+        argv: &[String],
+    ) -> Result<Vec<String>, EnvError> {
+        let program = system_tool(m, using)?;
+        let mut full = vec![program.to_string_lossy().into_owned()];
+        full.extend(argv.iter().skip(1).cloned());
+        let out = run_program(
+            &full,
+            &BTreeMap::new(),
+            &std::env::temp_dir(),
+            &CancellationToken::new(),
+        )
+        .await?;
+        let mut v: Vec<String> = out
+            .lines()
+            .filter_map(|l| l.split_whitespace().next())
+            .filter(|w| valid_version(w))
+            .map(String::from)
+            .collect();
+        v.sort_by(|a, b| compare_versions(b, a));
+        v.dedup();
+        Ok(v)
     }
 
     fn new_plan_id(&self) -> String {
@@ -217,7 +288,7 @@ impl Installer {
         hex::encode(&d.finalize()[..16])
     }
 
-    /// `env/planInstall`. Runs nothing; at most a `HEAD` request for the download size.
+    /// `env/planInstall`. Runs nothing; at most a `HEAD` request per download for its size.
     pub async fn plan(
         &self,
         m: &ProviderManifest,
@@ -236,76 +307,135 @@ impl Installer {
                 m.name
             )));
         }
-        if self.toolchains_dir().join(&m.id).join(version).exists() {
+        let final_root = self.toolchains_dir().join(&m.id).join(version);
+        if final_root.exists() {
             return Err(EnvError::AlreadyExists(format!(
                 "{} {version} is already installed.",
                 m.name
             )));
         }
-        let (index, chosen) = match method {
+        let root = final_root.to_string_lossy().into_owned();
+        let index = match method {
+            Some(i) if (i as usize) < m.install.len() => i as usize,
             Some(i) => {
-                let im = m.install.get(i as usize).ok_or_else(|| {
-                    EnvError::InvalidParams(format!("{} has no install method {i}", m.id))
-                })?;
-                (i as usize, im)
+                return Err(EnvError::InvalidParams(format!(
+                    "{} has no install method {i}",
+                    m.id
+                )))
             }
             None => m
                 .install
                 .iter()
-                .enumerate()
-                .find(|(_, im)| match im {
-                    InstallMethod::Archive { artifacts, .. } => artifacts
-                        .iter()
-                        .any(|a| platform_matches(&a.platform, &host)),
-                    _ => false,
+                .position(|im| match im {
+                    InstallMethod::Archive {
+                        artifacts,
+                        provides,
+                        ..
+                    } => {
+                        provides.is_empty()
+                            && artifacts
+                                .iter()
+                                .any(|a| platform_matches(&a.platform, &host))
+                    }
+                    InstallMethod::Delegate { .. } => true,
+                    InstallMethod::SystemPackage { .. } => false,
                 })
                 .ok_or_else(|| {
                     EnvError::UnsupportedPlatform(format!(
-                        "{} has no managed download for this platform.",
+                        "{} has no managed install for this platform.",
                         m.name
                     ))
                 })?,
         };
-        let InstallMethod::Archive { artifacts, .. } = chosen else {
-            return Err(EnvError::Unsupported(
-                "Only archive installs are available yet.".into(),
-            ));
-        };
-        let artifact = artifacts
-            .iter()
-            .find(|a| platform_matches(&a.platform, &host))
-            .ok_or_else(|| {
-                EnvError::UnsupportedPlatform(format!(
-                    "{} has no download for this platform.",
-                    m.name
+        let built = match &m.install[index] {
+            archive @ InstallMethod::Archive { .. } => {
+                build_archive(m, archive, version, &root, &host)?
+            }
+            InstallMethod::Delegate {
+                using,
+                install,
+                env,
+                bin_dirs,
+                ..
+            } => {
+                let mut steps = Vec::new();
+                let bootstrap = m.install.iter().find(|im| match im {
+                    InstallMethod::Archive {
+                        provides,
+                        artifacts,
+                        ..
+                    } => {
+                        provides.contains(using)
+                            && artifacts
+                                .iter()
+                                .any(|a| platform_matches(&a.platform, &host))
+                    }
+                    _ => false,
+                });
+                let tool = m.tools.iter().find(|t| &t.id == using).ok_or_else(|| {
+                    EnvError::InvalidParams(format!("{} has no tool {using}", m.id))
+                })?;
+                let delegate = match bootstrap {
+                    Some(b) => {
+                        let built = build_archive(m, b, version, &root, &host)?;
+                        steps.extend(built.steps);
+                        let dir = built.bin_dirs.first().cloned().unwrap_or_default();
+                        let name = detect::executable_names(&tool.program)
+                            .into_iter()
+                            .next()
+                            .unwrap_or_default();
+                        Path::new(&root).join(dir).join(name)
+                    }
+                    None => system_tool(m, using)?,
+                };
+                let mut argv = vec![delegate.to_string_lossy().into_owned()];
+                argv.extend(
+                    install
+                        .iter()
+                        .skip(1)
+                        .map(|a| manifest::expand(a, version, &root)),
+                );
+                let env = expand_map(env, version, &root);
+                steps.push(Step::Run {
+                    argv,
+                    env: env.clone(),
+                });
+                Built {
+                    steps,
+                    bin_dirs: bin_dirs.clone(),
+                    env,
+                }
+            }
+            InstallMethod::SystemPackage { .. } => {
+                return Err(EnvError::Unsupported(
+                    "System package installs are not available yet.".into(),
                 ))
-            })?;
-        let url = expand_version(&artifact.url, version)?;
-        let sha256 = match &artifact.checksum {
-            Checksum::Sha256 { values } => Sha256Source::Digest {
-                value: values.get(version).cloned().ok_or_else(|| {
-                    EnvError::NotFound(format!(
-                        "The provider lists no checksum for {} {version}.",
-                        m.name
-                    ))
-                })?,
-            },
-            Checksum::Sha256Url { url } => Sha256Source::Url {
-                url: expand_version(url, version)?,
-            },
+            }
         };
-        let bytes = self.http.size(&url).await;
-        let mut steps = vec![
-            Step::Download { url, bytes, sha256 },
-            Step::Extract {
-                format: artifact.format,
-                strip_components: artifact.strip_components,
-            },
-        ];
+        let mut steps = built.steps;
         for t in m.tools.iter().filter(|t| t.required) {
             steps.push(Step::Verify {
                 tool_id: t.id.clone(),
             });
+        }
+        // Sizes, where the servers state them.
+        let mut total = Some(0u64);
+        for s in steps.iter_mut() {
+            if let Step::Download { url, bytes, .. } = s {
+                *bytes = self.http.size(url).await;
+                total = total.zip(*bytes).map(|(a, b)| a + b);
+            }
+        }
+        let has_download = steps.iter().any(|s| matches!(s, Step::Download { .. }));
+        let mut effects = Vec::new();
+        if has_download {
+            effects.push(Effect::Network);
+        }
+        effects.push(Effect::WriteManaged);
+        effects.push(Effect::RunPrograms);
+        if steps.iter().any(|s| matches!(s, Step::Run { .. })) && !has_download {
+            // A delegate from PATH downloads by itself.
+            effects.insert(0, Effect::Network);
         }
         let plan = InstallPlan {
             plan_id: self.new_plan_id(),
@@ -313,8 +443,8 @@ impl Installer {
             version: version.to_string(),
             scope: InstallScope::Managed,
             steps,
-            download_bytes: bytes,
-            effects: vec![Effect::Network, Effect::WriteManaged, Effect::RunPrograms],
+            download_bytes: if has_download { total } else { None },
+            effects,
             expires_ms: now_ms() + self.plan_lifetime.as_millis() as u64,
         };
         let mut plans = lock(&self.plans);
@@ -324,7 +454,9 @@ impl Installer {
             Issued {
                 plan: plan.clone(),
                 manifest: m.clone(),
-                method: index,
+                final_root: root,
+                verify_bin_dirs: built.bin_dirs,
+                verify_env: built.env,
                 expires: Instant::now() + self.plan_lifetime,
             },
         );
@@ -361,10 +493,6 @@ impl Installer {
         }
         let plan = &issued.plan;
         let m = &issued.manifest;
-        let bin_dirs = match &m.install[issued.method] {
-            InstallMethod::Archive { bin_dirs, .. } => bin_dirs.clone(),
-            _ => Vec::new(),
-        };
         let steps = plan.steps.len() as u32;
         let report = |step: usize, label: String, done: Option<u64>, total: Option<u64>| {
             progress(InstallProgress {
@@ -385,8 +513,11 @@ impl Installer {
         std::fs::create_dir(&staging)
             .map_err(EnvError::io("Cannot create the staging directory"))?;
         let mut cleanup = Cleanup(Some(staging.clone()));
+        let staging_str = staging.to_string_lossy().into_owned();
+        let relocate = |s: &str| s.replace(issued.final_root.as_str(), &staging_str);
 
         let mut archive_path: Option<PathBuf> = None;
+        let mut download_name = String::new();
         let mut verified = Vec::new();
         for (i, step) in plan.steps.iter().enumerate() {
             if cancel.is_cancelled() {
@@ -397,6 +528,7 @@ impl Installer {
                     report(i, format!("Downloading {}", file_name_of(url)), None, None);
                     let path = self.download(plan, i, url, sha256, cancel, &report).await?;
                     archive_path = Some(path);
+                    download_name = file_name_of(url);
                 }
                 Step::Extract {
                     format,
@@ -408,8 +540,9 @@ impl Installer {
                     };
                     let (format, strip, dest, c) =
                         (*format, *strip_components, staging.clone(), cancel.clone());
+                    let name = download_name.clone();
                     tokio::task::spawn_blocking(move || {
-                        archive::extract(&src, format, strip, &dest, &|| c.is_cancelled())
+                        archive::extract(&src, format, strip, &name, &dest, &|| c.is_cancelled())
                     })
                     .await
                     .map_err(|_| EnvError::Unsupported("extraction task failed".into()))??;
@@ -419,18 +552,31 @@ impl Installer {
                     let tool = m.tools.iter().find(|t| &t.id == tool_id).ok_or_else(|| {
                         EnvError::NotFound(format!("The provider has no tool {tool_id}."))
                     })?;
-                    let version = detect::tool_version_in_root(tool, &staging, &bin_dirs)
-                        .await
-                        .ok_or_else(|| {
-                            EnvError::NotFound(format!(
-                                "{tool_id} did not run from the installed files."
-                            ))
-                        })?;
+                    let env: BTreeMap<String, String> = issued
+                        .verify_env
+                        .iter()
+                        .map(|(k, v)| (k.clone(), relocate(v)))
+                        .collect();
+                    let version =
+                        detect::tool_version_in_root(tool, &staging, &issued.verify_bin_dirs, &env)
+                            .await
+                            .ok_or_else(|| {
+                                EnvError::NotFound(format!(
+                                    "{tool_id} did not run from the installed files."
+                                ))
+                            })?;
                     verified.push((tool.id.clone(), version));
                 }
-                Step::Run { .. } | Step::SystemPackages { .. } => {
+                Step::Run { argv, env } => {
+                    report(i, format!("Running {}", command_label(argv)), None, None);
+                    let argv: Vec<String> = argv.iter().map(|a| relocate(a)).collect();
+                    let env: BTreeMap<String, String> =
+                        env.iter().map(|(k, v)| (k.clone(), relocate(v))).collect();
+                    run_program(&argv, &env, &staging, cancel).await?;
+                }
+                Step::SystemPackages { .. } => {
                     return Err(EnvError::Unsupported(
-                        "This plan step is not available yet.".into(),
+                        "System package installs are not available yet.".into(),
                     ));
                 }
             }
@@ -541,8 +687,33 @@ impl Installer {
         Ok(cached)
     }
 
-    /// `env/uninstall`: removes `toolchains/<provider>/<version>` and nothing else.
-    pub fn uninstall(&self, provider_id: &str, version: &str) -> Result<(), EnvError> {
+    /// `env/uninstall`: runs a delegate's declared `uninstall` command with the delegate from
+    /// inside the root (its failure is logged, not fatal), then removes
+    /// `toolchains/<provider>/<version>` and nothing else.
+    pub async fn uninstall(
+        &self,
+        provider_id: &str,
+        version: &str,
+        m: Option<&ProviderManifest>,
+    ) -> Result<(), EnvError> {
+        let dir = self.checked_install_dir(provider_id, version)?;
+        if let Some(m) = m.filter(|m| m.id == provider_id) {
+            if let Some((argv, env)) = delegate_uninstall(m, version, &dir) {
+                if let Err(e) = run_program(&argv, &env, &dir, &CancellationToken::new()).await {
+                    tracing::warn!("{provider_id} {version}: the uninstall command failed: {e}");
+                }
+            }
+        }
+        let resolved = self.checked_install_dir(provider_id, version)?;
+        tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&resolved))
+            .await
+            .map_err(|_| EnvError::Unsupported("removal task failed".into()))?
+            .map_err(EnvError::io("Cannot remove the install"))
+    }
+
+    /// The canonical version directory, if it is a real directory directly inside the
+    /// provider's toolchains directory.
+    fn checked_install_dir(&self, provider_id: &str, version: &str) -> Result<PathBuf, EnvError> {
         if !manifest::valid_id(provider_id) || !valid_version(version) {
             return Err(EnvError::InvalidParams(
                 "Not a provider id and version.".into(),
@@ -572,8 +743,201 @@ impl Installer {
                 "{provider_id}/{version} resolves outside the toolchains directory; not removed"
             )));
         }
-        std::fs::remove_dir_all(&resolved).map_err(EnvError::io("Cannot remove the install"))
+        Ok(resolved)
     }
+}
+
+fn expand_map(
+    env: &BTreeMap<String, String>,
+    version: &str,
+    root: &str,
+) -> BTreeMap<String, String> {
+    env.iter()
+        .map(|(k, v)| (k.clone(), manifest::expand(v, version, root)))
+        .collect()
+}
+
+/// Download, extract and (if declared) setup steps of an archive method for this host.
+fn build_archive(
+    m: &ProviderManifest,
+    method: &InstallMethod,
+    version: &str,
+    root: &str,
+    host: &Platform,
+) -> Result<Built, EnvError> {
+    let InstallMethod::Archive {
+        artifacts,
+        bin_dirs,
+        env,
+        setup,
+        ..
+    } = method
+    else {
+        return Err(EnvError::InvalidParams("not an archive method".into()));
+    };
+    let artifact = artifacts
+        .iter()
+        .find(|a| platform_matches(&a.platform, host))
+        .ok_or_else(|| {
+            EnvError::UnsupportedPlatform(format!("{} has no download for this platform.", m.name))
+        })?;
+    let url = expand_version(&artifact.url, version)?;
+    let sha256 = match &artifact.checksum {
+        Checksum::Sha256 { values } => Sha256Source::Digest {
+            value: values.get(version).cloned().ok_or_else(|| {
+                EnvError::NotFound(format!(
+                    "The provider lists no checksum for {} {version}.",
+                    m.name
+                ))
+            })?,
+        },
+        Checksum::Sha256Url { url } => Sha256Source::Url {
+            url: expand_version(url, version)?,
+        },
+    };
+    let env = expand_map(env, version, root);
+    let mut steps = vec![
+        Step::Download {
+            url,
+            bytes: None,
+            sha256,
+        },
+        Step::Extract {
+            format: artifact.format,
+            strip_components: artifact.strip_components,
+        },
+    ];
+    if !setup.is_empty() {
+        steps.push(Step::Run {
+            argv: setup
+                .iter()
+                .map(|a| manifest::expand(a, version, root))
+                .collect(),
+            env: env.clone(),
+        });
+    }
+    Ok(Built {
+        steps,
+        bin_dirs: bin_dirs.clone(),
+        env,
+    })
+}
+
+/// A tool of the provider found on the daemon's `PATH`.
+fn system_tool(m: &ProviderManifest, tool_id: &str) -> Result<PathBuf, EnvError> {
+    let tool = m
+        .tools
+        .iter()
+        .find(|t| t.id == tool_id)
+        .ok_or_else(|| EnvError::InvalidParams(format!("{} has no tool {tool_id}", m.id)))?;
+    let path = std::env::var_os("PATH");
+    detect::path_candidates(&tool.program, path.as_deref())
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            EnvError::PrerequisiteMissing(
+                format!(
+                    "{} needs {} to install, and it was not found.",
+                    m.name, tool.program
+                ),
+                vec![tool_id.to_string()],
+            )
+        })
+}
+
+/// The delegate's uninstall command for an installed root, if the delegate is inside it.
+fn delegate_uninstall(
+    m: &ProviderManifest,
+    version: &str,
+    root: &Path,
+) -> Option<(Vec<String>, BTreeMap<String, String>)> {
+    let (using, uninstall, env) = m.install.iter().find_map(|i| match i {
+        InstallMethod::Delegate {
+            using,
+            uninstall,
+            env,
+            ..
+        } if !uninstall.is_empty() => Some((using, uninstall, env)),
+        _ => None,
+    })?;
+    let program = &m.tools.iter().find(|t| &t.id == using)?.program;
+    let root_s = root.to_string_lossy().into_owned();
+    let exe = detect::managed_layouts(m).into_iter().find_map(|(d, _)| {
+        detect::executable_names(program)
+            .into_iter()
+            .map(|n| root.join(&d).join(n))
+            .find(|p| p.is_file())
+    })?;
+    let mut argv = vec![exe.to_string_lossy().into_owned()];
+    argv.extend(
+        uninstall
+            .iter()
+            .skip(1)
+            .map(|a| manifest::expand(a, version, &root_s)),
+    );
+    Some((argv, expand_map(env, version, &root_s)))
+}
+
+fn command_label(argv: &[String]) -> String {
+    let mut parts = argv.iter();
+    let program = parts
+        .next()
+        .map(|p| {
+            Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.clone())
+        })
+        .unwrap_or_default();
+    std::iter::once(program)
+        .chain(parts.cloned())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Runs argv (never through a shell) with extra variables, stdin closed. Returns stdout;
+/// a non-zero exit is an error carrying the end of the combined output.
+pub async fn run_program(
+    argv: &[String],
+    env: &BTreeMap<String, String>,
+    cwd: &Path,
+    cancel: &CancellationToken,
+) -> Result<String, EnvError> {
+    let Some((program, args)) = argv.split_first() else {
+        return Err(EnvError::InvalidParams("empty command".into()));
+    };
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args)
+        .envs(env)
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    let child = cmd
+        .spawn()
+        .map_err(|e| EnvError::Spawn(format!("Cannot start {}: {e}", command_label(&argv[..1]))))?;
+    let out = tokio::select! {
+        o = child.wait_with_output() => o.map_err(EnvError::io("Cannot run the command"))?,
+        _ = cancel.cancelled() => return Err(EnvError::Cancelled),
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    if out.status.success() {
+        return Ok(stdout);
+    }
+    let mut all = stdout;
+    all.push_str(&String::from_utf8_lossy(&out.stderr));
+    let tail: String = {
+        let chars: Vec<char> = all.chars().collect();
+        chars[chars.len().saturating_sub(OUTPUT_TAIL)..]
+            .iter()
+            .collect()
+    };
+    Err(EnvError::CommandFailed {
+        command: command_label(argv),
+        code: out.status.code(),
+        output: tail,
+    })
 }
 
 fn sha256_file(path: &Path) -> Result<String, EnvError> {

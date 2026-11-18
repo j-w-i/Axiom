@@ -1,12 +1,21 @@
 {
   "$defs": {
     "ArchiveFormat": {
-      "enum": [
-        "tar.gz",
-        "tar.xz",
-        "zip"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "tar.gz",
+            "tar.xz",
+            "zip"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "file",
+          "description": "The download is the file itself (a single executable, e.g. `rustup-init`), placed at\nthe root under its URL's last path segment, executable. Added in M2-ENV-003.",
+          "type": "string"
+        }
+      ]
     },
     "Artifact": {
       "additionalProperties": false,
@@ -201,6 +210,20 @@
               "const": "archive",
               "type": "string"
             },
+            "provides": {
+              "description": "Tool ids this method installs for another method to use (e.g. `rustup` for the\n`delegate` method). Such a method only bootstraps: it is not offered on its own.\nAdded in M2-ENV-003.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "setup": {
+              "description": "argv run once after extraction, inside the new root, with `env`; `${root}` and\n`${version}` expand. Never through a shell. Added in M2-ENV-003.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "versions": {
               "$ref": "#/$defs/VersionSource",
               "description": "Where the list of versions comes from."
@@ -217,6 +240,13 @@
           "additionalProperties": false,
           "description": "Delegate to the ecosystem's own installer (rustup, swiftly, uv...).\nRuns with managed HOME-style variables so nothing global is modified\nunless `scope` is `system`.",
           "properties": {
+            "bin_dirs": {
+              "description": "Directories (relative to the install root) holding the installed executables.\nAdded in M2-ENV-003.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "env": {
               "additionalProperties": {
                 "type": "string"
@@ -254,6 +284,17 @@
             "using": {
               "description": "Tool that must already be available (itself possibly installed by\nanother provider), e.g. `rustup`.",
               "type": "string"
+            },
+            "versions": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/VersionSource"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where installable versions come from; absent = run `list_versions` through the\ndelegate. Added in M2-ENV-003."
             }
           },
           "required": [

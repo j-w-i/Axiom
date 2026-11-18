@@ -24,6 +24,10 @@ tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 
+[features]
+# Runs tests that install real toolchains from the internet (CI only; M2-ENV-003).
+ci-install = []
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { version = "1", features = ["full"] }

@@ -132,9 +132,11 @@ pub async fn install(
 }
 
 pub async fn uninstall(app: Arc<App>, p: UninstallParams) -> Result<Empty, RpcError> {
-    let installer = app.env.installer.clone();
-    tokio::task::spawn_blocking(move || installer.uninstall(&p.provider_id, &p.version))
-        .await
-        .map_err(|_| internal())??;
+    // The manifest, if the provider still exists, supplies a delegate's uninstall command.
+    let m = provider(&app, &p.provider_id).await?;
+    app.env
+        .installer
+        .uninstall(&p.provider_id, &p.version, m.as_ref())
+        .await?;
     Ok(Empty {})
 }
