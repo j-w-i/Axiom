@@ -1,8 +1,8 @@
 ---
 id: M2-PROV-003
 title: Python provider delegating to uv
-status: planned
-status_note:
+status: tested
+status_note: 
 depends_on: [M2-ENV-003]
 order: 322
 scope: providers/python/ (new)

@@ -9,8 +9,20 @@ use std::path::{Path, PathBuf};
 /// contract test checks that this list matches `providers/*/provider.toml` exactly.
 pub const BUILTIN: &[(&str, &str)] = &[
     (
+        "cmake",
+        include_str!("../../../providers/cmake/provider.toml"),
+    ),
+    (
+        "ninja",
+        include_str!("../../../providers/ninja/provider.toml"),
+    ),
+    (
         "node",
         include_str!("../../../providers/node/provider.toml"),
+    ),
+    (
+        "python",
+        include_str!("../../../providers/python/provider.toml"),
     ),
     (
         "rust",

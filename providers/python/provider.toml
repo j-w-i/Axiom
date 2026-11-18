@@ -1,0 +1,94 @@
+# Built-in provider: Python through uv (M2-PROV-003; contract: docs/protocols/providers.md).
+# Each managed Python version root is self-contained: its own uv (bootstrapped from uv's
+# release archive, verified against the published .sha256), and `uv python install` with
+# every uv location inside the root, so the user's own Python, uv cache and uv config are
+# never read for writing or changed. UV_PYTHON_INSTALL_REGISTRY=0 keeps Windows' PEP 514
+# registry untouched; UV_NO_CONFIG=1 ignores the user's uv.toml.
+# The bootstrap downloads uv's latest release (`${version}` here is the Python version).
+schema = "axiom.provider/1"
+id = "python"
+name = "Python"
+description = "Python interpreters installed by uv into Axiom's storage; uv and pytest tasks."
+version = "0.1.0"
+homepage = "https://docs.astral.sh/uv/"
+
+[project]
+any_file = ["pyproject.toml", "requirements.txt"]
+
+[[tools]]
+id = "python"
+program = "python3"
+version_regex = 'Python (\d+\.\d+\.\d+)'
+
+[[tools]]
+id = "uv"
+program = "uv"
+version_regex = 'uv (\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "delegate"
+using = "uv"
+scope = "managed"
+install = ["uv", "python", "install", "${version}", "--default"]
+uninstall = ["uv", "python", "uninstall", "${version}"]
+list_versions = ["uv", "python", "list", "--only-downloads"]
+versions = { kind = "static", versions = ["3.13", "3.12", "3.11", "3.10"] }
+bin_dirs = ["bin"]
+env = { UV_PYTHON_INSTALL_DIR = "${root}/python", UV_PYTHON_BIN_DIR = "${root}/bin", UV_CACHE_DIR = "${root}/cache", UV_PYTHON_INSTALL_REGISTRY = "0", UV_NO_CONFIG = "1" }
+
+# Bootstraps the delegate: uv's release archive, verified against its .sha256 file.
+[[install]]
+kind = "archive"
+provides = ["uv"]
+versions = { kind = "static", versions = ["latest"] }
+bin_dirs = ["."]
+env = { UV_PYTHON_INSTALL_DIR = "${root}/python", UV_CACHE_DIR = "${root}/cache", UV_NO_CONFIG = "1" }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz.sha256" }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-gnu.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-gnu.tar.gz.sha256" }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "aarch64" }
+url = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz.sha256" }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "x86_64" }
+url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz.sha256" }
+
+[[install.artifacts]]
+platform = { os = "windows", arch = "x86_64" }
+url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
+format = "zip"
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip.sha256" }
+
+[[tasks]]
+id = "sync"
+kind = "other"
+label = "uv sync"
+command = ["uv", "sync"]
+
+[[tasks]]
+id = "test"
+kind = "test"
+label = "uv run pytest"
+command = ["uv", "run", "pytest", "--tb=line", "-q"]
+# pytest's `--tb=line` form: one `path.py:LINE: message` line per failure.
+diagnostics = { kind = "regex", pattern = '^(?P<file>[^\s:]+\.py):(?P<line>\d+): (?P<message>.+)$' }

@@ -151,7 +151,10 @@ Additive manifest fields (all optional; older manifests are unchanged):
   (`rustup-init -y --no-modify-path --default-toolchain none`; the CI test runs with an empty
   temporary HOME and asserts it stays empty).
 - Plans show `${root}` as the final root; execution runs in the staging directory with every
-  occurrence of the final root rewritten, then renames it into place.
+  occurrence of the final root rewritten, then renames it into place. Absolute symbolic links
+  into the staging directory that an installer leaves behind (uv does) are re-pointed at the
+  final root before the rename (M2-PROV-003).
+- Built-in providers in M2: `rust`, `node`, `cmake`, `ninja`, `python` (`providers/*`).
 - Uninstall runs the delegate's `uninstall` command with the delegate from inside the root
   (a failure is logged, not fatal), then removes the root.
 - Detection runs a managed tool with its method's `env` expanded for that root (rustup's

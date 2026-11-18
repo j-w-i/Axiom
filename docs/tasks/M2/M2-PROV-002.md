@@ -1,8 +1,8 @@
 ---
 id: M2-PROV-002
 title: CMake and Ninja providers (archives)
-status: planned
-status_note:
+status: tested
+status_note: 
 depends_on: [M2-ENV-002]
 order: 321
 scope: providers/cmake/, providers/ninja/ (new)

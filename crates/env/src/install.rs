@@ -765,6 +765,14 @@ impl Installer {
             toml::to_string(&receipt).unwrap_or_default(),
         )
         .map_err(EnvError::io("Cannot write the install receipt"))?;
+        // Installers (uv) may leave absolute symbolic links into the staging root; point them at
+        // the same place under the final root before the rename makes that the real path.
+        {
+            let (from, to) = (staging.clone(), final_root.clone());
+            tokio::task::spawn_blocking(move || relink(&from, &to))
+                .await
+                .map_err(|_| EnvError::Unsupported("relink task failed".into()))??;
+        }
         // Publish: one rename, so a version directory is either complete or absent.
         if final_root.exists() {
             return Err(EnvError::AlreadyExists(format!(
@@ -1160,6 +1168,53 @@ pub async fn run_program(
     })
 }
 
+/// Rewrites every symbolic link under `root` whose absolute target lies inside `root` to the
+/// same path under `to` (the root's final location). Other links are left alone.
+pub fn relink(root: &Path, to: &Path) -> Result<u32, EnvError> {
+    let mut changed = 0;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(read) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in read.flatten() {
+            let path = e.path();
+            let Ok(md) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if md.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !md.file_type().is_symlink() {
+                continue;
+            }
+            let Ok(target) = std::fs::read_link(&path) else {
+                continue;
+            };
+            let Ok(rest) = target.strip_prefix(root) else {
+                continue;
+            };
+            let new = to.join(rest);
+            std::fs::remove_file(&path).map_err(EnvError::io("Cannot relink an installed file"))?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&new, &path)
+                .map_err(EnvError::io("Cannot relink an installed file"))?;
+            #[cfg(windows)]
+            {
+                let r = if new.is_dir() {
+                    std::os::windows::fs::symlink_dir(&new, &path)
+                } else {
+                    std::os::windows::fs::symlink_file(&new, &path)
+                };
+                r.map_err(EnvError::io("Cannot relink an installed file"))?;
+            }
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
 fn sha256_file(path: &Path) -> Result<String, EnvError> {
     let mut f = std::fs::File::open(path).map_err(EnvError::io("Cannot read the cache"))?;
     let mut h = Sha256::new();
@@ -1170,6 +1225,39 @@ fn sha256_file(path: &Path) -> Result<String, EnvError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn relink_points_absolute_links_at_the_final_root() {
+        let t = tempfile::tempdir().unwrap();
+        let staging = t.path().join(".staging");
+        let fin = t.path().join("1.0");
+        std::fs::create_dir_all(staging.join("python/bin")).unwrap();
+        std::fs::create_dir_all(staging.join("bin")).unwrap();
+        std::fs::write(staging.join("python/bin/python3.12"), "").unwrap();
+        std::os::unix::fs::symlink(
+            staging.join("python/bin/python3.12"),
+            staging.join("bin/python3"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink("../python/bin/python3.12", staging.join("bin/rel")).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/env", staging.join("bin/outside")).unwrap();
+        assert_eq!(relink(&staging, &fin).unwrap(), 1);
+        std::fs::rename(&staging, &fin).unwrap();
+        assert_eq!(
+            std::fs::read_link(fin.join("bin/python3")).unwrap(),
+            fin.join("python/bin/python3.12")
+        );
+        assert!(fin.join("bin/python3").exists(), "valid after the rename");
+        assert_eq!(
+            std::fs::read_link(fin.join("bin/rel")).unwrap(),
+            Path::new("../python/bin/python3.12")
+        );
+        assert_eq!(
+            std::fs::read_link(fin.join("bin/outside")).unwrap(),
+            Path::new("/usr/bin/env")
+        );
+    }
 
     #[test]
     fn versions_as_directory_names() {

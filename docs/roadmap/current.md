@@ -65,6 +65,8 @@ lives on branch `task/m1.6`.
 - **M2-UI-001 + M2-UI-002 tested (2026-11-19):** activity rail (Files, Environments), Environment Manager page, install-plan dialog showing the daemon's plan verbatim, install progress on the page and in the transport, Remove with confirmation, trust and error states. Smoke 24a–e, a11y S18/S18d, shots S18–S18d.
 - **M2-UI-003 tested (2026-11-19):** console view strip (Output / Problems), Problems grouped by file with Enter → file at line/column (bridge-1 `revealPosition`), provider tasks in the palette and as the transport's Rerun target. Note for e2e: run `shots.mjs` in its own `e2e.sh` invocation (it switches Xvfb to 2880x1800, where keyboard focus does not reach the app; UI-001 handoff).
 - **M2-PROV-001 tested (2026-11-19):** built-in `node` provider (nodejs.org archives verified against SHASUMS256.txt; npm tasks); `strip_prefix` on JSON version sources; pre-releases never offered. Node 22.11.0 round trip: 3.7 s, 29.2 MB download.
+- **M2-PROV-002 tested (2026-11-19):** `cmake` (Kitware archives, SHA-256.txt) and `ninja` (pinned per-version digests from GitHub's asset digests); a C project builds with the Ninja generator from the project environment.
+- **M2-PROV-003 tested (2026-11-19):** `python` via a bootstrapped uv, every uv location inside the root, HOME untouched; installer now re-points absolute symlinks from staging to the final root.
 - **M1.6-QA-006 is tested (2026-11-18): M1.6 is complete** on Linux and macOS (deviations approved by the owner); legacy aliases removed (pixel-identical); every exit criterion in `M1.6.md` §Exit review. Windows is deferred. Merged to main (PR j-w-i/Axiom#2, 2026-11-18).
 - **Next:** see `scripts/tasks.py | grep '^M1.6-' | grep READY` (`scripts/tasks.py | grep '^M1.6-' | grep READY`).
 - _(Wave B history:)_ M1.6-QA-002 (performance baseline and new scenarios),
@@ -117,7 +119,7 @@ gone (tag `qt-shell-final`).
 ## Next task
 
 **M2**, on branch `task/m2`: take the first `READY` task whose id starts with `M2-`, in `order`
-(`scripts/tasks.py | grep '^M2-'`). After M2-PROV-001 that is M2-PROV-002.
+(`scripts/tasks.py | grep '^M2-'`). After M2-PROV-003 that is M2-QA-001 (the M2 exit review).
 
 ## M1.5 follow-ups (open by owner waiver; not blocking M1.6)
 

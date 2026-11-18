@@ -288,3 +288,163 @@ async fn node_managed_install_roundtrip() {
     inst.uninstall("node", &version, Some(&m)).await.unwrap();
     assert!(!root.exists());
 }
+
+/// M2-PROV-002 (Linux CI): CMake (Kitware archive, SHA-256.txt) and Ninja (pinned digest)
+/// install, a C project configures and builds with the Ninja generator inside the project
+/// environment, and both uninstall.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn cmake_and_ninja_managed_roundtrip() {
+    let r = Registry::load(&Sources {
+        builtin: Builtin::Embedded,
+        user_dir: None,
+        workspace_dir: None,
+        workspace_trusted: false,
+    });
+    let data = tempfile::tempdir().unwrap();
+    let inst = Installer::new(
+        data.path().to_path_buf(),
+        Http::new(HttpConfig::default()).unwrap(),
+    );
+    let toolchains = data.path().join("toolchains");
+    for (id, version) in [("cmake", "4.5.0"), ("ninja", "1.13.2")] {
+        let m = r.get(id).unwrap();
+        let plan = inst.plan(m, version, None).await.unwrap();
+        let started = Instant::now();
+        let res = inst
+            .install(&plan.plan_id, Some(m), &CancellationToken::new(), &|_| {})
+            .await
+            .unwrap();
+        println!(
+            "installed {id} {version} in {:.1} s: download {:?} bytes, {:.1} MiB on disk; verified {:?}",
+            started.elapsed().as_secs_f64(),
+            plan.download_bytes,
+            dir_size(&toolchains.join(id).join(version)) as f64 / 1048576.0,
+            res.verified.iter().map(|t| (&t.tool_id, &t.version)).collect::<Vec<_>>()
+        );
+        assert_eq!(res.verified[0].version, version);
+    }
+
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.20)\nproject(hello C)\nadd_executable(hello main.c)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("main.c"),
+        "int main(void) { return 0; }\n",
+    )
+    .unwrap();
+    let selection =
+        axiom_env::project::parse("[environment]\ncmake = \"4.5.0\"\nninja = \"1.13.2\"\n")
+            .unwrap();
+    let (env, _) = axiom_env::project::resolve(&r, &selection, &toolchains, None)
+        .await
+        .unwrap();
+    let vars = axiom_env::project::process_env(&env, std::env::var_os("PATH"));
+    for argv in [
+        vec!["cmake", "-S", ".", "-B", "build", "-G", "Ninja"],
+        vec!["cmake", "--build", "build"],
+    ] {
+        let out = std::process::Command::new(argv[0])
+            .args(&argv[1..])
+            .current_dir(project.path())
+            .envs(&vars)
+            .output()
+            .unwrap();
+        println!(
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.status.success(), "{argv:?}");
+    }
+    assert!(project.path().join("build").join("hello").is_file());
+
+    for (id, version) in [("cmake", "4.5.0"), ("ninja", "1.13.2")] {
+        inst.uninstall(id, version, r.get(id)).await.unwrap();
+        assert!(!toolchains.join(id).join(version).exists());
+    }
+}
+
+/// M2-PROV-003: uv (bootstrapped from its release archive) installs a managed Python with every
+/// uv location inside the root; the interpreter runs from the project environment; uninstall
+/// removes it. HOME is an empty temp directory that must stay empty.
+#[tokio::test]
+async fn python_managed_install_roundtrip() {
+    let home = tempfile::tempdir().unwrap();
+    let r = Registry::load(&Sources {
+        builtin: Builtin::Embedded,
+        user_dir: None,
+        workspace_dir: None,
+        workspace_trusted: false,
+    });
+    let m = r.get("python").unwrap().clone();
+    let data = tempfile::tempdir().unwrap();
+    let inst = Installer::new(
+        data.path().to_path_buf(),
+        Http::new(HttpConfig::default()).unwrap(),
+    );
+    let version = "3.12";
+    let plan = inst.plan(&m, version, None).await.unwrap();
+    println!("plan:\n{}", serde_json::to_string_pretty(&plan).unwrap());
+    // The installer's processes inherit HOME: point it at the empty temp dir (the CI step runs
+    // this binary single-threaded).
+    std::env::set_var("HOME", home.path());
+    std::env::set_var("USERPROFILE", home.path());
+    std::env::remove_var("XDG_DATA_HOME");
+    std::env::remove_var("XDG_CACHE_HOME");
+    std::env::remove_var("XDG_CONFIG_HOME");
+    let started = Instant::now();
+    let res = inst
+        .install(&plan.plan_id, Some(&m), &CancellationToken::new(), &|p| {
+            if p.bytes_done.is_none() {
+                println!("[{}/{}] {}", p.step + 1, p.steps, p.label);
+            }
+        })
+        .await
+        .unwrap();
+    let root = data.path().join("toolchains").join("python").join(version);
+    println!(
+        "installed python {version} in {:.1} s, {:.1} MiB on disk; verified {:?}",
+        started.elapsed().as_secs_f64(),
+        dir_size(&root) as f64 / 1048576.0,
+        res.verified
+            .iter()
+            .map(|t| (&t.tool_id, &t.version))
+            .collect::<Vec<_>>()
+    );
+    assert!(res.verified[0].version.starts_with("3.12."));
+
+    let selection = axiom_env::project::parse("[environment]\npython = \"3.12\"\n").unwrap();
+    let (env, _) =
+        axiom_env::project::resolve(&r, &selection, &data.path().join("toolchains"), None)
+            .await
+            .unwrap();
+    let vars = axiom_env::project::process_env(&env, std::env::var_os("PATH"));
+    let exe = if cfg!(windows) {
+        "python.exe"
+    } else {
+        "python3"
+    };
+    let out = std::process::Command::new(exe)
+        .args(["-c", "import sys; print(sys.prefix)"])
+        .envs(&vars)
+        .output()
+        .unwrap();
+    let prefix = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    println!("sys.prefix = {prefix}");
+    assert!(
+        std::path::Path::new(&prefix).starts_with(&root),
+        "the managed interpreter ran"
+    );
+
+    inst.uninstall("python", version, Some(&m)).await.unwrap();
+    assert!(!root.exists());
+    assert_eq!(
+        std::fs::read_dir(home.path()).unwrap().count(),
+        0,
+        "HOME was written to"
+    );
+}
