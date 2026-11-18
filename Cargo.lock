@@ -159,6 +159,7 @@ name = "axiom-desktop-tauri"
 version = "0.1.0"
 dependencies = [
  "axiom-desktop-bridge",
+ "objc2",
  "serde",
  "serde_json",
  "tauri",

@@ -16,6 +16,9 @@
 //! The command list is pinned in build.rs (`AppManifest::commands`) and the
 //! window's capability (capabilities/main.json) grants exactly these.
 
+#[cfg(target_os = "macos")]
+mod macos_frame_rate;
+
 use axiom_desktop_bridge::{locate_daemon, ui_callable, BridgeConfig, BridgeEvent, DaemonBridge};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -689,6 +692,15 @@ pub fn run() {
         ])
         .setup(move |app| {
             restore_geometry(app.handle());
+            // macOS: render at the display's refresh rate (120 Hz on ProMotion), not WebKit's 60.
+            #[cfg(target_os = "macos")]
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.with_webview(|wv| {
+                    if let Err(e) = macos_frame_rate::allow_full_refresh_rate(wv.inner()) {
+                        eprintln!("[webview] kept the 60 Hz rendering cap: {e}");
+                    }
+                });
+            }
             #[cfg(all(feature = "e2e", target_os = "macos"))]
             if e2e_background {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);

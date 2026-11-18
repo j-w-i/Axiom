@@ -41,6 +41,12 @@ toml = "1.2.1"
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2", features = ["v2_40"] }
 
+# macOS only: Objective-C messaging for one WebKit preference (src/macos_frame_rate.rs: the page
+# renders at the display's refresh rate, not 60 Hz). The same crate and major version Tauri itself
+# links, so nothing new is compiled.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+
 [features]
 # Serve the bundled frontend (dist/) instead of the dev server. The Tauri CLI
 # turns this on for `tauri build`; it is a default so plain `cargo build
