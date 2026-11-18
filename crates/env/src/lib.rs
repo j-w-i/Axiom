@@ -5,7 +5,7 @@
 //! - [`registry`]: built-in, user and workspace providers, override order and trust.
 //! - [`detect`]: which providers apply to a workspace and which of their tools are present.
 //! - [`install`]: install plans, managed archive installs, uninstall; [`fetch`] (HTTPS) and
-//!   [`archive`] (safe extraction) beneath it.
+//!   [`archive`] (safe extraction) beneath it; [`system`] for host package managers.
 
 pub mod archive;
 pub mod detect;
@@ -14,6 +14,7 @@ pub mod fetch;
 pub mod install;
 pub mod manifest;
 pub mod registry;
+pub mod system;
 
 pub use detect::{detect, HostPaths};
 pub use error::EnvError;

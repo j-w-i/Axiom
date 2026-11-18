@@ -139,7 +139,17 @@ pub async fn detect_tool(
             ));
         }
     }
-    for bin in path_candidates(&tool.program, host.path.as_deref()) {
+    detect_on_path(m, tool, host.path.as_deref()).await
+}
+
+/// The tool on `PATH` only (system installs).
+pub async fn detect_on_path(
+    m: &ProviderManifest,
+    tool: &ToolSpec,
+    path: Option<&std::ffi::OsStr>,
+) -> Option<Toolchain> {
+    let re = manifest::version_regex(&tool.version_regex).ok()?;
+    for bin in path_candidates(&tool.program, path) {
         if let Some(version) = run_version(&bin, &tool.version_args, &BTreeMap::new(), &re).await {
             return Some(toolchain(
                 m,

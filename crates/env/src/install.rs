@@ -26,6 +26,7 @@ use crate::detect::{self, compare_versions};
 use crate::error::EnvError;
 use crate::fetch::{digest_from_checksum_file, Http};
 use crate::manifest;
+use crate::system::{self, SystemHost};
 use axiom_protocol::env::{
     Effect, InstallPlan, InstallProgress, InstallResult, Sha256Source, Step, ToolLocation,
     Toolchain, VersionsResult,
@@ -57,6 +58,8 @@ struct Issued {
     /// Where `Verify` looks, and the variables it sets (expanded for the final root).
     verify_bin_dirs: Vec<String>,
     verify_env: BTreeMap<String, String>,
+    /// A system plan: no staging root; verification searches this `PATH`.
+    system_path: Option<Option<std::ffi::OsString>>,
     expires: Instant,
 }
 
@@ -75,6 +78,7 @@ pub struct Installer {
     versions: Mutex<HashMap<String, (Instant, Vec<String>)>>,
     plan_lifetime: Duration,
     counter: std::sync::atomic::AtomicU64,
+    system: SystemHost,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -155,7 +159,14 @@ impl Installer {
             versions: Mutex::default(),
             plan_lifetime: PLAN_LIFETIME,
             counter: Default::default(),
+            system: SystemHost::from_env(),
         }
+    }
+
+    /// TEST ONLY: the package-manager host to use instead of this machine's.
+    pub fn with_system_host(mut self, host: SystemHost) -> Installer {
+        self.system = host;
+        self
     }
 
     /// TEST ONLY: shorter plan lifetime.
@@ -256,6 +267,7 @@ impl Installer {
             &BTreeMap::new(),
             &std::env::temp_dir(),
             &CancellationToken::new(),
+            &|_| {},
         )
         .await?;
         let mut v: Vec<String> = out
@@ -406,10 +418,8 @@ impl Installer {
                     env,
                 }
             }
-            InstallMethod::SystemPackage { .. } => {
-                return Err(EnvError::Unsupported(
-                    "System package installs are not available yet.".into(),
-                ))
+            InstallMethod::SystemPackage { packages } => {
+                return self.plan_system(m, version, packages);
             }
         };
         let mut steps = built.steps;
@@ -457,10 +467,150 @@ impl Installer {
                 final_root: root,
                 verify_bin_dirs: built.bin_dirs,
                 verify_env: built.env,
+                system_path: None,
                 expires: Instant::now() + self.plan_lifetime,
             },
         );
         Ok(plan)
+    }
+
+    /// A `system_package` plan: the exact elevated command for this host's package manager,
+    /// then verification on `PATH`. Never chosen by default.
+    fn plan_system(
+        &self,
+        m: &ProviderManifest,
+        version: &str,
+        packages: &BTreeMap<String, Vec<String>>,
+    ) -> Result<InstallPlan, EnvError> {
+        let manager = system::detect_manager(&self.system).ok_or_else(|| {
+            EnvError::UnsupportedPlatform("No supported package manager was found.".into())
+        })?;
+        let list = system::packages_for(packages, &manager).ok_or_else(|| {
+            EnvError::UnsupportedPlatform(format!("{} lists no {} packages.", m.name, manager.name))
+        })?;
+        let mut steps = Vec::new();
+        let mut elevated = false;
+        for argv in system::install_commands(&manager, list) {
+            let (argv, e) = system::elevate(&self.system, argv)?;
+            elevated |= e;
+            steps.push(Step::SystemPackages {
+                manager: manager.name.to_string(),
+                packages: list.clone(),
+                argv,
+            });
+        }
+        for t in m.tools.iter().filter(|t| t.required) {
+            steps.push(Step::Verify {
+                tool_id: t.id.clone(),
+            });
+        }
+        let mut effects = vec![Effect::Network, Effect::SystemChange];
+        if elevated {
+            effects.push(Effect::Elevation);
+        }
+        effects.push(Effect::RunPrograms);
+        let plan = InstallPlan {
+            plan_id: self.new_plan_id(),
+            provider_id: m.id.clone(),
+            version: version.to_string(),
+            scope: InstallScope::System,
+            steps,
+            download_bytes: None,
+            effects,
+            expires_ms: now_ms() + self.plan_lifetime.as_millis() as u64,
+        };
+        let mut plans = lock(&self.plans);
+        plans.retain(|_, p| p.expires > Instant::now());
+        plans.insert(
+            plan.plan_id.clone(),
+            Issued {
+                plan: plan.clone(),
+                manifest: m.clone(),
+                final_root: String::new(),
+                verify_bin_dirs: Vec::new(),
+                verify_env: BTreeMap::new(),
+                system_path: Some(self.system.path.clone()),
+                expires: Instant::now() + self.plan_lifetime,
+            },
+        );
+        Ok(plan)
+    }
+
+    /// Executes a system plan: each command as shown (its output becomes progress), then
+    /// detection on `PATH`.
+    async fn install_system(
+        &self,
+        issued: &Issued,
+        path: Option<std::ffi::OsString>,
+        cancel: &CancellationToken,
+        progress: &(dyn Fn(InstallProgress) + Send + Sync),
+    ) -> Result<InstallResult, EnvError> {
+        let plan = &issued.plan;
+        let m = &issued.manifest;
+        let steps = plan.steps.len() as u32;
+        let report = |step: usize, label: String| {
+            progress(InstallProgress {
+                plan_id: plan.plan_id.clone(),
+                step: step as u32,
+                steps,
+                label,
+                bytes_done: None,
+                bytes_total: None,
+            })
+        };
+        let mut verified = Vec::new();
+        for (i, step) in plan.steps.iter().enumerate() {
+            if cancel.is_cancelled() {
+                return Err(EnvError::Cancelled);
+            }
+            match step {
+                Step::SystemPackages { argv, .. } => {
+                    report(i, format!("Running {}", command_label(argv)));
+                    let last = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+                    let on_line = |line: &str| {
+                        let mut at = lock(&last);
+                        if at.elapsed() >= PROGRESS_INTERVAL && !line.trim().is_empty() {
+                            *at = Instant::now();
+                            report(i, line.trim().chars().take(200).collect());
+                        }
+                    };
+                    run_program(
+                        argv,
+                        &BTreeMap::new(),
+                        &std::env::temp_dir(),
+                        cancel,
+                        &on_line,
+                    )
+                    .await?;
+                }
+                Step::Verify { tool_id } => {
+                    report(i, format!("Verifying {tool_id}"));
+                    let tool = m.tools.iter().find(|t| &t.id == tool_id).ok_or_else(|| {
+                        EnvError::NotFound(format!("The provider has no tool {tool_id}."))
+                    })?;
+                    let found = detect::detect_on_path(m, tool, path.as_deref())
+                        .await
+                        .ok_or_else(|| {
+                            EnvError::NotFound(format!(
+                                "{tool_id} was not found after installing the packages."
+                            ))
+                        })?;
+                    verified.push(found);
+                }
+                _ => {
+                    return Err(EnvError::InvalidParams(
+                        "A system plan has only package and verify steps.".into(),
+                    ))
+                }
+            }
+        }
+        Ok(InstallResult {
+            plan_id: plan.plan_id.clone(),
+            provider_id: m.id.clone(),
+            version: plan.version.clone(),
+            root: None,
+            verified,
+        })
     }
 
     /// The provider an issued, unexpired plan is for (to look up its current manifest).
@@ -490,6 +640,9 @@ impl Installer {
             return Err(EnvError::ApprovalDenied(
                 "The provider changed after the plan was made; review a new plan.".into(),
             ));
+        }
+        if let Some(path) = issued.system_path.clone() {
+            return self.install_system(&issued, path, cancel, progress).await;
         }
         let plan = &issued.plan;
         let m = &issued.manifest;
@@ -572,7 +725,15 @@ impl Installer {
                     let argv: Vec<String> = argv.iter().map(|a| relocate(a)).collect();
                     let env: BTreeMap<String, String> =
                         env.iter().map(|(k, v)| (k.clone(), relocate(v))).collect();
-                    run_program(&argv, &env, &staging, cancel).await?;
+                    let last = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+                    let on_line = |line: &str| {
+                        let mut at = lock(&last);
+                        if at.elapsed() >= PROGRESS_INTERVAL && !line.trim().is_empty() {
+                            *at = Instant::now();
+                            report(i, line.trim().chars().take(200).collect(), None, None);
+                        }
+                    };
+                    run_program(&argv, &env, &staging, cancel, &on_line).await?;
                 }
                 Step::SystemPackages { .. } => {
                     return Err(EnvError::Unsupported(
@@ -699,7 +860,10 @@ impl Installer {
         let dir = self.checked_install_dir(provider_id, version)?;
         if let Some(m) = m.filter(|m| m.id == provider_id) {
             if let Some((argv, env)) = delegate_uninstall(m, version, &dir) {
-                if let Err(e) = run_program(&argv, &env, &dir, &CancellationToken::new()).await {
+                let quiet = |_: &str| {};
+                if let Err(e) =
+                    run_program(&argv, &env, &dir, &CancellationToken::new(), &quiet).await
+                {
                     tracing::warn!("{provider_id} {version}: the uninstall command failed: {e}");
                 }
             }
@@ -895,14 +1059,17 @@ fn command_label(argv: &[String]) -> String {
         .join(" ")
 }
 
-/// Runs argv (never through a shell) with extra variables, stdin closed. Returns stdout;
-/// a non-zero exit is an error carrying the end of the combined output.
+/// Runs argv (never through a shell) with extra variables, stdin closed. Each output line
+/// (stdout or stderr) is passed to `on_line` as it arrives. Returns stdout; a non-zero exit
+/// is an error carrying the end of the combined output.
 pub async fn run_program(
     argv: &[String],
     env: &BTreeMap<String, String>,
     cwd: &Path,
     cancel: &CancellationToken,
+    on_line: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, EnvError> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
     let Some((program, args)) = argv.split_first() else {
         return Err(EnvError::InvalidParams("empty command".into()));
     };
@@ -914,28 +1081,61 @@ pub async fn run_program(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| EnvError::Spawn(format!("Cannot start {}: {e}", command_label(&argv[..1]))))?;
-    let out = tokio::select! {
-        o = child.wait_with_output() => o.map_err(EnvError::io("Cannot run the command"))?,
+    let (Some(out), Some(err)) = (child.stdout.take(), child.stderr.take()) else {
+        return Err(EnvError::Spawn("Cannot read the command's output".into()));
+    };
+    let mut out = BufReader::new(out).lines();
+    let mut err = BufReader::new(err).lines();
+    let (mut stdout, mut combined) = (String::new(), String::new());
+    let (mut out_open, mut err_open) = (true, true);
+    let mut keep = |line: &str, is_out: bool| {
+        on_line(line);
+        if is_out && stdout.len() < 1 << 20 {
+            stdout.push_str(line);
+            stdout.push('\n');
+        }
+        combined.push_str(line);
+        combined.push('\n');
+        if combined.len() > 4 * OUTPUT_TAIL {
+            let cut = combined.len() - 2 * OUTPUT_TAIL;
+            let cut = (cut..combined.len())
+                .find(|i| combined.is_char_boundary(*i))
+                .unwrap_or(0);
+            combined.drain(..cut);
+        }
+    };
+    while out_open || err_open {
+        tokio::select! {
+            l = out.next_line(), if out_open => match l {
+                Ok(Some(l)) => keep(&l, true),
+                _ => out_open = false,
+            },
+            l = err.next_line(), if err_open => match l {
+                Ok(Some(l)) => keep(&l, false),
+                _ => err_open = false,
+            },
+            _ = cancel.cancelled() => return Err(EnvError::Cancelled),
+        }
+    }
+    let status = tokio::select! {
+        s = child.wait() => s.map_err(EnvError::io("Cannot run the command"))?,
         _ = cancel.cancelled() => return Err(EnvError::Cancelled),
     };
-    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    if out.status.success() {
+    if status.success() {
         return Ok(stdout);
     }
-    let mut all = stdout;
-    all.push_str(&String::from_utf8_lossy(&out.stderr));
     let tail: String = {
-        let chars: Vec<char> = all.chars().collect();
+        let chars: Vec<char> = combined.chars().collect();
         chars[chars.len().saturating_sub(OUTPUT_TAIL)..]
             .iter()
             .collect()
     };
     Err(EnvError::CommandFailed {
         command: command_label(argv),
-        code: out.status.code(),
+        code: status.code(),
         output: tail,
     })
 }

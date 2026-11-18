@@ -103,3 +103,80 @@ fn dir_size(p: &std::path::Path) -> u64 {
     }
     total
 }
+
+/// Linux CI only (`AXIOM_CI_SYSTEM_INSTALL=1`): a real `hello` package through the host's
+/// apt or dnf, with a pkexec shim that runs the approved command through the runner's
+/// passwordless `sudo -n` (CI has no polkit agent to show a prompt).
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn system_package_install_through_pkexec_shim() {
+    use std::os::unix::fs::PermissionsExt;
+    if std::env::var("AXIOM_CI_SYSTEM_INSTALL").as_deref() != Ok("1") {
+        eprintln!("skipped: set AXIOM_CI_SYSTEM_INSTALL=1 (CI runners only; uses sudo)");
+        return;
+    }
+    let t = tempfile::tempdir().unwrap();
+    let shim = t.path().join("bin");
+    std::fs::create_dir_all(&shim).unwrap();
+    let log = t.path().join("pkexec.log");
+    let pk = shim.join("pkexec");
+    std::fs::write(
+        &pk,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\nexec sudo -n \"$@\"\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&pk, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut host = axiom_env::system::SystemHost::from_env();
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    host.path = Some(
+        std::env::join_paths(std::iter::once(shim.clone()).chain(std::env::split_paths(&path)))
+            .unwrap(),
+    );
+
+    let m = axiom_env::manifest::parse(
+        r#"schema = "axiom.provider/1"
+id = "hello"
+name = "GNU Hello"
+description = "CI fixture"
+version = "0.1.0"
+
+[[tools]]
+id = "hello"
+program = "hello"
+version_regex = 'hello \(GNU Hello\) (\d+\.\d+(?:\.\d+)?)'
+
+[[install]]
+kind = "system_package"
+packages = { apt = ["hello"], dnf = ["hello"] }
+"#,
+    )
+    .unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let inst = Installer::new(
+        data.path().to_path_buf(),
+        Http::new(HttpConfig::default()).unwrap(),
+    )
+    .with_system_host(host);
+    let plan = inst.plan(&m, "system", Some(0)).await.unwrap();
+    println!("plan:\n{}", serde_json::to_string_pretty(&plan).unwrap());
+    let axiom_protocol::env::Step::SystemPackages { argv, .. } = &plan.steps[0] else {
+        panic!()
+    };
+    assert_eq!(argv[0], pk.to_string_lossy());
+    let r = inst
+        .install(&plan.plan_id, Some(&m), &CancellationToken::new(), &|p| {
+            println!("  {}", p.label)
+        })
+        .await
+        .unwrap();
+    println!("verified {:?}", r.verified);
+    assert_eq!(r.verified[0].tool_id, "hello");
+    // The shim saw exactly the command the plan showed (after `pkexec`).
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap().trim(),
+        argv[1..].join(" ")
+    );
+}

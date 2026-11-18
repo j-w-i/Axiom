@@ -31,7 +31,11 @@ jobs:
       - run: cargo test --workspace --exclude axiom-desktop-tauri
       # M2-ENV-003: a real managed Rust install (rustup-init + a minimal toolchain) into a
       # temp data dir with a temp HOME, then uninstall. Needs the internet.
+      # On Linux it also installs the `hello` package with apt through a pkexec shim
+      # (M2-ENV-004); the runner's passwordless sudo stands in for the polkit prompt.
       - run: cargo test -p axiom-env --features ci-install --test ci_install -- --nocapture
+        env:
+          AXIOM_CI_SYSTEM_INSTALL: ${{ runner.os == 'Linux' && '1' || '' }}
       - run: cargo run -q -p axiom-protocol --example export_schema -- --check
       - run: python3 scripts/tasks.py check
       - run: python3 scripts/check_deps.py

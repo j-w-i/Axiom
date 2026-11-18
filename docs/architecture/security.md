@@ -48,6 +48,17 @@ is written.
 Installs run as their own task in the daemon, so a cancelled request that the RPC layer stops
 waiting for still completes its own cleanup.
 
+## System installs (M2, `axiom-env` `system`; as built by M2-ENV-004)
+
+| Rule | How | Test (`crates/env/tests/system.rs`) |
+|------|-----|------|
+| Never by default | A `system_package` method is planned only when the client names it (`method`); default selection skips it | `plan_lists_exact_argv` (default → `unsupported_platform`) |
+| The exact command is in the plan | `SystemPackages.argv` is the full command including the elevation wrapper; `scope: system`; effects `systemChange` and `elevation`. Non-interactive flags (`-y`, `--noconfirm`, winget's agreement flags) are part of that argv, so the user sees them | `plan_lists_exact_argv` |
+| Only approved plans run | The same single-use, 10-minute `planId` as managed installs; planning runs nothing | `runs_only_approved_plan` (shim log empty until the approved install) |
+| Elevation is the OS's prompt | Linux: `pkexec` (polkit's dialog); without pkexec, `sudo -A` only when `SUDO_ASKPASS` names the desktop's askpass helper, else `prerequisite_missing`. macOS: Homebrew unelevated (it refuses root). Windows: winget, which raises UAC itself. Axiom never asks for, sees or stores a password, and never uses `sudo` without `-A` | `plan_lists_exact_argv` (pkexec, sudo -A, refusal, brew, winget) |
+| Manager choice | The distribution's own manager (os-release `ID`/`ID_LIKE`) when present, else the first of apt, dnf, pacman; brew on macOS; winget on Windows | `detects_manager` |
+| Verified | Each required tool is re-detected on `PATH` afterwards | `runs_only_approved_plan`; CI: `ci_install.rs` `system_package_install_through_pkexec_shim` (real apt `hello` on Ubuntu) |
+
 ## Shell webview (Tauri, M1.5)
 
 - Assets are bundled and served by Tauri's asset protocol from `dist/`; there
