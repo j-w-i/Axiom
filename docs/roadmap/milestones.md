@@ -153,7 +153,7 @@ own milestones (governance rule 9).
 
 ## M2 — Environments and builds
 
-**Status (2026-11-18):** planned — 14 tasks in `docs/tasks/M2/`; decisions in `docs/decisions/proposed/ADR-0014-environments-and-builds.md`, awaiting the owner's approval before M2-ARCH-001 starts.
+**Status (2026-11-18):** planned — 14 tasks in `docs/tasks/M2/`; decisions in `docs/decisions/ADR-0014-environments-and-builds.md`, accepted by the owner 2026-11-18.
 
 **Outcome.** Axiom recognises what a project needs, shows what is installed,
 installs toolchains into managed storage with user-approved plans, and runs

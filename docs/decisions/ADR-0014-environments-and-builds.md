@@ -1,7 +1,7 @@
 # ADR-0014: Environments and builds (M2): protocol additions, dependencies, install approval
 
-Status: **Proposed** (2026-11-18, M2 planning). Becomes Accepted when the project owner approves it;
-until then no M2 implementation task starts.
+Status: **Accepted** (2026-11-18). Proposed by the M2 planning pass; approved by the project owner
+("Work through the M2 plan", 2026-11-18).
 
 ## Context
 
