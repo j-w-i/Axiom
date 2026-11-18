@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { ShellContext } from "../src/shell/actions";
 import { allCommands, buildCommands } from "../src/shell/commands";
+import { MOD } from "../src/shell/platform";
 
 interface Fixture {
   ready: boolean;
@@ -51,7 +52,10 @@ function ctx(f: Fixture): ShellContext {
 const view = (c: ShellContext) => allCommands(c).map(({ id, group, label, shortcut, enabled }) => ({ id, group, label, shortcut, enabled }));
 
 type Row = [id: string, group: string, label: string, shortcut: string | undefined, enabled: boolean | undefined];
-const rows = (r: Row[]) => r.map(([id, group, label, shortcut, enabled]) => ({ id, group, label, shortcut, enabled }));
+// The tables say "Ctrl+": the modifier is the platform's (⌘ on macOS, where Node's navigator
+// reports a Mac and the Mac CI and test hosts run this file).
+const rows = (r: Row[]) =>
+  r.map(([id, group, label, shortcut, enabled]) => ({ id, group, label, shortcut: shortcut?.replace(/^Ctrl\+/, `${MOD}+`), enabled }));
 
 describe("shell commands", () => {
   it("buildCommands matches the M1.5 command list", () => {

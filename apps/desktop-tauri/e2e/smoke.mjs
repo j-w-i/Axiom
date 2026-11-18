@@ -553,7 +553,9 @@ try {
     const before = await wd.exec(RUNNING);
     await wd.exec(`window.dispatchEvent(new Event('blur'))`);
     await new Promise((r) => setTimeout(r, 200));
-    const paused = await wd.exec(`const a = document.getAnimations(); return { total: a.length, paused: a.filter((x) => x.playState === 'paused').length, idle: document.documentElement.dataset.idle ?? null }`);
+    // The loops (infinite animations) pause; one-shot animations are left alone (a paused entrance
+    // froze at opacity 0 when it started while the window was unfocused: macOS, 2026-11-18).
+    const paused = await wd.exec(`const a = document.getAnimations().filter((x) => x.effect?.getTiming().iterations === Infinity); return { total: a.length, paused: a.filter((x) => x.playState === 'paused').length, idle: document.documentElement.dataset.idle ?? null }`);
     check("13b blur pauses loops", before > 0 && paused.total > 0 && paused.paused === paused.total && paused.idle === "true", `running before blur=${before}; after: ${JSON.stringify(paused)}`);
     }
     await wd.exec(`window.dispatchEvent(new Event('focus'))`);

@@ -90,4 +90,16 @@ describe("motion", () => {
     stop();
     expect(doc.documentElement.dataset.idle).toBeUndefined();
   });
+
+  it("the idle rule pauses exactly the loops, never one-shot animations", () => {
+    const { readFileSync, readdirSync } = require("node:fs") as typeof import("node:fs");
+    const { join } = require("node:path") as typeof import("node:path");
+    const dir = join(__dirname, "../src/styles");
+    const css = [join(dir, "base.css"), ...readdirSync(join(dir, "components")).map((f) => join(dir, "components", f))].map((f) => readFileSync(f, "utf8")).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
+    const idle = /([^{}]*)\{\s*animation-play-state:\s*paused !important;\s*\}/.exec(css)?.[1] ?? "";
+    expect(idle).not.toMatch(/\*/); // pausing everything froze entrances at opacity 0 (macOS, 2026-11-18)
+    const loops = [...css.matchAll(/(\.[\w-]+)[^{}]*\{[^}]*animation:[^;]*infinite/g)].map((m) => m[1]);
+    expect(loops.length).toBeGreaterThan(0);
+    for (const cls of loops) expect(idle, `${cls} pauses while idle`).toContain(`[data-idle="true"] ${cls}`);
+  });
 });

@@ -3,10 +3,12 @@
  * stepped loops (spinner .8s steps(8), LED run 1.6s steps(6)) and their static form under
  * reduced/off live in components/spinner.css and components/led.css. */
 
-/* Loops pause while the window is hidden or unfocused (ui/motion.ts startLoopGate). */
-[data-idle="true"] *,
-[data-idle="true"] *::before,
-[data-idle="true"] *::after {
+/* Loops pause while the window is hidden or unfocused (ui/motion.ts startLoopGate). Only the
+ * loops (the two infinite animations): pausing everything froze one-shot entrances at their first
+ * frame, so a side bar or toast that appeared while the window was unfocused stayed at opacity 0
+ * (geometry check 7 on macOS, 2026-11-18). */
+[data-idle="true"] .spinner,
+[data-idle="true"] .led {
   animation-play-state: paused !important;
 }
 
