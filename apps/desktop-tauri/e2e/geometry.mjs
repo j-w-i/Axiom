@@ -200,6 +200,44 @@ try {
     await wd.waitFor(`return document.querySelector('${SPLIT}').getAttribute('aria-valuenow') === '252'`, [], 3000, "layout reset after check 8");
     }
   }
+
+  // ---- 9. nothing is clipped by the window edge (a crowded title row overflowed on macOS) --
+  {
+    // The most crowded title row: a long workspace name and a running task.
+    const ws = mkdtempSync(join(tmpdir(), "axiom-geometry-a-long-workspace-name-"));
+    mkdirSync(join(ws, "tools"));
+    writeFileSync(join(ws, "tools", "slow.js"), "setTimeout(() => {}, 30000);\n");
+    try {
+      await wd.exec(`window.__axiom.documents.requestOpenFolder(arguments[0])`, [ws]);
+      await wd.waitFor(`return document.querySelector('[data-path="tools"]') !== null`, [], 8000, "workspace listing");
+      await wd.click(await wd.find("[data-testid=command-input]"));
+      await wd.keys([..."node tools/slow.js", Keys.ENTER]);
+      await wd.waitFor(`return document.querySelector('[data-testid=transport]')?.dataset.state === 'run'`, [], 8000, "task running");
+      const clipped = [];
+      for (const w of [1180, 1040, 900, 720]) {
+        await wd.cmd("POST", "/window/rect", { width: w, height: 700 });
+        await new Promise((r) => setTimeout(r, 400));
+        const m = await wd.exec(
+          `const W = innerWidth, H = innerHeight, row = document.querySelector('.titlerow');
+           const out = [...document.querySelectorAll('body *')].filter((e) => {
+             if (e.closest('.monaco-editor')) return false; // the editor scrolls its own content
+             const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+             return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && (r.right > W + 0.5 || r.bottom > H + 0.5);
+           }).map((e) => e.getAttribute('aria-label') || e.getAttribute('class') || e.tagName);
+           const boxes = [...row.querySelectorAll('button')].filter((b) => b.getClientRects().length).filter((b) => {
+             const r = b.getBoundingClientRect(), p = b.parentElement.closest('.transport, .titlerow').getBoundingClientRect();
+             return r.left < p.left - 0.5 || r.right > p.right + 0.5;
+           }).map((b) => b.getAttribute('aria-label'));
+           return { W, rowOverflow: row.scrollWidth - row.clientWidth, out: out.slice(0, 6), boxes };`,
+        );
+        if (m.rowOverflow > 1 || m.out.length || m.boxes.length) clipped.push(m);
+      }
+      check("9 nothing crosses the window edge at 1180/1040/900/720 px with a crowded title row", clipped.length === 0, JSON.stringify(clipped));
+      await wd.cmd("POST", "/window/rect", TARGET);
+    } finally {
+      await removeDir(ws);
+    }
+  }
 } catch (e) {
   check("unexpected failure", false, e instanceof Error ? e.message : String(e));
   await failureEvidence(wd, "geometry");

@@ -74,9 +74,12 @@ milestone. Nothing marked Designed may appear in the production shell before the
 (`task/start` answers with the task id only in IPC 0.1; no protocol change). The elapsed time
 shows `mm:ss` in 1 s steps (tenths would need a faster timer than the loop policy allows). The
 menus are ordered File, Edit, View, Run, Help. The Settings icon button stays next to the layout
-toggles. Narrow windows: at ≤ 1040 px the command field becomes an icon button and the
-workspace path is hidden; at ≤ 860 px the rate meter is hidden and the task label shortens to
-110 px, so every control stays reachable at the 720 px minimum. The status bar's spinner is static
+toggles. The row never overflows the window: when it is crowded the workspace path gives way
+first, then the command field (down to 180 px) and the task label and workspace name, which
+ellipsise; the LED, elapsed time and buttons keep their size. At ≤ 1040 px the command field
+becomes an icon button and the workspace path is hidden; at ≤ 860 px the rate meter, the task
+label (the status bar names the running task) and the word beside the logo are hidden, so every
+control stays reachable at the 720 px minimum (geometry suite, check 9). The status bar's spinner is static
 while the transport is visible (one running indicator). Both timers skip their updates while the
 window is idle (the loop gate's `data-idle`); the meter renders only when its bars change.
 

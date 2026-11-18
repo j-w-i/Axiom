@@ -58,10 +58,14 @@
 }
 .titlerow__ws {
   display: inline-flex;
-  align-items: baseline;
+  /* centre, not baseline: baseline put the text at the top of the 26 px target, 5 px above the menus */
+  align-items: center;
   gap: 7px;
-  /* Never squeezed below a 24 px target in a crowded row (D-A11Y-4). */
+  /* Shrinks last (the command field and the task label give way first), never below a 24 px
+     target (D-A11Y-4), and its name ellipsises instead of vanishing behind the chevron. */
+  flex: 0 8 auto;
   min-width: 24px;
+  overflow: hidden;
   height: 26px;
   padding: 0 8px;
   border: none;
@@ -74,10 +78,15 @@
   background: var(--hover);
 }
 .titlerow__ws-name {
+  min-width: 3ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--text-body);
   font-weight: var(--weight-strong);
 }
 .titlerow__ws-path {
+  flex: 0 10 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 240px;
@@ -86,6 +95,7 @@
   font-size: var(--text-tiny);
 }
 .titlerow__ws-chevron {
+  flex: none;
   align-self: center;
   width: 12px;
   height: 12px;
@@ -107,8 +117,9 @@
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
-  flex: none;
-  width: min(380px, 32vw);
+  /* Gives way first when the row is crowded (a running task, a long workspace name). */
+  flex: 0 8 min(380px, 32vw);
+  min-width: 180px;
   height: 26px;
   padding: 0 4px 0 var(--s-2);
   border: 1px solid var(--line);
@@ -148,10 +159,15 @@
 
 /* Task transport: recessed display. */
 .transport {
-  display: inline-flex;
+  /* A grid so that only the label's column can collapse: the label ellipsises before the row
+     overflows the window, and the LED, elapsed time, meter and buttons keep their size. */
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, max-content);
+  grid-auto-flow: column;
+  grid-auto-columns: auto;
   align-items: center;
-  gap: 8px;
-  flex: none;
+  column-gap: 8px;
+  flex: 0 3 auto;
   height: 26px;
   padding: 0 2px 0 9px;
   border: 1px solid var(--line);
@@ -160,6 +176,7 @@
   box-shadow: var(--recessed-shadow);
 }
 .transport__label {
+  min-width: 0;
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -198,7 +215,15 @@
   .transport .rate-meter {
     display: none;
   }
+  /* The mark alone identifies the app; its word would leave the workspace name a sliver. */
+  .titlerow__brand > span {
+    display: none;
+  }
+  /* The label would be a sliver here; the status bar names the running task. */
+  .transport {
+    grid-template-columns: none;
+  }
   .transport__label {
-    max-width: 110px;
+    display: none;
   }
 }
