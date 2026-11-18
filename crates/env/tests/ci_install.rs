@@ -154,10 +154,10 @@ async fn system_package_install_through_pkexec_shim() {
     std::fs::set_permissions(&pk, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut host = axiom_env::system::SystemHost::from_env();
     let path = std::env::var_os("PATH").unwrap_or_default();
-    host.path = Some(
+    let host_path =
         std::env::join_paths(std::iter::once(shim.clone()).chain(std::env::split_paths(&path)))
-            .unwrap(),
-    );
+            .unwrap();
+    host.path = Some(host_path.clone());
 
     let m = axiom_env::manifest::parse(
         r#"schema = "axiom.provider/1"
@@ -193,8 +193,27 @@ packages = { apt = ["hello"], dnf = ["hello"] }
         .install(&plan.plan_id, Some(&m), &CancellationToken::new(), &|p| {
             println!("  {}", p.label)
         })
-        .await
-        .unwrap();
+        .await;
+    if r.is_err() {
+        // What the host actually has, to tell a detection fault from an install fault.
+        for dir in std::env::split_paths(host_path.as_os_str()) {
+            let p = dir.join("hello");
+            if p.is_file() {
+                let out = std::process::Command::new(&p).arg("--version").output();
+                println!(
+                    "{}: {:?}",
+                    p.display(),
+                    out.map(|o| (
+                        o.status,
+                        String::from_utf8_lossy(&o.stdout).into_owned(),
+                        String::from_utf8_lossy(&o.stderr).into_owned()
+                    ))
+                );
+            }
+        }
+        println!("searched PATH: {}", host_path.to_string_lossy());
+    }
+    let r = r.unwrap();
     println!("verified {:?}", r.verified);
     assert_eq!(r.verified[0].tool_id, "hello");
     // The shim saw exactly the command the plan showed (after `pkexec`).
