@@ -50,7 +50,9 @@ milestone. Nothing marked Designed may appear in the production shell before the
   while Monaco has focus. Monaco 0.57 conflict check: Ctrl/⌘+0 and +1 occur only as the second
   key of the Ctrl/⌘+K fold chords (Fold All, Fold Level N), which the shell's Mod+K palette
   already pre-empts; Ctrl/⌘+Shift+1 (Replace One) is a different chord; Ctrl/⌘+\` has no
-  binding. No Monaco action is shadowed. On macOS ⌘+\` is the system's "cycle windows" shortcut,
+  binding. No Monaco action is shadowed. **Tab and the editor (M1.6-QA-003, D-A11Y-3):** in the editor
+  Tab indents; Monaco's "Toggle Tab Key Moves Focus" (Ctrl+M; Ctrl+Shift+M on macOS) makes Tab move
+  focus out of it, and the region shortcuts above always work. On macOS ⌘+\` is the system's "cycle windows" shortcut,
   which the OS may take first (unverified).
 
 ## 2. Main workspace (M1.6)

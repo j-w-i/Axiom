@@ -59,7 +59,8 @@
   display: inline-flex;
   align-items: baseline;
   gap: 7px;
-  min-width: 0;
+  /* Never squeezed below a 24 px target in a crowded row (D-A11Y-4). */
+  min-width: 24px;
   height: 26px;
   padding: 0 8px;
   border: none;
@@ -175,9 +176,10 @@
   font-size: var(--text-small);
   font-variant-numeric: tabular-nums;
 }
+/* 24 px: the WCAG 2.5.8 minimum target (D-A11Y-4). */
 .transport .icon-btn {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
 }
 .titlerow__toggles {
   display: flex;

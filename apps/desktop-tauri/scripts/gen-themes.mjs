@@ -289,7 +289,12 @@ export function build(theme, input) {
     prim.set(`graphite-${step}`, solveText(Math.max(t.min, t.ratio * k), surfaces, t.c * bc, bh + t.dh, dark));
   }
   for (const [step, [dL, c, dh]] of Object.entries(BRASS[theme])) prim.set(`brass-${step}`, hexOf(al + dL, c * ac, ah + dh));
-  const textSurfaces = [prim.get("graphite-175"), prim.get("graphite-200")];
+  // Light also clamps against the chrome tone (graphite-150): the status bar and title row show
+  // state text there (M1.6 a11y defect D-A11Y-2). Dark keeps its two surfaces (output pinned).
+  const textSurfaces = dark
+    ? [prim.get("graphite-175"), prim.get("graphite-200")]
+    : [prim.get("graphite-175"), prim.get("graphite-200"), prim.get("graphite-150")];
+  if (!dark) prim.set("brass-800", clampContrast(prim.get("brass-800"), textSurfaces, 4.5, dark)); // --accent-text
   for (const [name, v] of Object.entries(FIXED[theme])) {
     if (!["sage", "sage-text", "ember", "brick", "steel"].includes(name)) continue;
     const [hex, mode] = Array.isArray(v) ? v : [v];

@@ -189,8 +189,9 @@ async function setTheme(wd, theme) {
   await sleep(300);
 }
 
-/** Tab (or Shift+Tab) through the window, recording each focused element; steps past Monaco
- * (which keeps Tab for indentation) with the region shortcut Mod+` and records that it did. */
+/** Tab (or Shift+Tab) through the window, recording each focused element; in the editor, turns on
+ * Monaco's "Tab key moves focus" (Ctrl+M) once and goes on with Tab. */
+let tabFocusMode = false;
 async function traverse(wd, reverse) {
   const seen = [];
   let monacoStops = 0;
@@ -199,14 +200,15 @@ async function traverse(wd, reverse) {
     else await wd.keys([""]);
     await sleep(40);
     const d = await wd.exec(`const a = document.activeElement; const d = window.__a11y.describe(a); d.focus = window.__a11y.focusVisible(a); d.clipped = window.__a11y.clipped(a); return d;`);
-    if (d.region === "editor") {
+    if (d.region === "editor" && !tabFocusMode) {
+      // The editor keeps Tab for indentation until "Toggle Tab Key Moves Focus" (Monaco's
+      // Ctrl+M; Ctrl+Shift+M on macOS) is on: the documented way out (D-A11Y-3).
       monacoStops++;
       seen.push(d);
-      if (reverse) await wd.exec(`document.querySelector('.tabs [role=tab][aria-selected=true]')?.focus()`);
-      else await wd.chord(MOD, "`");
+      if (process.platform === "darwin") await wd.chord(Keys.CTRL, Keys.SHIFT, "m");
+      else await wd.chord(Keys.CTRL, "m");
+      tabFocusMode = true;
       await sleep(80);
-      const after = await wd.exec(`const a = document.activeElement; const d = window.__a11y.describe(a); d.focus = window.__a11y.focusVisible(a); d.clipped = window.__a11y.clipped(a); return d;`);
-      seen.push(after);
       continue;
     }
     if (seen.length > 3 && JSON.stringify(d) === JSON.stringify(seen[0])) break;
@@ -276,8 +278,8 @@ try {
     check(
       `1 tab traversal (${theme}): forward and reverse reach every region in order`,
       fwdOk && backOk,
-      `forward ${t.forward.join(" → ")}; reverse ${t.reverse.join(" → ")}`,
-      fwd.monacoStops ? [`the editor keeps Tab (indentation): traversal steps past it with Mod+\` (EDITOR-002) — ${fwd.monacoStops} stop(s)`] : [],
+      `forward ${t.forward.join(" → ")}; reverse ${t.reverse.join(" → ")}; the editor was left with Ctrl+M (Tab moves focus) — ${fwd.monacoStops + back.monacoStops} time(s)`,
+      [],
     );
     // <body>: where focus rests between the last control and the wrap to the first (WKWebView,
     // WebView2): the webview's own chrome, not a control.

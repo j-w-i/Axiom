@@ -63,6 +63,11 @@ reproduced by the generator within ΔE2000 < 2.
 | `--glyph-{rs,md,toml,other}` and `-bg` | file-type glyph chips (§7): text and 12–17% tint | `rs` clay `#dd9e80`, `md` steel `#a9c1df`, `toml`/`lock` verdigris `#95c6b6`, other `#a3a097` | `#a8502e`, `#3b6a9e`, `#2f7a68`, `#5b5852` |
 | `--icon-folder`, `--tree-guide` | explorer folder icons and indent guides | `#8e8a82`, white 5% | `#7a766e`, ink 7% |
 
+**Light state text, as built after M1.6-QA-003 (D-A11Y-2).** The generator clamps light text hues
+against the chrome tone too (the status bar and title row show state text there): `--danger`
+`#bc342e`, `--ok-text` `#397330`, `--warn` `#a44e07`, `--accent-text` `#845f1b` (were `#c23a34`,
+`#3e7935`, `#a8520f`, `#85601c`), each ≥ 4.5:1 on editor, panel and chrome. Dark is unchanged.
+
 **`--editor-*` as built (M1.6-EDITOR-002).** Monaco's `axiom-dark` / `axiom-light` themes are
 generated from these tokens alone (`src/editor/theme.ts`, translucent values kept as
 `#rrggbbaa`):

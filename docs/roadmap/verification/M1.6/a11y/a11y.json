@@ -3,10 +3,8 @@
     {
       "name": "1 tab traversal (dark): forward and reverse reach every region in order",
       "ok": true,
-      "detail": "forward title → files → other → tabs → editor → console → status; reverse status → console → other → editor → tabs → files → title",
-      "violations": [
-        "the editor keeps Tab (indentation): traversal steps past it with Mod+` (EDITOR-002) — 1 stop(s)"
-      ]
+      "detail": "forward title → files → other → tabs → editor → console → status; reverse status → console → other → editor → tabs → files → title; the editor was left with Ctrl+M (Tab moves focus) — 1 time(s)",
+      "violations": []
     },
     {
       "name": "2 focus visible (dark): every element reached shows focus and is not clipped",
@@ -23,16 +21,14 @@
     {
       "name": "5 not by colour alone (dark): dirty, stderr, LEDs, failed status carry text",
       "ok": true,
-      "detail": "{\"stderr\":true,\"failed\":[\"✖ Failed with exit code 3 in 94 ms\"],\"dirty\":\"Close main.rs (unsaved)\",\"leds\":3,\"unlabeled\":0}",
+      "detail": "{\"stderr\":true,\"failed\":[\"✖ Failed with exit code 3 in 87 ms\"],\"dirty\":\"Close main.rs (unsaved)\",\"leds\":3,\"unlabeled\":0}",
       "violations": []
     },
     {
       "name": "1 tab traversal (light): forward and reverse reach every region in order",
       "ok": true,
-      "detail": "forward title → files → other → tabs → editor → console → status; reverse status → console → other → editor → tabs → files → title",
-      "violations": [
-        "the editor keeps Tab (indentation): traversal steps past it with Mod+` (EDITOR-002) — 1 stop(s)"
-      ]
+      "detail": "forward title → files → other → tabs → editor → console → status; reverse status → console → other → editor → tabs → files → title; the editor was left with Ctrl+M (Tab moves focus) — 0 time(s)",
+      "violations": []
     },
     {
       "name": "2 focus visible (light): every element reached shows focus and is not clipped",
@@ -49,7 +45,7 @@
     {
       "name": "5 not by colour alone (light): dirty, stderr, LEDs, failed status carry text",
       "ok": true,
-      "detail": "{\"stderr\":true,\"failed\":[\"✖ Failed with exit code 3 in 94 ms\"],\"dirty\":\"Close main.rs (unsaved)\",\"leds\":3,\"unlabeled\":0}",
+      "detail": "{\"stderr\":true,\"failed\":[\"✖ Failed with exit code 3 in 87 ms\"],\"dirty\":\"Close main.rs (unsaved)\",\"leds\":3,\"unlabeled\":0}",
       "violations": []
     },
     {
@@ -60,11 +56,9 @@
     },
     {
       "name": "4 rendered contrast S2 light",
-      "ok": false,
-      "detail": "1 text node(s) below the minimum",
-      "violations": [
-        "editor-area .btn btn--primary \"Open Folder…\" 4.15:1 < 4.5 (rgb(29, 21, 5))"
-      ]
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
     },
     {
       "name": "4 rendered contrast S4 dark",
@@ -92,11 +86,9 @@
     },
     {
       "name": "4 rendered contrast S4 light",
-      "ok": false,
-      "detail": "1 text node(s) below the minimum",
-      "violations": [
-        "status .sb__task sb__task--failed \"node -e \"console.log('out'); console.err\" 4.19:1 < 4.5 (rgb(194, 58, 52))"
-      ]
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
     },
     {
       "name": "4 rendered contrast S7 light",
@@ -106,19 +98,15 @@
     },
     {
       "name": "4 rendered contrast S11 light",
-      "ok": false,
-      "detail": "1 text node(s) below the minimum",
-      "violations": [
-        "dialog .btn btn--primary \"Done\" 4.15:1 < 4.5 (rgb(29, 21, 5))"
-      ]
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
     },
     {
       "name": "4 rendered contrast S12 light",
-      "ok": false,
-      "detail": "1 text node(s) below the minimum",
-      "violations": [
-        "dialog .btn btn--primary \"Save\" 4.15:1 < 4.5 (rgb(29, 21, 5))"
-      ]
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
     },
     {
       "name": "6 reduced motion: Off leaves nothing running once settled; Reduced presence ≤ 80 ms",
@@ -150,33 +138,6 @@
         ],
         "targets": [
           {
-            "tag": "button",
-            "cls": "titlerow__ws",
-            "region": "title",
-            "role": "button",
-            "w": 16,
-            "name": "Workspace axiom-a11y-ws-yOvmXe: switch folder",
-            "h": 26
-          },
-          {
-            "tag": "button",
-            "cls": "icon-btn",
-            "region": "title",
-            "role": "button",
-            "w": 22,
-            "name": "Rerun: node -e \"console.log('out'); console.error('warning: ",
-            "h": 22
-          },
-          {
-            "tag": "button",
-            "cls": "icon-btn",
-            "region": "title",
-            "role": "button",
-            "w": 22,
-            "name": "Stop",
-            "h": 22
-          },
-          {
             "tag": "div",
             "cls": "tree-row",
             "region": "files",
@@ -219,33 +180,6 @@
             "role": "treeitem",
             "w": 252,
             "name": "mdREADME.md",
-            "h": 22
-          },
-          {
-            "tag": "span",
-            "cls": "tab__close",
-            "region": "tabs",
-            "role": "button",
-            "w": 18,
-            "name": "Close README.md",
-            "h": 18
-          },
-          {
-            "tag": "span",
-            "cls": "tab__close",
-            "region": "tabs",
-            "role": "button",
-            "w": 18,
-            "name": "Close main.rs (unsaved)",
-            "h": 18
-          },
-          {
-            "tag": "button",
-            "cls": "btn btn--sm btn--quiet",
-            "region": "console",
-            "role": "button",
-            "w": 62,
-            "name": "Run",
             "h": 22
           }
         ]
@@ -271,33 +205,6 @@
         ],
         "targets": [
           {
-            "tag": "button",
-            "cls": "titlerow__ws",
-            "region": "title",
-            "role": "button",
-            "w": 16,
-            "name": "Workspace axiom-a11y-ws-yOvmXe: switch folder",
-            "h": 26
-          },
-          {
-            "tag": "button",
-            "cls": "icon-btn",
-            "region": "title",
-            "role": "button",
-            "w": 22,
-            "name": "Rerun: node -e \"console.log('out'); console.error('warning: ",
-            "h": 22
-          },
-          {
-            "tag": "button",
-            "cls": "icon-btn",
-            "region": "title",
-            "role": "button",
-            "w": 22,
-            "name": "Stop",
-            "h": 22
-          },
-          {
             "tag": "div",
             "cls": "tree-row",
             "region": "files",
@@ -340,33 +247,6 @@
             "role": "treeitem",
             "w": 252,
             "name": "mdREADME.md",
-            "h": 22
-          },
-          {
-            "tag": "span",
-            "cls": "tab__close",
-            "region": "tabs",
-            "role": "button",
-            "w": 18,
-            "name": "Close README.md",
-            "h": 18
-          },
-          {
-            "tag": "span",
-            "cls": "tab__close",
-            "region": "tabs",
-            "role": "button",
-            "w": 18,
-            "name": "Close main.rs (unsaved)",
-            "h": 18
-          },
-          {
-            "tag": "button",
-            "cls": "btn btn--sm btn--quiet",
-            "region": "console",
-            "role": "button",
-            "w": 62,
-            "name": "Run",
             "h": 22
           }
         ]

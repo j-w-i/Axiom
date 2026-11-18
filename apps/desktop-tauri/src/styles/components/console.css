@@ -136,3 +136,7 @@
 .prompt__input:disabled {
   opacity: 0.42;
 }
+/* Run / Stop: 24 px tall, the WCAG 2.5.8 minimum target (D-A11Y-4). */
+.prompt .btn {
+  height: 24px;
+}

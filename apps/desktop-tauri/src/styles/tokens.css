@@ -216,11 +216,11 @@
   --brass-500: #c99a49;
   --brass-600: #b88a3a;
   --brass-700: #9a722c;
-  --brass-800: #85601c;
+  --brass-800: #845f1b;
   --sage: #4f8f45;
-  --sage-text: #3e7935;
-  --ember: #a8520f;
-  --brick: #c23a34;
+  --sage-text: #397330;
+  --ember: #a44e07;
+  --brick: #bc342e;
   --steel: #3b6a9e;
   /* semantic */
   color-scheme: light;
@@ -276,7 +276,7 @@
   --press: rgb(40 30 10 / 0.1);
   --accent-soft: rgb(184 138 58 / 0.14);
   --accent-line: rgb(150 110 40 / 0.55);
-  --danger-soft: rgb(194 58 52 / 0.1);
+  --danger-soft: rgb(188 52 46 / 0.1);
   --scrim: rgb(60 55 45 / 0.18);
   --scroll-thumb: rgb(0 0 0 / 0.14);
   --scroll-thumb-hover: rgb(0 0 0 / 0.26);
@@ -333,7 +333,8 @@
   /* Light: the press depth is 0.14 (SURFACES-003, the light recipe for raised controls). */
   --pressed-shadow: inset 0 1px 2px rgb(0 0 0 / 0.14);
   --engaged-shadow: inset 0 1px 2px rgb(0 0 0 / 0.14), 0 1px 0 var(--edge);
-  --primary-bg: linear-gradient(var(--accent-hi), var(--accent-lo));
+  /* Light: the gradient ends at --accent, not --accent-lo: dark text on the darker stop was 4.15:1 (D-A11Y-1). */
+  --primary-bg: linear-gradient(var(--accent-hi), var(--accent));
   --primary-bg-hover: linear-gradient(color-mix(in srgb, var(--accent-hi) 85%, white), var(--accent));
   --primary-bg-pressed: linear-gradient(var(--accent-lo), var(--accent));
   --primary-border: color-mix(in srgb, var(--accent-lo) 60%, black);

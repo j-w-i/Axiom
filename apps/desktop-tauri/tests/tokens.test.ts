@@ -168,8 +168,8 @@ const DOCUMENTED: Record<Theme, Record<string, string>> = {
     "--surface-well": "#ffffff", "--surface-raised-1": "#ffffff", "--surface-raised-2": "#f1efeb", "--surface-overlay": "#fcfbf9",
     "--line": "#c3c0ba", "--line-mid": "#dcd9d3", "--line-strong": "#bdb9b2",
     "--text": "#1e1d1b", "--text-muted": "#5b5852", "--text-faint": "#84807a",
-    "--accent": "#b88a3a", "--accent-text": "#85601c", "--on-accent": "#1d1505", "--focus": "#9a722c",
-    "--ok": "#4f8f45", "--ok-text": "#3f7a36", "--warn": "#a8520f", "--danger": "#c43c35",
+    "--accent": "#b88a3a", "--accent-text": "#845f1b", "--on-accent": "#1d1505", "--focus": "#9a722c",
+    "--ok": "#4f8f45", "--ok-text": "#397330", "--warn": "#a44e07", "--danger": "#bc342e",
     "--glyph-rs": "#a8502e", "--glyph-md": "#3b6a9e", "--glyph-toml": "#2f7a68", "--glyph-other": "#5b5852", "--icon-folder": "#7a766e",
   },
 };
@@ -253,17 +253,19 @@ describe("design tokens", () => {
 
   it("light contrast matrix", () => {
     // The §2.3 matrix for "Aluminium" (M1.6-SURFACES-003), with the overlay added for text and
-    // muted text and focus checked on every surface. State texts on --surface-chrome are not in
-    // §2.3 and miss 4.5:1 in light (see the SURFACES-003 handoff: owner decision pending).
+    // muted text, focus checked on every surface, and state texts on chrome (D-A11Y-2, fixed by
+    // clamping the light state hues against the chrome tone too).
     const surfaces = ["--surface-editor", "--surface-panel", "--surface-chrome", "--surface-overlay"];
     const light: [string, string[], number][] = [
       ["--text", surfaces, 7],
       ["--text-muted", surfaces, 4.5],
       ["--text-faint", ["--surface-editor", "--surface-panel"], 3],
-      ["--accent-text", ["--surface-editor", "--surface-panel"], 4.5],
-      ["--ok-text", ["--surface-editor", "--surface-panel"], 4.5],
-      ["--warn", ["--surface-editor", "--surface-panel"], 4.5], // up from the prototype's 4.0:1
-      ["--danger", ["--surface-editor", "--surface-panel"], 4.5],
+      // State texts also on chrome: the status bar and title row show them there (D-A11Y-2).
+      ["--accent-text", ["--surface-editor", "--surface-panel", "--surface-chrome"], 4.5],
+      ["--ok-text", ["--surface-editor", "--surface-panel", "--surface-chrome"], 4.5],
+      ["--warn", ["--surface-editor", "--surface-panel", "--surface-chrome"], 4.5], // up from the prototype's 4.0:1
+      ["--danger", ["--surface-editor", "--surface-panel", "--surface-chrome"], 4.5],
+      ["--on-accent", ["--accent-hi"], 4.5], // the light primary gradient's top stop (its bottom is --accent)
       ["--on-accent", ["--accent"], 4.5],
       ["--focus", ["--surface-editor", "--surface-panel", "--surface-chrome", "--surface-overlay"], 3],
     ];
