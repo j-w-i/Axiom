@@ -127,7 +127,7 @@ fn dir_size(p: &std::path::Path) -> u64 {
     total
 }
 
-/// Linux CI only (`AXIOM_CI_SYSTEM_INSTALL=1`): a real `hello` package through the host's
+/// Linux CI only (`AXIOM_CI_SYSTEM_INSTALL=1`): a real `tree` package through the host's
 /// apt or dnf, with a pkexec shim that runs the approved command through the runner's
 /// passwordless `sudo -n` (CI has no polkit agent to show a prompt).
 #[cfg(target_os = "linux")]
@@ -161,19 +161,19 @@ async fn system_package_install_through_pkexec_shim() {
 
     let m = axiom_env::manifest::parse(
         r#"schema = "axiom.provider/1"
-id = "hello"
-name = "GNU Hello"
-description = "CI fixture"
+id = "tree"
+name = "tree"
+description = "CI fixture (Ubuntu's GNU hello prints no version, so it cannot be verified)"
 version = "0.1.0"
 
 [[tools]]
-id = "hello"
-program = "hello"
-version_regex = 'hello \(GNU Hello\) (\d+\.\d+(?:\.\d+)?)'
+id = "tree"
+program = "tree"
+version_regex = 'tree v(\d+\.\d+(?:\.\d+)?)'
 
 [[install]]
 kind = "system_package"
-packages = { apt = ["hello"], dnf = ["hello"] }
+packages = { apt = ["tree"], dnf = ["tree"] }
 "#,
     )
     .unwrap();
@@ -197,7 +197,7 @@ packages = { apt = ["hello"], dnf = ["hello"] }
     if r.is_err() {
         // What the host actually has, to tell a detection fault from an install fault.
         for dir in std::env::split_paths(host_path.as_os_str()) {
-            let p = dir.join("hello");
+            let p = dir.join("tree");
             if p.is_file() {
                 let out = std::process::Command::new(&p).arg("--version").output();
                 println!(
@@ -215,7 +215,7 @@ packages = { apt = ["hello"], dnf = ["hello"] }
     }
     let r = r.unwrap();
     println!("verified {:?}", r.verified);
-    assert_eq!(r.verified[0].tool_id, "hello");
+    assert_eq!(r.verified[0].tool_id, "tree");
     // The shim saw exactly the command the plan showed (after `pkexec`).
     assert_eq!(
         std::fs::read_to_string(&log).unwrap().trim(),
