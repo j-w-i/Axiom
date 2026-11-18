@@ -1,18 +1,26 @@
 // The workbench: side bar, splitters, main column (editor or Welcome) and the
 // console, with the per-machine layout state; and the banner strip above it.
 
-import { useMemo, useRef, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
 import { EditorArea } from "../components/EditorArea";
 import { Explorer } from "../components/Explorer";
 import { OutputPanel, type OutputPanelHandle } from "../components/OutputPanel";
 import { Welcome } from "../components/Welcome";
 import type { DaemonState } from "../daemon/types";
 import * as Icon from "../ui/icons";
+import { usePresence } from "../ui/motion";
 import { Panel, Splitter } from "../ui/panel";
 import { Banner, IconButton } from "../ui/primitives";
 import type { ShellContext } from "./actions";
 import { clampLayout, defaultLayout, LayoutStore, LIMITS, maxSizes } from "./layout";
 import { MOD } from "./platform";
+import { focusEditor } from "./shortcuts";
+
+/** A region's exit lasts --dur-1 (90 ms) in Standard; Presence makes it 0 in Reduced and Off. */
+export const REGION_EXIT_MS = 90;
+
+/** True when keyboard focus is inside the region `name` (data-region). */
+const focusIn = (name: string) => !!document.activeElement?.closest(`[data-region="${name}"]`);
 
 const windowSize = () => ({ width: window.innerWidth, height: window.innerHeight });
 
@@ -25,8 +33,16 @@ export function useLayout() {
   const sidebarVisible = useSyncExternalStore(s.subscribe, () => s.get().sidebarVisible);
   const panelVisible = useSyncExternalStore(s.subscribe, () => s.get().panelVisible);
   const panelRef = useRef<OutputPanelHandle>(null);
-  const toggleSidebar = () => s.update((l) => ({ ...l, sidebarVisible: !l.sidebarVisible }));
-  const togglePanel = () => s.update((l) => ({ ...l, panelVisible: !l.panelVisible }));
+  // Hiding a region that holds focus gives it to the editor first, on the input frame
+  // (motion-system.md §3 rule 3), before the exit animation starts.
+  const toggleSidebar = () => {
+    if (s.get().sidebarVisible && focusIn("files")) focusEditor();
+    s.update((l) => ({ ...l, sidebarVisible: !l.sidebarVisible }));
+  };
+  const togglePanel = () => {
+    if (s.get().panelVisible && focusIn("console")) focusEditor();
+    s.update((l) => ({ ...l, panelVisible: !l.panelVisible }));
+  };
   const focusRun = () => {
     s.update((l) => (l.panelVisible ? l : { ...l, panelVisible: true }));
     setTimeout(() => panelRef.current?.focusCommand(), 0);
@@ -83,17 +99,22 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
     const region = regionOf(e.target);
     if (region && root.current) root.current.dataset.focusedRegion = region;
   };
+  // Regions stay mounted through their exit (one commit removes the column afterwards); only
+  // their content animates (transform + opacity). No entrance on the first render.
+  const side = useRegionPresence(layout.sidebarVisible);
+  const panel = useRegionPresence(layout.panelVisible);
   const onBlur = (e: FocusEvent<HTMLDivElement>) => {
     if (!root.current?.contains(e.relatedTarget as Node | null)) delete root.current?.dataset.focusedRegion;
   };
   return (
     <div className="workbench" ref={root} style={style} onFocus={onFocus} onBlur={onBlur}>
-      {layout.sidebarVisible && (
+      {side.mounted && (
         <>
           <Panel
-            className="sidebar"
+            className="sidebar motion-in-left"
             title="Files"
             region="files"
+            phase={side.phase}
             meta={ws.name || undefined}
             tools={
               ws.id ? (
@@ -126,7 +147,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             <Welcome recent={ws.recent} ready={ready} onOpenFolder={() => void ctx.openFolder()} onOpenRecent={(r) => documents.requestOpenFolder(r)} mod={MOD} />
           )}
         </div>
-        {layout.panelVisible && (
+        {panel.mounted && (
           <>
             <Splitter
               orientation="horizontal"
@@ -141,11 +162,22 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
               onCommit={(panel) => store.update((l) => ({ ...l, panel }))}
             />
             <div className="console-host" data-region="console">
-              <OutputPanel ref={panelRef} tasks={tasks} workspace={workspace} ready={ready} onHide={ctx.togglePanel} />
+              <div className="console-motion motion-in-up" data-phase={panel.phase}>
+                <OutputPanel ref={panelRef} tasks={tasks} workspace={workspace} ready={ready} onHide={ctx.togglePanel} />
+              </div>
             </div>
           </>
         )}
       </main>
     </div>
   );
+}
+
+/** usePresence for a region, without a phase (no entrance animation) until it first toggles. */
+function useRegionPresence(visible: boolean): { mounted: boolean; phase: "in" | "out" | undefined } {
+  const p = usePresence(visible, REGION_EXIT_MS);
+  const [initial] = useState(visible);
+  const toggled = useRef(false);
+  if (visible !== initial) toggled.current = true;
+  return { mounted: p.mounted, phase: toggled.current ? p.phase : undefined };
 }

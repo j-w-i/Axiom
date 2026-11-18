@@ -241,6 +241,21 @@ try {
       JSON.stringify({ files, editor, console: consoleFocus }),
     );
     await wd.click(await wd.find(".monaco-editor .view-lines"));
+
+    // M1.6-INTERACTION-002: Monaco is laid out once per toggle (its box changes size once).
+    await wd.exec(
+      `window.__layouts = []; const ed = document.querySelector('[data-region="editor"] .monaco-editor'); let last = ed.offsetWidth + 'x' + ed.offsetHeight;` +
+        `window.__layoutRO = new ResizeObserver(() => { const now = ed.offsetWidth + 'x' + ed.offsetHeight; if (now !== last) { window.__layouts.push(now); last = now; } }); window.__layoutRO.observe(ed);`,
+    );
+    const layoutsPer = [];
+    for (const key of ["b", "b", "j", "j"]) {
+      await wd.exec(`window.__layouts.length = 0`);
+      await wd.chord(MOD, key);
+      await new Promise((r) => setTimeout(r, 400));
+      layoutsPer.push(await wd.exec(`return window.__layouts.length`));
+    }
+    await wd.exec(`window.__layoutRO.disconnect()`);
+    check("18c Monaco is laid out once per side bar / console toggle (hide, show, hide, show)", layoutsPer.every((n) => n === 1), JSON.stringify(layoutsPer));
   }
   await shot(wd, "04-editor-dark");
   // 4c: the legacy token aliases (M1.6-SYSTEM-001) resolve on real elements in both

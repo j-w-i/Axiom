@@ -24,7 +24,16 @@ export XDG_SESSION_TYPE=x11
 # Software rendering inside Xvfb (no GPU); keeps WebKitGTK from probing DMABUF.
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 export LIBGL_ALWAYS_SOFTWARE=1
-headless_stop() { kill "$AXIOM_XVFB_PID" 2>/dev/null || true; }
+# The webview's own storage (localStorage holds the layout; WebKit caches) goes to a private,
+# throw-away directory: a test run must never read or write the developer's profile
+# (~/.local/share/<identifier>). --data-dir covers only the daemon and the window geometry.
+AXIOM_HEADLESS_HOME="$(mktemp -d "${TMPDIR:-/tmp}/axiom-headless-XXXXXX")"
+export XDG_DATA_HOME="$AXIOM_HEADLESS_HOME/data" XDG_CACHE_HOME="$AXIOM_HEADLESS_HOME/cache" XDG_CONFIG_HOME="$AXIOM_HEADLESS_HOME/config"
+mkdir -p "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
+headless_stop() {
+  kill "$AXIOM_XVFB_PID" 2>/dev/null || true
+  rm -rf "$AXIOM_HEADLESS_HOME"
+}
 # Fail closed: the X server must be ours and alive.
 if ! kill -0 "$AXIOM_XVFB_PID" 2>/dev/null; then
   echo "headless.sh: Xvfb failed to start" >&2

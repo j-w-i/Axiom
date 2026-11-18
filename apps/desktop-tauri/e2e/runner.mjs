@@ -16,7 +16,7 @@
 //        AXIOM_ALLOW_EXISTING_DISPLAY
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -127,9 +127,16 @@ async function main() {
   let code = 0;
   for (const suitePath of suites) {
     log(`suite: ${suitePath}`);
+    // A private profile per suite (Linux): the webview's localStorage (the layout) and WebKit
+    // caches live under XDG_DATA_HOME / XDG_CACHE_HOME, so a run never reads or writes the
+    // developer's own profile (~/.local/share/<identifier>) and suites cannot leak state into
+    // each other. macOS and Windows keep the per-user webview store (not isolated yet).
+    const home = process.platform === "linux" ? mkdtempSync(join(tmpdir(), "axiom-e2e-home-")) : null;
+    const xdg = home ? { XDG_DATA_HOME: join(home, "data"), XDG_CACHE_HOME: join(home, "cache"), XDG_CONFIG_HOME: join(home, "config") } : {};
+    for (const d of Object.values(xdg)) mkdirSync(d, { recursive: true });
     const suiteCode = await new Promise((resolveExit) => {
       const suite = spawn(process.execPath, [suitePath], {
-        env: { ...process.env, ...env, AXIOM_TAURI_APP: app, AXIOM_E2E_LOG: appLog },
+        env: { ...process.env, ...env, ...xdg, AXIOM_TAURI_APP: app, AXIOM_E2E_LOG: appLog },
         stdio: "inherit",
         // Own process group on POSIX, so a failing suite cannot leave its app behind.
         detached: process.platform !== "win32",
@@ -140,6 +147,7 @@ async function main() {
     if (suiteCode !== 0) code = suiteCode;
     // Anything the suite left running (its app after a crash check) ends here.
     killTree(children.pop());
+    if (home) rmSync(home, { recursive: true, force: true });
   }
   log(`app log: ${appLog}`);
   return code;

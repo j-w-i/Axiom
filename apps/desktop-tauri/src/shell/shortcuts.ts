@@ -63,8 +63,11 @@ export function focusRegion(region: "files" | "editor" | "console", ctx: ShellCo
     }
     return;
   }
-  // The editor: Monaco's input when a document is open (focusing it is what a click does),
-  // otherwise the active tab.
+  focusEditor();
+}
+
+/** Focuses Monaco's input when a document is open (what a click does), otherwise the active tab. */
+export function focusEditor(): void {
   const input = document.querySelector<HTMLElement>('[data-region="editor"] .monaco-editor textarea');
   if (input && !input.closest("[hidden]")) input.focus();
   else document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();

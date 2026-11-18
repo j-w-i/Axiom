@@ -40,6 +40,12 @@ and in CI. A task is not Tested until it passes.
 4. **Isolation.** Every test uses its own temp directories and
    `AXIOM_DATA_DIR`; nothing touches the user's profile; tests are
    parallel-safe.
+   The webview keeps its own store (localStorage holds the layout) outside
+   `AXIOM_DATA_DIR`: on Linux every e2e suite (`e2e/runner.mjs`) and every
+   `headless.sh` run (benchmarks) gets a private `XDG_DATA_HOME` /
+   `XDG_CACHE_HOME` / `XDG_CONFIG_HOME`, removed afterwards (M1.6-INTERACTION-002;
+   until then runs wrote the developer's `~/.local/share/<identifier>`). macOS and
+   Windows runs still use the per-user webview store.
 5. **Fixtures are tiny and committed** (`tests/fixtures/`, each described in
    its README). Inspection fixtures carry an `expected-map.json` of
    element → exact source location.

@@ -45,6 +45,7 @@ lives on branch `task/m1.6`.
 - **M1.6-SHELL-007 is tested (2026-11-18):** Welcome, backend, opening, empty-folder, listing-error and no-document states; the explorer's error row no longer overlaps the next row.
 - **M1.6-EDITOR-001 is tested (2026-11-18):** tab strip (raised active key, transform-placed lit edge, glyph chips, dirty dot/close slot) and path breadcrumbs.
 - **M1.6-EDITOR-002 is tested (2026-11-18):** Monaco themes generated from `--syn-*`/`--editor-*`, Plex Mono 13/20 default, region focus Mod+0/1/\`; fixed a load-dependent race in a stores test (likely the unexplained SYSTEM-003 gate failure).
+- **M1.6-INTERACTION-002 is tested (2026-11-18):** side bar / console show-hide motion (content slides and fades, column changes once, Monaco lays out once per toggle). E2E and bench runs on Linux now use a private webview profile per suite/run (they wrote the developer's real localStorage before).
 - **Next:** see `scripts/tasks.py | grep '^M1.6-' | grep READY` (`scripts/tasks.py | grep '^M1.6-' | grep READY`).
 - _(Wave B history:)_ M1.6-QA-002 (performance baseline and new scenarios),
   M1.6-SYSTEM-001 (generated tokens), M1.6-SHELL-001 (split `App.tsx`, no visual
@@ -90,7 +91,7 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`. Earlier: `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
+`agents/handoffs/2026-11-18-M1.6-INTERACTION-002.md`. Earlier: `agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 

@@ -15,6 +15,7 @@ export function Panel({
   region,
   className,
   testId,
+  phase,
   children,
 }: {
   title: string;
@@ -23,10 +24,12 @@ export function Panel({
   region?: string;
   className?: string;
   testId?: string;
+  /** Presence phase (ui/motion.ts) for a region that animates in and out. */
+  phase?: "in" | "out";
   children: ReactNode;
 }) {
   return (
-    <section className={className ? `panel ${className}` : "panel"} aria-label={title} data-region={region} data-testid={testId}>
+    <section className={className ? `panel ${className}` : "panel"} aria-label={title} data-region={region} data-testid={testId} data-phase={phase}>
       <header className="panel__head">
         <span className="panel__title">{title}</span>
         {meta && <span className="panel__meta">{meta}</span>}

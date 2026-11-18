@@ -36,6 +36,14 @@
   flex-direction: column;
   height: var(--panel-h);
 }
+/* The console's content: what animates when it is shown or hidden (INTERACTION-002); the
+   host box keeps its size. */
+.console-motion {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
 /* Nothing animates during a drag (motion-system.md §3.5). */
 .workbench[data-dragging="true"] * {
   transition: none !important;

@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 import { Keys, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const here = import.meta.dirname;
+const MOD = process.platform === "darwin" ? Keys.META : Keys.CTRL;
 const repo = resolve(here, "../../..");
 const EXE = process.platform === "win32" ? ".exe" : "";
 const APP = process.env.AXIOM_TAURI_APP ?? join(repo, `target/release/axiom-tauri${EXE}`);
@@ -141,6 +142,58 @@ try {
   await wd.waitFor(`return document.querySelector('${SPLIT}').getAttribute('aria-valuenow') === '252'`, [], 3000, "double-click reset").catch(() => {});
   const afterDbl = await now();
   check("6 splitter double-click reset", afterDbl === 252 && (await width()) === 252, `aria-valuenow ${afterDbl}`);
+
+  // ---- region motion (M1.6-INTERACTION-002) ---------------------------------------------
+  {
+    // Five Ctrl+B within ~300 ms: an odd count ends hidden, with nothing left mid-exit.
+    await wd.exec(`document.activeElement?.blur()`);
+    const t0 = Date.now();
+    for (let i = 0; i < 5; i++) await wd.chord(MOD, "b");
+    const burst = Date.now() - t0;
+    await new Promise((r) => setTimeout(r, 400));
+    const hidden = await wd.exec(`return { sidebar: !!document.querySelector('.sidebar'), stale: document.querySelectorAll('[data-phase="out"]').length }`);
+    await wd.chord(MOD, "b");
+    const entering = await wd.exec(`return document.querySelector('.sidebar')?.dataset.phase ?? null`);
+    await new Promise((r) => setTimeout(r, 400));
+    const settled = await wd.exec(
+      `const s = document.querySelector('.sidebar'); return { shown: !!s, phase: s?.dataset.phase ?? null, running: document.getAnimations().filter(a => a.playState === 'running' && s?.contains(a.effect?.target)).length, opacity: s ? getComputedStyle(s).opacity : null }`,
+    );
+    check(
+      "7 toggle side bar 5x ends hidden, then visible, with no stale phase",
+      !hidden.sidebar && hidden.stale === 0 && entering === "in" && settled.shown && settled.running === 0 && settled.opacity === "1",
+      `5 toggles in ${burst} ms → ${JSON.stringify(hidden)}; toggled again → phase ${entering}, settled ${JSON.stringify(settled)}`,
+    );
+
+    // A pointer drag of the side bar seam (+60 px) is kept after a restart.
+    const r = await wd.exec(`const b = document.querySelector('${SPLIT}').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }`);
+    const moves = Array.from({ length: 12 }, (_, i) => ({ type: "pointerMove", duration: 16, x: r.x + (i + 1) * 5, y: r.y, origin: "viewport" }));
+    await wd.cmd("POST", "/actions", {
+      actions: [
+        {
+          type: "pointer",
+          id: "mouse",
+          parameters: { pointerType: "mouse" },
+          actions: [{ type: "pointerMove", duration: 0, x: r.x, y: r.y, origin: "viewport" }, { type: "pointerDown", button: 0 }, ...moves, { type: "pointerUp", button: 0 }],
+        },
+      ],
+    });
+    await new Promise((r2) => setTimeout(r2, 300));
+    const dragged = await width();
+    await wd.execAsync(`const cb = arguments[arguments.length-1]; window.__axiomHost.quit().then(() => cb(true))`).catch(() => {});
+    await wd.waitForExit(15000);
+    try {
+      await wd.quit();
+    } catch {
+      /* already gone */
+    }
+    wd = await launch();
+    await wd.waitFor(`return !!document.querySelector('.sidebar')`, [], 10000, "side bar after restart");
+    const after = await width();
+    check("8 splitter drag persists width after restart", dragged === 312 && after === 312, `dragged to ${dragged}px; after restart ${after}px`);
+    // Leave the default layout for the suites that follow in this run.
+    await wd.exec(`document.querySelector('${SPLIT}').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    await wd.waitFor(`return document.querySelector('${SPLIT}').getAttribute('aria-valuenow') === '252'`, [], 3000, "layout reset after check 8");
+  }
 } catch (e) {
   check("unexpected failure", false, e instanceof Error ? e.message : String(e));
   await failureEvidence(wd, "geometry");
