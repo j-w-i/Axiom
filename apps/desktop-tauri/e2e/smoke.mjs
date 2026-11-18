@@ -633,6 +633,46 @@ try {
   await new Promise((r) => setTimeout(r, 1500));
   await setTheme(wd, "dark");
 
+  // ---- 20. settings dialog (M1.6-SURFACES-002) ------------------------------------------
+  {
+    await wd.click(await wd.find(".monaco-editor .view-lines"));
+    await wd.chord(MOD, ",");
+    await wd.waitFor(`return !!document.querySelector('[data-testid=settings] [role=tablist]')`, [], 3000, "settings open");
+    await new Promise((r) => setTimeout(r, 200));
+    const landing = await wd.exec(
+      `const a = document.activeElement; return { section: document.querySelector('[data-testid=settings] [role=tab][aria-selected=true]')?.textContent, focus: a?.closest('[role=radiogroup]')?.getAttribute('aria-label') ?? a?.tagName }`,
+    );
+    // Shift+Tab from the first control reaches the selected section tab; arrows move between sections.
+    await wd.chord(Keys.SHIFT, "\uE004"); // Shift+Tab
+    const onTab = await wd.exec(`return document.activeElement?.getAttribute('role')`);
+    await wd.keys(["\uE015"]); // ArrowDown → Editor
+    const editor = await wd.exec(`return { tab: document.activeElement?.textContent, fontSize: !!document.querySelector('[role=tabpanel] #font-size') }`);
+    await wd.keys(["\uE015", "\uE015"]); // → Workspace → About
+    const about = await wd.exec(`return document.querySelector('[role=tabpanel] .about-grid')?.textContent ?? ''`);
+    await wd.keys(["\uE015"]); // wraps to Appearance
+    const wrapped = await wd.exec(`return document.activeElement?.textContent`);
+    check(
+      "20a settings sections keyboard navigation (lands on Appearance's first control; Shift+Tab to the tabs; arrows move and wrap)",
+      landing.section === "Appearance" && landing.focus === "Theme" && onTab === "tab" && editor.tab === "Editor" && editor.fontSize && wrapped === "Appearance",
+      JSON.stringify({ landing, onTab, editor, wrapped }),
+    );
+    check("20b about section shows versions", /axiomd \d/.test(about) && /Tauri/.test(about) && /Webview/.test(about), about.slice(0, 100));
+
+    const before = await wd.exec(`return document.documentElement.dataset.motion`);
+    await wd.click(await wd.find('[role=radiogroup][aria-label=Motion] [role=radio]:nth-child(4)')); // "Off" (the glide is child 1)
+    const off = await wd.waitFor(`return document.documentElement.dataset.motion === 'off' ? 'off' : null`, [], 3000, "motion off").catch(() => null);
+    const restore = { standard: 2, reduced: 3, off: 4 }[before] ?? 2;
+    await wd.click(await wd.find(`[role=radiogroup][aria-label=Motion] [role=radio]:nth-child(${restore})`));
+    const back = await wd.waitFor(`return document.documentElement.dataset.motion === arguments[0] ? arguments[0] : null`, [before], 3000, "motion restored").catch(() => null);
+    check("20c motion setting applies immediately (data-motion follows the control)", off === "off" && back === before, `before ${before} → off ${off} → back ${back}`);
+
+    await wd.keys([Keys.ESC]);
+    await wd.waitFor(`return document.querySelector('[data-testid=settings]') === null`, [], 3000, "settings closed");
+    const returned = await wd.exec(`return !!document.activeElement?.closest('.monaco-editor')`);
+    const where = await wd.exec(`const a = document.activeElement; return a ? a.tagName + '.' + a.className + ' ' + (a.getAttribute('aria-label') ?? '') : null`);
+    check("20d Escape closes settings and focus returns to the editor", returned, `focus in editor: ${returned}; active ${where}`);
+  }
+
   // ---- 8. restore state after restart --------------------------------------------
   await wd.exec(`${appExpr}.settings.setValue("editor.fontSize", 15)`);
   await wd.waitFor(`return ${appExpr}.settings.getSnapshot().editorFontSize === 15`, [], 3000, "font size");

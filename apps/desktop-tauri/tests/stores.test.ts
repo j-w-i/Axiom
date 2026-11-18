@@ -660,6 +660,20 @@ describe("stores against the real daemon", () => {
     expect(app.settings.getSnapshot().editorFontSize).toBe(13);
   });
 
+  it("settings motion key round trip", async () => {
+    // appearance.motion is stored by the daemon as an unknown key (INTERACTION-001); the
+    // Settings dialog writes it like any other setting (SURFACES-002).
+    await app.settings.setValue("appearance.motion", "off");
+    await waitFor(() => app.settings.getSnapshot().motion === "off", 2000, "motion off");
+    await app.client.restart();
+    await waitFor(() => app.client.ready, 5000, "restarted");
+    await app.settings.setValue("appearance.motion", "reduced");
+    await waitFor(() => app.settings.getSnapshot().motion === "reduced", 2000, "motion reduced after a restart");
+    expect(app.settings.getSnapshot().error).toBe("");
+    await app.settings.setValue("appearance.motion", "standard");
+    await waitFor(() => app.settings.getSnapshot().motion === "standard", 2000, "motion standard");
+  });
+
   it("a crashed daemon fails requests cleanly and restart recovers", async () => {
     await app.workspace.openFolder(ws);
     transport.kill();

@@ -66,8 +66,8 @@ const CATALOGUE = [
   ["s8", "Palette, file mode with a query (no match highlighting exists yet)"],
   ["s9", "File menu open"],
   ["s10", "Output context menu"],
-  ["s11", "Settings (one sheet: appearance and editor together)"],
-  ["s11b", "Settings, Editor section", "SURFACES-002: settings has no sections yet; S11 shows all of it"],
+  ["s11", "Settings, Appearance section"],
+  ["s11b", "Settings, Editor section"],
   ["s12", "Unsaved-changes dialog"],
   ["s12b", "Conflict dialog"],
   ["s13", "Side bar hidden, console hidden (compact)"],
@@ -607,9 +607,15 @@ async function main() {
 
       await state(wd, "s11", async () => {
         await wd.click(await wd.find('button[aria-label="Settings"]'));
-        await waitFor(wd, `return document.querySelector('[role=dialog] #font-size') !== null`, "Settings");
+        await waitFor(wd, `return document.querySelector('[data-testid=settings] [role=tab][aria-selected=true]')?.textContent === 'Appearance'`, "Settings");
         await sleep(300);
         await bothThemes(wd, "s11");
+        await wd.click(await wd.find("#settings-tab-editor"));
+        await waitFor(wd, `return document.querySelector('[role=dialog] #font-size') !== null`, "Editor section");
+        await parkPointer(wd);
+        await sleep(200);
+        await bothThemes(wd, "s11b");
+        mark("s11b", { status: "captured" });
         await esc(wd, 1);
         await waitFor(wd, `return document.querySelector('[role=dialog]') === null`, "Settings closed");
       });

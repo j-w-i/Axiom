@@ -1,11 +1,15 @@
 /* Dialog and Sheet: the overlay material (design-system.md §4), scrim without blur. */
+/* Modal layers sit above the workbench (whose splitters and title row are positioned) and
+   below menus (50), tooltips (60) and toasts (70). */
 .overlay {
   position: fixed;
+  z-index: 40;
   inset: 0;
   background: var(--scrim);
 }
 .dialog {
   position: fixed;
+  z-index: 41;
   top: 18%;
   left: 50%;
   transform: translateX(-50%);

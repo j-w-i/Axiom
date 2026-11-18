@@ -1,7 +1,7 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { CommandPalette } from "./components/CommandPalette";
-import { AboutSheet, ConflictDialog, SettingsSheet, UnsavedDialog } from "./components/Dialogs";
+import { ConflictDialog, SettingsDialog, UnsavedDialog } from "./components/Dialogs";
 import { host, type AppInfo } from "./daemon/tauri-transport";
 import { useNativeMenu, type ShellContext } from "./shell/actions";
 import { usePaletteCommands } from "./shell/commands";
@@ -104,8 +104,9 @@ export function App({ app }: { app: AppStores }) {
       <StatusBar ctx={ctx} daemon={daemon} />
       <ConflictDialog documents={documents} />
       <UnsavedDialog documents={documents} />
-      <SettingsSheet settings={settings} open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <AboutSheet open={aboutOpen} onOpenChange={setAboutOpen} info={info} serverVersion={daemon.state === "ready" ? daemon.serverVersion : null} />
+      <SettingsDialog settings={settings} open={settingsOpen || aboutOpen} section={aboutOpen ? "about" : "appearance"} info={info}
+        onOpenChange={(o) => !o && (setSettingsOpen(false), setAboutOpen(false))} serverVersion={daemon.state === "ready" ? daemon.serverVersion : null}
+        onRestartBackend={() => void client.restart()} onOpenExternal={(url) => void host.openExternal(url)} />
       <CommandPalette
         open={palette !== null}
         mode={palette ?? "commands"}
