@@ -169,7 +169,14 @@ pub enum VersionSource {
     Static { versions: Vec<String> },
     /// JSON document; `pointer` (RFC 6901, `*` wildcard for arrays) selects
     /// the version strings.
-    Json { url: String, pointer: String },
+    Json {
+        url: String,
+        pointer: String,
+        /// Removed from the front of each version (`v` for nodejs.org's `v22.11.0`); versions
+        /// without it are dropped. Added in M2-PROV-001.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        strip_prefix: String,
+    },
     /// GitHub releases of `owner/repo`; tags stripped of `tag_prefix`.
     GithubReleases {
         repo: String,

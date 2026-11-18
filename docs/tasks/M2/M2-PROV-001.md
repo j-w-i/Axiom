@@ -1,8 +1,8 @@
 ---
 id: M2-PROV-001
 title: Node provider (official archives with SHASUMS256)
-status: planned
-status_note:
+status: tested
+status_note: 
 depends_on: [M2-ENV-002]
 order: 320
 scope: providers/node/ (new)

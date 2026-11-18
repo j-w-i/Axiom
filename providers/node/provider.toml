@@ -1,0 +1,94 @@
+# Built-in provider: Node.js (M2-PROV-001; contract: docs/protocols/providers.md).
+# Official archives from nodejs.org, each verified against the release's SHASUMS256.txt
+# before anything is extracted. Versions come from nodejs.org/dist/index.json (`v` stripped,
+# pre-releases dropped). Layout of a managed root: `bin/` on Linux and macOS, the root itself
+# on Windows (node.exe, npm.cmd), hence both bin_dirs.
+# npm is a Node script: it runs once `node` is on PATH (tasks run in the project environment),
+# so it is detected but not required.
+schema = "axiom.provider/1"
+id = "node"
+name = "Node.js"
+description = "Node.js runtimes from nodejs.org; npm scripts as tasks."
+version = "0.1.0"
+homepage = "https://nodejs.org"
+
+[project]
+any_file = ["package.json"]
+
+[[tools]]
+id = "node"
+program = "node"
+version_regex = 'v(\d+\.\d+\.\d+)'
+
+[[tools]]
+id = "npm"
+program = "npm"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "archive"
+versions = { kind = "json", url = "https://nodejs.org/dist/index.json", pointer = "/*/version", strip_prefix = "v" }
+bin_dirs = ["bin", "."]
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://nodejs.org/dist/v${version}/node-v${version}-linux-x64.tar.xz"
+format = "tar.xz"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://nodejs.org/dist/v${version}/SHASUMS256.txt" }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://nodejs.org/dist/v${version}/node-v${version}-linux-arm64.tar.xz"
+format = "tar.xz"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://nodejs.org/dist/v${version}/SHASUMS256.txt" }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "aarch64" }
+url = "https://nodejs.org/dist/v${version}/node-v${version}-darwin-arm64.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://nodejs.org/dist/v${version}/SHASUMS256.txt" }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "x86_64" }
+url = "https://nodejs.org/dist/v${version}/node-v${version}-darwin-x64.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://nodejs.org/dist/v${version}/SHASUMS256.txt" }
+
+[[install.artifacts]]
+platform = { os = "windows", arch = "x86_64" }
+url = "https://nodejs.org/dist/v${version}/node-v${version}-win-x64.zip"
+format = "zip"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://nodejs.org/dist/v${version}/SHASUMS256.txt" }
+
+[[install.artifacts]]
+platform = { os = "windows", arch = "aarch64" }
+url = "https://nodejs.org/dist/v${version}/node-v${version}-win-arm64.zip"
+format = "zip"
+strip_components = 1
+checksum = { kind = "sha256_url", url = "https://nodejs.org/dist/v${version}/SHASUMS256.txt" }
+
+[[tasks]]
+id = "build"
+kind = "build"
+label = "npm run build"
+command = ["npm", "run", "build"]
+# TypeScript's compiler output (`file(line,col): error TS1234: message`), as tsc prints it.
+diagnostics = { kind = "regex", pattern = '^(?P<file>[^\s(][^(]*)\((?P<line>\d+),(?P<column>\d+)\): (?P<severity>error|warning) (?P<code>TS\d+): (?P<message>.*)$' }
+
+[[tasks]]
+id = "test"
+kind = "test"
+label = "npm test"
+command = ["npm", "test"]
+
+[[tasks]]
+id = "start"
+kind = "run"
+label = "npm start"
+command = ["npm", "start"]

@@ -222,3 +222,69 @@ packages = { apt = ["tree"], dnf = ["tree"] }
         argv[1..].join(" ")
     );
 }
+
+/// M2-PROV-001: a Node.js LTS from nodejs.org (archive verified against SHASUMS256.txt)
+/// installs, verifies, runs from the project environment, and uninstalls.
+#[tokio::test]
+async fn node_managed_install_roundtrip() {
+    let r = Registry::load(&Sources {
+        builtin: Builtin::Embedded,
+        user_dir: None,
+        workspace_dir: None,
+        workspace_trusted: false,
+    });
+    let m = r.get("node").unwrap().clone();
+    let data = tempfile::tempdir().unwrap();
+    let inst = Installer::new(
+        data.path().to_path_buf(),
+        Http::new(HttpConfig::default()).unwrap(),
+    );
+    let available = inst.versions(&m).await.unwrap().available;
+    println!(
+        "node versions: {} offered, newest {:?}",
+        available.len(),
+        available.first()
+    );
+    assert!(available
+        .iter()
+        .all(|v| !v.starts_with('v') && !v.contains('-')));
+    let version = std::env::var("AXIOM_CI_NODE_VERSION").unwrap_or_else(|_| "22.11.0".into());
+    assert!(available.contains(&version), "{version} is listed");
+
+    let plan = inst.plan(&m, &version, None).await.unwrap();
+    println!("plan:\n{}", serde_json::to_string_pretty(&plan).unwrap());
+    let started = Instant::now();
+    let result = inst
+        .install(&plan.plan_id, Some(&m), &CancellationToken::new(), &|_| {})
+        .await
+        .unwrap();
+    let root = data.path().join("toolchains").join("node").join(&version);
+    println!(
+        "installed node {version} in {:.1} s: download {:?} bytes, {:.1} MiB on disk",
+        started.elapsed().as_secs_f64(),
+        plan.download_bytes,
+        dir_size(&root) as f64 / 1048576.0
+    );
+    assert_eq!(result.verified[0].version, version);
+
+    let project =
+        axiom_env::project::parse(&format!("[environment]\nnode = \"{version}\"\n")).unwrap();
+    let (env, _) = axiom_env::project::resolve(&r, &project, &data.path().join("toolchains"), None)
+        .await
+        .unwrap();
+    let vars = axiom_env::project::process_env(&env, std::env::var_os("PATH"));
+    let exe = if cfg!(windows) { "node.exe" } else { "node" };
+    let out = std::process::Command::new(exe)
+        .arg("-e")
+        .arg("console.log(process.version)")
+        .envs(&vars)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        format!("v{version}")
+    );
+
+    inst.uninstall("node", &version, Some(&m)).await.unwrap();
+    assert!(!root.exists());
+}

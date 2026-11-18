@@ -7,10 +7,16 @@ use std::path::{Path, PathBuf};
 
 /// The built-in providers, compiled in so the daemon needs no data files to find them. The
 /// contract test checks that this list matches `providers/*/provider.toml` exactly.
-pub const BUILTIN: &[(&str, &str)] = &[(
-    "rust",
-    include_str!("../../../providers/rust/provider.toml"),
-)];
+pub const BUILTIN: &[(&str, &str)] = &[
+    (
+        "node",
+        include_str!("../../../providers/node/provider.toml"),
+    ),
+    (
+        "rust",
+        include_str!("../../../providers/rust/provider.toml"),
+    ),
+];
 
 /// Where built-in manifests come from.
 #[derive(Debug, Clone)]

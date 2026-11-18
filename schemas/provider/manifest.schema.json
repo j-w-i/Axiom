@@ -514,6 +514,10 @@
             "pointer": {
               "type": "string"
             },
+            "strip_prefix": {
+              "description": "Removed from the front of each version (`v` for nodejs.org's `v22.11.0`); versions\nwithout it are dropped. Added in M2-PROV-001.",
+              "type": "string"
+            },
             "url": {
               "type": "string"
             }

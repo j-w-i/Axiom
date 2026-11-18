@@ -167,11 +167,18 @@ impl Http {
     pub async fn versions(&self, source: &VersionSource) -> Result<Vec<String>, EnvError> {
         let mut out = match source {
             VersionSource::Static { versions } => versions.clone(),
-            VersionSource::Json { url, pointer } => {
+            VersionSource::Json {
+                url,
+                pointer,
+                strip_prefix,
+            } => {
                 let text = self.get_text(url).await?;
                 let doc: serde_json::Value = serde_json::from_str(&text)
                     .map_err(|e| EnvError::Network(format!("{url} is not JSON: {e}")))?;
                 select(&doc, pointer)
+                    .into_iter()
+                    .filter_map(|v| v.strip_prefix(strip_prefix.as_str()).map(String::from))
+                    .collect()
             }
             VersionSource::GithubReleases { repo, tag_prefix } => {
                 let url = format!(
@@ -192,7 +199,8 @@ impl Http {
                     .collect()
             }
         };
-        out.retain(|v| crate::install::valid_version(v));
+        // Pre-releases (a `-` suffix, e.g. `27.0.0-alpha.0`) are never offered (M2-PROV-001).
+        out.retain(|v| crate::install::valid_version(v) && !v.contains('-'));
         out.sort_by(|a, b| compare_versions(b, a));
         out.dedup();
         Ok(out)
