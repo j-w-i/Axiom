@@ -658,6 +658,12 @@ pub fn run() {
     // (port from TAURI_WEBDRIVER_PORT). Compiled out of every other build.
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    // End-to-end builds only, macOS: AXIOM_E2E_BACKGROUND=1 keeps the app under test from taking
+    // the developer's focus (no activation, no Dock icon) and parks its window off-screen.
+    #[cfg(all(feature = "e2e", target_os = "macos"))]
+    let e2e_background = std::env::var("AXIOM_E2E_BACKGROUND").as_deref() == Ok("1");
+    #[cfg(all(feature = "e2e", target_os = "macos"))]
+    let builder = builder.activate_ignoring_other_apps(!e2e_background);
 
     let app = builder
         .manage(HostState {
@@ -683,6 +689,13 @@ pub fn run() {
         ])
         .setup(move |app| {
             restore_geometry(app.handle());
+            #[cfg(all(feature = "e2e", target_os = "macos"))]
+            if e2e_background {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_position(tauri::LogicalPosition::new(-20000.0, 20000.0));
+                }
+            }
             // The first page load gets FIRST_BEAT_GRACE_MS before the heartbeat
             // monitor considers it dead (it cannot have beaten yet).
             let state = app.state::<HostState>();
