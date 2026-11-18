@@ -1,0 +1,376 @@
+{
+  "results": [
+    {
+      "name": "1 tab traversal (dark): forward and reverse reach every region in order",
+      "ok": true,
+      "detail": "forward title → files → other → tabs → editor → console → status; reverse status → console → other → editor → tabs → files → title",
+      "violations": [
+        "the editor keeps Tab (indentation): traversal steps past it with Mod+` (EDITOR-002) — 1 stop(s)"
+      ]
+    },
+    {
+      "name": "2 focus visible (dark): every element reached shows focus and is not clipped",
+      "ok": true,
+      "detail": "22 elements",
+      "violations": []
+    },
+    {
+      "name": "3 names and roles (dark)",
+      "ok": true,
+      "detail": "22 elements",
+      "violations": []
+    },
+    {
+      "name": "5 not by colour alone (dark): dirty, stderr, LEDs, failed status carry text",
+      "ok": true,
+      "detail": "{\"stderr\":true,\"failed\":[\"✖ Failed with exit code 3 in 94 ms\"],\"dirty\":\"Close main.rs (unsaved)\",\"leds\":3,\"unlabeled\":0}",
+      "violations": []
+    },
+    {
+      "name": "1 tab traversal (light): forward and reverse reach every region in order",
+      "ok": true,
+      "detail": "forward title → files → other → tabs → editor → console → status; reverse status → console → other → editor → tabs → files → title",
+      "violations": [
+        "the editor keeps Tab (indentation): traversal steps past it with Mod+` (EDITOR-002) — 1 stop(s)"
+      ]
+    },
+    {
+      "name": "2 focus visible (light): every element reached shows focus and is not clipped",
+      "ok": true,
+      "detail": "22 elements",
+      "violations": []
+    },
+    {
+      "name": "3 names and roles (light)",
+      "ok": true,
+      "detail": "22 elements",
+      "violations": []
+    },
+    {
+      "name": "5 not by colour alone (light): dirty, stderr, LEDs, failed status carry text",
+      "ok": true,
+      "detail": "{\"stderr\":true,\"failed\":[\"✖ Failed with exit code 3 in 94 ms\"],\"dirty\":\"Close main.rs (unsaved)\",\"leds\":3,\"unlabeled\":0}",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S2 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S2 light",
+      "ok": false,
+      "detail": "1 text node(s) below the minimum",
+      "violations": [
+        "editor-area .btn btn--primary \"Open Folder…\" 4.15:1 < 4.5 (rgb(29, 21, 5))"
+      ]
+    },
+    {
+      "name": "4 rendered contrast S4 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S7 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S11 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S12 dark",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S4 light",
+      "ok": false,
+      "detail": "1 text node(s) below the minimum",
+      "violations": [
+        "status .sb__task sb__task--failed \"node -e \"console.log('out'); console.err\" 4.19:1 < 4.5 (rgb(194, 58, 52))"
+      ]
+    },
+    {
+      "name": "4 rendered contrast S7 light",
+      "ok": true,
+      "detail": "0 text node(s) below the minimum",
+      "violations": []
+    },
+    {
+      "name": "4 rendered contrast S11 light",
+      "ok": false,
+      "detail": "1 text node(s) below the minimum",
+      "violations": [
+        "dialog .btn btn--primary \"Done\" 4.15:1 < 4.5 (rgb(29, 21, 5))"
+      ]
+    },
+    {
+      "name": "4 rendered contrast S12 light",
+      "ok": false,
+      "detail": "1 text node(s) below the minimum",
+      "violations": [
+        "dialog .btn btn--primary \"Save\" 4.15:1 < 4.5 (rgb(29, 21, 5))"
+      ]
+    },
+    {
+      "name": "6 reduced motion: Off leaves nothing running once settled; Reduced presence ≤ 80 ms",
+      "ok": true,
+      "detail": "Off running []; Reduced palette/scrim durations [80,80] (the setting; the OS media query cannot be emulated in WebKitGTK)",
+      "violations": []
+    }
+  ],
+  "record": {
+    "themes": {
+      "dark": {
+        "forward": [
+          "title",
+          "files",
+          "other",
+          "tabs",
+          "editor",
+          "console",
+          "status"
+        ],
+        "reverse": [
+          "status",
+          "console",
+          "other",
+          "editor",
+          "tabs",
+          "files",
+          "title"
+        ],
+        "targets": [
+          {
+            "tag": "button",
+            "cls": "titlerow__ws",
+            "region": "title",
+            "role": "button",
+            "w": 16,
+            "name": "Workspace axiom-a11y-ws-yOvmXe: switch folder",
+            "h": 26
+          },
+          {
+            "tag": "button",
+            "cls": "icon-btn",
+            "region": "title",
+            "role": "button",
+            "w": 22,
+            "name": "Rerun: node -e \"console.log('out'); console.error('warning: ",
+            "h": 22
+          },
+          {
+            "tag": "button",
+            "cls": "icon-btn",
+            "region": "title",
+            "role": "button",
+            "w": 22,
+            "name": "Stop",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "src",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "main.rs, unsaved",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "target",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": ".gitignore",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "mdREADME.md",
+            "h": 22
+          },
+          {
+            "tag": "span",
+            "cls": "tab__close",
+            "region": "tabs",
+            "role": "button",
+            "w": 18,
+            "name": "Close README.md",
+            "h": 18
+          },
+          {
+            "tag": "span",
+            "cls": "tab__close",
+            "region": "tabs",
+            "role": "button",
+            "w": 18,
+            "name": "Close main.rs (unsaved)",
+            "h": 18
+          },
+          {
+            "tag": "button",
+            "cls": "btn btn--sm btn--quiet",
+            "region": "console",
+            "role": "button",
+            "w": 62,
+            "name": "Run",
+            "h": 22
+          }
+        ]
+      },
+      "light": {
+        "forward": [
+          "title",
+          "files",
+          "other",
+          "tabs",
+          "editor",
+          "console",
+          "status"
+        ],
+        "reverse": [
+          "status",
+          "console",
+          "other",
+          "editor",
+          "tabs",
+          "files",
+          "title"
+        ],
+        "targets": [
+          {
+            "tag": "button",
+            "cls": "titlerow__ws",
+            "region": "title",
+            "role": "button",
+            "w": 16,
+            "name": "Workspace axiom-a11y-ws-yOvmXe: switch folder",
+            "h": 26
+          },
+          {
+            "tag": "button",
+            "cls": "icon-btn",
+            "region": "title",
+            "role": "button",
+            "w": 22,
+            "name": "Rerun: node -e \"console.log('out'); console.error('warning: ",
+            "h": 22
+          },
+          {
+            "tag": "button",
+            "cls": "icon-btn",
+            "region": "title",
+            "role": "button",
+            "w": 22,
+            "name": "Stop",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "src",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "main.rs, unsaved",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "target",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": ".gitignore",
+            "h": 22
+          },
+          {
+            "tag": "div",
+            "cls": "tree-row",
+            "region": "files",
+            "role": "treeitem",
+            "w": 252,
+            "name": "mdREADME.md",
+            "h": 22
+          },
+          {
+            "tag": "span",
+            "cls": "tab__close",
+            "region": "tabs",
+            "role": "button",
+            "w": 18,
+            "name": "Close README.md",
+            "h": 18
+          },
+          {
+            "tag": "span",
+            "cls": "tab__close",
+            "region": "tabs",
+            "role": "button",
+            "w": 18,
+            "name": "Close main.rs (unsaved)",
+            "h": 18
+          },
+          {
+            "tag": "button",
+            "cls": "btn btn--sm btn--quiet",
+            "region": "console",
+            "role": "button",
+            "w": 62,
+            "name": "Run",
+            "h": 22
+          }
+        ]
+      }
+    }
+  }
+}
