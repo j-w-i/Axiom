@@ -43,6 +43,8 @@ function ctx(f: Fixture): ShellContext {
     togglePanel: noop,
     resetLayout: noop,
     focusRun: noop,
+    destination: "files",
+    setDestination: noop,
     setSettingsOpen: noop,
     setAboutOpen: noop,
     setPalette: noop,

@@ -27,8 +27,29 @@
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-width: 0;
   min-height: 120px;
   background: var(--surface-editor);
+}
+/* The side bar's explorer; hidden (not unmounted) while the Environments destination shows. */
+.sidebar__view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.sidebar__view[hidden] {
+  display: none;
+}
+/* The editor's own content; hidden (not unmounted) while the Environments page shows. */
+.editor-column__files {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.editor-column__files[hidden] {
+  display: none;
 }
 .console-host {
   display: flex;

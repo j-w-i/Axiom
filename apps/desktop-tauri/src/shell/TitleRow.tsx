@@ -3,7 +3,7 @@
 // On macOS the row hosts the traffic lights (overlay title bar, D3) and is the drag region
 // wherever it is not interactive.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as Icon from "../ui/icons";
 import { Menu, type MenuEntry } from "../ui/overlays";
 import { IconButton, Keys, Led, RateMeter, type LedState } from "../ui/primitives";
@@ -189,6 +189,32 @@ function Transport({ ctx }: { ctx: ShellContext }) {
       clearInterval(meter);
     };
   }, [task.running]);
+
+  // An install (M2-UI-002) is the running activity when no task runs: one place shows
+  // "something is executing".
+  const env = ctx.app.environments;
+  // A string snapshot (provider + step), so the label follows the install's progress.
+  const installKey = () => {
+    const a = env.activeInstall;
+    return a ? `${a.providerId}\n${a.progress?.label ?? ""}` : null;
+  };
+  const install = useSyncExternalStore(env.subscribe, installKey, installKey);
+  const installing = !task.running && install !== null ? env.activeInstall : null;
+  if (installing) {
+    const step = installing.progress?.label;
+    const text = `Installing ${installing.name}${step ? `: ${step}` : ""}`;
+    return (
+      <div className="transport" data-testid="transport" data-state="run" data-activity="install" role="group" aria-label="Task">
+        <Led state="run" label="Install running" />
+        <span className="transport__label" title={text}>
+          {text}
+        </span>
+        <IconButton label={`Stop installing ${installing.name}`} hint={`Stop installing ${installing.name}`} onClick={() => env.cancelInstall(installing.providerId)}>
+          <Icon.Stop />
+        </IconButton>
+      </div>
+    );
+  }
 
   const led: LedState = task.running ? "run" : task.lastOutcome === "succeeded" ? "on" : task.lastOutcome === "failed" ? "err" : "off";
   const label = task.running ? task.label : task.lastOutcome ? task.history[0] ?? "" : "";

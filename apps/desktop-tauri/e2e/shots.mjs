@@ -75,6 +75,10 @@ const CATALOGUE = [
   ["s15", "Focus on the tree (keyboard focus ring)"],
   ["s16", "Hint line showing the Rerun hint (Rerun focused)"],
   ["s17", "Gallery page, each section (dev-only gallery served locally, opened in the app's own webview, motion off)"],
+  ["s18", "Environments page (M2-UI-001): Rust detected in the fixture's Cargo workspace"],
+  ["s18b", "Environments page, an install in progress (meter and current step; the store's own progress set from the harness)"],
+  ["s18c", "Environments page, a failed install (the store's own failure set from the harness)"],
+  ["s18d", "Install plan dialog (M2-UI-002) for a managed Rust install (the plan the daemon returns for rust 1.84.0 on Linux)"],
   ["focused-region", "Focused-region rule", "SHELL-002 / EDITOR-002: no focused-region treatment yet"],
 ];
 const states = new Map(
@@ -687,6 +691,53 @@ async function main() {
         await wd.exec(`document.querySelector('[data-testid=transport] [data-hint^="Rerun"]').focus()`);
         await waitFor(wd, `return document.querySelector('.sb__hint')?.textContent.startsWith('Rerun the last command')`, "the Rerun hint");
         await bothThemes(wd, "s16");
+      });
+
+      // ---- S18: the Environment Manager (M2-UI-001, M2-UI-002) ------------------------------
+      await state(wd, "s18", async () => {
+        await wd.click(await wd.find('.rail [data-destination="environments"]'));
+        await waitFor(wd, `return document.querySelector('.env-table [data-provider="rust"]') !== null && ${STORES}.environments.getSnapshot().status === 'ready'`, "environments table");
+        await parkPointer(wd);
+        await bothThemes(wd, "s18");
+      });
+      const ENV = `${STORES}.environments`;
+      await state(wd, "s18b", async () => {
+        // An install runs for seconds to minutes: hold the store's own progress (as S1b holds `opening`).
+        await wd.exec(`${ENV}.set({ installs: { rust: { planId: "shots", progress: { planId: "shots", step: 0, steps: 6, label: "Downloading rustup-init", bytesDone: 9437184, bytesTotal: 21347088 } } } })`);
+        await waitFor(wd, `return document.querySelector('.env-table [data-provider="rust"]')?.dataset.state === 'installing'`, "installing row");
+        await bothThemes(wd, "s18b");
+        await wd.exec(`${ENV}.set({ installs: {} })`);
+      });
+      await state(wd, "s18c", async () => {
+        await wd.exec(`${ENV}.set({ failures: { rust: "The download did not match its published checksum, so nothing was installed." } })`);
+        await waitFor(wd, `return document.querySelector('.env-table [data-provider="rust"]')?.dataset.state === 'error'`, "failed row");
+        await bothThemes(wd, "s18c");
+        await wd.exec(`${ENV}.set({ failures: {} })`);
+      });
+      await state(wd, "s18d", async () => {
+        const root = "/home/alex/.local/share/axiom/toolchains/rust/1.84.0";
+        const plan = {
+          planId: "shots", providerId: "rust", version: "1.84.0", scope: "managed", downloadBytes: 21347088, expiresMs: 0,
+          effects: ["network", "writeManaged", "runPrograms"],
+          steps: [
+            { kind: "download", url: "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init", bytes: 21347088,
+              sha256: { kind: "url", url: "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256" } },
+            { kind: "extract", format: "file", stripComponents: 0 },
+            { kind: "run", argv: [root + "/rustup-init", "-y", "--no-modify-path", "--default-toolchain", "none", "--profile", "minimal"],
+              env: { CARGO_HOME: root + "/cargo", RUSTUP_HOME: root + "/rustup" } },
+            { kind: "run", argv: [root + "/cargo/bin/rustup", "toolchain", "install", "1.84.0", "--profile", "minimal"],
+              env: { CARGO_HOME: root + "/cargo", RUSTUP_HOME: root + "/rustup", RUSTUP_TOOLCHAIN: "1.84.0" } },
+            { kind: "verify", toolId: "cargo" },
+            { kind: "verify", toolId: "rustc" },
+          ],
+        };
+        await wd.exec(`${ENV}.set({ plan: { plan: arguments[0], providerName: "Rust" } })`, [plan]);
+        await waitFor(wd, `return document.querySelector('[data-testid=install-plan] .plan-step') !== null`, "plan dialog");
+        await sleep(300);
+        await bothThemes(wd, "s18d");
+        await wd.exec(`${ENV}.dismissPlan()`);
+        await waitFor(wd, `return document.querySelector('[data-testid=install-plan]') === null`, "plan dialog closed");
+        await wd.click(await wd.find('.rail [data-destination="files"]'));
       });
 
       await state(wd, "s12", async () => {

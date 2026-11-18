@@ -45,6 +45,8 @@ mkdirSync(join(ws, "src"), { recursive: true });
 writeFileSync(join(ws, "src", "main.rs"), 'fn main() {\n    println!("hello");\n}\n');
 writeFileSync(join(ws, "README.md"), "# Demo\n\nA small workspace.\n");
 writeFileSync(join(ws, ".gitignore"), "target/\n");
+// A Cargo workspace, so the Environments page (S18) has a toolchain row.
+writeFileSync(join(ws, "Cargo.toml"), '[package]\nname = "demo"\nversion = "0.1.0"\n');
 mkdirSync(join(ws, "target"), { recursive: true });
 
 // ---- in-page helpers -------------------------------------------------------------------
@@ -311,6 +313,58 @@ try {
     await wd.keys([Keys.ESC]);
     await wd.waitFor(`return !document.querySelector('[data-testid=unsaved-dialog]')`, [], 3000, "dialog closed");
 
+    // ---- S18: the Environments page and the install-plan dialog (M2-UI-001, M2-UI-002) ----
+    await wd.click(await wd.find('.rail [data-destination="environments"]'));
+    await wd.waitFor(`return window.__axiom.environments.getSnapshot().status === 'ready' && !!document.querySelector('.env-table')`, [], 15000, "environments page");
+    await sleep(300);
+    contrast[`S18 ${theme}`] = await wd.exec(`return window.__a11y.contrastScan()`);
+    // By keyboard, as check 2 (programmatic focus after a click does not show :focus-visible).
+    await wd.exec(`document.activeElement?.blur()`);
+    const envTrav = await traverse(wd, false);
+    const envNames = await wd.exec(`return [...document.querySelectorAll('.rail button, [data-region=files] button, .env-page button')].filter(e => e.getBoundingClientRect().width > 0 && e.tabIndex >= 0).map(e => window.__a11y.describe(e).name)`); // the rail is one Tab stop (roving)
+    const envEls = envTrav.seen.filter((d) => envNames.includes(d.name));
+    const missed = envNames.filter((n) => !envEls.some((d) => d.name === n));
+    const badEnv = [
+      ...envEls.filter((d) => !d.name || !d.role || !d.focus || d.clipped).map((d) => `${d.role} "${d.name}" focus=${d.focus} clipped=${d.clipped}`),
+      ...missed.map((n) => `not reached by Tab: "${n}"`),
+    ];
+    const table = await wd.exec(`const t = document.querySelector('.env-table'); return { name: t?.getAttribute('aria-label'), headers: [...t.querySelectorAll('thead th')].map(h => h.getAttribute('aria-label') || h.textContent), leds: [...t.querySelectorAll('.led')].every(l => (l.getAttribute('aria-label') ?? '').includes(':')) }`);
+    check(
+      `S18 environments page (${theme}): every control named, with a role and visible focus; the table and its columns are named; LEDs say their state`,
+      envEls.length > 0 && badEnv.length === 0 && table.name === "Toolchains" && table.headers.every(Boolean) && table.leds,
+      `${envEls.length} controls; table ${JSON.stringify(table)}`,
+      badEnv,
+    );
+    // The plan dialog (the daemon's plan for a fixture provider would need the network; the
+    // store's own plan state is set, as the shots harness does).
+    await wd.exec(`window.__axiom.environments.set({ plan: { providerName: "Rust", plan: { planId: "a11y", providerId: "rust", version: "1.84.0", scope: "system", downloadBytes: 1024, expiresMs: 0, effects: ["network", "systemChange", "elevation"],
+      steps: [{ kind: "download", url: "https://example.org/tool.tar.gz", bytes: 1024, sha256: { kind: "digest", value: "${"ab".repeat(32)}" } }, { kind: "systemPackages", manager: "dnf", packages: ["tool"], argv: ["pkexec", "dnf", "install", "-y", "tool"] }, { kind: "verify", toolId: "tool" }] } } })`);
+    await wd.waitFor(`return !!document.querySelector('[data-testid=install-plan] .plan-step')`, [], 5000, "plan dialog");
+    await sleep(300);
+    contrast[`S18d ${theme}`] = await wd.exec(`return window.__a11y.contrastScan()`);
+    const dlg = await wd.exec(`
+      const d = document.querySelector('[data-testid=install-plan]');
+      const list = d.querySelector('ol');
+      return { role: d.getAttribute('role'), name: document.getElementById(d.getAttribute('aria-labelledby'))?.textContent,
+               list: list?.tagName + ':' + list?.getAttribute('aria-label'), items: [...list.children].map(li => li.tagName + ':' + li.textContent.trim().slice(0, 30)),
+               warning: d.querySelector('.plan__warning')?.textContent, focus: document.activeElement?.dataset.action }`);
+    const trapped = [];
+    for (let i = 0; i < 6; i++) {
+      await wd.keys(["\uE004"]); // Tab
+      trapped.push(await wd.exec(`return !!document.activeElement?.closest('[data-testid=install-plan]')`));
+    }
+    await wd.keys([Keys.ESC]);
+    const closed = await wd.waitFor(`return !document.querySelector('[data-testid=install-plan]') && !window.__axiom.environments.getSnapshot().plan`, [], 3000, "plan closed").then(() => true, () => false);
+    const installs = await wd.exec(`return Object.keys(window.__axiom.environments.getSnapshot().installs).length`);
+    check(
+      `S18d install plan dialog (${theme}): a named dialog, steps are a named list of named items, focus starts on Install and stays inside, Escape cancels without installing`,
+      dlg.role === "dialog" && dlg.name === "Install Rust 1.84.0" && dlg.list === "OL:Steps" && dlg.items.length === 3 && dlg.items.every((x) => x.startsWith("LI:") && x.length > 4) &&
+        /System install/.test(dlg.warning ?? "") && dlg.focus === "install" && trapped.every(Boolean) && closed && installs === 0,
+      JSON.stringify({ ...dlg, trapped, closed, installs }),
+    );
+    await wd.click(await wd.find('.rail [data-destination="files"]'));
+    await wd.waitFor(`return document.querySelector('.editor-column__files')?.hidden === false`, [], 3000, "back to files");
+
     // ---- 5: not by colour alone ----------------------------------------------------------
     const marks = await wd.exec(`
       const dirty = document.querySelector('[role=tab][data-dirty=true] .tab__close')?.getAttribute('aria-label') ?? '';
@@ -328,7 +382,7 @@ try {
     t.targets = await wd.exec(`return window.__a11y.targets()`);
   }
 
-  // ---- 4: rendered contrast across S2, S4, S7, S11, S12 in both themes --------------------
+  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d in both themes ----------
   for (const [state, fails] of Object.entries(contrast)) {
     check(`4 rendered contrast ${state}`, fails.length === 0, `${fails.length} text node(s) below the minimum`, fails.map((f) => `${f.region} .${f.cls} "${f.text}" ${f.ratio}:1 < ${f.need} (${f.color})`));
   }

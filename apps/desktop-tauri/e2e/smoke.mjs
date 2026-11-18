@@ -8,7 +8,9 @@
 //        AXIOM_SCREENSHOT_DIR, AXIOM_E2E_LOG
 
 import { findDescendantsByName, findWebContentProcesses, killNow, readProcessTable } from "./processes.mjs";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { INPUT_RECORDER, Keys, PROVIDER, TRUSTED_INPUT, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
@@ -73,8 +75,59 @@ const docsTab = (path, dirty) =>
   `return document.querySelector('[data-path="${path}"][role=tab]')?.dataset.dirty === '${dirty}'`;
 const appExpr = "window.__axiom";
 
+// ---- M2-UI-001/002 fixture: two user providers whose single-file "toolchains" come from a
+// loopback HTTP server (the daemon allows plain HTTP to loopback only with the test switch).
+// `demo` downloads at once; `slowdemo` trickles 1 KiB every 20 ms so its install can be
+// cancelled mid-download.
+const IS_WIN = process.platform === "win32";
+const toolScript = (name, version, pad = 0) =>
+  IS_WIN
+    ? `@echo ${name} ${version}\r\n${"rem padding\r\n".repeat(Math.ceil(pad / 13))}`
+    : `#!/bin/sh\necho "${name} ${version}"\n${"# padding\n".repeat(Math.ceil(pad / 10))}`;
+const fixtureFiles = new Map([
+  [`/demotool${IS_WIN ? ".bat" : ""}`, { body: Buffer.from(toolScript("demo-tool", "1.0.0")), slow: false }],
+  [`/slowtool${IS_WIN ? ".bat" : ""}`, { body: Buffer.from(toolScript("slow-tool", "2.0.0", 96 * 1024)), slow: true }],
+]);
+const fixtureServer = createServer((req, res) => {
+  const f = fixtureFiles.get(req.url ?? "");
+  if (!f) return void res.writeHead(404).end();
+  res.writeHead(200, { "content-length": f.body.length });
+  if (req.method === "HEAD") return void res.end();
+  if (!f.slow) return void res.end(f.body);
+  let at = 0;
+  const tick = () => {
+    if (at >= f.body.length || res.destroyed) return void res.end();
+    res.write(f.body.subarray(at, at + 1024));
+    at += 1024;
+    setTimeout(tick, 20);
+  };
+  tick();
+});
+await new Promise((r) => fixtureServer.listen(0, "127.0.0.1", r));
+fixtureServer.unref();
+const fixtureBase = `http://127.0.0.1:${fixtureServer.address().port}`;
+const hostOs = { darwin: "macos", win32: "windows" }[process.platform] ?? "linux";
+for (const [id, name, program, version] of [
+  ["demo", "Demo", "demotool", "1.0.0"],
+  ["slowdemo", "Slow Demo", "slowtool", "2.0.0"],
+]) {
+  const file = `/${program}${IS_WIN ? ".bat" : ""}`;
+  const digest = createHash("sha256").update(fixtureFiles.get(file).body).digest("hex");
+  const tool = program === "demotool" ? "demo-tool" : "slow-tool";
+  mkdirSync(join(dataDir, "providers", id), { recursive: true });
+  writeFileSync(
+    join(dataDir, "providers", id, "provider.toml"),
+    `schema = "axiom.provider/1"\nid = "${id}"\nname = "${name}"\ndescription = "e2e fixture"\nversion = "0.1.0"\n` +
+      `[project]\nany_file = ["Cargo.toml"]\n` +
+      `[[tools]]\nid = "${program}"\nprogram = "${program}"\nversion_regex = '${tool} (\\d+\\.\\d+\\.\\d+)'\n` +
+      `[[install]]\nkind = "archive"\nversions = { kind = "static", versions = ["${version}"] }\nbin_dirs = ["."]\n` +
+      `[[install.artifacts]]\nplatform = { os = "${hostOs}" }\nurl = "${fixtureBase}${file}"\nformat = "file"\n` +
+      `checksum = { kind = "sha256", values = { "${version}" = "${digest}" } }\n`,
+  );
+}
+
 async function launch() {
-  return WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", dataDir], {}, onLog);
+  return WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", dataDir], { AXIOM_TEST_INSECURE_LOOPBACK_HTTP: "1" }, onLog);
 }
 
 async function shot(wd, name) {
@@ -804,6 +857,92 @@ try {
     );
     // The reordered strip (README first) is what check 8 must find after the restart.
     await new Promise((r) => setTimeout(r, 1500)); // the tab save debounce (500 ms) and WebKit's storage
+  }
+
+  // ---- 24. environments (M2-UI-001, M2-UI-002) --------------------------------------
+  {
+    const row = (id) => `.env-table [data-provider="${id}"]`;
+    await wd.click(await wd.find('.rail [data-destination="environments"]'));
+    await wd.waitFor(`return !!document.querySelector(${S(row("demo"))}) && !!document.querySelector(${S(row("rust"))})`, [], 15000, "environments table");
+    const page = await wd.exec(
+      `const r = (id) => document.querySelector('.env-table [data-provider="' + id + '"]');
+       return { current: document.querySelector('.rail [aria-current=page]')?.dataset.destination,
+                side: document.querySelector('[data-region=files] .panel__title')?.textContent,
+                editorHidden: document.querySelector('.editor-column__files')?.hidden,
+                rust: r('rust')?.querySelector('.env-name__tools')?.textContent, rustState: r('rust')?.dataset.state,
+                demo: r('demo')?.dataset.state, demoAction: r('demo')?.querySelector('.btn--primary')?.textContent.trim(),
+                badge: document.querySelector('.rail [data-destination=environments]')?.getAttribute('aria-label') }`,
+    );
+    check(
+      "24a environments page lists tools (rail destination, side bar, Rust's tools, Demo missing with Plan install…)",
+      page.current === "environments" && page.side === "Environments" && page.editorHidden === true && page.rust === "cargo · rustc · rustup" &&
+        page.demo === "missing" && page.demoAction === "Plan install…" && /need attention/.test(page.badge),
+      JSON.stringify(page),
+    );
+    await shot(wd, "24a-environments-dark");
+
+    await wd.click(await wd.find(`${row("demo")} .btn--primary`));
+    await wd.waitFor(`return !!document.querySelector('[data-testid=install-plan] .plan-step')`, [], 10000, "plan dialog");
+    const plan = await wd.exec(
+      `const d = document.querySelector('[data-testid=install-plan]');
+       return { title: d.querySelector('.dialog__title')?.textContent, steps: [...d.querySelectorAll('.plan__steps > li')].map(li => li.dataset.kind + ':' + li.querySelector('.plan-step__name').textContent.trim()),
+                url: d.querySelector('[data-kind=download] code')?.textContent, sha: d.querySelector('[data-kind=download]')?.textContent.includes('SHA-256'),
+                listName: d.querySelector('.plan__steps')?.getAttribute('aria-label'), focus: document.activeElement?.dataset.action }`,
+    );
+    await shot(wd, "24b-install-plan-dark");
+    await wd.click(await wd.find('[data-testid=install-plan] [data-action=install]'));
+    const installed = await wd
+      .waitFor(`const r = document.querySelector(${S(row("demo"))}); return r?.dataset.state === 'ready' ? r.querySelector('td:nth-child(3)').textContent + ' / ' + r.querySelector('td:nth-child(4)').textContent : null`, [], 20000, "demo ready")
+      .catch(() => null);
+    check(
+      "24b install plan dialog shows every step; Install runs it and the row becomes Ready with the managed version",
+      plan.title === "Install Demo 1.0.0" && plan.steps.join("|").startsWith("download:Download demotool") && plan.steps.length === 3 &&
+        plan.steps[1].startsWith("extract:") && plan.steps[2] === "verify:Check that demotool runs" && plan.url?.startsWith(fixtureBase) && plan.sha &&
+        plan.listName === "Steps" && plan.focus === "install" && /^1\.0\.0 \/ managed/.test(installed ?? ""),
+      `${JSON.stringify(plan)}; after install: ${installed}`,
+    );
+
+    await wd.click(await wd.find(`${row("slowdemo")} .btn--primary`));
+    await wd.waitFor(`return !!document.querySelector('[data-testid=install-plan] [data-action=install]')`, [], 10000, "slow plan dialog");
+    await wd.click(await wd.find('[data-testid=install-plan] [data-action=install]'));
+    await wd.waitFor(`return document.querySelector(${S(row("slowdemo"))})?.dataset.state === 'installing' && !!document.querySelector(${S(row("slowdemo") + " .meter")})`, [], 10000, "installing");
+    // The plan dialog's scrim animates out; a click before it is gone lands on it.
+    await wd.waitFor(`return !document.querySelector('[data-testid=install-plan], .overlay')`, [], 5000, "plan dialog gone");
+    const transport = await wd.exec(`const t = document.querySelector('[data-testid=transport]'); return t?.dataset.activity + ' ' + t?.querySelector('.transport__label')?.textContent`);
+    await shot(wd, "24c-installing-dark");
+    await wd.click(await wd.find(`${row("slowdemo")} .env-state--progress .btn`));
+    const cancelled = await wd
+      .waitFor(`const r = document.querySelector(${S(row("slowdemo"))}); return r?.dataset.state === 'error' ? r.querySelector('.env-state__error')?.textContent : null`, [], 10000, "cancelled")
+      .catch(() => null);
+    await shot(wd, "24c-install-error-dark");
+    const leftovers = (dir) => (existsSync(dir) ? readdirSync(dir) : []);
+    await new Promise((r) => setTimeout(r, 300));
+    check(
+      "24c cancel install: the transport shows the install, Cancel stops it and leaves nothing behind",
+      transport.startsWith("install Installing Slow Demo") && cancelled === "The install was cancelled." &&
+        leftovers(join(dataDir, "toolchains", "slowdemo")).length === 0 && leftovers(join(dataDir, "cache")).every((f) => !f.startsWith(".part")),
+      `transport="${transport}" row="${cancelled}" toolchains=${JSON.stringify(leftovers(join(dataDir, "toolchains", "slowdemo")))}`,
+    );
+
+    await wd.waitFor(`return !document.querySelector('.overlay')`, [], 5000, "no dialog");
+    await wd.click(await wd.find(`${row("demo")} .env-actions .icon-btn`));
+    await wd.waitFor(`return !!document.querySelector('[data-testid=remove-toolchain]')`, [], 5000, "remove dialog");
+    const names = await wd.exec(`return document.querySelector('[data-testid=remove-toolchain] .dialog__body')?.textContent`);
+    await wd.click(await wd.find('[data-testid=remove-toolchain] [data-action=remove]'));
+    await wd.waitFor(`return !document.querySelector('.overlay')`, [], 5000, "remove dialog gone");
+    const removed = await wd
+      .waitFor(`return document.querySelector(${S(row("demo"))})?.dataset.state === 'missing'`, [], 10000, "demo missing again")
+      .then(() => true, () => false);
+    check(
+      "24d Remove names the directory, removes it, and the row is missing again",
+      /toolchains[\\/]demo[\\/]1\.0\.0/.test(names ?? "") && removed && !existsSync(join(dataDir, "toolchains", "demo", "1.0.0")),
+      `dialog: ${names}`,
+    );
+
+    // Back to Files: the editor and its tabs are as they were.
+    await wd.click(await wd.find('.rail [data-destination="files"]'));
+    const back = await wd.exec(`return { hidden: document.querySelector('.editor-column__files')?.hidden, tabs: document.querySelectorAll('[role=tab]').length, side: document.querySelector('[data-region=files] .panel__title')?.textContent }`);
+    check("24e the Files destination returns to the explorer and the editor with its tabs", back.hidden === false && back.tabs > 0 && back.side === "Files", JSON.stringify(back));
   }
 
   // ---- 8. restore state after restart --------------------------------------------

@@ -16,6 +16,7 @@ const ctx = {
     documents: { hasDirty: true },
     tasks: { canRun: false },
     settings: {},
+    environments: { subscribe: () => noop, activeInstall: null },
   },
   ready: true,
   hasDoc: true,

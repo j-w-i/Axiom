@@ -378,6 +378,7 @@ export function Tooltip({
   open,
   container,
   phase = "in",
+  side = "bottom",
 }: {
   label: string;
   shortcut?: string;
@@ -385,6 +386,7 @@ export function Tooltip({
   open?: boolean;
   container?: HTMLElement | null;
   phase?: Phase;
+  side?: "top" | "right" | "bottom" | "left";
 }) {
   const provided = useContext(HasProvider);
   const keys = shortcut ? chordKeys(shortcut) : null;
@@ -392,7 +394,7 @@ export function Tooltip({
     <RTooltip.Root open={open}>
       <RTooltip.Trigger asChild>{children}</RTooltip.Trigger>
       <RTooltip.Portal container={container}>
-        <RTooltip.Content className="tooltip" data-phase={phase} side="bottom" sideOffset={6} collisionPadding={8}>
+        <RTooltip.Content className="tooltip" data-phase={phase} side={side} sideOffset={6} collisionPadding={8}>
           <span>{label}</span>
           {keys && <Keys keys={keys} />}
         </RTooltip.Content>
