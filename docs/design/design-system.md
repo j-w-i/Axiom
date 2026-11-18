@@ -63,6 +63,24 @@ reproduced by the generator within ΔE2000 < 2.
 | `--glyph-{rs,md,toml,other}` and `-bg` | file-type glyph chips (§7): text and 12–17% tint | `rs` clay `#dd9e80`, `md` steel `#a9c1df`, `toml`/`lock` verdigris `#95c6b6`, other `#a3a097` | `#a8502e`, `#3b6a9e`, `#2f7a68`, `#5b5852` |
 | `--icon-folder`, `--tree-guide` | explorer folder icons and indent guides | `#8e8a82`, white 5% | `#7a766e`, ink 7% |
 
+**`--editor-*` as built (M1.6-EDITOR-002).** Monaco's `axiom-dark` / `axiom-light` themes are
+generated from these tokens alone (`src/editor/theme.ts`, translucent values kept as
+`#rrggbbaa`):
+
+| Token | Dark | Light |
+|-------|------|-------|
+| `--editor-bg`, `--editor-gutter` | `--surface-editor` | `--surface-editor` |
+| `--editor-line` | white 2.8% | `rgb(60 45 20)` 3.5% |
+| `--editor-lnum` / `-active` | `#4f4d49` / `--text-muted` | `#b5b1a9` / `--text-muted` |
+| `--editor-selection` | brass `rgb(201 163 91)` 20% | `rgb(184 138 58)` 22% |
+| `--editor-cursor` | `--brass-300` | `--brass-700` |
+| `--editor-guide` / `-active` | white 4.5% / 14% | ink 6% / 18% |
+
+Widgets use `--surface-overlay` with a `--line-strong` border; bracket matches a
+`--editor-guide-active` outline; scrollbar thumbs `--scroll-thumb(-hover)`; `focusBorder` is
+transparent (the focused-region rule shows focus). The default code font is `--font-code` at
+`--code-size` / `--code-leading` (13 / 20), and the line height keeps that ratio at other sizes.
+
 `--run` equals the accent (activity is the brass signal), and `--attention`
 ("needs you", e.g. an approval or a dirty-on-quit prompt) equals `--warn`. Both are
 separate tokens so they can diverge.

@@ -508,7 +508,8 @@ describe("stores against the real daemon", () => {
     await waitFor(() => app.documents.getSnapshot().prompt?.kind === "folder", 3000, "folder prompt again");
     app.documents.resolvePrompt("discard");
     // The root, not the id: the daemon assigns the id (workspace.ts:155).
-    await waitFor(() => app.workspace.getSnapshot().root === canon(other), 5000, "switched to the other folder");
+    // The root is set when the daemon answers workspace/open; the listing arrives after it.
+    await waitFor(() => app.workspace.getSnapshot().root === canon(other) && app.workspace.getSnapshot().rootLoaded, 5000, "switched to the other folder and listed it");
     expect(app.workspace.visibleRows().map((r) => r.node.path)).toContain("b.txt");
     expect(app.documents.getSnapshot().docs).toHaveLength(0);
     // Discard writes nothing: the old folder still holds its own bytes.

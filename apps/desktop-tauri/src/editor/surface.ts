@@ -11,51 +11,45 @@
 
 import * as monaco from "monaco-editor";
 import { DocumentStore, inferLanguageId } from "@editor/documents";
-import { applyConfigure, COMMAND_ACTIONS, installWorkers, languageInfos } from "@editor/monaco-setup";
+import { COMMAND_ACTIONS, editorOptionsFor, installWorkers, languageInfos } from "@editor/monaco-setup";
 import { MONACO_VERSION } from "@editor/version";
 import type { ConfigurePayload, OpenDocumentPayload } from "@editor/bridge";
 import type { EditorListener, EditorPort } from "../state/documents";
+import { hexFromCanvasStyle, lineHeightFor, themeData, type ThemeToken } from "./theme";
 
 let workersInstalled = false;
 
-/** Monaco themes derived from the design tokens so the editor matches the shell. */
+/** Monaco hex for any CSS colour, through a canvas (keeps alpha: #rrggbbaa). */
+function hex(c: string): string {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return "#000000";
+  ctx.fillStyle = c;
+  return hexFromCanvasStyle(String(ctx.fillStyle));
+}
+
+/** Both Monaco themes from the tokens of each appearance (read through a hidden probe). */
 function defineThemes(): void {
-  const css = getComputedStyle(document.documentElement);
-  const read = (theme: "light" | "dark", name: string): string => {
+  for (const theme of ["light", "dark"] as const) {
     const probe = document.createElement("div");
     probe.dataset.theme = theme;
     probe.style.display = "none";
     document.body.appendChild(probe);
-    const v = getComputedStyle(probe).getPropertyValue(name).trim();
+    const css = getComputedStyle(probe);
+    // Every token is defined (tests/tokens.test.ts); an empty value would read back as black.
+    const color = (t: ThemeToken) => hex(css.getPropertyValue(t).trim());
+    monaco.editor.defineTheme(`axiom-${theme}`, themeData(theme === "light" ? "vs" : "vs-dark", color, css.getPropertyValue("--syn-keyword-style").trim()));
     probe.remove();
-    return v || css.getPropertyValue(name).trim();
-  };
-  const hex = (c: string): string => {
-    // Resolve any CSS colour to #rrggbb through a canvas (Monaco needs hex).
-    const ctx = document.createElement("canvas").getContext("2d");
-    if (!ctx) return "#000000";
-    ctx.fillStyle = c;
-    return ctx.fillStyle;
-  };
-  for (const theme of ["light", "dark"] as const) {
-    monaco.editor.defineTheme(`axiom-${theme}`, {
-      base: theme === "light" ? "vs" : "vs-dark",
-      inherit: true,
-      rules: [],
-      colors: {
-        "editor.background": hex(read(theme, "--bg")),
-        "editorGutter.background": hex(read(theme, "--bg")),
-        "editor.lineHighlightBackground": hex(read(theme, "--bg-hover")) + "80",
-        "editor.lineHighlightBorder": "#00000000",
-        "editorLineNumber.foreground": hex(read(theme, "--text-faint")),
-        "editorLineNumber.activeForeground": hex(read(theme, "--text-muted")),
-        "editorWidget.background": hex(read(theme, "--bg-elevated")),
-        "editorWidget.border": hex(read(theme, "--border-strong")),
-        "focusBorder": hex(read(theme, "--accent-line")),
-        "scrollbarSlider.background": hex(read(theme, "--scrollbar")) + "99",
-      },
-    });
   }
+}
+
+/** The default code font when the setting is empty (design-system.md §5): --font-code, 13 / 20. */
+function codeFont(): { family: string; size: number; leading: number } {
+  const css = getComputedStyle(document.documentElement);
+  return {
+    family: css.getPropertyValue("--font-code").trim(),
+    size: parseFloat(css.getPropertyValue("--code-size")) || 13,
+    leading: parseFloat(css.getPropertyValue("--code-leading")) || 20,
+  };
 }
 
 export class EditorSurface implements EditorPort {
@@ -64,7 +58,9 @@ export class EditorSurface implements EditorPort {
   private activePath: string | null = null;
   private readonly viewStates = new Map<string, monaco.editor.ICodeEditorViewState | null>();
   private readonly disposables: monaco.IDisposable[] = [];
-  private theme: "light" | "dark" = "dark";
+  /** The Monaco theme last applied: a theme is applied with one setTheme call, only when it changes. */
+  private applied = "axiom-dark";
+  private readonly font = codeFont();
 
   constructor(container: HTMLElement, private readonly listener: EditorListener) {
     if (!workersInstalled) {
@@ -75,6 +71,9 @@ export class EditorSurface implements EditorPort {
     this.editor = monaco.editor.create(container, {
       model: null,
       theme: "axiom-dark",
+      fontFamily: this.font.family,
+      fontSize: this.font.size,
+      lineHeight: this.font.leading,
       automaticLayout: true,
       fontLigatures: true,
       minimap: { enabled: true, renderCharacters: false, maxColumn: 80 },
@@ -103,6 +102,21 @@ export class EditorSurface implements EditorPort {
         monaco.Uri.from({ scheme: "file", path: `/${path}` }),
       ),
     );
+
+    // Bundled fonts may finish loading after Monaco measured its glyphs.
+    void document.fonts?.ready.then(() => monaco.editor.remeasureFonts());
+    // Tokens change with the appearance (and in development on a stylesheet update): the
+    // themes are regenerated then, never on the typing path.
+    const retheme = () => {
+      // Redefining the active theme refreshes the editor; switching applies the other one.
+      defineThemes();
+      const t = document.documentElement.dataset.theme;
+      if (t === "light" || t === "dark") this.applyTheme(t);
+    };
+    const mo = new MutationObserver(retheme);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    this.disposables.push({ dispose: () => mo.disconnect() });
+    if (import.meta.hot) import.meta.hot.on("vite:afterUpdate", retheme);
 
     // Page → shell.
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -156,9 +170,21 @@ export class EditorSurface implements EditorPort {
   // ---- EditorPort (shell → page) ----------------------------------------------
 
   configure(c: ConfigurePayload): void {
-    this.theme = c.theme;
-    applyConfigure(this.editor, c);
-    monaco.editor.setTheme(`axiom-${this.theme}`);
+    this.editor.updateOptions(editorOptionsFor(c));
+    // An empty family keeps Monaco's current one in the shared mapping; here it means the
+    // bundled code font. The line height keeps the 13 / 20 ratio at any size.
+    this.editor.updateOptions({
+      ...(c.fontFamily === "" ? { fontFamily: this.font.family } : {}),
+      lineHeight: lineHeightFor(c.fontSize, this.font.size, this.font.leading),
+    });
+    this.applyTheme(c.theme);
+  }
+
+  private applyTheme(theme: "light" | "dark"): void {
+    const name = `axiom-${theme}`;
+    if (name === this.applied) return;
+    this.applied = name;
+    monaco.editor.setTheme(name);
   }
 
   openDocument(p: OpenDocumentPayload): void {

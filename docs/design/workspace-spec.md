@@ -43,6 +43,15 @@ milestone. Nothing marked Designed may appear in the production shell before the
   (`design-system.md` §8). Ctrl+0 focuses the side bar (if visible), Ctrl+1 the
   editor, and Ctrl+\` the console prompt. These are new, conflict-checked against
   Monaco's bindings in EDITOR-002.
+- **As built (M1.6-EDITOR-002).** Mod+0 focuses the tree (showing the side bar first if it is
+  hidden), Mod+1 Monaco's input (or the active tab when no document is open), Mod+\` the
+  console prompt (showing the console). They match physical keys (`KeyboardEvent.code`
+  Digit0 / Digit1 / Backquote) and run in the shell's capture-phase handler, so they also work
+  while Monaco has focus. Monaco 0.57 conflict check: Ctrl/⌘+0 and +1 occur only as the second
+  key of the Ctrl/⌘+K fold chords (Fold All, Fold Level N), which the shell's Mod+K palette
+  already pre-empts; Ctrl/⌘+Shift+1 (Replace One) is a different chord; Ctrl/⌘+\` has no
+  binding. No Monaco action is shadowed. On macOS ⌘+\` is the system's "cycle windows" shortcut,
+  which the OS may take first (unverified).
 
 ## 2. Main workspace (M1.6)
 

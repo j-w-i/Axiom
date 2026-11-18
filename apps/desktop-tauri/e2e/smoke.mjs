@@ -49,6 +49,8 @@ const ws = mkdtempSync(join(tmpdir(), "axiom-tauri-e2e-ws-"));
 mkdirSync(join(ws, "src", "nested"), { recursive: true });
 writeFileSync(join(ws, "src", "main.rs"), 'fn main() {\n    println!("hello");\n}\n');
 writeFileSync(join(ws, "src", "nested", "deep.ts"), "export const x: number = 1;\n");
+// M1.6-EDITOR-002: one keyword, one string and one comment in known places.
+writeFileSync(join(ws, "src", "colors.rs"), 'fn colors() {\n    let s = "quoted";\n}\n// a comment\n');
 writeFileSync(join(ws, "README.md"), "# Demo\n\nA small workspace.\n");
 writeFileSync(join(ws, ".gitignore"), "target/\n");
 mkdirSync(join(ws, "target"));
@@ -195,6 +197,50 @@ try {
       env.input === "textarea",
       `${env.input}${env.editContextApi ? " (EditContext API present but not used)" : ""}`,
     );
+  }
+  // ---- 18. editor theme from tokens and region focus (M1.6-EDITOR-002) ------------------
+  {
+    await wd.click(await wd.find('[data-path="src/colors.rs"]'));
+    await wd.waitFor(`return document.querySelector('.monaco-editor .view-lines')?.textContent.includes('quoted')`, [], 10000, "colors.rs in Monaco");
+    await new Promise((r) => setTimeout(r, 300)); // tokenisation is asynchronous
+    const colours = await wd.exec(`
+      const ctx = document.createElement('canvas').getContext('2d');
+      const css = getComputedStyle(document.documentElement);
+      const want = (t) => { ctx.fillStyle = css.getPropertyValue(t).trim(); const h = ctx.fillStyle; return 'rgb(' + [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)).join(', ') + ')'; };
+      const spans = [...document.querySelectorAll('.monaco-editor .view-lines span span')];
+      const got = (text) => { const s = spans.find(e => e.textContent.replace(/\u00a0/g, ' ').trim() === text); return s ? getComputedStyle(s).color : null; };
+      return {
+        keyword: [got('fn'), want('--syn-keyword')],
+        string: [got('"quoted"'), want('--syn-string')],
+        comment: [got('// a comment'), want('--syn-comment')],
+      };`);
+    check(
+      "18a editor syntax colours follow the tokens (fn keyword, string, comment)",
+      Object.values(colours).every(([g, w]) => g === w),
+      JSON.stringify(colours),
+    );
+    await wd.exec(`${appExpr}.documents.close('src/colors.rs')`);
+    await wd.waitFor(`return document.querySelector('[role=tab][data-path="src/colors.rs"]') === null`, [], 5000, "colors.rs closed");
+
+    const where = () =>
+      wd.exec(
+        `const a = document.activeElement; return { region: document.querySelector('.workbench')?.dataset.focusedRegion ?? null, el: a?.getAttribute('role') || a?.dataset.testid || a?.tagName.toLowerCase() }`,
+      );
+    await wd.chord(MOD, "0");
+    await new Promise((r) => setTimeout(r, 150));
+    const files = await where();
+    await wd.chord(MOD, "1");
+    await new Promise((r) => setTimeout(r, 150));
+    const editor = await where();
+    await wd.chord(MOD, "`");
+    await new Promise((r) => setTimeout(r, 150));
+    const consoleFocus = await where();
+    check(
+      "18b region focus shortcuts: Mod+0 tree, Mod+1 editor, Mod+` console prompt (focused-region rule follows)",
+      files.region === "files" && files.el === "tree" && editor.region === "editor" && editor.el === "textbox" /* Monaco's input textarea */ && consoleFocus.region === "console" && consoleFocus.el === "command-input",
+      JSON.stringify({ files, editor, console: consoleFocus }),
+    );
+    await wd.click(await wd.find(".monaco-editor .view-lines"));
   }
   await shot(wd, "04-editor-dark");
   // 4c: the legacy token aliases (M1.6-SYSTEM-001) resolve on real elements in both
