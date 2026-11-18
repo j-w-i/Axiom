@@ -60,7 +60,10 @@ as a hardening item, not an M1 requirement.
   `core:window:allow-set-theme`: the page may set **its own window's**
   title-bar theme (light, dark or follow the system) so the native title bar
   matches the app on Windows and Linux (D3). It reads nothing and affects only
-  that window's decorations.
+  that window's decorations. Since M1.6 (macOS overlay title bar, `faea29e`) also
+  `core:window:allow-start-dragging` and `core:window:allow-internal-toggle-maximize`: the page may
+  start a drag of its own window from the title row and toggle its zoom with a double-click there
+  (Tauri's drag-region script). Neither reads anything or reaches beyond that window.
 
   There is **no** command that reads or writes workspace files, spawns a
   process, opens an arbitrary path, or grants network access.
