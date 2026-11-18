@@ -297,12 +297,17 @@ async function focusEditor(wd) {
 
 /** Moves the cursor to the document start (verified through the status line) and types "// ". */
 async function commentOutFirstLine(wd) {
+  const atStart = () => wd.exec(`return ${STORES}.documents.getSnapshot().cursorText.startsWith('Ln 1, Col 1')`);
   await focusEditor(wd);
   for (let attempt = 0; ; attempt++) {
-    // Document start without a modifier chord (⌘↑ through the embedded WebDriver did not move the
-    // caret on macOS, CI run 44247752618): click the first line, then plain Home.
-    // The view may be scrolled (it was on macOS and Windows CI): wheel it to the top first, until the
-    // first line number shown is 1.
+    // Two ways to the document start, each verified by the status line: the platform chord
+    // (Ctrl+Home; worked on Linux and Windows CI) and, where a modifier chord does not reach Monaco
+    // through the embedded WebDriver (⌘↑ on macOS CI), a wheel to the top, a click on line 1, Home.
+    if (process.platform !== "darwin") {
+      await wd.chord(MOD, Keys.HOME);
+      await sleep(150);
+      if (await atStart()) break;
+    }
     for (let i = 0; i < 20; i++) {
       const top = await wd.exec(
         `const ns = [...document.querySelectorAll('.monaco-editor .line-numbers')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); return ns[0]?.textContent.trim() ?? null`,
