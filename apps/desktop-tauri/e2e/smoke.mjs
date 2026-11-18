@@ -967,7 +967,7 @@ try {
       await wd.click(await wd.find('[data-path="Cargo.toml"]'));
       await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 1`, [], 10000, "Cargo.toml open");
       await wd.chord(MOD, "k");
-      await wd.waitFor(`return !!document.querySelector('[data-testid=palette] [role=option]')`, [], 3000, "palette");
+      await wd.waitFor(`return !!document.querySelector('[data-testid=palette] [role=option]') && !!document.activeElement?.closest('[data-testid=palette]')`, [], 3000, "palette focused");
       await wd.keys([..."Build: cargo"]);
       const options = await wd.exec(`return [...document.querySelectorAll('[data-testid=palette] [role=option]')].map(o => o.textContent)`);
       await wd.keys(["\uE007"]);
@@ -1005,6 +1005,9 @@ try {
         `${JSON.stringify(row)} → ${opened}`,
       );
       await wd.click(await wd.find('[data-view=output]'));
+      // The palette's MRU (the build command) is localStorage, which WebKit writes to disk on a
+      // ~1 s timer: let it land before the restart in section 8 (as after 10b).
+      await new Promise((r) => setTimeout(r, 1500));
     } finally {
       // Back to the smoke workspace (and its tabs) for the restart checks.
       await wd.exec(`${appExpr}.documents.requestOpenFolder(arguments[0])`, [ws]);

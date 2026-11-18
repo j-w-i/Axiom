@@ -38,7 +38,7 @@ class FakeEditor implements EditorPort {
   requestSave(p: { path: string }) { this.store.requestSave(p.path); }
   documentSaved(p: { path: string }) { this.store.documentSaved(p.path); }
   saveFailed(p: { path: string }) { this.store.saveFailed(p.path); }
-  revealPosition() {}
+  revealPosition(_p: { path: string; line: number; column: number }) {}
   runCommand() {}
 }
 
@@ -391,6 +391,28 @@ describe("stores against the real daemon", () => {
     fresh.documents.save("README.md");
     await waitFor(() => !fresh.documents.getSnapshot().docs[0]!.dirty, 3000, "saved");
     expect(readFileSync(join(ws, "README.md"), "utf8")).toBe("# unsaved work\n");
+  }, 20_000);
+
+  it("openAt before the editor surface exists reveals the position once it is ready (Problems, M2-QA-001)", async () => {
+    // A fresh page whose editor has not loaded yet (Monaco loads with the first document).
+    const fresh = createApp(transport);
+    await fresh.client.connect();
+    await waitFor(() => fresh.client.ready, 5000, "ready");
+    await fresh.workspace.openFolder(ws);
+    fresh.documents.openAt("src/main.rs", 1, 4);
+    await waitFor(() => fresh.documents.getSnapshot().docs.some((d) => d.path === "src/main.rs"), 5000, "document listed");
+    const reveals: unknown[] = [];
+    const surface = new (class extends FakeEditor {
+      override revealPosition(p: { path: string; line: number; column: number }) {
+        reveals.push(p);
+      }
+    })(fresh.documents);
+    fresh.documents.attachEditor(surface);
+    fresh.documents.ready({ bridgeVersion: 1, monacoVersion: "test" });
+    await waitFor(() => reveals.length === 1, 5000, "reveal after ready");
+    expect(reveals[0]).toEqual({ path: "src/main.rs", line: 1, column: 4 });
+    expect(surface.text("src/main.rs")).toBe("fn main() {}\n");
+    expect(fresh.documents.getSnapshot().activePath).toBe("src/main.rs");
   }, 20_000);
 
   it("a clean document leaves nothing to recover", async () => {

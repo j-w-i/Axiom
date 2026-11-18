@@ -1196,7 +1196,10 @@ pub fn relink(root: &Path, to: &Path) -> Result<u32, EnvError> {
                 continue;
             };
             let new = to.join(rest);
-            std::fs::remove_file(&path).map_err(EnvError::io("Cannot relink an installed file"))?;
+            // On Windows a link to a directory is removed as a directory.
+            std::fs::remove_file(&path)
+                .or_else(|_| std::fs::remove_dir(&path))
+                .map_err(EnvError::io("Cannot relink an installed file"))?;
             #[cfg(unix)]
             std::os::unix::fs::symlink(&new, &path)
                 .map_err(EnvError::io("Cannot relink an installed file"))?;

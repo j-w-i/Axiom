@@ -119,6 +119,13 @@ jobs:
       - name: End-to-end (${{ matrix.os == 'ubuntu-latest' && 'WebKitWebDriver + embedded' || 'embedded WebDriver' }})
         shell: bash
         run: scripts/e2e.sh --no-build --driver all
+      # The M2 exit scenario (M2-QA-001): a Cargo project with no Rust on the app's PATH and an
+      # empty HOME; install a managed Rust through the UI, build, Problems → source, remove.
+      # Needs the internet (static.rust-lang.org). Linux: the WebKitWebDriver path.
+      - name: End-to-end, M2 exit scenario (env.mjs)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver external e2e/env.mjs
 
       # ---- packages ---------------------------------------------------------------
       - name: Package
