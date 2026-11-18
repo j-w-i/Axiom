@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Keys, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
+import { Keys, TRUSTED_INPUT, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const here = import.meta.dirname;
 const MOD = process.platform === "darwin" ? Keys.META : Keys.CTRL;
@@ -164,7 +164,12 @@ try {
       `5 toggles in ${burst} ms → ${JSON.stringify(hidden)}; toggled again → phase ${entering}, settled ${JSON.stringify(settled)}`,
     );
 
-    // A pointer drag of the side bar seam (+60 px) is kept after a restart.
+    // A pointer drag of the side bar seam (+60 px) is kept after a restart. Pointer drags need
+    // trusted input (the external WebDriver on Linux); the embedded server (macOS, Windows) does
+    // not move the pointer, so the check does not run there.
+    if (!TRUSTED_INPUT) {
+      notRun("8 splitter drag persists width after restart", "pointer drags need trusted input (embedded WebDriver)");
+    } else {
     const r = await wd.exec(`const b = document.querySelector('${SPLIT}').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }`);
     const moves = Array.from({ length: 12 }, (_, i) => ({ type: "pointerMove", duration: 16, x: r.x + (i + 1) * 5, y: r.y, origin: "viewport" }));
     await wd.cmd("POST", "/actions", {
@@ -193,6 +198,7 @@ try {
     // Leave the default layout for the suites that follow in this run.
     await wd.exec(`document.querySelector('${SPLIT}').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
     await wd.waitFor(`return document.querySelector('${SPLIT}').getAttribute('aria-valuenow') === '252'`, [], 3000, "layout reset after check 8");
+    }
   }
 } catch (e) {
   check("unexpected failure", false, e instanceof Error ? e.message : String(e));

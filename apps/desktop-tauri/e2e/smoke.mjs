@@ -527,8 +527,15 @@ try {
     check("13a motion off leaves no running animations", offRunning === 0 && (probe === null || probe === 0), `running=${offRunning}, __axiomMotion=${probe === null ? "absent (production bundle)" : probe}`);
 
     // 13b: standard: the spinner runs, stepped; a window blur pauses it (synthetic events: the gate listens to window blur/focus).
+    // A host whose OS asks for reduced motion (the macOS and Windows CI runners) resolves "standard" to
+    // "reduced" (motion-system.md §6), where loops are static: 13b and 13b' cannot run there.
+    const osReduced = await wd.exec(`return matchMedia('(prefers-reduced-motion: reduce)').matches`);
     await wd.exec(`${appExpr}.settings.setValue("appearance.motion", "standard")`);
-    await wd.waitFor(`return document.documentElement.dataset.motion === 'standard'`, [], 5000, "data-motion standard");
+    await wd.waitFor(`return document.documentElement.dataset.motion === arguments[0]`, [osReduced ? "reduced" : "standard"], 5000, "data-motion standard (or reduced by the OS)");
+    if (osReduced) {
+      notRun("13b' the spinner and the LED pulse are stepped", "the OS prefers reduced motion: loops are static by design");
+      notRun("13b blur pauses loops", "the OS prefers reduced motion: no loops run");
+    } else {
     await wd.exec(`window.dispatchEvent(new Event('focus'))`);
     await new Promise((r) => setTimeout(r, 200));
     const stepped = await wd.exec(
@@ -544,6 +551,7 @@ try {
     await new Promise((r) => setTimeout(r, 200));
     const paused = await wd.exec(`const a = document.getAnimations(); return { total: a.length, paused: a.filter((x) => x.playState === 'paused').length, idle: document.documentElement.dataset.idle ?? null }`);
     check("13b blur pauses loops", before > 0 && paused.total > 0 && paused.paused === paused.total && paused.idle === "true", `running before blur=${before}; after: ${JSON.stringify(paused)}`);
+    }
     await wd.exec(`window.dispatchEvent(new Event('focus'))`);
     await wd.exec(`${appExpr}.tasks.stop()`);
     // Left at "reduced" so step 8 can check that it survives a restart.
@@ -672,12 +680,13 @@ try {
     );
     check("20b about section shows versions", /axiomd \d/.test(about) && /Tauri/.test(about) && /Webview/.test(about), about.slice(0, 100));
 
-    const before = await wd.exec(`return document.documentElement.dataset.motion`);
+    // The stored setting (the OS may resolve "standard" to "reduced"; Off always wins).
+    const before = await wd.exec(`return ${appExpr}.settings.getSnapshot().motion`);
     await wd.click(await wd.find('[role=radiogroup][aria-label=Motion] [role=radio]:nth-child(4)')); // "Off" (the glide is child 1)
     const off = await wd.waitFor(`return document.documentElement.dataset.motion === 'off' ? 'off' : null`, [], 3000, "motion off").catch(() => null);
     const restore = { standard: 2, reduced: 3, off: 4 }[before] ?? 2;
     await wd.click(await wd.find(`[role=radiogroup][aria-label=Motion] [role=radio]:nth-child(${restore})`));
-    const back = await wd.waitFor(`return document.documentElement.dataset.motion === arguments[0] ? arguments[0] : null`, [before], 3000, "motion restored").catch(() => null);
+    const back = await wd.waitFor(`return ${appExpr}.settings.getSnapshot().motion === arguments[0] && document.documentElement.dataset.motion !== 'off' ? arguments[0] : null`, [before], 3000, "motion restored").catch(() => null);
     check("20c motion setting applies immediately (data-motion follows the control)", off === "off" && back === before, `before ${before} → off ${off} → back ${back}`);
 
     await wd.keys([Keys.ESC]);
@@ -730,7 +739,7 @@ try {
     // Monaco's own caret blink (the caret is the editor's, not shell motion: motion-system.md §1).
     const running = await wd.exec(`return document.getAnimations().filter(a => a.playState === 'running' && !a.effect?.target?.closest?.('.monaco-editor')).map(a => (a.animationName || a.transitionProperty) + ' on ' + (a.effect?.target?.className || '?'))`);
     await wd.exec(`${appExpr}.settings.setValue("appearance.motion", arguments[0])`, [level]);
-    await wd.waitFor(`return document.documentElement.dataset.motion === arguments[0]`, [level], 3000, "motion restored");
+    await wd.waitFor(`return ${appExpr}.settings.getSnapshot().motion === arguments[0] && document.documentElement.dataset.motion !== 'off'`, [level], 3000, "motion restored");
     check("21c motion off: dialogs have no animations and close at once", anims === 0 && gone && running.length === 0, `animations on palette/scrim ${anims}; closed ${gone}; running anywhere after close: ${JSON.stringify(running)}`);
   }
 
@@ -752,6 +761,15 @@ try {
       return true;
     };
     const before = await order(); // src/main.rs,README.md
+    if (!TRUSTED_INPUT) {
+      // Pointer drags need trusted input; the embedded WebDriver (macOS, Windows) does not move the pointer.
+      notRun("22a drag tab reorders (transforms cleared after the drop)", "pointer drags need trusted input (embedded WebDriver)");
+      notRun("22b escape cancels tab drag (order unchanged, no lost or duplicated tab)", "pointer drags need trusted input (embedded WebDriver)");
+      // Reach the same order by keyboard, so 22c and check 8 start from README.md first.
+      await wd.exec(`document.querySelector('.tabs [role=tab][data-path="README.md"]').focus()`);
+      await wd.chord(MOD, Keys.SHIFT, "\uE00E"); // Mod+Shift+PageUp
+      await new Promise((r) => setTimeout(r, 300));
+    } else {
     const width = await wd.exec(`return document.querySelector('.tabs [role=tab][data-path="src/main.rs"]').getBoundingClientRect().width`);
     // Frame intervals during the drag (P3): a rAF recorder in the page.
     await wd.exec(`window.__dragFrames = []; let last = performance.now(); window.__dragRec = true; const tick = (t) => { window.__dragFrames.push(t - last); last = t; if (window.__dragRec) requestAnimationFrame(tick); }; requestAnimationFrame(tick);`);
@@ -767,6 +785,7 @@ try {
     await new Promise((r) => setTimeout(r, 400));
     const afterCancel = await order();
     check("22b escape cancels tab drag (order unchanged, no lost or duplicated tab)", lifted && afterCancel === "README.md,src/main.rs", `lifted ${lifted}; ${afterCancel}`);
+    }
 
     await wd.exec(`document.querySelector('.tabs [role=tab][data-path="README.md"]').focus()`);
     await wd.chord(MOD, Keys.SHIFT, "\uE00F"); // Mod+Shift+PageDown

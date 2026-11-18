@@ -18,7 +18,7 @@
 
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { Keys, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const repo = resolve(import.meta.dirname, "../../..");
@@ -237,7 +237,9 @@ try {
   }
 
   // S4: the workspace with a dirty tab, a failed run with stderr, a second tab.
-  await wd.click(await wd.find(`.welcome__item[title="${ws}"]`));
+  // By name: the row's title is the canonical root (/private/var/… on macOS, long names on Windows).
+  await wd.exec(`[...document.querySelectorAll('.welcome__item')].find(b => b.querySelector('.welcome__item-name')?.textContent === arguments[0])?.setAttribute('data-a11y-target', '')`, [basename(ws)]);
+  await wd.click(await wd.find(`.welcome__item[data-a11y-target]`));
   await wd.waitFor(`return !!document.querySelector('[data-path="src"]')`, [], 10000, "workspace");
   await wd.click(await wd.find('[data-path="src"]'));
   await wd.waitFor(`return !!document.querySelector('[data-path="src/main.rs"]')`, [], 5000, "src");

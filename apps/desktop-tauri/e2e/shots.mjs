@@ -26,7 +26,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { extname, join, normalize, resolve } from "node:path";
+import { basename, extname, join, normalize, resolve } from "node:path";
 import { Keys, PROVIDER, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
 
 const here = import.meta.dirname;
@@ -299,7 +299,8 @@ async function focusEditor(wd) {
 async function commentOutFirstLine(wd) {
   await focusEditor(wd);
   for (let attempt = 0; ; attempt++) {
-    await wd.chord(MOD, Keys.HOME);
+    // Document start: Ctrl+Home on Linux and Windows, ⌘↑ on macOS.
+    await wd.chord(MOD, process.platform === "darwin" ? "\uE013" : Keys.HOME);
     try {
       await waitFor(wd, `return ${STORES}.documents.getSnapshot().cursorText.startsWith('Ln 1, Col 1')`, "the cursor at the document start", 2500);
       break;
@@ -407,7 +408,8 @@ function serveDir(dir) {
 async function captureGallery(scale) {
   const appDir = resolve(here, "..");
   const dist = join(appDir, "dist-gallery");
-  const build = spawnSync("pnpm", ["-s", "run", "build:gallery"], { cwd: appDir, encoding: "utf8" });
+  // pnpm is a .cmd script on Windows: it needs a shell there.
+  const build = spawnSync("pnpm", ["-s", "run", "build:gallery"], { cwd: appDir, encoding: "utf8", shell: process.platform === "win32" });
   if (build.status !== 0) throw new Error(`build:gallery failed: ${build.stderr || build.stdout}`);
   const srv = await serveDir(dist);
   const env = scale === 2 ? { GDK_SCALE: "2", GDK_DPI_SCALE: "1" } : {};
@@ -489,7 +491,8 @@ async function main() {
       // Oldest first, so the Welcome list reads axiom, notes, scratch.
       for (const dir of [join(BASE, "scratch"), join(BASE, "notes"), WS]) {
         await wd.exec(`${STORES}.documents.requestOpenFolder(arguments[0])`, [dir]);
-        await wd.waitFor(`return ${STORES}.workspace.getSnapshot().root === arguments[0]`, [dir], 15000, `workspace ${dir} opened`);
+        // By name: the daemon reports the canonical root (/private/var/… on macOS, long names on Windows).
+        await wd.waitFor(`return ${STORES}.workspace.getSnapshot().name === arguments[0]`, [basename(dir)], 15000, `workspace ${dir} opened`);
         await sleep(400);
       }
       await wd.exec(`${STORES}.documents.requestCloseFolder()`);
