@@ -1,6 +1,6 @@
 # M1.6 visual QA
 
-_Status: **approved by ADR-0013** (2026-11-17). A passing unit test is not evidence of a polished
+_Status: **approved by ADR-0013** (2026-11-17); **implemented (M1.6, 2026-11-18)**. A passing unit test is not evidence of a polished
 interface. Every M1.6 task that changes pixels attaches screenshots and passes the
 review below._
 

@@ -204,3 +204,8 @@ sweep 2–5%; the stepped policy, everything on: 4.4%.
 policy (`docs/design/motion-system.md` §5) is adopted from these numbers. Not
 evidence for production performance: the engine differs (Blink, not WebKitGTK), so
 M1.6-QA-002/QA-004 measure the real app.
+
+**`e5-visual-concepts/` after M1.6 (2026-11-18):** still reference only. The production shell
+(`apps/desktop-tauri/src/`) implements the approved synthesis; where the two differ, the shell and
+`docs/design/concepts.md` §"Deviations at exit" are authoritative. Nothing imports the prototypes.
+

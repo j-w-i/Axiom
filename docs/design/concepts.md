@@ -1,6 +1,6 @@
 # M1.6 visual concepts, evaluation and recommendation
 
-_Status: **approved by ADR-0013** (2026-11-17); the owner chose the recommended synthesis (§5) and accepted D2–D10 as written (§6). Prototypes:
+_Status: **approved by ADR-0013** (2026-11-17); **implemented (M1.6, 2026-11-18)**; the owner chose the recommended synthesis (§5) and accepted D2–D10 as written (§6). Prototypes:
 `experiments/e5-visual-concepts/` (run instructions in `README.md`). Every
 screenshot below is from those prototypes in headless Chrome at 1440×900, with real
 repository content (`crates/exec/src/executor.rs`, real `cargo test` output
@@ -287,3 +287,28 @@ bundled files are IBM's own unmodified split subsets, not locally subset fonts
 
 The approval is recorded by **M1.6-DESIGN-001** (ADR-0013 "Visual identity and
 material grammar"). Until then, no production code changes.
+
+## Deviations at exit (M1.6-QA-006, 2026-11-18)
+
+Where the shipped shell differs from this document, `design-system.md`, `workspace-spec.md` or the
+reference screenshots. Each is recorded in its task's handoff; owner decisions are quoted in
+`docs/roadmap/verification/M1.6.md`.
+
+| Area | Specified | Shipped | Why / owner |
+|------|-----------|---------|-------------|
+| Transport elapsed time | tenths (00:12.4) | mm:ss, 1 s steps | the loop policy forbids a faster timer (SHELL-003) |
+| Status bar | EOL and language segments | omitted | the documents store exposes neither; no store change in M1.6 (SHELL-005) |
+| Console header meta | while a task runs | also the last command and its outcome afterwards | matches the transport (SHELL-006) |
+| Editor tabs | title ellipsis 220 px | tab max 260 px, title 220 px; close slot 24 px, right padding 3 px | room for glyph and close; 24 px target (EDITOR-001, QA-003) |
+| `--accent-line` | translucent brass (55 %) | solid `--accent` wherever a hairline or focus ring uses it | the legacy alias shadowed the token from SYSTEM-001 on, so every approved screenshot shows solid brass; kept pixel-identical at removal (QA-006) |
+| Light state text | `--danger` `#c23a34`, `--ok-text` `#3e7935`, `--warn` `#a8520f`, `--accent-text` `#85601c` | `#bc342e`, `#397330`, `#a44e07`, `#845f1b` | ≥ 4.5:1 on chrome too (QA-003, D-A11Y-2; owner: "fix the defects you can") |
+| Light primary button | gradient `--accent-hi` → `--accent-lo` | `--accent-hi` → `--accent` | text contrast 4.15 → ≥ 5.8 (QA-003, D-A11Y-1) |
+| Target sizes | (not specified) | transport and console buttons, tab close ≥ 24 px; explorer rows stay 22 px | WCAG 2.5.8; rows waived by the owner ("waive it") |
+| Leaving the editor with Tab | — | Ctrl+M (Ctrl+Shift+M on macOS), Monaco's own toggle, documented | D-A11Y-3 |
+| Title row | fixed layout | shrink order: workspace path → command field → task label / workspace name; ≤ 860 px hides the brand word and the task label | it overflowed the window (macOS session, `ea76324`) |
+| macOS title bar | 72 px inset | 86 px inset, traffic lights centred on the 38 px row, inset dropped in full screen; drag and double-click zoom enabled | measured on the owner's Mac (`7ffbae9`, `faea29e`, `59daa58`) |
+| Region motion | entrance on show | no entrance on the first render (startup) | INTERACTION-002 |
+| Loop gate | pause loops while unfocused | pauses only the two loops (spinner, LED) | pausing everything froze entrances at opacity 0 (found on macOS) |
+| Palette files, no match | — | "No matching files" / "Only files listed in the explorer are searched" | SURFACES-001 |
+| Settings | font size 8–40 (old sheet) | 8–32; Licences link to the public repository | spec range; no bundled licence page (SURFACES-002) |
+| macOS rendering | WebKit's 60 Hz cap | display refresh rate via WebKit private SPI (`macos_frame_rate.rs`) | owner-approved ("Yes.. I approved it") |

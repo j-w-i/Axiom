@@ -4,8 +4,8 @@ import type { DocumentsStore } from "../state/documents";
 import type { SettingsStore, ThemeSetting } from "../state/settings";
 import type { AppInfo } from "../daemon/tauri-transport";
 import type { MotionLevel } from "../ui/motion";
-import { useReturnFocus } from "../ui/overlays";
-import { Button, Dialog, Field, Segmented, Stepper, Switch } from "../ui/primitives";
+import { Dialog, useReturnFocus } from "../ui/overlays";
+import { Button, Field, Segmented, Stepper, Switch } from "../ui/primitives";
 import "../styles/components/settings.css";
 
 export function ConflictDialog({ documents }: { documents: DocumentsStore }) {

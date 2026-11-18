@@ -295,6 +295,8 @@
 /* ---- materials (design-system.md §4): one recipe per material ---- */
 :root,
 [data-theme="dark"] {
+  /* Scrollbar thumbs: opaque, as since M1.5 (a scrollbar pseudo-element resolves this from its element). */
+  --scroll-thumb-solid: var(--line-strong);
   --raised-bg: linear-gradient(var(--surface-raised-1), var(--surface-raised-2));
   --raised-shadow: inset 0 1px 0 var(--edge-strong), 0 1px 1px rgb(0 0 0 / 0.22);
   --recessed-bg: var(--surface-well);
@@ -323,6 +325,7 @@
 }
 
 [data-theme="light"] {
+  --scroll-thumb-solid: var(--line-mid);
   --raised-bg: linear-gradient(var(--surface-raised-1), var(--surface-raised-2));
   --raised-shadow: inset 0 1px 0 var(--edge-strong), 0 1px 1px rgb(0 0 0 / 0.22);
   --recessed-bg: var(--surface-well);
@@ -349,65 +352,4 @@
   --led-off: #cfccc6;
   --led-off-shadow: inset 0 1px 1px rgb(0 0 0 / 0.2);
   --led-ring: 0 0 0 1px rgb(0 0 0 / 0.12);
-}
-
-/* legacy: removed by M1.6-QA-006 ------------------------------------------------
- * The pre-M1.6 names, pointed at the new tokens so every existing component keeps
- * rendering while it is restyled task by task (D9). Declared on every theme
- * selector, not only :root, so an element with its own data-theme (the editor's
- * Monaco theme probe) resolves them against its own theme. */
-:root,
-[data-theme] {
-  --bg: var(--surface-editor);
-  --bg-subtle: var(--surface-chrome);
-  --bg-elevated: var(--surface-overlay);
-  --bg-active: var(--press);
-  --bg-selected: var(--selected);
-  --bg-input: var(--surface-well);
-  --border: var(--line-mid);
-  --border-strong: var(--line-strong);
-  /* Shadows the generated translucent --accent-line until QA-006 (recorded exception). */
-  --accent-line: var(--accent);
-  --accent-hover: var(--accent-lo);
-  --text-on-accent: var(--on-accent);
-  --warning: var(--warn);
-  --warning-soft: color-mix(in srgb, var(--warn) 14%, transparent);
-  --success: var(--ok);
-  --shadow-popover: var(--overlay-shadow);
-  --shadow-raised: var(--raised-shadow);
-  --space-0-5: 2px;
-  --space-1: var(--s-1);
-  --space-2: var(--s-2);
-  --space-3: var(--s-3);
-  --space-4: var(--s-4);
-  --space-5: var(--s-5);
-  --space-6: 32px;
-  --radius-s: var(--r-1);
-  --radius-m: var(--r-2);
-  --radius-l: var(--r-3);
-  --dur-fast: var(--dur-1);
-  --dur-normal: var(--dur-2);
-  --ease: var(--ease-out);
-  --font-mono: var(--font-code);
-  --text-caption: var(--text-tiny);
-  --text-heading: 20px;
-  --leading: 1.45;
-  --border-w: 1px;
-  --titlebar-h: var(--title-h);
-  --statusbar-h: var(--status-h);
-}
-
-/* Opaque on purpose: src/editor/surface.ts converts these to #rrggbb and appends an
- * alpha byte for Monaco, which a translucent value would break. Each is the opaque
- * tier closest to the translucent token it stands for (--hover over the panel,
- * --scroll-thumb over the editor). */
-:root,
-[data-theme="dark"] {
-  --bg-hover: var(--surface-raised-2);
-  --scrollbar: var(--line-strong);
-}
-
-[data-theme="light"] {
-  --bg-hover: var(--surface-chrome);
-  --scrollbar: var(--line-mid);
 }

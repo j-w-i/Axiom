@@ -1,6 +1,6 @@
 # Surface specifications
 
-_Status: **approved by ADR-0013** (2026-11-17). Tokens and
+_Status: **approved by ADR-0013** (2026-11-17); **implemented (M1.6, 2026-11-18)**. Tokens and
 components: `design-system.md`. Motion: `motion-system.md`. Every number is a token
 value at 100% zoom. Screens: `concepts/r-*.png`._
 

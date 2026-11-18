@@ -38,7 +38,7 @@
   box-shadow: inset 2px 0 0 var(--danger);
 }
 .banner[data-variant="warning"] {
-  background: var(--warning-soft);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
   box-shadow: inset 2px 0 0 var(--warn);
 }
 .banner[data-variant="info"] {

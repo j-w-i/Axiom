@@ -1,6 +1,6 @@
 # Axiom design system — "Precision Instrument"
 
-_Status: **approved by ADR-0013** (2026-11-17); normative for M1.6. It supersedes
+_Status: **approved by ADR-0013** (2026-11-17); **implemented (M1.6, 2026-11-18)**; normative for M1.6. It supersedes
 `docs/migration/qt-to-tauri/design-system.md` §1–§2 (goals and palette); that
 document's component accessibility table (§3) and library evaluation (§4) remain in
 force except where this one says otherwise. Reference implementation:
@@ -266,17 +266,17 @@ M1 surface uses it. The others are specified here and prototyped in
 | `Menu`, `ContextMenu` | Commands in a popup | items, shortcut, heading, separator, disabled | Radix DropdownMenu (existing); output context menu ported to the same styling | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/menu.css` (Radix DropdownMenu 2.2.1; ContextMenu is local, no Radix ContextMenu: only one context menu in M1.6) |
 | `Tooltip` | Names and shortcuts for icon controls | 500 ms delay, instant when moving between tooltips | Radix Tooltip (D8); also shown on focus | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/tooltip.css` (Radix Tooltip 1.4.1, D8) |
 | `Dialog` | Blocking decision | explicit buttons, dismiss action | Radix Dialog: focus trap, Escape, initial focus on the safe default | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/dialog.css` (Radix Dialog 1.3.1) |
-| `Sheet` / settings dialog | Non-blocking configuration | two-pane (sections and body) | as Dialog; section nav is a tablist | ✅ SURFACES-002 |
+| `Sheet` / settings dialog | Non-blocking configuration | two-pane (sections and body) | as Dialog; section nav is a tablist | ✅ built (SURFACES-002): `SettingsDialog` in `src/components/Dialogs.tsx`, `src/styles/components/settings.css` |
 | `Toast` | Transient confirmation or result | ok, error, with an action | `role="status"`/`alert`; never steals focus; 4 s, paused on hover or focus | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/toast.css` (local queue, no dependency) |
 | `Banner` | Persistent problem in context | danger, warning, info + action | `role="alert"`/`status` | ✅ built (SYSTEM-004): `src/ui/overlays.tsx`, `src/styles/components/banner.css` |
 | `Panel` | Region frame | header (title, meta, tools), body | `<section aria-label>`; header marks focused region | ✅ built (SHELL-002): `src/ui/panel.tsx`, `src/styles/components/panel.css` |
 | `Splitter` | Resize regions | vertical, horizontal | `role="separator"`, arrow keys ±16 (Shift ±48), Home resets; double-click resets | ✅ built (SHELL-002): `src/ui/panel.tsx`, `src/styles/components/panel.css` |
-| `Tree` | Explorer | rows, guides, glyphs, ignored, selected, focused, dirty dot | full tree keyboard model (existing) | ✅ SHELL-003 |
-| `Tabs` (editor) | Open documents | recessed strip, raised active key, lit-edge glide, dirty, hover close | tablist; Ctrl+Tab, Ctrl+PgUp/PgDn, Ctrl+W, middle-click | ✅ EDITOR-001 |
-| `Breadcrumbs` | Path of the active document | path segments (symbols need LSP: M4) | `nav` + `aria-label` | ✅ EDITOR-001 |
-| `TitleRow`, `CommandField`, `Transport` | App chrome | `workspace-spec.md` §2 | | ✅ SHELL-001 |
-| `StatusBar` + `HintLine` | State and discoverability | segments; hint with keycaps | `role="status"` for state; the hint is **not** live (no announcements on hover) | ✅ SHELL-004 |
-| `Palette` | Commands and files | modes, groups, glide, keycaps, highlights, footer | combobox + listbox + `aria-activedescendant` | ✅ SURFACES-001 |
+| `Tree` | Explorer | rows, guides, glyphs, ignored, selected, focused, dirty dot | full tree keyboard model (existing) | ✅ built (SHELL-004): `src/components/Explorer.tsx`, `src/styles/components/tree.css`, `glyph.css`, `states.css` |
+| `Tabs` (editor) | Open documents | recessed strip, raised active key, lit-edge glide, dirty, hover close | tablist; Ctrl+Tab, Ctrl+PgUp/PgDn, Ctrl+W, middle-click | ✅ built (EDITOR-001, INTERACTION-003/004): `src/components/EditorArea.tsx`, `src/styles/components/tabs.css` |
+| `Breadcrumbs` | Path of the active document | path segments (symbols need LSP: M4) | `nav` + `aria-label` | ✅ built (EDITOR-001, INTERACTION-003/004): `src/components/EditorArea.tsx`, `src/styles/components/tabs.css` |
+| `TitleRow`, `CommandField`, `Transport` | App chrome | `workspace-spec.md` §2 | | ✅ built (SHELL-003): `src/shell/TitleRow.tsx`, `src/styles/components/titlerow.css` |
+| `StatusBar` + `HintLine` | State and discoverability | segments; hint with keycaps | `role="status"` for state; the hint is **not** live (no announcements on hover) | ✅ built (SHELL-005): `src/shell/StatusBar.tsx`, `src/ui/hint.ts`, `src/styles/components/statusbar.css` |
+| `Palette` | Commands and files | modes, groups, glide, keycaps, highlights, footer | combobox + listbox + `aria-activedescendant` | ✅ built (SURFACES-001): `src/components/CommandPalette.tsx`, `src/styles/components/palette.css` |
 | `ActivityRail` | Top-level destinations | icons, active marker, badge | `nav`, `aria-current="page"` | ❌ until M2 (D4) |
 | `AgentLog`, `ToolRow`, `ApprovalCard`, `DiffBlock`, `Checkpoint`, `Composer` | AI workspace | prototype | `workspace-spec.md` §5.2 | ❌ M3 |
 | `EnvTable`, `InstallProgress`, `DiagnosticRow` | Environment Manager | prototype | `workspace-spec.md` §5.1 | ❌ M2 |

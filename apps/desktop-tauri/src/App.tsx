@@ -40,7 +40,7 @@ export function App({ app }: { app: AppStores }) {
     documents.setAppearance({
       theme: dark ? "dark" : "light",
       fontSize: prefs.editorFontSize,
-      fontFamily: prefs.editorFontFamily || getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
+      fontFamily: prefs.editorFontFamily || getComputedStyle(document.documentElement).getPropertyValue("--font-code").trim(),
       wordWrap: prefs.editorWordWrap,
     });
   }, [documents, dark, prefs.editorFontSize, prefs.editorFontFamily, prefs.editorWordWrap, docs.editorReady]);

@@ -340,8 +340,5 @@ export function Stepper({
 
 // ---- unchanged in SYSTEM-003 (SYSTEM-004 / SHELL-002) -----------------------------
 
-// Dialog, Sheet, Menu and Banner live in overlays.tsx (SYSTEM-004); re-exported here for
-// the existing imports until M1.6-QA-006.
-export { Banner, Dialog, Menu, Sheet, type DialogButton, type MenuEntry } from "./overlays";
 
 // Splitter moved to ui/panel.tsx (SHELL-002).

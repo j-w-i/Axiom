@@ -45,3 +45,9 @@
   gap: var(--s-2);
   margin-top: var(--s-2);
 }
+
+
+.dialog ul {
+  margin: 0;
+  padding-left: var(--s-4);
+}

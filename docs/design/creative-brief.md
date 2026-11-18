@@ -1,6 +1,6 @@
 # M1.6 creative brief
 
-_Status: **approved by ADR-0013** (2026-11-17)._
+_Status: **approved by ADR-0013** (2026-11-17); **implemented (M1.6, 2026-11-18)**._
 
 ## 1. The one-sentence goal
 

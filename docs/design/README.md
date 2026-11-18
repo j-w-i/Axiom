@@ -1,6 +1,6 @@
 # Axiom visual design (M1.6)
 
-_Status: **approved by ADR-0013** (2026-11-17): the "Precision Instrument"
+_Status: **approved by ADR-0013** (2026-11-17); **implemented (M1.6, 2026-11-18)**: the "Precision Instrument"
 synthesis, with decisions D2–D10 as recommended. Nothing is implemented in the
 production shell yet; Phase B tasks (`docs/tasks/M1.6/`) start now._
 

@@ -57,3 +57,20 @@
 .workbench[data-focused-region="editor"] [data-region="editor"] .tabs {
   box-shadow: inset 0 2px 0 var(--accent), inset 0 -1px 0 var(--line);
 }
+
+
+
+/* The editor area (moved from app.css by M1.6-QA-006). */
+.editor-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--surface-editor);
+}
+.editor-host {
+  position: absolute;
+  inset: 0;
+}
+.editor-host[hidden] {
+  display: none;
+}

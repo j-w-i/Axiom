@@ -69,7 +69,7 @@
   position: absolute;
   z-index: 1;
   opacity: 0;
-  background: var(--accent-line);
+  background: var(--accent);
   pointer-events: none;
   transition: opacity var(--dur-1) linear;
 }

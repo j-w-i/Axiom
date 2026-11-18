@@ -20,7 +20,7 @@
 .input:focus,
 .input[data-force="focus"] {
   outline: none;
-  border-color: var(--accent-line);
+  border-color: var(--accent);
   box-shadow: var(--recessed-shadow), 0 0 0 2px var(--accent-soft);
 }
 .input[aria-invalid="true"] {

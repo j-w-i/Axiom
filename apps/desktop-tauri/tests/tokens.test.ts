@@ -240,7 +240,7 @@ describe("design tokens", () => {
   it("text on backgrounds meets WCAG AA (4.5:1) in both themes", () => {
     for (const theme of THEMES) {
       const t = themeVars(theme);
-      for (const [fg, bg] of [["--text", "--bg"], ["--text", "--bg-subtle"], ["--text-muted", "--bg"], ["--text-muted", "--bg-subtle"], ["--danger", "--bg"], ["--text-on-accent", "--accent"]] as const) {
+      for (const [fg, bg] of [["--text", "--surface-editor"], ["--text", "--surface-chrome"], ["--text-muted", "--surface-editor"], ["--text-muted", "--surface-chrome"], ["--danger", "--surface-editor"], ["--on-accent", "--accent"]] as const) {
         const r = contrast(resolve(t, fg), resolve(t, bg));
         expect(r, `${theme} ${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
       }
@@ -249,6 +249,31 @@ describe("design tokens", () => {
 
   it.each(THEMES)("§2.3 contrast pairs (%s)", (theme) => {
     expect(contrastFailures(themeVars(theme), PAIRS)).toEqual([]);
+  });
+
+  it("no legacy token is defined or referenced", () => {
+    // The pre-M1.6 aliases (SYSTEM-001 requirement 5), removed by M1.6-QA-006. Re-adding one fails here.
+    const LEGACY = [
+      "--bg", "--bg-subtle", "--bg-elevated", "--bg-active", "--bg-selected", "--bg-input", "--bg-hover", "--border",
+      "--border-strong", "--accent-hover", "--text-on-accent", "--warning", "--warning-soft", "--success", "--shadow-popover",
+      "--shadow-raised", "--space-0-5", "--space-1", "--space-2", "--space-3", "--space-4", "--space-5", "--space-6",
+      "--radius-s", "--radius-m", "--radius-l", "--dur-fast", "--dur-normal", "--ease", "--font-mono", "--text-caption",
+      "--text-heading", "--leading", "--border-w", "--titlebar-h", "--statusbar-h", "--scrollbar",
+    ];
+    const hits: string[] = [];
+    for (const f of files(src)) {
+      if (!/\.(css|tsx?|html)$/.test(f)) continue;
+      const text = readFileSync(f, "utf8");
+      for (const name of LEGACY) {
+        const re = new RegExp(`${name.replace(/[-]/g, "\\-")}(?![\\w-])\\s*[:)\\,]`, "g");
+        for (const m of text.matchAll(re)) hits.push(`${f}: ${m[0]}`);
+      }
+    }
+    expect(hits).toEqual([]);
+    // The check itself catches a re-added alias (fixture).
+    const fixture = ":root { --bg: red; } .x { color: var(--space-4); }";
+    const found = LEGACY.filter((n) => new RegExp(`${n.replace(/[-]/g, "\\-")}(?![\\w-])\\s*[:)\\,]`).test(fixture));
+    expect(found).toEqual(["--bg", "--space-4"]);
   });
 
   it("light contrast matrix", () => {
