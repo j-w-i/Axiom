@@ -810,7 +810,7 @@ def scenario_palette(x):
             time.sleep(0.35)
         frames = wd.exec("return window.__axiomFrames.stop()")
         ms = wd.exec("return window.__axiomMarks.take('palette')")
-        return {"opens": 20, **latency_stats(ms, "key_to_frame"), **frame_stats(frames)}
+        return {"opens": 20, **latency_stats(ms, "key_to_frame"), **frame_stats(frames), "key_to_frame_each_ms": [round(v, 1) for v in ms]}
     finally:
         s.close()
 

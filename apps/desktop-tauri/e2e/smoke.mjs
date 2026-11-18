@@ -610,6 +610,15 @@ try {
   await wd.exec(`document.activeElement?.blur()`);
   await wd.chord(MOD, "k");
   await wd.waitFor(`return document.activeElement?.classList.contains('palette__input')`, [], 3000, "palette input focused");
+  {
+    // M1.6-SURFACES-001: one selection element follows the arrows (by transform); aria-selected stays the truth.
+    await wd.keys(["\uE015", "\uE015"]); // ArrowDown x2
+    await new Promise((r) => setTimeout(r, 250)); // the glide's --dur-1 transition
+    const glide = await wd.exec(
+      `const opts = [...document.querySelectorAll('[data-testid=palette] [role=option]')]; const g = document.querySelector('.palette__glide').getBoundingClientRect(); const sel = opts.findIndex(o => o.getAttribute('aria-selected') === 'true'); const o = opts[sel].getBoundingClientRect(); return { sel, dy: Math.round(g.top - o.top), active: document.querySelector('.palette__input').getAttribute('aria-activedescendant') === opts[sel].id }`,
+    );
+    check("19a palette glide follows arrow keys", glide.sel === 2 && glide.dy === 0 && glide.active, JSON.stringify(glide));
+  }
   await wd.keys([..."theme"]);
   await wd.waitFor(`return document.querySelector('.palette__item[aria-selected=true]')?.textContent.includes('Theme')`, [], 3000, "palette filters to the theme command");
   await new Promise((r) => setTimeout(r, 400));
@@ -619,6 +628,9 @@ try {
   await wd.keys([Keys.ENTER]);
   await wd.waitFor(`return document.documentElement.dataset.theme === 'light'`, [], 3000, "palette command ran");
   check("10b running a palette command works (theme switched)", true);
+  // WebKit writes localStorage to disk on a ~1 s timer; a quit right after a write loses it
+  // (19b below). Real use rarely quits within a second of running a command.
+  await new Promise((r) => setTimeout(r, 1500));
   await setTheme(wd, "dark");
 
   // ---- 8. restore state after restart --------------------------------------------
@@ -650,6 +662,16 @@ try {
     "motion restored",
   ).catch(() => null);
   check("13c appearance.motion persists across a restart (stored by the daemon as an unknown key)", motionAfter === "reduced", `after restart: ${motionAfter}`);
+  {
+    // M1.6-SURFACES-001: the last command run (10b, the theme command) is first in the palette after a restart.
+    await wd.click(await wd.find(".monaco-editor .view-lines"));
+    await wd.chord(MOD, "k");
+    await wd.waitFor(`return !!document.querySelector('[data-testid=palette] [role=option]')`, [], 3000, "palette after restart");
+    const first = await wd.exec(`return document.querySelector('[data-testid=palette] [role=option]').id`);
+    await wd.keys([Keys.ESC]);
+    await wd.waitFor(`return document.querySelector('[data-testid=palette]') === null`, [], 3000, "palette closed");
+    check("19b recent commands come first across a restart (axiom.palette.mru.v1)", first === "pal-theme", `first option ${first}`);
+  }
 
   // ---- 16. non-content states (M1.6-SHELL-007) -----------------------------------
   {

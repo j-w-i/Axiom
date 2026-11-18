@@ -102,60 +102,6 @@ button {
 }
 
 
-/* ---- command palette ---- */
-.palette {
-  position: fixed;
-  top: 14%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(560px, calc(100vw - 32px));
-  background: var(--bg-elevated);
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-popover);
-  overflow: hidden;
-  animation: dialog-in var(--dur-normal) var(--ease);
-}
-.palette__input {
-  width: 100%;
-  height: 46px;
-  border: none;
-  border-bottom: var(--border-w) solid var(--border);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--text-title);
-  padding: 0 var(--space-4);
-  outline: none;
-  user-select: text;
-}
-.palette__list {
-  max-height: 340px;
-  overflow: auto;
-  padding: var(--space-1);
-  margin: 0;
-  list-style: none;
-}
-.palette__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  height: 34px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-m);
-}
-.palette__item[aria-selected="true"] {
-  background: var(--bg-hover);
-}
-.palette__group {
-  color: var(--text-faint);
-  font-size: var(--text-caption);
-  width: 64px;
-}
-.palette__empty {
-  padding: var(--space-4);
-  color: var(--text-faint);
-}
-
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -165,9 +111,3 @@ button {
   white-space: nowrap;
 }
 
-@keyframes dialog-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(4px) scale(0.985);
-  }
-}

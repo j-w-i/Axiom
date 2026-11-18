@@ -1,0 +1,162 @@
+{
+  "host": {
+    "os": "Linux-7.3.3-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "x86_64",
+    "cpus": 12,
+    "mem_gib": 31.3,
+    "display": "Xvfb 1440x900x24 (software rendering, no GPU); repaint observed by XGetImage sampling",
+    "git": "05944d0",
+    "date": "2026-11-18T14:33:27+1100",
+    "loadavg_at_start": [
+      1.95,
+      3.56,
+      3.36
+    ]
+  },
+  "binaries": {
+    "qt": {
+      "path": "/home/jwalr/Axiom/build/desktop/axiom",
+      "bytes": 49173384
+    },
+    "tauri": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri",
+      "bytes": 13743032
+    },
+    "tauri-e2e": {
+      "path": "/home/jwalr/Axiom/target/release/axiom-tauri-e2e",
+      "bytes": 13743032
+    },
+    "base": {
+      "path": "/nonexistent",
+      "bytes": null
+    },
+    "axiomd": {
+      "path": "/home/jwalr/Axiom/target/release/axiomd",
+      "bytes": 6328456
+    }
+  },
+  "tauri": {
+    "startup": {
+      "cold": [],
+      "warm": []
+    },
+    "memory_cpu_typing": [],
+    "explorer": [],
+    "output": [],
+    "tab-switch": [],
+    "palette": [
+      {
+        "opens": 20,
+        "key_to_frame_samples": 20,
+        "key_to_frame_p50_ms": 15,
+        "key_to_frame_p95_ms": 45,
+        "key_to_frame_max_ms": 45,
+        "frames": 1006,
+        "frame_p50_ms": 16,
+        "frame_p95_ms": 18,
+        "frame_max_ms": 45,
+        "frames_gt_20ms": 26,
+        "frames_gt_25ms": 19,
+        "key_to_frame_each_ms": [
+          45,
+          18,
+          16,
+          16,
+          15,
+          16,
+          16,
+          15,
+          19,
+          15,
+          14,
+          13,
+          15,
+          15,
+          16,
+          15,
+          14,
+          15,
+          15,
+          15
+        ],
+        "loadavg_1m": 1.58
+      }
+    ],
+    "panel-toggle": [],
+    "splitter-drag": [],
+    "idle-running": [],
+    "typing-under-stream": []
+  },
+  "medians": {
+    "tauri": {
+      "palette": {
+        "frame_max_ms": {
+          "median": 45,
+          "min": 45,
+          "max": 45,
+          "samples": 1
+        },
+        "frame_p50_ms": {
+          "median": 16,
+          "min": 16,
+          "max": 16,
+          "samples": 1
+        },
+        "frame_p95_ms": {
+          "median": 18,
+          "min": 18,
+          "max": 18,
+          "samples": 1
+        },
+        "frames": {
+          "median": 1006,
+          "min": 1006,
+          "max": 1006,
+          "samples": 1
+        },
+        "frames_gt_20ms": {
+          "median": 26,
+          "min": 26,
+          "max": 26,
+          "samples": 1
+        },
+        "frames_gt_25ms": {
+          "median": 19,
+          "min": 19,
+          "max": 19,
+          "samples": 1
+        },
+        "key_to_frame_max_ms": {
+          "median": 45,
+          "min": 45,
+          "max": 45,
+          "samples": 1
+        },
+        "key_to_frame_p50_ms": {
+          "median": 15,
+          "min": 15,
+          "max": 15,
+          "samples": 1
+        },
+        "key_to_frame_p95_ms": {
+          "median": 45,
+          "min": 45,
+          "max": 45,
+          "samples": 1
+        },
+        "key_to_frame_samples": {
+          "median": 20,
+          "min": 20,
+          "max": 20,
+          "samples": 1
+        },
+        "opens": {
+          "median": 20,
+          "min": 20,
+          "max": 20,
+          "samples": 1
+        }
+      }
+    }
+  }
+}

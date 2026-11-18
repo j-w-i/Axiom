@@ -1,0 +1,160 @@
+/* Command palette (workspace-spec.md §3; M1.6-SURFACES-001): overlay material, 44 px input row
+   with a mode chip, 32 px rows under one gliding selection, a 30 px footer of keys. */
+
+.palette {
+  position: fixed;
+  top: 12%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(600px, calc(100% - 32px));
+  margin: 0 auto;
+  overflow: hidden;
+  transform-origin: 50% 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-overlay);
+  box-shadow: var(--overlay-shadow);
+}
+
+.palette__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--s-2);
+  height: 44px;
+  padding: 0 var(--s-3);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.palette__icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+.palette__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-title);
+  outline: none;
+  user-select: text;
+}
+/* The palette owns focus indication: the input draws no ring of its own. */
+.palette__input:focus,
+.palette__input:focus-visible {
+  outline: none;
+}
+.palette__input::placeholder {
+  color: var(--text-faint);
+}
+.palette__mode {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--text-tiny);
+}
+
+.palette__list {
+  position: relative;
+  max-height: 340px;
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  list-style: none;
+}
+/* One selection element, moved by transform (--sel is the selected index). */
+.palette__glide {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  height: 32px;
+  border-radius: var(--r-1);
+  background: var(--selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+  transform: translateY(calc(var(--sel) * 32px));
+  transition: transform var(--dur-1) var(--ease-out);
+  pointer-events: none;
+}
+.palette__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 32px;
+  padding: 0 var(--s-3);
+  color: var(--text);
+  font-size: var(--text-body);
+  white-space: nowrap;
+  cursor: default;
+}
+.palette__group {
+  flex: none;
+  width: 60px;
+  color: var(--text-faint);
+  font-size: var(--text-small);
+}
+.palette__label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.palette__keys {
+  margin-left: auto;
+}
+.palette__dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--text-small);
+  text-overflow: ellipsis;
+}
+.palette__item mark {
+  background: none;
+  color: var(--accent-text);
+  font-weight: var(--weight-strong);
+}
+
+.palette__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-3);
+}
+.palette__empty-title {
+  color: var(--text-muted);
+  font-size: var(--text-body);
+}
+.palette__empty-hint {
+  color: var(--text-faint);
+  font-size: var(--text-small);
+}
+
+.palette__foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--s-4);
+  height: 30px;
+  padding: 0 var(--s-3);
+  background: var(--surface-chrome);
+  box-shadow: inset 0 1px 0 var(--line);
+  color: var(--text-faint);
+  font-size: var(--text-tiny);
+}
+.palette__foot > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.palette__foot-spacer {
+  flex: 1;
+}

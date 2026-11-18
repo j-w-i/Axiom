@@ -108,9 +108,11 @@ export function App({ app }: { app: AppStores }) {
       <AboutSheet open={aboutOpen} onOpenChange={setAboutOpen} info={info} serverVersion={daemon.state === "ready" ? daemon.serverVersion : null} />
       <CommandPalette
         open={palette !== null}
+        mode={palette ?? "commands"}
         onOpenChange={(o) => !o && setPalette(null)}
         commands={commands}
-        placeholder={palette === "files" ? "Go to a listed file…" : "Type a command…"}
+        hasWorkspace={!!ctx.ws.id}
+        onOpenFolder={() => void ctx.openFolder()}
       />
     </div>
   );
