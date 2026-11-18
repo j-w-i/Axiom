@@ -52,6 +52,12 @@ fn capability_grants_exactly_the_pinned_commands() {
     expected.push("core:event:allow-listen".into());
     // The native title bar follows the theme setting on Windows and Linux (D3, M1.6-SURFACES-003).
     expected.push("core:window:allow-set-theme".into());
+    // macOS overlay title bar: the title row's data-tauri-drag-region moves the window (D3,
+    // M1.6-SHELL-003). It can only start a drag of this window; it moves no files or processes.
+    expected.push("core:window:allow-start-dragging".into());
+    // A double-click on the same row zooms the window (fills the screen, not full screen), as in
+    // other Mac apps; the drag-region script sends it as internal_toggle_maximize.
+    expected.push("core:window:allow-internal-toggle-maximize".into());
     let mut actual = permissions_in_capability();
     actual.sort();
     expected.sort();
