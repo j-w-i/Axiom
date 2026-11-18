@@ -69,6 +69,15 @@ export function glideTransform(offsetLeft: number, width: number): string {
   return `translateX(${offsetLeft}px) scaleX(${width / 100})`;
 }
 
+/** How the lit edge moves to a new placement: it glides when the active tab changes and jumps
+ * (one frame, no transition) on its first placement, after a tab closes (the strip reflows) and on
+ * resize (INTERACTION-003). */
+export function glideMode(prev: { path: string; count: number } | null, next: { path: string; count: number }): "glide" | "instant" {
+  if (!prev) return "instant";
+  if (next.count < prev.count) return "instant";
+  return next.path !== prev.path ? "glide" : "instant";
+}
+
 /**
  * The tab strip (workspace-spec.md §2.3; M1.6-EDITOR-001): a recessed chrome strip, the active
  * tab a raised key merging into the editor, and one brass lit edge placed over it by transform
@@ -77,21 +86,37 @@ export function glideTransform(offsetLeft: number, width: number): string {
 function TabStrip({ documents, docs, activePath }: { documents: DocumentsStore; docs: Doc[]; activePath: string }) {
   const strip = useRef<HTMLDivElement>(null);
   const glide = useRef<HTMLSpanElement>(null);
+  const placed = useRef<{ path: string; count: number } | null>(null);
 
   useLayoutEffect(() => {
     const el = strip.current;
     const edge = glide.current;
     if (!el || !edge) return;
-    const place = () => {
+    const place = (mode: "glide" | "instant") => {
       const tab = el.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
       edge.hidden = !tab;
-      if (tab) edge.style.transform = glideTransform(tab.offsetLeft, tab.offsetWidth);
+      if (!tab) return;
+      if (mode === "instant") {
+        // data-instant removes the transition for this placement only.
+        edge.dataset.instant = "";
+        edge.style.transform = glideTransform(tab.offsetLeft, tab.offsetWidth);
+        void edge.offsetWidth; // commit the jump before the transition comes back
+        delete edge.dataset.instant;
+      } else {
+        edge.style.transform = glideTransform(tab.offsetLeft, tab.offsetWidth);
+      }
     };
-    place();
+    const next = { path: activePath, count: docs.length };
+    place(glideMode(placed.current, next));
+    placed.current = next;
     const tab = el.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
     tab?.scrollIntoView({ inline: "nearest", block: "nearest" });
     // The strip's size and the active tab's width (a title or badge change) move the edge.
-    const ro = new ResizeObserver(place);
+    let first = true;
+    const ro = new ResizeObserver(() => {
+      if (first) return void (first = false); // the initial callback: already placed above
+      place("instant");
+    });
     ro.observe(el);
     if (tab) ro.observe(tab);
     return () => ro.disconnect();

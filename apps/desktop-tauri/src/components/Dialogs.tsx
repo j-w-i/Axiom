@@ -4,6 +4,7 @@ import type { DocumentsStore } from "../state/documents";
 import type { SettingsStore, ThemeSetting } from "../state/settings";
 import type { AppInfo } from "../daemon/tauri-transport";
 import type { MotionLevel } from "../ui/motion";
+import { useReturnFocus } from "../ui/overlays";
 import { Button, Dialog, Field, Segmented, Stepper, Switch } from "../ui/primitives";
 import "../styles/components/settings.css";
 
@@ -103,12 +104,7 @@ export function SettingsDialog({
   const [family, setFamily] = useState(s.editorFontFamily);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const body = useRef<HTMLDivElement>(null);
-  // The element that had focus when the dialog opened (read while rendering the opening frame,
-  // before the dialog takes focus); focus goes back to it on close.
-  const opener = useRef<Element | null>(null);
-  const wasOpen = useRef(false);
-  if (open && !wasOpen.current && typeof document !== "undefined") opener.current = document.activeElement;
-  wasOpen.current = open;
+  const returnFocus = useReturnFocus(open);
   useEffect(() => setFamily(s.editorFontFamily), [s.editorFontFamily]);
   useEffect(() => {
     if (open) {
@@ -157,19 +153,12 @@ export function SettingsDialog({
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <RDialog.Portal>
-        <RDialog.Overlay className="overlay motion-fade" data-phase="in" />
+        <RDialog.Overlay className="overlay" />
         <RDialog.Content
-          className="settings motion-pop"
-          data-phase="in"
+          className="settings"
           data-testid="settings"
           aria-describedby={undefined}
-          onCloseAutoFocus={(e) => {
-            const el = opener.current;
-            if (el instanceof HTMLElement && el.isConnected && el !== document.body) {
-              e.preventDefault();
-              el.focus();
-            }
-          }}
+          onCloseAutoFocus={returnFocus}
           onOpenAutoFocus={(e) => {
             // Land on the section's first control (Appearance: the theme choice).
             e.preventDefault();

@@ -8,6 +8,7 @@ import * as RDialog from "@radix-ui/react-dialog";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { substituteMod } from "../ui/hint";
 import * as Icon from "../ui/icons";
+import { useReturnFocus } from "../ui/overlays";
 import { Kbd, keyLabels } from "../ui/primitives";
 import { glyphFor } from "./Explorer";
 import "../styles/components/glyph.css";
@@ -149,6 +150,7 @@ export function CommandPalette({
   const [index, setIndex] = useState(0);
   const [mru, setMru] = useState<string[]>(() => loadMru());
   const list = useRef<HTMLUListElement>(null);
+  const returnFocus = useReturnFocus(open);
 
   const openFolderRow: PaletteCommand = { id: "palette:open-folder", group: "File", label: "Open Folder…", shortcut: "Ctrl+O", run: onOpenFolder };
   const empty = emptyState(mode, hasWorkspace);
@@ -188,8 +190,8 @@ export function CommandPalette({
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <RDialog.Portal>
-        <RDialog.Overlay className="overlay motion-fade" data-phase="in" />
-        <RDialog.Content className="palette motion-pop" data-phase="in" data-mode={mode} aria-describedby={undefined} data-testid="palette">
+        <RDialog.Overlay className="overlay" />
+        <RDialog.Content className="palette" data-mode={mode} aria-describedby={undefined} data-testid="palette" onCloseAutoFocus={returnFocus}>
           <RDialog.Title className="visually-hidden">{mode === "files" ? "Go to file" : "Command palette"}</RDialog.Title>
           <div className="palette__bar">
             <Icon.Search className="palette__icon" />

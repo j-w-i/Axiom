@@ -673,6 +673,53 @@ try {
     check("20d Escape closes settings and focus returns to the editor", returned, `focus in editor: ${returned}; active ${where}`);
   }
 
+  // ---- 21. microinteractions (M1.6-INTERACTION-003) -------------------------------------
+  {
+    const edge = () =>
+      wd.exec(
+        `const t = document.querySelector('.tabs [role=tab][aria-selected=true]').getBoundingClientRect(); const g = document.querySelector('.tabs__glide').getBoundingClientRect(); return { dx: +Math.abs(t.left - g.left).toFixed(2), dw: +Math.abs(t.width - g.width).toFixed(2) }`,
+      );
+    await wd.click(await wd.find(".monaco-editor .view-lines"));
+    const landings = [];
+    for (let i = 0; i < 4; i++) {
+      await wd.chord(Keys.CTRL, "\uE004"); // Ctrl+Tab (on every OS)
+      await new Promise((r) => setTimeout(r, 320)); // --dur-3 (200 ms) and a margin
+      landings.push(await edge());
+    }
+    const rect = await wd.cmd("GET", "/window/rect");
+    await wd.cmd("POST", "/window/rect", { ...rect, width: rect.width - 160 });
+    await new Promise((r) => setTimeout(r, 400));
+    landings.push(await edge());
+    await wd.cmd("POST", "/window/rect", rect);
+    await new Promise((r) => setTimeout(r, 400));
+    landings.push(await edge());
+    check("21a tab glide lands on the active tab (Ctrl+Tab x4, then a resize and back; ±0.5 px)", landings.every((l) => l.dx <= 0.5 && l.dw <= 0.5), JSON.stringify(landings));
+
+    await wd.click(await wd.find('button[aria-label="File menu"]'));
+    await wd.waitFor(`return !!document.querySelector('.menu[data-state=open]')`, [], 3000, "File menu open");
+    await wd.keys([Keys.ESC]);
+    const focusAtClose = await wd.exec(`return document.activeElement?.getAttribute('aria-label')`);
+    await new Promise((r) => setTimeout(r, 300));
+    const menuLeft = await wd.exec(`return document.querySelectorAll('.menu').length`);
+    check("21b menu exit leaves no mounted content, and focus is back on its trigger at once", menuLeft === 0 && focusAtClose === "File menu", `menus left ${menuLeft}; focus right after Escape: ${focusAtClose}`);
+
+    const level = await wd.exec(`return ${appExpr}.settings.getSnapshot().motion`);
+    await wd.exec(`${appExpr}.settings.setValue("appearance.motion", "off")`);
+    await wd.waitFor(`return document.documentElement.dataset.motion === 'off'`, [], 3000, "motion off");
+    await wd.click(await wd.find(".monaco-editor .view-lines"));
+    await wd.chord(MOD, "k");
+    await wd.waitFor(`return !!document.querySelector('[data-testid=palette]')`, [], 3000, "palette");
+    const anims = await wd.exec(`return document.getAnimations().filter(a => a.effect?.target?.closest?.('.palette, .overlay')).length`);
+    await wd.keys([Keys.ESC]);
+    const gone = await wd.waitFor(`return document.querySelector('[data-testid=palette]') === null ? Date.now() : null`, [], 1000, "palette gone").then(() => true, () => false);
+    // __axiomMotion.running() exists only in dev/e2e-mode builds; this is the same count, minus
+    // Monaco's own caret blink (the caret is the editor's, not shell motion: motion-system.md §1).
+    const running = await wd.exec(`return document.getAnimations().filter(a => a.playState === 'running' && !a.effect?.target?.closest?.('.monaco-editor')).map(a => (a.animationName || a.transitionProperty) + ' on ' + (a.effect?.target?.className || '?'))`);
+    await wd.exec(`${appExpr}.settings.setValue("appearance.motion", arguments[0])`, [level]);
+    await wd.waitFor(`return document.documentElement.dataset.motion === arguments[0]`, [level], 3000, "motion restored");
+    check("21c motion off: dialogs have no animations and close at once", anims === 0 && gone && running.length === 0, `animations on palette/scrim ${anims}; closed ${gone}; running anywhere after close: ${JSON.stringify(running)}`);
+  }
+
   // ---- 8. restore state after restart --------------------------------------------
   await wd.exec(`${appExpr}.settings.setValue("editor.fontSize", 15)`);
   await wd.waitFor(`return ${appExpr}.settings.getSnapshot().editorFontSize === 15`, [], 3000, "font size");

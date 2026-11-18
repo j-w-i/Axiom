@@ -1,0 +1,82 @@
+/* Overlay presence (motion-system.md §4; M1.6-INTERACTION-003). Radix sets data-state on its
+   content; on close it keeps the content mounted until the running exit animation ends, so
+   exits play without forceMount. Transform and opacity only.
+   Reduced: entrances and exits become fades (--dur-* are 80 ms there); Off: no animation. */
+
+/* Scrim: fade in --dur-2 linear, out --dur-1. */
+.overlay[data-state="open"] {
+  animation: fade-in var(--dur-2) linear both;
+}
+.overlay[data-state="closed"] {
+  animation: fade-out var(--dur-1) var(--ease-in) both;
+}
+
+/* Dialog panels (Dialog, Sheet, the palette, settings): pop in --dur-2, pop out --dur-1. */
+.dialog[data-state="open"],
+.palette[data-state="open"],
+.settings[data-state="open"] {
+  animation: pop-in var(--dur-2) var(--ease-out) both;
+}
+.dialog[data-state="closed"],
+.palette[data-state="closed"],
+.settings[data-state="closed"] {
+  animation: pop-out var(--dur-1) var(--ease-in) both;
+}
+
+/* Menus (Radix): drop 4 px and fade in --dur-2; fade out --dur-1. The context menu (not Radix)
+   has the entrance only: it unmounts at once on close. */
+.menu[data-state="open"],
+.menu[data-phase="in"]:not([data-state]) {
+  animation: menu-in var(--dur-2) var(--ease-out) both;
+}
+.menu[data-state="closed"] {
+  animation: fade-out var(--dur-1) var(--ease-in) both;
+}
+
+/* Tooltips: opacity only, --dur-1 (the 500 / 300 ms delays are the provider's). */
+.tooltip[data-state="delayed-open"],
+.tooltip[data-state="instant-open"] {
+  animation: fade-in var(--dur-1) linear both;
+}
+.tooltip[data-state="closed"] {
+  animation: fade-out var(--dur-1) linear both;
+}
+
+/* Toasts: rise 10 px and fade in --dur-3; fade out --dur-2 (ToastStack keeps them through it). */
+.toast[data-phase="in"] {
+  animation: toast-in var(--dur-3) var(--ease-out) both;
+}
+.toast[data-phase="out"] {
+  animation: fade-out var(--dur-2) var(--ease-in) both;
+}
+
+[data-motion="reduced"] .dialog[data-state="open"],
+[data-motion="reduced"] .palette[data-state="open"],
+[data-motion="reduced"] .settings[data-state="open"],
+[data-motion="reduced"] .menu[data-state="open"],
+[data-motion="reduced"] .menu[data-phase="in"]:not([data-state]),
+[data-motion="reduced"] .toast[data-phase="in"] {
+  animation-name: fade-in;
+}
+[data-motion="reduced"] .dialog[data-state="closed"],
+[data-motion="reduced"] .palette[data-state="closed"],
+[data-motion="reduced"] .settings[data-state="closed"] {
+  animation-name: fade-out;
+}
+/* Off: nothing animates, so Radix unmounts closing content at once. */
+[data-motion="off"] .overlay,
+[data-motion="off"] .dialog,
+[data-motion="off"] .palette,
+[data-motion="off"] .settings,
+[data-motion="off"] .menu,
+[data-motion="off"] .tooltip,
+[data-motion="off"] .toast {
+  animation: none;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}

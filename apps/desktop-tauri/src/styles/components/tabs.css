@@ -109,6 +109,13 @@
   transform-origin: 0 0;
   background: linear-gradient(var(--accent) 0 1.5px, var(--accent-soft) 1.5px, transparent 9px);
   pointer-events: none;
+  /* Glides between tabs (INTERACTION-003); Reduced and Off make it instant. */
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.tabs__glide[data-instant],
+[data-motion="reduced"] .tabs__glide,
+[data-motion="off"] .tabs__glide {
+  transition: none;
 }
 .tabs__glide[hidden] {
   display: none;

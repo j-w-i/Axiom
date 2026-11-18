@@ -9,15 +9,42 @@
 import * as RDialog from "@radix-ui/react-dialog";
 import * as RMenu from "@radix-ui/react-dropdown-menu";
 import * as RTooltip from "@radix-ui/react-tooltip";
-import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
+import { currentMotion } from "./motion";
 import { Button, Keys, Led } from "./primitives";
 import "../styles/components/dialog.css";
 import "../styles/components/menu.css";
 import "../styles/components/tooltip.css";
 import "../styles/components/toast.css";
 import "../styles/components/banner.css";
+import "../styles/components/overlay-motion.css";
 
 export type Phase = "in" | "out";
+
+
+/**
+ * Focus for an overlay that animates out (INTERACTION-003): the element focused when it opened
+ * gets focus back as soon as it starts closing, not when the exit animation ends, so the next
+ * keystroke never lands in a closing overlay. Pass the returned handler as Radix's
+ * onCloseAutoFocus: it stops Radix from re-focusing at unmount, which would take focus back
+ * from a command that moved it meanwhile (a palette or menu command runs after close starts).
+ */
+export function useReturnFocus(open: boolean): (e: Event) => void {
+  const opener = useRef<Element | null>(null);
+  const prev = useRef(false);
+  if (open && !prev.current && typeof document !== "undefined") opener.current = document.activeElement;
+  // A passive effect, not a layout effect: Radix's FocusScope (a descendant) drops its focus
+  // trap in its own passive effect, which runs first; a layout effect would be pulled back
+  // inside. A discrete event's passive effects still flush before a command's setTimeout(0).
+  useEffect(() => {
+    if (prev.current && !open) {
+      const el = opener.current;
+      if (el instanceof HTMLElement && el.isConnected && el !== document.body) el.focus();
+    }
+    prev.current = open;
+  }, [open]);
+  return (e: Event) => e.preventDefault();
+}
 
 // ---- shortcuts in menus and tooltips ----------------------------------------------
 
@@ -98,11 +125,12 @@ export function Dialog({
   container?: HTMLElement | null;
   modal?: boolean;
 }) {
+  const returnFocus = useReturnFocus(open);
   return (
     <RDialog.Root open={open} modal={modal} onOpenChange={(o) => !o && onChoose(dismissAction)}>
       <RDialog.Portal container={container}>
         {modal && <RDialog.Overlay className="overlay" data-phase={phase} />}
-        <RDialog.Content className="dialog" data-testid={testId} data-phase={phase} aria-describedby={undefined}>
+        <RDialog.Content className="dialog" data-testid={testId} data-phase={phase} aria-describedby={undefined} onCloseAutoFocus={returnFocus}>
           <RDialog.Title className="dialog__title">{title}</RDialog.Title>
           {description && <RDialog.Description className="dialog__body">{description}</RDialog.Description>}
           {children}
@@ -137,11 +165,12 @@ export function Sheet({
   container?: HTMLElement | null;
   modal?: boolean;
 }) {
+  const returnFocus = useReturnFocus(open);
   return (
     <RDialog.Root open={open} modal={modal} onOpenChange={onOpenChange}>
       <RDialog.Portal container={container}>
         {modal && <RDialog.Overlay className="overlay" data-phase={phase} />}
-        <RDialog.Content className="dialog" data-phase={phase} aria-describedby={undefined}>
+        <RDialog.Content className="dialog" data-phase={phase} aria-describedby={undefined} onCloseAutoFocus={returnFocus}>
           <RDialog.Title className="dialog__title">{title}</RDialog.Title>
           {children}
           <div className="dialog__actions">
@@ -186,15 +215,24 @@ export function Menu({
   /** The status bar hint of the trigger (SHELL-005). */
   hint?: string;
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
-    <RMenu.Root open={open} modal={open === undefined}>
+    <RMenu.Root
+      open={open}
+      modal={open === undefined}
+      onOpenChange={(o) => {
+        // Focus goes back to the trigger as the menu starts closing (INTERACTION-003), not after
+        // its exit animation; a command that moves focus afterwards keeps it.
+        if (!o && triggerRef.current && document.activeElement?.closest(".menu")) triggerRef.current.focus();
+      }}
+    >
       <RMenu.Trigger asChild>
-        <button type="button" className={triggerClassName} aria-label={label} data-hint={hint ?? label}>
+        <button ref={triggerRef} type="button" className={triggerClassName} aria-label={label} data-hint={hint ?? label}>
           {trigger}
         </button>
       </RMenu.Trigger>
       <RMenu.Portal container={container}>
-        <RMenu.Content className="menu" data-phase={phase} align="start" sideOffset={4}>
+        <RMenu.Content className="menu" data-phase={phase} align="start" sideOffset={4} onCloseAutoFocus={(e) => e.preventDefault()}>
           {items.map((it, i) =>
             it.separator ? (
               <RMenu.Separator key={i} className="menu__sep" />
@@ -439,7 +477,10 @@ export function ToastView({ item, onPause, onResume, onDismiss, phase = "in" }: 
   return (
     <div
       className="toast"
-      role={item.tone === "err" ? "alert" : "status"}
+      // A leaving copy is a new node: hidden and inert, so it is not announced a second time.
+      role={phase === "out" ? undefined : item.tone === "err" ? "alert" : "status"}
+      aria-hidden={phase === "out" || undefined}
+      inert={phase === "out" || undefined}
       data-tone={item.tone}
       data-phase={phase}
       onMouseEnter={onPause}
@@ -468,11 +509,33 @@ export function ToastView({ item, onPause, onResume, onDismiss, phase = "in" }: 
 /** The bottom-right stack, above the status bar. Mounted once by the app. */
 export function ToastStack({ queue = toasts }: { queue?: ToastQueue }) {
   const items = useToasts(queue);
+  // Dismissed toasts stay for their exit fade (--dur-2) in Standard; none in Reduced and Off.
+  const [leaving, setLeaving] = useState<ToastItem[]>([]);
+  const prev = useRef(items);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useLayoutEffect(() => {
+    const gone = prev.current.filter((p) => !items.some((i) => i.id === p.id));
+    prev.current = items;
+    if (gone.length === 0 || currentMotion() !== "standard") return;
+    setLeaving((l) => [...l, ...gone]);
+    const t = setTimeout(() => {
+      timers.current.delete(t);
+      setLeaving((l) => l.filter((x) => !gone.some((g) => g.id === x.id)));
+    }, TOAST_EXIT_MS);
+    timers.current.add(t);
+  }, [items]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
   return (
     <div className="toast-stack" aria-label="Notifications">
+      {leaving.map((t) => (
+        <ToastView key={`out-${t.id}`} item={t} phase="out" />
+      ))}
       {items.map((t) => (
         <ToastView key={t.id} item={t} onPause={() => queue.pause(t.id)} onResume={() => queue.resume(t.id)} onDismiss={() => queue.dismiss(t.id)} />
       ))}
     </div>
   );
 }
+
+/** A dismissed toast's exit (--dur-2, 140 ms) plus a frame. */
+export const TOAST_EXIT_MS = 160;
