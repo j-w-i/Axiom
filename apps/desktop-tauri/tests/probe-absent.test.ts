@@ -20,7 +20,8 @@ function files(dir: string): string[] {
 function build(mode?: string): string {
   const out = mkdtempSync(join(tmpdir(), "axiom-probe-"));
   const args = ["exec", "vite", "build", "--outDir", out, "--emptyOutDir", ...(mode ? ["--mode", mode] : [])];
-  execFileSync("pnpm", args, { cwd: app, stdio: "pipe" });
+  // pnpm is a .cmd script on Windows: it needs a shell there.
+  execFileSync("pnpm", args, { cwd: app, stdio: "pipe", shell: process.platform === "win32" });
   return out;
 }
 

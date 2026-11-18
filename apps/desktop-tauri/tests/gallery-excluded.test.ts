@@ -14,7 +14,8 @@ const files = (dir: string): string[] =>
 it("the production build contains no gallery code", () => {
   const out = mkdtempSync(join(tmpdir(), "axiom-gallery-"));
   try {
-    execFileSync("pnpm", ["exec", "vite", "build", "--outDir", out, "--emptyOutDir"], { cwd: app, stdio: "pipe" });
+    // pnpm is a .cmd script on Windows: it needs a shell there.
+    execFileSync("pnpm", ["exec", "vite", "build", "--outDir", out, "--emptyOutDir"], { cwd: app, stdio: "pipe", shell: process.platform === "win32" });
     expect(existsSync(join(out, "gallery.html"))).toBe(false);
     const text = files(out).filter((f) => /\.(js|html|css)$/.test(f)).map((f) => readFileSync(f, "utf8")).join("\n");
     expect(text.includes("axiom-component-gallery")).toBe(false);
