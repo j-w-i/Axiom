@@ -371,6 +371,10 @@ async fn cmake_and_ninja_managed_roundtrip() {
 /// M2-PROV-003: uv (bootstrapped from its release archive) installs a managed Python with every
 /// uv location inside the root; the interpreter runs from the project environment; uninstall
 /// removes it. HOME is an empty temp directory that must stay empty.
+// Not on Windows (deferred by the owner): uv's Windows launchers in `bin` embed the absolute
+// staging path, which the staging-then-rename publish cannot re-point (unlike Unix symlinks,
+// see `install::relink`). Recorded in docs/roadmap/verification/M2.md.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn python_managed_install_roundtrip() {
     let home = tempfile::tempdir().unwrap();
@@ -435,9 +439,12 @@ async fn python_managed_install_roundtrip() {
         .unwrap();
     let prefix = String::from_utf8_lossy(&out.stdout).trim().to_string();
     println!("sys.prefix = {prefix}");
+    // Canonical on both sides: macOS reports /private/var for a /var temp dir.
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     assert!(
-        std::path::Path::new(&prefix).starts_with(&root),
-        "the managed interpreter ran"
+        canon(std::path::Path::new(&prefix)).starts_with(canon(&root)),
+        "the managed interpreter ran: {prefix} is not under {}",
+        root.display()
     );
 
     inst.uninstall("python", version, Some(&m)).await.unwrap();
