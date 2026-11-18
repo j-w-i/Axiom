@@ -53,6 +53,7 @@ lives on branch `task/m1.6`.
 - **M1.6-INTERACTION-004 is tested (2026-11-18):** editor tabs reorder by drag (lift, siblings make room, brass slot line, settle) and by Mod+Shift+PageUp/PageDown (announced); the order persists with the tab state (D7).
 - **M1.6-QA-003 is blocked (2026-11-18):** the accessibility suite `e2e/a11y.mjs` exists and runs (15/19 on Linux); 4 defects (D-A11Y-1..4, light primary button and chrome state-text contrast, Tab in the editor, small targets) await the owner, and the Orca manual pass needs a person. Record: `docs/roadmap/verification/M1.6.md` §A11y.
 - **M1.6-QA-004 is tested (2026-11-18):** performance measured against the QA-002 build (interleaved): P1, P2, P6, P7, P9–P12 met; P3, P4 frame p95, P5, P6 cold open and P8 (4.1 %) not met and waived by the owner in writing (`M1.6.md` §Performance).
+- **M1.6-QA-005 is blocked (2026-11-18):** the automated half passes on macOS and Windows in GitHub Actions (run 44250978913; screenshot sets in `verification/M1.6/{macos,windows}/`); two platform defects (D-X-1 caret drift, D-X-2 Windows localStorage on quit) and the manual hardware items (VoiceOver, NVDA, High Contrast, title bar, HiDPI) remain. Record: `M1.6.md` §Cross-platform.
 - **Next:** see `scripts/tasks.py | grep '^M1.6-' | grep READY` (`scripts/tasks.py | grep '^M1.6-' | grep READY`).
 - _(Wave B history:)_ M1.6-QA-002 (performance baseline and new scenarios),
   M1.6-SYSTEM-001 (generated tokens), M1.6-SHELL-001 (split `App.tsx`, no visual

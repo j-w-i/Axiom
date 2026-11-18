@@ -1,0 +1,343 @@
+{
+  "commit": "905465bcf90f193e1186c42f471c2c74f851120d",
+  "dirty": false,
+  "os": "windows",
+  "platform": "win32 x64",
+  "engine": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+  "webdriver": "embedded",
+  "window": {
+    "width": 1440,
+    "height": 900
+  },
+  "minimumWindow": {
+    "width": 720,
+    "height": 480
+  },
+  "scales": [
+    1,
+    2
+  ],
+  "fixture": "tests/fixtures/visual",
+  "extraCss": null,
+  "seconds": 41,
+  "states": [
+    {
+      "id": "s1",
+      "title": "Welcome, backend connecting",
+      "status": "skipped",
+      "note": "the stand-in backends are POSIX scripts",
+      "files": []
+    },
+    {
+      "id": "s1b",
+      "title": "Workspace opening (tree skeleton rows)",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s1b-dark.png",
+        "s1b-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s1c",
+      "title": "Workspace empty folder",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s1c-dark.png",
+        "s1c-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s1d",
+      "title": "Workspace listing error row",
+      "status": "captured",
+      "note": "an unlistable folder is made with POSIX permissions",
+      "files": []
+    },
+    {
+      "id": "s2",
+      "title": "Welcome, backend connected, 3 recent folders",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s2-dark.png",
+        "s2-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s3",
+      "title": "Backend failed banner",
+      "status": "skipped",
+      "note": "the stand-in backends are POSIX scripts",
+      "files": []
+    },
+    {
+      "id": "s4",
+      "title": "Workspace, 4 tabs (one dirty), executor.rs active, console with a passing run",
+      "status": "captured",
+      "note": "the 200% pass runs on Linux only (GDK_SCALE); macOS and Windows are QA-005",
+      "files": [
+        "s4-dark.png",
+        "s4-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s5",
+      "title": "S4 with a task running (stderr progress lines; no LED, transport or elapsed time exist yet)",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s5-dark.png",
+        "s5-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s6",
+      "title": "S4 with a failed run",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s6-dark.png",
+        "s6-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s7",
+      "title": "Command palette, empty query",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s7-dark.png",
+        "s7-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s8",
+      "title": "Palette, file mode with a query (no match highlighting exists yet)",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s8-dark.png",
+        "s8-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s9",
+      "title": "File menu open",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s9-dark.png",
+        "s9-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s10",
+      "title": "Output context menu",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s10-dark.png",
+        "s10-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s11",
+      "title": "Settings, Appearance section",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s11-dark.png",
+        "s11-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s11b",
+      "title": "Settings, Editor section",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s11b-dark.png",
+        "s11b-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s12",
+      "title": "Unsaved-changes dialog",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s12-dark.png",
+        "s12-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s12b",
+      "title": "Conflict dialog",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s12b-dark.png",
+        "s12b-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s13",
+      "title": "Side bar hidden, console hidden (compact)",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s13-dark.png",
+        "s13-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s14",
+      "title": "Window at its 720x480 minimum",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s14-dark.png",
+        "s14-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 441,
+        "w": 704
+      }
+    },
+    {
+      "id": "s15",
+      "title": "Focus on the tree (keyboard focus ring)",
+      "status": "captured",
+      "note": "the app window could not be given X input focus (no python-xlib): the focus ring may be missing",
+      "files": [
+        "s15-dark.png",
+        "s15-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s16",
+      "title": "Hint line showing the Rerun hint (Rerun focused)",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s16-dark.png",
+        "s16-light.png"
+      ],
+      "viewport": {
+        "dpr": 1,
+        "h": 861,
+        "w": 1424
+      }
+    },
+    {
+      "id": "s17",
+      "title": "Gallery page, each section (dev-only gallery served locally, opened in the app's own webview, motion off)",
+      "status": "captured",
+      "note": "",
+      "files": [
+        "s17-button-dark.png",
+        "s17-iconbutton-dark.png",
+        "s17-kbd-keys-badge-count-led-spinner-meter-dark.png",
+        "s17-field-switch-segmented-stepper-dark.png",
+        "s17-overlays-menu-contextmenu-tooltip-dialog-toast-banner-dark.png",
+        "s17-type-dark.png",
+        "s17-button-light.png",
+        "s17-iconbutton-light.png",
+        "s17-kbd-keys-badge-count-led-spinner-meter-light.png",
+        "s17-field-switch-segmented-stepper-light.png",
+        "s17-overlays-menu-contextmenu-tooltip-dialog-toast-banner-light.png",
+        "s17-type-light.png"
+      ]
+    },
+    {
+      "id": "focused-region",
+      "title": "Focused-region rule",
+      "status": "pending",
+      "note": "SHELL-002 / EDITOR-002: no focused-region treatment yet",
+      "files": []
+    }
+  ]
+}
