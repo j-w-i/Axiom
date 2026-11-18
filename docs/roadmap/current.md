@@ -91,7 +91,7 @@ gone (tag `qt-shell-final`).
 | Backend (`crates/{rpc,store,workspace,exec,axiomd}`) | M1, 227 tests, unmodified by M1.5 |
 | `crates/desktop-bridge` | Tested: 13 behaviour tests against the real daemon (incl. stderr forwarding) + 12 unit tests (framing, daemon lookup order) |
 | `apps/desktop-tauri` | M1.5 shell: root-workspace Rust host + React UI; 5 host-surface + 3 release-guard tests, 51 Vitest tests, 51 end-to-end checks in 4 suites (smoke 22, quit 8, geometry 5, parity 13) through two WebDriver servers |
-| CI | Actions budget for the month is nearly exhausted (owner, 2026-11-12): verification is local on Linux plus one batched run, not a per-change loop. Last run 43146126579: Linux+macOS green, Windows at typing-fixed/commands-pending |
+| CI | The repository is public (checked 2026-11-18), so GitHub-hosted runners, macOS and Windows included, have no minute cap; the 2026-11-12 "budget nearly exhausted" note no longer constrains runs. `.github/workflows/qa-cross-platform.yml` runs QA-005's automated half on pushes to `qa/**`. Last run 43146126579: Linux+macOS green, Windows at typing-fixed/commands-pending |
 | Qt shell | Retired by T-15 (2026-11-17); recover from tag `qt-shell-final` |
 | M1.5 gate (T-12) | **Not passed** (superseded by the owner's T-14/T-15 decisions above): on Linux everything is verified (parity 52/56, all ten performance budgets, 48 end-to-end checks, package launches/finds its sidecar/connects) and macOS went green end to end in run 43141643434; Windows still fails at typing-free stages and KD-WIN-1 (Qt) is unchanged; macOS/Windows budgets, the manual protocol and the E-17 waiver are open — `docs/roadmap/verification/M1.5.md` |
 
