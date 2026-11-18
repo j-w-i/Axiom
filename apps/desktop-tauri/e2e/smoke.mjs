@@ -314,7 +314,11 @@ try {
        const spans = first.querySelectorAll('span span');
        const textRight = spans.length ? spans[spans.length - 1].getBoundingClientRect().right : first.getBoundingClientRect().left;
        const cursor = ed.querySelector('.cursors-layer .cursor');
-       return { textRight, caretLeft: cursor ? cursor.getBoundingClientRect().left : null, line: first.textContent };`,
+       // Monaco draws a 2 px line caret 1 px left of the glyph boundary and makes it up with
+       // padding-left: 1px ("shift the cursor a bit between the characters", viewCursor.js).
+       // The caret's position is its content edge, not its border box (D-X-1).
+       const caretLeft = cursor ? cursor.getBoundingClientRect().left + parseFloat(getComputedStyle(cursor).paddingLeft) : null;
+       return { textRight, caretLeft, line: first.textContent };`,
     );
     check(
       "4e caret aligns after font swap",
