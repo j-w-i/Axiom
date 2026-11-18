@@ -547,6 +547,9 @@ try {
     }
     await wd.exec(`window.dispatchEvent(new Event('focus'))`);
     await wd.exec(`${appExpr}.tasks.stop()`);
+    // Wait for the cancel to land: section 14 starts a task at once, and a run is refused while one
+    // is still running (on a host preferring reduced motion 13b is skipped, so nothing else waits).
+    await wd.waitFor(`return !${appExpr}.tasks.getSnapshot().running`, [], 8000, "the sleep task stopped");
     // Left at "reduced" so step 8 can check that it survives a restart.
     await wd.exec(`${appExpr}.settings.setValue("appearance.motion", "reduced")`);
     await wd.waitFor(`return document.documentElement.dataset.motion === 'reduced'`, [], 5000, "data-motion reduced");
