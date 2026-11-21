@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-local-all"
+description = "Enables the local_all command without any pre-configured scope."
+commands.allow = ["local_all"]
+
+[[permission]]
+identifier = "deny-local-all"
+description = "Denies the local_all command without any pre-configured scope."
+commands.deny = ["local_all"]

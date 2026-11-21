@@ -13,6 +13,7 @@ import { Kbd, keyLabels } from "../ui/primitives";
 import { glyphFor } from "./Explorer";
 import "../styles/components/glyph.css";
 import "../styles/components/palette.css";
+import { shellStorage } from "../state/shell-storage";
 
 export interface PaletteCommand {
   id: string;
@@ -89,7 +90,7 @@ export function pushMru(mru: readonly string[], id: string): string[] {
   return [id, ...mru.filter((x) => x !== id)].slice(0, MRU_MAX);
 }
 
-export function loadMru(storage: Pick<Storage, "getItem"> = localStorage): string[] {
+export function loadMru(storage: Pick<Storage, "getItem"> = shellStorage): string[] {
   try {
     const v: unknown = JSON.parse(storage.getItem(MRU_KEY) ?? "[]");
     return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, MRU_MAX) : [];
@@ -100,7 +101,7 @@ export function loadMru(storage: Pick<Storage, "getItem"> = localStorage): strin
 
 function saveMru(mru: string[]): void {
   try {
-    localStorage.setItem(MRU_KEY, JSON.stringify(mru));
+    shellStorage.setItem(MRU_KEY, JSON.stringify(mru));
   } catch {
     /* storage full or unavailable: ordering falls back to the default */
   }

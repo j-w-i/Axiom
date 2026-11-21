@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
 import { ChatPage, ChatSide } from "../components/Chat";
 import { ModelSetup } from "../components/Models";
+import { shellStorage } from "../state/shell-storage";
 import { EditorArea } from "../components/EditorArea";
 import { attentionCount, EnvironmentPage, EnvironmentsSide } from "../components/Environments";
 import { Explorer } from "../components/Explorer";
@@ -33,7 +34,7 @@ const windowSize = () => ({ width: window.innerWidth, height: window.innerHeight
  * The caller re-renders only when a visibility flag changes; sizes are the workbench's. */
 export function useLayout() {
   const store = useRef<LayoutStore | null>(null);
-  store.current ??= new LayoutStore(localStorage, windowSize());
+  store.current ??= new LayoutStore(shellStorage, windowSize());
   const s = store.current;
   const sidebarVisible = useSyncExternalStore(s.subscribe, () => s.get().sidebarVisible);
   const panelVisible = useSyncExternalStore(s.subscribe, () => s.get().panelVisible);

@@ -33,7 +33,7 @@ use tauri::{Manager, PhysicalPosition, PhysicalSize, RunEvent, WindowEvent};
 /// The complete command surface of the host. Pinned in `build.rs` (so no
 /// capability can grant anything else) and in `capabilities/main.json`; a test
 /// fails if the three lists disagree with this one.
-pub const COMMANDS: [&str; 11] = [
+pub const COMMANDS: [&str; 13] = [
     "host_subscribe",
     "daemon_request",
     "daemon_cancel",
@@ -45,6 +45,8 @@ pub const COMMANDS: [&str; 11] = [
     "snapshot_put",
     "snapshot_clear",
     "recovery_state",
+    "local_all",
+    "local_set",
 ];
 
 /// A webview that has not sent a heartbeat for this long is considered dead or
@@ -136,6 +138,10 @@ struct Recovery {
 struct HostState {
     bridge: DaemonBridge,
     recovery: Recovery,
+    /// Shell-local preferences (layout, palette history, the chosen model), kept by the host
+    /// because WebKit writes `localStorage` to disk on a timer and loses what was written in the
+    /// last second before the app quits (D-X-2). `None` until first read.
+    local: Mutex<Option<std::collections::BTreeMap<String, String>>>,
     outbox: Arc<Mutex<Outbox>>,
     started: Instant,
     data_dir: Option<PathBuf>,
@@ -399,6 +405,90 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+// ---- shell-local preferences (D-X-2) --------------------------------------------
+
+/// At most this many keys, each value at most 64 KiB: layout, palette history, model choice.
+const LOCAL_MAX_KEYS: usize = 64;
+const LOCAL_MAX_VALUE: usize = 64 * 1024;
+
+fn local_file(app: &tauri::AppHandle) -> Option<PathBuf> {
+    host_file(app, "shell-local.json")
+}
+
+fn local_map<'a>(
+    app: &tauri::AppHandle,
+    state: &'a HostState,
+) -> MutexGuard<'a, Option<std::collections::BTreeMap<String, String>>> {
+    let mut g = lock(&state.local);
+    if g.is_none() {
+        let loaded = local_file(app)
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        *g = Some(loaded);
+    }
+    g
+}
+
+/// Writes `text` to `file` through a temporary file and a rename, so a crash mid-write leaves
+/// the previous version.
+fn write_atomic(file: &std::path::Path, text: &str) -> std::io::Result<()> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, file)
+}
+
+/// Every stored shell-local preference (read once by the page before it builds its stores).
+#[tauri::command]
+fn local_all(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, HostState>,
+) -> std::collections::BTreeMap<String, String> {
+    local_map(&app, &state).clone().unwrap_or_default()
+}
+
+/// Stores (or with `null` removes) one preference; on disk before the call returns.
+#[tauri::command]
+fn local_set(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, HostState>,
+    key: String,
+    value: Option<String>,
+) -> Result<(), String> {
+    if key.is_empty()
+        || key.len() > 200
+        || value.as_ref().is_some_and(|v| v.len() > LOCAL_MAX_VALUE)
+    {
+        return Err("The preference is too large.".into());
+    }
+    let mut g = local_map(&app, &state);
+    let map = g.get_or_insert_with(Default::default);
+    match value {
+        Some(v) => {
+            if !map.contains_key(&key) && map.len() >= LOCAL_MAX_KEYS {
+                return Err("Too many preferences.".into());
+            }
+            if map.get(&key) == Some(&v) {
+                return Ok(());
+            }
+            map.insert(key, v);
+        }
+        None => {
+            if map.remove(&key).is_none() {
+                return Ok(());
+            }
+        }
+    }
+    let Some(file) = local_file(&app) else {
+        return Ok(());
+    };
+    let text = serde_json::to_string(map).map_err(|e| e.to_string())?;
+    write_atomic(&file, &text).map_err(|e| e.to_string())
+}
+
 // ---- crash recovery (T-08) ---------------------------------------------------
 
 /// The page is alive. Called every two seconds by the UI.
@@ -552,14 +642,17 @@ struct Geometry {
 /// database, so an isolated instance (tests, a second profile) never reads or
 /// writes the user's real one. Otherwise the per-machine app config dir.
 fn geometry_file(app: &tauri::AppHandle) -> Option<PathBuf> {
+    host_file(app, "window.json")
+}
+
+/// A file the host keeps for itself: in the explicit data directory when there is one (so an
+/// isolated instance never touches the user's), else in the per-machine app config dir.
+fn host_file(app: &tauri::AppHandle, name: &str) -> Option<PathBuf> {
     let state = app.state::<HostState>();
     if let Some(dir) = &state.data_dir {
-        return Some(dir.join("window.json"));
+        return Some(dir.join(name));
     }
-    app.path()
-        .app_config_dir()
-        .ok()
-        .map(|d| d.join("window.json"))
+    app.path().app_config_dir().ok().map(|d| d.join(name))
 }
 
 fn save_geometry(app: &tauri::AppHandle) {
@@ -675,6 +768,7 @@ pub fn run() {
             outbox: outbox.clone(),
             started,
             data_dir: cli.data_dir.clone(),
+            local: Mutex::new(None),
             quitting: AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![
@@ -688,7 +782,9 @@ pub fn run() {
             host_heartbeat,
             snapshot_put,
             snapshot_clear,
-            recovery_state
+            recovery_state,
+            local_all,
+            local_set
         ])
         .setup(move |app| {
             restore_geometry(app.handle());

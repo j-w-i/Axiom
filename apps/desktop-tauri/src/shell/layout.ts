@@ -1,6 +1,7 @@
 // Workbench layout state (workspace-spec.md §1; M1.6-SHELL-002): side bar width and
-// visibility, console height and visibility, and (M3-UI-002) the AI dock's width and visibility. Shell-local, per machine, in localStorage
-// `axiom.layout.v2` (migrated once from v1). Pure functions, unit-tested.
+// visibility, console height and visibility, and (M3-UI-002) the AI dock's width and visibility.
+// Shell-local, per machine, in `axiom.layout.v2` (migrated once from v1), stored in localStorage
+// and written through to the host (state/shell-storage.ts). Pure functions, unit-tested.
 
 export interface Layout {
   sidebar: number;

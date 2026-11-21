@@ -50,4 +50,7 @@ export const host = {
   snapshotClear: (path: string) => invoke<void>("snapshot_clear", { path }),
   /** What a freshly loaded page must restore after a crash. */
   recoveryState: () => invoke<RecoverySnapshot>("recovery_state"),
+  /** Shell-local preferences kept by the host (D-X-2; state/shell-storage.ts). */
+  localAll: () => invoke<Record<string, string>>("local_all"),
+  localSet: (key: string, value: string | null) => invoke<void>("local_set", { key, value }),
 };
