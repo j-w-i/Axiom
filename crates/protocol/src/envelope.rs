@@ -156,6 +156,11 @@ pub enum ErrorKind {
     ServerUnavailable,
     /// No `git`, or the workspace is not in a repository.
     GitUnavailable,
+    // Domain level, protocol 0.5 (ADR-0019).
+    /// The preview's dev server exited or printed no URL. Details: `{ "output": string }`.
+    PreviewFailed,
+    /// No page is connected to the preview (or its adapter stopped answering).
+    AdapterUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -191,6 +196,8 @@ impl ErrorKind {
             Self::LspError => -32026,
             Self::ServerUnavailable => -32027,
             Self::GitUnavailable => -32028,
+            Self::PreviewFailed => -32029,
+            Self::AdapterUnavailable => -32030,
             Self::Unknown => -32099,
         }
     }

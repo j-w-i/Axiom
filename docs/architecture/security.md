@@ -246,6 +246,22 @@ The Tauri shell's controls, kept as the record of how it was built:
   only for a path that one of the workspace's servers returned in a location result, read-only,
   so go-to-definition into a standard library works without opening the file system.
 
+## Previews and the inspection adapter (M5; ADR-0019)
+- **The adapter socket** is a WebSocket the daemon listens on at `127.0.0.1` only, one port per
+  daemon. A page's adapter must send `inspect/hello` with the preview's **one-time token**
+  (128 random bits, minted by `preview/start`, given to the page only through the generated Vite
+  config) before anything else; any other first message, a wrong token, or a token already used
+  by a live session closes the connection. The token is never logged or sent to a client.
+- **The adapter is the user's app's code's peer, not trusted.** What it reports (tree, text,
+  source stamps, errors) is data: source stamps are resolved only to paths inside the
+  workspace (a stamp outside it is dropped), sizes are capped (5000 nodes, 200 characters of
+  text per node), and nothing it sends is executed or shown as markup.
+- **Injection is development-only and does not edit the project.** The dev server runs with a
+  config generated under the data directory that imports the user's own; the plugin is
+  `apply: "serve"`, so production builds never contain the adapter.
+- **The dev server** is the project's own (a provider task or `npm run dev`), run as a task with
+  the person's rights, like a build.
+
 ## Isolation (ADR-0010)
 
 Axiom uses three distinct words and the UI must too:

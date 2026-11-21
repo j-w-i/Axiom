@@ -15,7 +15,8 @@ on one system. They bind every contributor, human or agent.
 | IPC protocol 0.3 additions | `crates/protocol/src/agent.rs`, `docs/protocols/ipc.md` §Protocol 0.3 | **Frozen for M3** (M3-ARCH-001) |
 | Agent tools & permissions | `docs/protocols/agents.md` | **Frozen for M3** (M3-ARCH-001) |
 | IPC protocol 0.4 additions | `crates/protocol/src/{lsp,terminal,git}.rs`, `workspace.rs` (`workspace/search`), `provider.rs` (`lsp` table), `docs/protocols/ipc.md` §Protocol 0.4 | **Frozen for M4** (M4-ARCH-001) |
-| Inspection | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | Draft until M5 starts |
+| IPC protocol 0.5 additions | `crates/protocol/src/{preview,ui}.rs`, `docs/protocols/ipc.md` §Protocol 0.5 | **Frozen for M5** (M5-ARCH-001) |
+| Inspection model and adapter protocol | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | **Frozen for M5** (M5-ARCH-001) |
 
 **Frozen** means: an implementation task may not change its meaning. If the
 contract is wrong or insufficient, stop and file a change request (below).

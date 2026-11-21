@@ -6,7 +6,31 @@
 
 import 'protocol_runtime.dart';
 
-const protocolVersion = '0.4';
+const protocolVersion = '0.5';
+
+final class Accessibility implements Wire {
+  const Accessibility({this.description, this.name, this.role});
+
+  final String? description;
+  final String? name;
+  final String? role;
+
+  static Accessibility fromJson(Object? json) {
+    final m = asMap(json);
+    return Accessibility(
+      description: m['description'] == null ? null : m['description'] as String,
+      name: m['name'] == null ? null : m['name'] as String,
+      role: m['role'] == null ? null : m['role'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (description != null) 'description': description!,
+    if (name != null) 'name': name!,
+    if (role != null) 'role': role!,
+  };
+}
 
 /// One journal event. `seq` increases by one per persisted event within a session;
 /// a `textDelta` carries the `seq` of the event it will become part of and is never persisted.
@@ -193,6 +217,93 @@ enum ArchiveFormat {
   String toJson() => wire;
 }
 
+/// What the agent states, before patching, would show success.
+sealed class Assertion implements Wire {
+  const Assertion();
+
+  static Assertion fromJson(Object? json) {
+    final m = asMap(json);
+    switch (m['kind']) {
+      case 'geometry':
+        return AssertionGeometry.fromJson(m);
+      case 'property':
+        return AssertionProperty.fromJson(m);
+    }
+    throw FormatException('Assertion: unknown kind ${m['kind']}');
+  }
+
+  @override
+  Map<String, Object?> toJson();
+}
+
+/// `node.edge op (other.edge + offset)`, or `node.edge op value`.
+final class AssertionGeometry extends Assertion {
+  const AssertionGeometry({
+    required this.edge,
+    required this.node,
+    this.offset,
+    required this.op,
+    this.other,
+    this.value,
+  });
+
+  final Edge edge;
+  final NodeTarget node;
+  final double? offset;
+  final Comparison op;
+  final EdgeRef? other;
+  final double? value;
+
+  static AssertionGeometry fromJson(Object? json) {
+    final m = asMap(json);
+    return AssertionGeometry(
+      edge: Edge.fromJson(m['edge']),
+      node: NodeTarget.fromJson(m['node']),
+      offset: m['offset'] == null ? null : (m['offset'] as num).toDouble(),
+      op: Comparison.fromJson(m['op']),
+      other: m['other'] == null ? null : EdgeRef.fromJson(m['other']),
+      value: m['value'] == null ? null : (m['value'] as num).toDouble(),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'kind': 'geometry',
+    'edge': edge.toJson(),
+    'node': node.toJson(),
+    if (offset != null) 'offset': offset!,
+    'op': op.toJson(),
+    if (other != null) 'other': other!.toJson(),
+    if (value != null) 'value': value!,
+  };
+}
+
+/// A computed property (namespaced, e.g. `css.padding-left`) equals `equals`.
+final class AssertionProperty extends Assertion {
+  const AssertionProperty({this.equals, required this.name, required this.node});
+
+  final Object? equals;
+  final String name;
+  final NodeTarget node;
+
+  static AssertionProperty fromJson(Object? json) {
+    final m = asMap(json);
+    return AssertionProperty(
+      equals: m['equals'] == null ? null : m['equals'],
+      name: m['name'] as String,
+      node: NodeTarget.fromJson(m['node']),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'kind': 'property',
+    if (equals != null) 'equals': equals,
+    'name': name,
+    'node': node.toJson(),
+  };
+}
+
 final class Attachment implements Wire {
   const Attachment({this.lines, required this.path});
 
@@ -291,6 +402,86 @@ final class Capabilities implements Wire {
   };
 }
 
+/// What an adapter can do. Sent once in `inspect/hello`. Consumers must
+/// degrade gracefully on every `false`/`None`; nothing here is mandatory
+/// except `tree`.
+final class Capabilities2 implements Wire {
+  const Capabilities2({
+    required this.accessibility,
+    required this.adapter,
+    required this.framework,
+    this.frameworkVersion,
+    required this.highlight,
+    required this.hitTest,
+    required this.mutations,
+    required this.properties,
+    required this.screenshot,
+    required this.source,
+    required this.tree,
+  });
+
+  final bool accessibility;
+  final PeerInfo adapter;
+
+  /// Framework identifier: `dom`, `react`, `qml`, `flutter`, ...
+  final String framework;
+
+  /// Detected framework/runtime version, if known.
+  final String? frameworkVersion;
+
+  /// Can draw a highlight overlay on a node in the running app.
+  final bool highlight;
+
+  /// Can map a point to the top-most node itself (otherwise the daemon
+  /// hit-tests against the last snapshot's bounds).
+  final bool hitTest;
+
+  /// Emits `inspect/didMutate`.
+  final bool mutations;
+  final bool properties;
+
+  /// Can capture pixels itself. If false the preview host captures.
+  final bool screenshot;
+
+  /// Level 3: best precision of source locations this adapter can report.
+  final SourcePrecision source;
+
+  /// Level 2: can produce a node tree with bounds.
+  final bool tree;
+
+  static Capabilities2 fromJson(Object? json) {
+    final m = asMap(json);
+    return Capabilities2(
+      accessibility: m['accessibility'] as bool,
+      adapter: PeerInfo.fromJson(m['adapter']),
+      framework: m['framework'] as String,
+      frameworkVersion: m['frameworkVersion'] == null ? null : m['frameworkVersion'] as String,
+      highlight: m['highlight'] as bool,
+      hitTest: m['hitTest'] as bool,
+      mutations: m['mutations'] as bool,
+      properties: m['properties'] as bool,
+      screenshot: m['screenshot'] as bool,
+      source: SourcePrecision.fromJson(m['source']),
+      tree: m['tree'] as bool,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'accessibility': accessibility,
+    'adapter': adapter.toJson(),
+    'framework': framework,
+    if (frameworkVersion != null) 'frameworkVersion': frameworkVersion!,
+    'highlight': highlight,
+    'hitTest': hitTest,
+    'mutations': mutations,
+    'properties': properties,
+    'screenshot': screenshot,
+    'source': source.toJson(),
+    'tree': tree,
+  };
+}
+
 final class CapabilityOverrides implements Wire {
   const CapabilityOverrides({
     this.contextWindow,
@@ -346,6 +537,71 @@ enum ChangeKind {
   static ChangeKind fromJson(Object? json) => values.firstWhere(
     (v) => v.wire == json,
     orElse: () => throw FormatException('ChangeKind: $json'),
+  );
+
+  String toJson() => wire;
+}
+
+final class Check implements Wire {
+  const Check({
+    this.actual,
+    this.expected,
+    required this.kind,
+    required this.passed,
+    this.skipped,
+    required this.summary,
+  });
+
+  final Object? actual;
+  final Object? expected;
+  final CheckKind kind;
+  final bool passed;
+
+  /// Not evaluated (pixel checks without a capture source, M5); a skipped check neither
+  /// passes nor fails the verdict.
+  final bool? skipped;
+
+  /// Human-readable one-liner: what was expected and what was observed.
+  final String summary;
+
+  static Check fromJson(Object? json) {
+    final m = asMap(json);
+    return Check(
+      actual: m['actual'] == null ? null : m['actual'],
+      expected: m['expected'] == null ? null : m['expected'],
+      kind: CheckKind.fromJson(m['kind']),
+      passed: m['passed'] as bool,
+      skipped: m['skipped'] == null ? null : m['skipped'] as bool,
+      summary: m['summary'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (actual != null) 'actual': actual,
+    if (expected != null) 'expected': expected,
+    'kind': kind.toJson(),
+    'passed': passed,
+    if (skipped != null) 'skipped': skipped!,
+    'summary': summary,
+  };
+}
+
+enum CheckKind {
+  buildClean('buildClean'),
+  runtimeClean('runtimeClean'),
+  nodeReidentified('nodeReidentified'),
+  geometry('geometry'),
+  pixelsChangedInRegion('pixelsChangedInRegion'),
+  pixelsStableElsewhere('pixelsStableElsewhere'),
+  property('property');
+
+  const CheckKind(this.wire);
+  final String wire;
+
+  static CheckKind fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('CheckKind: $json'),
   );
 
   String toJson() => wire;
@@ -472,6 +728,25 @@ final class CommandShell extends Command {
 
   @override
   Map<String, Object?> toJson() => {'shell': shell};
+}
+
+/// `eq` holds within 0.5 logical px.
+enum Comparison {
+  eq('eq'),
+  lt('lt'),
+  le('le'),
+  gt('gt'),
+  ge('ge');
+
+  const Comparison(this.wire);
+  final String wire;
+
+  static Comparison fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('Comparison: $json'),
+  );
+
+  String toJson() => wire;
 }
 
 final class ConfigureProviderParams implements Wire {
@@ -669,6 +944,24 @@ final class DidChangeParams implements Wire {
   };
 }
 
+final class DidMutateParams implements Wire {
+  const DidMutateParams({required this.previewId, required this.reason});
+
+  final PreviewId previewId;
+  final MutationReason reason;
+
+  static DidMutateParams fromJson(Object? json) {
+    final m = asMap(json);
+    return DidMutateParams(
+      previewId: m['previewId'] as String,
+      reason: MutationReason.fromJson(m['reason']),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'previewId': previewId, 'reason': reason.toJson()};
+}
+
 final class DirEntry implements Wire {
   const DirEntry({this.ignored, required this.kind, required this.name, this.size});
 
@@ -700,6 +993,41 @@ final class DirEntry implements Wire {
     'name': name,
     if (size != null) 'size': size!,
   };
+}
+
+/// A measurement of a node's bounds, in logical pixels of its surface.
+enum Edge {
+  left('left'),
+  right('right'),
+  top('top'),
+  bottom('bottom'),
+  width('width'),
+  height('height'),
+  centerX('centerX'),
+  centerY('centerY');
+
+  const Edge(this.wire);
+  final String wire;
+
+  static Edge fromJson(Object? json) =>
+      values.firstWhere((v) => v.wire == json, orElse: () => throw FormatException('Edge: $json'));
+
+  String toJson() => wire;
+}
+
+final class EdgeRef implements Wire {
+  const EdgeRef({required this.edge, required this.node});
+
+  final Edge edge;
+  final NodeTarget node;
+
+  static EdgeRef fromJson(Object? json) {
+    final m = asMap(json);
+    return EdgeRef(edge: Edge.fromJson(m['edge']), node: NodeTarget.fromJson(m['node']));
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'edge': edge.toJson(), 'node': node.toJson()};
 }
 
 enum Effect {
@@ -860,7 +1188,9 @@ enum ErrorKind {
   modelError('model_error'),
   lspError('lsp_error'),
   serverUnavailable('server_unavailable'),
-  gitUnavailable('git_unavailable');
+  gitUnavailable('git_unavailable'),
+  previewFailed('preview_failed'),
+  adapterUnavailable('adapter_unavailable');
 
   const ErrorKind(this.wire);
   final String wire;
@@ -1544,6 +1874,68 @@ final class GitStatus implements Wire {
   };
 }
 
+final class HighlightParams implements Wire {
+  const HighlightParams({this.node, required this.previewId});
+
+  final NodeId? node;
+  final PreviewId previewId;
+
+  static HighlightParams fromJson(Object? json) {
+    final m = asMap(json);
+    return HighlightParams(
+      node: m['node'] == null ? null : m['node'] as String,
+      previewId: m['previewId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {if (node != null) 'node': node!, 'previewId': previewId};
+}
+
+final class HitTestParams implements Wire {
+  const HitTestParams({
+    required this.previewId,
+    required this.surface,
+    required this.x,
+    required this.y,
+  });
+
+  final PreviewId previewId;
+  final String surface;
+  final double x;
+  final double y;
+
+  static HitTestParams fromJson(Object? json) {
+    final m = asMap(json);
+    return HitTestParams(
+      previewId: m['previewId'] as String,
+      surface: m['surface'] as String,
+      x: (m['x'] as num).toDouble(),
+      y: (m['y'] as num).toDouble(),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'previewId': previewId, 'surface': surface, 'x': x, 'y': y};
+}
+
+final class HitTestResult implements Wire {
+  const HitTestResult({required this.chain});
+
+  /// `chain[0]` is the hit node; the rest are its ancestors up to the root.
+  final List<UiNode> chain;
+
+  static HitTestResult fromJson(Object? json) {
+    final m = asMap(json);
+    return HitTestResult(chain: [for (final x in asList(m['chain'])) UiNode.fromJson(x)]);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'chain': [for (final x in chain) x.toJson()],
+  };
+}
+
 final class HostInfo implements Wire {
   const HostInfo({required this.arch, required this.os, required this.pathSeparator});
 
@@ -1585,6 +1977,27 @@ enum HostOs {
   );
 
   String toJson() => wire;
+}
+
+final class HoveredParams implements Wire {
+  const HoveredParams({this.node, required this.previewId});
+
+  final UiNode? node;
+  final PreviewId previewId;
+
+  static HoveredParams fromJson(Object? json) {
+    final m = asMap(json);
+    return HoveredParams(
+      node: m['node'] == null ? null : UiNode.fromJson(m['node']),
+      previewId: m['previewId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (node != null) 'node': node!.toJson(),
+    'previewId': previewId,
+  };
 }
 
 /// An image, base64-encoded.
@@ -1728,6 +2141,21 @@ final class InitializeResult implements Wire {
     'protocolVersion': protocolVersion,
     'server': server.toJson(),
   };
+}
+
+final class InspectModeParams implements Wire {
+  const InspectModeParams({required this.on_, required this.previewId});
+
+  final bool on_;
+  final PreviewId previewId;
+
+  static InspectModeParams fromJson(Object? json) {
+    final m = asMap(json);
+    return InspectModeParams(on_: m['on'] as bool, previewId: m['previewId'] as String);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'on': on_, 'previewId': previewId};
 }
 
 final class InstallAgentParams implements Wire {
@@ -1927,6 +2355,23 @@ enum InstallScope {
   String toJson() => wire;
 }
 
+final class Instance implements Wire {
+  const Instance({required this.count, required this.index_});
+
+  final int count;
+
+  /// 0-based position among live nodes with the same primary source.
+  final int index_;
+
+  static Instance fromJson(Object? json) {
+    final m = asMap(json);
+    return Instance(count: (m['count'] as num).toInt(), index_: (m['index'] as num).toInt());
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'count': count, 'index': index_};
+}
+
 final class ListParams implements Wire {
   const ListParams({required this.path, required this.workspaceId});
 
@@ -1973,6 +2418,22 @@ final class ListResult2 implements Wire {
   @override
   Map<String, Object?> toJson() => {
     'terminals': [for (final x in terminals) x.toJson()],
+  };
+}
+
+final class ListResult3 implements Wire {
+  const ListResult3({required this.previews});
+
+  final List<PreviewInfo> previews;
+
+  static ListResult3 fromJson(Object? json) {
+    final m = asMap(json);
+    return ListResult3(previews: [for (final x in asList(m['previews'])) PreviewInfo.fromJson(x)]);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'previews': [for (final x in previews) x.toJson()],
   };
 }
 
@@ -2164,6 +2625,25 @@ final class LspNotificationParams implements Wire {
   };
 }
 
+/// How a source location was obtained. Ordered from most to least reliable.
+enum MappingMethod {
+  buildInstrumentation('buildInstrumentation'),
+  runtimeMetadata('runtimeMetadata'),
+  sourceMap('sourceMap'),
+  heuristic('heuristic'),
+  visualInference('visualInference');
+
+  const MappingMethod(this.wire);
+  final String wire;
+
+  static MappingMethod fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('MappingMethod: $json'),
+  );
+
+  String toJson() => wire;
+}
+
 enum ModelErrorKind {
   auth('auth'),
   rateLimited('rateLimited'),
@@ -2237,6 +2717,82 @@ final class ModelsResult implements Wire {
   @override
   Map<String, Object?> toJson() => {
     'providers': [for (final x in providers) x.toJson()],
+  };
+}
+
+enum MutationReason {
+  tree('tree'),
+  layout('layout'),
+  navigation('navigation'),
+  hotReload('hotReload');
+
+  const MutationReason(this.wire);
+  final String wire;
+
+  static MutationReason fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('MutationReason: $json'),
+  );
+
+  String toJson() => wire;
+}
+
+/// Node identity within one adapter connection. Valid until the node is
+/// destroyed; never reused within a connection. Not stable across restarts.
+typedef NodeId = String;
+
+enum NodeKind {
+  text('text'),
+  element('element'),
+  component('component');
+
+  const NodeKind(this.wire);
+  final String wire;
+
+  static NodeKind fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('NodeKind: $json'),
+  );
+
+  String toJson() => wire;
+}
+
+final class NodeParams implements Wire {
+  const NodeParams({required this.node, required this.previewId});
+
+  final NodeId node;
+  final PreviewId previewId;
+
+  static NodeParams fromJson(Object? json) {
+    final m = asMap(json);
+    return NodeParams(node: m['node'] as String, previewId: m['previewId'] as String);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'node': node, 'previewId': previewId};
+}
+
+/// Which element an assertion is about. After a reload node ids are gone, so the stable key
+/// (`<file>:<line>:<column>#<instance>`) is what finds it again; `node` is used only while the
+/// page has not changed.
+final class NodeTarget implements Wire {
+  const NodeTarget({this.node, this.stableKey});
+
+  final NodeId? node;
+  final String? stableKey;
+
+  static NodeTarget fromJson(Object? json) {
+    final m = asMap(json);
+    return NodeTarget(
+      node: m['node'] == null ? null : m['node'] as String,
+      stableKey: m['stableKey'] == null ? null : m['stableKey'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (node != null) 'node': node!,
+    if (stableKey != null) 'stableKey': stableKey!,
   };
 }
 
@@ -2519,6 +3075,97 @@ final class PolicyRule implements Wire {
     if (path != null) 'path': path!,
     if (tool != null) 'tool': tool!,
   };
+}
+
+/// Opaque identifier of a preview, minted by `preview/start`.
+typedef PreviewId = String;
+
+final class PreviewInfo implements Wire {
+  const PreviewInfo({
+    this.adapter,
+    this.message,
+    this.output,
+    required this.previewId,
+    required this.state,
+    this.taskId,
+    this.url,
+    required this.workspaceId,
+  });
+
+  /// The connected page's adapter, if a page is open.
+  final Capabilities2? adapter;
+
+  /// Why it failed, in one sentence.
+  final String? message;
+
+  /// The last lines the server printed (on failure).
+  final String? output;
+  final PreviewId previewId;
+  final PreviewState state;
+
+  /// The dev server's task (its output streams as `task/output`).
+  final TaskId? taskId;
+
+  /// The page to open (loopback), once known.
+  final String? url;
+  final WorkspaceId workspaceId;
+
+  static PreviewInfo fromJson(Object? json) {
+    final m = asMap(json);
+    return PreviewInfo(
+      adapter: m['adapter'] == null ? null : Capabilities2.fromJson(m['adapter']),
+      message: m['message'] == null ? null : m['message'] as String,
+      output: m['output'] == null ? null : m['output'] as String,
+      previewId: m['previewId'] as String,
+      state: PreviewState.fromJson(m['state']),
+      taskId: m['taskId'] == null ? null : m['taskId'] as String,
+      url: m['url'] == null ? null : m['url'] as String,
+      workspaceId: m['workspaceId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (adapter != null) 'adapter': adapter!.toJson(),
+    if (message != null) 'message': message!,
+    if (output != null) 'output': output!,
+    'previewId': previewId,
+    'state': state.toJson(),
+    if (taskId != null) 'taskId': taskId!,
+    if (url != null) 'url': url!,
+    'workspaceId': workspaceId,
+  };
+}
+
+final class PreviewRef implements Wire {
+  const PreviewRef({required this.previewId});
+
+  final PreviewId previewId;
+
+  static PreviewRef fromJson(Object? json) {
+    final m = asMap(json);
+    return PreviewRef(previewId: m['previewId'] as String);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'previewId': previewId};
+}
+
+enum PreviewState {
+  stopped('stopped'),
+  starting('starting'),
+  ready('ready'),
+  failed('failed');
+
+  const PreviewState(this.wire);
+  final String wire;
+
+  static PreviewState fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('PreviewState: $json'),
+  );
+
+  String toJson() => wire;
 }
 
 final class ProviderConfig implements Wire {
@@ -2845,6 +3492,28 @@ final class RecentWorkspace implements Wire {
 
   @override
   Map<String, Object?> toJson() => {'lastOpenedMs': lastOpenedMs, 'name': name, 'root': root};
+}
+
+final class Rect implements Wire {
+  const Rect({required this.height, required this.width, required this.x, required this.y});
+
+  final double height;
+  final double width;
+  final double x;
+  final double y;
+
+  static Rect fromJson(Object? json) {
+    final m = asMap(json);
+    return Rect(
+      height: (m['height'] as num).toDouble(),
+      width: (m['width'] as num).toDouble(),
+      x: (m['x'] as num).toDouble(),
+      y: (m['y'] as num).toDouble(),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'height': height, 'width': width, 'x': x, 'y': y};
 }
 
 final class RelatedInfo implements Wire {
@@ -3270,6 +3939,28 @@ final class SearchResult implements Wire {
     'filesSearched': filesSearched,
     if (matches != null) 'matches': [for (final x in matches!) x.toJson()],
     'truncated': truncated,
+  };
+}
+
+final class SelectedParams implements Wire {
+  const SelectedParams({required this.chain, required this.previewId});
+
+  /// `chain[0]` is the selected node; the rest its ancestors.
+  final List<UiNode> chain;
+  final PreviewId previewId;
+
+  static SelectedParams fromJson(Object? json) {
+    final m = asMap(json);
+    return SelectedParams(
+      chain: [for (final x in asList(m['chain'])) UiNode.fromJson(x)],
+      previewId: m['previewId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'chain': [for (final x in chain) x.toJson()],
+    'previewId': previewId,
   };
 }
 
@@ -3788,6 +4479,141 @@ final class ShowResult implements Wire {
   Map<String, Object?> toJson() => {'binary': binary, if (text != null) 'text': text!};
 }
 
+final class Snapshot implements Wire {
+  const Snapshot({
+    required this.capturedMs,
+    required this.nodes,
+    required this.surfaces,
+    required this.truncated,
+  });
+
+  /// Milliseconds since the Unix epoch, adapter clock.
+  final int capturedMs;
+
+  /// Flat list, parents before children.
+  final List<UiNode> nodes;
+  final List<Surface> surfaces;
+  final bool truncated;
+
+  static Snapshot fromJson(Object? json) {
+    final m = asMap(json);
+    return Snapshot(
+      capturedMs: (m['capturedMs'] as num).toInt(),
+      nodes: [for (final x in asList(m['nodes'])) UiNode.fromJson(x)],
+      surfaces: [for (final x in asList(m['surfaces'])) Surface.fromJson(x)],
+      truncated: m['truncated'] as bool,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'capturedMs': capturedMs,
+    'nodes': [for (final x in nodes) x.toJson()],
+    'surfaces': [for (final x in surfaces) x.toJson()],
+    'truncated': truncated,
+  };
+}
+
+final class SnapshotParams implements Wire {
+  const SnapshotParams({this.includeInvisible, this.maxNodes, required this.previewId});
+
+  final bool? includeInvisible;
+
+  /// Maximum number of nodes. Default 5000.
+  final int? maxNodes;
+  final PreviewId previewId;
+
+  static SnapshotParams fromJson(Object? json) {
+    final m = asMap(json);
+    return SnapshotParams(
+      includeInvisible: m['includeInvisible'] == null ? null : m['includeInvisible'] as bool,
+      maxNodes: m['maxNodes'] == null ? null : (m['maxNodes'] as num).toInt(),
+      previewId: m['previewId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (includeInvisible != null) 'includeInvisible': includeInvisible!,
+    if (maxNodes != null) 'maxNodes': maxNodes!,
+    'previewId': previewId,
+  };
+}
+
+final class SourceCandidate implements Wire {
+  const SourceCandidate({
+    required this.confidence,
+    this.generated,
+    required this.location,
+    required this.method,
+    required this.relation,
+  });
+
+  /// 0.0..=1.0. Must not exceed `method.max_confidence()`.
+  final double confidence;
+
+  /// Location is in generated or third-party code (not a file the user
+  /// would edit). Such candidates are never auto-selected for patching.
+  final bool? generated;
+  final Location location;
+  final MappingMethod method;
+  final SourceRelation relation;
+
+  static SourceCandidate fromJson(Object? json) {
+    final m = asMap(json);
+    return SourceCandidate(
+      confidence: (m['confidence'] as num).toDouble(),
+      generated: m['generated'] == null ? null : m['generated'] as bool,
+      location: Location.fromJson(m['location']),
+      method: MappingMethod.fromJson(m['method']),
+      relation: SourceRelation.fromJson(m['relation']),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'confidence': confidence,
+    if (generated != null) 'generated': generated!,
+    'location': location.toJson(),
+    'method': method.toJson(),
+    'relation': relation.toJson(),
+  };
+}
+
+enum SourcePrecision {
+  none('none'),
+  file('file'),
+  line('line'),
+  lineColumn('lineColumn');
+
+  const SourcePrecision(this.wire);
+  final String wire;
+
+  static SourcePrecision fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('SourcePrecision: $json'),
+  );
+
+  String toJson() => wire;
+}
+
+enum SourceRelation {
+  instantiation('instantiation'),
+  definition('definition'),
+  owner('owner'),
+  style('style');
+
+  const SourceRelation(this.wire);
+  final String wire;
+
+  static SourceRelation fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('SourceRelation: $json'),
+  );
+
+  String toJson() => wire;
+}
+
 final class StartParams implements Wire {
   const StartParams({
     required this.command,
@@ -3830,6 +4656,25 @@ final class StartParams implements Wire {
     if (label != null) 'label': label!,
     'workspaceId': workspaceId,
   };
+}
+
+final class StartParams2 implements Wire {
+  const StartParams2({this.argv, required this.workspaceId});
+
+  /// The dev server's command and arguments, overriding the provider's `dev` task.
+  final List<String>? argv;
+  final WorkspaceId workspaceId;
+
+  static StartParams2 fromJson(Object? json) {
+    final m = asMap(json);
+    return StartParams2(
+      argv: m['argv'] == null ? null : [for (final x in asList(m['argv'])) x as String],
+      workspaceId: m['workspaceId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {if (argv != null) 'argv': argv!, 'workspaceId': workspaceId};
 }
 
 final class StartResult implements Wire {
@@ -4022,6 +4867,83 @@ enum Support {
   static Support fromJson(Object? json) => values.firstWhere(
     (v) => v.wire == json,
     orElse: () => throw FormatException('Support: $json'),
+  );
+
+  String toJson() => wire;
+}
+
+/// A top-level rendering target: a window, a browser page, an iframe, or an
+/// embedded foreign surface (e.g. a web view inside a native window).
+final class Surface implements Wire {
+  const Surface({
+    required this.devicePixelRatio,
+    required this.height,
+    this.hostNode,
+    required this.id,
+    required this.kind,
+    this.scrollX,
+    this.scrollY,
+    this.title,
+    required this.width,
+  });
+
+  final double devicePixelRatio;
+  final double height;
+
+  /// For nested surfaces: the node in the parent surface that hosts this one.
+  final NodeId? hostNode;
+  final String id;
+  final SurfaceKind kind;
+
+  /// Scroll offset of the surface's root scroller, logical pixels.
+  final double? scrollX;
+  final double? scrollY;
+  final String? title;
+
+  /// Visible size in logical pixels.
+  final double width;
+
+  static Surface fromJson(Object? json) {
+    final m = asMap(json);
+    return Surface(
+      devicePixelRatio: (m['devicePixelRatio'] as num).toDouble(),
+      height: (m['height'] as num).toDouble(),
+      hostNode: m['hostNode'] == null ? null : m['hostNode'] as String,
+      id: m['id'] as String,
+      kind: SurfaceKind.fromJson(m['kind']),
+      scrollX: m['scrollX'] == null ? null : (m['scrollX'] as num).toDouble(),
+      scrollY: m['scrollY'] == null ? null : (m['scrollY'] as num).toDouble(),
+      title: m['title'] == null ? null : m['title'] as String,
+      width: (m['width'] as num).toDouble(),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'devicePixelRatio': devicePixelRatio,
+    'height': height,
+    if (hostNode != null) 'hostNode': hostNode!,
+    'id': id,
+    'kind': kind.toJson(),
+    if (scrollX != null) 'scrollX': scrollX!,
+    if (scrollY != null) 'scrollY': scrollY!,
+    if (title != null) 'title': title!,
+    'width': width,
+  };
+}
+
+enum SurfaceKind {
+  window('window'),
+  page('page'),
+  frame('frame'),
+  embedded('embedded');
+
+  const SurfaceKind(this.wire);
+  final String wire;
+
+  static SurfaceKind fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('SurfaceKind: $json'),
   );
 
   String toJson() => wire;
@@ -4488,6 +5410,115 @@ enum TurnEndReason {
   String toJson() => wire;
 }
 
+/// One element of the running UI.
+final class UiNode implements Wire {
+  const UiNode({
+    this.accessibility,
+    this.bounds,
+    this.children,
+    required this.id,
+    this.instance,
+    required this.kind,
+    this.name,
+    this.parent,
+    this.properties,
+    this.sources,
+    this.stableKey,
+    required this.surface,
+    this.text,
+    required this.typeName,
+    required this.visibility,
+  });
+
+  final Accessibility? accessibility;
+
+  /// Axis-aligned bounding box. Absent for nodes that render nothing
+  /// (pure components, `display: contents`).
+  final Rect? bounds;
+
+  /// Children in paint order (last is top-most).
+  final List<NodeId>? children;
+  final NodeId id;
+
+  /// Set when several live nodes share this node's primary source
+  /// location (list items, repeated components).
+  final Instance? instance;
+  final NodeKind kind;
+
+  /// Developer-assigned identifier if any: DOM `id`, `data-testid`,
+  /// QML `objectName`/`id`, accessibility identifier.
+  final String? name;
+  final NodeId? parent;
+
+  /// Layout-relevant runtime properties, framework vocabulary preserved
+  /// (CSS computed style subset, QML properties...). Only present in
+  /// `inspect/nodeDetails` results.
+  final Map<String, Object?>? properties;
+
+  /// Candidate source locations, best first. Empty when unknown. More than
+  /// one entry means the mapping is ambiguous or multi-faceted; see
+  /// [`SourceRelation`].
+  final List<SourceCandidate>? sources;
+
+  /// Identity intended to survive a rebuild/reload of unchanged source: see
+  /// `docs/protocols/inspection.md#stable-keys`. Absent if the adapter
+  /// cannot compute one.
+  final String? stableKey;
+  final String surface;
+
+  /// Own rendered text, truncated to 200 characters.
+  final String? text;
+
+  /// Framework type as the developer wrote it where possible: `button`,
+  /// `BalanceCard`, `QQuickRectangle`.
+  final String typeName;
+  final Visibility visibility;
+
+  static UiNode fromJson(Object? json) {
+    final m = asMap(json);
+    return UiNode(
+      accessibility: m['accessibility'] == null ? null : Accessibility.fromJson(m['accessibility']),
+      bounds: m['bounds'] == null ? null : Rect.fromJson(m['bounds']),
+      children: m['children'] == null ? null : [for (final x in asList(m['children'])) x as String],
+      id: m['id'] as String,
+      instance: m['instance'] == null ? null : Instance.fromJson(m['instance']),
+      kind: NodeKind.fromJson(m['kind']),
+      name: m['name'] == null ? null : m['name'] as String,
+      parent: m['parent'] == null ? null : m['parent'] as String,
+      properties: m['properties'] == null
+          ? null
+          : {for (final kv in asMap(m['properties']).entries) kv.key: kv.value},
+      sources: m['sources'] == null
+          ? null
+          : [for (final x in asList(m['sources'])) SourceCandidate.fromJson(x)],
+      stableKey: m['stableKey'] == null ? null : m['stableKey'] as String,
+      surface: m['surface'] as String,
+      text: m['text'] == null ? null : m['text'] as String,
+      typeName: m['typeName'] as String,
+      visibility: Visibility.fromJson(m['visibility']),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (accessibility != null) 'accessibility': accessibility!.toJson(),
+    if (bounds != null) 'bounds': bounds!.toJson(),
+    if (children != null) 'children': children!,
+    'id': id,
+    if (instance != null) 'instance': instance!.toJson(),
+    'kind': kind.toJson(),
+    if (name != null) 'name': name!,
+    if (parent != null) 'parent': parent!,
+    if (properties != null) 'properties': properties!,
+    if (sources != null) 'sources': [for (final x in sources!) x.toJson()],
+    if (stableKey != null) 'stableKey': stableKey!,
+    'surface': surface,
+    if (text != null) 'text': text!,
+    'typeName': typeName,
+    'visibility': visibility.toJson(),
+  };
+}
+
 final class UninstallParams implements Wire {
   const UninstallParams({required this.providerId, required this.version});
 
@@ -4501,6 +5532,103 @@ final class UninstallParams implements Wire {
 
   @override
   Map<String, Object?> toJson() => {'providerId': providerId, 'version': version};
+}
+
+enum Verdict {
+  verified('verified'),
+  failed('failed'),
+  inconclusive('inconclusive');
+
+  const Verdict(this.wire);
+  final String wire;
+
+  static Verdict fromJson(Object? json) => values.firstWhere(
+    (v) => v.wire == json,
+    orElse: () => throw FormatException('Verdict: $json'),
+  );
+
+  String toJson() => wire;
+}
+
+/// Outcome of the before/after comparison in the closed-loop workflow.
+final class VerificationReport implements Wire {
+  const VerificationReport({
+    this.changedFraction,
+    this.changedRegion,
+    required this.checks,
+    required this.verdict,
+  });
+
+  /// Fraction of pixels that differ, 0.0..=1.0.
+  final double? changedFraction;
+
+  /// Bounding box of changed pixels (logical px), if screenshots differ.
+  final Rect? changedRegion;
+  final List<Check> checks;
+  final Verdict verdict;
+
+  static VerificationReport fromJson(Object? json) {
+    final m = asMap(json);
+    return VerificationReport(
+      changedFraction: m['changedFraction'] == null
+          ? null
+          : (m['changedFraction'] as num).toDouble(),
+      changedRegion: m['changedRegion'] == null ? null : Rect.fromJson(m['changedRegion']),
+      checks: [for (final x in asList(m['checks'])) Check.fromJson(x)],
+      verdict: Verdict.fromJson(m['verdict']),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (changedFraction != null) 'changedFraction': changedFraction!,
+    if (changedRegion != null) 'changedRegion': changedRegion!.toJson(),
+    'checks': [for (final x in checks) x.toJson()],
+    'verdict': verdict.toJson(),
+  };
+}
+
+final class VerifyParams implements Wire {
+  const VerifyParams({
+    required this.assertions,
+    required this.previewId,
+    this.sinceMs,
+    this.target,
+    this.timeoutMs,
+  });
+
+  final List<Assertion> assertions;
+  final PreviewId previewId;
+
+  /// Runtime errors and build errors are counted from this time (ms since the epoch);
+  /// default: the previous `ui/verify` or the adapter's connection.
+  final int? sinceMs;
+
+  /// The element the change was about (re-identification is reported for it).
+  final NodeTarget? target;
+
+  /// How long to wait for the page to settle. Default 5000, at most 30000.
+  final int? timeoutMs;
+
+  static VerifyParams fromJson(Object? json) {
+    final m = asMap(json);
+    return VerifyParams(
+      assertions: [for (final x in asList(m['assertions'])) Assertion.fromJson(x)],
+      previewId: m['previewId'] as String,
+      sinceMs: m['sinceMs'] == null ? null : (m['sinceMs'] as num).toInt(),
+      target: m['target'] == null ? null : NodeTarget.fromJson(m['target']),
+      timeoutMs: m['timeoutMs'] == null ? null : (m['timeoutMs'] as num).toInt(),
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'assertions': [for (final x in assertions) x.toJson()],
+    'previewId': previewId,
+    if (sinceMs != null) 'sinceMs': sinceMs!,
+    if (target != null) 'target': target!.toJson(),
+    if (timeoutMs != null) 'timeoutMs': timeoutMs!,
+  };
 }
 
 final class VersionsParams implements Wire {
@@ -4536,6 +5664,37 @@ final class VersionsResult implements Wire {
 
   @override
   Map<String, Object?> toJson() => {'available': available, 'installed': installed};
+}
+
+final class Visibility implements Wire {
+  const Visibility({this.clipped, this.occluded, required this.visible});
+
+  /// Part of the node lies outside the surface or an ancestor's clip.
+  final bool? clipped;
+
+  /// Whether another node paints over this one's centre point.
+  /// `None` = not determined.
+  final bool? occluded;
+
+  /// The framework considers the node visible (not hidden, non-zero size,
+  /// opacity > 0, attached).
+  final bool visible;
+
+  static Visibility fromJson(Object? json) {
+    final m = asMap(json);
+    return Visibility(
+      clipped: m['clipped'] == null ? null : m['clipped'] as bool,
+      occluded: m['occluded'] == null ? null : m['occluded'] as bool,
+      visible: m['visible'] as bool,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (clipped != null) 'clipped': clipped!,
+    if (occluded != null) 'occluded': occluded!,
+    'visible': visible,
+  };
 }
 
 final class WatchParams implements Wire {
@@ -4755,6 +5914,15 @@ abstract final class Methods {
     'lsp/servers',
     ServersResult.fromJson,
   );
+  static const previewList = Method<WorkspaceRef, ListResult3>(
+    'preview/list',
+    ListResult3.fromJson,
+  );
+  static const previewStart = Method<StartParams2, PreviewInfo>(
+    'preview/start',
+    PreviewInfo.fromJson,
+  );
+  static const previewStop = Method<PreviewRef, Empty>('preview/stop', Empty.fromJson);
   static const settingsGet = Method<GetParams, GetResult>('settings/get', GetResult.fromJson);
   static const settingsSet = Method<SetParams, Empty>('settings/set', Empty.fromJson);
   static const shutdown = Method<Empty, Empty>('shutdown', Empty.fromJson);
@@ -4775,6 +5943,18 @@ abstract final class Methods {
   );
   static const terminalResize = Method<ResizeParams, Empty>('terminal/resize', Empty.fromJson);
   static const terminalWrite = Method<WriteParams, Empty>('terminal/write', Empty.fromJson);
+  static const uiHighlight = Method<HighlightParams, Empty>('ui/highlight', Empty.fromJson);
+  static const uiHitTest = Method<HitTestParams, HitTestResult>(
+    'ui/hitTest',
+    HitTestResult.fromJson,
+  );
+  static const uiInspectMode = Method<InspectModeParams, Empty>('ui/inspectMode', Empty.fromJson);
+  static const uiNodeDetails = Method<NodeParams, UiNode>('ui/nodeDetails', UiNode.fromJson);
+  static const uiSnapshot = Method<SnapshotParams, Snapshot>('ui/snapshot', Snapshot.fromJson);
+  static const uiVerify = Method<VerifyParams, VerificationReport>(
+    'ui/verify',
+    VerificationReport.fromJson,
+  );
   static const workspaceClose = Method<WorkspaceRef, Empty>('workspace/close', Empty.fromJson);
   static const workspaceGetState = Method<GetStateParams, StateResult>(
     'workspace/getState',
@@ -4840,6 +6020,7 @@ abstract final class Notifications {
     'lsp/serverState',
     ServerStateParams.fromJson,
   );
+  static const previewState = NotificationType<PreviewInfo>('preview/state', PreviewInfo.fromJson);
   static const settingsDidChange = NotificationType<GetResult>(
     'settings/didChange',
     GetResult.fromJson,
@@ -4853,5 +6034,14 @@ abstract final class Notifications {
   static const terminalOutput = NotificationType<OutputParams2>(
     'terminal/output',
     OutputParams2.fromJson,
+  );
+  static const uiDidMutate = NotificationType<DidMutateParams>(
+    'ui/didMutate',
+    DidMutateParams.fromJson,
+  );
+  static const uiHovered = NotificationType<HoveredParams>('ui/hovered', HoveredParams.fromJson);
+  static const uiSelected = NotificationType<SelectedParams>(
+    'ui/selected',
+    SelectedParams.fromJson,
   );
 }

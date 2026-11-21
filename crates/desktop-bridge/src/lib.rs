@@ -349,9 +349,10 @@ impl DaemonBridge {
         }
 
         // Handshake.
-        // Protocol 0.4 (ADR-0018; 0.3, ADR-0015: the GUI shows approval requests to a person).
+        // The protocol this crate was built against (0.5 since M5-ARCH-001; 0.3, ADR-0015: the GUI
+        // shows approval requests to a person).
         let params = json!({
-            "protocolVersion": "0.4",
+            "protocolVersion": axiom_protocol::PROTOCOL_VERSION,
             "client": { "name": self.inner.config.client_name, "version": self.inner.config.client_version },
             "capabilities": { "approvals": true },
         });

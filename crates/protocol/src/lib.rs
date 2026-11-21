@@ -37,11 +37,13 @@ pub mod inspection;
 pub mod lifecycle;
 pub mod lsp;
 pub mod method;
+pub mod preview;
 pub mod provider;
 pub mod registry;
 pub mod settings;
 pub mod task;
 pub mod terminal;
+pub mod ui;
 pub mod workspace;
 
 pub use envelope::{
@@ -50,7 +52,7 @@ pub use envelope::{
 pub use method::{Method, Notification};
 
 /// Protocol version implemented by this crate. `MAJOR.MINOR`.
-pub const PROTOCOL_VERSION: &str = "0.4";
+pub const PROTOCOL_VERSION: &str = "0.5";
 
 /// A path inside a workspace: relative to the workspace root, `/`-separated,
 /// UTF-8, with no `.`/`..` segments, no leading `/`, and no trailing `/`.

@@ -107,11 +107,22 @@ pub fn build_router(app: Arc<App>) -> Router {
     r
 }
 
-/// Protocol 0.4 methods registered by M4-ARCH-001 whose handlers later M4 tasks add. Each task
-/// that wires one removes it here; the last M4 backend task leaves this empty. Clients
-/// feature-detect from `initialize.methods` (ADR-0018 §1), which lists only served methods.
+/// Protocol 0.5 methods registered by M5-ARCH-001 whose handlers later M5 tasks add
+/// (M5-PREVIEW-001: `preview/*`; M5-INSPECT-001 and M5-VERIFY-001: `ui/*`). Each task that wires
+/// one removes it here; the last M5 backend task leaves this empty. Clients feature-detect from
+/// `initialize.methods`, which lists only served methods.
 #[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &[];
+pub const NOT_YET_SERVED: &[&str] = &[
+    "preview/start",
+    "preview/stop",
+    "preview/list",
+    "ui/inspectMode",
+    "ui/snapshot",
+    "ui/hitTest",
+    "ui/nodeDetails",
+    "ui/highlight",
+    "ui/verify",
+];
 
 #[cfg(test)]
 mod tests {

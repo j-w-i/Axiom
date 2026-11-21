@@ -303,26 +303,40 @@ no new edge.
   that watch, debounced 300 ms). The watch starts with a workspace's first status. Status on
   this repository takes 15 ms.
 
+## M5 modules
+
+### `crates/inspect` — `axiom-inspect` (M5-INSPECT-001…; ADR-0019 §4)
+- The adapter WebSocket server (loopback, one port per daemon, a one-time token per preview),
+  adapter sessions and their latest snapshot, normalisation, source resolution (stamps to
+  workspace paths, owner and heuristic candidates, the confidence caps), and the verification
+  engine (quiescence, re-identification, checks, verdict).
+- Depends on `axiom-protocol` only; `axiomd` serves `preview/*` and `ui/*` through it and runs
+  the dev server through `axiom-exec`.
+- `inspectors/web/` (not a crate): the Vite plugin and the in-page adapter script, JavaScript
+  shipped with the daemon's data.
+
 ## Dependency matrix (allowed edges)
 
-| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | lsp | term | desktop-bridge | axiomd |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
-| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
-| lsp       | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
-| term      | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
-| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
-| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
-| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | lsp | term | inspect | desktop-bridge | axiomd |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
+| lsp       | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
+| term      | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
+| inspect   | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
+| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
+| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
+| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
 
 The `env` and `build` rows are ADR-0014 §4; the `agent` and `cli` rows are ADR-0015 §2; the
-`lsp` and `term` rows and `axiomd → lsp, term` are ADR-0018 §7.
+`lsp` and `term` rows and `axiomd → lsp, term` are ADR-0018 §7; the `inspect` row and
+`axiomd → inspect` are ADR-0019 §4.
 
 Later service crates follow the same rule: they may depend on `protocol` and
 on *lower* service crates listed in their task spec (e.g. `build` → `exec`,

@@ -1,7 +1,7 @@
 # Visual inspection protocol
 
-**State: draft 0.1**, validated by experiments E2 (QML) and E3 (React/DOM).
-Frozen by the first task of M5. Types: `crates/protocol/src/inspection.rs`.
+**State: frozen for M5** (M5-ARCH-001, ADR-0019), validated by experiments E2 (QML) and E3
+(React/DOM). Types: `crates/protocol/src/inspection.rs`.
 Schema: `schemas/inspection/inspection.schema.json`. Research:
 `docs/research/visual-inspection.md`. Decision: ADR-0008.
 
@@ -18,7 +18,7 @@ previewed app ── adapter ──(inspect/* JSON-RPC)── daemon `inspect` �
   path mapping, source-map resolution, heuristic candidates), stores
   snapshots and runs verification.
 - Clients (the Visual Inspector view, agent tools `ui.*`) only see the
-  normalised model.
+  normalised model, through the client methods `ui/*` and `preview/*` (`ipc.md` §Protocol 0.5).
 
 Adapter transport: the daemon is the client. The adapter connects *to* the
 daemon on a loopback WebSocket (web) or local socket (native) whose address
@@ -33,7 +33,7 @@ can do. The three levels of the brief are derived:
 
 | Level | Requires | Without it |
 |-------|----------|-----------|
-| 1 Screenshot | a capture source (adapter `screenshot`, or the preview host: `QQuickItem::grabToImage`, CDP `Page.captureScreenshot`) | preview unavailable |
+| 1 Screenshot | a capture source (adapter `screenshot`, or the preview host: `QQuickItem::grabToImage`, a native web-view snapshot) | no pixel checks (they are `skipped`); the web adapter in M5 has none |
 | 2 Runtime tree | `tree: true` | selection is a rectangle; source candidates come only from `heuristic`/`visualInference` |
 | 3 Source-aware | `source != none` | tree works; each node's `sources` is empty until the daemon adds heuristic candidates |
 
@@ -111,6 +111,9 @@ are enforced (`MappingMethod::max_confidence`, tested). Rules:
 | `inspect/nodeDetails` | adds `properties` (framework vocabulary, namespaced keys: `css.margin-left`, `qml.anchors.leftMargin`) |
 | `inspect/highlight` | overlay on/off |
 | `inspect/didMutate` (notification) | snapshots are stale; reasons `tree`, `layout`, `navigation`, `hotReload` |
+| `inspect/setMode` | inspect mode on or off (hover highlight, click to select) |
+| `inspect/hovered`, `inspect/selected` (notifications) | in inspect mode: the element under the pointer; the clicked element with its ancestors |
+| `inspect/runtimeError` (notification) | an uncaught or console error in the page, for `runtimeClean` |
 
 Timeouts (daemon-side): `hello` 5 s, `snapshot` 10 s, others 3 s. On timeout
 the session is marked degraded and the Inspector shows the last snapshot
@@ -130,13 +133,18 @@ Two cooperating parts; see ADR-0008 for why both.
    elements are not stamped because they may not forward unknown props; their
    location is recovered as the `owner` relation from the nearest stamped
    ancestor in a different file, plus the fiber's owner component name.
-2. **Runtime adapter**: the previewed page is shown in a WebEngine view with
-   an isolated profile. The daemon-side web inspector drives it through the
-   Chrome DevTools Protocol (`DOM.getNodeForLocation`, `DOM.describeNode`,
-   `DOM.getBoxModel`, `CSS.getMatchedStylesForNode`,
-   `Page.captureScreenshot`) — E3 exercised these against Chrome; the first
-   M5 task repeats E3 against Qt WebEngine's Chromium, which is the remaining
-   unverified link.
+2. **Runtime adapter** (`inspectors/web/adapter.js`, ADR-0019 §1): a plain DOM script the
+   plugin injects into the page (`transformIndexHtml`) with the daemon's endpoint and the
+   preview's one-time token. It dials the daemon's loopback WebSocket and answers the methods
+   above with DOM APIs (`elementsFromPoint`, `getBoundingClientRect`, `getComputedStyle`), draws
+   the highlight as an overlay element, reports `didMutate` from a `MutationObserver` and Vite's
+   HMR events, and reports uncaught and console errors (`inspect/runtimeError`). No CDP: the
+   page runs in whatever browser the person uses (ADR-0020 §8), so the adapter works the same in
+   all of them. It reports `screenshot: false`: there is no pixel capture in M5.
+
+   **Inspect mode** (`inspect/setMode`): with it on, the adapter takes the pointer: hover
+   highlights the element under it (`inspect/hovered`), and a click selects it
+   (`inspect/selected`, the node and its ancestors) and is not passed to the app.
 
 Without the build plugin the web adapter still gives Level 2, and the daemon
 adds `sourceMap` candidates for CSS rules and `heuristic` candidates for
@@ -172,6 +180,14 @@ change). After reload the daemon evaluates them and adds its own:
 | `property` | stated property equals the expected value |
 | `pixelsChangedInRegion` | changed pixels exist inside the expected region |
 | `pixelsStableElsewhere` | changed fraction outside the expected region (grown by 8 px) ≤ 0.1 % |
+
+The agent states its checks as `ui/verify` assertions: `geometry` (`node.edge op other.edge +
+offset`, or `op value`; edges `left`, `right`, `top`, `bottom`, `width`, `height`, `centerX`,
+`centerY`; `eq` within 0.5 px) and `property` (a computed property, e.g. `css.padding-left`,
+equals a value). Nodes are named by stable key, which survives the reload.
+
+**M5 has no pixel capture** (`Capabilities.screenshot: false`): the two pixel checks are reported
+with `skipped: true` and neither pass nor fail.
 
 Verdict: `failed` if any check fails; `verified` if none fails **and** at
 least one `geometry` or `property` check stated by the agent passed;

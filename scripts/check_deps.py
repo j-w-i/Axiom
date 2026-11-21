@@ -26,9 +26,11 @@ ALLOWED = {
     # M4 (ADR-0018 §7): language servers and terminals.
     "axiom-lsp": {"axiom-protocol"},
     "axiom-term": {"axiom-protocol"},
+    # M5 (ADR-0019 §4): previews and inspection.
+    "axiom-inspect": {"axiom-protocol"},
     "axiomd": {
         "axiom-protocol", "axiom-rpc", "axiom-store", "axiom-workspace", "axiom-exec",
-        "axiom-env", "axiom-build", "axiom-agent", "axiom-lsp", "axiom-term",
+        "axiom-env", "axiom-build", "axiom-agent", "axiom-lsp", "axiom-term", "axiom-inspect",
     },
     # The `axiom` command-line client (ADR-0015 §2, §6): a protocol client.
     "axiom-cli": {"axiom-protocol", "axiom-rpc"},

@@ -1,8 +1,9 @@
 //! Framework-independent UI inspection model (the Visual Intelligence
 //! contract). Normative prose: `docs/protocols/inspection.md`.
 //!
-//! DRAFT 0.1: validated by experiments E2 (QML) and E3 (React/DOM); frozen
-//! when milestone M5 starts. Not served by the 0.1 daemon.
+//! FROZEN for M5 (ADR-0019; validated by experiments E2 (QML) and E3 (React/DOM)). The web
+//! adapter is a script injected into the previewed page that dials the daemon; it has no pixel
+//! capture in M5 (`screenshot: false`). Clients use `crate::ui`, not these methods.
 //!
 //! Coordinates: every rectangle is in *logical pixels* of its [`Surface`],
 //! origin at the surface's top-left, y down, after all transforms and
@@ -285,6 +286,49 @@ notification!(
     "inspect/didMutate",
     DidMutateParams
 );
+method!(
+    /// Turns inspect mode on or off: on, the adapter highlights the element under the pointer,
+    /// sends `inspect/hovered`, and on a click sends `inspect/selected` instead of passing the
+    /// click to the app (ADR-0019 §1).
+    SetMode, "inspect/setMode", SetModeParams => crate::lifecycle::Empty
+);
+notification!(
+    /// Adapter to daemon: in inspect mode, the element under the pointer (absent: none).
+    AdapterHovered,
+    "inspect/hovered",
+    AdapterHoveredParams
+);
+notification!(
+    /// Adapter to daemon: in inspect mode, the element clicked, with its ancestors.
+    AdapterSelected,
+    "inspect/selected",
+    HitTestResult
+);
+notification!(
+    /// Adapter to daemon: an uncaught error or a console error in the page (`runtimeClean`).
+    RuntimeError,
+    "inspect/runtimeError",
+    RuntimeErrorParams
+);
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SetModeParams {
+    pub on: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AdapterHoveredParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<UiNode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeErrorParams {
+    pub message: String,
+    /// Milliseconds since the Unix epoch, adapter clock.
+    pub at_ms: u64,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -392,6 +436,10 @@ pub enum Verdict {
 pub struct Check {
     pub kind: CheckKind,
     pub passed: bool,
+    /// Not evaluated (pixel checks without a capture source, M5); a skipped check neither
+    /// passes nor fails the verdict.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skipped: bool,
     /// Human-readable one-liner: what was expected and what was observed.
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

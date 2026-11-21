@@ -59,15 +59,11 @@ tracing-subscriber = "0.3"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 nix = { version = "0.30", default-features = false, features = ["signal"] }
 windows-sys = "0.61"
-# Desktop shell (ADR-0012). Exact pins: the prototype was verified against these.
-tauri = "=2.12.5"
-tauri-build = "=2.7.4"
-tauri-plugin-dialog = "=2.8.4"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
 
-# Shipped binaries (axiomd, axiom-tauri). Deliberately no `panic = "abort"`:
+# Shipped binary (axiomd). Deliberately no `panic = "abort"`:
 # the rpc server catches handler panics to answer `internal` (docs/protocols/ipc.md).
 [profile.release]
 lto = "thin"

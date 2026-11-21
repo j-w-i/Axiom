@@ -1,6 +1,7 @@
-# IPC protocol 0.2 (shell/CLI/agents ↔ daemon)
+# IPC protocol 0.5 (shell/CLI/agents ↔ daemon)
 
-**State: 0.1 frozen for M1; the 0.2 additions (§Protocol 0.2) frozen for M2 by M2-ARCH-001.**
+**State: 0.1 frozen for M1; each later minor's additions frozen by its milestone's first task
+(0.2 M2-ARCH-001, 0.3 M3-ARCH-001, 0.4 M4-ARCH-001, 0.5 M5-ARCH-001).**
 Source of truth for types: `crates/protocol`.
 Machine-readable form: `schemas/ipc/protocol.schema.json` (generated). This
 document specifies the behaviour the types cannot express.
@@ -297,6 +298,43 @@ terminal,git}.rs` and `workspace.rs` (`workspace/search`).
   `command`, `initialization_options`, `install_hint`); a manifest without it is unchanged.
 - New error kinds: `lsp_error` (-32026), `server_unavailable` (-32027), `git_unavailable` (-32028).
 
+## Protocol 0.5 (M5, ADR-0019)
+
+Additive only, under the same rules: the daemon reports `0.5`. Types:
+`crates/protocol/src/{preview,ui}.rs`; the element model and the adapter's own protocol are
+`crates/protocol/src/inspection.rs` and `docs/protocols/inspection.md` (frozen for M5).
+
+| Method | Params → Result | Errors (besides the generic ones) |
+|--------|-----------------|-----------------------------------|
+| `preview/start` | `StartParams → PreviewInfo` | `workspace_not_open`, `spawn_failed`, `preview_failed` (details `{output}`) |
+| `preview/stop` | `PreviewRef → {}` | `not_found` |
+| `preview/list` | `WorkspaceRef → ListResult` | `workspace_not_open` |
+| `ui/inspectMode` | `InspectModeParams → {}` | `not_found`, `adapter_unavailable` |
+| `ui/snapshot` | `SnapshotParams → Snapshot` | `not_found`, `adapter_unavailable`, `timeout` |
+| `ui/hitTest` | `HitTestParams → HitTestResult` | `not_found`, `adapter_unavailable` |
+| `ui/nodeDetails` | `NodeParams → UiNode` | `not_found`, `adapter_unavailable` |
+| `ui/highlight` | `HighlightParams → {}` | `not_found`, `adapter_unavailable` |
+| `ui/verify` | `VerifyParams → VerificationReport` | `not_found`, `adapter_unavailable`, `invalid_params` |
+
+| Notification | Direction | Module |
+|--------------|-----------|--------|
+| `preview/state` | daemon → clients of the workspace | `inspect` |
+| `ui/selected` | daemon → clients of the workspace | `inspect` |
+| `ui/hovered` | daemon → clients of the workspace | `inspect` |
+| `ui/didMutate` | daemon → clients of the workspace | `inspect` |
+
+- **A preview** is the workspace's web dev server run as a task (its output is `task/output` of
+  `PreviewInfo.taskId`) with Axiom's Vite plugin injected through a generated config that
+  imports the user's own; the user's files are not edited. The page opens in the person's
+  browser (ADR-0020 §8); its adapter dials the daemon, and `preview/state` says when a page is
+  connected (`adapter`).
+- **`ui/*` results are normalised:** source locations are workspace-relative, candidates are
+  ranked and capped (`docs/protocols/inspection.md` §Source candidates).
+- **`ui/verify`** waits for quiescence, re-identifies nodes by stable key, evaluates the stated
+  assertions and adds `buildClean`, `runtimeClean` and `nodeReidentified`; pixel checks are
+  `skipped` in M5. A skipped check neither passes nor fails the verdict.
+- New error kinds: `preview_failed` (-32029), `adapter_unavailable` (-32030).
+
 ## Behavioural details
 
 ### `fs/writeFile` decision table
@@ -366,8 +404,8 @@ it to this table and the daemon's registry.
 - MINOR bump: new methods, notifications, optional fields, settings keys.
 - MAJOR bump: anything that could break an existing client. Needs an ADR.
 - The daemon must keep serving every method listed for the MAJOR it speaks.
-- Negotiation: the session runs at `min(client minor, server minor)`; 0.2, 0.3 and 0.4 added
-  methods and optional fields only, so a 0.1 client talking to a 0.4 daemon gets `"0.1"` and
+- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 to 0.5 added
+  methods and optional fields only, so a 0.1 client talking to a 0.5 daemon gets `"0.1"` and
   unchanged behaviour.
 
 ## Example session

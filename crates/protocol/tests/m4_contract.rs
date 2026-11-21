@@ -19,8 +19,10 @@ fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + st
 }
 
 #[test]
-fn protocol_version_is_0_4() {
-    assert_eq!(PROTOCOL_VERSION, "0.4");
+fn protocol_version_is_0_4_or_later() {
+    let (major, minor) = PROTOCOL_VERSION.split_once('.').expect("MAJOR.MINOR");
+    assert_eq!(major, "0");
+    assert!(minor.parse::<u32>().unwrap() >= 4, "{PROTOCOL_VERSION}");
 }
 
 #[test]
