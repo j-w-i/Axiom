@@ -3,6 +3,7 @@
 //! Depends only on `protocol` and `store`: tools reach the platform services through the
 //! implementations `axiomd` registers.
 
+pub mod checkpoint;
 pub mod credentials;
 pub mod gate;
 pub mod model;

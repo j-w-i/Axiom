@@ -166,6 +166,11 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
   if its content equals what the agent last left; otherwise it is a conflict
   (`modifiedSinceAgent`, `deletedSinceAgent`, `createdSinceAgent`). With conflicts nothing is
   restored unless `skipConflicts`. Restore takes a checkpoint first.
+- As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir; the agent's
+  latest state is `refs/axiom/<session>/post`, taken after each writing tool; a restore with
+  conflicts changes nothing (not even the undo checkpoint) unless `skipConflicts`. Nested
+  repositories are recorded as git links and never restored. First checkpoint of this
+  repository: 0.94 s; later ones: 21 ms.
 - Concurrent write-capable agents on one workspace are not offered in M3 (worktrees: M6).
 
 ## Sessions

@@ -1,8 +1,8 @@
 ---
 id: M3-CKPT-001
 title: Checkpoints: shadow git repository, create/list/restore with conflict detection
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: [M3-ARCH-001]
 order: 407
 scope: crates/agent/

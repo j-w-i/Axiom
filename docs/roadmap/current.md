@@ -16,6 +16,7 @@ ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cl
 - **M3-TOOLS-001 tested (2026-11-21):** tool registry (prepare → gate token → execute, bounded results, structured errors with hints) and the 12 built-in tools over the services; `agent/tools` served; `workspace` gains search and `remove_file`.
 - **M3-ARCH-002 tested (2026-11-21):** protocol additions for Chat and external agents: workspace-free sessions, `agent/sessionRename|sessionDelete|image`, `fromTurn` + `rewind`, images (both adapters), `ProviderKind::Acp` with `command`/`env`.
 - **M3-GATE-001 tested (2026-11-21):** permission gate (policy with specificity, stricter-only workspace rules, session grants), approvals to connections that declared `capabilities.approvals`, the `call_tool` pipeline and audit log; `agent/policy|setPolicy|approve|toolCall` served.
+- **M3-CKPT-001 tested (2026-11-21):** shadow-git checkpoints through the `git` CLI (isolated env; user's `.git` byte-identical in tests), restore with per-file conflicts and an undo checkpoint; 0.94 s first / 21 ms later on this repository.
 
 
 
