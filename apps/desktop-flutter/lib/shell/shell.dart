@@ -22,6 +22,8 @@ import '../state/documents.dart';
 import '../state/settings.dart';
 import '../state/tasks.dart';
 import '../console/output.dart';
+import '../scm/scm_page.dart';
+import '../search/search_page.dart';
 import '../ui/controls.dart';
 import '../ui/icon_data.dart';
 import '../ui/icons.dart';
@@ -243,6 +245,24 @@ class _ShellState extends State<Shell> {
         category: 'View',
         shortcut: 'Mod+Shift+E',
         run: () => _go(Destination.files),
+      ),
+      Command(
+        id: 'search',
+        title: 'Search in Files',
+        shortcut: 'Mod+Shift+F',
+        category: 'View',
+        enabled: () => ws.isOpen,
+        run: () {
+          _go(Destination.search);
+          WidgetsBinding.instance.addPostFrameCallback((_) => app.focusSearch?.call());
+        },
+      ),
+      Command(
+        id: 'scm',
+        title: 'Show Source Control',
+        shortcut: 'Mod+Shift+G',
+        category: 'View',
+        run: () => _go(Destination.scm),
       ),
       Command(id: 'chat', title: 'Show Chat', category: 'View', run: () => _go(Destination.chat)),
       Command(
@@ -546,6 +566,8 @@ class _ShellState extends State<Shell> {
     _mod(LogicalKeyboardKey.digit1): const _CommandIntent('focus-left'),
     _mod(LogicalKeyboardKey.digit2): const _CommandIntent('focus-right'),
     _mod(LogicalKeyboardKey.keyR, shift: true): const _CommandIntent('run-command'),
+    _mod(LogicalKeyboardKey.keyF, shift: true): const _CommandIntent('search'),
+    _mod(LogicalKeyboardKey.keyG, shift: true): const _CommandIntent('scm'),
     const SingleActivator(LogicalKeyboardKey.f5): const _CommandIntent('rerun'),
     const SingleActivator(LogicalKeyboardKey.f5, shift: true): const _CommandIntent('stop'),
     _mod(LogicalKeyboardKey.backquote, shift: true): const _CommandIntent('new-terminal'),
@@ -866,6 +888,8 @@ class _TitleRow extends StatelessWidget {
 const _railItems = <(Destination, String, IconData16, String?)>[
   (Destination.files, 'Files', AxiomIcons.files, 'Mod+Shift+E'),
   (Destination.chat, 'Chat', AxiomIcons.chat, null),
+  (Destination.search, 'Search', AxiomIcons.search, 'Mod+Shift+F'),
+  (Destination.scm, 'Source Control', AxiomIcons.branch, 'Mod+Shift+G'),
 ];
 
 class _Rail extends StatefulWidget {
@@ -1009,6 +1033,8 @@ class _SideBarState extends State<_SideBar> {
 
   Widget _page(AppState app, Destination d) => switch (d) {
     Destination.chat => const ChatSide(),
+    Destination.search => const SearchSide(),
+    Destination.scm => const ScmSide(),
     _ => FilesPage(
       onOpenFile: (p, {bool focus = true}) => unawaited(app.documents.open(p, focus: focus)),
     ),
@@ -1019,7 +1045,10 @@ class _SideBarState extends State<_SideBar> {
     final app = AppScope.of(context);
     final t = context.axiom;
     final c = t.colors;
-    final d = widget.destination == Destination.chat ? Destination.chat : Destination.files;
+    final d = switch (widget.destination) {
+      Destination.environments => Destination.files,
+      final x => x,
+    };
     _shown.add(d);
     return ColoredBox(
       color: c.bar,
@@ -1038,9 +1067,12 @@ class _SideBarState extends State<_SideBar> {
                       builder: (context, _) => Semantics(
                         header: true,
                         child: Text(
-                          d == Destination.chat
-                              ? 'Chat'
-                              : (app.workspace.isOpen ? app.workspace.name : 'Files'),
+                          switch (d) {
+                            Destination.chat => 'Chat',
+                            Destination.search => 'Search',
+                            Destination.scm => 'Source Control',
+                            _ => app.workspace.isOpen ? app.workspace.name : 'Files',
+                          },
                           style: t.type.label,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1055,7 +1087,12 @@ class _SideBarState extends State<_SideBar> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                for (final x in const [Destination.files, Destination.chat])
+                for (final x in const [
+                  Destination.files,
+                  Destination.chat,
+                  Destination.search,
+                  Destination.scm,
+                ])
                   if (_shown.contains(x))
                     Offstage(
                       key: ValueKey(x),
@@ -1094,16 +1131,24 @@ class _MainState extends State<_Main> {
   Widget build(BuildContext context) {
     _chatShown |= widget.chat;
     final work = _Work(editor: widget.editor);
+    final git = AppScope.of(context).git;
+    return ListenableBuilder(listenable: git, builder: (context, _) => _layers(work, git.diff));
+  }
+
+  Widget _layers(Widget work, String? diff) {
+    // A diff (Source Control) covers the editor, which stays mounted under it.
+    final covered = widget.chat || diff != null;
     return Stack(
       fit: StackFit.expand,
       children: [
         Offstage(
-          offstage: widget.chat,
+          offstage: covered,
           child: TickerMode(
-            enabled: !widget.chat,
-            child: ExcludeFocus(excluding: widget.chat, child: work),
+            enabled: !covered,
+            child: ExcludeFocus(excluding: covered, child: work),
           ),
         ),
+        if (diff != null && !widget.chat) DiffView(key: ValueKey(diff), path: diff),
         if (_chatShown)
           Offstage(
             offstage: !widget.chat,
@@ -1276,6 +1321,40 @@ class _StatusBar extends StatelessWidget {
                         const SizedBox(width: Metrics.s2),
                         Text(text, style: t.type.tiny),
                       ],
+                    ),
+                  );
+                },
+              ),
+              ListenableBuilder(
+                listenable: app.git,
+                builder: (context, _) {
+                  final g = app.git.status;
+                  if (g == null || !g.repo) return const SizedBox.shrink();
+                  final branch =
+                      g.branch ?? 'detached at ${(g.head ?? '').padRight(7).substring(0, 7)}';
+                  final sync = [
+                    if ((g.ahead ?? 0) > 0) '↑${g.ahead}',
+                    if ((g.behind ?? 0) > 0) '↓${g.behind}',
+                  ].join(' ');
+                  final n = app.git.count();
+                  return Padding(
+                    padding: const EdgeInsets.only(left: Metrics.s6),
+                    child: Semantics(
+                      label:
+                          'Branch $branch${sync.isEmpty ? '' : ', $sync'}, '
+                          '$n change${n == 1 ? '' : 's'}',
+                      excludeSemantics: true,
+                      child: Row(
+                        children: [
+                          AxiomIcon(AxiomIcons.branch, size: 12, color: c.ink3),
+                          const SizedBox(width: 4),
+                          Text(branch, style: t.type.tiny),
+                          if (sync.isNotEmpty) ...[
+                            const SizedBox(width: 4),
+                            Text(sync, style: t.type.numeric.copyWith(fontSize: 11)),
+                          ],
+                        ],
+                      ),
                     ),
                   );
                 },

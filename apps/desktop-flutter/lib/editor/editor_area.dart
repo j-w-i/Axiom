@@ -1,3 +1,4 @@
+import 'dart:async';
 // The editor area (FL-EDIT-001): tabs, breadcrumbs, the banner, the code view for the active
 // document, the right group, and the find bar. Each open document keeps its own editor state;
 // switching tabs shows the one already laid out (no model swap, unlike Monaco's 17 ms).
@@ -11,6 +12,7 @@ import 'package:re_editor/re_editor.dart';
 
 import '../app/app_state.dart';
 import '../state/documents.dart';
+import '../state/git.dart';
 import '../ui/controls.dart';
 import '../ui/icon_data.dart';
 import '../ui/icons.dart';
@@ -197,10 +199,19 @@ class _Tab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final git = AppScope.of(context).git;
+    return ListenableBuilder(
+      listenable: git,
+      builder: (context, _) => _tab(context, git.marks[doc.path]),
+    );
+  }
+
+  Widget _tab(BuildContext context, GitMark? mark) {
     final t = context.axiom;
     final c = t.colors;
     final name = [
       doc.title,
+      if (mark != null) mark.word,
       if (doc.dirty) 'unsaved',
       if (doc.changedOnDisk) 'changed on disk',
     ].join(', ');
@@ -222,8 +233,19 @@ class _Tab extends StatelessWidget {
               children: [
                 Text(
                   doc.title,
-                  style: t.type.label.copyWith(color: selected || s.hovered ? c.ink : c.ink2),
+                  style: t.type.label.copyWith(
+                    color: gitInk(c, mark?.kind) ?? (selected || s.hovered ? c.ink : c.ink2),
+                  ),
                 ),
+                if (mark != null) ...[
+                  const SizedBox(width: 5),
+                  ExcludeSemantics(
+                    child: Text(
+                      mark.letter,
+                      style: t.type.codeSmall.copyWith(color: gitInk(c, mark.kind)),
+                    ),
+                  ),
+                ],
                 const SizedBox(width: 6),
                 SizedBox.square(
                   dimension: 20,
@@ -372,10 +394,30 @@ class _DocViewState extends State<_DocView> {
   late final CodeFindController _find = CodeFindController(_controller);
   late final CodeScrollController _scroll = CodeScrollController();
 
+  /// The gutter's marks against HEAD (recomputed 150 ms after an edit or a repository change).
+  final gitMarks = ValueNotifier<Map<int, GutterMark>>(const {});
+  Timer? _marksTimer;
+  int _marksSeq = 0;
+
+  void _scheduleMarks() {
+    _marksTimer?.cancel();
+    _marksTimer = Timer(const Duration(milliseconds: 150), () => unawaited(_computeMarks()));
+  }
+
+  Future<void> _computeMarks() async {
+    final seq = ++_marksSeq;
+    final head = await app.git.headText(widget.doc.path);
+    if (!mounted || seq != _marksSeq) return;
+    gitMarks.value = head == null ? const {} : gutterMarks(head, _controller.text);
+  }
+
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onChange);
+    _controller.addListener(_scheduleMarks);
+    app.git.addListener(_scheduleMarks);
+    _scheduleMarks();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _reveal();
@@ -387,6 +429,10 @@ class _DocViewState extends State<_DocView> {
 
   @override
   void dispose() {
+    _marksTimer?.cancel();
+    _controller.removeListener(_scheduleMarks);
+    app.git.removeListener(_scheduleMarks);
+    gitMarks.dispose();
     _controller.removeListener(_onChange);
     app.documents.removeListener(_reveal);
     _find.dispose();
@@ -468,6 +514,7 @@ class _DocViewState extends State<_DocView> {
             onSave: () => app.documents.save(widget.doc.path),
             overrides: overrides,
             gutterKey: _gutter,
+            gitMarks: gitMarks,
           ),
         ),
       ),

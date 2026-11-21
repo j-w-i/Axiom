@@ -2,6 +2,7 @@
 // (ADR-0020 §3). The documents store owns the text; this widget presents one document's
 // controller.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:re_highlight/languages/bash.dart';
@@ -23,6 +24,7 @@ import 'package:re_highlight/languages/xml.dart';
 import 'package:re_highlight/languages/yaml.dart';
 import 'package:re_highlight/re_highlight.dart';
 
+import '../state/git.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
 
@@ -178,6 +180,7 @@ class CodeView extends StatelessWidget {
     this.onSave,
     this.overrides = const {},
     this.gutterKey,
+    this.gitMarks,
   });
 
   final CodeLineEditingController controller;
@@ -200,6 +203,9 @@ class CodeView extends StatelessWidget {
 
   /// Measures the gutter (popups are placed relative to the text).
   final GlobalKey? gutterKey;
+
+  /// Lines added, modified, or after a deletion, against HEAD (a strip beside the numbers).
+  final ValueListenable<Map<int, GutterMark>>? gitMarks;
 
   @override
   Widget build(BuildContext context) {
@@ -264,7 +270,12 @@ class CodeView extends StatelessWidget {
               color: y.lineNumberActive,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 4),
+          if (gitMarks != null)
+            GitMarkStrip(notifier: notifier, marks: gitMarks!)
+          else
+            const SizedBox(width: 3),
+          const SizedBox(width: 6),
         ],
       ),
     );
@@ -280,4 +291,78 @@ class _AxiomShortcuts extends CodeShortcutsActivatorsBuilder {
   List<ShortcutActivator>? build(CodeShortcutType type) => type == CodeShortcutType.lineSelect
       ? null
       : const DefaultCodeShortcutsActivatorsBuilder().build(type);
+}
+
+/// The gutter's Git marks: a bar per added (green) or modified (brass) line, a wedge where lines
+/// were deleted. The file's state is also on its tab as text.
+class GitMarkStrip extends StatelessWidget {
+  const GitMarkStrip({super.key, required this.notifier, required this.marks});
+  final CodeIndicatorValueNotifier notifier;
+  final ValueListenable<Map<int, GutterMark>> marks;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return ExcludeSemantics(
+      child: SizedBox(
+        width: 3,
+        // Repainted, not rebuilt: the editor updates [notifier] during its layout.
+        child: CustomPaint(
+          painter: _MarksPainter(
+            notifier,
+            marks,
+            added: c.ok,
+            modified: c.accent,
+            deleted: c.danger,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MarksPainter extends CustomPainter {
+  _MarksPainter(
+    this.notifier,
+    this.marksOf, {
+    required this.added,
+    required this.modified,
+    required this.deleted,
+  }) : super(repaint: Listenable.merge([notifier, marksOf]));
+  final CodeIndicatorValueNotifier notifier;
+  final ValueListenable<Map<int, GutterMark>> marksOf;
+  final Color added, modified, deleted;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final marks = marksOf.value;
+    if (marks.isEmpty) return;
+    for (final p in notifier.value?.paragraphs ?? const <CodeLineRenderParagraph>[]) {
+      final m = marks[p.index];
+      if (m == null) continue;
+      final paint = Paint()
+        ..color = switch (m) {
+          GutterMark.added => added,
+          GutterMark.modified => modified,
+          GutterMark.deleted => deleted,
+        };
+      if (m == GutterMark.deleted) {
+        final y = p.offset.dy;
+        canvas.drawPath(
+          Path()
+            ..moveTo(0, y - 3)
+            ..lineTo(size.width + 2, y)
+            ..lineTo(0, y + 3)
+            ..close(),
+          paint,
+        );
+      } else {
+        canvas.drawRect(Rect.fromLTWH(0, p.offset.dy, size.width, p.height), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MarksPainter old) =>
+      old.notifier != notifier || old.marksOf != marksOf || old.added != added;
 }

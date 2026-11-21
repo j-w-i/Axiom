@@ -1314,6 +1314,12 @@ class DiffBlock extends StatelessWidget {
   const DiffBlock({super.key, required this.diff});
   final String diff;
 
+  /// The file's changes against HEAD in the diff view (with a folder open).
+  static void openInDiffView(AppState app, String file) {
+    app.git.openDiff(file);
+    if (app.destination == Destination.chat) app.destination = Destination.files;
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
@@ -1337,6 +1343,13 @@ class DiffBlock extends StatelessWidget {
                   Expanded(
                     child: Text(d.file, style: t.type.codeSmall.copyWith(color: c.ink)),
                   ),
+                  if (AppScope.of(context).workspace.isOpen && d.file.isNotEmpty)
+                    AxButton(
+                      label: 'Open in the diff view',
+                      kind: ButtonKind.quiet,
+                      hint: "Show the file's changes against HEAD",
+                      onPressed: () => openInDiffView(AppScope.of(context), d.file),
+                    ),
                   Text('+${d.added}', style: t.type.numeric.copyWith(color: c.okText)),
                   const SizedBox(width: 6),
                   Text('−${d.removed}', style: t.type.numeric.copyWith(color: c.dangerText)),

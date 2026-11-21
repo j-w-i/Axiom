@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../app/app_state.dart';
+import '../state/git.dart';
 import '../state/workspace.dart';
 import '../ui/controls.dart';
 import '../ui/icon_data.dart';
@@ -114,8 +115,9 @@ class _ExplorerState extends State<Explorer> {
   Widget build(BuildContext context) {
     final t = context.axiom;
     final c = t.colors;
+    final git = AppScope.of(context).git;
     return ListenableBuilder(
-      listenable: widget.workspace,
+      listenable: Listenable.merge([widget.workspace, git]),
       builder: (context, _) {
         final ws = widget.workspace;
         _rows = ws.visibleRows();
@@ -172,6 +174,8 @@ class _ExplorerState extends State<Explorer> {
                     },
                     colors: c,
                     type: t.type,
+                    mark: git.marks[node.path],
+                    folderKind: node.isDir ? git.folders[node.path] : null,
                   );
                 },
               ),
@@ -200,6 +204,8 @@ class _Row extends StatelessWidget {
     required this.onPressed,
     required this.colors,
     required this.type,
+    this.mark,
+    this.folderKind,
   });
   final TreeNode node;
   final int depth;
@@ -209,14 +215,21 @@ class _Row extends StatelessWidget {
   final AxiomColors colors;
   final AxiomType type;
 
+  /// The file's Git mark, or the most severe change inside a folder.
+  final GitMark? mark;
+  final GitKind? folderKind;
+
   @override
   Widget build(BuildContext context) {
     final c = colors;
-    final ink = node.ignored ? c.ink3 : c.ink;
+    final tint = gitInk(c, mark?.kind ?? folderKind);
+    final ink = node.ignored ? c.ink3 : (tint ?? c.ink);
     final label = [
       node.name,
       if (node.isDir) 'folder' else 'file',
       if (node.ignored) 'ignored',
+      if (mark != null) mark!.word,
+      if (folderKind != null) 'holds changes',
     ].join(', ');
     return Pressable(
       label: label,
@@ -256,6 +269,20 @@ class _Row extends StatelessWidget {
             ),
             if (node.loading && !node.loaded)
               const Padding(padding: EdgeInsets.only(right: 6), child: Spinner(size: 10)),
+            if (mark != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(mark!.letter, style: type.codeSmall.copyWith(color: tint)),
+              )
+            else if (folderKind != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: Container(
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(color: tint, shape: BoxShape.circle),
+                ),
+              ),
           ],
         );
         if (selected) {

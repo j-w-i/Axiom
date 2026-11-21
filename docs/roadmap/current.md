@@ -38,6 +38,14 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
   - sync, diagnostic underlines and the Problems panel (the console region, Mod+J);
   - completion, hover, F12, F2 across files as one undo, formatting, the status segment;
   - `lsp_test.dart` against fake-lsp; the real servers required in CI on Ubuntu.
+- **FL-GIT-001 implemented (2026-11-22):** Git and Search in Flutter:
+  - the branch in the status bar; M/U/A/D marks on explorer rows, folders and tabs; gutter
+    marks against HEAD that follow unsaved edits;
+  - Source Control (Mod+Shift+G) and a side-by-side diff (Esc closes it), also opened from
+    Chat's diffs;
+  - the Search page (Mod+Shift+F) with case, word and regex options and include/exclude globs;
+  - `git_test.dart` and `search_test.dart` pass; the shell's frame benchmark still has no
+    frame over budget.
 - **FL-CONSOLE-001 implemented (2026-11-22):** the console's Output view and the Terminal:
   - Output: the run prompt with its history, stdout and stderr apart, the exit status, Stop,
     Rerun; the title row's transport;

@@ -8,6 +8,8 @@ import '../state/agent.dart';
 import '../state/documents.dart';
 import '../state/lsp.dart';
 import '../state/problems.dart';
+import '../state/git.dart';
+import '../state/search.dart';
 import '../state/tasks.dart';
 import '../state/terminals.dart';
 import '../state/settings.dart';
@@ -54,6 +56,8 @@ class AppState {
     problems = ProblemsStore(lsp, client: client, workspace: workspace);
     tasks = TasksStore(client, workspace)..onProviderStart = problems.begin;
     terminals = TerminalsStore(client, workspace);
+    git = GitStore(client, workspace);
+    search = SearchStore(client, workspace);
     agent = AgentStore(client, workspace);
   }
 
@@ -68,6 +72,8 @@ class AppState {
   late final ProblemsStore problems;
   late final TasksStore tasks;
   late final TerminalsStore terminals;
+  late final GitStore git;
+  late final SearchStore search;
   late final AgentStore agent;
 
   /// The hint line's text (the hovered or focused control's hint).
@@ -86,6 +92,9 @@ class AppState {
 
   /// Focuses the AI dock's composer (set by the dock while it is shown).
   VoidCallback? focusDock;
+
+  /// Focuses the Search page's query (set by the page).
+  VoidCallback? focusSearch;
 
   /// Focuses the run prompt (set by the Output view).
   VoidCallback? focusRunPrompt;

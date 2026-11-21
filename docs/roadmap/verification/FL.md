@@ -77,6 +77,28 @@ the whole answer and rebuilt the whole transcript. Three changes fixed it:
 After the change, `frames_test.dart` (the shell's interactions) still has no frame over budget.
 
 ## End to end
+`git_test.dart`: 1/1, in a private virtual KWin and in a private Xvfb, against a temporary
+repository.
+- The status bar reads "Branch main, 0 changes".
+- An unsaved edit marks line 2 modified in the gutter.
+- Once saved, the explorer row reads "lib.rs, file, modified" and the tab is marked too.
+- A new file reads "notes.txt, file, untracked".
+- Source Control lists both. Its row opens the diff, "Changes to lib.rs: 1 added, 1 removed",
+  with the replaced line beside its replacement; Esc closes it.
+- A commit made outside the app clears the marks, the list ("No changes") and the gutter.
+
+`search_test.dart`: 1/1, in KWin and in Xvfb.
+- Mod+Shift+F focuses the query. "needle" finds 3 matches in 2 files; `target/` (ignored) is
+  not searched.
+- ↓ ↓ Enter opens the second match at its line and column.
+- Tab reaches Match case and Space turns it on; the upper-case line drops out.
+- A regular expression finds its 2 matches.
+- Go to File finds `src/deep/nested/needles.rs` for "dpnstd" before the explorer listed it, and
+  opens it.
+
+The shell's frame benchmark was run again after the Git marks went in: no frame over 16.7 ms
+in any interaction. The highest build was 14.2 ms, opening the palette.
+
 `console_test.dart`: 3/3, in a private virtual KWin and in a private Xvfb, against the real
 daemon.
 - **Output:**

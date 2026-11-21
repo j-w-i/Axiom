@@ -1,8 +1,8 @@
 ---
 id: FL-GIT-001
 title: Source Control, gutter marks, the diff view; the Search page
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux verified (git_test and search_test in KWin and Xvfb); macOS in CI
 depends_on: [FL-EDIT-001]
 order: 528
 scope: apps/desktop-flutter/lib/scm/, apps/desktop-flutter/lib/search/, apps/desktop-flutter/integration_test/{git,search}_test.dart
