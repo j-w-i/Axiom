@@ -20,6 +20,8 @@ axiom-rpc = { path = "../rpc" }
 axiom-store = { path = "../store" }
 axiom-workspace = { path = "../workspace" }
 axiom-exec = { path = "../exec" }
+axiom-env = { path = "../env" }
+axiom-build = { path = "../build" }
 tokio = { version = "1", features = ["full"] }
 clap.workspace = true
 tracing.workspace = true
@@ -29,6 +31,10 @@ serde_json.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 dunce.workspace = true
+tar.workspace = true
+flate2.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 [lints]
 workspace = true

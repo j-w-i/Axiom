@@ -7,6 +7,7 @@ import { useNativeMenu, type ShellContext } from "./shell/actions";
 import { usePaletteCommands } from "./shell/commands";
 import { useNativeTitleBarTheme, useSystemDark } from "./shell/platform";
 import { useAppShortcuts } from "./shell/shortcuts";
+import type { Destination } from "./shell/Rail";
 import { StatusBar } from "./shell/StatusBar";
 import { TitleRow } from "./shell/TitleRow";
 import { Banners, useLayout, Workbench } from "./shell/Workbench";
@@ -27,6 +28,7 @@ export function App({ app }: { app: AppStores }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [palette, setPalette] = useState<"commands" | "files" | null>(null);
+  const [destination, setDestination] = useState<Destination>("files");
   const [info, setInfo] = useState<AppInfo | null>(null);
   const ready = daemon.state === "ready";
 
@@ -89,7 +91,7 @@ export function App({ app }: { app: AppStores }) {
   }, [documents]);
 
   const ctx: ShellContext = {
-    app, ready, dark, ws, docs, task, prefs, openFolder, setSettingsOpen, setAboutOpen, setPalette,
+    app, ready, dark, ws, docs, task, prefs, openFolder, setSettingsOpen, setAboutOpen, setPalette, destination, setDestination,
     hasDoc: docs.docs.length > 0 && docs.editorReady,
     toggleSidebar: layout.toggleSidebar, togglePanel: layout.togglePanel, resetLayout: layout.resetLayout, focusRun: layout.focusRun,
   };

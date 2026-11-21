@@ -18,7 +18,13 @@ ALLOWED = {
     "axiom-store": set(),
     "axiom-workspace": {"axiom-protocol"},
     "axiom-exec": {"axiom-protocol"},
-    "axiomd": {"axiom-protocol", "axiom-rpc", "axiom-store", "axiom-workspace", "axiom-exec"},
+    # M2 (ADR-0014 §4).
+    "axiom-env": {"axiom-protocol", "axiom-store"},
+    "axiom-build": {"axiom-protocol", "axiom-exec", "axiom-env"},
+    "axiomd": {
+        "axiom-protocol", "axiom-rpc", "axiom-store", "axiom-workspace", "axiom-exec",
+        "axiom-env", "axiom-build",
+    },
     # The GUI's daemon client (ADR-0012): protocol only.
     "axiom-desktop-bridge": {"axiom-protocol"},
     # Tauri shell host: bridge only (plus third-party crates).

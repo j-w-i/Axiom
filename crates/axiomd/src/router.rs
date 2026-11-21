@@ -1,6 +1,8 @@
 use crate::app::App;
-use crate::handlers::{fs, settings, task, workspace};
-use axiom_protocol::{fs as pfs, settings as pset, task as ptask, workspace as pws};
+use crate::handlers::{build, env, fs, settings, task, workspace};
+use axiom_protocol::{
+    build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask, workspace as pws,
+};
 use axiom_rpc::Router;
 use std::sync::Arc;
 
@@ -35,6 +37,16 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(ptask::ListTasks, task::list);
     wire!(pset::Get, settings::get);
     wire!(pset::Set, settings::set, ctx);
+    wire!(penv::Providers, env::providers);
+    wire!(penv::Detect, env::detect_tools);
+    wire!(penv::Trust, env::trust);
+    wire!(penv::Versions, env::versions);
+    wire!(penv::PlanInstall, env::plan_install);
+    wire!(penv::Install, env::install, ctx);
+    wire!(penv::Uninstall, env::uninstall);
+    wire!(penv::Resolve, env::resolve);
+    wire!(pbuild::Tasks, build::tasks);
+    wire!(pbuild::Run, build::run, ctx);
 
     let a = app;
     r.on_shutdown(move || {

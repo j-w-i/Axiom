@@ -75,7 +75,14 @@ impl Daemon {
 
     /// Spawns against an existing data dir (for restart tests).
     pub async fn spawn_in(data_dir: &Path) -> Daemon {
-        let mut child = axiomd()
+        Self::spawn_configured(data_dir, |_| {}).await
+    }
+
+    /// Spawns with extra process configuration (e.g. a controlled `PATH`).
+    pub async fn spawn_configured(data_dir: &Path, configure: impl FnOnce(&mut Command)) -> Daemon {
+        let mut cmd = axiomd();
+        configure(&mut cmd);
+        let mut child = cmd
             .env("AXIOM_DATA_DIR", data_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

@@ -136,6 +136,12 @@ pub enum ErrorKind {
     TooLarge,
     WorkspaceNotOpen,
     SpawnFailed,
+    // Domain level, protocol 0.2 (ADR-0014).
+    ChecksumMismatch,
+    UnsupportedPlatform,
+    ApprovalDenied,
+    /// Details: `{ "missing": [toolId] }`.
+    PrerequisiteMissing,
     #[serde(other)]
     Unknown,
 }
@@ -161,6 +167,10 @@ impl ErrorKind {
             Self::TooLarge => -32016,
             Self::WorkspaceNotOpen => -32017,
             Self::SpawnFailed => -32018,
+            Self::ChecksumMismatch => -32019,
+            Self::UnsupportedPlatform => -32020,
+            Self::ApprovalDenied => -32021,
+            Self::PrerequisiteMissing => -32022,
             Self::Unknown => -32099,
         }
     }

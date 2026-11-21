@@ -1,10 +1,10 @@
-# Reference provider manifest (DRAFT contract, see docs/protocols/providers.md).
-# Validated against the schema by crates/protocol/tests/drafts.rs.
+# Built-in provider (contract: docs/protocols/providers.md, frozen for M2).
+# Checked by crates/env/tests/provider_contract.rs and crates/protocol/tests/drafts.rs.
 schema = "axiom.provider/1"
 id = "rust"
 name = "Rust"
 description = "Rust toolchains managed through rustup; build, run and test through Cargo."
-version = "0.1.0"
+version = "0.2.0"
 homepage = "https://www.rust-lang.org"
 
 [project]
@@ -26,6 +26,9 @@ program = "rustup"
 version_regex = 'rustup (\d+\.\d+\.\d+)'
 required = false
 
+# Managed install: each Rust version gets its own root with a private rustup
+# (`${root}/rustup`, `${root}/cargo`), so `~/.rustup` and `~/.cargo` are never
+# touched. RUSTUP_TOOLCHAIN makes the root's proxies run exactly this version.
 [[install]]
 kind = "delegate"
 using = "rustup"
@@ -33,7 +36,49 @@ scope = "managed"
 install = ["rustup", "toolchain", "install", "${version}", "--profile", "minimal"]
 uninstall = ["rustup", "toolchain", "uninstall", "${version}"]
 list_versions = ["rustup", "toolchain", "list"]
+versions = { kind = "github_releases", repo = "rust-lang/rust" }
+bin_dirs = ["cargo/bin"]
+env = { RUSTUP_HOME = "${root}/rustup", CARGO_HOME = "${root}/cargo", RUSTUP_TOOLCHAIN = "${version}" }
+
+# Bootstraps the delegate: rustup-init, verified against its published SHA-256,
+# installs rustup (no toolchain, no PATH or profile changes) into the same root.
+[[install]]
+kind = "archive"
+provides = ["rustup"]
+versions = { kind = "static", versions = ["latest"] }
+bin_dirs = ["cargo/bin"]
+setup = ["${root}/rustup-init", "-y", "--no-modify-path", "--default-toolchain", "none", "--profile", "minimal"]
 env = { RUSTUP_HOME = "${root}/rustup", CARGO_HOME = "${root}/cargo" }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"
+format = "file"
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256" }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://static.rust-lang.org/rustup/dist/aarch64-unknown-linux-gnu/rustup-init"
+format = "file"
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/aarch64-unknown-linux-gnu/rustup-init.sha256" }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "aarch64" }
+url = "https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin/rustup-init"
+format = "file"
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin/rustup-init.sha256" }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "x86_64" }
+url = "https://static.rust-lang.org/rustup/dist/x86_64-apple-darwin/rustup-init"
+format = "file"
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/x86_64-apple-darwin/rustup-init.sha256" }
+
+[[install.artifacts]]
+platform = { os = "windows", arch = "x86_64" }
+url = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+format = "file"
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe.sha256" }
 
 [[install]]
 kind = "system_package"

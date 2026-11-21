@@ -1,0 +1,23 @@
+[package]
+name = "axiom-build"
+description = "Provider tasks run in the project environment, and diagnostics parsers (ADR-0014)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-protocol = { path = "../protocol" }
+axiom-exec = { path = "../exec" }
+axiom-env = { path = "../env" }
+regex.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

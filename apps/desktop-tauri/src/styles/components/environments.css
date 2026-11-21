@@ -1,0 +1,337 @@
+/* Environment Manager (workspace-spec.md §5.1; M2-UI-001/002): an editor-area page on the
+   editor surface; a table on the panel tone with 40 px rows; mono for versions and paths. */
+.env-page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-5) var(--s-5) var(--s-5);
+  background: var(--surface-editor);
+  color: var(--text);
+  font-size: var(--text-body);
+}
+.env-page__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+.env-page__title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-title);
+}
+/* Fixed layout: the table never widens the window (long paths and the progress cell
+   ellipsize instead); the state column keeps room for a meter and Cancel. */
+.env-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+  overflow: hidden;
+}
+.env-col-name {
+  width: 24%;
+}
+.env-col-required {
+  width: 17%;
+}
+.env-col-detected {
+  width: 10%;
+}
+.env-col-state {
+  width: 250px;
+}
+.env-table th,
+.env-table td {
+  height: 40px;
+  padding: 0 var(--s-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+  font-weight: var(--weight-regular);
+}
+.env-table thead th {
+  height: 30px;
+  color: var(--text-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+}
+.env-table tbody tr:last-child th,
+.env-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.env-table tbody tr[data-state="installing"] {
+  background: var(--accent-soft);
+}
+.env-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.env-name__text {
+  flex: none;
+}
+.env-name__tools {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.env-name__text {
+  font-weight: var(--weight-strong);
+}
+.env-name__tools {
+  color: var(--text-faint);
+  font-size: var(--text-small);
+}
+.env-mono {
+  font-family: var(--font-code);
+  font-size: var(--text-small);
+}
+.env-faint {
+  color: var(--text-muted);
+}
+.env-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.env-actions > * + * {
+  margin-left: var(--s-2);
+}
+.env-state {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  vertical-align: middle;
+}
+.env-state svg {
+  width: var(--icon);
+  height: var(--icon);
+}
+.env-state--ready {
+  color: var(--ok-text);
+}
+.env-state--progress {
+  display: inline-grid;
+  grid-template-columns: 140px auto;
+  grid-template-rows: auto auto;
+  column-gap: var(--s-2);
+  row-gap: 3px;
+  align-items: center;
+}
+.env-state--progress .meter {
+  grid-column: 1;
+}
+.env-state--progress .btn {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+.env-state__step {
+  grid-column: 1;
+  max-width: 140px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-tiny);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A failure: its reason in up to two lines beside Plan install…. */
+.env-state--error {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  text-align: left;
+}
+.env-state__error {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: var(--text-tiny);
+  line-height: var(--leading-tiny);
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.env-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+  max-width: 560px;
+  padding: var(--s-4) 0;
+}
+.env-empty__title {
+  margin: 0;
+  font-weight: var(--weight-strong);
+}
+.env-empty__body,
+.env-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+.env-section {
+  margin-top: var(--s-5);
+  max-width: 720px;
+}
+.env-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-2);
+  font-size: var(--text-body);
+  font-weight: var(--weight-strong);
+}
+.env-section__title svg {
+  width: var(--icon);
+  height: var(--icon);
+  color: var(--warn);
+}
+.env-section__body {
+  margin: 0 0 var(--s-3);
+  color: var(--text-muted);
+}
+.env-errors {
+  margin: 0;
+  padding-left: var(--s-4);
+  color: var(--text-muted);
+}
+.env-page code,
+.env-path {
+  font-family: var(--font-code);
+  font-size: var(--text-small);
+}
+
+/* The side bar's summary for the Environments destination. */
+.env-side {
+  margin: 0;
+  padding: var(--s-1) 0;
+  list-style: none;
+}
+.env-side__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--s-3);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-body);
+  text-align: left;
+}
+.env-side__row:hover {
+  background: var(--hover);
+}
+.env-side__row:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: -2px;
+}
+.env-side__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.env-side__state {
+  color: var(--text-muted);
+  font-family: var(--font-code);
+  font-size: var(--text-tiny);
+}
+
+/* The install plan dialog: wider than a confirmation, steps as a numbered list. */
+/* The title and the buttons stay in view; the steps scroll between them. */
+.dialog[data-testid="install-plan"] {
+  width: min(680px, calc(100vw - 32px));
+  max-height: 78vh;
+  overflow: hidden;
+}
+.plan {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-height: 0;
+  overflow: auto;
+}
+.plan__warning {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-1);
+  background: var(--danger-soft);
+  color: var(--text);
+  font-weight: var(--weight-strong);
+}
+.plan__warning svg {
+  width: var(--icon);
+  height: var(--icon);
+  color: var(--warn);
+}
+.plan__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-small);
+}
+.plan__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-step {
+  display: flex;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--surface-panel);
+}
+.plan-step > svg {
+  flex: none;
+  width: var(--icon);
+  height: var(--icon);
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+.plan-step[data-kind="systemPackages"] > svg {
+  color: var(--warn);
+}
+.plan-step__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.plan-step__name {
+  font-weight: var(--weight-medium);
+}
+.plan-step__meta {
+  color: var(--text-muted);
+  font-weight: var(--weight-regular);
+}
+.plan-step__detail {
+  color: var(--text-muted);
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}
+code.plan-step__detail {
+  font-family: var(--font-code);
+}

@@ -9,8 +9,9 @@ on one system. They bind every contributor, human or agent.
 |----------|---------|-------|
 | IPC protocol 0.1 | `crates/protocol/src/{envelope,method,lifecycle,workspace,fs,task,settings}.rs`, `docs/protocols/ipc.md` | **Frozen for M1** |
 | Editor bridge 1 | `docs/protocols/editor-bridge.md` | **Frozen for M1** |
-| Provider manifest | `crates/protocol/src/provider.rs`, `docs/protocols/providers.md` | Draft until M2 starts |
-| Diagnostics | `crates/protocol/src/diagnostics.rs` | Draft until M2 starts |
+| IPC protocol 0.2 additions | `crates/protocol/src/{env,build}.rs`, `docs/protocols/ipc.md` §Protocol 0.2 | **Frozen for M2** (M2-ARCH-001) |
+| Provider manifest | `crates/protocol/src/provider.rs`, `docs/protocols/providers.md` | **Frozen for M2** (M2-ARCH-001) |
+| Diagnostics | `crates/protocol/src/diagnostics.rs` | **Frozen for M2** (M2-ARCH-001) |
 | Agent tools & permissions | `docs/protocols/agents.md` | Draft until M3 starts |
 | Inspection | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | Draft until M5 starts |
 

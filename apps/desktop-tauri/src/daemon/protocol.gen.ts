@@ -4,6 +4,23 @@
 //   cargo run -p axiom-protocol --example export_schema
 // then regenerate this file. `pnpm run check:types` fails when it is stale (ADR-0005).
 
+export type ArchiveFormat = ("tar.gz" | "tar.xz" | "zip") | "file";
+/**
+ * A path inside a workspace: relative to the workspace root, `/`-separated,
+ * UTF-8, with no `.`/`..` segments, no leading `/`, and no trailing `/`.
+ * The workspace root itself is the empty string.
+ *
+ * Clients never send absolute host paths except in `workspace/open`. The
+ * daemon rejects any `WorkspacePath` that fails these rules with
+ * [`ErrorKind::InvalidParams`] and any that resolves (through symlinks)
+ * outside the root with [`ErrorKind::PermissionDenied`].
+ */
+export type WorkspacePath = string;
+export type Severity = "error" | "warning" | "info" | "hint";
+/**
+ * Opaque identifier of a running or finished task, minted by `task/start`.
+ */
+export type TaskId = string;
 /**
  * Request correlation id. Clients choose ids; they must be unique among that
  * client's in-flight requests on one connection.
@@ -20,57 +37,100 @@ export type Command =
   | {
       shell: string;
     };
-/**
- * A path inside a workspace: relative to the workspace root, `/`-separated,
- * UTF-8, with no `.`/`..` segments, no leading `/`, and no trailing `/`.
- * The workspace root itself is the empty string.
- *
- * Clients never send absolute host paths except in `workspace/open`. The
- * daemon rejects any `WorkspacePath` that fails these rules with
- * [`ErrorKind::InvalidParams`] and any that resolves (through symlinks)
- * outside the root with [`ErrorKind::PermissionDenied`].
- */
-export type WorkspacePath = string;
+export type ToolLocation =
+  | {
+      kind: "managed";
+      root: string;
+    }
+  | {
+      kind: "system";
+      path: string;
+    };
 /**
  * Opaque identifier of an open workspace, minted by `workspace/open`.
  */
 export type WorkspaceId = string;
 export type EntryKind = ("file" | "directory") | "symlink";
+export type Effect = "network" | "writeManaged" | "runPrograms" | "systemChange" | "elevation";
 /**
  * Closed set of error categories. Unknown values received from a newer peer
  * deserialize as [`ErrorKind::Unknown`].
  */
 export type ErrorKind =
-  | "parse_error"
-  | "invalid_request"
-  | "method_not_found"
-  | "invalid_params"
-  | "internal"
-  | "not_initialized"
-  | "cancelled"
-  | "timeout"
-  | "unsupported"
-  | "not_found"
-  | "already_exists"
-  | "permission_denied"
-  | "conflict"
-  | "io"
-  | "unsupported_encoding"
-  | "too_large"
-  | "workspace_not_open"
-  | "spawn_failed"
-  | "unknown";
+  | (
+      | "parse_error"
+      | "invalid_request"
+      | "method_not_found"
+      | "invalid_params"
+      | "internal"
+      | "not_initialized"
+      | "cancelled"
+      | "timeout"
+      | "unsupported"
+      | "not_found"
+      | "already_exists"
+      | "permission_denied"
+      | "conflict"
+      | "io"
+      | "unsupported_encoding"
+      | "too_large"
+      | "workspace_not_open"
+      | "spawn_failed"
+      | "checksum_mismatch"
+      | "unsupported_platform"
+      | "approval_denied"
+      | "unknown"
+    )
+  | "prerequisite_missing";
 export type Outcome = "succeeded" | "failed" | "cancelled";
-/**
- * Opaque identifier of a running or finished task, minted by `task/start`.
- */
-export type TaskId = string;
 /**
  * Opaque content fingerprint (lowercase hex SHA-256 of the file bytes).
  * Two reads return equal versions iff the bytes are equal.
  */
 export type FileVersion = string;
 export type HostOs = "linux" | "macos" | "windows";
+export type InstallScope = "managed" | "system";
+export type Step =
+  | {
+      bytes?: number | null;
+      kind: "download";
+      sha256: Sha256Source;
+      url: string;
+    }
+  | {
+      format: ArchiveFormat;
+      kind: "extract";
+      stripComponents: number;
+    }
+  | {
+      argv: string[];
+      env?: {
+        [k: string]: string;
+      };
+      kind: "run";
+    }
+  | {
+      /**
+       * The exact command that will run (after the elevation wrapper).
+       */
+      argv: string[];
+      kind: "systemPackages";
+      manager: string;
+      packages: string[];
+    }
+  | {
+      kind: "verify";
+      toolId: string;
+    };
+export type Sha256Source =
+  | {
+      kind: "digest";
+      value: string;
+    }
+  | {
+      kind: "url";
+      url: string;
+    };
 /**
  * The literal string `"2.0"`.
  */
@@ -84,9 +144,96 @@ export type LogLevel = "error" | "warn" | "info" | "debug";
  */
 export type Message = Request | Response | Notification;
 export type Stream = "stdout" | "stderr";
+export type ProviderSource = "builtin" | "user" | "workspace";
+export type TaskKind = "build" | "run" | "test" | "clean" | "other";
 
+export interface BuildDiagnostics {
+  /**
+   * No more diagnostics follow for this task.
+   */
+  complete: boolean;
+  diagnostics: Diagnostic[];
+  taskId: TaskId;
+}
+export interface Diagnostic {
+  /**
+   * Tool-specific code, e.g. `E0308`, `-Wunused-variable`.
+   */
+  code?: string | null;
+  /**
+   * Primary location. Absent for diagnostics not tied to a file.
+   */
+  location?: Location | null;
+  /**
+   * One-line message without location prefix.
+   */
+  message: string;
+  /**
+   * Secondary locations ("defined here", notes).
+   */
+  related?: RelatedInfo[];
+  /**
+   * The tool's own human-readable rendering, if it provides one.
+   */
+  rendered?: string | null;
+  severity: Severity;
+  /**
+   * Producing tool, e.g. `rustc`, `clang`, `tsc`.
+   */
+  source: string;
+}
+/**
+ * A span in a workspace file. Lines and columns are 1-based; columns count
+ * Unicode scalar values. `end` is exclusive and may be absent (point).
+ */
+export interface Location {
+  column?: number | null;
+  endColumn?: number | null;
+  endLine?: number | null;
+  file: WorkspacePath;
+  line: number;
+}
+export interface RelatedInfo {
+  location: Location;
+  message: string;
+}
 export interface CancelParams {
   id: RequestId;
+}
+export interface DetectResult {
+  /**
+   * The providers whose project detection matched, in registry order.
+   */
+  providers: ProviderDetection[];
+}
+export interface ProviderDetection {
+  providerId: string;
+  /**
+   * The version `.axiom/project.toml` selects for this provider, if any.
+   */
+  selectedVersion?: string | null;
+  tools: ToolStatus[];
+}
+export interface ToolStatus {
+  /**
+   * Absent when the tool was not found.
+   */
+  found?: Toolchain | null;
+  required: boolean;
+  toolId: string;
+}
+/**
+ * A located, version-checked tool.
+ */
+export interface Toolchain {
+  location: ToolLocation;
+  providerId: string;
+  toolId: string;
+  /**
+   * When the version was last checked (Unix ms).
+   */
+  verifiedMs: number;
+  version: string;
 }
 export interface DidChangeParams {
   changes: FileChange[];
@@ -113,6 +260,22 @@ export interface DirEntry {
   size?: number | null;
 }
 export interface Empty {}
+/**
+ * What a process started for the project runs with.
+ */
+export interface Environment {
+  /**
+   * Directories (host paths) put in front of `PATH`, in order.
+   */
+  pathPrepend: string[];
+  toolchains: Toolchain[];
+  /**
+   * Variables set for the process.
+   */
+  vars: {
+    [k: string]: string;
+  };
+}
 export interface ErrorData {
   /**
    * Kind-specific structured detail (documented per method).
@@ -124,25 +287,31 @@ export interface ErrorData {
    * Machine-readable category. Clients branch on this, never on `message`.
    */
   kind:
-    | "parse_error"
-    | "invalid_request"
-    | "method_not_found"
-    | "invalid_params"
-    | "internal"
-    | "not_initialized"
-    | "cancelled"
-    | "timeout"
-    | "unsupported"
-    | "not_found"
-    | "already_exists"
-    | "permission_denied"
-    | "conflict"
-    | "io"
-    | "unsupported_encoding"
-    | "too_large"
-    | "workspace_not_open"
-    | "spawn_failed"
-    | "unknown";
+    | (
+        | "parse_error"
+        | "invalid_request"
+        | "method_not_found"
+        | "invalid_params"
+        | "internal"
+        | "not_initialized"
+        | "cancelled"
+        | "timeout"
+        | "unsupported"
+        | "not_found"
+        | "already_exists"
+        | "permission_denied"
+        | "conflict"
+        | "io"
+        | "unsupported_encoding"
+        | "too_large"
+        | "workspace_not_open"
+        | "spawn_failed"
+        | "checksum_mismatch"
+        | "unsupported_platform"
+        | "approval_denied"
+        | "unknown"
+      )
+    | "prerequisite_missing";
   /**
    * Whether retrying the identical request may succeed.
    */
@@ -227,6 +396,58 @@ export interface InitializeResult {
    */
   protocolVersion: string;
   server: PeerInfo;
+}
+export interface InstallParams {
+  planId: string;
+}
+/**
+ * Everything an install will do, shown to the user before anything runs. Immutable.
+ */
+export interface InstallPlan {
+  /**
+   * Total download size when every download's size is known.
+   */
+  downloadBytes?: number | null;
+  /**
+   * What the plan will do to the machine, for the approval summary.
+   */
+  effects: Effect[];
+  /**
+   * The plan expires at this time (Unix ms); `env/install` refuses it afterwards.
+   */
+  expiresMs: number;
+  planId: string;
+  providerId: string;
+  scope: InstallScope;
+  steps: Step[];
+  version: string;
+}
+export interface InstallProgress {
+  bytesDone?: number | null;
+  bytesTotal?: number | null;
+  /**
+   * Human-readable current activity, e.g. "Verifying SHA-256".
+   */
+  label: string;
+  planId: string;
+  /**
+   * 0-based index of the current step in `InstallPlan.steps`.
+   */
+  step: number;
+  steps: number;
+}
+export interface InstallResult {
+  planId: string;
+  providerId: string;
+  /**
+   * The published install root (managed installs).
+   */
+  root?: string | null;
+  /**
+   * The tools verified after the install.
+   */
+  verified: Toolchain[];
+  version: string;
 }
 export interface ListParams {
   path: WorkspacePath;
@@ -316,6 +537,46 @@ export interface OutputParams {
   stream: Stream;
   taskId: TaskId;
 }
+export interface PlanInstallParams {
+  /**
+   * Index into the manifest's `install` methods; absent = the first one usable on this host.
+   */
+  method?: number | null;
+  providerId: string;
+  version: string;
+}
+export interface ProviderInfo {
+  description: string;
+  /**
+   * Why the provider cannot be used (manifest validation errors). A provider with errors
+   * is never loaded; for a manifest that did not parse, `id` is its directory name.
+   */
+  errors?: string[];
+  id: string;
+  name: string;
+  source: ProviderSource;
+  /**
+   * Workspace providers: whether the workspace is trusted (they load only then). Always
+   * `true` for built-in and user providers.
+   */
+  trusted: boolean;
+  /**
+   * Version of the manifest.
+   */
+  version: string;
+}
+export interface ProvidersParams {
+  /**
+   * Include this workspace's own providers (listed untrusted until `env/trust`).
+   */
+  workspaceId?: WorkspaceId | null;
+}
+export interface ProvidersResult {
+  /**
+   * Every manifest found, including those that failed validation (with `errors`).
+   */
+  providers: ProviderInfo[];
+}
 export interface ReadFileParams {
   path: WorkspacePath;
   workspaceId: WorkspaceId;
@@ -337,6 +598,14 @@ export interface RecentWorkspace {
   lastOpenedMs: number;
   name: string;
   root: string;
+}
+export interface RunParams {
+  providerId: string;
+  task: string;
+  workspaceId: WorkspaceId;
+}
+export interface RunResult {
+  taskId: TaskId;
 }
 export interface SetParams {
   values: {
@@ -375,8 +644,41 @@ export interface StateResult {
     [k: string]: unknown;
   };
 }
+export interface TaskInfo2 {
+  /**
+   * Task id within the provider's manifest.
+   */
+  id: string;
+  kind: TaskKind;
+  label: string;
+  providerId: string;
+}
 export interface TaskRef {
   taskId: TaskId;
+}
+export interface TasksResult {
+  tasks: TaskInfo2[];
+}
+export interface TrustParams {
+  trusted: boolean;
+  workspaceId: WorkspaceId;
+}
+export interface UninstallParams {
+  providerId: string;
+  version: string;
+}
+export interface VersionsParams {
+  providerId: string;
+}
+export interface VersionsResult {
+  /**
+   * Newest first.
+   */
+  available: string[];
+  /**
+   * Versions present in managed storage.
+   */
+  installed: string[];
 }
 export interface WatchParams {
   enabled: boolean;

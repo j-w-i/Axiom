@@ -1,8 +1,10 @@
+use axiom_env::{Builtin, Http, HttpConfig, Installer};
 use axiom_exec::Executor;
 use axiom_protocol::{ErrorKind, RpcError, WorkspaceId};
 use axiom_store::{Store, StoreError};
 use axiom_workspace::Workspaces;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::task::AbortHandle;
 
@@ -14,15 +16,59 @@ pub struct App {
     /// Forwarder tasks for `fs/watch`, one per workspace. Aborting a task
     /// drops the `WatchHandle` it owns.
     pub watchers: Mutex<HashMap<WorkspaceId, AbortHandle>>,
+    pub env: EnvConfig,
 }
 
+/// Where the environment services find their files.
+pub struct EnvConfig {
+    /// The daemon's data directory: `providers/` (user providers) and `toolchains/` (managed
+    /// installs) live here, next to the database.
+    pub data_dir: PathBuf,
+    pub builtin: Builtin,
+    pub installer: Arc<Installer>,
+}
+
+/// TEST ONLY: set to `1` to let installs use plain HTTP to loopback hosts (a fixture server).
+/// Nothing else changes: every other URL must still be HTTPS.
+pub const INSECURE_LOOPBACK_ENV: &str = "AXIOM_TEST_INSECURE_LOOPBACK_HTTP";
+
 impl App {
+    /// Data directory: the database's (`AXIOM_DATA_DIR` or the platform default).
     pub fn new(store: Store) -> Arc<App> {
+        let data_dir = axiom_store::default_db_path()
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        Self::with_data_dir(store, data_dir)
+    }
+
+    pub fn with_data_dir(store: Store, data_dir: PathBuf) -> Arc<App> {
+        let allow_http = std::env::var(INSECURE_LOOPBACK_ENV).is_ok_and(|v| v == "1");
+        if allow_http {
+            tracing::warn!("{INSECURE_LOOPBACK_ENV}=1: plain HTTP to loopback hosts is allowed");
+        }
+        let http = match Http::new(HttpConfig {
+            allow_http,
+            ..HttpConfig::default()
+        }) {
+            Ok(h) => h,
+            Err(e) => {
+                // Building a client only fails if the TLS backend cannot initialise.
+                tracing::error!("cannot initialise HTTPS: {e}");
+                std::process::exit(1);
+            }
+        };
+        let installer = Arc::new(Installer::new(data_dir.clone(), http));
         Arc::new(App {
             store: Arc::new(store),
             workspaces: Workspaces::new(),
             executor: Executor::new(),
             watchers: Mutex::default(),
+            env: EnvConfig {
+                data_dir,
+                builtin: Builtin::Embedded,
+                installer,
+            },
         })
     }
 

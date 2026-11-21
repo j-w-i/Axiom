@@ -39,9 +39,9 @@ where
     }
 }
 
-/// Every request method in protocol 0.1. Add new methods here.
+/// Every request method in protocol 0.2 (0.1 plus the M2 additions). Add new methods here.
 pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
-    use crate::{fs, lifecycle, settings, task, workspace};
+    use crate::{build, env, fs, lifecycle, settings, task, workspace};
     vec![
         m::<lifecycle::Initialize>(g),
         m::<lifecycle::Shutdown>(g),
@@ -59,12 +59,22 @@ pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
         m::<task::ListTasks>(g),
         m::<settings::Get>(g),
         m::<settings::Set>(g),
+        m::<env::Providers>(g),
+        m::<env::Detect>(g),
+        m::<env::Versions>(g),
+        m::<env::PlanInstall>(g),
+        m::<env::Install>(g),
+        m::<env::Uninstall>(g),
+        m::<env::Resolve>(g),
+        m::<env::Trust>(g),
+        m::<build::Tasks>(g),
+        m::<build::Run>(g),
     ]
 }
 
-/// Every notification in protocol 0.1. Add new notifications here.
+/// Every notification in protocol 0.2. Add new notifications here.
 pub fn notifications(g: &mut SchemaGenerator) -> Vec<NotificationSpec> {
-    use crate::{fs, lifecycle, settings, task};
+    use crate::{build, env, fs, lifecycle, settings, task};
     vec![
         n::<lifecycle::Cancel>(g),
         n::<lifecycle::Log>(g),
@@ -72,6 +82,9 @@ pub fn notifications(g: &mut SchemaGenerator) -> Vec<NotificationSpec> {
         n::<task::Output>(g),
         n::<task::Exited>(g),
         n::<settings::DidChange>(g),
+        n::<env::Progress>(g),
+        n::<env::Installed>(g),
+        n::<build::Diagnostics>(g),
     ]
 }
 
@@ -116,7 +129,7 @@ pub fn protocol_document() -> serde_json::Value {
     })
 }
 
-/// DRAFT: schema of `provider.toml` (written to `schemas/provider/manifest.schema.json`).
+/// Schema of `provider.toml` (frozen for M2) (written to `schemas/provider/manifest.schema.json`).
 pub fn provider_manifest_document() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(crate::provider::ProviderManifest))
         .expect("schema serializes")

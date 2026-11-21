@@ -42,7 +42,10 @@ async fn major_version_mismatch_is_unsupported_with_supported_detail() {
     p.protocol_version = "1.0".into();
     let e = d.client.request::<Initialize>(p).await.unwrap_err();
     assert_eq!(kind(&e), ErrorKind::Unsupported);
-    assert_eq!(e.data.details.unwrap()["supported"], "0.1");
+    assert_eq!(
+        e.data.details.unwrap()["supported"],
+        axiom_protocol::PROTOCOL_VERSION
+    );
 }
 
 #[tokio::test]
@@ -59,7 +62,8 @@ async fn negotiated_version_is_min_of_minors() {
         })
         .await
         .unwrap();
-    assert_eq!(r.protocol_version, "0.1");
+    // The server's minor (0.2 since M2-ARCH-001) is below the client's 0.9.
+    assert_eq!(r.protocol_version, axiom_protocol::PROTOCOL_VERSION);
 }
 
 #[tokio::test]

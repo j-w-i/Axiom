@@ -216,3 +216,61 @@ fn sqlite_version_is_reported() {
     eprintln!("sqlite_version={v}");
     assert!(!v.is_empty());
 }
+
+#[test]
+fn workspace_trust_set_clear_and_isolation() {
+    let s = Store::open_in_memory().unwrap();
+    assert!(!s.workspace_trusted("/a").unwrap());
+    s.set_workspace_trusted("/a", true, 1).unwrap();
+    s.set_workspace_trusted("/a", true, 2).unwrap();
+    assert!(s.workspace_trusted("/a").unwrap());
+    assert!(!s.workspace_trusted("/b").unwrap());
+    s.set_workspace_trusted("/a", false, 3).unwrap();
+    assert!(!s.workspace_trusted("/a").unwrap());
+}
+
+/// A version-1 database (M1) migrates to the trust table and keeps its data.
+#[test]
+fn version_1_database_migrates() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("axiom.db");
+    {
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch(MIGRATIONS[0].1).unwrap();
+        c.execute_batch(
+            "PRAGMA user_version = 1;
+             INSERT INTO settings (key, value) VALUES ('editor.fontSize', '14');",
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    assert_eq!(
+        s.setting_get("editor.fontSize").unwrap(),
+        Some(Value::from(14))
+    );
+    s.set_workspace_trusted("/w", true, 1).unwrap();
+    assert!(s.workspace_trusted("/w").unwrap());
+}
+
+#[test]
+fn build_history_keeps_the_newest_twenty_per_workspace() {
+    let s = Store::open_in_memory().unwrap();
+    let run = |i: u64| BuildRun {
+        provider: "rust".into(),
+        task: "build".into(),
+        started_ms: i,
+        duration_ms: 10,
+        outcome: "succeeded".into(),
+        errors: 0,
+        warnings: i as u32,
+    };
+    for i in 0..25 {
+        s.build_history_add("/a", &run(i)).unwrap();
+    }
+    s.build_history_add("/b", &run(99)).unwrap();
+    let a = s.build_history("/a").unwrap();
+    assert_eq!(a.len(), BUILD_HISTORY_LIMIT);
+    assert_eq!(a[0].started_ms, 24, "newest first");
+    assert_eq!(a.last().unwrap().started_ms, 5);
+    assert_eq!(s.build_history("/b").unwrap(), [run(99)]);
+}

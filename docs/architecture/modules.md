@@ -47,8 +47,9 @@ before the task that needs them** (no empty scaffolding).
   I/O, no async, no `cfg(target_os)`.
 - **Public interface:** `Method`/`Notification` traits; one module per domain;
   `registry::{methods, notifications, method_names, protocol_document}`.
-- **Tests:** `tests/contract.rs` pins wire shapes; `tests/drafts.rs` keeps
-  draft contracts parseable.
+- **Tests:** `tests/contract.rs` pins the 0.1 wire shapes, `tests/m2_contract.rs` the 0.2
+  additions (`env`, `build`); `tests/drafts.rs` keeps the manifest and draft contracts
+  parseable.
 
 ### `crates/rpc` — `axiom-rpc`
 - **Responsibility:** turn a byte stream into typed request handling.
@@ -184,18 +185,42 @@ before the task that needs them** (no empty scaffolding).
 - **Rule:** no network access, no direct file access; it only knows documents
   the host gave it.
 
+## M2 modules
+
+### `crates/env` — `axiom-env` (M2-ENV-001…005)
+- **Status:** complete for M2: registry, validation and detection (ENV-001), archive installs
+  (ENV-002), delegate installs (ENV-003), system packages (ENV-004), project environments and
+  the lock (ENV-005).
+- **Responsibility:** providers (load, validate, trust), tool detection, version listing,
+  install plans and their execution into managed storage, uninstall, and resolving a
+  project's `Environment` from `.axiom/project.toml` / `.axiom/project.lock`.
+- **Depends on:** `protocol`, `store` (installed-toolchain index, workspace trust); `reqwest`
+  (rustls), `sha2`, `tar`, `flate2`, `xz2`, `zip`, `toml`, `regex`, `semver` (ADR-0014 §3).
+- **Rule:** never executes anything not in an issued `InstallPlan`; never writes outside its
+  managed root except the workspace's `.axiom/project.lock`.
+
+### `crates/build` — `axiom-build` (M2-BUILD-001)
+- **Status:** built (M2-BUILD-001).
+- **Responsibility:** provider tasks: list them, start them through `exec` in the resolved
+  environment, and parse their output into `Diagnostic`s (`build/diagnostics`).
+- **Depends on:** `protocol`, `exec`, `env`; `regex`.
+
 ## Dependency matrix (allowed edges)
 
-| From ↓ / To → | protocol | rpc | store | workspace | exec | desktop-bridge | axiomd |
-|---|---|---|---|---|---|---|---|
-| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
-| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
-| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
-| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
-| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
-| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
-| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | desktop-bridge | axiomd |
+|---|---|---|---|---|---|---|---|---|---|
+| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
+| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
+| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
+| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ |
+| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
+| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
+| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+
+The `env` and `build` rows are ADR-0014 §4.
 
 Later service crates follow the same rule: they may depend on `protocol` and
 on *lower* service crates listed in their task spec (e.g. `build` → `exec`,
@@ -216,8 +241,6 @@ change to record here.
 
 | Module | Contract today | Detailed design when |
 |--------|----------------|----------------------|
-| `env` | `crates/protocol/src/provider.rs`, `docs/protocols/providers.md`, `providers/rust/provider.toml` | start of M2 |
-| `build` | `crates/protocol/src/diagnostics.rs`, `TaskTemplate` in provider.rs | start of M2 |
 | `agent` | `docs/protocols/agents.md` | start of M3 |
 | `lsp` | ADR-0004 §Language intelligence | start of M4 |
 | `inspect` | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | start of M5 |

@@ -29,6 +29,14 @@ jobs:
       # crates/desktop-bridge's tests spawn the real daemon binary.
       - run: cargo build -p axiomd
       - run: cargo test --workspace --exclude axiom-desktop-tauri
+      # M2-ENV-003: a real managed Rust install (rustup-init + a minimal toolchain) into a
+      # temp data dir with a temp HOME, then uninstall. Needs the internet.
+      # On Linux it also installs the `tree` package with apt through a pkexec shim
+      # (M2-ENV-004); the runner's passwordless sudo stands in for the polkit prompt.
+      # One thread: the Rust test points HOME at a temp dir for the whole process.
+      - run: cargo test -p axiom-env --features ci-install --test ci_install -- --nocapture --test-threads=1
+        env:
+          AXIOM_CI_SYSTEM_INSTALL: ${{ runner.os == 'Linux' && '1' || '' }}
       - run: cargo run -q -p axiom-protocol --example export_schema -- --check
       - run: python3 scripts/tasks.py check
       - run: python3 scripts/check_deps.py
@@ -111,6 +119,13 @@ jobs:
       - name: End-to-end (${{ matrix.os == 'ubuntu-latest' && 'WebKitWebDriver + embedded' || 'embedded WebDriver' }})
         shell: bash
         run: scripts/e2e.sh --no-build --driver all
+      # The M2 exit scenario (M2-QA-001): a Cargo project with no Rust on the app's PATH and an
+      # empty HOME; install a managed Rust through the UI, build, Problems → source, remove.
+      # Needs the internet (static.rust-lang.org). Linux: the WebKitWebDriver path.
+      - name: End-to-end, M2 exit scenario (env.mjs)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver external e2e/env.mjs
 
       # ---- packages ---------------------------------------------------------------
       - name: Package

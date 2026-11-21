@@ -4,6 +4,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import type { AppStores } from "../state/app";
+import type { Destination } from "./Rail";
 import type { DocumentsState } from "../state/documents";
 import type { SettingsState } from "../state/settings";
 import type { TasksState } from "../state/tasks";
@@ -27,6 +28,9 @@ export interface ShellContext {
   setSettingsOpen: (open: boolean) => void;
   setAboutOpen: (open: boolean) => void;
   setPalette: (palette: "commands" | "files" | null) => void;
+  /** The rail's current destination (M2-UI-001). */
+  destination: Destination;
+  setDestination: (d: Destination) => void;
 }
 
 /** The ids the native menu sends (T-07); unknown ids are ignored. */

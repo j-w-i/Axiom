@@ -229,6 +229,36 @@ under the row. Esc or "Done" closes. Agents (M3) and Environments (M2) sections 
   (click → editor). The same rows become the console's **Problems** view.
 - Builds run through the same transport as tasks.
 
+**As built (M2-UI-001, M2-UI-002):**
+- **Rail** (`shell/Rail.tsx`): 44 px, chrome tone, Files and Environments only (D4: no
+  placeholder destinations). A `nav` named "Activity"; the current item has
+  `aria-current="page"` and a 2 px brass marker; ↑/↓/Home/End move (roving tabindex). The
+  Environments item carries a brass count of toolchains that are missing or failed, also in its
+  name ("Environments, 2 need attention").
+- **Side bar** follows the destination: the explorer for Files; for Environments, one row per
+  toolchain (LED, name, version or state), which moves focus to that row on the page.
+- **Page** (`components/Environments.tsx`): replaces the editor column's content while
+  Environments is current; the editor stays mounted, hidden, so tabs and Monaco state survive.
+  Title and **Detect again**; a table (`Toolchains`) with an LED (named "Rust: Ready" etc.),
+  name, tools (faint), the project's selection with `.axiom/project.toml`, the detected version,
+  the source (managed or system, home-shortened path), and the state: Ready (sage check),
+  **Plan install…** (primary), or progress (determinate meter, current step, Cancel). A failed
+  install shows its reason in plain language above Plan install…. Managed installs have a
+  Remove icon button; its confirmation names the directory it deletes.
+- **States:** no workspace ("Open a folder to see the toolchains it needs" + Open Folder…);
+  detecting; no provider applies (lists the available providers); detection failed (+ Retry);
+  the folder's own providers untrusted (Trust this folder's providers, with why it matters);
+  providers with manifest errors.
+- **Install plan dialog**: title "Install <name> <version>"; a "System install" warning for
+  system scope; one sentence per effect (system change, administrator prompt, managed-only);
+  the steps as a list named "Steps", one item per step with an icon per kind and every detail
+  the daemon returned (URL, size, SHA-256 digest or checksum URL, argv, variables, package
+  manager and packages); download size; **Install** (primary, focused) / Cancel. Cancel sends
+  nothing.
+- **Transport**: while an install runs and no task does, the transport shows "Installing
+  <name>: <step>" with a running LED and Stop (cancels the install).
+- Diagnostics rows and the Problems view arrive with M2-UI-003.
+
 ### 5.2 AI workspace (M3 epic 3.8) — `concepts/r-workspace-dark.png` (right dock)
 
 - Dock on the right (`--dock-w` 352, resizable 300–640), toggled with Ctrl+L.

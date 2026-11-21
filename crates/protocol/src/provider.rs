@@ -1,7 +1,7 @@
 //! Toolchain provider manifest (`provider.toml`). Normative prose:
 //! `docs/protocols/providers.md`.
 //!
-//! DRAFT 0.1: frozen when milestone M2 starts. A manifest is pure data: the
+//! Frozen for M2 (M2-ARCH-001; `axiom.provider/1`). A manifest is pure data: the
 //! daemon interprets it; a manifest can never run code other than the
 //! commands it declares, and each such command passes the permission gate.
 
@@ -110,6 +110,15 @@ pub enum InstallMethod {
         /// Extra environment variables; `${root}` expands to the install root.
         #[serde(default)]
         env: BTreeMap<String, String>,
+        /// Tool ids this method installs for another method to use (e.g. `rustup` for the
+        /// `delegate` method). Such a method only bootstraps: it is not offered on its own.
+        /// Added in M2-ENV-003.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        provides: Vec<String>,
+        /// argv run once after extraction, inside the new root, with `env`; `${root}` and
+        /// `${version}` expand. Never through a shell. Added in M2-ENV-003.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        setup: Vec<String>,
     },
     /// Delegate to the ecosystem's own installer (rustup, swiftly, uv...).
     /// Runs with managed HOME-style variables so nothing global is modified
@@ -126,6 +135,14 @@ pub enum InstallMethod {
         list_versions: Vec<String>,
         #[serde(default)]
         env: BTreeMap<String, String>,
+        /// Directories (relative to the install root) holding the installed executables.
+        /// Added in M2-ENV-003.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bin_dirs: Vec<String>,
+        /// Where installable versions come from; absent = run `list_versions` through the
+        /// delegate. Added in M2-ENV-003.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        versions: Option<VersionSource>,
     },
     /// Install through the host's package manager. Always `system` scope and
     /// always requires explicit user approval.
@@ -152,7 +169,14 @@ pub enum VersionSource {
     Static { versions: Vec<String> },
     /// JSON document; `pointer` (RFC 6901, `*` wildcard for arrays) selects
     /// the version strings.
-    Json { url: String, pointer: String },
+    Json {
+        url: String,
+        pointer: String,
+        /// Removed from the front of each version (`v` for nodejs.org's `v22.11.0`); versions
+        /// without it are dropped. Added in M2-PROV-001.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        strip_prefix: String,
+    },
     /// GitHub releases of `owner/repo`; tags stripped of `tag_prefix`.
     GithubReleases {
         repo: String,
@@ -182,6 +206,10 @@ pub enum ArchiveFormat {
     TarXz,
     #[serde(rename = "zip")]
     Zip,
+    /// The download is the file itself (a single executable, e.g. `rustup-init`), placed at
+    /// the root under its URL's last path segment, executable. Added in M2-ENV-003.
+    #[serde(rename = "file")]
+    File,
 }
 
 /// Integrity is mandatory: an artifact without a verifiable SHA-256 is not

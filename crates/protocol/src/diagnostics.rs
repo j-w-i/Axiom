@@ -1,6 +1,8 @@
 //! Normalised build/tool diagnostics. Produced by diagnostic parsers in the
 //! build engine (M2) and consumed by the Problems view, agents and the
-//! verification pipeline. DRAFT until milestone M2 starts.
+//! verification pipeline. Frozen for M2 (M2-ARCH-001): carried by `build/diagnostics`.
+//! A diagnostic located outside the workspace (a dependency's source, a toolchain file)
+//! has no `location`; its text stays in `message`/`rendered`.
 
 use crate::WorkspacePath;
 use schemars::JsonSchema;

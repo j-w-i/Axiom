@@ -3,6 +3,7 @@
 
 import { useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
 import { EditorArea } from "../components/EditorArea";
+import { attentionCount, EnvironmentPage, EnvironmentsSide } from "../components/Environments";
 import { Explorer } from "../components/Explorer";
 import { OutputPanel, type OutputPanelHandle } from "../components/OutputPanel";
 import { Welcome } from "../components/Welcome";
@@ -15,6 +16,7 @@ import { IconButton } from "../ui/primitives";
 import type { ShellContext } from "./actions";
 import { clampLayout, defaultLayout, LayoutStore, LIMITS, maxSizes } from "./layout";
 import { MOD } from "./platform";
+import { Rail } from "./Rail";
 import { focusEditor } from "./shortcuts";
 
 /** A region's exit lasts --dur-1 (90 ms) in Standard; Presence makes it 0 in Reduced and Off. */
@@ -88,8 +90,9 @@ const regionOf = (el: EventTarget | null): string | undefined =>
   (el instanceof Element ? el.closest<HTMLElement>("[data-region]")?.dataset.region : undefined) ?? undefined;
 
 export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellContext; layout: LayoutHandle }) {
-  const { workspace, documents, tasks } = ctx.app;
-  const { ws, ready } = ctx;
+  const { workspace, documents, tasks, environments } = ctx.app;
+  const { ws, ready, destination } = ctx;
+  const envPage = destination === "environments";
   const root = useRef<HTMLDivElement>(null);
   const dirtyPaths = useMemo(() => new Set(ctx.docs.docs.filter((d) => d.dirty).map((d) => d.path)), [ctx.docs.docs]);
   const layout = clampLayout(useSyncExternalStore(store.subscribe, store.get), windowSize());
@@ -109,23 +112,34 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
   };
   return (
     <div className="workbench" ref={root} style={style} onFocus={onFocus} onBlur={onBlur}>
+      <Rail current={destination} onSelect={ctx.setDestination} attention={ws.id ? () => attentionCount(environments) : () => 0} subscribe={environments.subscribe} />
       {side.mounted && (
         <>
           <Panel
             className="sidebar motion-in-left"
-            title="Files"
+            title={envPage ? "Environments" : "Files"}
             region="files"
             phase={side.phase}
             meta={ws.name || undefined}
             tools={
               ws.id ? (
-                <IconButton label="Refresh explorer" onClick={() => workspace.applyChanges([""])}>
-                  <Icon.Refresh />
-                </IconButton>
+                envPage ? (
+                  <IconButton label="Detect toolchains again" onClick={() => void environments.refresh()}>
+                    <Icon.Refresh />
+                  </IconButton>
+                ) : (
+                  <IconButton label="Refresh explorer" onClick={() => workspace.applyChanges([""])}>
+                    <Icon.Refresh />
+                  </IconButton>
+                )
               ) : undefined
             }
           >
-            <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} onReopen={() => documents.requestOpenFolder(ws.root)} />
+            {/* The explorer stays mounted (expansion, scroll and its active row survive). */}
+            <div className="sidebar__view" hidden={envPage}>
+              <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} onReopen={() => documents.requestOpenFolder(ws.root)} />
+            </div>
+            {envPage && <EnvironmentsSide store={environments} />}
           </Panel>
           <Splitter
             orientation="vertical"
@@ -142,11 +156,15 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
       )}
       <main className="main">
         <div className="editor-column" data-region="editor">
-          {ws.id || ws.opening ? (
-            <EditorArea documents={documents} mod={MOD} />
-          ) : (
-            <Welcome recent={ws.recent} ready={ready} onOpenFolder={() => void ctx.openFolder()} onOpenRecent={(r) => documents.requestOpenFolder(r)} mod={MOD} />
-          )}
+          {/* The editor stays mounted (Monaco keeps its state) while the Environments page shows. */}
+          <div className="editor-column__files" hidden={envPage}>
+            {ws.id || ws.opening ? (
+              <EditorArea documents={documents} mod={MOD} />
+            ) : (
+              <Welcome recent={ws.recent} ready={ready} onOpenFolder={() => void ctx.openFolder()} onOpenRecent={(r) => documents.requestOpenFolder(r)} mod={MOD} />
+            )}
+          </div>
+          {envPage && <EnvironmentPage store={environments} hasWorkspace={!!ws.id} onOpenFolder={() => void ctx.openFolder()} />}
         </div>
         {panel.mounted && (
           <>
@@ -164,7 +182,15 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             />
             <div className="console-host" data-region="console">
               <div className="console-motion motion-in-up" data-phase={panel.phase}>
-                <OutputPanel ref={panelRef} tasks={tasks} workspace={workspace} ready={ready} onHide={ctx.togglePanel} />
+                <OutputPanel
+                  ref={panelRef}
+                  tasks={tasks}
+                  workspace={workspace}
+                  problems={ctx.app.problems}
+                  ready={ready}
+                  onHide={ctx.togglePanel}
+                  onOpenProblem={(d) => d.location && documents.openAt(d.location.file, d.location.line, d.location.column ?? 1)}
+                />
               </div>
             </div>
           </>

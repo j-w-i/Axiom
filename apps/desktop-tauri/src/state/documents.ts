@@ -154,6 +154,9 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     this.set({ editorReady: false });
   }
 
+  /** A revealPosition waiting for the editor surface to come up (see `ready`). */
+  private pendingReveal: RevealPositionPayload | null = null;
+
   private get editorUp(): boolean {
     return this.state.editorReady && this.port !== null;
   }
@@ -202,6 +205,20 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
       return;
     }
     void this.openInternal(path, false);
+  }
+
+  /** Opens (or activates) a document and puts the cursor at 1-based line and column, centred
+   * (bridge-1 `revealPosition`, which also activates). Used by the Problems view. */
+  openAt(path: string, line: number, column: number): void {
+    const reveal = () => {
+      if (this.index(path) < 0) return;
+      this.activate(path);
+      // The editor loads with the first document; until it is ready, keep the position.
+      if (this.editorUp) this.port?.revealPosition({ path, line, column });
+      else this.pendingReveal = { path, line, column };
+    };
+    if (this.index(path) >= 0) return reveal();
+    void this.openInternal(path, false).then(reveal);
   }
 
   private async openInternal(path: string, silent: boolean): Promise<void> {
@@ -329,16 +346,28 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     const port = this.port;
     if (!port) return;
     port.configure(this.appearance);
+    const loads: Promise<unknown>[] = [];
     for (const d of this.state.docs) {
       const snap = this.snapshots.get(d.path);
       if (snap !== undefined) {
         // After a renderer reload: unsaved text comes back from the last snapshot, marked dirty.
         port.openDocument({ path: d.path, text: snap, version: d.savedVersion, activate: false, dirty: true });
       } else {
-        void this.reloadFromDisk(d.path);
+        loads.push(this.reloadFromDisk(d.path));
       }
     }
     if (this.state.activePath) port.activateDocument({ path: this.state.activePath });
+    // A position asked for before the editor existed (openAt from Problems) goes in once the
+    // documents are in it.
+    const reveal = this.pendingReveal;
+    this.pendingReveal = null;
+    if (reveal) {
+      void Promise.all(loads).then(() => {
+        if (this.index(reveal.path) < 0 || !this.editorUp) return;
+        this.activate(reveal.path);
+        this.port?.revealPosition(reveal);
+      });
+    }
   }
 
   saveRequested(p: SaveRequestedPayload): void {

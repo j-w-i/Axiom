@@ -243,6 +243,47 @@ async fn cwd_and_env_are_applied() {
     assert!(out.contains(&shown), "{out}");
 }
 
+/// M2-ENV-005: a project environment reaches a task as a `PATH` in the env overlay. The
+/// overlay's `PATH` decides which program an argv names (the child's PATH, not the daemon's).
+#[tokio::test]
+async fn env_overlay_path_selects_the_program() {
+    let dir = std::env::temp_dir().join(format!("axiom-exec-overlay-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = if cfg!(windows) {
+        "axiomoverlaydemo.bat"
+    } else {
+        "axiomoverlaydemo"
+    };
+    let file = dir.join(program);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(&file, "#!/bin/sh\necho from-overlay\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    #[cfg(windows)]
+    std::fs::write(&file, "@echo from-overlay\r\n").unwrap();
+
+    // Not on the daemon's PATH: without the overlay the program is not found.
+    assert!(std::process::Command::new(program).output().is_err());
+
+    let mut dirs = vec![dir.clone()];
+    dirs.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let mut s = spec(Command::Argv(vec![program.into()]));
+    s.env.insert(
+        "PATH".into(),
+        std::env::join_paths(dirs)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    let c = run(s).await;
+    assert_eq!(c.stream(Stream::Stdout).trim(), "from-overlay");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test]
 async fn shell_command_runs_through_the_shell() {
     let c = run(spec(Command::Shell("echo one && echo two".into()))).await;
