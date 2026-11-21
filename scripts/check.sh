@@ -70,9 +70,12 @@ if [[ ( "$what" == all || "$what" == flutter ) && -f apps/desktop-flutter/pubspe
     fi
     echo "SKIPPED: the Flutter shell (flutter is not installed; see dev-setup.md). CI always runs it."
   else
-    step "flutter shell: dependencies (lockfile enforced), format, analyze, tests, licences"
+    step "flutter shell: dependencies (lockfile enforced), wire types, format, analyze, tests, licences"
+    # The client tests spawn the real daemon.
+    cargo build -q -p axiomd
     (cd apps/desktop-flutter && flutter pub get --enforce-lockfile >/dev/null \
-      && dart format --output=none --set-exit-if-changed lib test \
+      && dart run tool/gen_types.dart --check \
+      && dart format --output=none --set-exit-if-changed lib test tool \
       && flutter analyze --fatal-infos \
       && flutter test)
     python3 scripts/check_dart_licences.py apps/desktop-flutter >/dev/null

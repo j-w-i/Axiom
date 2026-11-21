@@ -1,8 +1,8 @@
 ---
 id: FL-CORE-001
 title: Dart daemon client: spawn and supervise axiomd, NDJSON JSON-RPC, generated wire types
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux verified, CI pending
 depends_on: [FL-ARCH-001]
 order: 521
 scope: apps/desktop-flutter/lib/daemon/, apps/desktop-flutter/tool/gen_types.dart, apps/desktop-flutter/test/

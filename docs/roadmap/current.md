@@ -12,6 +12,9 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
 - **FL-ARCH-001 implemented (2026-11-22):** `apps/desktop-flutter` (widgets layer only; a test
   rejects Material and Cupertino), `scripts/check.sh flutter` (format, analyze, tests,
   licences), `scripts/check_dart_licences.py`, the CI job on Ubuntu and macOS, the docs.
+- **FL-CORE-001 implemented (2026-11-22):** the Dart daemon client (lifecycle, wire order,
+  cancel, timeout, crash and restart, bounded shutdown) and generated wire types for all 170
+  definitions with typed method and notification descriptors; 10 tests against the real axiomd.
 
 ## M2 — Environments and builds: complete (2026-11-21)
 
