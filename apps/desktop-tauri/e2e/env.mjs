@@ -72,6 +72,10 @@ function snapshot(dir) {
   return out.sort();
 }
 
+/** Not the toolchain's: the daemon's download cache, and the shell's own preferences (written by
+ * the host when the palette or layout changes; D-X-2). */
+const notToolchain = (p) => !p.startsWith("cache") && !/^shell-local\.json(\.tmp)?$/.test(p);
+
 const appExpr = "window.__axiom";
 const row = `.env-table [data-provider="rust"]`;
 let wd;
@@ -129,7 +133,7 @@ try {
     Array.isArray(ready) && ready[1] === VERSION && ready[2].startsWith("managed") && existsSync(root),
     `${JSON.stringify(ready)} in ${timings.install.toFixed(1)} s`,
   );
-  const afterInstall = snapshot(dataDir).filter((p) => !p.startsWith("cache"));
+  const afterInstall = snapshot(dataDir).filter(notToolchain);
 
   // 4. cargo build inside it, from the palette; the error in Problems; Enter opens it.
   await wd.click(await wd.find('.rail [data-destination="files"]'));
@@ -174,7 +178,7 @@ try {
   const confirm = await wd.exec(`return document.querySelector('[data-testid=remove-toolchain] .dialog__body')?.textContent`);
   await wd.click(await wd.find("[data-testid=remove-toolchain] [data-action=remove]"));
   await wd.waitFor(`return document.querySelector(${JSON.stringify(row)})?.dataset.state === 'missing'`, [], 120000, "rust missing again");
-  const afterRemove = snapshot(dataDir).filter((p) => !p.startsWith("cache"));
+  const afterRemove = snapshot(dataDir).filter(notToolchain);
   const prefix = `toolchains/rust/${VERSION}`;
   const expected = afterInstall.filter((p) => p !== prefix && !p.startsWith(prefix + "/"));
   const removedOnly = JSON.stringify(afterRemove) === JSON.stringify(expected);
