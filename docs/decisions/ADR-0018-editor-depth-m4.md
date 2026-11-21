@@ -167,6 +167,12 @@ Commit, stage and push are **not** in M4 (milestones: "visible and diffable").
   handling in one place, and the daemon is that place. The relay would push both into every
   client.
 - **`monaco-languageclient`:** requires `monaco-vscode-api` (ADR-0004).
+- **Monaco 0.57's bundled `monaco.lsp.MonacoLspClient`** (found while implementing M4-LSP-002):
+  - it speaks to one server over a raw message transport and runs `initialize` itself, which
+    this ADR gives to the daemon;
+  - it syncs every Monaco model, of every language, to that server;
+  - it registers its providers for `language: "*"` when a server's capabilities carry no
+    document selector, so two servers in one editor would answer for each other's files.
 - **`gix`:** see §5.
 - **A terminal in the host (Tauri plugin):** the shell may not run processes (ADR-0002/0012), and
   terminals belong to a workspace in the daemon.

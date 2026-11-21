@@ -252,6 +252,10 @@ export class EditorSurface implements EditorPort {
     const position = { lineNumber: p.line, column: p.column };
     this.editor.setPosition(position);
     this.editor.revealPositionInCenter(position);
+    // Setting the position a fresh model already has (1:1) fires no cursor event: report it, so
+    // the status bar shows where the reveal landed.
+    const at = this.editor.getPosition();
+    if (at) this.store.cursorMoved(p.path, at.lineNumber, at.column, 0);
   }
 
   runCommand(p: { command: string }): void {

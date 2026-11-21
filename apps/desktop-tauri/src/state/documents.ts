@@ -221,6 +221,28 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     void this.openInternal(path, false).then(reveal);
   }
 
+  private readonly savedListeners = new Set<(path: string) => void>();
+
+  /** Called after each successful save (the language servers get `didSave`). */
+  onSaved(fn: (path: string) => void): () => void {
+    this.savedListeners.add(fn);
+    return () => this.savedListeners.delete(fn);
+  }
+
+  /** Opens a document as a tab without activating it (a rename or a code action changing a file
+   * that was not open). Resolves once it is open, or at once if it cannot be. */
+  async openInBackground(path: string): Promise<void> {
+    if (this.index(path) >= 0) return;
+    this.background.add(path);
+    try {
+      await this.openInternal(path, true);
+    } finally {
+      this.background.delete(path);
+    }
+  }
+
+  private readonly background = new Set<string>();
+
   private async openInternal(path: string, silent: boolean): Promise<void> {
     if (!this.workspace.isOpen || this.opening.has(path)) return;
     this.opening.add(path);
@@ -245,10 +267,10 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
   private addDocument(path: string, text: string, version: string): void {
     if (this.index(path) >= 0) return;
     const doc: Doc = { path, title: titleOf(path), dirty: false, savedVersion: version, changedOnDisk: false };
-    const activate = this.state.activePath === "" || !this.restoring;
+    const activate = (this.state.activePath === "" || !this.restoring) && !this.background.has(path);
     this.set({ docs: [...this.state.docs, doc], banner: "" });
     if (this.editorUp) this.port?.openDocument({ path, text, version, activate, dirty: false });
-    if (activate || !this.state.activePath) this.setActive(path);
+    if (activate || (!this.state.activePath && !this.background.has(path))) this.setActive(path);
     this.scheduleTabSave();
   }
 
@@ -442,6 +464,7 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     if (this.index(path) >= 0) {
       this.updateDoc(path, { savedVersion: version, changedOnDisk: false });
       if (this.editorUp) this.port?.documentSaved({ path, version });
+      for (const fn of [...this.savedListeners]) fn(path);
     }
     this.awaitingSave.delete(path);
     if (this.awaitingSave.size === 0 && this.afterSave) {

@@ -17,6 +17,13 @@ const ctx = {
     tasks: { canRun: false },
     settings: {},
     environments: { subscribe: () => noop, activeInstall: null },
+    // The active file's language server has failed: the status bar offers Restart (M4-LSP-002).
+    lsp: {
+      subscribe: () => noop,
+      getSnapshot: () => ({ servers: [], problems: {}, progress: {}, languages: {} }),
+      serverForPath: () => ({ serverId: "rust-analyzer", providerId: "rust", languages: ["rust"], state: "failed", detail: "It crashed." }),
+      restart: async () => {},
+    },
   },
   ready: true,
   hasDoc: true,

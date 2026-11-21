@@ -1001,7 +1001,7 @@ try {
         .catch(() => null);
       check(
         "25b problems click to source: Enter on the E0308 row opens src/main.rs at line 2, column 18",
-        /^Error: mismatched types \(E0308\) at src\/main\.rs:2:18$/.test(row.name ?? "") && row.file === "src/main.rs" && row.selected === "true" && opened !== null,
+        /^Error: mismatched types \(E0308\) at src\/main\.rs:2:18, from rustc$/.test(row.name ?? "") && row.file === "src/main.rs" && row.selected === "true" && opened !== null,
         `${JSON.stringify(row)} → ${opened}`,
       );
       await wd.click(await wd.find('[data-view=output]'));

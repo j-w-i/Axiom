@@ -9,6 +9,9 @@
 //!   returns what it got.
 //! - `fake/crash`: exits with status 3 at once.
 //! - `fake/echo`: returns its params.
+//! - `textDocument/rename`: every whole-word occurrence of the word at the position, in every
+//!   open document, becomes the new name.
+//! - `textDocument/formatting`: removes trailing spaces.
 //!
 //! `FAKE_LSP_LOG` (optional): every received method is appended there, one per line.
 
@@ -93,7 +96,8 @@ fn main() {
         };
         match method.as_str() {
             "initialize" => reply(json!({"capabilities":{
-                "textDocumentSync":1,"completionProvider":{},"definitionProvider":true,"hoverProvider":true},
+                "textDocumentSync":1,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"hoverProvider":true,
+                "renameProvider":true,"documentFormattingProvider":true},
                 "serverInfo":{"name":"fake-lsp","version":"0"}})),
             "textDocument/didOpen" => {
                 let td = &p["textDocument"];
@@ -187,6 +191,38 @@ fn main() {
                 }
                 reply(got);
             }
+            "textDocument/rename" => {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let (line, ch) = (p["position"]["line"].as_u64().unwrap_or(0) as usize, p["position"]["character"].as_u64().unwrap_or(0) as usize);
+                let new = p["newName"].as_str().unwrap_or_default();
+                let word = docs.get(uri).and_then(|(t, _)| word_at(t, line, ch)).unwrap_or_default();
+                let mut changes = serde_json::Map::new();
+                if !word.is_empty() {
+                    for (u, (t, _)) in &docs {
+                        let edits: Vec<Value> = occurrences(t, &word)
+                            .into_iter()
+                            .map(|(l, c)| json!({"range":{"start":{"line":l,"character":c},"end":{"line":l,"character":c + word.len()}},"newText":new}))
+                            .collect();
+                        if !edits.is_empty() {
+                            changes.insert(u.clone(), Value::Array(edits));
+                        }
+                    }
+                }
+                reply(json!({"changes": changes}));
+            }
+            "textDocument/formatting" => {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let text = docs.get(uri).map(|(t, _)| t.clone()).unwrap_or_default();
+                let edits: Vec<Value> = text
+                    .lines()
+                    .enumerate()
+                    .filter_map(|(i, l)| {
+                        let t = l.trim_end_matches(' ');
+                        (t.len() < l.len()).then(|| json!({"range":{"start":{"line":i,"character":t.len()},"end":{"line":i,"character":l.len()}},"newText":""}))
+                    })
+                    .collect();
+                reply(Value::Array(edits));
+            }
             "fake/crash" => std::process::exit(3),
             "fake/echo" => reply(p.clone()),
             "fake/fail" => {
@@ -207,4 +243,42 @@ fn main() {
             }
         }
     }
+}
+
+/// The identifier at a 0-based line and (ASCII) character.
+fn word_at(text: &str, line: usize, ch: usize) -> Option<String> {
+    let l = text.lines().nth(line)?;
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let bytes: Vec<char> = l.chars().collect();
+    if ch > bytes.len() {
+        return None;
+    }
+    let mut a = ch;
+    while a > 0 && is_word(bytes[a - 1]) {
+        a -= 1;
+    }
+    let mut b = ch;
+    while b < bytes.len() && is_word(bytes[b]) {
+        b += 1;
+    }
+    (a < b).then(|| bytes[a..b].iter().collect())
+}
+
+/// (line, character) of every whole-word occurrence (ASCII text).
+fn occurrences(text: &str, word: &str) -> Vec<(usize, usize)> {
+    let is_word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let mut out = Vec::new();
+    for (i, l) in text.lines().enumerate() {
+        let mut from = 0;
+        while let Some(k) = l[from..].find(word) {
+            let at = from + k;
+            let before = l[..at].chars().last();
+            let after = l[at + word.len()..].chars().next();
+            if !is_word(before) && !is_word(after) {
+                out.push((i, at));
+            }
+            from = at + word.len();
+        }
+    }
+    out
 }

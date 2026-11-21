@@ -146,6 +146,12 @@ this workspace". The header and its tools are memoised so an output batch re-ren
 rows (P12). D6 adopted: stderr `--text-muted`, gutter `▏` in `--warn` at 55%; `--danger` is used
 only by the failure status line and error rows. CSS in `styles/components/console.css`.
 
+**Problems (M4-LSP-002).** The Problems view lists the latest run of each provider task and the
+language servers' diagnostics together, grouped by file, each row labelled with its source in a
+muted mono label (`rustc`, `rustc (rust-analyzer)`, `typescript (typescript-language-server)`);
+the row's accessible name ends with ", from <source>". Server diagnostics update live as the
+servers publish them and disappear when a server stops.
+
 ### 2.5 Status bar (SHELL-004)
 
 Segments separated by `--line-mid` hairlines, 12 px muted text, hover overlay on
@@ -156,6 +162,7 @@ interactive segments:
 | Backend | LED (on/run while starting/err) + "axiomd 0.1.0" / "Connecting…" / "Backend stopped" | click: restart if stopped |
 | Task | while running: stepped spinner + label; afterwards the last outcome (existing `statusText`, e.g. "✖ Failed with exit code 101 in 4.8 s"). Only one of the transport and this segment animates (`motion-system.md` §5.3): the spinner here is static when the transport is visible | click: show the console |
 | **Hint line** (flex) | hovered or focused control's `data-hint`: "Action — Shortcut", shortcut as keycaps; idle: empty | none; `aria-live="off"` |
+| Language server (M4-LSP-002) | the active document's server: LED + its id ("rust-analyzer"), "…: starting…", its `$/progress` title while it works ("rust-analyzer: Indexing"), "…: not installed" (the hint is the install command), "…: failed — Restart" / "…: stopped — Restart". Nothing for a language without a server | click (failed/stopped): restart it |
 | Cursor | Ln, Col | (M4: go to line) |
 | Encoding, language | "UTF-8" (as today) and the Monaco language of the active document; an EOL segment needs line-ending data the documents store does not expose yet, so it is omitted (no new store field in M1.6) | — |
 

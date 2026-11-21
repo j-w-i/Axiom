@@ -66,7 +66,21 @@ export function positionText(d: Diagnostic): string {
   return `${l.file}:${l.line}${l.column ? `:${l.column}` : ""}`;
 }
 
+/** Another source of problems (language servers, M4-LSP-002). */
+export interface ProblemSource {
+  all(): Diagnostic[];
+  subscribe(fn: () => void): () => void;
+}
+
 export class ProblemsStore extends Observable<ProblemsState> {
+  private sources: ProblemSource[] = [];
+
+  /** Merges a source's problems into `all()`; its changes notify this store's subscribers. */
+  attach(source: ProblemSource): void {
+    this.sources.push(source);
+    source.subscribe(() => this.set({}));
+  }
+
   constructor(client: DaemonClient, workspace: WorkspaceStore) {
     super({ runs: {}, byTask: {} });
     client.onNotification<BuildDiagnostics>("build/diagnostics", (p) => {
@@ -92,8 +106,10 @@ export class ProblemsStore extends Observable<ProblemsState> {
     this.set({ runs: { ...this.state.runs, [key]: { taskId, label } }, byTask });
   }
 
-  /** Every current problem: the latest run of each provider task. */
+  /** Every current problem: the latest run of each provider task, then the attached sources'
+   * (language servers). */
   all(): Diagnostic[] {
-    return Object.values(this.state.runs).flatMap((r) => this.state.byTask[r.taskId]?.diagnostics ?? []);
+    const builds = Object.values(this.state.runs).flatMap((r) => this.state.byTask[r.taskId]?.diagnostics ?? []);
+    return [...builds, ...this.sources.flatMap((s) => s.all())];
   }
 }

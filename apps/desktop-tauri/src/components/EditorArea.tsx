@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject, type WheelEvent } from "react";
 import type { Doc, DocumentsStore } from "../state/documents";
+import type { LspStore } from "../state/lsp";
 import * as Icon from "../ui/icons";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { glyphFor } from "./Explorer";
@@ -13,7 +14,7 @@ import "../styles/components/tabs.css";
 // startup, so cold start and idle memory do not pay for it.
 const MonacoHost = lazy(() => import("./MonacoHost"));
 
-export function EditorArea({ documents, mod }: { documents: DocumentsStore; mod: string }) {
+export function EditorArea({ documents, lsp, mod }: { documents: DocumentsStore; lsp?: LspStore; mod: string }) {
   const s = useSyncExternalStore(documents.subscribe, documents.getSnapshot);
   // Load Monaco only once a document exists (sticky), after the frame that
   // shows the explorer: parsing ~4 MB of editor code must not delay first paint.
@@ -31,7 +32,7 @@ export function EditorArea({ documents, mod }: { documents: DocumentsStore; mod:
       <div className="editor-area">
         <ErrorBoundary label="editor">
           <Suspense fallback={null}>
-            {wantEditor && <MonacoHost documents={documents} hidden={s.docs.length === 0} />}
+            {wantEditor && <MonacoHost documents={documents} lsp={lsp} hidden={s.docs.length === 0} />}
           </Suspense>
         </ErrorBoundary>
         {s.docs.length === 0 && (

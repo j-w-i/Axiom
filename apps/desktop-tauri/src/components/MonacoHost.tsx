@@ -1,15 +1,20 @@
 import * as monaco from "monaco-editor";
 import { useEffect, useRef } from "react";
+import { EditorLsp } from "../editor/lsp/client";
 import { EditorSurface } from "../editor/surface";
 import type { DocumentsStore } from "../state/documents";
+import type { LspStore } from "../state/lsp";
 
 /** Mounts one Monaco editor for the app's lifetime and attaches it to the store. */
-export default function MonacoHost({ documents, hidden }: { documents: DocumentsStore; hidden: boolean }) {
+export default function MonacoHost({ documents, lsp, hidden }: { documents: DocumentsStore; lsp?: LspStore; hidden: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current) return;
     let surface: EditorSurface | null = null;
+    let language: EditorLsp | null = null;
     try {
+      // The language-server client first: it tracks the models the surface creates (M4-LSP-002).
+      if (lsp) language = new EditorLsp(lsp, documents);
       surface = new EditorSurface(ref.current, documents);
       documents.attachEditor(surface);
       surface.announceReady();
@@ -23,7 +28,8 @@ export default function MonacoHost({ documents, hidden }: { documents: Documents
     return () => {
       documents.detachEditor();
       surface?.dispose();
+      language?.dispose();
     };
-  }, [documents]);
+  }, [documents, lsp]);
   return <div ref={ref} className="editor-host" hidden={hidden} data-testid="editor" />;
 }

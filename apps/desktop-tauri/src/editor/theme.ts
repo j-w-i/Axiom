@@ -22,6 +22,7 @@ export const THEME_TOKENS = [
   "--editor-bg", "--editor-gutter", "--editor-line", "--editor-lnum", "--editor-lnum-active", "--editor-selection",
   "--editor-cursor", "--editor-guide", "--editor-guide-active",
   "--surface-overlay", "--line-strong", "--scroll-thumb", "--scroll-thumb-hover", "--warn", "--danger",
+  "--text", "--text-muted", "--accent-text", "--selected", "--hover",
 ] as const;
 export type ThemeToken = (typeof THEME_TOKENS)[number];
 
@@ -82,6 +83,32 @@ export function themeData(base: "vs" | "vs-dark", color: (token: ThemeToken) => 
       "editorOverviewRuler.border": none,
       "editorWarning.foreground": color("--warn"),
       "editorError.foreground": color("--danger"),
+      // Language-server widgets (M4-LSP-002): suggestions, hovers and the peek's lists use the
+      // shell's overlay and row colours, like the menus and the palette. Monaco's light defaults
+      // left the focused suggestion's text the colour of its row (1.03:1).
+      "editorSuggestWidget.background": color("--surface-overlay"),
+      "editorSuggestWidget.border": color("--line-strong"),
+      "editorSuggestWidget.foreground": color("--text"),
+      "editorSuggestWidget.selectedForeground": color("--text"),
+      "editorSuggestWidget.selectedIconForeground": color("--text"),
+      "editorSuggestWidget.selectedBackground": color("--selected"),
+      "editorSuggestWidget.highlightForeground": color("--accent-text"),
+      "editorSuggestWidget.focusHighlightForeground": color("--accent-text"),
+      "editorHoverWidget.background": color("--surface-overlay"),
+      "editorHoverWidget.border": color("--line-strong"),
+      "editorHoverWidget.foreground": color("--text"),
+      "editorHoverWidget.statusBarBackground": color("--surface-overlay"),
+      "list.hoverBackground": color("--hover"),
+      "list.hoverForeground": color("--text"),
+      "list.activeSelectionBackground": color("--selected"),
+      "list.activeSelectionForeground": color("--text"),
+      "list.focusBackground": color("--selected"),
+      "list.focusForeground": color("--text"),
+      "list.inactiveSelectionBackground": color("--selected"),
+      "list.inactiveSelectionForeground": color("--text"),
+      "list.highlightForeground": color("--accent-text"),
+      "list.focusHighlightForeground": color("--accent-text"),
+      "descriptionForeground": color("--text-muted"),
     },
   };
 }

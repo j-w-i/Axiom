@@ -133,6 +133,20 @@ jobs:
       # OpenAI-compatible server; "add a function and fix the build" through tools with the
       # scripted model and real cargo, checkpoints, a denied command, resume after a restart; an
       # MCP server's tools and an ACP agent (tests/helpers). Both Linux drivers.
+      # M4-LSP-002: language servers in the editor. fake-lsp always; the real rust-analyzer and
+      # typescript-language-server must run here (AXIOM_REQUIRE_LSP=1 fails their absence).
+      - name: Language servers for the end-to-end run (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          rustup component add rust-analyzer
+          npm install -g typescript-language-server@6.0.0 typescript@6.0.3
+      - name: End-to-end, language servers (lsp.mjs)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          AXIOM_REQUIRE_LSP: "1"
+        run: scripts/e2e.sh --no-build --driver all e2e/lsp.mjs
       - name: End-to-end, M3 exit scenario (agent.mjs)
         if: runner.os == 'Linux'
         shell: bash

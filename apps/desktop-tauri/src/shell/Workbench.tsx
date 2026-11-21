@@ -188,7 +188,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
           {/* The editor stays mounted (Monaco keeps its state) while the Environments page shows. */}
           <div className="editor-column__files" hidden={page}>
             {ws.id || ws.opening ? (
-              <EditorArea documents={documents} mod={MOD} />
+              <EditorArea documents={documents} lsp={ctx.app.lsp} mod={MOD} />
             ) : (
               <Welcome recent={ws.recent} ready={ready} onOpenFolder={() => void ctx.openFolder()} onOpenRecent={(r) => documents.requestOpenFolder(r)} onStartChat={() => ctx.setDestination("chat")} mod={MOD} />
             )}

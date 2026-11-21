@@ -5,6 +5,7 @@ import { DaemonClient, type Transport } from "../daemon/client";
 import { AgentStore } from "./agent";
 import { DocumentsStore } from "./documents";
 import { EnvironmentsStore } from "./environments";
+import { LspStore } from "./lsp";
 import { ProblemsStore } from "./problems";
 import { SettingsStore } from "./settings";
 import { TasksStore } from "./tasks";
@@ -19,6 +20,7 @@ export interface AppStores {
   environments: EnvironmentsStore;
   problems: ProblemsStore;
   agent: AgentStore;
+  lsp: LspStore;
 }
 
 export function createApp(transport: Transport): AppStores {
@@ -30,6 +32,8 @@ export function createApp(transport: Transport): AppStores {
   const environments = new EnvironmentsStore(client, workspace);
   const problems = new ProblemsStore(client, workspace);
   const agent = new AgentStore(client, workspace);
+  const lsp = new LspStore(client, workspace);
+  problems.attach(lsp);
   tasks.onProviderStart = (key, taskId, label) => problems.begin(key, taskId, label);
   // Once per launch: reopen the last workspace when the setting says so.
   let reopened = false;
@@ -39,5 +43,5 @@ export function createApp(transport: Transport): AppStores {
       void workspace.reopenLast();
     }
   });
-  return { client, workspace, documents, tasks, settings, environments, problems, agent };
+  return { client, workspace, documents, tasks, settings, environments, problems, agent, lsp };
 }
