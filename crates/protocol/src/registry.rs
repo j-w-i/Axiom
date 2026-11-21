@@ -39,9 +39,9 @@ where
     }
 }
 
-/// Every request method in protocol 0.2 (0.1 plus the M2 additions). Add new methods here.
+/// Every request method in protocol 0.3 (0.1, the M2 and the M3 additions). Add new methods here.
 pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
-    use crate::{build, env, fs, lifecycle, settings, task, workspace};
+    use crate::{agent, build, env, fs, lifecycle, settings, task, workspace};
     vec![
         m::<lifecycle::Initialize>(g),
         m::<lifecycle::Shutdown>(g),
@@ -69,12 +69,26 @@ pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
         m::<env::Trust>(g),
         m::<build::Tasks>(g),
         m::<build::Run>(g),
+        m::<agent::Models>(g),
+        m::<agent::ConfigureProvider>(g),
+        m::<agent::SessionCreate>(g),
+        m::<agent::SessionList>(g),
+        m::<agent::SessionOpen>(g),
+        m::<agent::Send>(g),
+        m::<agent::Cancel>(g),
+        m::<agent::Approve>(g),
+        m::<agent::Checkpoints>(g),
+        m::<agent::Restore>(g),
+        m::<agent::Tools>(g),
+        m::<agent::ToolCall>(g),
+        m::<agent::GetPolicy>(g),
+        m::<agent::SetPolicy>(g),
     ]
 }
 
-/// Every notification in protocol 0.2. Add new notifications here.
+/// Every notification in protocol 0.3. Add new notifications here.
 pub fn notifications(g: &mut SchemaGenerator) -> Vec<NotificationSpec> {
-    use crate::{build, env, fs, lifecycle, settings, task};
+    use crate::{agent, build, env, fs, lifecycle, settings, task};
     vec![
         n::<lifecycle::Cancel>(g),
         n::<lifecycle::Log>(g),
@@ -85,6 +99,10 @@ pub fn notifications(g: &mut SchemaGenerator) -> Vec<NotificationSpec> {
         n::<env::Progress>(g),
         n::<env::Installed>(g),
         n::<build::Diagnostics>(g),
+        n::<agent::Event>(g),
+        n::<agent::ApprovalRequested>(g),
+        n::<agent::ApprovalResolved>(g),
+        n::<agent::Reveal>(g),
     ]
 }
 

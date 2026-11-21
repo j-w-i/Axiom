@@ -59,13 +59,34 @@ pub fn build_router(app: Arc<App>) -> Router {
     r
 }
 
+/// Protocol 0.3 methods registered by M3-ARCH-001 whose handlers later M3 tasks add. Each task
+/// that wires one removes it here; the last M3 backend task leaves this empty. Clients
+/// feature-detect from `initialize.methods` (ADR-0015 §1), which lists only served methods.
+#[doc(hidden)]
+pub const NOT_YET_SERVED: &[&str] = &[
+    "agent/models",
+    "agent/configureProvider",
+    "agent/sessionCreate",
+    "agent/sessionList",
+    "agent/sessionOpen",
+    "agent/send",
+    "agent/cancel",
+    "agent/approve",
+    "agent/checkpoints",
+    "agent/restore",
+    "agent/tools",
+    "agent/toolCall",
+    "agent/policy",
+    "agent/setPolicy",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axiom_store::Store;
     use std::collections::BTreeSet;
 
-    /// A protocol method can never be left unwired.
+    /// A protocol method can never be left unwired (beyond the explicit `NOT_YET_SERVED`).
     #[tokio::test]
     async fn router_serves_exactly_the_registry_methods() {
         let app = App::new(Store::open_in_memory().unwrap());
@@ -73,8 +94,15 @@ mod tests {
         let served: BTreeSet<String> = router.method_names().into_iter().collect();
         let expected: BTreeSet<String> = axiom_protocol::registry::method_names()
             .into_iter()
+            .filter(|m| !NOT_YET_SERVED.contains(m))
             .map(String::from)
             .collect();
         assert_eq!(served, expected);
+        for m in NOT_YET_SERVED {
+            assert!(
+                axiom_protocol::registry::method_names().contains(m),
+                "{m} is not a protocol method"
+            );
+        }
     }
 }

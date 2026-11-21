@@ -188,6 +188,53 @@ once the daemon serves it). Types: `crates/protocol/src/{env,build}.rs`.
 - The daemon keeps the last 20 runs per workspace in its store (provider, task, start,
   duration, outcome, error and warning counts); not exposed through the protocol yet.
 
+## Protocol 0.3 (M3, ADR-0015)
+
+Additive only, under the same rules as 0.2: every 0.1/0.2 method, notification and meaning is
+unchanged; the daemon reports `0.3`; clients feature-detect from `initialize.methods`. Types:
+`crates/protocol/src/agent.rs`. Behaviour: `docs/protocols/agents.md` (normative for the agent
+runtime).
+
+| Method | Params → Result | Errors (besides the generic ones) |
+|--------|-----------------|-----------------------------------|
+| `agent/models` | `ModelsParams → ModelsResult` | — (an unreachable provider is listed with `error`) |
+| `agent/configureProvider` | `ConfigureProviderParams → {}` | `invalid_params`, `unsupported` (no credential store) |
+| `agent/sessionCreate` | `SessionCreateParams → SessionInfo` | `workspace_not_open`, `not_found` |
+| `agent/sessionList` | `WorkspaceRef → SessionListResult` | `workspace_not_open` |
+| `agent/sessionOpen` | `SessionRef → SessionOpenResult` | `workspace_not_open`, `not_found` |
+| `agent/send` | `SendParams → {}` | `not_found`, `conflict` (turn running), `prerequisite_missing` |
+| `agent/cancel` | `SessionRef → {}` | `not_found` |
+| `agent/approve` | `ApproveParams → {}` | `not_found` |
+| `agent/checkpoints` | `SessionRef → CheckpointsResult` | `not_found` |
+| `agent/restore` | `RestoreParams → RestoreResult` | `not_found`, `checkpoint_conflict`, `prerequisite_missing` |
+| `agent/tools` | `WorkspaceRef → ToolsResult` | `workspace_not_open` |
+| `agent/toolCall` | `ToolCallParams → ToolCallResult` | `approval_denied`, `approval_required`, `invalid_params` |
+| `agent/policy` | `PolicyParams → PolicyResult` | — |
+| `agent/setPolicy` | `Policy → {}` | `invalid_params` |
+
+| Notification | Direction | Module |
+|--------------|-----------|--------|
+| `agent/event` | daemon → attached clients | `agent` |
+| `agent/approvalRequested` | daemon → approving clients | `agent` |
+| `agent/approvalResolved` | daemon → approving clients | `agent` |
+| `agent/reveal` | daemon → clients of the workspace | `agent` |
+
+- **`initialize`** gains two optional fields: `authToken` (required on the local socket,
+  ignored on stdio) and `capabilities.approvals` (the client shows approvals to a person).
+- **Attachment.** `agent/sessionOpen` and `agent/sessionCreate` attach the calling connection
+  to the session; it then receives every `agent/event` of that session until it disconnects.
+- **Turns.** `agent/send` responds once the turn is accepted; the turn's events follow and the
+  last one is `turnEnd`. `textDelta` events are ephemeral (never persisted or replayed).
+- **Approvals.** A tool call the policy answers with `ask` is announced with
+  `agent/approvalRequested` to every connection that declared `capabilities.approvals` and waits
+  for the first `agent/approve`; then `agent/approvalResolved` goes to the same connections. With
+  no approving connection the call fails with `approval_required` and does not run.
+- New error kinds: `approval_required` (-32023), `checkpoint_conflict` (-32024, details
+  `{conflicts}`), `model_error` (-32025, details `{kind}`).
+- Not in ADR-0015 §1's table, added by M3-ARCH-001: `agent/approvalResolved` (so every approving
+  client can drop a prompt someone else answered) and `agent/reveal` (the `editor.open` tool's
+  notification, ADR-0015 §2's tool list).
+
 ## Behavioural details
 
 ### `fs/writeFile` decision table
@@ -253,8 +300,9 @@ it to this table and the daemon's registry.
 - MINOR bump: new methods, notifications, optional fields, settings keys.
 - MAJOR bump: anything that could break an existing client. Needs an ADR.
 - The daemon must keep serving every method listed for the MAJOR it speaks.
-- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 added methods only, so a
-  0.1 client talking to a 0.2 daemon gets `"0.1"` and unchanged behaviour.
+- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 and 0.3 added methods
+  and optional fields only, so a 0.1 client talking to a 0.3 daemon gets `"0.1"` and unchanged
+  behaviour.
 
 ## Example session
 

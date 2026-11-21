@@ -39,6 +39,22 @@ pub struct InitializeParams {
     /// Highest protocol version the client speaks, `MAJOR.MINOR`.
     pub protocol_version: String,
     pub client: PeerInfo,
+    /// Protocol 0.3: required on the daemon's local socket (the token in
+    /// `<data dir>/axiomd.token`); ignored on stdio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
+    /// Protocol 0.3: what this client can do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<ClientCapabilities>,
+}
+
+/// Protocol 0.3 (ADR-0015).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCapabilities {
+    /// The client shows `agent/approvalRequested` to a person and answers with `agent/approve`.
+    #[serde(default)]
+    pub approvals: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

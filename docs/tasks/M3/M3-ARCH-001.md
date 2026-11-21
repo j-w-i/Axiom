@@ -1,8 +1,8 @@
 ---
 id: M3-ARCH-001
 title: Freeze the M3 contracts: protocol 0.3 agent/* types, agents.md, module edges
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: []
 order: 401
 scope: crates/protocol/, schemas/ (regenerated), apps/desktop-tauri/src/protocol.gen.ts (regenerated), docs/protocols/{ipc,agents}.md, docs/architecture/{modules,governance}.md, scripts/check_deps.py

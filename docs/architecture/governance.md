@@ -12,7 +12,8 @@ on one system. They bind every contributor, human or agent.
 | IPC protocol 0.2 additions | `crates/protocol/src/{env,build}.rs`, `docs/protocols/ipc.md` §Protocol 0.2 | **Frozen for M2** (M2-ARCH-001) |
 | Provider manifest | `crates/protocol/src/provider.rs`, `docs/protocols/providers.md` | **Frozen for M2** (M2-ARCH-001) |
 | Diagnostics | `crates/protocol/src/diagnostics.rs` | **Frozen for M2** (M2-ARCH-001) |
-| Agent tools & permissions | `docs/protocols/agents.md` | Draft until M3 starts |
+| IPC protocol 0.3 additions | `crates/protocol/src/agent.rs`, `docs/protocols/ipc.md` §Protocol 0.3 | **Frozen for M3** (M3-ARCH-001) |
+| Agent tools & permissions | `docs/protocols/agents.md` | **Frozen for M3** (M3-ARCH-001) |
 | Inspection | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | Draft until M5 starts |
 
 **Frozen** means: an implementation task may not change its meaning. If the

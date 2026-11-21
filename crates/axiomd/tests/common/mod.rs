@@ -36,6 +36,8 @@ pub fn client_info() -> InitializeParams {
             name: "axiomd-tests".into(),
             version: "0".into(),
         },
+        auth_token: None,
+        capabilities: None,
     }
 }
 
