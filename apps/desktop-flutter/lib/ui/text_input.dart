@@ -54,15 +54,37 @@ class AxTextInput extends StatefulWidget {
 }
 
 class _AxTextInputState extends State<AxTextInput> {
-  late final TextEditingController _controller = widget.controller ?? TextEditingController();
-  late final FocusNode _focus = widget.focusNode ?? FocusNode(debugLabel: widget.label);
+  TextEditingController? _ownController;
+  FocusNode? _ownFocus;
+  late TextEditingController _controller;
+  late FocusNode _focus;
   bool _focused = false;
 
   @override
   void initState() {
     super.initState();
+    _bind();
+  }
+
+  /// The widget's controller and focus node, or this state's own.
+  void _bind() {
+    _controller = widget.controller ?? (_ownController ??= TextEditingController());
+    _focus = widget.focusNode ?? (_ownFocus ??= FocusNode(debugLabel: widget.label));
     _focus.addListener(_onFocus);
     _controller.addListener(_onText);
+    _focused = _focus.hasFocus;
+  }
+
+  @override
+  void didUpdateWidget(AxTextInput old) {
+    super.didUpdateWidget(old);
+    // The element can be reused for another field (a form whose rows change): follow the new
+    // widget's controller and focus node.
+    if (old.controller != widget.controller || old.focusNode != widget.focusNode) {
+      _focus.removeListener(_onFocus);
+      _controller.removeListener(_onText);
+      _bind();
+    }
   }
 
   void _onFocus() {
@@ -83,8 +105,8 @@ class _AxTextInputState extends State<AxTextInput> {
   void dispose() {
     _focus.removeListener(_onFocus);
     _controller.removeListener(_onText);
-    if (widget.controller == null) _controller.dispose();
-    if (widget.focusNode == null) _focus.dispose();
+    _ownController?.dispose();
+    _ownFocus?.dispose();
     super.dispose();
   }
 
@@ -151,29 +173,39 @@ class _AxTextInputState extends State<AxTextInput> {
       ],
     );
     final ring = _focused ? c.focus : c.hairline;
+    // A press anywhere in the box focuses the field. A Listener, not a GestureDetector: the
+    // editable's own tap recognizer wins the gesture arena over an ancestor's.
+    Widget focusing(Widget child) => Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (_) {
+        if (!_focus.hasFocus) _focus.requestFocus();
+      },
+      child: child,
+    );
     if (widget.bezel) {
       // An outer bezel ring around a slightly lighter inner surface (the Antigravity reference).
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          color: c.recessed,
-          borderRadius: BorderRadius.circular(Metrics.radiusSheet),
-          border: Border.all(color: _focused ? c.focus : c.hairline, width: _focused ? 1.5 : 1),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(3),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: c.raised,
-              borderRadius: BorderRadius.circular(Metrics.radiusSheet - 3),
+      return focusing(
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: c.recessed,
+            borderRadius: BorderRadius.circular(Metrics.radiusSheet),
+            border: Border.all(color: _focused ? c.focus : c.hairline, width: _focused ? 1.5 : 1),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(3),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: c.raised,
+                borderRadius: BorderRadius.circular(Metrics.radiusSheet - 3),
+              ),
+              child: Padding(padding: const EdgeInsets.fromLTRB(12, 10, 8, 8), child: inner),
             ),
-            child: Padding(padding: const EdgeInsets.fromLTRB(12, 10, 8, 8), child: inner),
           ),
         ),
       );
     }
-    return GestureDetector(
-      onTap: _focus.requestFocus,
-      child: DecoratedBox(
+    return focusing(
+      DecoratedBox(
         decoration: BoxDecoration(
           color: c.recessed,
           borderRadius: BorderRadius.circular(Metrics.radiusControl),

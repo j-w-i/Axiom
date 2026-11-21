@@ -93,7 +93,7 @@ String languageName(String? lang) => switch (lang) {
   _ => lang,
 };
 
-final _modes = <String, Mode>{
+final highlightModes = <String, Mode>{
   'rust': langRust,
   'typescript': langTypescript,
   'javascript': langJavascript,
@@ -206,7 +206,7 @@ class CodeView extends StatelessWidget {
     final t = context.axiom;
     final c = t.colors;
     final y = c.syntax;
-    final mode = language == null ? null : _modes[language];
+    final mode = language == null ? null : highlightModes[language];
     return CodeEditor(
       controller: controller,
       focusNode: focusNode,
@@ -217,6 +217,7 @@ class CodeView extends StatelessWidget {
       wordWrap: wordWrap,
       onChanged: onChanged,
       padding: const EdgeInsets.only(left: 6, right: 12, top: 6, bottom: 64),
+      shortcutsActivatorsBuilder: const _AxiomShortcuts(),
       shortcutOverrideActions: {
         ...overrides,
         if (onSave != null)
@@ -268,4 +269,15 @@ class CodeView extends StatelessWidget {
       ),
     );
   }
+}
+
+/// re_editor's keys without the ones the shell owns: Mod+L is the AI dock (as in the Tauri
+/// shell), not "select line".
+class _AxiomShortcuts extends CodeShortcutsActivatorsBuilder {
+  const _AxiomShortcuts();
+
+  @override
+  List<ShortcutActivator>? build(CodeShortcutType type) => type == CodeShortcutType.lineSelect
+      ? null
+      : const DefaultCodeShortcutsActivatorsBuilder().build(type);
 }

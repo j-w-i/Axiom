@@ -1,8 +1,8 @@
 ---
 id: FL-CHAT-001
 title: Chat, first-party and under Files: conversations, streaming Markdown, models and agent harnesses (with or without a folder), approvals, the dock, checkpoints
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux verified (chat_test 3/3 in KWin and Xvfb, chat_frames_test 0 over budget); macOS in CI
 depends_on: [FL-SHELL-001, FL-EDIT-001]
 order: 530
 scope: apps/desktop-flutter/lib/chat/, crates/agent/ and crates/axiomd/ (harness scratch directory, harness install), crates/protocol/ (additive: agent/installHarness), apps/desktop-flutter/integration_test/chat_test.dart

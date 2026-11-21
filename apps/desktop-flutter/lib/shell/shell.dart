@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../app/app_state.dart';
+import '../chat/chat_page.dart';
 import '../daemon/client.dart';
 import '../daemon/protocol.g.dart' show Methods, SearchMode, SearchParams;
 import '../editor/code_view.dart';
@@ -77,7 +78,7 @@ class _ShellState extends State<Shell> {
         showAxDialog<String>(
           context: context,
           label: 'Unsaved changes',
-          builder: (context) => _Question(
+          builder: (context) => AxQuestion(
             title: 'Save the changes to $what?',
             detail: switch (p.kind) {
               'quit' => 'Your changes are lost if you quit without saving.',
@@ -99,7 +100,7 @@ class _ShellState extends State<Shell> {
         showAxDialog<String>(
           context: context,
           label: 'Changed on disk',
-          builder: (context) => _Question(
+          builder: (context) => AxQuestion(
             title: '$conflict changed on disk',
             detail: 'Another program changed the file since you opened it. Overwrite it with your version, or reload the version on disk (your changes are lost).',
             actions: const [('overwrite', 'Overwrite'), ('reload', 'Reload'), ('cancel', 'Cancel')],
@@ -175,12 +176,12 @@ class _ShellState extends State<Shell> {
     return d.active;
   }
 
-  void _showSettings() {
+  void _showSettings([String? section]) {
     unawaited(
       showAxDialog<void>(
         context: context,
         label: 'Settings',
-        builder: (_) => SettingsPage(app: app),
+        builder: (_) => SettingsPage(app: app, section: section ?? 'appearance'),
       ),
     );
   }
@@ -237,7 +238,27 @@ class _ShellState extends State<Shell> {
         id: 'files',
         title: 'Show Files',
         category: 'View',
+        shortcut: 'Mod+Shift+E',
         run: () => _go(Destination.files),
+      ),
+      Command(id: 'chat', title: 'Show Chat', category: 'View', run: () => _go(Destination.chat)),
+      Command(
+        id: 'toggle-dock',
+        title: 'Toggle AI Dock',
+        shortcut: 'Mod+L',
+        category: 'View',
+        enabled: () => ws.isOpen,
+        run: _toggleDock,
+      ),
+      Command(
+        id: 'new-chat',
+        title: 'New Chat',
+        shortcut: 'Mod+N',
+        category: 'View',
+        run: () {
+          app.agent.newChat();
+          _go(Destination.chat);
+        },
       ),
       Command(
         id: 'go-to-file',
@@ -375,11 +396,27 @@ class _ShellState extends State<Shell> {
     ];
   }
 
-  void _go(Destination d) => setState(() {
-    if (app.destination == d && app.sideVisible) return;
-    app.destination = d;
-    app.sideVisible = true;
-  });
+  /// The dock opens beside the editor (leaving Chat for the files when Chat is showing).
+  void _toggleDock() {
+    final open = app.dockVisible && app.destination != Destination.chat;
+    setState(() {
+      if (app.destination == Destination.chat) app.destination = Destination.files;
+      app.dockVisible = !open;
+    });
+    if (open) {
+      _editor.currentState?.focusGroup(1);
+    } else {
+      app.focusDock?.call();
+    }
+  }
+
+  void _go(Destination d) {
+    setState(() {
+      app.destination = d;
+      app.sideVisible = true;
+    });
+    if (d == Destination.chat) app.focusComposer?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -389,6 +426,9 @@ class _ShellState extends State<Shell> {
         _mod(LogicalKeyboardKey.keyK): const _CommandIntent('palette'),
         _mod(LogicalKeyboardKey.keyP, shift: true): const _CommandIntent('palette'),
         _mod(LogicalKeyboardKey.keyB): const _CommandIntent('toggle-side'),
+        _mod(LogicalKeyboardKey.keyE, shift: true): const _CommandIntent('files'),
+        _mod(LogicalKeyboardKey.keyL): const _CommandIntent('toggle-dock'),
+        _mod(LogicalKeyboardKey.keyN): const _CommandIntent('new-chat'),
         _mod(LogicalKeyboardKey.keyJ): const _CommandIntent('toggle-console'),
         _mod(LogicalKeyboardKey.comma): const _CommandIntent('settings'),
         _mod(LogicalKeyboardKey.keyO): const _CommandIntent('open-folder'),
@@ -439,12 +479,15 @@ class _ShellState extends State<Shell> {
                     const Groove(),
                     Expanded(
                       child: ListenableBuilder(
-                        listenable: app.prefs,
+                        listenable: Listenable.merge([app.prefs, app.workspace]),
                         builder: (context, _) => Row(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _Rail(
-                              selected: app.sideVisible ? app.destination : null,
+                              // Chat owns the main area, so it stays marked with the side bar hidden.
+                              selected: app.sideVisible || app.destination == Destination.chat
+                                  ? app.destination
+                                  : null,
                               onSelect: (d) {
                                 setState(() {
                                   if (app.destination == d && app.sideVisible) {
@@ -454,6 +497,9 @@ class _ShellState extends State<Shell> {
                                     app.sideVisible = true;
                                   }
                                 });
+                                if (d == Destination.chat && app.destination == d) {
+                                  app.focusComposer?.call();
+                                }
                               },
                             ),
                             const Groove(vertical: true),
@@ -487,7 +533,12 @@ class _ShellState extends State<Shell> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  Expanded(child: _Main(editor: _editor)),
+                                  Expanded(
+                                    child: _Main(
+                                      editor: _editor,
+                                      chat: app.destination == Destination.chat,
+                                    ),
+                                  ),
                                   if (app.consoleVisible) ...[
                                     AxSplitter(
                                       label: 'Resize the console',
@@ -507,6 +558,20 @@ class _ShellState extends State<Shell> {
                                 ],
                               ),
                             ),
+                            if (app.dockVisible &&
+                                app.workspace.isOpen &&
+                                app.destination != Destination.chat) ...[
+                              AxSplitter(
+                                label: 'Resize the AI dock',
+                                value: app.dockWidth,
+                                min: 300,
+                                max: 720,
+                                invert: true,
+                                defaultValue: AppState.dockDefault,
+                                onChanged: (v) => app.dockWidth = v,
+                              ),
+                              SizedBox(width: app.dockWidth, child: const ChatView(dock: true)),
+                            ],
                           ],
                         ),
                       ),
@@ -517,6 +582,24 @@ class _ShellState extends State<Shell> {
                 ),
               ),
               const Positioned(right: 0, bottom: 0, child: SheetWarmup()),
+              Positioned(
+                right: 16,
+                bottom: 36,
+                width: 440,
+                child: ListenableBuilder(
+                  listenable: Listenable.merge([app.prefs, app.workspace]),
+                  builder: (context, _) => ApprovalsStack(
+                    chatShowing:
+                        app.destination == Destination.chat ||
+                        (app.dockVisible && app.workspace.isOpen),
+                    onShow: (id) {
+                      final a = app.agent;
+                      if (a.activeId != id) unawaited(a.open(id));
+                      _go(Destination.chat);
+                    },
+                  ),
+                ),
+              ),
               if (_paletteOpen && !_filesMode)
                 Palette(
                   commands: commands(),
@@ -659,7 +742,10 @@ class _TitleRow extends StatelessWidget {
 // ---- rail ------------------------------------------------------------------------------------
 
 /// The destinations that exist so far (a destination appears with its page).
-const _railItems = [(Destination.files, 'Files', AxiomIcons.files, 'Mod+Shift+E')];
+const _railItems = <(Destination, String, IconData16, String?)>[
+  (Destination.files, 'Files', AxiomIcons.files, 'Mod+Shift+E'),
+  (Destination.chat, 'Chat', AxiomIcons.chat, null),
+];
 
 class _Rail extends StatefulWidget {
   const _Rail({required this.selected, required this.onSelect});
@@ -718,16 +804,45 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
                   for (final (d, label, icon, shortcut) in _railItems)
                     SizedBox(
                       height: _itemHeight,
-                      child: Center(
-                        child: AxIconButton(
-                          icon: icon,
-                          label: label,
-                          shortcut: shortcut,
-                          selected: widget.selected == d,
-                          size: 32,
-                          onPressed: () => widget.onSelect(d),
-                        ),
-                      ),
+                      child: d == Destination.chat
+                          // Chat carries the approvals waiting for the person.
+                          ? ListenableBuilder(
+                              listenable: AppScope.of(context).agent,
+                              builder: (context, _) {
+                                final n = AppScope.of(context).agent.approvals.length;
+                                return Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Center(
+                                      child: AxIconButton(
+                                        icon: icon,
+                                        label: n == 0 ? label : '$label, $n waiting for you',
+                                        shortcut: shortcut,
+                                        selected: widget.selected == d,
+                                        size: 32,
+                                        onPressed: () => widget.onSelect(d),
+                                      ),
+                                    ),
+                                    if (n > 0)
+                                      Positioned(
+                                        right: 4,
+                                        top: 4,
+                                        child: IgnorePointer(child: AxBadge(n)),
+                                      ),
+                                  ],
+                                );
+                              },
+                            )
+                          : Center(
+                              child: AxIconButton(
+                                icon: icon,
+                                label: label,
+                                shortcut: shortcut,
+                                selected: widget.selected == d,
+                                size: 32,
+                                onPressed: () => widget.onSelect(d),
+                              ),
+                            ),
                     ),
                 ],
               ),
@@ -759,15 +874,32 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
 
 // ---- side bar --------------------------------------------------------------------------------
 
-class _SideBar extends StatelessWidget {
+class _SideBar extends StatefulWidget {
   const _SideBar({required this.destination});
   final Destination destination;
+
+  @override
+  State<_SideBar> createState() => _SideBarState();
+}
+
+/// Each destination's page stays mounted once shown: switching back costs no rebuild.
+class _SideBarState extends State<_SideBar> {
+  final _shown = <Destination>{};
+
+  Widget _page(AppState app, Destination d) => switch (d) {
+    Destination.chat => const ChatSide(),
+    _ => FilesPage(
+      onOpenFile: (p, {bool focus = true}) => unawaited(app.documents.open(p, focus: focus)),
+    ),
+  };
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final t = context.axiom;
     final c = t.colors;
+    final d = widget.destination == Destination.chat ? Destination.chat : Destination.files;
+    _shown.add(d);
     return ColoredBox(
       color: c.bar,
       child: Column(
@@ -785,7 +917,9 @@ class _SideBar extends StatelessWidget {
                       builder: (context, _) => Semantics(
                         header: true,
                         child: Text(
-                          app.workspace.isOpen ? app.workspace.name : 'Files',
+                          d == Destination.chat
+                              ? 'Chat'
+                              : (app.workspace.isOpen ? app.workspace.name : 'Files'),
                           style: t.type.label,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -797,9 +931,20 @@ class _SideBar extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: FilesPage(
-              onOpenFile: (p, {bool focus = true}) =>
-                  unawaited(app.documents.open(p, focus: focus)),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                for (final x in const [Destination.files, Destination.chat])
+                  if (_shown.contains(x))
+                    Offstage(
+                      key: ValueKey(x),
+                      offstage: x != d,
+                      child: TickerMode(
+                        enabled: x == d,
+                        child: ExcludeFocus(excluding: x != d, child: _page(app, x)),
+                      ),
+                    ),
+              ],
             ),
           ),
         ],
@@ -810,8 +955,50 @@ class _SideBar extends StatelessWidget {
 
 // ---- main area -------------------------------------------------------------------------------
 
-class _Main extends StatelessWidget {
-  const _Main({required this.editor});
+class _Main extends StatefulWidget {
+  const _Main({required this.editor, required this.chat});
+  final GlobalKey<EditorAreaState> editor;
+
+  /// Chat owns the main area (the editor stays mounted behind it).
+  final bool chat;
+
+  @override
+  State<_Main> createState() => _MainState();
+}
+
+class _MainState extends State<_Main> {
+  bool _chatShown = false;
+
+  @override
+  Widget build(BuildContext context) {
+    _chatShown |= widget.chat;
+    final work = _Work(editor: widget.editor);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Offstage(
+          offstage: widget.chat,
+          child: TickerMode(
+            enabled: !widget.chat,
+            child: ExcludeFocus(excluding: widget.chat, child: work),
+          ),
+        ),
+        if (_chatShown)
+          Offstage(
+            offstage: !widget.chat,
+            child: TickerMode(
+              enabled: widget.chat,
+              child: ExcludeFocus(excluding: !widget.chat, child: const ChatView()),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The folder's work: the editor, or what to do when nothing is open.
+class _Work extends StatelessWidget {
+  const _Work({required this.editor});
   final GlobalKey<EditorAreaState> editor;
 
   @override
@@ -1045,50 +1232,6 @@ class _StatusBar extends StatelessWidget {
 }
 
 /// A question with its actions (unsaved changes, conflicts); pops the chosen action's id.
-class _Question extends StatelessWidget {
-  const _Question({required this.title, required this.detail, required this.actions});
-  final String title;
-  final String detail;
-  final List<(String, String)> actions;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.axiom;
-    return SizedBox(
-      width: 460,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Semantics(header: true, child: Text(title, style: t.type.title)),
-            const SizedBox(height: Metrics.s4),
-            Text(detail, style: t.type.small),
-            const SizedBox(height: Metrics.s6),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                for (final (i, (id, label)) in actions.indexed) ...[
-                  if (i > 0) const SizedBox(width: Metrics.s3),
-                  AxButton(
-                    label: label,
-                    autofocus: i == 0,
-                    kind: id == 'cancel'
-                        ? ButtonKind.quiet
-                        : (id == 'discard' ? ButtonKind.danger : ButtonKind.standard),
-                    onPressed: () => Navigator.of(context).pop(id),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// Go to line: a number, Enter goes there.
 class _GoToLine extends StatefulWidget {
   const _GoToLine({required this.lines});

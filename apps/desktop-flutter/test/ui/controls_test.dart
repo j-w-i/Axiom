@@ -35,6 +35,7 @@ bool ringVisible(WidgetTester tester, Finder of) => tester
     .any((r) => r.visible);
 
 void main() {
+  textInputClickTests();
   testWidgets('a button: Tab focuses it with a visible ring; Enter and Space activate it', (
     tester,
   ) async {
@@ -286,3 +287,59 @@ void main() {
 }
 
 void _noop() {}
+
+void textInputClickTests() {
+  testWidgets('text fields: a click focuses the field, and typing goes to the clicked one', (
+    tester,
+  ) async {
+    final a = TextEditingController();
+    final b = TextEditingController();
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    await pumpApp(
+      tester,
+      Column(
+        children: [
+          AxTextInput(label: 'First', controller: a),
+          const SizedBox(height: 20),
+          AxTextInput(label: 'Second', controller: b, obscure: true),
+        ],
+      ),
+    );
+    Finder field(String l) => find.descendant(
+      of: find.byWidgetPredicate((w) => w is AxTextInput && w.label == l),
+      matching: find.byType(EditableText),
+    );
+    await tester.tap(field('First'));
+    await tester.pump();
+    tester.testTextInput.enterText('one');
+    await tester.pump();
+    await tester.tap(field('Second'));
+    await tester.pump();
+    tester.testTextInput.enterText('two');
+    await tester.pump();
+    expect(a.text, 'one');
+    expect(b.text, 'two');
+  });
+
+  testWidgets('a text field reused for another controller follows the new one', (tester) async {
+    final a = TextEditingController(text: 'key');
+    final b = TextEditingController(text: 'url');
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    final which = ValueNotifier(a);
+    addTearDown(which.dispose);
+    await pumpApp(
+      tester,
+      ValueListenableBuilder(
+        valueListenable: which,
+        builder: (_, c, _) => AxTextInput(label: 'Field', controller: c),
+      ),
+    );
+    expect(find.text('key'), findsOneWidget);
+    which.value = b;
+    await tester.pump();
+    expect(find.text('url'), findsOneWidget);
+    expect(find.text('key'), findsNothing);
+  });
+}

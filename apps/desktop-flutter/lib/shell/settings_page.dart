@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../app/app_state.dart';
+import '../chat/models.dart';
 import '../daemon/client.dart';
 import '../state/settings.dart';
 import '../ui/controls.dart';
@@ -15,23 +16,26 @@ import '../ui/theme.dart';
 import '../ui/tokens.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, required this.app});
+  const SettingsPage({super.key, required this.app, this.section = 'appearance'});
   final AppState app;
+
+  /// The section shown first.
+  final String section;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  String _section = 'appearance';
+  late String _section = widget.section;
 
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
     final s = widget.app.settings;
     return SizedBox(
-      width: 640,
-      height: 440,
+      width: 680,
+      height: 560,
       child: ListenableBuilder(
         listenable: s,
         builder: (context, _) => Padding(
@@ -58,6 +62,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   TabItem(id: 'appearance', label: 'Appearance'),
                   TabItem(id: 'editor', label: 'Editor'),
                   TabItem(id: 'workspace', label: 'Workspace'),
+                  TabItem(id: 'models', label: 'Models'),
                   TabItem(id: 'about', label: 'About'),
                 ],
                 selected: _section,
@@ -208,6 +213,8 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ],
         );
+      case 'models':
+        return const ModelsPane();
       case 'workspace':
         return _row(
           context,

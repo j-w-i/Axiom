@@ -12,6 +12,7 @@ dependencies:
   file_selector: ^1.1.0
   flutter:
     sdk: flutter
+  markdown: ^7.3.1
   path_parsing: ^1.1.0
   re_editor: ^0.10.0
   re_highlight: ^0.0.3

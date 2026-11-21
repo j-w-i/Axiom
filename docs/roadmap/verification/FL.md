@@ -58,7 +58,52 @@ measured with requestAnimationFrame:
 
 The editor's own figures come with FL-EDIT-001.
 
+### Chat (FL-CHAT-001)
+`AXIOM_FRAMES_TARGET=chat_frames_test.dart scripts/frames.sh`, same setup, against the real
+daemon. The scripted model streams a long Markdown answer: 12 sections of prose, lists, tables
+and Rust blocks, 444 chunks 12 ms apart. Then the transcript is flung.
+
+| Interaction | Frames | Build p99 / max (ms) | Raster p99 / max (ms) | Over 16.7 ms |
+|-------------|-------:|---------------------:|----------------------:|-------------:|
+| Streaming the answer | 188 / 191 | 7.4 / 8.3, 7.2 / 7.4 | 4.9 / 7.3, 7.5 / 10.7 | 0 / 0 |
+| Transcript fling | 227 / 222 | 0.7 / 0.9, 0.6 / 1.1 | 6.5 / 7.8, 5.5 / 7.4 | 0 / 0 |
+
+**The first version missed the budget:** 5 frames over, build max 36.3 ms. Each delta re-parsed
+the whole answer and rebuilt the whole transcript. Three changes fixed it:
+- the Markdown is split into top-level pieces, each parsed and built once (`markdownPieces`);
+- the transcript is rebuilt only when its events change;
+- each item's widget is reused, and the streaming text sits where its finished item will.
+
+After the change, `frames_test.dart` (the shell's interactions) still has no frame over budget.
+
 ## End to end
+`chat_test.dart`: 3/3, in a private virtual KWin and in a private Xvfb, against the real daemon.
+- **No folder, the scripted model:**
+  - Chat is on the rail under Files and opens with a model chosen;
+  - Enter sends; streamed Markdown arrives with a table and a code block coloured per token;
+  - the conversation is titled from the first message;
+  - ↑ edits the message and replaces the branch; Regenerate replaces the answer;
+  - an attached image reaches the model and shows as a thumbnail;
+  - F2 renames; Delete asks first, then removes the conversation from the daemon too.
+- **A folder, the dock:**
+  - Mod+L opens the dock beside the editor, in the folder's scope;
+  - an edit asks with a focused card showing the diff, and the rail reads "Chat, 1 waiting for
+    you"; Enter allows it and the file changes; Esc denies the next one and the file stays;
+  - Restore puts the file back;
+  - a file the person changed after the agent is a conflict: it is listed, nothing is
+    restored, the person's text stays;
+  - Mod+L closes the dock.
+- **No folder, no model:**
+  - the first-run setup shows;
+  - an OpenAI-compatible server (a fake one on loopback) is added with a key. The key never
+    shows in the UI and reaches the server as a bearer, and the answer streams;
+  - Settings → Models shows "Key stored · 1 model"; removing the provider brings the setup
+    back;
+  - Claude Code is installed from the setup by a fake npm into `<data>/agents`;
+  - in Settings → Models, cancelling a hung install stops it within seconds;
+  - the fake ACP agent, picked in the model picker, answers in `<data>/scratch/<session>`. The
+    card names it as an external agent, and its write happens only after Allow once.
+
 `apps/desktop-flutter/scripts/e2e.sh shell_test.dart`: 1/1, in a private virtual KWin and in a
 private Xvfb. It covers connecting, opening a folder, the ignored entries, the explorer by
 keyboard, the hint line, the palette, Mod+B, the splitter's keys, Settings, and a restart that

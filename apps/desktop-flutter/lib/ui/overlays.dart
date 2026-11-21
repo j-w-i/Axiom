@@ -465,43 +465,94 @@ class ToastHostState extends State<ToastHost> {
         Positioned(
           right: Metrics.s6,
           bottom: Metrics.s7 + Metrics.statusBarHeight,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final (id, message, kind) in _toasts)
-                Padding(
-                  key: ValueKey(id),
-                  padding: const EdgeInsets.only(top: Metrics.s4),
-                  child: Semantics(
-                    liveRegion: true,
-                    label: '${kind == ToastKind.error ? 'Error: ' : ''}$message',
-                    excludeSemantics: true,
-                    child: Sheet(
-                      radius: Metrics.radiusRaised,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          StatusDot(switch (kind) {
-                            ToastKind.info => DotState.running,
-                            ToastKind.ok => DotState.ok,
-                            ToastKind.error => DotState.error,
-                          }, ring: t.colors.sheet),
-                          const SizedBox(width: Metrics.s4),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 360),
-                            child: Text(message, style: t.type.body),
-                          ),
-                        ],
+          // Toasts only announce: a click goes to what is under them.
+          child: IgnorePointer(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (id, message, kind) in _toasts)
+                  Padding(
+                    key: ValueKey(id),
+                    padding: const EdgeInsets.only(top: Metrics.s4),
+                    child: Semantics(
+                      liveRegion: true,
+                      label: '${kind == ToastKind.error ? 'Error: ' : ''}$message',
+                      excludeSemantics: true,
+                      child: Sheet(
+                        radius: Metrics.radiusRaised,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            StatusDot(switch (kind) {
+                              ToastKind.info => DotState.running,
+                              ToastKind.ok => DotState.ok,
+                              ToastKind.error => DotState.error,
+                            }, ring: t.colors.sheet),
+                            const SizedBox(width: Metrics.s4),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 360),
+                              child: Text(message, style: t.type.body),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A question with its answers (`(id, label)`; the first is focused, `cancel` is quiet,
+/// `discard` and `delete` are dangerous). Pops the chosen id.
+class AxQuestion extends StatelessWidget {
+  const AxQuestion({super.key, required this.title, required this.detail, required this.actions});
+  final String title;
+  final String detail;
+  final List<(String, String)> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.axiom;
+    return SizedBox(
+      width: 460,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(header: true, child: Text(title, style: t.type.title)),
+            const SizedBox(height: Metrics.s4),
+            Text(detail, style: t.type.small),
+            const SizedBox(height: Metrics.s6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                for (final (i, (id, label)) in actions.indexed) ...[
+                  if (i > 0) const SizedBox(width: Metrics.s3),
+                  AxButton(
+                    label: label,
+                    autofocus: i == 0,
+                    kind: id == 'cancel'
+                        ? ButtonKind.quiet
+                        : (id == 'discard' || id == 'delete'
+                              ? ButtonKind.danger
+                              : ButtonKind.standard),
+                    onPressed: () => Navigator.of(context).pop(id),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

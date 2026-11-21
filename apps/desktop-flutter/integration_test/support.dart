@@ -43,10 +43,13 @@ Future<void> until(
   bool Function() cond, {
   Duration timeout = const Duration(seconds: 20),
   String what = 'condition',
+  String Function()? detail,
 }) async {
   final end = DateTime.now().add(timeout);
   while (!cond()) {
-    if (DateTime.now().isAfter(end)) fail('timed out waiting for $what');
+    if (DateTime.now().isAfter(end)) {
+      fail('timed out waiting for $what${detail == null ? '' : ' (${detail()})'}');
+    }
     await tester.pump(const Duration(milliseconds: 50));
   }
 }
@@ -88,6 +91,9 @@ final _physical = <LogicalKeyboardKey, PhysicalKeyboardKey>{
   LogicalKeyboardKey.f12: PhysicalKeyboardKey.f12,
   LogicalKeyboardKey.keyI: PhysicalKeyboardKey.keyI,
   LogicalKeyboardKey.keyZ: PhysicalKeyboardKey.keyZ,
+  LogicalKeyboardKey.keyN: PhysicalKeyboardKey.keyN,
+  LogicalKeyboardKey.keyE: PhysicalKeyboardKey.keyE,
+  LogicalKeyboardKey.delete: PhysicalKeyboardKey.delete,
 };
 
 Future<void> _down(WidgetTester t, LogicalKeyboardKey k) =>

@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../daemon/client.dart';
 import '../editor/lsp/lsp_editor.dart';
+import '../state/agent.dart';
 import '../state/documents.dart';
 import '../state/lsp.dart';
 import '../state/problems.dart';
@@ -49,6 +50,7 @@ class AppState {
     lspSync = LspSync(docs: documents, lsp: lsp);
     documents.onSaved = lspSync.saved;
     problems = ProblemsStore(lsp);
+    agent = AgentStore(client, workspace);
   }
 
   final AppArgs args;
@@ -60,15 +62,24 @@ class AppState {
   late final LspStore lsp;
   late final LspSync lspSync;
   late final ProblemsStore problems;
+  late final AgentStore agent;
 
   /// The hint line's text (the hovered or focused control's hint).
   final hint = ValueNotifier<String?>(null);
 
   /// Opens the palette (set by the shell).
   VoidCallback? openPalette;
-  VoidCallback? openSettings;
+
+  /// Opens Settings, at [section] when given (`models`, …).
+  void Function([String? section])? openSettings;
   Future<void> Function()? pickFolder;
   VoidCallback? openGoToFile;
+
+  /// Focuses the Chat composer (set by the Chat view once it exists).
+  VoidCallback? focusComposer;
+
+  /// Focuses the AI dock's composer (set by the dock while it is shown).
+  VoidCallback? focusDock;
 
   /// [daemonEnvironment]: extra variables for the daemon (the end-to-end suites' fake servers).
   static Future<AppState> create(AppArgs args, {Map<String, String>? daemonEnvironment}) async {
@@ -132,6 +143,15 @@ class AppState {
 
   double get consoleHeight => prefs.number('console.height', consoleDefault);
   set consoleHeight(double v) => prefs.set('console.height', v);
+
+  static const dockDefault = 380.0;
+
+  /// The AI dock beside the editor (Mod+L; workspace-spec.md §5.2): Chat in the folder's scope.
+  bool get dockVisible => prefs.flag('dock.visible', false);
+  set dockVisible(bool v) => prefs.set('dock.visible', v);
+
+  double get dockWidth => prefs.number('dock.width', dockDefault);
+  set dockWidth(double v) => prefs.set('dock.width', v);
 
   MotionMode get motion => settings.motion;
 }

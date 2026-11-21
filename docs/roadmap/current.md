@@ -38,6 +38,17 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
   - sync, diagnostic underlines and the Problems panel (the console region, Mod+J);
   - completion, hover, F12, F2 across files as one undo, formatting, the status segment;
   - `lsp_test.dart` against fake-lsp; the real servers required in CI on Ubuntu.
+- **FL-CHAT-001 implemented (2026-11-22):** Chat, first-party, on the rail under Files:
+  - conversations with or without a folder, streamed Markdown, edit, regenerate, images,
+    rename and delete;
+  - the AI dock beside the editor (Mod+L), approvals with the diff and a rail badge,
+    checkpoints and Restore with conflicts;
+  - the first-run setup and Settings → Models;
+  - the external agents (Claude Code, Codex, Gemini CLI) in the same picker; a missing one is
+    installed by the daemon into the data directory, and the install can be cancelled; an agent
+    without a folder works in a scratch folder;
+  - `chat_test.dart` 3/3; streaming a long answer with no frame over 16.7 ms at the owner's
+    scale.
 
 ## M2 — Environments and builds: complete (2026-11-21)
 
