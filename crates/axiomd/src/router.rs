@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::handlers::{agent, build, env, fs, settings, task, workspace};
+use crate::handlers::{agent, build, env, fs, sessions, settings, task, workspace};
 use axiom_protocol::{
     agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
     workspace as pws,
@@ -55,6 +55,16 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(pagent::SetPolicy, agent::set_policy);
     wire!(pagent::Approve, agent::approve);
     wire!(pagent::ToolCall, agent::tool_call, ctx);
+    wire!(pagent::SessionCreate, sessions::create, ctx);
+    wire!(pagent::SessionList, sessions::list);
+    wire!(pagent::SessionOpen, sessions::open, ctx);
+    wire!(pagent::SessionRename, sessions::rename);
+    wire!(pagent::SessionDelete, sessions::delete);
+    wire!(pagent::Image, sessions::image);
+    wire!(pagent::Send, sessions::send, ctx);
+    wire!(pagent::Cancel, sessions::cancel);
+    wire!(pagent::Checkpoints, sessions::checkpoints);
+    wire!(pagent::Restore, sessions::restore);
 
     let a = app.clone();
     r.on_initialize(move |params, notifier| {
@@ -73,30 +83,13 @@ pub fn build_router(app: Arc<App>) -> Router {
     r
 }
 
-/// Protocol 0.3 methods registered by M3-ARCH-001 whose handlers later M3 tasks add. Each task
-/// that wires one removes it here; the last M3 backend task leaves this empty. Clients
-/// feature-detect from `initialize.methods` (ADR-0015 §1), which lists only served methods.
-#[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &[
-    "agent/sessionCreate",
-    "agent/sessionList",
-    "agent/sessionOpen",
-    "agent/sessionRename",
-    "agent/sessionDelete",
-    "agent/image",
-    "agent/send",
-    "agent/cancel",
-    "agent/checkpoints",
-    "agent/restore",
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use axiom_store::Store;
     use std::collections::BTreeSet;
 
-    /// A protocol method can never be left unwired (beyond the explicit `NOT_YET_SERVED`).
+    /// A protocol method can never be left unwired.
     #[tokio::test]
     async fn router_serves_exactly_the_registry_methods() {
         let app = App::new(Store::open_in_memory().unwrap());
@@ -104,15 +97,8 @@ mod tests {
         let served: BTreeSet<String> = router.method_names().into_iter().collect();
         let expected: BTreeSet<String> = axiom_protocol::registry::method_names()
             .into_iter()
-            .filter(|m| !NOT_YET_SERVED.contains(m))
             .map(String::from)
             .collect();
         assert_eq!(served, expected);
-        for m in NOT_YET_SERVED {
-            assert!(
-                axiom_protocol::registry::method_names().contains(m),
-                "{m} is not a protocol method"
-            );
-        }
     }
 }

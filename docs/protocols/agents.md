@@ -193,6 +193,27 @@ created, updated).
   appends a `compaction` event; the journal keeps the original events.
 - Context: system prompt (tool rules, workspace name and root-relative layout), the workspace's
   `AGENTS.md` if present (capped at 32 KiB), the latest compaction summary, then the messages.
+- As built (M3-LOOP-001):
+  - Journal records are `event` (a wire `AgentEvent`), `assistant` (the exact blocks of one
+    model round, opaque ones included), `toolResults` and `attached` (attached file contents),
+    each with `v: 1`. The internal records carry `atSeq`, the newest event's seq.
+  - Every write is `sync_data`'d. A torn last line is dropped on read; any other bad line is an
+    error.
+  - **The loop:**
+    - It journals a `toolCall` (with its resolved targets) before the gate, and `toolResult`
+      after it.
+    - The turn's checkpoint is taken in the gate's before-execute hook, so a refused call
+      takes none. The post-state is recorded after each successful non-read call.
+    - At most 50 tool rounds per turn.
+    - A rate limit before any tool ran is retried once when the wait is ≤ 30 s.
+    - An incomplete round (an error, a cancel, or a stream that ended early) keeps its text
+      but drops its unconfirmed tool calls.
+  - **Compaction** when the last `usage` exceeds 75 % of the window, keeping the last two
+    turns.
+  - **Resume:** a session loaded with an open turn gets `interrupted` for each unanswered call
+    (and an error result for the model), then `turnEnd` (`error`).
+  - **External calls:** `agent/toolCall` writes are checkpointed too, under
+    `ext-<principal>`.
 
 ## External agents and MCP
 

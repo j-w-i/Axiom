@@ -3,11 +3,14 @@
 //! Depends only on `protocol` and `store`: tools reach the platform services through the
 //! implementations `axiomd` registers.
 
+pub mod agent_loop;
 pub mod checkpoint;
 pub mod credentials;
 pub mod gate;
+pub mod live;
 pub mod model;
 pub mod providers;
+pub mod session;
 pub mod tools;
 
 /// A stable key for a workspace root, used to name its sessions, checkpoints and audit log

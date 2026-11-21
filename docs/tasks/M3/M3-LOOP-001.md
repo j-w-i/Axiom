@@ -1,8 +1,8 @@
 ---
 id: M3-LOOP-001
 title: Agent loop and sessions: streaming, tools, cancellation, JSONL journal, resume, compaction
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: [M3-MODEL-002, M3-ARCH-002, M3-GATE-001, M3-CKPT-001]
 order: 408
 scope: crates/agent/, crates/axiomd/, crates/store/ (migration 4)

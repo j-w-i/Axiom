@@ -53,6 +53,11 @@ pub struct Expect {
     pub tool_result: Option<ExpectToolResult>,
     /// The last user message carries this many images.
     pub user_images: Option<usize>,
+    /// Some text block anywhere in the messages contains this (resume tests).
+    pub history_contains: Option<String>,
+    /// No tools are offered.
+    #[serde(default)]
+    pub no_tools: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -172,6 +177,26 @@ fn check(expect: &Expect, req: &TurnRequest) -> Result<(), String> {
                 "last user text {last_user:?} does not contain {s:?}"
             ));
         }
+    }
+    if let Some(h) = &expect.history_contains {
+        let found = req
+            .messages
+            .iter()
+            .flat_map(|m| &m.blocks)
+            .any(|b| match b {
+                Block::Text(t) => t.text.contains(h.as_str()),
+                Block::ToolResult { content, .. } => content.contains(h.as_str()),
+                _ => false,
+            });
+        if !found {
+            return Err(format!("no message contains {h:?}"));
+        }
+    }
+    if expect.no_tools && !req.tools.is_empty() {
+        return Err(format!(
+            "{} tools are offered, expected none",
+            req.tools.len()
+        ));
     }
     if let Some(n) = expect.user_images {
         let got = req

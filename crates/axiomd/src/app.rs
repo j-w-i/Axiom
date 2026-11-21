@@ -35,6 +35,12 @@ pub struct AgentServices {
     pub gate: axiom_agent::gate::Gate,
     /// Connections that declared `capabilities.approvals`.
     pub approvers: Arc<ConnApprovers>,
+    /// Open sessions (journals under `<data dir>/sessions/`).
+    pub sessions: axiom_agent::live::Sessions,
+    /// One shadow repository per workspace root (checkpoints).
+    pub shadows: Mutex<HashMap<PathBuf, Arc<axiom_agent::checkpoint::Shadow>>>,
+    /// Which connection is attached to which session (one forwarder each).
+    pub attached: Mutex<Vec<(axiom_protocol::agent::SessionId, Notifier)>>,
     /// Built-in tools (ADR-0015 §2), backed by this daemon's services.
     pub tools: axiom_agent::tools::Registry,
 }
@@ -91,7 +97,7 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
     }
 }
 
-fn agent_services(app: std::sync::Weak<App>) -> AgentServices {
+fn agent_services(app: std::sync::Weak<App>, data_dir: &std::path::Path) -> AgentServices {
     let approvers = Arc::new(ConnApprovers::default());
     let scripted = std::env::var_os(SCRIPTED_MODEL_ENV).and_then(|p| {
         match axiom_agent::model::scripted::ScriptedProvider::from_file(
@@ -116,6 +122,9 @@ fn agent_services(app: std::sync::Weak<App>) -> AgentServices {
         tools: crate::tools::registry(app),
         gate: axiom_agent::gate::Gate::new(approvers.clone()),
         approvers,
+        sessions: axiom_agent::live::Sessions::new(data_dir.join("sessions")),
+        shadows: Mutex::default(),
+        attached: Mutex::default(),
     }
 }
 
@@ -159,6 +168,7 @@ impl App {
             }
         };
         let installer = Arc::new(Installer::new(data_dir.clone(), http));
+        let sessions_dir = data_dir.clone();
         Arc::new_cyclic(|weak| App {
             store: Arc::new(store),
             workspaces: Workspaces::new(),
@@ -169,7 +179,7 @@ impl App {
                 builtin: Builtin::Embedded,
                 installer,
             },
-            agent: agent_services(weak.clone()),
+            agent: agent_services(weak.clone(), &sessions_dir),
             last_diagnostics: Mutex::default(),
             clients: Mutex::default(),
         })

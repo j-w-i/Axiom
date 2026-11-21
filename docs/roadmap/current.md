@@ -17,6 +17,7 @@ ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cl
 - **M3-ARCH-002 tested (2026-11-21):** protocol additions for Chat and external agents: workspace-free sessions, `agent/sessionRename|sessionDelete|image`, `fromTurn` + `rewind`, images (both adapters), `ProviderKind::Acp` with `command`/`env`.
 - **M3-GATE-001 tested (2026-11-21):** permission gate (policy with specificity, stricter-only workspace rules, session grants), approvals to connections that declared `capabilities.approvals`, the `call_tool` pipeline and audit log; `agent/policy|setPolicy|approve|toolCall` served.
 - **M3-CKPT-001 tested (2026-11-21):** shadow-git checkpoints through the `git` CLI (isolated env; user's `.git` byte-identical in tests), restore with per-file conflicts and an undo checkpoint; 0.94 s first / 21 ms later on this repository.
+- **M3-LOOP-001 tested (2026-11-21):** session journal, context (rewinds, compaction, images), the agent loop (tools through the gate, checkpoint before the first write of a turn, cancel, resume with repair), store migration 4; every protocol 0.3 method served (`NOT_YET_SERVED` removed). Scripted "add a function and fix the build" passes against real cargo.
 
 
 

@@ -167,6 +167,16 @@ pub struct Notifier {
 }
 
 impl Notifier {
+    /// The connection is gone.
+    pub fn is_closed(&self) -> bool {
+        self.tx.is_closed()
+    }
+
+    /// Whether both notifiers send on the same connection.
+    pub fn same_connection(&self, other: &Notifier) -> bool {
+        self.tx.same_channel(&other.tx)
+    }
+
     /// Queues a notification. Waits while the queue (1024 messages) is full:
     /// this is the backpressure path for task output.
     pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<(), Closed> {

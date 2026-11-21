@@ -345,6 +345,25 @@ pub async fn call_tool(
             );
         }
     };
+    run_prepared(
+        registry, gate, ctx, session, prepared, policies, hook, audit, started,
+    )
+    .await
+}
+
+/// The pipeline after `prepare` (the loop journals the call's targets in between).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_prepared(
+    registry: &Registry,
+    gate: &Gate,
+    ctx: &ToolCtx,
+    session: Option<&SessionId>,
+    prepared: Prepared,
+    policies: &Policies,
+    hook: &dyn BeforeExecute,
+    audit: Option<&PathBuf>,
+    started: Instant,
+) -> CallOutcome {
     let (name, effect, targets) = (
         prepared.name.clone(),
         prepared.effect,
@@ -416,7 +435,7 @@ impl CallOutcome {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn finish(
+pub(crate) fn finish(
     ctx: &ToolCtx,
     audit: Option<&PathBuf>,
     started: Instant,

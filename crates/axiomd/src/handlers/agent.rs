@@ -197,6 +197,24 @@ pub async fn tool_call(
     };
     let policies = policies(&app, &p.workspace_id).await?;
     let audit = audit_path(&app, ws.root());
+    let shadow = crate::handlers::sessions::shadow(&app, ws.root());
+    // Calls from outside a session keep their checkpoints under one key per principal.
+    let key: String = format!(
+        "ext-{}",
+        tctx.principal
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            })
+            .collect::<String>()
+    );
+    let hook = ExternalCheckpoint {
+        shadow: &shadow,
+        key: &key,
+        principal: &tctx.principal,
+    };
     let out = axiom_agent::gate::call_tool(
         &app.agent.tools,
         &app.agent.gate,
@@ -205,10 +223,15 @@ pub async fn tool_call(
         &p.tool,
         p.input,
         &policies,
-        &axiom_agent::gate::NoHook,
+        &hook,
         Some(&audit),
     )
     .await;
+    if out.effect != axiom_protocol::agent::Effect::Read && !out.is_error {
+        if let Err(e) = shadow.record_post(&key).await {
+            tracing::warn!("cannot record the post-state: {e}");
+        }
+    }
     if let Some(r) = out.refusal {
         return Err(RpcError::new(r.kind, r.message));
     }
@@ -218,4 +241,34 @@ pub async fn tool_call(
         is_error: out.is_error,
         truncated: out.output.truncated,
     })
+}
+
+/// A checkpoint before every writing call from outside a session (every write is preceded by
+/// one, whoever asks; ADR-0015 §5).
+struct ExternalCheckpoint<'a> {
+    shadow: &'a axiom_agent::checkpoint::Shadow,
+    key: &'a str,
+    principal: &'a str,
+}
+
+impl axiom_agent::gate::BeforeExecute for ExternalCheckpoint<'_> {
+    fn before<'b>(
+        &'b self,
+        p: &'b axiom_agent::tools::Prepared,
+    ) -> futures_util::future::BoxFuture<'b, Result<(), axiom_agent::tools::ToolError>> {
+        Box::pin(async move {
+            if p.effect == axiom_protocol::agent::Effect::Read {
+                return Ok(());
+            }
+            self.shadow
+                .create(
+                    self.key,
+                    &format!("before {} ({})", p.name, self.principal),
+                    0,
+                )
+                .await
+                .map(|_| ())
+                .map_err(axiom_agent::agent_loop::checkpoint_error)
+        })
+    }
 }

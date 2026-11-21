@@ -86,7 +86,6 @@ async fn initialize_lists_every_method_and_host_info() {
     let got: BTreeSet<&str> = r.methods.iter().map(String::as_str).collect();
     let mut want: BTreeSet<&str> = axiom_protocol::registry::method_names()
         .into_iter()
-        .filter(|m| !axiomd::NOT_YET_SERVED.contains(m))
         .collect();
     want.insert("initialize");
     want.insert("shutdown");

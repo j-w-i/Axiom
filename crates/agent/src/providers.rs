@@ -99,6 +99,29 @@ impl Providers {
         blocking(move || creds.get(&id)).await
     }
 
+    /// The capability profile of `model` on provider `id` (no network).
+    pub fn capabilities(
+        &self,
+        user: &[ProviderConfig],
+        id: &str,
+        model: &str,
+    ) -> Option<axiom_protocol::agent::Capabilities> {
+        let c = self.all(user).into_iter().find(|c| c.id == id)?;
+        let base = c.base_url.clone().unwrap_or_else(|| match c.kind {
+            ProviderKind::OpenaiChat => crate::model::openai::DEFAULT_BASE_URL.into(),
+            _ => String::new(),
+        });
+        Some(profiles::apply(
+            profiles::profile(c.kind, &base, model),
+            c.capabilities.as_ref(),
+        ))
+    }
+
+    /// The configuration of `id`.
+    pub fn config(&self, user: &[ProviderConfig], id: &str) -> Option<ProviderConfig> {
+        self.all(user).into_iter().find(|c| c.id == id)
+    }
+
     /// The provider for `id`, built (or taken from the cache) with its current key.
     pub async fn get(
         &self,

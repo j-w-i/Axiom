@@ -31,7 +31,29 @@ const MIGRATIONS: &[(u32, &str)] = &[(
        started_ms INTEGER NOT NULL, duration_ms INTEGER NOT NULL, outcome TEXT NOT NULL,
        errors INTEGER NOT NULL, warnings INTEGER NOT NULL);
      CREATE INDEX build_history_root ON build_history (root, id);",
+), (
+    4,
+    // M3-LOOP-001: the agent session index (the journals are files; ADR-0015 §9). `root` is
+    // NULL for a conversation without a workspace (ADR-0017).
+    "CREATE TABLE agent_session (
+       id TEXT PRIMARY KEY, root TEXT, title TEXT NOT NULL,
+       provider TEXT NOT NULL, model TEXT NOT NULL,
+       created_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL);
+     CREATE INDEX agent_session_root ON agent_session (root, updated_ms);",
 )];
+
+/// One agent session's index row (M3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRow {
+    pub id: String,
+    /// `None`: a conversation without a workspace.
+    pub root: Option<String>,
+    pub title: String,
+    pub provider: String,
+    pub model: String,
+    pub created_ms: u64,
+    pub updated_ms: u64,
+}
 
 /// Build runs kept per workspace.
 pub const BUILD_HISTORY_LIMIT: usize = 20;
@@ -326,6 +348,51 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Inserts or replaces a session's index row.
+    pub fn session_put(&self, row: &SessionRow) -> Result<(), StoreError> {
+        self.conn().execute(
+            "INSERT OR REPLACE INTO agent_session (id, root, title, provider, model, created_ms, updated_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                row.id,
+                row.root,
+                row.title,
+                row.provider,
+                row.model,
+                row.created_ms as i64,
+                row.updated_ms as i64
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn session_get(&self, id: &str) -> Result<Option<SessionRow>, StoreError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, root, title, provider, model, created_ms, updated_ms FROM agent_session WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map([id], session_row)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// A workspace's sessions (`None`: those without a workspace), newest first.
+    pub fn session_list(&self, root: Option<&str>) -> Result<Vec<SessionRow>, StoreError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, root, title, provider, model, created_ms, updated_ms FROM agent_session
+             WHERE root IS ?1 ORDER BY updated_ms DESC, id DESC",
+        )?;
+        let rows = stmt.query_map([root], session_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn session_delete(&self, id: &str) -> Result<bool, StoreError> {
+        Ok(self
+            .conn()
+            .execute("DELETE FROM agent_session WHERE id = ?1", [id])?
+            > 0)
+    }
+
     /// Whether the user trusts this workspace's own providers.
     pub fn workspace_trusted(&self, root: &str) -> Result<bool, StoreError> {
         let n: i64 = self.conn().query_row(
@@ -441,3 +508,15 @@ fn collect_values(
 
 #[cfg(test)]
 mod tests;
+
+fn session_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
+    Ok(SessionRow {
+        id: r.get(0)?,
+        root: r.get(1)?,
+        title: r.get(2)?,
+        provider: r.get(3)?,
+        model: r.get(4)?,
+        created_ms: r.get::<_, i64>(5)? as u64,
+        updated_ms: r.get::<_, i64>(6)? as u64,
+    })
+}
