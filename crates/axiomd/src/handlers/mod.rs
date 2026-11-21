@@ -8,4 +8,5 @@ pub mod sessions;
 pub mod settings;
 pub mod task;
 pub mod terminal;
+pub mod ui;
 pub mod workspace;

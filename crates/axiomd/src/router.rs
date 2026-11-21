@@ -1,6 +1,6 @@
 use crate::app::App;
 use crate::handlers::{
-    agent, build, env, fs, git, lsp, sessions, settings, task, terminal, workspace,
+    agent, build, env, fs, git, lsp, sessions, settings, task, terminal, ui, workspace,
 };
 use axiom_protocol::{
     agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
@@ -33,6 +33,11 @@ pub fn build_router(app: Arc<App>) -> Router {
         }};
     }
 
+    wire!(axiom_protocol::ui::InspectMode, ui::inspect_mode);
+    wire!(axiom_protocol::ui::TakeSnapshot, ui::snapshot);
+    wire!(axiom_protocol::ui::HitTest, ui::hit_test);
+    wire!(axiom_protocol::ui::NodeDetails, ui::node_details);
+    wire!(axiom_protocol::ui::Highlight, ui::highlight);
     wire!(pws::Open, workspace::open, ctx);
     wire!(pws::Close, workspace::close);
     wire!(pws::Recent, workspace::recent);
@@ -108,21 +113,11 @@ pub fn build_router(app: Arc<App>) -> Router {
 }
 
 /// Protocol 0.5 methods registered by M5-ARCH-001 whose handlers later M5 tasks add
-/// (M5-PREVIEW-001: `preview/*`; M5-INSPECT-001 and M5-VERIFY-001: `ui/*`). Each task that wires
+/// (M5-PREVIEW-001: `preview/*`; M5-VERIFY-001: `ui/verify`). Each task that wires
 /// one removes it here; the last M5 backend task leaves this empty. Clients feature-detect from
 /// `initialize.methods`, which lists only served methods.
 #[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &[
-    "preview/start",
-    "preview/stop",
-    "preview/list",
-    "ui/inspectMode",
-    "ui/snapshot",
-    "ui/hitTest",
-    "ui/nodeDetails",
-    "ui/highlight",
-    "ui/verify",
-];
+pub const NOT_YET_SERVED: &[&str] = &["preview/start", "preview/stop", "preview/list", "ui/verify"];
 
 #[cfg(test)]
 mod tests {

@@ -1,8 +1,8 @@
 ---
 id: M5-INSPECT-001
 title: crates/inspect: adapter WebSocket server, sessions, normalisation, source resolution
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux (cargo test -p axiom-inspect 6/6, -p axiomd --test inspect)
 depends_on: [M5-ARCH-001]
 order: 602
 scope: crates/inspect/, crates/axiomd/, Cargo.toml, deny.toml (if needed)

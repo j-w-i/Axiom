@@ -39,6 +39,8 @@ pub struct App {
     pub terminals: axiom_term::Terminals,
     /// The language-server event forwarder runs (started with the first router).
     pub lsp_forwarding: std::sync::atomic::AtomicBool,
+    /// Previews and their pages' inspection (M5, ADR-0019).
+    pub previews: crate::handlers::ui::Previews,
 }
 
 /// The agent runtime's daemon-wide state (M3).
@@ -216,6 +218,7 @@ impl App {
             git_watches: Mutex::default(),
             terminals: axiom_term::Terminals::default(),
             lsp_forwarding: std::sync::atomic::AtomicBool::new(false),
+            previews: crate::handlers::ui::Previews::default(),
         })
     }
 

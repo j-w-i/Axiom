@@ -248,10 +248,12 @@ The Tauri shell's controls, kept as the record of how it was built:
 
 ## Previews and the inspection adapter (M5; ADR-0019)
 - **The adapter socket** is a WebSocket the daemon listens on at `127.0.0.1` only, one port per
-  daemon. A page's adapter must send `inspect/hello` with the preview's **one-time token**
-  (128 random bits, minted by `preview/start`, given to the page only through the generated Vite
-  config) before anything else; any other first message, a wrong token, or a token already used
-  by a live session closes the connection. The token is never logged or sent to a client.
+  daemon. A page connects with its preview's **token** in the URL (128 random bits, minted by
+  `preview/start`, given to the page only through the generated Vite config). An unknown or
+  missing token is refused at the handshake (HTTP 401). The daemon then sends `inspect/hello`;
+  only after its answer is the connection the preview's session. The token stays valid while the
+  preview runs, so a reload reconnects and replaces the previous session; `preview/stop` voids it.
+  The token is never logged or sent to a client.
 - **The adapter is the user's app's code's peer, not trusted.** What it reports (tree, text,
   source stamps, errors) is data: source stamps are resolved only to paths inside the
   workspace (a stamp outside it is dropped), sizes are capped (5000 nodes, 200 characters of
