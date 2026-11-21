@@ -1032,6 +1032,8 @@ try {
   await wd.waitFor(`return ${appExpr}.settings.getSnapshot().editorFontSize === 15`, [], 3000, "font size");
   // Quit through the app's own path (flushes explorer + tab state, shuts the daemon down).
   await wd.execAsync(`const done = arguments[arguments.length-1]; ${appExpr}.workspace.flushState().then(() => ${appExpr}.documents.saveTabState()).then(() => done(true))`);
+  // What the daemon holds before the restart (for the macOS tab-restore failure, see below).
+  const savedTabs = await wd.execAsync(`const done = arguments[arguments.length - 1]; const w = ${appExpr}.workspace.getSnapshot(); ${appExpr}.client.request('workspace/getState', { workspaceId: w.id, keys: ['editor.openPaths', 'editor.activePath'] }).then(r => done({ ws: w.id, values: r.values, docs: ${appExpr}.documents.getSnapshot().docs.map(d => d.path) }), e => done(String(e)))`).catch((x) => String(x));
   await wd.quit();
   wd = null;
   await new Promise((r) => setTimeout(r, 500));
@@ -1041,7 +1043,7 @@ try {
   await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 2`, [], 8000, "tabs restored").catch(async (e) => {
     // Seen twice on macOS CI (M3, M4): what was stored and what the store holds, for the next time.
     const state = await wd.execAsync(`const done = arguments[arguments.length - 1]; const w = ${appExpr}.workspace.getSnapshot(); ${appExpr}.client.request('workspace/getState', { workspaceId: w.id, keys: ['editor.openPaths', 'editor.activePath'] }).then(r => done({ ws: w.id, values: r.values, docs: ${appExpr}.documents.getSnapshot().docs.map(d => d.path), banner: ${appExpr}.documents.getSnapshot().banner }), e => done(String(e)))`).catch((x) => String(x));
-    console.log("DIAG tabs restore:", JSON.stringify(state));
+    console.log("DIAG tabs restore:", JSON.stringify(state), "before the restart:", JSON.stringify(savedTabs));
     throw e;
   });
   const tabs = await wd.exec(`return [...document.querySelectorAll('[role=tab][data-path]')].map(t => t.dataset.path)`);
