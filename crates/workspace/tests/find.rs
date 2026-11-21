@@ -268,3 +268,49 @@ async fn ten_thousand_files_first_page_is_fast() {
     eprintln!("file list of 10 000 files: {} ms", t.elapsed().as_millis());
     assert_eq!(f.files.len(), 10_000);
 }
+
+/// The parallel walk does not change the answer: a truncated search holds the first matches in
+/// path order, every time.
+#[tokio::test]
+async fn truncated_results_are_the_first_in_path_order() {
+    let files: Vec<(String, String)> = (0..300)
+        .map(|i| {
+            (
+                format!("d{:02}/f{i:03}.txt", i % 37),
+                "hit\nhit\n".to_string(),
+            )
+        })
+        .collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    let (_d, w) = ws(&refs).await;
+    let mut want: Vec<String> = files.iter().map(|f| f.0.clone()).collect();
+    want.sort();
+    for _ in 0..5 {
+        let r = w
+            .find(
+                FindQuery {
+                    limit: 51,
+                    ..q("hit")
+                },
+                no(),
+            )
+            .await
+            .unwrap();
+        assert!(r.truncated);
+        assert_eq!(r.matches.len(), 51);
+        let got: Vec<(String, u32)> = r
+            .matches
+            .iter()
+            .map(|m| (m.path.0.clone(), m.line))
+            .collect();
+        let expect: Vec<(String, u32)> = want
+            .iter()
+            .flat_map(|p| [(p.clone(), 1), (p.clone(), 2)])
+            .take(51)
+            .collect();
+        assert_eq!(got, expect);
+    }
+}

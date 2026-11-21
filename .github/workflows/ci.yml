@@ -149,6 +149,11 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: scripts/e2e.sh --no-build --driver all e2e/search.mjs
+      # M4-UX-002: the split editor. Linux and macOS.
+      - name: End-to-end, split editor (split.mjs)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver all e2e/split.mjs
       # M4-LSP-002: language servers in the editor. fake-lsp always; the real rust-analyzer and
       # typescript-language-server must run here (AXIOM_REQUIRE_LSP=1 fails their absence).
       - name: Language servers for the end-to-end run (Linux)

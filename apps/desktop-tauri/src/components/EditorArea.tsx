@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject, type WheelEvent } from "react";
+import { lazy, Suspense, type CSSProperties, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject, type WheelEvent } from "react";
 import type { Doc, DocumentsStore } from "../state/documents";
 import type { LspStore } from "../state/lsp";
 import type { GitState, GitStore } from "../state/git";
 import "../styles/components/scm.css";
 import * as Icon from "../ui/icons";
+import { Splitter } from "../ui/panel";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { glyphFor } from "./Explorer";
 import { currentMotion } from "../ui/motion";
@@ -31,35 +32,143 @@ export function EditorArea({ documents, lsp, git, mod }: { documents: DocumentsS
     return () => cancelAnimationFrame(id);
   }, [wantEditor, s.docs.length]);
   const active = s.docs.find((d) => d.path === s.activePath);
+  // The right group (M4-UX-002): its editor's host element goes to MonacoHost.
+  const groups = useRef<HTMLDivElement>(null);
+  const [secondaryEl, setSecondaryEl] = useState<HTMLDivElement | null>(null);
+  const [splitW, setSplitW] = useState<number | null>(null);
+  const width = groups.current?.clientWidth ?? 1000;
+  const splitMax = Math.max(SPLIT_MIN, width - SPLIT_MIN);
+  const splitValue = Math.min(splitMax, Math.max(SPLIT_MIN, splitW ?? Math.round(width / 2)));
+  // The wrapper and the left group are always there, so the editor never remounts when the
+  // split comes and goes.
   return (
-    <>
-      <TabStrip documents={documents} docs={s.docs} activePath={s.activePath} marks={g.marks} />
-      {active && <Breadcrumbs path={active.path} />}
-      <div className="editor-area">
-        <ErrorBoundary label="editor">
-          <Suspense fallback={null}>
-            {wantEditor && <MonacoHost documents={documents} lsp={lsp} git={git} hidden={s.docs.length === 0} />}
-            {git && g.diff && <DiffHost key={g.diff} git={git} documents={documents} path={g.diff} />}
-          </Suspense>
-        </ErrorBoundary>
-        {s.docs.length === 0 && (
-          <div className="empty-editor" data-testid="empty-editor">
-            <dl className="empty-editor__keys">
-              {emptyShortcuts(mod).map(([label, keys]) => (
-                <div key={label} className="empty-editor__row">
-                  <dt>{label}</dt>
-                  <dd className="keys">
-                    {keys.map((k) => (
-                      <Kbd key={k}>{k}</Kbd>
-                    ))}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        )}
+    <div className="editor-groups" ref={groups} data-split={s.split ? "" : undefined} style={s.split ? ({ "--split-w": `${splitValue}px` } as CSSProperties) : undefined}>
+      <div className="editor-group" data-group="1">
+        <TabStrip documents={documents} docs={s.docs} activePath={s.activePath} marks={g.marks} />
+        {active && <Breadcrumbs path={active.path} />}
+        <div className="editor-area">
+          <ErrorBoundary label="editor">
+            <Suspense fallback={null}>
+              {wantEditor && <MonacoHost documents={documents} lsp={lsp} git={git} hidden={s.docs.length === 0} />}
+              {git && g.diff && <DiffHost key={g.diff} git={git} documents={documents} path={g.diff} />}
+            </Suspense>
+          </ErrorBoundary>
+          {s.docs.length === 0 && (
+            <div className="empty-editor" data-testid="empty-editor">
+              <dl className="empty-editor__keys">
+                {emptyShortcuts(mod).map(([label, keys]) => (
+                  <div key={label} className="empty-editor__row">
+                    <dt>{label}</dt>
+                    <dd className="keys">
+                      {keys.map((k) => (
+                        <Kbd key={k}>{k}</Kbd>
+                      ))}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+        </div>
       </div>
-    </>
+      {s.split && (
+        <>
+          <Splitter
+            orientation="vertical"
+            label="Resize the editor groups"
+            value={splitValue}
+            min={SPLIT_MIN}
+            max={splitMax}
+            defaultValue={Math.round(width / 2)}
+            target={groups}
+            cssVar="--split-w"
+            onCommit={setSplitW}
+          />
+          <div className="editor-group editor-group--right" data-group="2">
+            <SplitTabs documents={documents} split={s.split} docs={s.docs} marks={g.marks} />
+            <div className="editor-area">
+              <div ref={setSecondaryEl} className="editor-host" data-testid="editor-right" />
+            </div>
+          </div>
+        </>
+      )}
+      {wantEditor && <SecondaryLink documents={documents} el={s.split ? secondaryEl : null} active={s.split?.active ?? null} />}
+    </div>
+  );
+}
+
+const SPLIT_MIN = 240;
+
+/** Hands the right group's host element and active document to the editor surface. */
+function SecondaryLink({ documents, el, active }: { documents: DocumentsStore; el: HTMLDivElement | null; active: string | null }) {
+  useEffect(() => documents.setSecondaryHost(el), [documents, el]);
+  useEffect(() => documents.showSecondary(active), [documents, active, el]);
+  return null;
+}
+
+/** The right group's tabs (M4-UX-002): click or Enter shows one; Close removes it from this group
+ * (it stays open on the left); ←/→ move between them. */
+function SplitTabs({ documents, split, docs, marks }: { documents: DocumentsStore; split: { paths: string[]; active: string }; docs: Doc[]; marks: GitState["marks"] }) {
+  const refs = useRef<(HTMLDivElement | null)[]>([]);
+  return (
+    <div className="tabs tabs--right" role="tablist" aria-label="Right editor group">
+      {split.paths.map((path, i) => {
+        const d = docs.find((x) => x.path === path);
+        if (!d) return null;
+        const on = path === split.active;
+        const glyph = glyphFor(d.title);
+        return (
+          <div
+            key={path}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            className="tab"
+            role="tab"
+            aria-selected={on}
+            tabIndex={on ? 0 : -1}
+            title={path}
+            data-path={path}
+            data-dirty={d.dirty}
+            data-git={marks[path]?.kind}
+            data-hint={`${path} (right group)`}
+            onClick={() => documents.activateSplit(path)}
+            onKeyDown={(e) => {
+              const n = split.paths.length;
+              const to = e.key === "ArrowRight" ? (i + 1) % n : e.key === "ArrowLeft" ? (i + n - 1) % n : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : -1;
+              if (to >= 0) {
+                e.preventDefault();
+                documents.activateSplit(split.paths[to]!);
+                refs.current[to]?.focus();
+              }
+            }}
+          >
+            <span className="glyph" data-kind={glyph.kind} aria-hidden="true">
+              {glyph.label}
+            </span>
+            <span className="tab__title">{d.title}</span>
+            {marks[path] && (
+              <span className="tab__git" aria-hidden="true">
+                {marks[path]!.letter}
+              </span>
+            )}
+            <span
+              className="tab__close"
+              role="button"
+              data-hint="Close in this group"
+              aria-label={`Close ${d.title} in the right group`}
+              onClick={(e) => {
+                e.stopPropagation();
+                documents.closeInSplit(path);
+              }}
+            >
+              {d.dirty && <span className="tab__dot" aria-hidden="true" />}
+              <Icon.Close className="tab__x" width={12} height={12} />
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

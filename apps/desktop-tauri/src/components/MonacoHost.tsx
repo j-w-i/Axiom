@@ -21,6 +21,12 @@ export default function MonacoHost({ documents, lsp, git, hidden }: { documents:
       if (git) changes = new EditorGit(git);
       surface = new EditorSurface(ref.current, documents);
       documents.attachEditor(surface);
+      const sf = surface;
+      documents.connectSecondary({
+        attach: (el) => (el ? sf.attachSecondary(el, (p, l, c, n) => documents.secondaryCursor(p, l, c, n)) : sf.detachSecondary()),
+        show: (p) => sf.showSecondary(p),
+        focus: () => sf.focusSecondary(),
+      });
       surface.announceReady();
       // The code face is font-display: swap; once it has loaded, Monaco must
       // remeasure or the caret is placed with the fallback's metrics.
@@ -30,6 +36,7 @@ export default function MonacoHost({ documents, lsp, git, hidden }: { documents:
       documents.showBanner(`The editor failed to start: ${e instanceof Error ? e.message : String(e)}`);
     }
     return () => {
+      documents.connectSecondary(null);
       documents.detachEditor();
       surface?.dispose();
       language?.dispose();

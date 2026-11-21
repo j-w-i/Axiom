@@ -72,6 +72,8 @@ describe("shell commands", () => {
       ["find", "Edit", "Find", undefined, false],
       ["replace", "Edit", "Replace", undefined, false],
       ["format", "Edit", "Format Document", undefined, false],
+      ["splitRight", "View", "Split Editor Right", "Ctrl+\\", false], // added by M4-UX-002
+      ["unsplit", "View", "Close Right Group", undefined, false], // added by M4-UX-002
       ["chat", "View", "Open Chat", undefined, false], // added by M3-UI-001
       ["newChat", "View", "New Chat", "Ctrl+N", false],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
@@ -99,6 +101,8 @@ describe("shell commands", () => {
       ["find", "Edit", "Find", undefined, false],
       ["replace", "Edit", "Replace", undefined, false],
       ["format", "Edit", "Format Document", undefined, false],
+      ["splitRight", "View", "Split Editor Right", "Ctrl+\\", false], // added by M4-UX-002
+      ["unsplit", "View", "Close Right Group", undefined, false], // added by M4-UX-002
       ["chat", "View", "Open Chat", undefined, true], // added by M3-UI-001
       ["newChat", "View", "New Chat", "Ctrl+N", true],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
@@ -127,6 +131,8 @@ describe("shell commands", () => {
       ["find", "Edit", "Find", undefined, true],
       ["replace", "Edit", "Replace", undefined, true],
       ["format", "Edit", "Format Document", undefined, true],
+      ["splitRight", "View", "Split Editor Right", "Ctrl+\\", true], // added by M4-UX-002
+      ["unsplit", "View", "Close Right Group", undefined, false], // added by M4-UX-002
       ["chat", "View", "Open Chat", undefined, true], // added by M3-UI-001
       ["newChat", "View", "New Chat", "Ctrl+N", true],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],

@@ -24,6 +24,8 @@ export function allCommands(ctx: ShellContext): CommandEntry[] {
     { id: "find", group: "Edit", label: "Find", run: () => documents.runCommand("find"), enabled: hasDoc },
     { id: "replace", group: "Edit", label: "Replace", run: () => documents.runCommand("replace"), enabled: hasDoc },
     { id: "format", group: "Edit", label: "Format Document", run: () => documents.runCommand("format"), enabled: hasDoc },
+    { id: "splitRight", group: "View", label: "Split Editor Right", shortcut: `${MOD}+\\`, run: () => documents.splitRight(), enabled: hasDoc },
+    { id: "unsplit", group: "View", label: "Close Right Group", run: () => documents.unsplit(), enabled: !!ctx.docs.split },
     { id: "chat", group: "View", label: "Open Chat", run: () => ctx.setDestination("chat"), enabled: ready },
     { id: "newChat", group: "View", label: "New Chat", shortcut: `${MOD}+N`, run: () => (ctx.app.agent.newChat(), ctx.setDestination("chat")), enabled: ready },
     { id: "sidebar", group: "View", label: "Toggle Side Bar", shortcut: `${MOD}+B`, run: ctx.toggleSidebar },

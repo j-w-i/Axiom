@@ -276,84 +276,149 @@ fn find_blocking(
         )
     };
     let filter = overrides(root, q.include.as_deref(), q.exclude.as_deref())?;
-    let walker = ignore::WalkBuilder::new(root)
-        .hidden(false)
-        .git_global(false)
-        .git_ignore(true)
-        .git_exclude(true)
-        .ignore(true)
-        .require_git(false)
-        .parents(false)
-        .sort_by_file_path(|a, b| a.cmp(b))
-        .filter_entry(|e| e.file_name() != ".git")
-        .build();
-    let mut out = FindResult::default();
-    for entry in walker {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        let Ok(entry) = entry else { continue };
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
-        let Ok(rel) = entry.path().strip_prefix(root) else {
-            continue;
-        };
+    let builder = || {
+        let mut b = ignore::WalkBuilder::new(root);
+        b.hidden(false)
+            .git_global(false)
+            .git_ignore(true)
+            .git_exclude(true)
+            .ignore(true)
+            .require_git(false)
+            .parents(false)
+            .filter_entry(|e| e.file_name() != ".git");
+        b
+    };
+    let rel_of = |p: &std::path::Path| -> Option<String> {
+        let rel = p.strip_prefix(root).ok()?;
         if let Some(f) = &filter {
             if !f.matched(rel, false).is_whitelist() {
-                continue;
+                return None;
             }
         }
-        let rel_s = rel
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
-        let Some(re) = &re else {
+        Some(
+            rel.components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/"),
+        )
+    };
+    let mut out = FindResult::default();
+    let Some(re) = re else {
+        // The file list: sequential (cheap), in path order.
+        let mut b = builder();
+        b.sort_by_file_path(|a, c| a.cmp(c));
+        for entry in b.build() {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let Ok(entry) = entry else { continue };
+            if !entry.file_type().is_some_and(|t| t.is_file()) {
+                continue;
+            }
+            let Some(rel) = rel_of(entry.path()) else {
+                continue;
+            };
             if out.files.len() == limit {
                 out.truncated = true;
                 break;
             }
-            out.files.push(WorkspacePath(rel_s));
+            out.files.push(WorkspacePath(rel));
             out.files_searched += 1;
-            continue;
-        };
-        if entry.metadata().map(|m| m.len()).unwrap_or(u64::MAX) > MAX_FILE_BYTES {
-            continue;
         }
-        let Ok(bytes) = std::fs::read(entry.path()) else {
-            continue;
-        };
-        if bytes[..bytes.len().min(8192)].contains(&0) {
-            continue;
-        }
-        let Ok(text) = String::from_utf8(bytes) else {
-            continue;
-        };
-        out.files_searched += 1;
-        for (i, line) in text.lines().enumerate() {
-            for m in re.find_iter(line) {
-                if m.start() == m.end() {
-                    continue;
-                }
-                if out.matches.len() == limit {
-                    out.truncated = true;
-                    return Ok(out);
-                }
-                // The preview starts at most PREVIEW_BEFORE characters before the match.
-                let before: Vec<(usize, char)> = line[..m.start()].char_indices().collect();
-                let from = before.len().saturating_sub(PREVIEW_BEFORE);
-                let start_byte = before.get(from).map_or(m.start(), |(b, _)| *b);
-                let preview: String = line[start_byte..].chars().take(MAX_LINE_CHARS).collect();
-                out.matches.push(FindMatch {
-                    path: WorkspacePath(rel_s.clone()),
-                    line: i as u32 + 1,
-                    column: utf16_len(&line[..m.start()]) + 1,
-                    end_column: utf16_len(&line[..m.end()]) + 1,
-                    preview,
-                    preview_column: utf16_len(&line[start_byte..m.start()]) + 1,
-                });
+        return Ok(out);
+    };
+    // Text: files are read and matched on several threads; the results are put in path order
+    // afterwards, so the answer does not depend on scheduling.
+    // (matches per file, how many are held, whether any were dropped).
+    #[allow(clippy::type_complexity)]
+    let found: std::sync::Mutex<(Vec<(String, Vec<FindMatch>)>, usize, bool)> =
+        std::sync::Mutex::new((Vec::new(), 0, false));
+    let searched = std::sync::atomic::AtomicU32::new(0);
+    builder().build_parallel().run(|| {
+        Box::new(|entry| {
+            use ignore::WalkState;
+            if cancel.load(Ordering::Relaxed) {
+                return WalkState::Quit;
             }
+            let Ok(entry) = entry else {
+                return WalkState::Continue;
+            };
+            if !entry.file_type().is_some_and(|t| t.is_file()) {
+                return WalkState::Continue;
+            }
+            let Some(rel) = rel_of(entry.path()) else {
+                return WalkState::Continue;
+            };
+            if entry.metadata().map(|m| m.len()).unwrap_or(u64::MAX) > MAX_FILE_BYTES {
+                return WalkState::Continue;
+            }
+            let Ok(bytes) = std::fs::read(entry.path()) else {
+                return WalkState::Continue;
+            };
+            if bytes[..bytes.len().min(8192)].contains(&0) {
+                return WalkState::Continue;
+            }
+            let Ok(text) = String::from_utf8(bytes) else {
+                return WalkState::Continue;
+            };
+            searched.fetch_add(1, Ordering::Relaxed);
+            let mut ms = Vec::new();
+            for (i, line) in text.lines().enumerate() {
+                for m in re.find_iter(line) {
+                    if m.start() == m.end() {
+                        continue;
+                    }
+                    // The preview starts at most PREVIEW_BEFORE characters before the match.
+                    let before: Vec<(usize, char)> = line[..m.start()].char_indices().collect();
+                    let from = before.len().saturating_sub(PREVIEW_BEFORE);
+                    let start_byte = before.get(from).map_or(m.start(), |(b, _)| *b);
+                    let preview: String = line[start_byte..].chars().take(MAX_LINE_CHARS).collect();
+                    ms.push(FindMatch {
+                        path: WorkspacePath(rel.clone()),
+                        line: i as u32 + 1,
+                        column: utf16_len(&line[..m.start()]) + 1,
+                        end_column: utf16_len(&line[..m.end()]) + 1,
+                        preview,
+                        preview_column: utf16_len(&line[start_byte..m.start()]) + 1,
+                    });
+                }
+            }
+            if !ms.is_empty() {
+                let mut f = found.lock().unwrap_or_else(|p| p.into_inner());
+                f.0.push((rel, ms));
+                f.1 += f.0.last().map_or(0, |x| x.1.len());
+                // Bounded memory, same answer whatever the scheduling: past twice the limit, keep
+                // only the files that sort first (whole files) while they hold the limit.
+                if f.1 > limit * 2 {
+                    f.0.sort_by(|a, b| a.0.cmp(&b.0));
+                    let mut kept = 0;
+                    let mut cut = f.0.len();
+                    for (i, (_, m)) in f.0.iter().enumerate() {
+                        if kept >= limit {
+                            cut = i;
+                            break;
+                        }
+                        kept += m.len();
+                    }
+                    f.0.truncate(cut);
+                    f.1 = kept;
+                    f.2 = true;
+                }
+            }
+            WalkState::Continue
+        })
+    });
+    let (mut found, _, dropped) = found.into_inner().unwrap_or_else(|p| p.into_inner());
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    out.files_searched = searched.load(Ordering::Relaxed);
+    out.truncated = dropped;
+    for (_, ms) in found {
+        for m in ms {
+            if out.matches.len() == limit {
+                out.truncated = true;
+                return Ok(out);
+            }
+            out.matches.push(m);
         }
     }
     Ok(out)

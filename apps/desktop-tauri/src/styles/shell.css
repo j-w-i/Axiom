@@ -84,6 +84,24 @@
 
 
 
+/* Editor groups (M4-UX-002): the left group always, the right one beside it when split; the
+   left group's width is --split-w (the splitter's). */
+.editor-groups {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.editor-group {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.editor-groups[data-split] > .editor-group[data-group="1"] {
+  flex: none;
+  width: var(--split-w, 50%);
+}
+
 /* The editor area (moved from app.css by M1.6-QA-006). */
 .editor-area {
   position: relative;

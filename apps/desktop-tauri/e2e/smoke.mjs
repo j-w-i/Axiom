@@ -985,6 +985,8 @@ try {
         `options=${JSON.stringify(options.slice(0, 4))} outcome=${ran} rerun="${transport}" problems=${count}`,
       );
 
+      // The palette's scrim animates out; a fast build can finish before it is gone (CI).
+      await wd.waitFor(`return !document.querySelector('[data-testid=palette], .overlay')`, [], 5000, "palette gone");
       await wd.click(await wd.find('[data-view=problems]'));
       await wd.waitFor(`return !!document.querySelector('[data-testid=problems] .problem')`, [], 5000, "problems listed");
       const row = await wd.exec(

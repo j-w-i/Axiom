@@ -36,6 +36,9 @@ export function useAppShortcuts(ctx: ShellContext): void {
       // work on any layout. Monaco has no binding of its own for them (see the handoff table).
       else if (mod && !e.shiftKey && !e.altKey && e.code === "Digit0") focusRegion("files", ctx);
       else if (mod && !e.shiftKey && !e.altKey && e.code === "Digit1") focusRegion("editor", ctx);
+      // M4-UX-002: split the editor (Mod+\), and the right group (Mod+2).
+      else if (mod && !e.shiftKey && !e.altKey && e.code === "Backslash") { if (activePath) documents.splitRight(); }
+      else if (mod && !e.shiftKey && !e.altKey && e.code === "Digit2") { if (!documents.focusSecondary()) handled = false; }
       else if (mod && !e.shiftKey && !e.altKey && e.code === "Backquote") focusRegion("console", ctx);
       // M4-TERM-002: the Terminal view (Mod+` stays the console region, EDITOR-002).
       else if (mod && e.shiftKey && !e.altKey && e.code === "Backquote") { if (wsId) ctx.showTerminal(); }

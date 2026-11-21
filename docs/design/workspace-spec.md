@@ -161,6 +161,21 @@ only by the failure status line and error rows. CSS in `styles/components/consol
   reload the terminals come back with their backlog (`terminal/list`).
 - **Not done.** Links in the terminal are not clickable yet (no link addon).
 
+**Split editor (M4-UX-002).**
+- **Splitting.** Mod+\\ (or "Split Editor Right") shows the active document in a right group
+  beside the editor. The left group keeps every open document's tabs; the right group shows a
+  chosen subset in its own tab strip (`Right editor group`, ←/→/Home/End) and its own Monaco
+  editor over the same buffer, so typing on either side is one document.
+- **Closing.** Close on a right-hand tab removes it from that group only; closing a document on
+  the left closes it everywhere. The right group's last tab ends the split, as does "Close Right
+  Group".
+- **Keys and size.** Mod+1 focuses the left editor and Mod+2 the right one. Mod+S on the right
+  saves its document. The splitter between the groups answers ←/→ (±16), Shift (±48) and Home
+  (half), like the others.
+- **Restore.** The split, and the right group's tabs, come back after a restart (workspace state
+  `editor.splitPaths`, `editor.splitActive`).
+- **Not done.** Tabs are not dragged between groups. New documents open on the left.
+
 **Search (M4-UX-001).**
 - **Search page.** A rail destination when a folder is open, with Mod+Shift+F and the palette's
   "Search in Files". It holds:
