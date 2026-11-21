@@ -77,6 +77,23 @@ the whole answer and rebuilt the whole transcript. Three changes fixed it:
 After the change, `frames_test.dart` (the shell's interactions) still has no frame over budget.
 
 ## End to end
+`env_test.dart`: 1/1, in a private virtual KWin and in a private Xvfb, against the real daemon
+and two fixture providers served from loopback.
+- **24a:** Environments on the rail reads "Environments, N need attention". The page lists
+  Rust's tools (cargo, rustc, rustup) and shows Demo as missing, with Plan install….
+- **24b:** the plan is titled "Install Demo 1.0.0". It has 3 named steps: the download with its
+  URL and SHA-256, then placing the program, then "Check that demotool runs". Install runs it,
+  and Demo becomes Ready at 1.0.0, managed.
+- **24c:** a trickling install shows "Installing Slow Demo" in the transport. Cancel ends it with
+  "The install was cancelled.", leaving no toolchain directory and no partial download.
+- **24d:** Remove Demo 1.0.0 asks first, naming `toolchains/demo/1.0.0`, deletes it, and Demo is
+  missing again.
+- **24e:** Files brings back the editor with its tab.
+
+`env_rust_test.dart` (the M2 exit scenario, env.mjs) installs a real Rust toolchain, so it needs
+the internet. It runs with `AXIOM_E2E_NETWORK=1`, set in CI on Ubuntu. It was not run on this
+machine.
+
 `git_test.dart`: 1/1, in a private virtual KWin and in a private Xvfb, against a temporary
 repository.
 - The status bar reads "Branch main, 0 changes".

@@ -38,6 +38,14 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
   - sync, diagnostic underlines and the Problems panel (the console region, Mod+J);
   - completion, hover, F12, F2 across files as one undo, formatting, the status segment;
   - `lsp_test.dart` against fake-lsp; the real servers required in CI on Ubuntu.
+- **FL-ENV-001 implemented (2026-11-22):** Environments in Flutter:
+  - the toolchains page and side list, and the rail badge ("N need attention");
+  - the plan dialog with every step; install with progress, also in the title-row transport,
+    and Cancel; Remove names the directory;
+  - trusting the folder's own providers;
+  - `env_test.dart` (smoke 24a–24e, a loopback fixture) passes;
+  - `env_rust_test.dart` (the M2 exit scenario) needs the internet, so it runs in CI on
+    Ubuntu only.
 - **FL-GIT-001 implemented (2026-11-22):** Git and Search in Flutter:
   - the branch in the status bar; M/U/A/D marks on explorer rows, folders and tabs; gutter
     marks against HEAD that follow unsaved edits;

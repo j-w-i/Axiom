@@ -8,6 +8,7 @@ import '../state/agent.dart';
 import '../state/documents.dart';
 import '../state/lsp.dart';
 import '../state/problems.dart';
+import '../state/environments.dart';
 import '../state/git.dart';
 import '../state/search.dart';
 import '../state/tasks.dart';
@@ -58,6 +59,7 @@ class AppState {
     terminals = TerminalsStore(client, workspace);
     git = GitStore(client, workspace);
     search = SearchStore(client, workspace);
+    environments = EnvironmentsStore(client, workspace);
     agent = AgentStore(client, workspace);
   }
 
@@ -74,6 +76,7 @@ class AppState {
   late final TerminalsStore terminals;
   late final GitStore git;
   late final SearchStore search;
+  late final EnvironmentsStore environments;
   late final AgentStore agent;
 
   /// The hint line's text (the hovered or focused control's hint).

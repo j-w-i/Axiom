@@ -22,6 +22,7 @@ import '../state/documents.dart';
 import '../state/settings.dart';
 import '../state/tasks.dart';
 import '../console/output.dart';
+import '../env/env_page.dart';
 import '../scm/scm_page.dart';
 import '../search/search_page.dart';
 import '../ui/controls.dart';
@@ -256,6 +257,12 @@ class _ShellState extends State<Shell> {
           _go(Destination.search);
           WidgetsBinding.instance.addPostFrameCallback((_) => app.focusSearch?.call());
         },
+      ),
+      Command(
+        id: 'environments',
+        title: 'Show Environments',
+        category: 'View',
+        run: () => _go(Destination.environments),
       ),
       Command(
         id: 'scm',
@@ -678,6 +685,7 @@ class _ShellState extends State<Shell> {
                                     child: _Main(
                                       editor: _editor,
                                       chat: app.destination == Destination.chat,
+                                      environments: app.destination == Destination.environments,
                                     ),
                                   ),
                                   if (app.consoleVisible) ...[
@@ -890,6 +898,7 @@ const _railItems = <(Destination, String, IconData16, String?)>[
   (Destination.chat, 'Chat', AxiomIcons.chat, null),
   (Destination.search, 'Search', AxiomIcons.search, 'Mod+Shift+F'),
   (Destination.scm, 'Source Control', AxiomIcons.branch, 'Mod+Shift+G'),
+  (Destination.environments, 'Environments', AxiomIcons.layers, null),
 ];
 
 class _Rail extends StatefulWidget {
@@ -949,19 +958,28 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
                   for (final (d, label, icon, shortcut) in _railItems)
                     SizedBox(
                       height: _itemHeight,
-                      child: d == Destination.chat
-                          // Chat carries the approvals waiting for the person.
+                      child: d == Destination.chat || d == Destination.environments
+                          // Chat carries the approvals waiting for the person; Environments
+                          // the toolchains that need them.
                           ? ListenableBuilder(
-                              listenable: AppScope.of(context).agent,
+                              listenable: d == Destination.chat
+                                  ? AppScope.of(context).agent
+                                  : AppScope.of(context).environments,
                               builder: (context, _) {
-                                final n = AppScope.of(context).agent.approvals.length;
+                                final app = AppScope.of(context);
+                                final chat = d == Destination.chat;
+                                final n = chat
+                                    ? app.agent.approvals.length
+                                    : app.environments.needAttention;
                                 return Stack(
                                   clipBehavior: Clip.none,
                                   children: [
                                     Center(
                                       child: AxIconButton(
                                         icon: icon,
-                                        label: n == 0 ? label : '$label, $n waiting for you',
+                                        label: chat
+                                            ? (n == 0 ? label : '$label, $n waiting for you')
+                                            : environmentsRailLabel(n),
                                         shortcut: shortcut,
                                         selected: widget.selected == d,
                                         size: 32,
@@ -1035,6 +1053,7 @@ class _SideBarState extends State<_SideBar> {
     Destination.chat => const ChatSide(),
     Destination.search => const SearchSide(),
     Destination.scm => const ScmSide(),
+    Destination.environments => const EnvironmentsSide(),
     _ => FilesPage(
       onOpenFile: (p, {bool focus = true}) => unawaited(app.documents.open(p, focus: focus)),
     ),
@@ -1045,10 +1064,7 @@ class _SideBarState extends State<_SideBar> {
     final app = AppScope.of(context);
     final t = context.axiom;
     final c = t.colors;
-    final d = switch (widget.destination) {
-      Destination.environments => Destination.files,
-      final x => x,
-    };
+    final d = widget.destination;
     _shown.add(d);
     return ColoredBox(
       color: c.bar,
@@ -1071,6 +1087,7 @@ class _SideBarState extends State<_SideBar> {
                             Destination.chat => 'Chat',
                             Destination.search => 'Search',
                             Destination.scm => 'Source Control',
+                            Destination.environments => 'Environments',
                             _ => app.workspace.isOpen ? app.workspace.name : 'Files',
                           },
                           style: t.type.label,
@@ -1092,6 +1109,7 @@ class _SideBarState extends State<_SideBar> {
                   Destination.chat,
                   Destination.search,
                   Destination.scm,
+                  Destination.environments,
                 ])
                   if (_shown.contains(x))
                     Offstage(
@@ -1114,8 +1132,11 @@ class _SideBarState extends State<_SideBar> {
 // ---- main area -------------------------------------------------------------------------------
 
 class _Main extends StatefulWidget {
-  const _Main({required this.editor, required this.chat});
+  const _Main({required this.editor, required this.chat, this.environments = false});
   final GlobalKey<EditorAreaState> editor;
+
+  /// The Environments page owns the main area (the editor stays mounted behind it).
+  final bool environments;
 
   /// Chat owns the main area (the editor stays mounted behind it).
   final bool chat;
@@ -1137,7 +1158,7 @@ class _MainState extends State<_Main> {
 
   Widget _layers(Widget work, String? diff) {
     // A diff (Source Control) covers the editor, which stays mounted under it.
-    final covered = widget.chat || diff != null;
+    final covered = widget.chat || widget.environments || diff != null;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -1148,7 +1169,10 @@ class _MainState extends State<_Main> {
             child: ExcludeFocus(excluding: covered, child: work),
           ),
         ),
-        if (diff != null && !widget.chat) DiffView(key: ValueKey(diff), path: diff),
+        if (widget.environments && !widget.chat)
+          const EnvironmentsPage()
+        else if (diff != null && !widget.chat)
+          DiffView(key: ValueKey(diff), path: diff),
         if (_chatShown)
           Offstage(
             offstage: !widget.chat,

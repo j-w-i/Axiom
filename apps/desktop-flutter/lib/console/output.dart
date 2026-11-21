@@ -266,6 +266,7 @@ class TransportState extends State<Transport> {
   void initState() {
     super.initState();
     app.tasks.addListener(_changed);
+    app.environments.addListener(_changed);
   }
 
   void _changed() {
@@ -293,6 +294,7 @@ class TransportState extends State<Transport> {
   void dispose() {
     _tick?.cancel();
     app.tasks.removeListener(_changed);
+    app.environments.removeListener(_changed);
     super.dispose();
   }
 
@@ -302,6 +304,36 @@ class TransportState extends State<Transport> {
     final c = t.colors;
     final tasks = app.tasks;
     final st = state;
+    final install = app.environments.activeInstall;
+    if (install != null && !tasks.running) {
+      // A toolchain install: its name, its step, and Cancel.
+      return Semantics(
+        container: true,
+        explicitChildNodes: true,
+        label: 'Installing ${install.name}',
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            StatusDot(DotState.running, ring: c.bar),
+            const SizedBox(width: 6),
+            Text('Installing ${install.name}', style: t.type.small.copyWith(color: c.ink2)),
+            if (install.progress != null) ...[
+              const SizedBox(width: 6),
+              Text(
+                '${install.progress!.step + 1}/${install.progress!.steps}',
+                style: t.type.numeric,
+              ),
+            ],
+            AxIconButton(
+              icon: AxiomIcons.stop,
+              label: 'Cancel installing ${install.name}',
+              size: 24,
+              onPressed: () => app.environments.cancelInstall(install.providerId),
+            ),
+          ],
+        ),
+      );
+    }
     if (!tasks.running && tasks.lastLabel.isEmpty) return const SizedBox.shrink();
     final lamp = switch (st) {
       'run' => DotState.running,

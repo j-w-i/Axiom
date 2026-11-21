@@ -255,6 +255,8 @@ jobs:
           AXIOM_E2E_DISPLAY: xvfb
           # Ubuntu: the real servers must run (a missing one fails instead of being skipped).
           AXIOM_REQUIRE_LSP: ${{ runner.os == 'Linux' && '1' || '0' }}
+          # Ubuntu: the M2 exit scenario installs a real Rust toolchain (env_rust_test.dart).
+          AXIOM_E2E_NETWORK: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: apps/desktop-flutter/scripts/e2e.sh
 
   deny:
