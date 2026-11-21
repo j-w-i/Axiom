@@ -1,8 +1,8 @@
 // Accessibility across the Flutter shell (FL-QA-001; ADR-0020 §7), against the real daemon, in
 // both themes: every page (Files with an open editor, Chat, Search, Source Control,
-// Environments), the console's three views, Settings' five sections and the palette. On each,
-// every node a person can act on (tap, focus, type) has a name, and Tab moves focus through the
-// window without getting stuck. Contrast is checked on the tokens (test/ui/tokens_test.dart).
+// Environments, the Inspector), the console's three views, Settings' five sections and the
+// palette. On each, every node a person can act on (tap, focus, type) has a name, and Tab moves
+// focus through the window without getting stuck. Contrast is checked on the tokens (test/ui/tokens_test.dart).
 // Run: apps/desktop-flutter/scripts/e2e.sh a11y_test.dart
 
 import 'dart:io';
@@ -100,6 +100,7 @@ void main() {
         Destination.search,
         Destination.scm,
         Destination.environments,
+        Destination.inspector,
       ]) {
         app.destination = d;
         app.sideVisible = true;

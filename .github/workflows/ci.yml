@@ -86,6 +86,13 @@ jobs:
         run: |
           rustup component add rust-analyzer
           npm install -g typescript-language-server@6.0.0 typescript@6.0.3
+      # M5-UI-001: the Inspector suite runs the inspector fixture in headless Chrome (the
+      # runner's google-chrome).
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - name: The inspector fixture's dependencies
+        working-directory: tests/fixtures/inspect-react
+        run: pnpm install --frozen-lockfile
       - name: End-to-end (integration_test against the real daemon)
         env:
           AXIOM_E2E_DISPLAY: xvfb
@@ -93,6 +100,8 @@ jobs:
           AXIOM_REQUIRE_LSP: ${{ runner.os == 'Linux' && '1' || '0' }}
           # Ubuntu: the M2 exit scenario installs a real Rust toolchain (env_rust_test.dart).
           AXIOM_E2E_NETWORK: ${{ runner.os == 'Linux' && '1' || '0' }}
+          # Ubuntu: the Inspector suite must run (inspector_test.dart).
+          AXIOM_REQUIRE_PREVIEW: ${{ runner.os == 'Linux' && '1' || '' }}
         run: apps/desktop-flutter/scripts/e2e.sh
       - name: Packages (Linux .deb and .rpm, the macOS app bundle) and their verification
         run: |

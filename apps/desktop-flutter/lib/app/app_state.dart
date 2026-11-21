@@ -9,6 +9,7 @@ import '../state/documents.dart';
 import '../state/lsp.dart';
 import '../state/problems.dart';
 import '../state/environments.dart';
+import '../state/inspector.dart';
 import '../state/git.dart';
 import '../state/search.dart';
 import '../state/tasks.dart';
@@ -21,7 +22,7 @@ import 'local_prefs.dart';
 
 /// The rail's destinations, in the owner's order (ADR-0020 §6). A destination appears on the
 /// rail once its page exists.
-enum Destination { files, chat, search, scm, environments }
+enum Destination { files, chat, search, scm, environments, inspector }
 
 /// One command: shown in the palette and menus, bound to its shortcut.
 final class Command {
@@ -61,6 +62,7 @@ class AppState {
     search = SearchStore(client, workspace);
     environments = EnvironmentsStore(client, workspace);
     agent = AgentStore(client, workspace);
+    inspector = InspectorStore(client, workspace);
   }
 
   final AppArgs args;
@@ -78,6 +80,7 @@ class AppState {
   late final SearchStore search;
   late final EnvironmentsStore environments;
   late final AgentStore agent;
+  late final InspectorStore inspector;
 
   /// Ctrl+M in the editor: Tab moves focus instead of indenting.
   final tabMovesFocus = ValueNotifier(false);
@@ -98,6 +101,9 @@ class AppState {
 
   /// Focuses the AI dock's composer (set by the dock while it is shown).
   VoidCallback? focusDock;
+
+  /// Shows the AI dock beside the editor and focuses it (set by the shell).
+  VoidCallback? showDock;
 
   /// Shows [items] in the palette (references, symbols, code actions; set by the shell).
   void Function({

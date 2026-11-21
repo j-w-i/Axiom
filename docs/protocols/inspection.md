@@ -132,7 +132,9 @@ Two cooperating parts; see ADR-0008 for why both.
    regardless of React version or JSX compiler. Component (capitalised)
    elements are not stamped because they may not forward unknown props; their
    location is recovered as the `owner` relation from the nearest stamped
-   ancestor in a different file, plus the fiber's owner component name.
+   ancestor in a different file, plus the fiber's owner component name. The daemon applies the
+   same rule in snapshots, in hit-test chains, and in `ui/nodeDetails`, which walks up the
+   node's parents (at most 32) before falling back to a text search.
 2. **Runtime adapter** (`inspectors/web/adapter.js`, ADR-0019 §1): a plain DOM script the
    plugin injects into the page (`transformIndexHtml`) with the daemon's endpoint and the
    preview's one-time token. It dials the daemon's loopback WebSocket and answers the methods

@@ -124,6 +124,12 @@ impl Normalizer {
         n
     }
 
+    /// Where the node itself was written (a build stamp or runtime metadata in the workspace),
+    /// if anywhere: what an unstamped descendant's owner is.
+    pub(crate) fn own_location_of(&self, n: UiNode) -> Option<Location> {
+        own_location(&self.own(n))
+    }
+
     /// The node's own reported candidates, resolved and capped; text bounded.
     fn own(&self, mut n: UiNode) -> UiNode {
         if let Some(t) = &n.text {

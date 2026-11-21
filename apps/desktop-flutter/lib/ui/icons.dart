@@ -47,6 +47,12 @@ abstract final class AxiomIcons {
     IconPath('M2 8l6 3 6-3'),
     IconPath('M2 11l6 3 6-3'),
   ]);
+
+  /// The Inspector: a pointer over a frame.
+  static const inspect = IconData16([
+    IconPath('M6.5 13.5H3.5a1 1 0 01-1-1v-9a1 1 0 011-1h9a1 1 0 011 1v3'),
+    IconPath('M8 8l6 2.2-2.6 1-1 2.6z'),
+  ]);
   static const check = IconData16([IconPath('M3.5 8.5l3 3 6-7')]);
   static const download = IconData16([
     IconPath('M8 2.5v8M4.8 7.5L8 10.7l3.2-3.2'),

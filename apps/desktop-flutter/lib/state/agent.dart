@@ -317,6 +317,38 @@ class AgentStore extends ChangeNotifier {
   final images = <String, ImageData>{};
   final _imagesLoading = <String>{};
   List<ApprovalRequest> approvals = const [];
+
+  /// Context the person attached for the next message (the Inspector's element, M5-UI-001):
+  /// source lines the daemon adds to the turn, each with its label for the composer.
+  List<({Attachment attachment, String label})> context = const [];
+
+  /// Text for an empty composer, taken once by the Chat view that shows it.
+  String? composerSeed;
+
+  void attach(Attachment a, String label, {String? seed}) {
+    context = [...context.where((c) => c.label != label), (attachment: a, label: label)];
+    if (seed != null) composerSeed = seed;
+    notifyListeners();
+  }
+
+  void detach(int i) {
+    if (i < 0 || i >= context.length) return;
+    context = [...context]..removeAt(i);
+    notifyListeners();
+  }
+
+  void seed(String text) {
+    composerSeed = text;
+    notifyListeners();
+  }
+
+  /// The seed, once.
+  String? takeSeed() {
+    final s = composerSeed;
+    composerSeed = null;
+    return s;
+  }
+
   ({int checkpoint, List<RestoreConflict> conflicts})? restoreConflict;
 
   /// Agents being installed (the spinner shows), and how to stop each.
@@ -337,6 +369,7 @@ class AgentStore extends ChangeNotifier {
     final id = workspace.isOpen ? workspace.id : null;
     if (id == _lastWs) return;
     _lastWs = id;
+    context = const [];
     if (id == null && scope == Scope.workspace) {
       newChat(Scope.general);
     } else if (status != 'idle') {
@@ -484,16 +517,22 @@ class AgentStore extends ChangeNotifier {
         sessions = [s, ...sessions];
       }
       _patch(id, running: true);
+      final attached = context;
       await client.call(
         Methods.agentSend,
         SendParams(
           workspaceId: _wsId,
           sessionId: id,
           text: text,
+          attachments: attached.isEmpty ? null : [for (final c in attached) c.attachment],
           images: images.isEmpty ? null : images,
           fromTurn: fromTurn,
         ),
       );
+      if (identical(context, attached)) {
+        context = const [];
+        notifyListeners();
+      }
       return true;
     } on DaemonException catch (e) {
       if (id != null) _patch(id, running: false);

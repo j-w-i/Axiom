@@ -304,11 +304,23 @@ class ChatViewState extends State<ChatView> {
     app.agent.addListener(_follow);
     if (widget.dock) {
       app.focusDock = _focusSoon;
+      _takeSeed();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && app.agent.scope != Scope.workspace) app.agent.setScope(Scope.workspace);
       });
     } else {
       app.focusComposer = _focusSoon;
+    }
+    _focusSoon();
+  }
+
+  /// The dock puts the Inspector's question in an empty composer (M5-UI-001).
+  void _takeSeed() {
+    if (!widget.dock || app.agent.composerSeed == null) return;
+    final seed = app.agent.takeSeed()!;
+    if (composer.text.trim().isEmpty) {
+      composer.text = seed;
+      composer.selection = TextSelection.collapsed(offset: seed.length);
     }
     _focusSoon();
   }
@@ -335,6 +347,7 @@ class ChatViewState extends State<ChatView> {
   /// Keep the newest text in view while the person has not scrolled up; announce the end of an
   /// answer to a screen reader.
   void _follow() {
+    _takeSeed();
     final running = app.agent.active.running;
     if (_wasRunning && !running && mounted && TickerMode.valuesOf(context).enabled) {
       unawaited(
@@ -539,6 +552,50 @@ class ChatViewState extends State<ChatView> {
   }
 }
 
+/// Context attached to the next message (an element's source lines), removable.
+class _ContextChip extends StatelessWidget {
+  const _ContextChip({required this.label, required this.onRemove});
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.axiom;
+    final c = t.colors;
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: 'Attached: $label',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: c.recessed,
+          borderRadius: BorderRadius.circular(Metrics.radiusControl),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ExcludeSemantics(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 260),
+                  child: Text(label, style: t.type.small, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+              AxIconButton(
+                icon: AxiomIcons.close,
+                label: 'Remove $label',
+                size: 22,
+                onPressed: onRemove,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The dock's header: the folder's conversations to switch between, and New chat.
 class _DockHeader extends StatelessWidget {
   const _DockHeader({required this.title});
@@ -675,7 +732,8 @@ class _Composer extends StatelessWidget {
         ),
       ),
     );
-    if (state.attached.isEmpty && note.isEmpty) return input;
+    final context_ = app.agent.context;
+    if (state.attached.isEmpty && note.isEmpty && context_.isEmpty) return input;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -708,6 +766,18 @@ class _Composer extends StatelessWidget {
                       ],
                     ),
                   ),
+              ],
+            ),
+          ),
+        if (context_.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final (i, x) in context_.indexed)
+                  _ContextChip(label: x.label, onRemove: () => app.agent.detach(i)),
               ],
             ),
           ),

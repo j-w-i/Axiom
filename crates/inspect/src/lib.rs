@@ -33,6 +33,8 @@ use tokio::sync::broadcast;
 pub const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+/// How far up `ui/nodeDetails` looks for an unstamped element's owner.
+const MAX_OWNER_DEPTH: usize = 32;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum InspectError {
@@ -194,7 +196,32 @@ impl Inspect {
         let n: UiNode = s
             .request("inspect/nodeDetails", &NodeRef { node }, REQUEST_TIMEOUT)
             .await?;
-        Ok(s.normalizer().node(n, None))
+        // Without a location of its own, its owner: the nearest ancestor that has one (as a
+        // hit-test chain gives it), before any text search.
+        let norm = s.normalizer();
+        let mut owner = None;
+        if norm.own_location_of(n.clone()).is_none() {
+            let mut parent = n.parent.clone();
+            for _ in 0..MAX_OWNER_DEPTH {
+                let Some(p) = parent else { break };
+                let Ok(a) = s
+                    .request::<_, UiNode>(
+                        "inspect/nodeDetails",
+                        &NodeRef { node: p },
+                        REQUEST_TIMEOUT,
+                    )
+                    .await
+                else {
+                    break;
+                };
+                parent = a.parent.clone();
+                if let Some(l) = norm.own_location_of(a) {
+                    owner = Some(l);
+                    break;
+                }
+            }
+        }
+        Ok(norm.node(n, owner))
     }
 
     pub async fn highlight(

@@ -23,6 +23,7 @@ import '../state/settings.dart';
 import '../state/tasks.dart';
 import '../console/output.dart';
 import '../env/env_page.dart';
+import '../inspector/inspector_page.dart';
 import '../scm/scm_page.dart';
 import '../search/search_page.dart';
 import '../ui/controls.dart';
@@ -89,6 +90,7 @@ class _ShellState extends State<Shell> {
               items: items,
             );
           });
+      app.showDock = _showDock;
       app.documents.addListener(_onDocuments);
     });
   }
@@ -277,6 +279,12 @@ class _ShellState extends State<Shell> {
           _go(Destination.search);
           WidgetsBinding.instance.addPostFrameCallback((_) => app.focusSearch?.call());
         },
+      ),
+      Command(
+        id: 'inspector',
+        title: 'Show Inspector',
+        category: 'View',
+        run: () => _go(Destination.inspector),
       ),
       Command(
         id: 'environments',
@@ -538,6 +546,16 @@ class _ShellState extends State<Shell> {
     if (id != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => app.focusTerminal?.call());
     }
+  }
+
+  /// Opens the dock beside the editor and focuses it (the Inspector's "Ask AI").
+  void _showDock() {
+    if (!app.workspace.isOpen) return;
+    setState(() {
+      if (app.destination == Destination.chat) app.destination = Destination.files;
+      app.dockVisible = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => app.focusDock?.call());
   }
 
   /// The dock opens beside the editor (leaving Chat for the files when Chat is showing).
@@ -929,6 +947,7 @@ const _railItems = <(Destination, String, IconData16, String?)>[
   (Destination.search, 'Search', AxiomIcons.search, 'Mod+Shift+F'),
   (Destination.scm, 'Source Control', AxiomIcons.branch, 'Mod+Shift+G'),
   (Destination.environments, 'Environments', AxiomIcons.layers, null),
+  (Destination.inspector, 'Inspector', AxiomIcons.inspect, null),
 ];
 
 class _Rail extends StatefulWidget {
@@ -1084,6 +1103,7 @@ class _SideBarState extends State<_SideBar> {
     Destination.search => const SearchSide(),
     Destination.scm => const ScmSide(),
     Destination.environments => const EnvironmentsSide(),
+    Destination.inspector => const InspectorSide(),
     _ => FilesPage(
       onOpenFile: (p, {bool focus = true}) => unawaited(app.documents.open(p, focus: focus)),
     ),
@@ -1118,6 +1138,7 @@ class _SideBarState extends State<_SideBar> {
                             Destination.search => 'Search',
                             Destination.scm => 'Source Control',
                             Destination.environments => 'Environments',
+                            Destination.inspector => 'Inspector',
                             _ => app.workspace.isOpen ? app.workspace.name : 'Files',
                           },
                           style: t.type.label,
@@ -1140,6 +1161,7 @@ class _SideBarState extends State<_SideBar> {
                   Destination.search,
                   Destination.scm,
                   Destination.environments,
+                  Destination.inspector,
                 ])
                   if (_shown.contains(x))
                     Offstage(

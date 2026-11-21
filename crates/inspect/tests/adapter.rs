@@ -95,7 +95,11 @@ async fn adapter(
                     page_nodes()[2].clone(), page_nodes()[1].clone(), page_nodes()[0].clone()
                 ]}),
                 "inspect/nodeDetails" => {
-                    let mut n = page_nodes()[0].clone();
+                    let id = v["params"]["node"].as_str().unwrap_or("root").to_string();
+                    let mut n = page_nodes()
+                        .into_iter()
+                        .find(|n| n["id"] == id.as_str())
+                        .unwrap_or_else(|| page_nodes()[0].clone());
                     n["properties"] = json!({"css.padding-left": "16px"});
                     n
                 }
@@ -233,6 +237,17 @@ async fn hit_test_and_details_round_trip_with_a_text_search_fallback() {
         ),
         ("src/App.jsx", 4, Some(10))
     );
+
+    // An unstamped element's details name its nearest stamped ancestor as the owner, as the
+    // hit test does (not a text search).
+    let d = inspect
+        .node_details(&preview, NodeId("lib".into()))
+        .await
+        .unwrap();
+    assert_eq!(d.sources.len(), 1, "{:?}", d.sources);
+    assert_eq!(d.sources[0].relation, SourceRelation::Owner);
+    assert_eq!(d.sources[0].location.line, 12);
+    assert!(d.sources[0].confidence < 0.6);
 }
 
 #[tokio::test]
