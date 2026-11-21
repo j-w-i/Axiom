@@ -36,6 +36,11 @@ static void my_application_activate(GApplication* application) {
     }
   }
   gtk_window_set_default_size(window, width, height);
+  // The smallest window the layout is made for (rail, side bar, editor, AI dock).
+  GdkGeometry hints = {};
+  hints.min_width = 900;
+  hints.min_height = 560;
+  gtk_window_set_geometry_hints(window, nullptr, &hints, GDK_HINT_MIN_SIZE);
 
   // If you want to use a header bar, uncomment the following lines.
   // Header bars are commonly used in GNOME based desktop environments and
