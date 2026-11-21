@@ -125,11 +125,15 @@ waiting for still completes its own cleanup.
 ## Daemon endpoint
 
 - M1: stdio of a child process. Only the parent can talk to it.
-- M3+: local socket. Unix: created inside a `0700` directory under
-  `$XDG_RUNTIME_DIR` (or the per-user temp dir on macOS), socket mode `0600`.
-  Windows: named pipe with an ACL granting only the current user. Clients
-  must present a per-launch token (read from a `0600` file next to the
-  socket) in `initialize`. No TCP listener, ever, by default.
+- M3+: local socket (as built by M3-DAEMON-001).
+  - Unix: `<data dir>/run/axiomd.sock`, mode `0600`, in the `0700` directory `run/`.
+  - Clients must present the per-launch token (`run/axiomd.token`, `0600`, 32 random bytes
+    from `/dev/urandom` as hex) in `initialize.authToken`. A connection without it, or with a
+    wrong one, gets `permission_denied` and is closed before anything else is served.
+  - Anyone who can read the token file (the same user) can drive the daemon: the same trust
+    boundary as the user's files.
+  - Windows named pipe: deferred.
+  - No TCP listener, ever, by default.
 
 ## Processes
 

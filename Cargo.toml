@@ -11,6 +11,7 @@ members = [
     "crates/agent",
     "crates/axiomd",
     "crates/desktop-bridge",
+    "apps/cli",
     "apps/desktop-tauri/src-tauri",
     "tests/helpers/emit",
 ]

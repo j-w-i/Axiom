@@ -1,8 +1,8 @@
 ---
 id: M3-DAEMON-001
 title: Multi-client daemon (Unix socket + token) and the axiom CLI
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: [M3-LOOP-001]
 order: 409
 scope: crates/axiomd/, crates/rpc/, apps/cli/, Cargo.toml (members)

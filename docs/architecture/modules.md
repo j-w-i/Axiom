@@ -222,11 +222,13 @@ before the task that needs them** (no empty scaffolding).
 - **Rule:** no tool executes without a gate decision; no write without a checkpoint.
 
 ### `apps/cli` — `axiom-cli`, binary `axiom` (M3-DAEMON-001, M3-MCP-001)
-- **Status:** planned.
+- **Status:** built: `task run`, `build`, `agent sessions|send` (M3-DAEMON-001); `mcp` follows
+  (M3-MCP-001).
 - **Responsibility:** the command-line client: `task run`, `build`, `agent send|sessions`,
   `mcp` (the MCP server front end). Connects to a running daemon's local socket, else spawns
   its own `axiomd` over stdio.
-- **Depends on:** `protocol`, `rpc` (codec and typed client); `clap`, `tokio`.
+- **Depends on:** `protocol`, `rpc` (codec and typed client); `clap`, `tokio`, `serde_json`,
+  `directories` (the data dir, as the store finds it).
 - **Rule:** no business logic; everything is a protocol call.
 
 ## Dependency matrix (allowed edges)

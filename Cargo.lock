@@ -323,6 +323,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-cli"
+version = "0.1.0"
+dependencies = [
+ "axiom-protocol",
+ "axiom-rpc",
+ "clap",
+ "directories",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "axiom-desktop-bridge"
 version = "0.1.0"
 dependencies = [

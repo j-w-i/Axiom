@@ -38,12 +38,46 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// How one connection is served (protocol 0.3, ADR-0015 §6).
+#[derive(Debug, Clone)]
+pub struct ServeOptions {
+    /// `initialize` must carry this `authToken`, or the connection is refused and closed.
+    pub token: Option<String>,
+    /// Run the router's shutdown hooks when this connection ends. True for the daemon's own
+    /// (stdio) client; false for extra connections, whose end must not stop the daemon's work.
+    pub run_hooks: bool,
+}
+
+impl Default for ServeOptions {
+    fn default() -> Self {
+        Self {
+            token: None,
+            run_hooks: true,
+        }
+    }
+}
+
 /// Serves one connection until `shutdown` completes or the reader hits EOF.
 pub async fn serve<R, W>(
     reader: R,
     writer: W,
     router: Arc<Router>,
     info: ServerInfo,
+) -> Result<(), ServeError>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    serve_with(reader, writer, router, info, ServeOptions::default()).await
+}
+
+/// [`serve`] with options.
+pub async fn serve_with<R, W>(
+    reader: R,
+    writer: W,
+    router: Arc<Router>,
+    info: ServerInfo,
+    opts: ServeOptions,
 ) -> Result<(), ServeError>
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -114,6 +148,22 @@ where
                     } else {
                         initialize(params, &router, &info)
                     };
+                    let outcome = outcome.and_then(|(v, params)| match &opts.token {
+                        Some(t) if params.auth_token.as_deref() != Some(t.as_str()) => {
+                            Err(RpcError::new(
+                                ErrorKind::PermissionDenied,
+                                "This connection needs the daemon's token.",
+                            ))
+                        }
+                        _ => Ok((v, params)),
+                    });
+                    if let (Err(_), Some(_)) = (&outcome, &opts.token) {
+                        // Refused: answer once and close.
+                        if let Err(e) = outcome {
+                            send_err(&tx, id, e).await;
+                        }
+                        break;
+                    }
                     match outcome {
                         Ok((v, params)) => {
                             initialized = true;
@@ -137,8 +187,10 @@ where
 
     // Peer gone, fatal error, or shutdown: stop all in-flight work, run hooks.
     cancel_all(&in_flight);
-    for hook in &router.hooks {
-        hook().await;
+    if opts.run_hooks {
+        for hook in &router.hooks {
+            hook().await;
+        }
     }
     if let Some(id) = shutdown_requested {
         let v = serde_json::to_value(Empty {}).unwrap_or(Value::Null);

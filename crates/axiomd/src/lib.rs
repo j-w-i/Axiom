@@ -5,6 +5,7 @@ mod app;
 mod handlers;
 mod router;
 pub mod settings;
+pub mod socket;
 mod tools;
 
 pub use app::App;

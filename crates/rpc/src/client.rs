@@ -17,6 +17,8 @@ struct Inner {
     next_id: AtomicI64,
     notifications: broadcast::Sender<(String, Value)>,
     orphans: broadcast::Sender<RpcError>,
+    /// Set when the reader ends: later requests fail at once instead of waiting forever.
+    closed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Typed client over the NDJSON framing. Cheap to clone.
@@ -40,12 +42,15 @@ impl Client {
         let pending: Pending = Arc::default();
         let (notifications, _) = broadcast::channel(4096);
         let (orphans, _) = broadcast::channel(64);
+        let closed_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader_closed = closed_flag.clone();
         let inner = Arc::new(Inner {
             tx,
             pending: pending.clone(),
             next_id: AtomicI64::new(1),
             notifications: notifications.clone(),
             orphans: orphans.clone(),
+            closed: closed_flag,
         });
 
         tokio::spawn(async move {
@@ -99,7 +104,8 @@ impl Client {
                     Message::Request(_) => {}
                 }
             }
-            // Connection ended: fail every outstanding request.
+            // Connection ended: fail every outstanding request (and every later one).
+            reader_closed.store(true, Ordering::SeqCst);
             let drained: Vec<_> = pending
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -158,6 +164,14 @@ impl Client {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(id.clone(), otx);
+        let already_closed = self.inner.closed.load(Ordering::SeqCst);
+        if already_closed {
+            self.inner
+                .pending
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&id);
+        }
         let line = codec::encode(&Request {
             jsonrpc: JsonRpcVersion::V2,
             id: id.clone(),
@@ -166,7 +180,7 @@ impl Client {
         });
         let inner = self.inner.clone();
         (id, async move {
-            if inner.tx.send(line).await.is_err() {
+            if already_closed || inner.tx.send(line).await.is_err() {
                 return Err(closed());
             }
             orx.await.unwrap_or_else(|_| Err(closed()))
