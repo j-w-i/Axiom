@@ -492,12 +492,18 @@ try {
   {
     const HINT = `const h = document.querySelector('.sb__hint'); return { text: h.childNodes[0]?.textContent ?? '', keys: [...h.querySelectorAll('.kbd')].map((k) => k.textContent) };`;
     const rerun = `document.querySelector('[data-testid=transport] [data-hint^="Rerun"]')`;
+    // The hint line is React state: give each event its render (bounded) before reading it, or a
+    // slow runner reads the previous control's hint.
+    const settled = (text) => wd.waitFor(`return (document.querySelector('.sb__hint').childNodes[0]?.textContent ?? '') === arguments[0]`, [text], 2000, `hint "${text}"`).catch(() => {});
     await wd.exec(`${rerun}.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`);
+    await settled("Rerun the last command");
     const hovered = await wd.exec(HINT);
     await wd.exec(`document.body.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`);
     await wd.exec(`${rerun}.focus()`);
+    await settled("Rerun the last command");
     const focused = await wd.exec(HINT);
     await wd.exec(`document.querySelector('.monaco-editor textarea').focus()`);
+    await settled("");
     const editor = await wd.exec(HINT);
     check(
       "15 hint line follows hover and focus",

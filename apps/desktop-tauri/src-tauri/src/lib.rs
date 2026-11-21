@@ -717,6 +717,14 @@ fn restore_geometry(app: &tauri::AppHandle) {
 
 pub fn run() {
     let started = Instant::now();
+    let context = tauri::generate_context!();
+    // Linux: GTK names the window after the program (the Wayland app_id, X11's WM_CLASS), and the
+    // desktop takes the window's icon and name from the `.desktop` file of that name. Without this
+    // it is the binary's name, which no desktop entry carries, so the window shows a generic icon.
+    // Tauri's `enableGtkAppId` would do the same but also registers the app on the session bus,
+    // which allows only one running instance (and the tests and benchmarks start several).
+    #[cfg(target_os = "linux")]
+    webkit2gtk::glib::set_prgname(Some(context.config().identifier.as_str()));
     let cli = parse_cli();
     let outbox: Arc<Mutex<Outbox>> = Arc::default();
 
@@ -855,7 +863,7 @@ pub fn run() {
                 }
             }
         })
-        .build(tauri::generate_context!());
+        .build(context);
 
     let app = match app {
         Ok(a) => a,

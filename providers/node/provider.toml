@@ -99,3 +99,9 @@ id = "typescript-language-server"
 languages = ["typescript", "javascript"]
 command = ["typescript-language-server", "--stdio"]
 install_hint = "Install it with: npm install -g typescript-language-server typescript"
+
+# F2 renames the symbol everywhere it is used. typescript-language-server's default
+# (providePrefixAndSuffixTextForRename) instead turns a rename of an imported name into an alias in
+# the importing file (`import { helper as renamed }`) and leaves the declaring file unchanged.
+[lsp.initialization_options.preferences]
+providePrefixAndSuffixTextForRename = false

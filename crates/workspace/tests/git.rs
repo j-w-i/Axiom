@@ -205,14 +205,24 @@ fn not_a_repository_is_not_an_error() {
 #[test]
 fn status_of_this_repository_is_fast() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let _ = git::status(&root).unwrap(); // warm the file cache
-    let t = std::time::Instant::now();
-    let st = git::status(&root).unwrap();
-    let ms = t.elapsed().as_millis();
+    // Warm the file cache first.
+    let _ = git::status(&root).unwrap();
+    // The median of three, so one slow process start on a busy runner (the other tests here run
+    // git at the same time) is not read as the cost of a status; the limit is unchanged.
+    let mut times = Vec::new();
+    let mut st = None;
+    for _ in 0..3 {
+        let t = std::time::Instant::now();
+        st = Some(git::status(&root).unwrap());
+        times.push(t.elapsed().as_millis());
+    }
+    let st = st.unwrap();
+    times.sort_unstable();
+    let ms = times[1];
     eprintln!(
-        "git status of this repository: {ms} ms, {} files",
+        "git status of this repository: {ms} ms (median of {times:?}), {} files",
         st.files.len()
     );
     assert!(st.repo);
-    assert!(ms < 300, "{ms} ms");
+    assert!(ms < 300, "{ms} ms (median of {times:?})");
 }

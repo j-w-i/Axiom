@@ -256,7 +256,14 @@ async function realServer({ name, ok, files, open, completion, error, definition
     check(`${name}: F12 opens the definition in ${definition.target}`, true);
     await openFile(wd, open);
     await rename(wd, renameAt.line, renameAt.column, "renamedThing");
-    await wd.waitFor(`return arguments[0].every(p => (window.__axiomEditor.store.model(p)?.getValue() ?? '').includes('renamedThing'))`, [renamedIn], 60000, "the rename in every file");
+    await wd
+      .waitFor(`return arguments[0].every(p => (window.__axiomEditor.store.model(p)?.getValue() ?? '').includes('renamedThing'))`, [renamedIn], 60000, "the rename in every file")
+      .catch(async (e) => {
+        const texts = {};
+        for (const p of renamedIn) texts[p] = await textOf(wd, p).catch(() => null);
+        console.log("RENAME", JSON.stringify(texts));
+        throw e;
+      });
     check(`${name}: F2 renames across ${renamedIn.join(" and ")}`, true);
     writeFileSync(join(SHOTS, `lsp-${name}.png`), await wd.screenshot());
   } catch (e) {

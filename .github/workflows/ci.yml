@@ -168,6 +168,14 @@ jobs:
         env:
           AXIOM_REQUIRE_LSP: "1"
         run: scripts/e2e.sh --no-build --driver all e2e/lsp.mjs
+      # The M4 exit scenario (M4-QA-001): both real language servers, the terminal and Git in one
+      # session on one workspace.
+      - name: End-to-end, M4 exit scenario (editor.mjs)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          AXIOM_REQUIRE_LSP: "1"
+        run: scripts/e2e.sh --no-build --driver all e2e/editor.mjs
       - name: End-to-end, M3 exit scenario (agent.mjs)
         if: runner.os == 'Linux'
         shell: bash

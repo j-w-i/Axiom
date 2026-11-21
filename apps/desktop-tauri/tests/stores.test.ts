@@ -91,7 +91,7 @@ describe("stores against the real daemon", () => {
 
   afterEach(async () => {
     await transport.dispose();
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
 
   const names = () => app.workspace.visibleRows().map((r) => r.node.path);
