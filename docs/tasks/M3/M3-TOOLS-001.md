@@ -1,8 +1,8 @@
 ---
 id: M3-TOOLS-001
 title: Tool registry and the M3 tools (workspace, fs, patch, task, build, env, editor)
-status: in-progress
-status_note: 2026-11-21
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: [M3-ARCH-001]
 order: 405
 scope: crates/agent/, crates/axiomd/, crates/workspace/ (search)

@@ -83,8 +83,9 @@ before the task that needs them** (no empty scaffolding).
   containment; directory listing with ignore rules; text file read/write with
   version checks; file watching.
 - **Depends on:** `axiom-protocol`, `tokio`, `ignore`, `notify`, `sha2`,
-  `thiserror`, `tempfile`; from M3 (`search`, for the `workspace.search` tool) `grep-searcher`,
-  `grep-regex`, `grep-matcher` (ADR-0015 §3).
+  `thiserror`, `tempfile`; from M3 (`search`, for the `workspace.search` tool) `regex`; the
+  `ignore` walker does the traversal (M3-TOOLS-001 chose this over the grep crates ADR-0015 §3
+  named: no new dependency).
 - **Public interface:** `Workspaces` (registry) with `open`, `close`, `get`;
   `Workspace` with `resolve(&WorkspacePath) -> Result<PathBuf>`, `list`,
   `read_text`, `write_text`, `watch() -> WatchHandle` (exact signatures:

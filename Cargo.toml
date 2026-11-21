@@ -46,6 +46,8 @@ flate2 = "1"
 xz2 = "0.1"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 hex = "0.4"
+# M3 (ADR-0015): unified diffs for fs.applyPatch.
+similar = "3"
 dunce = "1"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = "0.3"

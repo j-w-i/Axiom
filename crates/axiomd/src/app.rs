@@ -1,6 +1,9 @@
 use axiom_env::{Builtin, Http, HttpConfig, Installer};
 use axiom_exec::Executor;
-use axiom_protocol::{ErrorKind, RpcError, WorkspaceId};
+use axiom_protocol::build::BuildDiagnostics;
+use axiom_protocol::diagnostics::Diagnostic;
+use axiom_protocol::{ErrorKind, RpcError, TaskId, WorkspaceId};
+use axiom_rpc::Notifier;
 use axiom_store::{Store, StoreError};
 use axiom_workspace::Workspaces;
 use std::collections::HashMap;
@@ -18,18 +21,25 @@ pub struct App {
     pub watchers: Mutex<HashMap<WorkspaceId, AbortHandle>>,
     pub env: EnvConfig,
     pub agent: AgentServices,
+    /// The newest build's diagnostics per workspace (`build.diagnostics` tool).
+    pub last_diagnostics: Mutex<HashMap<WorkspaceId, (TaskId, Vec<Diagnostic>)>>,
+    /// Connections that opened each workspace, for daemon-initiated notifications
+    /// (`agent/reveal`). Closed connections are dropped on the next send.
+    pub clients: Mutex<HashMap<WorkspaceId, Vec<Notifier>>>,
 }
 
 /// The agent runtime's daemon-wide state (M3).
 pub struct AgentServices {
     pub providers: axiom_agent::providers::Providers,
+    /// Built-in tools (ADR-0015 §2), backed by this daemon's services.
+    pub tools: axiom_agent::tools::Registry,
 }
 
 /// TEST ONLY: a script file for the scripted model provider (ADR-0015 §4). When set, the daemon
 /// offers the provider `scripted` that replays it.
 pub const SCRIPTED_MODEL_ENV: &str = "AXIOM_TEST_SCRIPTED_MODEL";
 
-fn agent_services() -> AgentServices {
+fn agent_services(app: std::sync::Weak<App>) -> AgentServices {
     let scripted = std::env::var_os(SCRIPTED_MODEL_ENV).and_then(|p| {
         match axiom_agent::model::scripted::ScriptedProvider::from_file(
             axiom_agent::providers::SCRIPTED_ID,
@@ -50,6 +60,7 @@ fn agent_services() -> AgentServices {
             Arc::from(axiom_agent::credentials::platform_or_test()),
             scripted,
         ),
+        tools: crate::tools::registry(app),
     }
 }
 
@@ -93,7 +104,7 @@ impl App {
             }
         };
         let installer = Arc::new(Installer::new(data_dir.clone(), http));
-        Arc::new(App {
+        Arc::new_cyclic(|weak| App {
             store: Arc::new(store),
             workspaces: Workspaces::new(),
             executor: Executor::new(),
@@ -103,8 +114,43 @@ impl App {
                 builtin: Builtin::Embedded,
                 installer,
             },
-            agent: agent_services(),
+            agent: agent_services(weak.clone()),
+            last_diagnostics: Mutex::default(),
+            clients: Mutex::default(),
         })
+    }
+
+    pub fn record_diagnostics(&self, ws: &WorkspaceId, d: &BuildDiagnostics) {
+        let mut m = self
+            .last_diagnostics
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let entry = m
+            .entry(ws.clone())
+            .or_insert_with(|| (d.task_id.clone(), Vec::new()));
+        if entry.0 != d.task_id {
+            *entry = (d.task_id.clone(), Vec::new());
+        }
+        entry.1.extend(d.diagnostics.iter().cloned());
+    }
+
+    pub fn add_client(&self, ws: &WorkspaceId, n: Notifier) {
+        self.clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(ws.clone())
+            .or_default()
+            .push(n);
+    }
+
+    /// The connections that opened `ws`.
+    pub fn clients_of(&self, ws: &WorkspaceId) -> Vec<Notifier> {
+        self.clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(ws)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn stop_watcher(&self, id: &WorkspaceId) {

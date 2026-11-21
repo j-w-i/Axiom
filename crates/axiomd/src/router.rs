@@ -24,7 +24,7 @@ pub fn build_router(app: Arc<App>) -> Router {
         }};
     }
 
-    wire!(pws::Open, workspace::open);
+    wire!(pws::Open, workspace::open, ctx);
     wire!(pws::Close, workspace::close);
     wire!(pws::Recent, workspace::recent);
     wire!(pws::GetState, workspace::get_state);
@@ -50,6 +50,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(pbuild::Run, build::run, ctx);
     wire!(pagent::Models, agent::models);
     wire!(pagent::ConfigureProvider, agent::configure_provider);
+    wire!(pagent::Tools, agent::tools);
 
     let a = app;
     r.on_shutdown(move || {
@@ -75,7 +76,6 @@ pub const NOT_YET_SERVED: &[&str] = &[
     "agent/approve",
     "agent/checkpoints",
     "agent/restore",
-    "agent/tools",
     "agent/toolCall",
     "agent/policy",
     "agent/setPolicy",

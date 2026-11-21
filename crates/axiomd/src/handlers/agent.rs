@@ -4,8 +4,11 @@
 use crate::app::App;
 use axiom_agent::credentials::CredentialError;
 use axiom_agent::providers::ProvidersError;
-use axiom_protocol::agent::{ConfigureProviderParams, ModelsParams, ModelsResult, ProviderConfig};
+use axiom_protocol::agent::{
+    ConfigureProviderParams, ModelsParams, ModelsResult, ProviderConfig, ToolsResult,
+};
 use axiom_protocol::lifecycle::Empty;
+use axiom_protocol::workspace::WorkspaceRef;
 use axiom_protocol::{ErrorKind, RpcError};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -73,4 +76,12 @@ pub async fn configure_provider(
     })
     .await?;
     Ok(Empty {})
+}
+
+/// The tool registry offered in this workspace (built-in tools; MCP tools join per session).
+pub async fn tools(app: Arc<App>, p: WorkspaceRef) -> Result<ToolsResult, RpcError> {
+    app.workspaces.get(&p.workspace_id)?;
+    Ok(ToolsResult {
+        tools: app.agent.tools.infos(),
+    })
 }

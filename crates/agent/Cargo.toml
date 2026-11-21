@@ -10,6 +10,8 @@ license.workspace = true
 axiom-protocol = { path = "../protocol" }
 serde.workspace = true
 serde_json.workspace = true
+schemars.workspace = true
+similar.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -25,6 +27,8 @@ tokio = { version = "1", features = ["full"] }
 tempfile.workspace = true
 
 [features]
+# Lets tests outside this crate call tools without the gate (dev-dependency use only).
+test-support = []
 # Exercises the real OS credential store (a desktop session; M3-MODEL-002).
 keyring-live = []
 

@@ -5,6 +5,7 @@ use axiom_protocol::workspace::{
     StateResult, WorkspaceRef,
 };
 use axiom_protocol::RpcError;
+use axiom_rpc::RequestCtx;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -12,8 +13,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const RECENT_LIMIT: usize = 20;
 
-pub async fn open(app: Arc<App>, p: OpenParams) -> Result<OpenResult, RpcError> {
+pub async fn open(app: Arc<App>, p: OpenParams, ctx: RequestCtx) -> Result<OpenResult, RpcError> {
     let opened = app.workspaces.open(&p.path).await?;
+    app.add_client(&opened.workspace_id, ctx.notifier.clone());
     let (root, name) = (opened.root.clone(), opened.name.clone());
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -35,6 +37,10 @@ pub async fn close(app: Arc<App>, p: WorkspaceRef) -> Result<Empty, RpcError> {
     app.workspaces.get(&p.workspace_id)?;
     app.executor.cancel_all(&p.workspace_id).await;
     app.stop_watcher(&p.workspace_id);
+    app.clients
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&p.workspace_id);
     app.workspaces.close(&p.workspace_id).await?;
     Ok(Empty {})
 }

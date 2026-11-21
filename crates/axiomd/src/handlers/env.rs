@@ -36,6 +36,29 @@ pub(crate) async fn registry(app: &App, ws: Option<(PathBuf, bool)>) -> Result<R
         .map_err(|_| internal())
 }
 
+/// The workspace's environment from `.axiom/project.toml`, or the empty one without a project
+/// file. Shared by `build/run` and the agent's `task.run`/`build.run` tools.
+pub(crate) async fn project_environment(
+    app: &App,
+    id: &WorkspaceId,
+    r: &Registry,
+) -> Result<Environment, RpcError> {
+    Ok(match project_file(app, id).await? {
+        Some(selection) => {
+            let path = std::env::var_os("PATH");
+            project::resolve(
+                r,
+                &selection,
+                &app.env.data_dir.join("toolchains"),
+                path.as_deref(),
+            )
+            .await?
+            .0
+        }
+        None => Environment::default(),
+    })
+}
+
 pub async fn providers(app: Arc<App>, p: ProvidersParams) -> Result<ProvidersResult, RpcError> {
     let ws = match &p.workspace_id {
         Some(id) => Some(workspace(&app, id).await?),
@@ -118,7 +141,7 @@ pub async fn trust(app: Arc<App>, p: TrustParams) -> Result<Empty, RpcError> {
 }
 
 /// The effective built-in or user provider with this id (installs use no workspace providers).
-async fn provider(app: &App, id: &str) -> Result<Option<ProviderManifest>, RpcError> {
+pub(crate) async fn provider(app: &App, id: &str) -> Result<Option<ProviderManifest>, RpcError> {
     Ok(registry(app, None).await?.get(id).cloned())
 }
 
