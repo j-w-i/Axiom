@@ -1,5 +1,7 @@
 use crate::app::App;
-use crate::handlers::{agent, build, env, fs, lsp, sessions, settings, task, terminal, workspace};
+use crate::handlers::{
+    agent, build, env, fs, git, lsp, sessions, settings, task, terminal, workspace,
+};
 use axiom_protocol::{
     agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
     workspace as pws,
@@ -41,6 +43,8 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(axiom_protocol::lsp::Request, lsp::request, ctx);
     wire!(axiom_protocol::lsp::Notify, lsp::notify);
     wire!(axiom_protocol::lsp::Restart, lsp::restart);
+    wire!(axiom_protocol::git::Status, git::status);
+    wire!(axiom_protocol::git::Show, git::show);
     wire!(axiom_protocol::terminal::Create, terminal::create);
     wire!(axiom_protocol::terminal::Write, terminal::write);
     wire!(axiom_protocol::terminal::Resize, terminal::resize);
@@ -105,7 +109,7 @@ pub fn build_router(app: Arc<App>) -> Router {
 /// that wires one removes it here; the last M4 backend task leaves this empty. Clients
 /// feature-detect from `initialize.methods` (ADR-0018 §1), which lists only served methods.
 #[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &["git/status", "git/show", "workspace/search"];
+pub const NOT_YET_SERVED: &[&str] = &["workspace/search"];
 
 #[cfg(test)]
 mod tests {

@@ -9,6 +9,7 @@ mod search;
 mod watch;
 mod workspace;
 
+pub mod git;
 pub use error::WsError;
 pub use registry::Workspaces;
 pub use search::{SearchMatch, SearchQuery, SearchResult};

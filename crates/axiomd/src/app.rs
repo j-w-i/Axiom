@@ -33,6 +33,8 @@ pub struct App {
     /// Files outside each workspace that one of its language servers returned in a location:
     /// readable (only) through `fs/readFile` with a `file://` path (ADR-0018 §2).
     pub external_reads: Mutex<HashMap<WorkspaceId, std::collections::HashSet<PathBuf>>>,
+    /// `git/didChange` watches, one per workspace that asked for its status (M4-GIT-001).
+    pub git_watches: Mutex<HashMap<WorkspaceId, AbortHandle>>,
     /// Integrated terminals (M4, ADR-0018 §4).
     pub terminals: axiom_term::Terminals,
     /// The language-server event forwarder runs (started with the first router).
@@ -210,6 +212,7 @@ impl App {
             clients: Mutex::default(),
             lsp: axiom_lsp::Manager::default(),
             external_reads: Mutex::default(),
+            git_watches: Mutex::default(),
             terminals: axiom_term::Terminals::default(),
             lsp_forwarding: std::sync::atomic::AtomicBool::new(false),
         })

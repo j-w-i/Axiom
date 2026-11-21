@@ -39,6 +39,7 @@ pub async fn close(app: Arc<App>, p: WorkspaceRef) -> Result<Empty, RpcError> {
     app.stop_watcher(&p.workspace_id);
     app.lsp.close_workspace(&p.workspace_id).await;
     app.terminals.close_workspace(&p.workspace_id);
+    crate::handlers::git::stop_watch(&app, &p.workspace_id);
     app.external_reads
         .lock()
         .unwrap_or_else(|p| p.into_inner())

@@ -262,6 +262,15 @@ before the task that needs them** (no empty scaffolding).
 
 `crates/workspace` gains a `git` module (M4-GIT-001) that runs the `git` program read-only;
 no new edge.
+- **Isolation:** the inherited `GIT_*` variables are removed; no pager, hooks or fsmonitor;
+  `GIT_OPTIONAL_LOCKS=0`; `LC_ALL=C`. The person's own configuration (ignore files,
+  `safe.directory`) applies.
+- **Operations:** discovery with `rev-parse` (a workspace may be a subdirectory); status with
+  porcelain v2, made relative to the workspace; show at HEAD or in the index, with binary
+  detection; a watch on the repository's HEAD, index and refs.
+- **In `axiomd`:** `git/status` and `git/show`, and `git/didChange` (the workspace watcher plus
+  that watch, debounced 300 ms). The watch starts with a workspace's first status. Status on
+  this repository takes 15 ms.
 
 ## Dependency matrix (allowed edges)
 
