@@ -96,11 +96,31 @@ fn a_conflict() {
     g(p, &["checkout", "-q", "main"]);
     std::fs::write(p.join("mod.txt"), "ours\n").unwrap();
     g(p, &["commit", "-qam", "ours"]);
-    let _ = Command::new("git")
+    // The merge stops with a conflict (a non-zero exit, so not through `g`); it needs an identity
+    // like every other call here (CI has no global one).
+    let out = Command::new("git")
         .current_dir(p)
-        .args(["-c", "core.hooksPath=/dev/null", "merge", "-q", "other"])
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@example.com")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "commit.gpgsign=false",
+            "merge",
+            "-q",
+            "other",
+        ])
         .output()
         .unwrap();
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("CONFLICT"),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     let st = git::status(p).unwrap();
     assert_eq!(
         states(&st),
