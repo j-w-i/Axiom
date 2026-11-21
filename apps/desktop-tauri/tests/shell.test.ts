@@ -43,6 +43,7 @@ function ctx(f: Fixture): ShellContext {
     togglePanel: noop, toggleDock: () => {},
     resetLayout: noop,
     focusRun: noop,
+    showTerminal: noop,
     destination: "files",
     setDestination: noop,
     setSettingsOpen: noop,
@@ -71,11 +72,15 @@ describe("shell commands", () => {
       ["find", "Edit", "Find", undefined, false],
       ["replace", "Edit", "Replace", undefined, false],
       ["format", "Edit", "Format Document", undefined, false],
+      ["splitRight", "View", "Split Editor Right", "Ctrl+\\", false], // added by M4-UX-002
+      ["unsplit", "View", "Close Right Group", undefined, false], // added by M4-UX-002
       ["chat", "View", "Open Chat", undefined, false], // added by M3-UI-001
       ["newChat", "View", "New Chat", "Ctrl+N", false],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
       ["dock", "View", "Toggle AI Dock", "Ctrl+L", false], // added by M3-UI-002
+      ["search", "View", "Search in Files", "Ctrl+Shift+F", false], // added by M4-UX-001
+      ["terminal", "View", "Show Terminal", "Ctrl+Shift+`", false], // added by M4-TERM-002
       ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Light Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", false],
@@ -96,11 +101,15 @@ describe("shell commands", () => {
       ["find", "Edit", "Find", undefined, false],
       ["replace", "Edit", "Replace", undefined, false],
       ["format", "Edit", "Format Document", undefined, false],
+      ["splitRight", "View", "Split Editor Right", "Ctrl+\\", false], // added by M4-UX-002
+      ["unsplit", "View", "Close Right Group", undefined, false], // added by M4-UX-002
       ["chat", "View", "Open Chat", undefined, true], // added by M3-UI-001
       ["newChat", "View", "New Chat", "Ctrl+N", true],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
       ["dock", "View", "Toggle AI Dock", "Ctrl+L", false], // added by M3-UI-002
+      ["search", "View", "Search in Files", "Ctrl+Shift+F", false], // added by M4-UX-001
+      ["terminal", "View", "Show Terminal", "Ctrl+Shift+`", false], // added by M4-TERM-002
       ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Dark Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", false],
@@ -122,11 +131,15 @@ describe("shell commands", () => {
       ["find", "Edit", "Find", undefined, true],
       ["replace", "Edit", "Replace", undefined, true],
       ["format", "Edit", "Format Document", undefined, true],
+      ["splitRight", "View", "Split Editor Right", "Ctrl+\\", true], // added by M4-UX-002
+      ["unsplit", "View", "Close Right Group", undefined, false], // added by M4-UX-002
       ["chat", "View", "Open Chat", undefined, true], // added by M3-UI-001
       ["newChat", "View", "New Chat", "Ctrl+N", true],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
       ["dock", "View", "Toggle AI Dock", "Ctrl+L", true], // added by M3-UI-002
+      ["search", "View", "Search in Files", "Ctrl+Shift+F", true], // added by M4-UX-001
+      ["terminal", "View", "Show Terminal", "Ctrl+Shift+`", true], // added by M4-TERM-002
       ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Light Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", true],

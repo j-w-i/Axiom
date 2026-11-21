@@ -82,9 +82,19 @@
   white-space: nowrap;
 }
 .problem__code,
+.problem__source,
 .problem__at {
   flex: none;
   color: var(--text-muted);
   font-family: var(--font-code);
   font-size: var(--out-size);
+}
+
+/* The producing tool or server (rustc, rust-analyzer…): the same muted mono label as the code,
+   but narrower and clipped so it never pushes the position out (M4-LSP-002). */
+.problem__source {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

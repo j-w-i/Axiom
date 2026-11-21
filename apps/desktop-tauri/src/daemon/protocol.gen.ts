@@ -161,6 +161,10 @@ export type Command =
       shell: string;
     };
 export type ProviderKind = "anthropic" | "openaiChat" | "scripted" | "acp";
+/**
+ * Opaque identifier of an open workspace, minted by `workspace/open`.
+ */
+export type WorkspaceId = string;
 export type Decision = "allow" | "ask" | "deny";
 export type ToolLocation =
   | {
@@ -171,10 +175,6 @@ export type ToolLocation =
       kind: "system";
       path: string;
     };
-/**
- * Opaque identifier of an open workspace, minted by `workspace/open`.
- */
-export type WorkspaceId = string;
 export type EntryKind = ("file" | "directory") | "symlink";
 export type Effect = "network" | "writeManaged" | "runPrograms" | "systemChange" | "elevation";
 /**
@@ -209,13 +209,33 @@ export type ErrorKind =
   | "prerequisite_missing"
   | "approval_required"
   | "checkpoint_conflict"
-  | "model_error";
+  | "model_error"
+  | "lsp_error"
+  | "server_unavailable"
+  | "git_unavailable";
 export type Outcome = "succeeded" | "failed" | "cancelled";
+/**
+ * Opaque identifier of a terminal, minted by `terminal/create`.
+ */
+export type TerminalId = string;
 /**
  * Opaque content fingerprint (lowercase hex SHA-256 of the file bytes).
  * Two reads return equal versions iff the bytes are equal.
  */
 export type FileVersion = string;
+export type GitFileState =
+  | "unmodified"
+  | "modified"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "typeChanged"
+  | "untracked"
+  | "ignored"
+  | "conflicted"
+  | "unknown";
+export type GitRev = "head" | "index";
 export type HostOs = "linux" | "macos" | "windows";
 export type InstallScope = "managed" | "system";
 export type Step =
@@ -273,6 +293,8 @@ export type LogLevel = "error" | "warn" | "info" | "debug";
 export type Message = Request | Response | Notification;
 export type Stream = "stdout" | "stderr";
 export type ProviderSource = "builtin" | "user" | "workspace";
+export type SearchMode = "text" | "files";
+export type ServerState = ("starting" | "ready" | "stopped" | "unknown") | "idle" | "failed" | "missing";
 export type TaskKind = "build" | "run" | "test" | "clean" | "other";
 
 /**
@@ -513,6 +535,15 @@ export interface ProviderConfig {
    */
   name: string;
 }
+export interface CreateParams {
+  /**
+   * The program and its arguments; default: the person's login shell.
+   */
+  argv?: string[] | null;
+  cols: number;
+  rows: number;
+  workspaceId: WorkspaceId;
+}
 export interface DetectResult {
   /**
    * The providers whose project detection matched, in registry order.
@@ -627,7 +658,10 @@ export interface ErrorData {
     | "prerequisite_missing"
     | "approval_required"
     | "checkpoint_conflict"
-    | "model_error";
+    | "model_error"
+    | "lsp_error"
+    | "server_unavailable"
+    | "git_unavailable";
   /**
    * Whether retrying the identical request may succeed.
    */
@@ -658,6 +692,13 @@ export interface ExitedParams {
   signal?: number | null;
   taskId: TaskId;
 }
+export interface ExitedParams2 {
+  /**
+   * Absent when the process was ended by a signal.
+   */
+  code?: number | null;
+  terminalId: TerminalId;
+}
 export interface GetParams {
   /**
    * Keys to read; empty means all known and stored keys.
@@ -675,6 +716,62 @@ export interface GetStateParams {
    */
   keys?: string[];
   workspaceId: WorkspaceId;
+}
+export interface GitFile {
+  /**
+   * The staged side (index vs HEAD).
+   */
+  index:
+    | "unmodified"
+    | "modified"
+    | "added"
+    | "deleted"
+    | "renamed"
+    | "copied"
+    | "typeChanged"
+    | "untracked"
+    | "ignored"
+    | "conflicted"
+    | "unknown";
+  /**
+   * For a rename or copy: the path it came from.
+   */
+  origPath?: WorkspacePath | null;
+  path: WorkspacePath;
+  /**
+   * The unstaged side (worktree vs index).
+   */
+  worktree:
+    | "unmodified"
+    | "modified"
+    | "added"
+    | "deleted"
+    | "renamed"
+    | "copied"
+    | "typeChanged"
+    | "untracked"
+    | "ignored"
+    | "conflicted"
+    | "unknown";
+}
+export interface GitStatus {
+  ahead?: number;
+  behind?: number;
+  /**
+   * The branch name; absent when HEAD is detached.
+   */
+  branch?: string | null;
+  files?: GitFile[];
+  /**
+   * The commit HEAD points at (abbreviated), when there is one.
+   */
+  head?: string | null;
+  /**
+   * Why `repo` is false: `git` not found, or not a repository.
+   */
+  reason?: string | null;
+  repo: boolean;
+  upstream?: string | null;
 }
 export interface HostInfo {
   /**
@@ -740,6 +837,18 @@ export interface InitializeResult {
   protocolVersion: string;
   server: PeerInfo;
 }
+export interface InstallAgentParams {
+  /**
+   * A built-in agent's provider id (`claude-code`, `codex`, `gemini`).
+   */
+  providerId: string;
+}
+export interface InstallAgentResult {
+  /**
+   * The installed program.
+   */
+  program: string;
+}
 export interface InstallParams {
   planId: string;
 }
@@ -799,6 +908,25 @@ export interface ListParams {
 export interface ListResult {
   entries: DirEntry[];
 }
+export interface ListResult2 {
+  terminals: ListedTerminal[];
+}
+export interface ListedTerminal {
+  /**
+   * The kept output; `seq` is the sequence number of the last output it includes.
+   */
+  backlog: string;
+  exitCode?: number | null;
+  pid?: number | null;
+  running: boolean;
+  seq: number;
+  terminalId: TerminalId;
+  /**
+   * The program's name, e.g. `zsh`.
+   */
+  title: string;
+  workspaceId: WorkspaceId;
+}
 export interface ListTasksParams {
   workspaceId: WorkspaceId;
 }
@@ -822,6 +950,14 @@ export interface LogParams {
   level: LogLevel;
   message: string;
   target: string;
+}
+export interface LspNotificationParams {
+  method: string;
+  params?: {
+    [k: string]: unknown;
+  };
+  serverId: string;
+  workspaceId: WorkspaceId;
 }
 export interface Request {
   id: RequestId;
@@ -884,6 +1020,14 @@ export interface ProviderStatus {
   hasKey: boolean;
   models: ModelInfo[];
 }
+export interface NotifyParams {
+  method: string;
+  params?: {
+    [k: string]: unknown;
+  };
+  serverId: string;
+  workspaceId: WorkspaceId;
+}
 export interface OpenParams {
   /**
    * Absolute host path in host-native form.
@@ -906,6 +1050,14 @@ export interface OutputParams {
   seq: number;
   stream: Stream;
   taskId: TaskId;
+}
+export interface OutputParams2 {
+  data: string;
+  /**
+   * Increases by one per notification of this terminal.
+   */
+  seq: number;
+  terminalId: TerminalId;
 }
 export interface PlanInstallParams {
   /**
@@ -1007,6 +1159,30 @@ export interface RecentWorkspace {
   name: string;
   root: string;
 }
+export interface RequestParams {
+  /**
+   * The LSP method, e.g. `textDocument/completion`.
+   */
+  method: string;
+  params?: {
+    [k: string]: unknown;
+  };
+  serverId: string;
+  workspaceId: WorkspaceId;
+}
+export interface RequestResult {
+  /**
+   * The LSP result (may be `null`).
+   */
+  result: {
+    [k: string]: unknown;
+  };
+}
+export interface ResizeParams {
+  cols: number;
+  rows: number;
+  terminalId: TerminalId;
+}
 export interface RestoreParams {
   checkpoint: number;
   sessionId: SessionId;
@@ -1040,6 +1216,61 @@ export interface RunParams {
 export interface RunResult {
   taskId: TaskId;
 }
+export interface SearchMatch {
+  /**
+   * 1-based, in UTF-16 code units (Monaco's columns).
+   */
+  column: number;
+  /**
+   * Exclusive end column on the same line.
+   */
+  endColumn: number;
+  /**
+   * 1-based.
+   */
+  line: number;
+  path: WorkspacePath;
+  /**
+   * The line, trimmed to 300 characters around the match.
+   */
+  preview: string;
+  /**
+   * Column of the match within `preview`, 1-based (differs from `column` when trimmed).
+   */
+  previewColumn: number;
+}
+export interface SearchParams {
+  caseSensitive?: boolean;
+  /**
+   * Comma-separated globs of paths to skip.
+   */
+  exclude?: string | null;
+  /**
+   * Comma-separated workspace-relative globs a path must match (`**` allowed).
+   */
+  include?: string | null;
+  limit?: number | null;
+  mode?: "text" | "files";
+  /**
+   * The text or pattern; ignored in `files` mode.
+   */
+  query?: string;
+  regex?: boolean;
+  wholeWord?: boolean;
+  workspaceId: WorkspaceId;
+}
+export interface SearchResult {
+  /**
+   * Files mode: the workspace's file paths.
+   */
+  files?: WorkspacePath[];
+  filesSearched: number;
+  /**
+   * Text mode: the matches in path order, then line order.
+   */
+  matches?: SearchMatch[];
+  truncated: boolean;
+}
 export interface SendParams {
   /**
    * Context the user attached (an editor selection, a file).
@@ -1057,6 +1288,46 @@ export interface SendParams {
   sessionId: SessionId;
   text: string;
   workspaceId?: WorkspaceId | null;
+}
+export interface ServerInfo {
+  /**
+   * The server's `ServerCapabilities` once `ready`.
+   */
+  capabilities?: {
+    [k: string]: unknown;
+  };
+  /**
+   * One sentence for the person: why it failed, what is missing.
+   */
+  detail?: string | null;
+  /**
+   * How to get the server when it is `missing`.
+   */
+  installHint?: string | null;
+  /**
+   * Monaco/LSP language ids it serves, e.g. `["rust"]`.
+   */
+  languages: string[];
+  /**
+   * The provider whose manifest defines it.
+   */
+  providerId: string;
+  /**
+   * The definition's id, e.g. `rust-analyzer`.
+   */
+  serverId: string;
+  state: ServerState;
+}
+export interface ServerRef {
+  serverId: string;
+  workspaceId: WorkspaceId;
+}
+export interface ServerStateParams {
+  server: ServerInfo;
+  workspaceId: WorkspaceId;
+}
+export interface ServersResult {
+  servers: ServerInfo[];
 }
 export interface SessionCreateParams {
   model: string;
@@ -1133,6 +1404,18 @@ export interface SetStateParams {
   };
   workspaceId: WorkspaceId;
 }
+export interface ShowParams {
+  path: WorkspacePath;
+  rev: GitRev;
+  workspaceId: WorkspaceId;
+}
+export interface ShowResult {
+  binary: boolean;
+  /**
+   * The text (UTF-8); absent when the file is binary.
+   */
+  text?: string | null;
+}
 export interface StartParams {
   command: Command;
   /**
@@ -1173,6 +1456,20 @@ export interface TaskRef {
 }
 export interface TasksResult {
   tasks: TaskInfo2[];
+}
+export interface TerminalInfo {
+  exitCode?: number | null;
+  pid?: number | null;
+  running: boolean;
+  terminalId: TerminalId;
+  /**
+   * The program's name, e.g. `zsh`.
+   */
+  title: string;
+  workspaceId: WorkspaceId;
+}
+export interface TerminalRef {
+  terminalId: TerminalId;
 }
 export interface ToolCallParams {
   input: unknown;
@@ -1260,4 +1557,8 @@ export interface WriteFileParams {
 }
 export interface WriteFileResult {
   version: FileVersion;
+}
+export interface WriteParams {
+  data: string;
+  terminalId: TerminalId;
 }

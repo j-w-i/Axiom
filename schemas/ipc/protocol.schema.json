@@ -496,6 +496,41 @@
         }
       ]
     },
+    "CreateParams": {
+      "properties": {
+        "argv": {
+          "description": "The program and its arguments; default: the person's login shell.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "cols": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    },
     "Decision": {
       "enum": [
         "allow",
@@ -783,6 +818,21 @@
         {
           "const": "model_error",
           "description": "Details: `{ \"kind\": ModelErrorKind }`.",
+          "type": "string"
+        },
+        {
+          "const": "lsp_error",
+          "description": "A language server answered with an error. Details: `{ \"code\": i64, \"data\"? }`.",
+          "type": "string"
+        },
+        {
+          "const": "server_unavailable",
+          "description": "The language server cannot take requests. Details: `{ \"state\": ServerState }`.",
+          "type": "string"
+        },
+        {
+          "const": "git_unavailable",
+          "description": "No `git`, or the workspace is not in a repository.",
           "type": "string"
         }
       ]
@@ -1213,6 +1263,25 @@
       ],
       "type": "object"
     },
+    "ExitedParams2": {
+      "properties": {
+        "code": {
+          "description": "Absent when the process was ended by a signal.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "terminalId": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminalId"
+      ],
+      "type": "object"
+    },
     "FileChange": {
       "properties": {
         "kind": {
@@ -1273,6 +1342,118 @@
       },
       "required": [
         "workspaceId"
+      ],
+      "type": "object"
+    },
+    "GitFile": {
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/GitFileState",
+          "description": "The staged side (index vs HEAD)."
+        },
+        "origPath": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspacePath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For a rename or copy: the path it came from."
+        },
+        "path": {
+          "$ref": "#/$defs/WorkspacePath"
+        },
+        "worktree": {
+          "$ref": "#/$defs/GitFileState",
+          "description": "The unstaged side (worktree vs index)."
+        }
+      },
+      "required": [
+        "path",
+        "index",
+        "worktree"
+      ],
+      "type": "object"
+    },
+    "GitFileState": {
+      "enum": [
+        "unmodified",
+        "modified",
+        "added",
+        "deleted",
+        "renamed",
+        "copied",
+        "typeChanged",
+        "untracked",
+        "ignored",
+        "conflicted",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "GitRev": {
+      "enum": [
+        "head",
+        "index"
+      ],
+      "type": "string"
+    },
+    "GitStatus": {
+      "properties": {
+        "ahead": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "behind": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "branch": {
+          "description": "The branch name; absent when HEAD is detached.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GitFile"
+          },
+          "type": "array"
+        },
+        "head": {
+          "description": "The commit HEAD points at (abbreviated), when there is one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "Why `repo` is false: `git` not found, or not a repository.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "type": "boolean"
+        },
+        "upstream": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "repo"
       ],
       "type": "object"
     },
@@ -1429,6 +1610,30 @@
         "server",
         "methods",
         "host"
+      ],
+      "type": "object"
+    },
+    "InstallAgentParams": {
+      "properties": {
+        "providerId": {
+          "description": "A built-in agent's provider id (`claude-code`, `codex`, `gemini`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "providerId"
+      ],
+      "type": "object"
+    },
+    "InstallAgentResult": {
+      "properties": {
+        "program": {
+          "description": "The installed program.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "program"
       ],
       "type": "object"
     },
@@ -1627,6 +1832,20 @@
       ],
       "type": "object"
     },
+    "ListResult2": {
+      "properties": {
+        "terminals": {
+          "items": {
+            "$ref": "#/$defs/ListedTerminal"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "terminals"
+      ],
+      "type": "object"
+    },
     "ListTasksParams": {
       "properties": {
         "workspaceId": {
@@ -1649,6 +1868,56 @@
       },
       "required": [
         "tasks"
+      ],
+      "type": "object"
+    },
+    "ListedTerminal": {
+      "properties": {
+        "backlog": {
+          "description": "The kept output; `seq` is the sequence number of the last output it includes.",
+          "type": "string"
+        },
+        "exitCode": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminalId": {
+          "$ref": "#/$defs/TerminalId"
+        },
+        "title": {
+          "description": "The program's name, e.g. `zsh`.",
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "terminalId",
+        "workspaceId",
+        "title",
+        "running",
+        "backlog",
+        "seq"
       ],
       "type": "object"
     },
@@ -1719,6 +1988,28 @@
         "level",
         "target",
         "message"
+      ],
+      "type": "object"
+    },
+    "LspNotificationParams": {
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "default": null
+        },
+        "serverId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "serverId",
+        "method"
       ],
       "type": "object"
     },
@@ -1808,6 +2099,28 @@
       ],
       "type": "object"
     },
+    "NotifyParams": {
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "default": null
+        },
+        "serverId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "serverId",
+        "method"
+      ],
+      "type": "object"
+    },
     "OpenParams": {
       "properties": {
         "path": {
@@ -1881,6 +2194,28 @@
         "taskId",
         "seq",
         "stream",
+        "data"
+      ],
+      "type": "object"
+    },
+    "OutputParams2": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "seq": {
+          "description": "Increases by one per notification of this terminal.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminalId": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminalId",
+        "seq",
         "data"
       ],
       "type": "object"
@@ -2365,6 +2700,65 @@
       ],
       "description": "Request correlation id. Clients choose ids; they must be unique among that\nclient's in-flight requests on one connection."
     },
+    "RequestParams": {
+      "properties": {
+        "method": {
+          "description": "The LSP method, e.g. `textDocument/completion`.",
+          "type": "string"
+        },
+        "params": {
+          "default": null
+        },
+        "serverId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "serverId",
+        "method"
+      ],
+      "type": "object"
+    },
+    "RequestResult": {
+      "properties": {
+        "result": {
+          "description": "The LSP result (may be `null`)."
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "type": "object"
+    },
+    "ResizeParams": {
+      "properties": {
+        "cols": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminalId": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminalId",
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    },
     "Response": {
       "description": "Exactly one of `result` / `error` is present.",
       "properties": {
@@ -2560,6 +2954,144 @@
       ],
       "type": "object"
     },
+    "SearchMatch": {
+      "properties": {
+        "column": {
+          "description": "1-based, in UTF-16 code units (Monaco's columns).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "endColumn": {
+          "description": "Exclusive end column on the same line.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "line": {
+          "description": "1-based.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "$ref": "#/$defs/WorkspacePath"
+        },
+        "preview": {
+          "description": "The line, trimmed to 300 characters around the match.",
+          "type": "string"
+        },
+        "previewColumn": {
+          "description": "Column of the match within `preview`, 1-based (differs from `column` when trimmed).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "column",
+        "endColumn",
+        "preview",
+        "previewColumn"
+      ],
+      "type": "object"
+    },
+    "SearchMode": {
+      "enum": [
+        "text",
+        "files"
+      ],
+      "type": "string"
+    },
+    "SearchParams": {
+      "properties": {
+        "caseSensitive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "exclude": {
+          "description": "Comma-separated globs of paths to skip.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "include": {
+          "description": "Comma-separated workspace-relative globs a path must match (`**` allowed).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/SearchMode",
+          "default": "text"
+        },
+        "query": {
+          "default": "",
+          "description": "The text or pattern; ignored in `files` mode.",
+          "type": "string"
+        },
+        "regex": {
+          "default": false,
+          "type": "boolean"
+        },
+        "wholeWord": {
+          "default": false,
+          "type": "boolean"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ],
+      "type": "object"
+    },
+    "SearchResult": {
+      "properties": {
+        "files": {
+          "default": [],
+          "description": "Files mode: the workspace's file paths.",
+          "items": {
+            "$ref": "#/$defs/WorkspacePath"
+          },
+          "type": "array"
+        },
+        "filesSearched": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "matches": {
+          "default": [],
+          "description": "Text mode: the matches in path order, then line order.",
+          "items": {
+            "$ref": "#/$defs/SearchMatch"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "truncated",
+        "filesSearched"
+      ],
+      "type": "object"
+    },
     "SendParams": {
       "properties": {
         "attachments": {
@@ -2605,6 +3137,124 @@
       "required": [
         "sessionId",
         "text"
+      ],
+      "type": "object"
+    },
+    "ServerInfo": {
+      "properties": {
+        "capabilities": {
+          "description": "The server's `ServerCapabilities` once `ready`."
+        },
+        "detail": {
+          "description": "One sentence for the person: why it failed, what is missing.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "installHint": {
+          "description": "How to get the server when it is `missing`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "languages": {
+          "description": "Monaco/LSP language ids it serves, e.g. `[\"rust\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "providerId": {
+          "description": "The provider whose manifest defines it.",
+          "type": "string"
+        },
+        "serverId": {
+          "description": "The definition's id, e.g. `rust-analyzer`.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ServerState"
+        }
+      },
+      "required": [
+        "serverId",
+        "providerId",
+        "languages",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ServerRef": {
+      "properties": {
+        "serverId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "serverId"
+      ],
+      "type": "object"
+    },
+    "ServerState": {
+      "oneOf": [
+        {
+          "enum": [
+            "starting",
+            "ready",
+            "stopped",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "idle",
+          "description": "Defined, not started yet (it starts on first use).",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "Crashed too often (3 times in 3 minutes) or failed to initialize; `lsp/restart` retries.",
+          "type": "string"
+        },
+        {
+          "const": "missing",
+          "description": "The command was not found in the workspace's environment.",
+          "type": "string"
+        }
+      ]
+    },
+    "ServerStateParams": {
+      "properties": {
+        "server": {
+          "$ref": "#/$defs/ServerInfo"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "server"
+      ],
+      "type": "object"
+    },
+    "ServersResult": {
+      "properties": {
+        "servers": {
+          "items": {
+            "$ref": "#/$defs/ServerInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "servers"
       ],
       "type": "object"
     },
@@ -2870,6 +3520,43 @@
           "type": "object"
         }
       ]
+    },
+    "ShowParams": {
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/WorkspacePath"
+        },
+        "rev": {
+          "$ref": "#/$defs/GitRev"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "path",
+        "rev"
+      ],
+      "type": "object"
+    },
+    "ShowResult": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "text": {
+          "description": "The text (UTF-8); absent when the file is binary.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "binary"
+      ],
+      "type": "object"
     },
     "StartParams": {
       "properties": {
@@ -3179,6 +3866,60 @@
       },
       "required": [
         "tasks"
+      ],
+      "type": "object"
+    },
+    "TerminalId": {
+      "description": "Opaque identifier of a terminal, minted by `terminal/create`.",
+      "type": "string"
+    },
+    "TerminalInfo": {
+      "properties": {
+        "exitCode": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "terminalId": {
+          "$ref": "#/$defs/TerminalId"
+        },
+        "title": {
+          "description": "The program's name, e.g. `zsh`.",
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "terminalId",
+        "workspaceId",
+        "title",
+        "running"
+      ],
+      "type": "object"
+    },
+    "TerminalRef": {
+      "properties": {
+        "terminalId": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminalId"
       ],
       "type": "object"
     },
@@ -3533,6 +4274,21 @@
         "version"
       ],
       "type": "object"
+    },
+    "WriteParams": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "terminalId": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminalId",
+        "data"
+      ],
+      "type": "object"
     }
   },
   "envelope": {
@@ -3577,6 +4333,14 @@
       },
       "result": {
         "$ref": "#/$defs/ImageData"
+      }
+    },
+    "agent/installAgent": {
+      "params": {
+        "$ref": "#/$defs/InstallAgentParams"
+      },
+      "result": {
+        "$ref": "#/$defs/InstallAgentResult"
       }
     },
     "agent/models": {
@@ -3787,12 +4551,60 @@
         "$ref": "#/$defs/WriteFileResult"
       }
     },
+    "git/show": {
+      "params": {
+        "$ref": "#/$defs/ShowParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ShowResult"
+      }
+    },
+    "git/status": {
+      "params": {
+        "$ref": "#/$defs/WorkspaceRef"
+      },
+      "result": {
+        "$ref": "#/$defs/GitStatus"
+      }
+    },
     "initialize": {
       "params": {
         "$ref": "#/$defs/InitializeParams"
       },
       "result": {
         "$ref": "#/$defs/InitializeResult"
+      }
+    },
+    "lsp/notify": {
+      "params": {
+        "$ref": "#/$defs/NotifyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    "lsp/request": {
+      "params": {
+        "$ref": "#/$defs/RequestParams"
+      },
+      "result": {
+        "$ref": "#/$defs/RequestResult"
+      }
+    },
+    "lsp/restart": {
+      "params": {
+        "$ref": "#/$defs/ServerRef"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    "lsp/servers": {
+      "params": {
+        "$ref": "#/$defs/WorkspaceRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ServersResult"
       }
     },
     "settings/get": {
@@ -3843,6 +4655,46 @@
         "$ref": "#/$defs/StartResult"
       }
     },
+    "terminal/close": {
+      "params": {
+        "$ref": "#/$defs/TerminalRef"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    "terminal/create": {
+      "params": {
+        "$ref": "#/$defs/CreateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TerminalInfo"
+      }
+    },
+    "terminal/list": {
+      "params": {
+        "$ref": "#/$defs/WorkspaceRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ListResult2"
+      }
+    },
+    "terminal/resize": {
+      "params": {
+        "$ref": "#/$defs/ResizeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    "terminal/write": {
+      "params": {
+        "$ref": "#/$defs/WriteParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
     "workspace/close": {
       "params": {
         "$ref": "#/$defs/WorkspaceRef"
@@ -3873,6 +4725,14 @@
       },
       "result": {
         "$ref": "#/$defs/RecentResult"
+      }
+    },
+    "workspace/search": {
+      "params": {
+        "$ref": "#/$defs/SearchParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SearchResult"
       }
     },
     "workspace/setState": {
@@ -3935,6 +4795,21 @@
         "$ref": "#/$defs/DidChangeParams"
       }
     },
+    "git/didChange": {
+      "params": {
+        "$ref": "#/$defs/WorkspaceRef"
+      }
+    },
+    "lsp/notification": {
+      "params": {
+        "$ref": "#/$defs/LspNotificationParams"
+      }
+    },
+    "lsp/serverState": {
+      "params": {
+        "$ref": "#/$defs/ServerStateParams"
+      }
+    },
     "settings/didChange": {
       "params": {
         "$ref": "#/$defs/GetResult"
@@ -3949,7 +4824,17 @@
       "params": {
         "$ref": "#/$defs/OutputParams"
       }
+    },
+    "terminal/exited": {
+      "params": {
+        "$ref": "#/$defs/ExitedParams2"
+      }
+    },
+    "terminal/output": {
+      "params": {
+        "$ref": "#/$defs/OutputParams2"
+      }
     }
   },
-  "protocolVersion": "0.3"
+  "protocolVersion": "0.4"
 }

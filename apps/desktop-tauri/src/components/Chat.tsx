@@ -193,6 +193,7 @@ export function ChatPage({
   hasWorkspace,
   dark,
   onOpenLink,
+  onOpenDiff,
   setup,
   variant = "page",
 }: {
@@ -200,6 +201,8 @@ export function ChatPage({
   hasWorkspace: boolean;
   dark: boolean;
   onOpenLink: (url: string) => void;
+  /** Opens a workspace file's diff in the editor (M4-GIT-002); absent without a folder. */
+  onOpenDiff?: (path: string) => void;
   /** What to show when no model is available (the first-run setup, M3-UI-003). */
   setup?: ReactNode;
   /** "dock": beside the editor (workspace-spec.md §5.2): the header switches conversations. */
@@ -263,7 +266,7 @@ export function ChatPage({
       {noModel && setup ? (
         <div className="chat__setup">{setup}</div>
       ) : (
-        <Transcript store={store} items={items} streaming={s.active.streaming} running={s.active.running} images={s.images} dark={dark} onOpenLink={onOpenLink} hasWorkspace={hasWorkspace} empty={noModel ? "No model is available. Add one in Settings → Models." : null}
+        <Transcript store={store} items={items} streaming={s.active.streaming} running={s.active.running} images={s.images} dark={dark} onOpenLink={onOpenLink} onOpenDiff={onOpenDiff} hasWorkspace={hasWorkspace} empty={noModel ? "No model is available. Add one in Settings → Models." : null}
           approvals={s.approvals.filter((a) => a.sessionId === s.activeId)} external={modelOf?.kind === "acp" ? modelOf.name : null} />
       )}
       <Dialog
@@ -356,6 +359,7 @@ function ModelPicker({
 // ---- transcript ------------------------------------------------------------------
 
 function Transcript({
+  onOpenDiff,
   store,
   items,
   streaming,
@@ -375,6 +379,7 @@ function Transcript({
   images: Record<string, string>;
   dark: boolean;
   onOpenLink: (url: string) => void;
+  onOpenDiff?: (path: string) => void;
   hasWorkspace: boolean;
   empty: string | null;
   approvals: ApprovalRequest[];
@@ -410,7 +415,7 @@ function Transcript({
     <div className="chat__scroll" ref={scroller} onScroll={onScroll}>
       <div className="chat__log" role="log" aria-label="Conversation" aria-live="off" data-testid="chat-log">
         {items.map((it) => (
-          <ItemView key={it.key} item={it} store={store} images={images} dark={dark} onOpenLink={onOpenLink} last={it.key === lastAssistant && !running} running={running} />
+          <ItemView key={it.key} item={it} store={store} images={images} dark={dark} onOpenLink={onOpenLink} onOpenDiff={onOpenDiff} last={it.key === lastAssistant && !running} running={running} />
         ))}
         {streaming && (
           <article className="msg msg--assistant" aria-label="Assistant" data-streaming="true">
@@ -436,7 +441,7 @@ function Transcript({
   );
 }
 
-function ItemView({ item, store, images, dark, onOpenLink, last, running }: { item: Item; store: AgentStore; images: Record<string, string>; dark: boolean; onOpenLink: (url: string) => void; last: boolean; running: boolean }) {
+function ItemView({ item, store, images, dark, onOpenLink, onOpenDiff, last, running }: { item: Item; store: AgentStore; images: Record<string, string>; dark: boolean; onOpenLink: (url: string) => void; onOpenDiff?: (path: string) => void; last: boolean; running: boolean }) {
   switch (item.kind) {
     case "user":
       return <UserMessage item={item} store={store} images={images} running={running} />;
@@ -463,7 +468,7 @@ function ItemView({ item, store, images, dark, onOpenLink, last, running }: { it
         </article>
       );
     case "tool":
-      return <ToolRow item={item} />;
+      return <ToolRow item={item} onOpenDiff={onOpenDiff} />;
     case "checkpoint":
       return (
         <p className="chat__checkpoint" data-checkpoint={item.number}>
@@ -551,7 +556,7 @@ function diffOf(output: unknown): string | null {
   return null;
 }
 
-function ToolRow({ item }: { item: Item & { kind: "tool" } }) {
+function ToolRow({ item, onOpenDiff }: { item: Item & { kind: "tool" }; onOpenDiff?: (path: string) => void }) {
   const diff = diffOf(item.output);
   // A finished edit shows its diff until the person closes it (the row first renders running).
   const [chosen, setOpen] = useState<boolean | null>(null);
@@ -570,7 +575,7 @@ function ToolRow({ item }: { item: Item & { kind: "tool" } }) {
         <span className="tool-row__targets">{item.targets.join(", ")}</span>
         <span className="tool-row__summary">{item.summary}</span>
       </button>
-      {open && diff && <DiffBlock diff={diff} />}
+      {open && diff && <DiffBlock diff={diff} onOpen={onOpenDiff} />}
       {open && !diff && out && (
         <pre className="tool-row__out">
           {all || lines.length <= TOOL_PREVIEW_LINES ? out : lines.slice(0, TOOL_PREVIEW_LINES).join("\n")}
@@ -742,7 +747,7 @@ export function parseDiff(diff: string): { file: string; added: number; removed:
   return { file, added, removed, rows };
 }
 
-export function DiffBlock({ diff }: { diff: string }) {
+export function DiffBlock({ diff, onOpen }: { diff: string; onOpen?: (path: string) => void }) {
   const d = useMemo(() => parseDiff(diff), [diff]);
   return (
     <figure className="diff" aria-label={`Diff of ${d.file}: ${d.added} added, ${d.removed} removed`}>
@@ -751,6 +756,11 @@ export function DiffBlock({ diff }: { diff: string }) {
         <span className="diff__stat">
           <span className="diff__plus">+{d.added}</span> <span className="diff__minus">−{d.removed}</span>
         </span>
+        {onOpen && d.file && (
+          <Button size="sm" variant="quiet" onClick={() => onOpen(d.file)} data-hint="Show the file's changes against HEAD in the diff editor">
+            Open in diff editor
+          </Button>
+        )}
       </figcaption>
       <div className="diff__body" role="table" aria-label="Changed lines">
         {d.rows.map((r, i) =>

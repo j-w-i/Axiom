@@ -1,4 +1,4 @@
-//! Axiom wire protocol, version 0.3.
+//! Axiom wire protocol, version 0.4.
 //!
 //! This crate is the single source of truth for the contract between the
 //! daemon (`axiomd`) and every client (desktop shell, CLI, agents, tests).
@@ -14,6 +14,8 @@
 //!   [`task`], [`settings`]. These make up protocol 0.1 (milestone M1).
 //! - [`env`] and [`build`]: the protocol 0.2 additions (milestone M2, ADR-0014).
 //! - [`agent`]: the protocol 0.3 additions (milestone M3, ADR-0015).
+//! - [`lsp`], [`terminal`], [`git`] and `workspace/search`: the protocol 0.4 additions
+//!   (milestone M4, ADR-0018).
 //! - DRAFT contracts for later milestones, compiled and schema-exported but
 //!   not served yet: [`inspection`]. [`diagnostics`] and [`provider`] were drafts and are
 //!   frozen for M2 (used by [`env`] and [`build`]).
@@ -30,13 +32,16 @@ pub mod diagnostics;
 pub mod env;
 pub mod envelope;
 pub mod fs;
+pub mod git;
 pub mod inspection;
 pub mod lifecycle;
+pub mod lsp;
 pub mod method;
 pub mod provider;
 pub mod registry;
 pub mod settings;
 pub mod task;
+pub mod terminal;
 pub mod workspace;
 
 pub use envelope::{
@@ -45,7 +50,7 @@ pub use envelope::{
 pub use method::{Method, Notification};
 
 /// Protocol version implemented by this crate. `MAJOR.MINOR`.
-pub const PROTOCOL_VERSION: &str = "0.3";
+pub const PROTOCOL_VERSION: &str = "0.4";
 
 /// A path inside a workspace: relative to the workspace root, `/`-separated,
 /// UTF-8, with no `.`/`..` segments, no leading `/`, and no trailing `/`.

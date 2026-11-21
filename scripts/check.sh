@@ -2,8 +2,9 @@
 # The single quality gate. Every task must leave this passing.
 # Usage: scripts/check.sh            (everything: Rust + editor + the Tauri shell)
 #        scripts/check.sh rust       (only the Rust workspace + repository guards)
-#        scripts/check.sh editor | tauri   (one part)
+#        scripts/check.sh editor | tauri | flutter   (one part)
 #        scripts/check.sh e2e        (Tauri end-to-end test, headless, ~2 min)
+#        scripts/check.sh flutter-e2e   (the Flutter shell's end-to-end suites, private compositor)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -61,15 +62,48 @@ if [[ ( "$what" == all || "$what" == tauri ) && -f apps/desktop-tauri/package.js
   cargo test -p axiom-desktop-tauri   # includes the release guard
 fi
 
+# The Flutter shell (ADR-0020). Flutter is looked for on PATH, then in ~/flutter (dev-setup.md).
+if [[ ( "$what" == all || "$what" == flutter ) && -f apps/desktop-flutter/pubspec.yaml ]]; then
+  export PATH="$PATH:$HOME/flutter/bin"
+  if ! command -v flutter >/dev/null 2>&1; then
+    if [[ "$what" == flutter ]]; then
+      echo "flutter is not installed (docs/contributing/dev-setup.md §Flutter)" >&2; exit 1
+    fi
+    echo "SKIPPED: the Flutter shell (flutter is not installed; see dev-setup.md). CI always runs it."
+  else
+    step "flutter shell: dependencies (lockfile enforced), wire types, format, analyze, tests, licences"
+    # The client tests spawn the real daemon.
+    cargo build -q -p axiomd
+    (cd apps/desktop-flutter && flutter pub get --enforce-lockfile >/dev/null \
+      && dart run tool/gen_types.dart --check \
+      && dart format --output=none --set-exit-if-changed lib test tool \
+      && flutter analyze --fatal-infos \
+      && flutter test)
+    python3 scripts/check_dart_licences.py apps/desktop-flutter >/dev/null
+  fi
+fi
+
 # End-to-end (real app, real webview, real daemon, real input). Needs a private
 # X server, so it is opt-in: `scripts/check.sh e2e`. On Linux it runs twice:
 # through WebKitWebDriver (trusted OS-level key events) and through the
 # embedded driver that Windows and macOS CI use, so both paths stay honest.
+# The Flutter shell's end-to-end suites (a private compositor; opt-in like the Tauri e2e).
+if [[ "$what" == flutter-e2e ]]; then
+  step "flutter shell: end-to-end (private compositor)"
+  apps/desktop-flutter/scripts/e2e.sh
+fi
+
 if [[ "$what" == e2e ]]; then
   step "tauri shell: end-to-end (headless)"
   cargo build -p axiomd
   apps/desktop-tauri/scripts/e2e.sh --driver all
   apps/desktop-tauri/scripts/e2e.sh --no-build --driver all agent.mjs   # the M3 exit scenario
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all lsp.mjs     # language servers (M4)
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all terminal.mjs  # the terminal (M4)
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all git.mjs       # Git in the UI (M4)
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all search.mjs    # search, quick open (M4)
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all split.mjs     # the split editor (M4)
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all editor.mjs    # the M4 exit scenario
 fi
 
 # Packaging, as an installed copy behaves: unpack the package, launch it with no

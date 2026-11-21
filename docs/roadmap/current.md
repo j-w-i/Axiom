@@ -2,13 +2,58 @@
 
 _Last updated: 2026-11-22._
 
+## FL — Flutter shell: in progress (2026-11-22)
+
+The owner chose a full Flutter rewrite of the desktop shell (ADR-0020): the daemon and protocol
+are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity gate. 12 tasks in
+`docs/tasks/FL/`, branch `task/flutter` (from `task/m4`). M5 waits for the switch. Flutter
+3.50.1 is installed in `~/flutter` (dev-setup.md §Flutter).
+
+- **FL-ARCH-001 implemented (2026-11-22):** `apps/desktop-flutter` (widgets layer only; a test
+  rejects Material and Cupertino), `scripts/check.sh flutter` (format, analyze, tests,
+  licences), `scripts/check_dart_licences.py`, the CI job on Ubuntu and macOS, the docs.
+- **FL-CORE-001 implemented (2026-11-22):** the Dart daemon client (lifecycle, wire order,
+  cancel, timeout, crash and restart, bounded shutdown) and generated wire types for all 170
+  definitions with typed method and notification descriptors; 10 tests against the real axiomd.
+- **FL-DS-001 implemented (2026-11-22):** the design system in Flutter
+  (`docs/design/flutter/README.md`): Temporal Tactility's surfaces and motion with Precision
+  Instrument's brass, Plex and hint line; every control keyboard-operable and named;
+  contrast-checked tokens; golden images of the gallery in both themes.
+- **FL-SHELL-001 and FL-FILES-001 implemented (2026-11-22):**
+  - the shell: title row and menus, the rail with its ink underline, side bar and splitter, the
+    status bar with the hint line, the palette, Settings, layout in `shell-local.json`, the
+    quit path;
+  - the explorer (lazy tree, ignored entries, keyboard, external changes, restored after a
+    restart);
+  - `scripts/e2e.sh` (a private compositor) and `scripts/frames.sh`;
+  - at the owner's 125 % scale and window size, no frame over 16.7 ms in any measured
+    interaction (`verification/FL.md`).
+- **FL-EDIT-001 implemented (2026-11-22):**
+  - the editor on `re_editor`: documents with the Tauri rules (saving with `expectedVersion`,
+    conflicts, external changes, unsaved-work prompts, restore), tabs, the split, find and
+    replace, Go to File, go to line;
+  - no frame over 16.7 ms while scrolling, typing or switching tabs on 5000-line files at the
+    owner's scale. The Tauri editor ran at 44 fps there.
+- **FL-EDIT-002 implemented (2026-11-22):** language servers in the Flutter editor:
+  - sync, diagnostic underlines and the Problems panel (the console region, Mod+J);
+  - completion, hover, F12, F2 across files as one undo, formatting, the status segment;
+  - `lsp_test.dart` against fake-lsp; the real servers required in CI on Ubuntu.
+
 ## M2 — Environments and builds: complete (2026-11-21)
 
 All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).
 
+## M4 — Editor depth: planned (2026-11-22)
+
+ADR-0018 records the decisions (protocol 0.4 `lsp/*`, `terminal/*`, `git/*`, `workspace/search`; `crates/lsp` supervises servers and owns the protocol, and the editor is a client of the daemon; an in-house LSP client over Monaco's providers; `crates/term` on `portable-pty` with xterm.js in the console; Git through the `git` CLI). 10 tasks in `docs/tasks/M4/`. Branch `task/m4`, PR to main. Next task: the first READY `M4-*` by order.
+
+- **M4-ARCH-001 tested (2026-11-22):** protocol 0.4 (`lsp/*`, `terminal/*`, `git/*`, `workspace/search`; provider `[[lsp]]`), docs, module edges.
+- **M4-LSP-001 tested (2026-11-22):** `crates/lsp`: daemon-supervised language servers shared by every client (own ids, server requests answered, document mirror, diagnostics, restart policy), `lsp/*` served; rust-analyzer and typescript-language-server in the manifests. Real rust-analyzer test: CI.
+- **M4-LSP-002 tested (2026-11-22):** the editor's LSP client (sync, completion, hover, signature, definition, references, highlight, rename, formatting, code actions, symbols), diagnostics in Problems with their source, the status-bar server segment, themed suggest and hover widgets. e2e `lsp.mjs` 9/9 against fake-lsp; real servers: CI (Ubuntu).
+
 ## M3 — Agent runtime: complete (2026-11-22)
 
-ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4; merged to main once CI is green, under the owner's standing permission. **Next: M4 (editor depth)**, then M5.
+ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4, **merged to main 2026-11-22** (f45bae4; CI green on Linux, macOS and Windows) under the owner's standing permission. **Next: M4 (editor depth)**, then M5.
 
 - **M3-ARCH-001 tested (2026-11-21):** protocol 0.3 (`crates/protocol/src/agent.rs`: 14 methods, 4 notifications, 3 error kinds, optional `authToken`/`capabilities` on initialize); `agents.md` frozen; `agent`/`cli` edges. `axiomd::NOT_YET_SERVED` lists the agent methods until wired.
 - **M3-MODEL-001 tested (2026-11-21):** `crates/agent` with the message model, `ModelProvider`, an in-house SSE parser, the Anthropic Messages adapter (text, tools, opaque thinking, errors, cancel) and `ScriptedProvider`; tested against a loopback fixture server.

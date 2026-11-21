@@ -27,6 +27,8 @@ export interface ShellContext {
   toggleDock: () => void;
   resetLayout: () => void;
   focusRun: () => void;
+  /** The console's Terminal view (M4-TERM-002; Mod+Shift+`). */
+  showTerminal: () => void;
   setSettingsOpen: (open: boolean) => void;
   setAboutOpen: (open: boolean) => void;
   setPalette: (palette: "commands" | "files" | null) => void;

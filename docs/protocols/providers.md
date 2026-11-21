@@ -212,6 +212,22 @@ Additive manifest fields (all optional; older manifests are unchanged):
   which program an argv names (`axiom-exec` test `env_overlay_path_selects_the_program`).
   M2-BUILD-001 starts provider tasks this way. `task/start` (0.1) is unchanged.
 
+## Language servers (`[[lsp]]`, M4; ADR-0018 §2)
+An optional table, additive to `axiom.provider/1`:
+
+```toml
+[[lsp]]
+id = "rust-analyzer"          # unique across providers
+languages = ["rust"]          # Monaco/LSP language ids
+command = ["rust-analyzer"]   # argv, resolved in the workspace's environment
+install_hint = "Install it with: rustup component add rust-analyzer"
+# initialization_options = { ... }   # merged under settings lsp.<id>.initializationOptions
+```
+
+The daemon starts a server on first use for a workspace the provider applies to (M4-LSP-001).
+A command that is not found leaves the server `missing` with the hint; nothing is installed
+silently.
+
 ## Template variables
 
 Only these expand, and only in the fields documented as templates:

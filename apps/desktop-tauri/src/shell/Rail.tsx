@@ -7,7 +7,7 @@ import * as Icon from "../ui/icons";
 import { Tooltip } from "../ui/overlays";
 import "../styles/components/rail.css";
 
-export type Destination = "files" | "chat" | "environments";
+export type Destination = "files" | "search" | "scm" | "chat" | "environments";
 
 interface Item {
   id: Destination;
@@ -41,6 +41,7 @@ export function Rail({
   subscribe,
   chatAttention = () => 0,
   chatSubscribe = () => () => {},
+  scm = false,
 }: {
   current: Destination;
   onSelect: (d: Destination) => void;
@@ -49,11 +50,16 @@ export function Rail({
   /** Approvals waiting (M3-UI-002). */
   chatAttention?: () => number;
   chatSubscribe?: (fn: () => void) => () => void;
+  /** Show Source Control (a folder is open). */
+  scm?: boolean;
 }) {
   const missing = useSyncExternalStore(subscribe, attention, attention);
   const waiting = useSyncExternalStore(chatSubscribe, chatAttention, chatAttention);
   const items: Item[] = [
     { id: "files", label: "Files", icon: <Icon.Files /> },
+    // M4-GIT-002: the side bar's Source Control page (the editor stays).
+    // M4-UX-001: the Search page; M4-GIT-002: Source Control (both need a folder).
+    ...(scm ? [{ id: "search" as const, label: "Search", icon: <Icon.Search /> }, { id: "scm" as const, label: "Source Control", icon: <Icon.Branch /> }] : []),
     { id: "chat", label: "Chat", icon: <Icon.Chat />, badge: waiting },
     { id: "environments", label: "Environments", icon: <Icon.Layers />, badge: missing },
   ];

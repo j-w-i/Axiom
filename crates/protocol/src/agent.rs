@@ -75,6 +75,13 @@ method!(
     Approve, "agent/approve", ApproveParams => Empty
 );
 method!(
+    /// Installs a built-in external agent (ADR-0020 §6: Claude Code, Codex, Gemini CLI) into the
+    /// daemon's data directory with `npm`, so Chat can use it; the person still signs in to it.
+    /// Errors: `not_found` (not a built-in agent), `prerequisite_missing` (`npm`), `io` (the
+    /// install failed; the message ends with npm's own output).
+    InstallAgent, "agent/installAgent", InstallAgentParams => InstallAgentResult
+);
+method!(
     /// The session's checkpoints, oldest first.
     Checkpoints, "agent/checkpoints", SessionRef => CheckpointsResult
 );
@@ -256,6 +263,20 @@ pub struct ModelInfo {
     pub id: String,
     pub display_name: String,
     pub capabilities: Capabilities,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallAgentParams {
+    /// A built-in agent's provider id (`claude-code`, `codex`, `gemini`).
+    pub provider_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallAgentResult {
+    /// The installed program.
+    pub program: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

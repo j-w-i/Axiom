@@ -206,6 +206,18 @@ waiting for still completes its own cleanup.
 - TEST ONLY: `AXIOM_TEST_CREDENTIALS_FILE` replaces the store with a plain JSON file (daemon
   integration tests); `AXIOM_TEST_SCRIPTED_MODEL` offers the scripted model.
 
+## Terminals and language servers (M4; ADR-0018)
+- **Terminals** run the person's own shell (`terminal/*`): they are not agent tools, pass no
+  gate and are never offered to a model. They run in the workspace root with the project's
+  environment; closing one hangs up its process group, and all end with the workspace or the
+  daemon.
+- **Language servers** are commands from provider manifests, resolved in the workspace's
+  environment like build tools; they run with the person's rights, as the build does. The
+  daemon refuses `workspace/applyEdit` (a server cannot change files by itself in 0.4).
+- **Reads outside the workspace** (`fs/readFile` with an absolute `file://` path) are allowed
+  only for a path that one of the workspace's servers returned in a location result, read-only,
+  so go-to-definition into a standard library works without opening the file system.
+
 ## Isolation (ADR-0010)
 
 Axiom uses three distinct words and the UI must too:

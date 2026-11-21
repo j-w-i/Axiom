@@ -9,7 +9,7 @@ schema = "axiom.provider/1"
 id = "node"
 name = "Node.js"
 description = "Node.js runtimes from nodejs.org; npm scripts as tasks."
-version = "0.1.0"
+version = "0.2.0"
 homepage = "https://nodejs.org"
 
 [project]
@@ -92,3 +92,16 @@ id = "start"
 kind = "run"
 label = "npm start"
 command = ["npm", "start"]
+
+# M4 (ADR-0018 §2): TypeScript and JavaScript through typescript-language-server.
+[[lsp]]
+id = "typescript-language-server"
+languages = ["typescript", "javascript"]
+command = ["typescript-language-server", "--stdio"]
+install_hint = "Install it with: npm install -g typescript-language-server typescript"
+
+# F2 renames the symbol everywhere it is used. typescript-language-server's default
+# (providePrefixAndSuffixTextForRename) instead turns a rename of an imported name into an alias in
+# the importing file (`import { helper as renamed }`) and leaves the declaring file unchanged.
+[lsp.initialization_options.preferences]
+providePrefixAndSuffixTextForRename = false

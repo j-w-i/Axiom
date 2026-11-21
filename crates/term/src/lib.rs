@@ -1,0 +1,477 @@
+//! Integrated terminals (ADR-0018 §4; M4-TERM-001): the person's shell in a PTY
+//! (`portable-pty`), its output streamed as UTF-8 that never splits a character, coalesced to at
+//! most one event per 16 ms, with a bounded backlog for a client that reconnects. A terminal is
+//! not an agent tool and passes no gate.
+
+use axiom_protocol::terminal::{ListedTerminal, TerminalId, TerminalInfo};
+use axiom_protocol::WorkspaceId;
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use std::collections::{BTreeMap, HashMap};
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
+/// Output kept per terminal for a client that reconnects.
+pub const BACKLOG_BYTES: usize = 1024 * 1024;
+/// At most one output event per terminal in this interval.
+pub const COALESCE: Duration = Duration::from_millis(16);
+/// Hang-up, then a kill after this long.
+pub const CLOSE_GRACE: Duration = Duration::from_secs(2);
+
+#[derive(Debug, thiserror::Error)]
+pub enum TermError {
+    #[error("There is no terminal {0}.")]
+    NotFound(String),
+    #[error("The terminal could not be started: {0}")]
+    Spawn(String),
+    #[error("{0}")]
+    Invalid(String),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl From<TermError> for axiom_protocol::RpcError {
+    fn from(e: TermError) -> Self {
+        use axiom_protocol::ErrorKind;
+        let kind = match &e {
+            TermError::NotFound(_) => ErrorKind::NotFound,
+            TermError::Spawn(_) => ErrorKind::SpawnFailed,
+            TermError::Invalid(_) => ErrorKind::InvalidParams,
+            TermError::Io(_) => ErrorKind::Io,
+        };
+        axiom_protocol::RpcError::new(kind, e.to_string())
+    }
+}
+
+/// What a terminal reports.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TermEvent {
+    Output {
+        workspace_id: WorkspaceId,
+        terminal_id: TerminalId,
+        seq: u64,
+        data: String,
+    },
+    Exited {
+        workspace_id: WorkspaceId,
+        terminal_id: TerminalId,
+        code: Option<i32>,
+    },
+}
+
+/// How to start one terminal (resolved by the daemon).
+#[derive(Debug, Clone)]
+pub struct Spec {
+    pub workspace_id: WorkspaceId,
+    /// The program and its arguments; `None`: the person's shell.
+    pub argv: Option<Vec<String>>,
+    pub cwd: PathBuf,
+    /// The complete environment (the daemon's plus the project's).
+    pub env: BTreeMap<String, String>,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Decodes UTF-8 across reads: a character split between two reads is held until it is whole;
+/// invalid bytes become U+FFFD.
+#[derive(Default)]
+pub struct Utf8Stream {
+    pending: Vec<u8>,
+}
+
+impl Utf8Stream {
+    pub fn push(&mut self, bytes: &[u8]) -> String {
+        self.pending.extend_from_slice(bytes);
+        let mut out = String::new();
+        loop {
+            match std::str::from_utf8(&self.pending) {
+                Ok(s) => {
+                    out.push_str(s);
+                    self.pending.clear();
+                    return out;
+                }
+                Err(e) => {
+                    let good = e.valid_up_to();
+                    // The prefix was just validated.
+                    out.push_str(std::str::from_utf8(&self.pending[..good]).unwrap_or_default());
+                    match e.error_len() {
+                        // Incomplete character at the end: keep it for the next read.
+                        None => {
+                            self.pending.drain(..good);
+                            return out;
+                        }
+                        Some(n) => {
+                            out.push('\u{FFFD}');
+                            self.pending.drain(..good + n);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The kept output, trimmed from the front at a character boundary.
+#[derive(Default)]
+struct Backlog {
+    text: String,
+    seq: u64,
+}
+
+impl Backlog {
+    fn push(&mut self, s: &str) {
+        self.text.push_str(s);
+        if self.text.len() > BACKLOG_BYTES {
+            let mut cut = self.text.len() - BACKLOG_BYTES;
+            while !self.text.is_char_boundary(cut) {
+                cut += 1;
+            }
+            self.text.drain(..cut);
+        }
+    }
+}
+
+pub struct Terminal {
+    pub id: TerminalId,
+    pub workspace_id: WorkspaceId,
+    pub title: String,
+    pub pid: Option<u32>,
+    master: Mutex<Box<dyn MasterPty + Send>>,
+    writer: Mutex<Box<dyn Write + Send>>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    backlog: Mutex<Backlog>,
+    running: AtomicBool,
+    exit_code: Mutex<Option<i32>>,
+}
+
+impl Terminal {
+    pub fn info(&self) -> TerminalInfo {
+        TerminalInfo {
+            terminal_id: self.id.clone(),
+            workspace_id: self.workspace_id.clone(),
+            title: self.title.clone(),
+            pid: self.pid,
+            running: self.running.load(Ordering::SeqCst),
+            exit_code: *lock(&self.exit_code),
+        }
+    }
+
+    pub fn listed(&self) -> ListedTerminal {
+        let b = lock(&self.backlog);
+        ListedTerminal {
+            info: self.info(),
+            backlog: b.text.clone(),
+            seq: b.seq,
+        }
+    }
+
+    pub fn write(&self, data: &str) -> Result<(), TermError> {
+        let mut w = lock(&self.writer);
+        w.write_all(data.as_bytes())?;
+        w.flush()?;
+        Ok(())
+    }
+
+    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), TermError> {
+        if cols == 0 || rows == 0 {
+            return Err(TermError::Invalid(
+                "A terminal needs at least one row and one column.".into(),
+            ));
+        }
+        lock(&self.master)
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| TermError::Io(std::io::Error::other(e.to_string())))
+    }
+
+    /// Hangs up the process group; kills it if it is still there after the grace period.
+    pub fn close(self: &Arc<Self>) {
+        if !self.running.load(Ordering::SeqCst) {
+            return;
+        }
+        #[cfg(unix)]
+        if let Some(pid) = self.pid {
+            use nix::sys::signal::{killpg, Signal};
+            use nix::unistd::Pid;
+            let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGHUP);
+            let me = self.clone();
+            std::thread::spawn(move || {
+                let end = Instant::now() + CLOSE_GRACE;
+                while Instant::now() < end {
+                    if !me.running.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL);
+            });
+            return;
+        }
+        let _ = lock(&self.killer).kill();
+    }
+}
+
+/// Every terminal of the daemon.
+pub struct Terminals {
+    map: Mutex<HashMap<TerminalId, Arc<Terminal>>>,
+    next: AtomicU64,
+    events: tokio::sync::broadcast::Sender<TermEvent>,
+}
+
+impl Default for Terminals {
+    fn default() -> Self {
+        Self {
+            map: Mutex::new(HashMap::new()),
+            next: AtomicU64::new(1),
+            events: tokio::sync::broadcast::channel(4096).0,
+        }
+    }
+}
+
+/// The person's login shell: `$SHELL`, else `/bin/sh` (`-l` on macOS, as Terminal.app starts it).
+#[cfg(not(windows))]
+pub fn default_shell(env: &BTreeMap<String, String>) -> Vec<String> {
+    let shell = env
+        .get("SHELL")
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .unwrap_or_else(|| "/bin/sh".into());
+    if cfg!(target_os = "macos") {
+        vec![shell, "-l".into()]
+    } else {
+        vec![shell]
+    }
+}
+
+/// The person's shell on Windows: `%COMSPEC%` (cmd.exe). Windows support is deferred.
+#[cfg(windows)]
+pub fn default_shell(_env: &BTreeMap<String, String>) -> Vec<String> {
+    vec![std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())]
+}
+
+impl Terminals {
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<TermEvent> {
+        self.events.subscribe()
+    }
+
+    pub fn get(&self, id: &TerminalId) -> Result<Arc<Terminal>, TermError> {
+        lock(&self.map)
+            .get(id)
+            .cloned()
+            .ok_or_else(|| TermError::NotFound(id.0.clone()))
+    }
+
+    pub fn of_workspace(&self, ws: &WorkspaceId) -> Vec<Arc<Terminal>> {
+        let mut v: Vec<_> = lock(&self.map)
+            .values()
+            .filter(|t| &t.workspace_id == ws)
+            .cloned()
+            .collect();
+        v.sort_by_key(|t| t.id.0.trim_start_matches('t').parse::<u64>().unwrap_or(0));
+        v
+    }
+
+    /// Closes and forgets the workspace's terminals.
+    pub fn close_workspace(&self, ws: &WorkspaceId) {
+        let gone: Vec<_> = {
+            let mut m = lock(&self.map);
+            let ids: Vec<_> = m
+                .values()
+                .filter(|t| &t.workspace_id == ws)
+                .map(|t| t.id.clone())
+                .collect();
+            ids.into_iter().filter_map(|id| m.remove(&id)).collect()
+        };
+        for t in gone {
+            t.close();
+        }
+    }
+
+    pub fn close_all(&self) {
+        let all: Vec<_> = lock(&self.map).drain().map(|(_, t)| t).collect();
+        for t in all {
+            t.close();
+        }
+    }
+
+    /// Closes one terminal and forgets it.
+    pub fn close(&self, id: &TerminalId) -> Result<(), TermError> {
+        let t = lock(&self.map)
+            .remove(id)
+            .ok_or_else(|| TermError::NotFound(id.0.clone()))?;
+        t.close();
+        Ok(())
+    }
+
+    pub fn create(&self, spec: Spec) -> Result<Arc<Terminal>, TermError> {
+        if spec.cols == 0 || spec.rows == 0 {
+            return Err(TermError::Invalid(
+                "A terminal needs at least one row and one column.".into(),
+            ));
+        }
+        let argv = match &spec.argv {
+            Some(a) if !a.is_empty() => a.clone(),
+            Some(_) => return Err(TermError::Invalid("argv is empty.".into())),
+            None => default_shell(&spec.env),
+        };
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: spec.rows,
+                cols: spec.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| TermError::Spawn(e.to_string()))?;
+        let mut cmd = CommandBuilder::new(&argv[0]);
+        cmd.args(&argv[1..]);
+        cmd.cwd(&spec.cwd);
+        cmd.env_clear();
+        for (k, v) in &spec.env {
+            cmd.env(k, v);
+        }
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "Axiom");
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| TermError::Spawn(format!("{}: {e}", argv[0])))?;
+        drop(pair.slave);
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| TermError::Spawn(e.to_string()))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| TermError::Spawn(e.to_string()))?;
+        let id = TerminalId(format!("t{}", self.next.fetch_add(1, Ordering::SeqCst)));
+        let title = std::path::Path::new(&argv[0])
+            .file_name()
+            .map_or_else(|| argv[0].clone(), |n| n.to_string_lossy().into_owned());
+        let t = Arc::new(Terminal {
+            id: id.clone(),
+            workspace_id: spec.workspace_id.clone(),
+            title,
+            pid: child.process_id(),
+            master: Mutex::new(pair.master),
+            writer: Mutex::new(writer),
+            killer: Mutex::new(child.clone_killer()),
+            backlog: Mutex::new(Backlog::default()),
+            running: AtomicBool::new(true),
+            exit_code: Mutex::new(None),
+        });
+        lock(&self.map).insert(id, t.clone());
+
+        // Reader → (bounded: the shell waits when output piles up) → coalescer.
+        let (tx, rx) = sync_channel::<Vec<u8>>(64);
+        std::thread::Builder::new()
+            .name(format!("pty-read-{}", t.id.0))
+            .spawn(move || {
+                let mut r = reader;
+                let mut buf = vec![0u8; 64 * 1024];
+                loop {
+                    match r.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if tx.send(buf[..n].to_vec()).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            })?;
+        let events = self.events.clone();
+        let term = t.clone();
+        std::thread::Builder::new()
+            .name(format!("pty-out-{}", t.id.0))
+            .spawn(move || {
+                let mut decoder = Utf8Stream::default();
+                let mut pending = String::new();
+                let mut last = Instant::now() - COALESCE;
+                let mut open = true;
+                while open || !pending.is_empty() {
+                    let wait = if pending.is_empty() {
+                        Duration::from_secs(3600)
+                    } else {
+                        COALESCE.saturating_sub(last.elapsed())
+                    };
+                    if open {
+                        match rx.recv_timeout(wait) {
+                            Ok(bytes) => pending.push_str(&decoder.push(&bytes)),
+                            Err(RecvTimeoutError::Timeout) => {}
+                            Err(RecvTimeoutError::Disconnected) => {
+                                open = false;
+                                pending.push_str(&decoder.push(&[]));
+                            }
+                        }
+                    }
+                    if !pending.is_empty() && (last.elapsed() >= COALESCE || !open) {
+                        let data = std::mem::take(&mut pending);
+                        let seq = {
+                            let mut b = lock(&term.backlog);
+                            b.push(&data);
+                            b.seq += 1;
+                            b.seq
+                        };
+                        let _ = events.send(TermEvent::Output {
+                            workspace_id: term.workspace_id.clone(),
+                            terminal_id: term.id.clone(),
+                            seq,
+                            data,
+                        });
+                        last = Instant::now();
+                    }
+                }
+                // The output has ended: wait for the process and report it.
+                // A process ended by a signal has no exit code.
+                let code = child
+                    .wait()
+                    .ok()
+                    .filter(|s| s.signal().is_none())
+                    .map(|s| s.exit_code() as i32);
+                *lock(&term.exit_code) = code;
+                term.running.store(false, Ordering::SeqCst);
+                let _ = events.send(TermEvent::Exited {
+                    workspace_id: term.workspace_id.clone(),
+                    terminal_id: term.id.clone(),
+                    code,
+                });
+            })?;
+        Ok(t)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf8_split_across_reads_and_invalid_bytes() {
+        let mut d = Utf8Stream::default();
+        let pi = "π😀".as_bytes();
+        assert_eq!(d.push(&pi[..1]), "");
+        assert_eq!(d.push(&pi[1..4]), "π");
+        assert_eq!(d.push(&pi[4..]), "😀");
+        assert_eq!(d.push(b"a\xffb"), "a\u{FFFD}b");
+    }
+
+    #[test]
+    fn backlog_is_bounded_at_a_character_boundary() {
+        let mut b = Backlog::default();
+        b.push(&"é".repeat(BACKLOG_BYTES));
+        assert!(b.text.len() <= BACKLOG_BYTES);
+        assert!(b.text.starts_with('é'));
+    }
+}

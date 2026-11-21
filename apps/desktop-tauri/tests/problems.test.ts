@@ -56,6 +56,13 @@ describe("problems helpers", () => {
     expect(viewTarget("ArrowRight")).toBe("problems");
     expect(viewTarget("Home")).toBe("output");
     expect(viewTarget("x")).toBeNull();
+    // M4-TERM-002: three views, wrapping; only the shown ones.
+    expect(viewTarget("ArrowRight", "problems")).toBe("terminal");
+    expect(viewTarget("ArrowRight", "terminal")).toBe("output");
+    expect(viewTarget("ArrowLeft", "output")).toBe("terminal");
+    expect(viewTarget("End")).toBe("terminal");
+    expect(viewTarget("ArrowRight", "problems", ["output", "problems"])).toBe("output");
+    expect(viewTarget("End", "output", ["output", "problems"])).toBe("problems");
   });
 });
 

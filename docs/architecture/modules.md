@@ -19,11 +19,13 @@ crates/
   env/                     provider registry, detection, installation      M2
   build/                   task templates, diagnostics parsing             M2
   agent/                   model providers, agent loop, tools, permissions M3
-  lsp/                     language-server supervision and relay           M4
+  lsp/                     language-server supervision and protocol client M4
+  term/                    PTY terminals                                   M4
   inspect/                 inspection sessions, source resolution, verify  M5
 apps/
   desktop/                 Qt shell (C++/QML) - retired by M1.5 task T-15  M1
-  desktop-tauri/           Tauri shell: Rust host + React webview          M1.5
+  desktop-tauri/           Tauri shell: Rust host + React webview          M1.5 (retired by FL-QA-001)
+  desktop-flutter/         Flutter shell (Dart, widgets layer only)         FL (ADR-0020)
   cli/                     `axiom` command-line client (Rust)              M3
 editor/                    editor surface (TypeScript, Monaco)             M1
 providers/<id>/            provider manifests (+ optional helper)          rust/ EXISTS
@@ -177,6 +179,18 @@ before the task that needs them** (no empty scaffolding).
   and never speaks the wire protocol itself; it calls the host's commands.
   No business logic in either half.
 
+### `apps/desktop-flutter` — Flutter shell (ADR-0020)
+- **Responsibility:** the desktop shell that replaces `apps/desktop-tauri` once FL-QA-001's gate
+  passes. One Dart process that presents daemon state and forwards user intent.
+- **Parts:** `lib/daemon/` (spawns and supervises `axiomd`, JSON-RPC over its stdio, wire types
+  generated from `schemas/`), `lib/ui/` (the design system), `lib/state/` (stores), and one
+  folder per surface (`shell`, `files`, `editor`, `console`, `scm`, `search`, `env`, `chat`).
+- **Depends on:** Flutter's `widgets` layer and Dart packages that are MIT, BSD or Apache-2.0
+  (`scripts/check_dart_licences.py`); no Material or Cupertino (a test enforces it).
+- **Rule:** like the Tauri shell, it never touches workspace files and never runs processes
+  other than `axiomd`; no business logic. It has no Rust dependency: the daemon is the only
+  edge, over the process boundary.
+
 ### `editor/` — package `@axiom/editor`
 - **Responsibility:** the editor surface: Monaco setup, workers, document
   models and the page side of the bridge. Its framework-neutral modules
@@ -231,24 +245,67 @@ before the task that needs them** (no empty scaffolding).
   `directories` (the data dir, as the store finds it).
 - **Rule:** no business logic; everything is a protocol call.
 
+### `crates/lsp` — `axiom-lsp` (M4-LSP-001; ADR-0018 §2)
+- **Responsibility:** language servers as daemon children, one per (workspace, server
+  definition): LSP base-protocol framing, `initialize` with one fixed client-capability set, a
+  shared id space with a pending map (many clients, one server), answers to server→client
+  requests, a mirror of open documents, diagnostics per URI, a bounded restart policy.
+- **Depends on:** `protocol`; `tokio`, `tokio-util` (cancellation), `serde_json`, `url`,
+  `tracing`, `thiserror`.
+- **Status:** built (M4-LSP-001). `axiomd` serves `lsp/*`, resolves each server's command in the
+  workspace's environment (the daemon's plus the project's, as builds), and relays events to the
+  workspace's clients. Tests: `crates/axiomd/tests/{lsp_server,lsp}.rs` against
+  `tests/helpers/fake-lsp`, plus the real rust-analyzer where installed.
+- **Rule:** the daemon owns the conversation with each server; clients use `lsp/request` and
+  `lsp/notify`, never the server's own ids.
+
+### `crates/term` — `axiom-term` (M4-TERM-001; ADR-0018 §4)
+- **Responsibility:** PTY terminals: spawn the person's shell (`portable-pty`, behind a `Pty`
+  trait), stream UTF-8 output without splitting characters, coalesce it, keep a bounded backlog,
+  resize, end the process group.
+- **Depends on:** `protocol`; `portable-pty`, `tokio` (events), `nix` (signals, Unix), `thiserror`.
+- **Status:** built (M4-TERM-001). Two threads per terminal: one reads the PTY, the other
+  coalesces. A bounded channel between them makes a flooding shell wait instead of growing
+  memory. Close is SIGHUP to the process group, then SIGKILL after 2 s; a signal ends it without
+  an exit code. `axiomd` serves `terminal/*` and relays events to the workspace's clients. Tests:
+  `crates/term/tests/pty.rs`, `crates/axiomd/tests/terminal.rs` (Unix; ConPTY is owed with
+  Windows). `portable-pty` is used directly rather than behind a `Pty` trait: the tests run
+  real PTYs on Linux and macOS.
+- **Rule:** not an agent tool and not gated: a terminal is the person's own shell.
+
+`crates/workspace` gains a `git` module (M4-GIT-001) that runs the `git` program read-only;
+no new edge.
+- **Isolation:** the inherited `GIT_*` variables are removed; no pager, hooks or fsmonitor;
+  `GIT_OPTIONAL_LOCKS=0`; `LC_ALL=C`. The person's own configuration (ignore files,
+  `safe.directory`) applies.
+- **Operations:** discovery with `rev-parse` (a workspace may be a subdirectory); status with
+  porcelain v2, made relative to the workspace; show at HEAD or in the index, with binary
+  detection; a watch on the repository's HEAD, index and refs.
+- **In `axiomd`:** `git/status` and `git/show`, and `git/didChange` (the workspace watcher plus
+  that watch, debounced 300 ms). The watch starts with a workspace's first status. Status on
+  this repository takes 15 ms.
+
 ## Dependency matrix (allowed edges)
 
-| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | desktop-bridge | axiomd |
-|---|---|---|---|---|---|---|---|---|---|---|
-| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
-| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
-| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ |
-| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
-| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
-| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
-| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | lsp | term | desktop-bridge | axiomd |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
+| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
+| lsp       | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
+| term      | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
+| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
+| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
+| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 
-The `env` and `build` rows are ADR-0014 §4; the `agent` and `cli` rows are ADR-0015 §2.
+The `env` and `build` rows are ADR-0014 §4; the `agent` and `cli` rows are ADR-0015 §2; the
+`lsp` and `term` rows and `axiomd → lsp, term` are ADR-0018 §7.
 
 Later service crates follow the same rule: they may depend on `protocol` and
 on *lower* service crates listed in their task spec (e.g. `build` → `exec`,
@@ -269,5 +326,4 @@ change to record here.
 
 | Module | Contract today | Detailed design when |
 |--------|----------------|----------------------|
-| `lsp` | ADR-0004 §Language intelligence | start of M4 |
 | `inspect` | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | start of M5 |

@@ -39,6 +39,7 @@ export const Shield = (p: P) => (<svg {...base(p)}><path d="M8 2l5 2v3.5c0 3-2.2
 export const Warning = (p: P) => (<svg {...base(p)}><path d="M8 2.5l6 11H2z" /><path d="M8 6.5v3M8 11.5v.2" /></svg>);
 export const Dock = (p: P) => (<svg {...base(p)}><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M10 3v10" /></svg>);
 export const Chat = (p: P) => (<svg {...base(p)}><path d="M2.5 4a1 1 0 011-1h9a1 1 0 011 1v6a1 1 0 01-1 1H7l-3 2.5V11h-.5a1 1 0 01-1-1z" /></svg>);
+export const Branch = (p: P) => (<svg {...base(p)}><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5.5" r="1.5" /><path d="M4.5 5v6M11.5 7c0 2.5-2 3.2-5 4" /></svg>);
 export const Plus = (p: P) => (<svg {...base(p)}><path d="M8 3v10M3 8h10" /></svg>);
 export const Send = (p: P) => (<svg {...base(p)}><path d="M2.5 8L13.5 3l-3 10.5-2.5-4.5z" /><path d="M8 9l5.5-6" /></svg>);
 export const Image = (p: P) => (<svg {...base(p)}><rect x="2" y="3" width="12" height="10" rx="1.2" /><circle cx="6" cy="6.5" r="1.2" /><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3" /></svg>);

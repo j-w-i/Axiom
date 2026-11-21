@@ -147,6 +147,17 @@ check "the package ships the app and its daemon sidecar" \
   && check "both are in the same directory (the sibling lookup can find it)" 1 "$(dirname "$app_rel")" \
   || { check "both are in the same directory" 0 "$(dirname "$app_rel") vs $(dirname "$daemon_rel")"; exit 1; }
 
+# The window's app id (Wayland) and WM_CLASS (X11) are the identifier (src-tauri/src/lib.rs), so
+# the desktop finds this entry, and its icon, through StartupWMClass.
+ident="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["identifier"])' "$here/src-tauri/tauri.conf.json")"
+desk="$(find "$work/prefix" -path '*/share/applications/*.desktop' | head -1)"
+wmclass="$( [[ -n "$desk" ]] && sed -n 's/^StartupWMClass=//p' "$desk" || true)"
+icon="$( [[ -n "$desk" ]] && sed -n 's/^Icon=//p' "$desk" || true)"
+nicons="$(find "$work/prefix" -path "*/share/icons/hicolor/*/apps/$icon.png" 2>/dev/null | wc -l)"
+check "the desktop entry matches the window (StartupWMClass is the identifier) and its icon is installed" \
+  "$([[ "$wmclass" == "$ident" && -n "$icon" && "$nicons" -gt 0 ]] && echo 1 || echo 0)" \
+  "StartupWMClass=${wmclass:-none}, Icon=${icon:-none} in $nicons sizes"
+
 app="$work/prefix/$app_rel"
 daemon="$work/prefix/$daemon_rel"
 chmod +x "$app" "$daemon"

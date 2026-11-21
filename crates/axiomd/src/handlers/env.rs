@@ -59,6 +59,23 @@ pub(crate) async fn project_environment(
     })
 }
 
+/// The complete environment of a process the person runs in the workspace (a language server, a
+/// terminal): the daemon's own with the project's on top, as builds get it.
+pub(crate) async fn process_environment(
+    app: &App,
+    id: &WorkspaceId,
+) -> Result<std::collections::BTreeMap<String, String>, RpcError> {
+    let w = workspace(app, id).await?;
+    let r = registry(app, Some(w)).await?;
+    let environment = project_environment(app, id, &r).await?;
+    let mut env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    env.extend(axiom_env::project::process_env(
+        &environment,
+        std::env::var_os("PATH"),
+    ));
+    Ok(env)
+}
+
 pub async fn providers(app: Arc<App>, p: ProvidersParams) -> Result<ProvidersResult, RpcError> {
     let ws = match &p.workspace_id {
         Some(id) => Some(workspace(&app, id).await?),

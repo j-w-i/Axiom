@@ -208,6 +208,7 @@ runtime).
 | `agent/send` | `SendParams → {}` | `not_found`, `conflict` (turn running), `prerequisite_missing` |
 | `agent/cancel` | `SessionRef → {}` | `not_found` |
 | `agent/approve` | `ApproveParams → {}` | `not_found` |
+| `agent/installAgent` | `InstallAgentParams → InstallAgentResult` (ADR-0020 §6, additive) | `not_found`, `prerequisite_missing` (npm), `io`, `timeout` |
 | `agent/checkpoints` | `SessionRef → CheckpointsResult` | `not_found` |
 | `agent/restore` | `RestoreParams → RestoreResult` | `not_found`, `checkpoint_conflict`, `prerequisite_missing` |
 | `agent/tools` | `WorkspaceRef → ToolsResult` | `workspace_not_open` |
@@ -248,6 +249,53 @@ runtime).
 - Not in ADR-0015 §1's table, added by M3-ARCH-001: `agent/approvalResolved` (so every approving
   client can drop a prompt someone else answered) and `agent/reveal` (the `editor.open` tool's
   notification, ADR-0015 §2's tool list).
+
+## Protocol 0.4 (M4, ADR-0018)
+
+Additive only, under the same rules as 0.2 and 0.3: every earlier method, notification and
+meaning is unchanged; the daemon reports `0.4` (a client asking for an older minor gets that
+minor); clients feature-detect from `initialize.methods`. Types: `crates/protocol/src/{lsp,
+terminal,git}.rs` and `workspace.rs` (`workspace/search`).
+
+| Method | Params → Result | Errors (besides the generic ones) |
+|--------|-----------------|-----------------------------------|
+| `lsp/servers` | `WorkspaceRef → ServersResult` | `workspace_not_open` |
+| `lsp/request` | `RequestParams → {result}` | `workspace_not_open`, `not_found`, `server_unavailable` (details `{state}`), `lsp_error` (details `{code, data?}`), `cancelled` |
+| `lsp/notify` | `NotifyParams → {}` | `workspace_not_open`, `not_found`, `server_unavailable` |
+| `lsp/restart` | `ServerRef → {}` | `workspace_not_open`, `not_found` |
+| `terminal/create` | `CreateParams → TerminalInfo` | `workspace_not_open`, `spawn_failed`, `invalid_params` |
+| `terminal/write` | `WriteParams → {}` | `not_found` |
+| `terminal/resize` | `ResizeParams → {}` | `not_found`, `invalid_params` |
+| `terminal/close` | `TerminalRef → {}` | `not_found` |
+| `terminal/list` | `WorkspaceRef → ListResult` | `workspace_not_open` |
+| `git/status` | `WorkspaceRef → GitStatus` | `workspace_not_open`, `timeout` |
+| `git/show` | `ShowParams → ShowResult` | `workspace_not_open`, `git_unavailable`, `not_found`, `invalid_params` |
+| `workspace/search` | `SearchParams → SearchResult` | `workspace_not_open`, `invalid_params` (bad pattern) |
+
+| Notification | Direction | Module |
+|--------------|-----------|--------|
+| `lsp/notification` | daemon → clients of the workspace | `lsp` |
+| `lsp/serverState` | daemon → clients of the workspace | `lsp` |
+| `terminal/output` | daemon → clients of the workspace | `term` |
+| `terminal/exited` | daemon → clients of the workspace | `term` |
+| `git/didChange` | daemon → clients of the workspace | `workspace` |
+
+- **Language servers.** LSP payloads are JSON values whose contract is LSP 3.17, with absolute
+  `file://` URIs. The daemon owns each server's ids; cancelling an `lsp/request` with `$/cancel`
+  sends `$/cancelRequest` for the daemon's id to the server. Document sync is per server: a client sends `didOpen` for a document once per
+  server that handles its language. The daemon answers the server's own requests (ADR-0018 §2);
+  `workspace/applyEdit` is refused in 0.4.
+- **Reads outside the workspace.** `fs/readFile` accepts an absolute `file://` path that one of the
+  workspace's servers returned in a location (definition, references…), read-only; any other
+  path outside the root stays `permission_denied`.
+- **Terminals** are not agent tools and pass no gate (the person's own shell). `terminal/output`
+  carries UTF-8 text; `seq` increases by one per notification of a terminal, and `terminal/list`
+  returns the backlog up to a `seq`, so a client can redraw and continue without gaps.
+- **Git** is read-only; status paths are workspace-relative and paths outside the workspace are
+  omitted.
+- **Provider manifests** gain an optional `lsp` table (`LspServerSpec`: `id`, `languages`,
+  `command`, `initialization_options`, `install_hint`); a manifest without it is unchanged.
+- New error kinds: `lsp_error` (-32026), `server_unavailable` (-32027), `git_unavailable` (-32028).
 
 ## Behavioural details
 
@@ -306,6 +354,7 @@ directory is reported, because `fs/list` lists such files. If the OS reports an 
 | `workspace.lastRoot` | string or null | `null` | canonical root of the most recently opened workspace; written by the daemon on `workspace/open` |
 | `agent.policy` | `Policy` | ask, reads allowed | the user's agent permission policy (M3); `agent/setPolicy` writes it |
 | `agent.mcpServers` | array of `{name, argv, env}` | `[]` | MCP servers whose tools join workspace sessions as `mcp.<name>.<tool>` (M3) |
+| `lsp.servers` | object `{<serverId>: {settings?, initializationOptions?}}` | `{}` | Per language server: `settings` answers its `workspace/configuration`; `initializationOptions` merge over the manifest's (M4) |
 | `agent.providers` | array of `ProviderConfig` | `[]` | model provider configurations (M3); written by `agent/configureProvider`; never contains a key |
 
 Unknown keys are stored and returned unchanged, so clients can add settings
@@ -317,9 +366,9 @@ it to this table and the daemon's registry.
 - MINOR bump: new methods, notifications, optional fields, settings keys.
 - MAJOR bump: anything that could break an existing client. Needs an ADR.
 - The daemon must keep serving every method listed for the MAJOR it speaks.
-- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 and 0.3 added methods
-  and optional fields only, so a 0.1 client talking to a 0.3 daemon gets `"0.1"` and unchanged
-  behaviour.
+- Negotiation: the session runs at `min(client minor, server minor)`; 0.2, 0.3 and 0.4 added
+  methods and optional fields only, so a 0.1 client talking to a 0.4 daemon gets `"0.1"` and
+  unchanged behaviour.
 
 ## Example session
 

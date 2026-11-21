@@ -37,7 +37,9 @@ async fn defaults_for_all_known_keys() {
     assert_eq!(v["agent.policy"]["default"], json!("ask"));
     // M3-MCP-001.
     assert_eq!(v["agent.mcpServers"], json!([]));
-    assert_eq!(v.len(), 9);
+    // M4-LSP-001.
+    assert_eq!(v["lsp.servers"], json!({}));
+    assert_eq!(v.len(), 10);
 }
 
 #[tokio::test]

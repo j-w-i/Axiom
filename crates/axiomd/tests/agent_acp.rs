@@ -289,9 +289,9 @@ async fn acp_builtin_agents_are_listed_with_availability() {
             );
         }
     }
-    // A plain conversation cannot use an external agent.
-    let e = d
-        .client
+    // ADR-0020 §6 (changed from M3): a conversation without a folder can use an external agent;
+    // it runs in a scratch folder (acp_agent_without_a_folder_runs_in_a_scratch_folder).
+    d.client
         .request::<SessionCreate>(SessionCreateParams {
             workspace_id: None,
             provider_id: "claude-code".into(),
@@ -299,6 +299,169 @@ async fn acp_builtin_agents_are_listed_with_availability() {
             title: None,
         })
         .await
+        .expect("a conversation without a folder can use an external agent");
+}
+
+/// ADR-0020 §6: an external agent in a conversation without a folder runs in a scratch folder
+/// of its own (`<data dir>/scratch/<session>`), with Axiom's gate and approvals as in a folder.
+#[tokio::test]
+async fn acp_agent_without_a_folder_runs_in_a_scratch_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let log = tmp.path().join("acp.log");
+    let data = tempfile::tempdir().unwrap();
+    let d = Daemon::spawn_in(data.path()).await;
+    let mut info = client_info();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    let mut env = std::collections::BTreeMap::new();
+    env.insert(
+        "FAKE_ACP_LOG".to_string(),
+        log.to_string_lossy().into_owned(),
+    );
+    d.client
+        .request::<ConfigureProvider>(ConfigureProviderParams {
+            id: "fake-agent".into(),
+            config: Some(ProviderConfig {
+                id: "fake-agent".into(),
+                kind: ProviderKind::Acp,
+                name: "Fake Agent".into(),
+                base_url: None,
+                api_key_env: None,
+                models: vec![],
+                capabilities: None,
+                command: vec![fake_acp().to_string_lossy().into_owned()],
+                env,
+            }),
+            api_key: None,
+            clear_key: false,
+        })
+        .await
+        .unwrap();
+    let sid = d
+        .client
+        .request::<SessionCreate>(SessionCreateParams {
+            workspace_id: None,
+            provider_id: "fake-agent".into(),
+            model: "default".into(),
+            title: None,
+        })
+        .await
+        .expect("a conversation without a folder can use an external agent")
+        .session_id;
+
+    // A write, approved once: it lands in the conversation's scratch folder.
+    let mut rx = d.client.notifications();
+    d.client
+        .request::<Send>(SendParams {
+            workspace_id: None,
+            session_id: sid.clone(),
+            text: "write".into(),
+            attachments: vec![],
+            images: vec![],
+            from_turn: None,
+        })
+        .await
+        .unwrap();
+    let mut evs = Vec::new();
+    loop {
+        let (m, p) = tokio::time::timeout(Duration::from_secs(60), rx.recv())
+            .await
+            .expect("turn ended")
+            .unwrap();
+        if m == "agent/approvalRequested" {
+            let r: ApprovalRequest = serde_json::from_value(p).unwrap();
+            d.client
+                .request::<Approve>(ApproveParams {
+                    request_id: r.request_id,
+                    decision: ApprovalDecision::Once,
+                })
+                .await
+                .unwrap();
+        } else if m == "agent/event" {
+            let e: AgentEvent = serde_json::from_value(p).unwrap();
+            let done = matches!(e.event, EventBody::TurnEnd { .. });
+            evs.push(e);
+            if done {
+                break;
+            }
+        }
+    }
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:?}");
+    let scratch = data.path().join("scratch").join(&sid.0);
+    let scratch = std::fs::canonicalize(&scratch).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(scratch.join("notes.md")).unwrap(),
+        "hello\n"
+    );
+    let new: Value = serde_json::from_str(
+        std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(new["cwd"].as_str().unwrap(), scratch.to_string_lossy());
+}
+
+/// ADR-0020 §6: `agent/installAgent` installs a built-in agent with npm into the data
+/// directory, after which it is available (here a fake `npm` that creates the program).
+#[tokio::test]
+async fn install_agent_puts_a_builtin_agent_in_the_data_directory() {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = tempfile::tempdir().unwrap();
+    let npm = bin.path().join("npm");
+    std::fs::write(
+        &npm,
+        "#!/bin/sh\n# fake npm: install --no-fund --no-audit --prefix <dir> <package>\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nprefix=\"$2\"; pkg=\"$3\"\necho \"$pkg\" > \"$prefix/installed.txt\"\nmkdir -p \"$prefix/node_modules/.bin\"\nprintf '#!/bin/sh\\n' > \"$prefix/node_modules/.bin/claude-agent-acp\"\nchmod +x \"$prefix/node_modules/.bin/claude-agent-acp\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&npm, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let path = format!("{}:/usr/bin:/bin", bin.path().display());
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("PATH", &path);
+    })
+    .await;
+    d.client.request::<Initialize>(client_info()).await.unwrap();
+    let r = d
+        .client
+        .request::<axiom_protocol::agent::InstallAgent>(axiom_protocol::agent::InstallAgentParams {
+            provider_id: "claude-code".into(),
+        })
+        .await
+        .unwrap();
+    let agents = std::fs::canonicalize(data.path().join("agents")).unwrap();
+    assert!(
+        Path::new(&r.program).starts_with(&agents)
+            || r.program.contains("/agents/node_modules/.bin/"),
+        "{}",
+        r.program
+    );
+    assert_eq!(
+        std::fs::read_to_string(data.path().join("agents/installed.txt"))
+            .unwrap()
+            .trim(),
+        "@agentclientprotocol/claude-agent-acp"
+    );
+    let m = d
+        .client
+        .request::<Models>(ModelsParams::default())
+        .await
+        .unwrap();
+    let cc = m
+        .providers
+        .iter()
+        .find(|p| p.config.id == "claude-code")
+        .unwrap();
+    assert!(cc.error.is_none(), "{:?}", cc.error);
+    // Not a built-in agent: not_found.
+    let e = d
+        .client
+        .request::<axiom_protocol::agent::InstallAgent>(axiom_protocol::agent::InstallAgentParams {
+            provider_id: "nope".into(),
+        })
+        .await
         .unwrap_err();
-    assert_eq!(common::kind(&e), axiom_protocol::ErrorKind::InvalidParams);
+    assert_eq!(common::kind(&e), axiom_protocol::ErrorKind::NotFound);
 }
