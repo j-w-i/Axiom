@@ -11,7 +11,6 @@ import 'package:axiom_desktop/ui/theme.dart';
 import 'package:axiom_desktop/ui/tokens.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -84,7 +83,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.keyK, mod: true);
     await tester.pump(const Duration(milliseconds: 100));
     expect(named('Command palette'), findsOneWidget);
-    await tester.enterText(find.byType(EditableText).last, 'theme dark');
+    await typeFocused(tester, 'theme dark');
     await tester.pump();
     await key(tester, LogicalKeyboardKey.enter);
     await until(tester, () => app.settings.theme == ThemeSetting.dark, what: 'the dark theme');

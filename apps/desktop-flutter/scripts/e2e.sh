@@ -15,7 +15,7 @@ cargo build -q -p axiomd
 export AXIOMD_UNDER_TEST="${AXIOMD_UNDER_TEST:-$root/target/debug/axiomd}"
 cd "$here"
 suites=("$@")
-if [[ ${#suites[@]} -eq 0 ]]; then mapfile -t suites < <(cd integration_test && ls *_test.dart); fi
+if [[ ${#suites[@]} -eq 0 ]]; then mapfile -t suites < <(cd integration_test && ls *_test.dart | grep -v frames_test); fi
 
 cleanup() { [[ -n "${kwin_pid:-}" ]] && kill "$kwin_pid" 2>/dev/null || true; }
 trap cleanup EXIT

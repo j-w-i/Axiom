@@ -12,7 +12,11 @@ import 'package:flutter/widgets.dart';
 
 import '../app/app_state.dart';
 import '../daemon/client.dart';
+import '../daemon/protocol.g.dart' show Methods, SearchMode, SearchParams;
+import '../editor/code_view.dart';
+import '../editor/editor_area.dart';
 import '../files/explorer.dart';
+import '../state/documents.dart';
 import '../state/settings.dart';
 import '../ui/controls.dart';
 import '../ui/icon_data.dart';
@@ -21,6 +25,7 @@ import '../ui/overlays.dart';
 import '../ui/pressable.dart';
 import '../ui/splitter.dart';
 import '../ui/surfaces.dart';
+import '../ui/text_input.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
 import 'palette.dart';
@@ -41,8 +46,12 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> {
   late final AppState app = AppScope.of(context);
   final _sideSplitter = FocusNode(debugLabel: 'side bar splitter');
+  final _editor = GlobalKey<EditorAreaState>();
   bool _paletteOpen = false;
   String _paletteSeed = '';
+  bool _filesMode = false;
+  bool _promptShown = false;
+  bool _conflictShown = false;
 
   @override
   void initState() {
@@ -51,24 +60,119 @@ class _ShellState extends State<Shell> {
       app.openPalette = () => _showPalette();
       app.openSettings = _showSettings;
       app.pickFolder = _pickFolder;
+      app.openGoToFile = _goToFile;
+      app.documents.addListener(_onDocuments);
     });
+  }
+
+  /// Unsaved-work questions and save conflicts are dialogs.
+  void _onDocuments() {
+    final d = app.documents;
+    if (d.prompt != null && !_promptShown) {
+      _promptShown = true;
+      final p = d.prompt!;
+      final what = p.names.length == 1 ? p.names.first : '${p.names.length} files';
+      unawaited(
+        showAxDialog<String>(
+          context: context,
+          label: 'Unsaved changes',
+          builder: (context) => _Question(
+            title: 'Save the changes to $what?',
+            detail: switch (p.kind) {
+              'quit' => 'Your changes are lost if you quit without saving.',
+              'folder' => 'Your changes are lost if you switch folders without saving.',
+              _ => 'Your changes are lost if you close it without saving.',
+            },
+            actions: const [('save', 'Save'), ('discard', "Don't Save"), ('cancel', 'Cancel')],
+          ),
+        ).then((a) {
+          _promptShown = false;
+          unawaited(d.resolvePrompt(a ?? 'cancel'));
+        }),
+      );
+    }
+    final conflict = d.conflictName;
+    if (conflict != null && !_conflictShown) {
+      _conflictShown = true;
+      unawaited(
+        showAxDialog<String>(
+          context: context,
+          label: 'Changed on disk',
+          builder: (context) => _Question(
+            title: '$conflict changed on disk',
+            detail: 'Another program changed the file since you opened it. Overwrite it with your version, or reload the version on disk (your changes are lost).',
+            actions: const [('overwrite', 'Overwrite'), ('reload', 'Reload'), ('cancel', 'Cancel')],
+          ),
+        ).then((a) {
+          _conflictShown = false;
+          unawaited(d.resolveConflict(a ?? 'cancel'));
+        }),
+      );
+    }
   }
 
   @override
   void dispose() {
+    app.documents.removeListener(_onDocuments);
     _sideSplitter.dispose();
     super.dispose();
   }
 
   Future<void> _pickFolder() async {
     final dir = await getDirectoryPath(confirmButtonText: 'Open');
-    if (dir != null) await app.workspace.openFolder(dir);
+    if (dir != null) app.documents.requestOpenFolder(dir);
   }
 
   void _showPalette([String seed = '']) => setState(() {
     _paletteOpen = true;
+    _filesMode = false;
     _paletteSeed = seed;
   });
+
+  void _goToFile() {
+    if (!app.workspace.isOpen) return;
+    setState(() {
+      _paletteOpen = true;
+      _filesMode = true;
+      _paletteSeed = '';
+    });
+  }
+
+  Future<List<Command>> _files() async {
+    try {
+      final r = await app.client.call(
+        Methods.workspaceSearch,
+        SearchParams(workspaceId: app.workspace.id, mode: SearchMode.files, limit: 20000),
+      );
+      return [
+        for (final f in r.files ?? const <String>[])
+          Command(id: 'file:$f', title: f, run: () => unawaited(app.documents.open(f))),
+      ];
+    } on DaemonException {
+      return const [];
+    }
+  }
+
+  void _goToLine() {
+    final doc = app.documents.active;
+    if (doc == null) return;
+    unawaited(
+      showAxDialog<int>(
+        context: context,
+        label: 'Go to line',
+        builder: (context) => _GoToLine(lines: doc.controller.lineCount),
+      ).then((line) {
+        if (line != null) unawaited(app.documents.open(doc.path, line: line, column: 1));
+      }),
+    );
+  }
+
+  Doc? get _focusedDoc {
+    final d = app.documents;
+    final f = FocusManager.instance.primaryFocus?.debugLabel ?? '';
+    if (f.startsWith('editor 2:') && d.split != null) return d.doc(d.split!.active);
+    return d.active;
+  }
 
   void _showSettings() {
     unawaited(
@@ -96,14 +200,14 @@ class _ShellState extends State<Shell> {
         title: 'Close Folder',
         category: 'File',
         enabled: () => ws.isOpen,
-        run: () => unawaited(ws.close()),
+        run: app.documents.requestCloseFolder,
       ),
       for (final r in ws.recent.take(8))
         Command(
           id: 'recent:${r.root}',
           title: 'Open Recent: ${r.name}',
           category: 'File',
-          run: () => unawaited(ws.openFolder(r.root)),
+          run: () => app.documents.requestOpenFolder(r.root),
         ),
       Command(
         id: 'toggle-side',
@@ -117,6 +221,112 @@ class _ShellState extends State<Shell> {
         title: 'Show Files',
         category: 'View',
         run: () => _go(Destination.files),
+      ),
+      Command(
+        id: 'go-to-file',
+        title: 'Go to File…',
+        shortcut: 'Mod+P',
+        category: 'Go',
+        enabled: () => ws.isOpen,
+        run: _goToFile,
+      ),
+      Command(
+        id: 'go-to-line',
+        title: 'Go to Line…',
+        shortcut: 'Ctrl+G',
+        category: 'Go',
+        enabled: () => app.documents.active != null,
+        run: _goToLine,
+      ),
+      Command(
+        id: 'save',
+        title: 'Save',
+        shortcut: 'Mod+S',
+        category: 'File',
+        enabled: () => _focusedDoc != null,
+        run: () => unawaited(app.documents.save(_focusedDoc!.path)),
+      ),
+      Command(
+        id: 'save-all',
+        title: 'Save All',
+        shortcut: 'Mod+Alt+S',
+        category: 'File',
+        enabled: () => app.documents.dirtyPaths.isNotEmpty,
+        run: () => unawaited(app.documents.saveAll()),
+      ),
+      Command(
+        id: 'close-editor',
+        title: 'Close Editor',
+        shortcut: 'Mod+W',
+        category: 'File',
+        enabled: () => app.documents.active != null,
+        run: () => app.documents.close(app.documents.activePath),
+      ),
+      Command(
+        id: 'next-tab',
+        title: 'Next Tab',
+        shortcut: 'Ctrl+Tab',
+        category: 'View',
+        run: () => app.documents.cycle(1),
+      ),
+      Command(
+        id: 'prev-tab',
+        title: 'Previous Tab',
+        shortcut: 'Ctrl+Shift+Tab',
+        category: 'View',
+        run: () => app.documents.cycle(-1),
+      ),
+      Command(
+        id: 'move-tab-left',
+        title: 'Move Tab Left',
+        shortcut: 'Ctrl+Shift+PgUp',
+        category: 'View',
+        run: () {
+          final d = app.documents;
+          d.moveTab(d.activePath, d.docs.indexWhere((x) => x.path == d.activePath) - 1);
+        },
+      ),
+      Command(
+        id: 'move-tab-right',
+        title: 'Move Tab Right',
+        shortcut: 'Ctrl+Shift+PgDn',
+        category: 'View',
+        run: () {
+          final d = app.documents;
+          d.moveTab(d.activePath, d.docs.indexWhere((x) => x.path == d.activePath) + 1);
+        },
+      ),
+      Command(
+        id: 'split-right',
+        title: 'Split Editor Right',
+        shortcut: 'Mod+\\',
+        category: 'View',
+        enabled: () => app.documents.active != null,
+        run: () {
+          app.documents.splitRight();
+          WidgetsBinding.instance.addPostFrameCallback((_) => _editor.currentState?.focusGroup(2));
+        },
+      ),
+      Command(
+        id: 'close-right-group',
+        title: 'Close Right Group',
+        category: 'View',
+        enabled: () => app.documents.split != null,
+        run: app.documents.unsplit,
+      ),
+      Command(
+        id: 'focus-left',
+        title: 'Focus the Left Editor Group',
+        shortcut: 'Mod+1',
+        category: 'View',
+        run: () => _editor.currentState?.focusGroup(1),
+      ),
+      Command(
+        id: 'focus-right',
+        title: 'Focus the Right Editor Group',
+        shortcut: 'Mod+2',
+        category: 'View',
+        run: () => _editor.currentState?.focusGroup(2),
       ),
       Command(
         id: 'settings',
@@ -164,6 +374,26 @@ class _ShellState extends State<Shell> {
         _mod(LogicalKeyboardKey.keyB): const _CommandIntent('toggle-side'),
         _mod(LogicalKeyboardKey.comma): const _CommandIntent('settings'),
         _mod(LogicalKeyboardKey.keyO): const _CommandIntent('open-folder'),
+        _mod(LogicalKeyboardKey.keyP): const _CommandIntent('go-to-file'),
+        _mod(LogicalKeyboardKey.keyS): const _CommandIntent('save'),
+        SingleActivator(LogicalKeyboardKey.keyS, control: !_isMac, meta: _isMac, alt: true):
+            const _CommandIntent('save-all'),
+        _mod(LogicalKeyboardKey.keyW): const _CommandIntent('close-editor'),
+        const SingleActivator(LogicalKeyboardKey.keyG, control: true): const _CommandIntent(
+          'go-to-line',
+        ),
+        const SingleActivator(LogicalKeyboardKey.tab, control: true): const _CommandIntent(
+          'next-tab',
+        ),
+        const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true):
+            const _CommandIntent('prev-tab'),
+        const SingleActivator(LogicalKeyboardKey.pageUp, control: true, shift: true):
+            const _CommandIntent('move-tab-left'),
+        const SingleActivator(LogicalKeyboardKey.pageDown, control: true, shift: true):
+            const _CommandIntent('move-tab-right'),
+        _mod(LogicalKeyboardKey.backslash): const _CommandIntent('split-right'),
+        _mod(LogicalKeyboardKey.digit1): const _CommandIntent('focus-left'),
+        _mod(LogicalKeyboardKey.digit2): const _CommandIntent('focus-right'),
       },
       child: Actions(
         actions: {
@@ -172,7 +402,8 @@ class _ShellState extends State<Shell> {
               if (i.id == 'palette') {
                 _showPalette();
               } else {
-                commands().firstWhere((x) => x.id == i.id).run();
+                final cmd = commands().firstWhere((x) => x.id == i.id);
+                if (cmd.isEnabled) cmd.run();
               }
               return null;
             },
@@ -208,11 +439,22 @@ class _ShellState extends State<Shell> {
                               },
                             ),
                             const Groove(vertical: true),
-                            if (app.sideVisible) ...[
-                              SizedBox(
-                                width: app.sideWidth,
-                                child: _SideBar(destination: app.destination),
+                            // Kept mounted while hidden: showing it again costs no rebuild of
+                            // the explorer (measured: 20 ms otherwise, with 3000 rows listed).
+                            Offstage(
+                              offstage: !app.sideVisible,
+                              child: SizedBox(
+                                width: app.sideVisible ? app.sideWidth : 0,
+                                child: TickerMode(
+                                  enabled: app.sideVisible,
+                                  child: ExcludeFocus(
+                                    excluding: !app.sideVisible,
+                                    child: _SideBar(destination: app.destination),
+                                  ),
+                                ),
                               ),
+                            ),
+                            if (app.sideVisible) ...[
                               AxSplitter(
                                 label: 'Resize the side bar',
                                 value: app.sideWidth,
@@ -223,7 +465,7 @@ class _ShellState extends State<Shell> {
                                 onChanged: (v) => app.sideWidth = v,
                               ),
                             ],
-                            const Expanded(child: _Main()),
+                            Expanded(child: _Main(editor: _editor)),
                           ],
                         ),
                       ),
@@ -234,10 +476,21 @@ class _ShellState extends State<Shell> {
                 ),
               ),
               const Positioned(right: 0, bottom: 0, child: SheetWarmup()),
-              if (_paletteOpen)
+              if (_paletteOpen && !_filesMode)
                 Palette(
                   commands: commands(),
                   seed: _paletteSeed,
+                  onClose: () => setState(() => _paletteOpen = false),
+                ),
+              if (_paletteOpen && _filesMode)
+                Palette(
+                  key: const ValueKey('go-to-file'),
+                  commands: const [],
+                  load: _files,
+                  label: 'Go to File',
+                  inputLabel: 'File name',
+                  placeholder: 'Search files by name',
+                  empty: 'No matching file',
                   onClose: () => setState(() => _paletteOpen = false),
                 ),
             ],
@@ -502,7 +755,12 @@ class _SideBar extends StatelessWidget {
               ),
             ),
           ),
-          const Expanded(child: FilesPage()),
+          Expanded(
+            child: FilesPage(
+              onOpenFile: (p, {bool focus = true}) =>
+                  unawaited(app.documents.open(p, focus: focus)),
+            ),
+          ),
         ],
       ),
     );
@@ -512,14 +770,15 @@ class _SideBar extends StatelessWidget {
 // ---- main area -------------------------------------------------------------------------------
 
 class _Main extends StatelessWidget {
-  const _Main();
+  const _Main({required this.editor});
+  final GlobalKey<EditorAreaState> editor;
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final t = context.axiom;
     return ListenableBuilder(
-      listenable: Listenable.merge([app.workspace, app.client.state]),
+      listenable: Listenable.merge([app.workspace, app.client.state, app.documents]),
       builder: (context, _) {
         final ws = app.workspace;
         final daemon = app.client.state.value;
@@ -549,12 +808,33 @@ class _Main extends StatelessWidget {
             ],
           );
         }
+        if (ws.isOpen && app.documents.docs.isNotEmpty) return EditorArea(key: editor);
         if (ws.isOpen) {
           return _Centered(
             children: [
               AnswerLine(ws.name, detail: ws.root),
               const SizedBox(height: Metrics.s5),
-              Text('Open a file from the explorer.', style: t.type.small),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Open a file from the explorer, or', style: t.type.small),
+                  const SizedBox(width: 6),
+                  AxButton(
+                    label: 'Go to File…',
+                    kind: ButtonKind.quiet,
+                    hint: 'Go to File… — Mod+P',
+                    onPressed: () => app.openGoToFile?.call(),
+                  ),
+                  const Keycaps('Mod+P'),
+                ],
+              ),
+              if (app.documents.banner.isNotEmpty) ...[
+                const SizedBox(height: Metrics.s4),
+                Text(
+                  app.documents.banner,
+                  style: t.type.small.copyWith(color: t.colors.dangerText),
+                ),
+              ],
             ],
           );
         }
@@ -685,13 +965,136 @@ class _StatusBar extends StatelessWidget {
                 ),
               ),
               ListenableBuilder(
-                listenable: app.workspace,
-                builder: (context, _) => app.workspace.isOpen
-                    ? Text(app.workspace.root, style: t.type.tiny, overflow: TextOverflow.ellipsis)
-                    : const SizedBox.shrink(),
+                listenable: Listenable.merge([app.workspace, app.documents]),
+                builder: (context, _) {
+                  final doc = app.documents.active;
+                  if (doc == null) {
+                    return app.workspace.isOpen
+                        ? Text(
+                            app.workspace.root,
+                            style: t.type.tiny,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        : const SizedBox.shrink();
+                  }
+                  return Row(
+                    children: [
+                      if (app.documents.cursorText.isNotEmpty)
+                        Semantics(
+                          label: app.documents.cursorText,
+                          child: Text(
+                            app.documents.cursorText,
+                            style: t.type.numeric.copyWith(fontSize: 11),
+                          ),
+                        ),
+                      const SizedBox(width: Metrics.s5),
+                      Text(languageName(doc.language), style: t.type.tiny),
+                    ],
+                  );
+                },
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A question with its actions (unsaved changes, conflicts); pops the chosen action's id.
+class _Question extends StatelessWidget {
+  const _Question({required this.title, required this.detail, required this.actions});
+  final String title;
+  final String detail;
+  final List<(String, String)> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.axiom;
+    return SizedBox(
+      width: 460,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(header: true, child: Text(title, style: t.type.title)),
+            const SizedBox(height: Metrics.s4),
+            Text(detail, style: t.type.small),
+            const SizedBox(height: Metrics.s6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                for (final (i, (id, label)) in actions.indexed) ...[
+                  if (i > 0) const SizedBox(width: Metrics.s3),
+                  AxButton(
+                    label: label,
+                    autofocus: i == 0,
+                    kind: id == 'cancel'
+                        ? ButtonKind.quiet
+                        : (id == 'discard' ? ButtonKind.danger : ButtonKind.standard),
+                    onPressed: () => Navigator.of(context).pop(id),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Go to line: a number, Enter goes there.
+class _GoToLine extends StatefulWidget {
+  const _GoToLine({required this.lines});
+  final int lines;
+
+  @override
+  State<_GoToLine> createState() => _GoToLineState();
+}
+
+class _GoToLineState extends State<_GoToLine> {
+  final _text = TextEditingController();
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _go() {
+    final n = int.tryParse(_text.text.trim());
+    if (n == null) return;
+    Navigator.of(context).pop(n.clamp(1, widget.lines));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.axiom;
+    return SizedBox(
+      width: 360,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Go to line (1–${widget.lines})', style: t.type.label),
+            const SizedBox(height: Metrics.s4),
+            CallbackShortcuts(
+              bindings: {const SingleActivator(LogicalKeyboardKey.enter): _go},
+              child: AxTextInput(
+                label: 'Line number',
+                controller: _text,
+                autofocus: true,
+                placeholder: 'Line',
+                onSubmitted: (_) => _go(),
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+            ),
+          ],
         ),
       ),
     );

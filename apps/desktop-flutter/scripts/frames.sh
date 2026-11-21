@@ -21,4 +21,4 @@ for _ in $(seq 80); do [[ -S "$XDG_RUNTIME_DIR/$sock" ]] && break; sleep 0.1; do
 unset DISPLAY
 export WAYLAND_DISPLAY="$sock" GDK_BACKEND=wayland AXIOM_WINDOW_SIZE="${AXIOM_WINDOW_SIZE:-2040x1120}"
 cd "$here"
-flutter drive --profile -d linux --driver=test_driver/integration_test.dart --target=integration_test/frames_test.dart
+flutter drive --profile -d linux --driver=test_driver/integration_test.dart --target=integration_test/${AXIOM_FRAMES_TARGET:-frames_test.dart}

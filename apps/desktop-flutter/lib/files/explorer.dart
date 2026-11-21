@@ -20,8 +20,9 @@ import '../ui/tokens.dart';
 const rowExtent = 22.0;
 const _indent = 12.0;
 
-/// What opening a file does (the editor, from FL-EDIT-001 on).
-typedef OpenFile = void Function(String path);
+/// What opening a file does (the editor, from FL-EDIT-001 on). [focus]: move keyboard focus to
+/// the editor (opened by keyboard), or leave it in the explorer (a click).
+typedef OpenFile = void Function(String path, {bool focus});
 
 class Explorer extends StatefulWidget {
   const Explorer({super.key, required this.workspace, this.onOpenFile});
@@ -72,7 +73,7 @@ class _ExplorerState extends State<Explorer> {
     if (n.isDir) {
       widget.workspace.toggle(n.path);
     } else {
-      widget.onOpenFile?.call(n.path);
+      widget.onOpenFile?.call(n.path, focus: FocusVisibility.instance.keyboard.value);
     }
   }
 

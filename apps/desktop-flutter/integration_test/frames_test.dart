@@ -8,53 +8,15 @@ import 'dart:io';
 import 'package:axiom_desktop/app/app_state.dart';
 import 'package:axiom_desktop/ui/splitter.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:re_editor/re_editor.dart';
 
+import 'frame_report.dart';
+import 'editor_frames_test.dart' show bigRust;
 import 'support.dart';
-
-const budgetMs = 16.7;
-
-final class Report {
-  Report(this.name, this.frames);
-  final String name;
-  final List<FrameTiming> frames;
-
-  double _ms(Duration d) => d.inMicroseconds / 1000;
-  List<double> get build => [for (final f in frames) _ms(f.buildDuration)];
-  List<double> get raster => [for (final f in frames) _ms(f.rasterDuration)];
-  int get over => frames
-      .where((f) => _ms(f.buildDuration) > budgetMs || _ms(f.rasterDuration) > budgetMs)
-      .length;
-
-  double _p(List<double> v, double q) {
-    if (v.isEmpty) return 0;
-    final s = [...v]..sort();
-    return s[((s.length - 1) * q).round()];
-  }
-
-  Map<String, Object> toJson() => {
-    'frames': frames.length,
-    'build_p50_ms': _p(build, .5),
-    'build_p99_ms': _p(build, .99),
-    'build_max_ms': _p(build, 1),
-    'raster_p50_ms': _p(raster, .5),
-    'raster_p99_ms': _p(raster, .99),
-    'raster_max_ms': _p(raster, 1),
-    'over_budget': over,
-  };
-
-  @override
-  String toString() {
-    final j = toJson();
-    String f(String k) => (j[k]! as double).toStringAsFixed(1);
-    return '${name.padRight(22)} frames ${'${j['frames']}'.padLeft(4)}  build p50 ${f('build_p50_ms')} p99 ${f('build_p99_ms')} max ${f('build_max_ms')}  '
-        'raster p50 ${f('raster_p50_ms')} p99 ${f('raster_p99_ms')} max ${f('raster_max_ms')}  over ${j['over_budget']}';
-  }
-}
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -64,6 +26,9 @@ void main() {
     final data = tempDir('axiom-fl-frames-data-');
     final ws = tempDir('axiom-fl-frames-ws-');
     // A folder long enough to scroll: 3000 files.
+    for (final name in ['a', 'b', 'c']) {
+      writeFile(ws, 'big/$name.rs', bigRust(5000));
+    }
     for (var i = 0; i < 3000; i++) {
       writeFile(ws, 'many/file_${i.toString().padLeft(4, '0')}.txt', '$i\n');
     }
@@ -79,15 +44,8 @@ void main() {
     await Future<void>.delayed(const Duration(seconds: 1));
 
     final reports = <Report>[];
-    Future<void> measure(String name, Future<void> Function() body) async {
-      final frames = <FrameTiming>[];
-      void cb(List<FrameTiming> t) => frames.addAll(t);
-      SchedulerBinding.instance.addTimingsCallback(cb);
-      await body();
-      await Future<void>.delayed(const Duration(milliseconds: 600)); // let the last frames report
-      SchedulerBinding.instance.removeTimingsCallback(cb);
-      reports.add(Report(name, frames));
-    }
+    Future<void> measure(String name, Future<void> Function() body) async =>
+        reports.add(await measureFrames(name, body));
 
     try {
       await _interactions(tester, app, measure);
@@ -175,6 +133,33 @@ Future<void> _interactions(
     for (final th in ['dark', 'light', 'dark']) {
       await app.settings.setValue('appearance.theme', th);
       await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+  });
+
+  // The editor inside the shell: three 5000-line files, Ctrl+Tab between them, typing, scrolling.
+  for (final n in ['a', 'b', 'c']) {
+    await app.documents.open('big/$n.rs');
+  }
+  await Future<void>.delayed(const Duration(seconds: 1));
+  await measure('tab switching', () async {
+    for (var i = 0; i < 12; i++) {
+      await key(tester, LogicalKeyboardKey.tab, ctrl: true);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+  });
+  final doc = app.documents.active!;
+  doc.controller.selection = const CodeLineSelection.collapsed(index: 40, offset: 4);
+  await measure('typing in the shell', () async {
+    for (final ch in 'let value = compute(items, 42); // typed\n'.split('')) {
+      doc.controller.replaceSelection(ch);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
+  });
+  final view = find.byType(CodeEditor).first;
+  await measure('editor fling in the shell', () async {
+    for (var i = 0; i < 3; i++) {
+      await tester.fling(view, const Offset(0, -1500), 5000);
+      await Future<void>.delayed(const Duration(milliseconds: 900));
     }
   });
 }

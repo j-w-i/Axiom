@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:ui' show AppExitResponse;
+import 'dart:ui' show AppExitResponse, AppExitType;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'app/app_state.dart';
@@ -53,6 +54,16 @@ class _AxiomAppState extends State<AxiomApp> with WidgetsBindingObserver {
       _lifecycle = AppLifecycleListener(
         onExitRequested: () async {
           if (_quitting) return AppExitResponse.exit;
+          // Unsaved work: ask first (Save, Don't Save, Cancel); quit once it is answered.
+          if (app.documents.dirtyPaths.isNotEmpty) {
+            app.documents.onQuitConfirmed = () async {
+              _quitting = true;
+              await app.shutdown();
+              await ServicesBinding.instance.exitApplication(AppExitType.required);
+            };
+            app.documents.requestQuit();
+            return AppExitResponse.cancel;
+          }
           _quitting = true;
           await app.shutdown();
           return AppExitResponse.exit;

@@ -73,6 +73,13 @@ final _physical = <LogicalKeyboardKey, PhysicalKeyboardKey>{
   LogicalKeyboardKey.keyJ: PhysicalKeyboardKey.keyJ,
   LogicalKeyboardKey.keyL: PhysicalKeyboardKey.keyL,
   LogicalKeyboardKey.keyW: PhysicalKeyboardKey.keyW,
+  LogicalKeyboardKey.keyG: PhysicalKeyboardKey.keyG,
+  LogicalKeyboardKey.keyF: PhysicalKeyboardKey.keyF,
+  LogicalKeyboardKey.digit1: PhysicalKeyboardKey.digit1,
+  LogicalKeyboardKey.digit2: PhysicalKeyboardKey.digit2,
+  LogicalKeyboardKey.pageUp: PhysicalKeyboardKey.pageUp,
+  LogicalKeyboardKey.pageDown: PhysicalKeyboardKey.pageDown,
+  LogicalKeyboardKey.backquote: PhysicalKeyboardKey.backquote,
 };
 
 Future<void> _down(WidgetTester t, LogicalKeyboardKey k) =>
@@ -85,14 +92,21 @@ Future<void> key(
   LogicalKeyboardKey k, {
   bool mod = false,
   bool shift = false,
+  bool ctrl = false,
 }) async {
   final modKey = Platform.isMacOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
+  if (ctrl && !(mod && modKey == LogicalKeyboardKey.controlLeft)) {
+    await _down(tester, LogicalKeyboardKey.controlLeft);
+  }
   if (mod) await _down(tester, modKey);
   if (shift) await _down(tester, LogicalKeyboardKey.shiftLeft);
   await _down(tester, k);
   await _up(tester, k);
   if (shift) await _up(tester, LogicalKeyboardKey.shiftLeft);
   if (mod) await _up(tester, modKey);
+  if (ctrl && !(mod && modKey == LogicalKeyboardKey.controlLeft)) {
+    await _up(tester, LogicalKeyboardKey.controlLeft);
+  }
   await tester.pump(const Duration(milliseconds: 50));
 }
 
@@ -105,4 +119,10 @@ void writeFile(Directory root, String path, String text) {
   final f = File('${root.path}/$path');
   f.parent.createSync(recursive: true);
   f.writeAsStringSync(text);
+}
+
+/// Types into the focused text field (the palette's query, a dialog's input).
+Future<void> typeFocused(WidgetTester tester, String text) async {
+  tester.testTextInput.enterText(text);
+  await tester.pump(const Duration(milliseconds: 50));
 }

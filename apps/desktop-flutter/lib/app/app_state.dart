@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../daemon/client.dart';
+import '../state/documents.dart';
 import '../state/settings.dart';
 import '../state/workspace.dart';
 import '../ui/tokens.dart';
@@ -39,13 +40,16 @@ final class Command {
 class AppState {
   AppState({required this.args, required this.client, required this.prefs})
     : settings = SettingsStore(client),
-      workspace = WorkspaceStore(client);
+      workspace = WorkspaceStore(client) {
+    documents = DocumentsStore(client, workspace);
+  }
 
   final AppArgs args;
   final DaemonClient client;
   final LocalPrefs prefs;
   final SettingsStore settings;
   final WorkspaceStore workspace;
+  late final DocumentsStore documents;
 
   /// The hint line's text (the hovered or focused control's hint).
   final hint = ValueNotifier<String?>(null);
@@ -54,6 +58,7 @@ class AppState {
   VoidCallback? openPalette;
   VoidCallback? openSettings;
   Future<void> Function()? pickFolder;
+  VoidCallback? openGoToFile;
 
   static Future<AppState> create(AppArgs args) async {
     final program = locateDaemon(explicit: args.daemon);
@@ -88,6 +93,7 @@ class AppState {
 
   /// The quit path: save the shell's state, stop the daemon (bounded).
   Future<void> shutdown() async {
+    await documents.saveTabState();
     await workspace.flushState();
     await prefs.flush();
     await client.shutdown();

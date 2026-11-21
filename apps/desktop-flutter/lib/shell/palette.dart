@@ -16,10 +16,27 @@ import '../ui/theme.dart';
 import '../ui/tokens.dart';
 
 class Palette extends StatefulWidget {
-  const Palette({super.key, required this.commands, required this.onClose, this.seed = ''});
+  const Palette({
+    super.key,
+    required this.commands,
+    required this.onClose,
+    this.seed = '',
+    this.load,
+    this.label = 'Command palette',
+    this.inputLabel = 'Run a command',
+    this.placeholder = 'Type a command',
+    this.empty = 'No matching command',
+  });
   final List<Command> commands;
   final VoidCallback onClose;
   final String seed;
+
+  /// Items fetched when the palette opens (Go to File's file list); [commands] shows meanwhile.
+  final Future<List<Command>> Function()? load;
+  final String label;
+  final String inputLabel;
+  final String placeholder;
+  final String empty;
 
   @override
   State<Palette> createState() => _PaletteState();
@@ -31,11 +48,23 @@ class _PaletteState extends State<Palette> {
   final _scroll = ScrollController();
   FocusNode? _returnTo;
   int _active = 0;
+  List<Command>? _loaded;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
     _returnTo = FocusManager.instance.primaryFocus;
+    if (widget.load != null) {
+      _loading = true;
+      widget.load!().then((items) {
+        if (!mounted) return;
+        setState(() {
+          _loaded = items;
+          _loading = false;
+        });
+      });
+    }
     _query.addListener(() => setState(() => _active = 0));
     WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
   }
@@ -48,8 +77,12 @@ class _PaletteState extends State<Palette> {
     super.dispose();
   }
 
-  List<({Command item, FuzzyMatch match})> get _results =>
-      rankFuzzy(widget.commands.where((c) => c.isEnabled), _query.text, (c) => c.title, limit: 60);
+  List<({Command item, FuzzyMatch match})> get _results => rankFuzzy(
+    (_loaded ?? widget.commands).where((c) => c.isEnabled),
+    _query.text,
+    (c) => c.title,
+    limit: 60,
+  );
 
   void _close() {
     widget.onClose();
@@ -114,7 +147,7 @@ class _PaletteState extends State<Palette> {
                 child: Semantics(
                   scopesRoute: true,
                   namesRoute: true,
-                  label: 'Command palette',
+                  label: widget.label,
                   explicitChildNodes: true,
                   child: SizedBox(
                     width: 600,
@@ -125,10 +158,10 @@ class _PaletteState extends State<Palette> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           AxTextInput(
-                            label: 'Run a command',
+                            label: widget.inputLabel,
                             controller: _query,
                             focusNode: _focus,
-                            placeholder: 'Type a command',
+                            placeholder: widget.placeholder,
                             leading: AxiomIcon(AxiomIcons.search, size: 14, color: c.ink3),
                           ),
                           const SizedBox(height: Metrics.s3),
@@ -137,7 +170,12 @@ class _PaletteState extends State<Palette> {
                             child: results.isEmpty
                                 ? Padding(
                                     padding: const EdgeInsets.all(Metrics.s4),
-                                    child: Text('No matching command', style: t.type.small),
+                                    child: _loading
+                                        ? const Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: Spinner(label: 'Listing files'),
+                                          )
+                                        : Text(widget.empty, style: t.type.small),
                                   )
                                 : ListView.builder(
                                     controller: _scroll,

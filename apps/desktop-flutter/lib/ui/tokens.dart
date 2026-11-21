@@ -38,6 +38,7 @@ final class AxiomColors {
     required this.danger,
     required this.dangerText,
     required this.dangerSoft,
+    required this.syntax,
   });
 
   final Brightness brightness;
@@ -107,6 +108,9 @@ final class AxiomColors {
   final Color dangerText;
   final Color dangerSoft;
 
+  /// Code colours (Precision Instrument's syntax palette, checked against the editor's ground).
+  final SyntaxColors syntax;
+
   bool get isDark => brightness == Brightness.dark;
 
   static const dark = AxiomColors(
@@ -141,6 +145,19 @@ final class AxiomColors {
     danger: Color(0xFFFF6259),
     dangerText: Color(0xFFFF7A72),
     dangerSoft: Color(0x24FF6259),
+    syntax: SyntaxColors(
+      text: Color(0xFFDCD8D0),
+      comment: Color(0xFF8A867E),
+      keyword: Color(0xFFD18E6E),
+      type: Color(0xFF8EC2B2),
+      string: Color(0xFFA9C47F),
+      number: Color(0xFFC4A7DE),
+      punct: Color(0xFF9D998F),
+      macro: Color(0xFF9FB8D8),
+      lineNumber: Color(0xFF6E727A),
+      lineNumberActive: Color(0xFFB8BCC3),
+      currentLine: Color(0x0AFFFFFF),
+    ),
   );
 
   static const light = AxiomColors(
@@ -175,7 +192,40 @@ final class AxiomColors {
     danger: Color(0xFFC8322B),
     dangerText: Color(0xFFB02C26),
     dangerSoft: Color(0x1AC8322B),
+    syntax: SyntaxColors(
+      text: Color(0xFF2B2925),
+      comment: Color(0xFF6B675F),
+      keyword: Color(0xFFA0482A),
+      type: Color(0xFF2A6E5D),
+      string: Color(0xFF4D6E21),
+      number: Color(0xFF74489F),
+      punct: Color(0xFF65615A),
+      macro: Color(0xFF365F8F),
+      lineNumber: Color(0xFF7A7E86),
+      lineNumberActive: Color(0xFF2B2925),
+      currentLine: Color(0x0A0D0E10),
+    ),
   );
+}
+
+/// The editor's code colours.
+@immutable
+final class SyntaxColors {
+  const SyntaxColors({
+    required this.text,
+    required this.comment,
+    required this.keyword,
+    required this.type,
+    required this.string,
+    required this.number,
+    required this.punct,
+    required this.macro,
+    required this.lineNumber,
+    required this.lineNumberActive,
+    required this.currentLine,
+  });
+  final Color text, comment, keyword, type, string, number, punct, macro;
+  final Color lineNumber, lineNumberActive, currentLine;
 }
 
 /// Sizes, spacing and shape.

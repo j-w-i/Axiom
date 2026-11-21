@@ -1,8 +1,8 @@
 ---
 id: FL-EDIT-001
 title: The editor: re_editor, documents (open, save, conflicts, dirty, recovery), tabs, split, highlighting, find and replace
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux verified (editor_test, frames), CI pending
 depends_on: [FL-FILES-001]
 order: 525
 scope: apps/desktop-flutter/lib/editor/, apps/desktop-flutter/integration_test/editor_test.dart

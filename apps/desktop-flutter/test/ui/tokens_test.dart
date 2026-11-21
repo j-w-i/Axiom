@@ -49,6 +49,25 @@ void main() {
         }
         expect(failures, isEmpty);
       });
+      test('code colours on the editor ground ≥ 4.5:1 (line numbers ≥ 3:1)', () {
+        final y = c.syntax;
+        final failures = <String>[];
+        for (final (n, col) in [
+          ('text', y.text),
+          ('comment', y.comment),
+          ('keyword', y.keyword),
+          ('type', y.type),
+          ('string', y.string),
+          ('number', y.number),
+          ('punct', y.punct),
+          ('macro', y.macro),
+        ]) {
+          final r = contrast(col, Color.alphaBlend(y.currentLine, c.ground));
+          if (r < 4.5) failures.add('$n: ${r.toStringAsFixed(2)}');
+        }
+        if (contrast(y.lineNumber, c.ground) < 3) failures.add('line numbers');
+        expect(failures, isEmpty);
+      });
       test('text on the accent and on the ink circle ≥ 4.5:1; the focus ring ≥ 3:1', () {
         expect(contrast(c.onAccent, c.accent), greaterThanOrEqualTo(4.5));
         expect(contrast(c.onInk, c.ink), greaterThanOrEqualTo(4.5));

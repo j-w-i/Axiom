@@ -28,6 +28,12 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
   - `scripts/e2e.sh` (a private compositor) and `scripts/frames.sh`;
   - at the owner's 125 % scale and window size, no frame over 16.7 ms in any measured
     interaction (`verification/FL.md`).
+- **FL-EDIT-001 implemented (2026-11-22):**
+  - the editor on `re_editor`: documents with the Tauri rules (saving with `expectedVersion`,
+    conflicts, external changes, unsaved-work prompts, restore), tabs, the split, find and
+    replace, Go to File, go to line;
+  - no frame over 16.7 ms while scrolling, typing or switching tabs on 5000-line files at the
+    owner's scale. The Tauri editor ran at 44 fps there.
 
 ## M2 — Environments and builds: complete (2026-11-21)
 
