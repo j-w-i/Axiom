@@ -1,6 +1,11 @@
 # Current state
 
-_Last updated: 2026-11-17._
+_Last updated: 2026-11-21._
+
+## M2 — Environments and builds: complete (2026-11-21)
+
+All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).
+
 
 ## M1.6 — Axiom Visual Experience: approved, Phase B ready (2026-11-17)
 
