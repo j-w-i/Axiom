@@ -1,7 +1,7 @@
 // The Visual Inspector (M5-UI-001; ADR-0019, ADR-0020 §8), in the side bar beside the editor:
 // the folder's preview (start, open in the browser, stop), inspect mode, and the element the
 // person selected in the page: its hierarchy, source (exact locations open at line and column;
-// guesses say so), computed properties, "Ask AI about this element", and the latest
+// guesses say so), computed properties and "Ask AI about this element"; above it, the latest
 // verification an agent ran.
 
 import 'dart:async';
@@ -73,13 +73,15 @@ class InspectorSide extends StatelessWidget {
                     ),
                   ),
               ],
-              if (shown != null) ...[
-                const SizedBox(height: Metrics.s5),
-                _Selection(store: s, node: shown),
-              ],
+              // The latest verification comes first: after an agent's change it is what the
+              // person looks for.
               if (s.report != null) ...[
                 const SizedBox(height: Metrics.s5),
                 _Report(report: s.report!.report),
+              ],
+              if (shown != null) ...[
+                const SizedBox(height: Metrics.s5),
+                _Selection(store: s, node: shown),
               ],
             ],
           ),
@@ -316,6 +318,7 @@ class _Selection extends StatelessWidget {
           const _Heading('Properties'),
           for (final e in props)
             Semantics(
+              container: true,
               label: '${e.key}: ${propertyText(e.value)}',
               child: ExcludeSemantics(
                 child: Padding(
@@ -360,6 +363,7 @@ class _Report extends StatelessWidget {
       children: [
         const _Heading('Last verification'),
         Semantics(
+          container: true,
           liveRegion: true,
           label: 'Verification: ${verdictLabel(v)}',
           child: ExcludeSemantics(
@@ -379,6 +383,7 @@ class _Report extends StatelessWidget {
         const SizedBox(height: Metrics.s2),
         for (final c in report.checks)
           Semantics(
+            container: true,
             label:
                 '${c.skipped == true
                     ? 'Skipped'

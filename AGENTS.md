@@ -14,7 +14,7 @@ Requirements: `docs/product/requirements.md`.
 
 ## Current status
 
-**M1 and M1.5 (Qt → Tauri migration) complete.** Always check
+**M1–M5 complete** (M5, visual intelligence for React + Vite, on branch `task/m5`). Always check
 `docs/roadmap/current.md` and `scripts/tasks.py` — they are kept current; this
 paragraph may lag. The Tauri shell became the default on 2026-11-17 (T-14) and the Qt shell was retired the same day (T-15; recover it from tag `qt-shell-final`).
 ADR-0020 then moved the shell to Flutter: FL-QA-001 made `apps/desktop-flutter` the app and

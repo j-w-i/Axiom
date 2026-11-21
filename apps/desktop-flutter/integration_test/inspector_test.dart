@@ -10,8 +10,6 @@
 // AXIOM_REQUIRE_PREVIEW=1 (CI), where it fails.
 // Run: apps/desktop-flutter/scripts/e2e.sh inspector_test.dart
 
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show SemanticsAction;
 
@@ -20,116 +18,8 @@ import 'package:axiom_desktop/daemon/protocol.g.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'browser.dart';
 import 'support.dart';
-
-String _root() {
-  var d = Directory.current;
-  while (!File('${d.path}/scripts/check.sh').existsSync()) {
-    final up = d.parent;
-    if (up.path == d.path) {
-      throw StateError('the repository root is not above ${Directory.current}');
-    }
-    d = up;
-  }
-  return d.path;
-}
-
-String? _chrome() {
-  for (final dir in (Platform.environment['PATH'] ?? '').split(':')) {
-    for (final n in ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
-      if (File('$dir/$n').existsSync()) return '$dir/$n';
-    }
-  }
-  return null;
-}
-
-/// A headless Chrome on [url] with a throw-away profile; its page's debugging socket.
-final class Page {
-  Page._(this.process, this.profile, this._ws);
-  final Process process;
-  final Directory profile;
-  final WebSocket _ws;
-  var _id = 0;
-  final _replies = <int, Completer<Object?>>{};
-
-  static Future<Page> open(String chrome, String url) async {
-    final profile = tempDir('axiom-fl-inspector-chrome-');
-    final p = await Process.start(chrome, [
-      '--headless=new',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-gpu',
-      '--window-size=1024,768',
-      '--remote-debugging-port=0',
-      '--user-data-dir=${profile.path}',
-      url,
-    ]);
-    unawaited(p.stdout.drain<void>());
-    unawaited(p.stderr.drain<void>());
-    final portFile = File('${profile.path}/DevToolsActivePort');
-    final end = DateTime.now().add(const Duration(seconds: 20));
-    while (!portFile.existsSync() || portFile.readAsLinesSync().isEmpty) {
-      if (DateTime.now().isAfter(end)) throw StateError('Chrome did not open its debugging port');
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    final port = int.parse(portFile.readAsLinesSync().first.trim());
-    String? wsUrl;
-    while (wsUrl == null) {
-      if (DateTime.now().isAfter(end)) throw StateError('Chrome has no page target');
-      final http = HttpClient();
-      try {
-        final rq = await http.getUrl(Uri.parse('http://127.0.0.1:$port/json/list'));
-        final body = await (await rq.close()).transform(utf8.decoder).join();
-        final targets = (jsonDecode(body) as List).cast<Map<String, Object?>>();
-        wsUrl = targets
-            .where((t) => t['type'] == 'page' && '${t['url']}'.startsWith(url))
-            .map((t) => t['webSocketDebuggerUrl'] as String?)
-            .firstOrNull;
-      } finally {
-        http.close();
-      }
-      if (wsUrl == null) await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    final ws = await WebSocket.connect(wsUrl);
-    final page = Page._(p, profile, ws);
-    ws.listen((m) {
-      final j = jsonDecode(m as String) as Map<String, Object?>;
-      final c = page._replies.remove(j['id']);
-      c?.complete(j['result']);
-    });
-    return page;
-  }
-
-  Future<Object?> _send(String method, Map<String, Object?> params) {
-    final id = ++_id;
-    final c = _replies[id] = Completer<Object?>();
-    _ws.add(jsonEncode({'id': id, 'method': method, 'params': params}));
-    return c.future.timeout(const Duration(seconds: 10));
-  }
-
-  /// The person's click at (x, y) in CSS px: move there, press, release.
-  Future<void> click(double x, double y) async {
-    for (final type in ['mouseMoved', 'mousePressed', 'mouseReleased']) {
-      await _send('Input.dispatchMouseEvent', {
-        'type': type,
-        'x': x,
-        'y': y,
-        if (type != 'mouseMoved') ...{'button': 'left', 'clickCount': 1},
-      });
-    }
-  }
-
-  Future<void> close() async {
-    await _ws.close();
-    process.kill();
-    await process.exitCode.timeout(const Duration(seconds: 5), onTimeout: () => -1);
-    try {
-      profile.deleteSync(recursive: true);
-    } on FileSystemException {
-      // Chrome may still be writing its profile; the temp dir is the system's to clear.
-    }
-  }
-}
 
 /// Every node a person can act on has a name.
 List<String> unnamed() => [
@@ -150,14 +40,10 @@ void main() {
   testWidgets('the inspector: start, select in the page, source, uncertain, ask AI', (
     tester,
   ) async {
-    final root = _root();
+    final root = repoRoot();
     final fixture = '$root/tests/fixtures/inspect-react';
-    final chrome = _chrome();
-    final missing = !File('$fixture/node_modules/.bin/vite').existsSync()
-        ? 'the fixture\'s dependencies are not installed (pnpm install in tests/fixtures/inspect-react)'
-        : chrome == null
-        ? 'no Chrome or Chromium on PATH'
-        : null;
+    final chrome = findChrome();
+    final missing = previewUnavailable(fixture, chrome);
     if (missing != null) {
       if (Platform.environment['AXIOM_REQUIRE_PREVIEW'] == '1') fail(missing);
       // ignore: avoid_print
@@ -172,17 +58,7 @@ void main() {
       data.deleteSync(recursive: true);
       ws.deleteSync(recursive: true);
     });
-    for (final f in ['package.json', 'vite.config.js', 'index.html']) {
-      File('$fixture/$f').copySync('${ws.path}/$f');
-    }
-    for (final d in ['src', 'lib']) {
-      Directory('${ws.path}/$d').createSync();
-      for (final e in Directory('$fixture/$d').listSync().whereType<File>()) {
-        e.copySync('${ws.path}/$d/${e.uri.pathSegments.last}');
-      }
-    }
-    Link('${ws.path}/node_modules').createSync('$fixture/node_modules');
-    writeFile(ws, '.gitignore', 'node_modules\n');
+    copyInspectFixture(fixture, ws);
 
     final app = await boot(tester, data.path);
     await app.workspace.openFolder(ws.path);

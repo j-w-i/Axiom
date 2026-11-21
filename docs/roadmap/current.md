@@ -2,6 +2,43 @@
 
 _Last updated: 2026-11-22._
 
+## M5 — Visual intelligence (web): complete (2026-11-22)
+
+Branch `task/m5`, which builds on `task/flutter` (M4 + FL). ADR-0019 is amended by ADR-0020 §8:
+the preview opens in the person's browser; the injected adapter talks to the daemon over a
+loopback WebSocket, gated by a token; there is no CDP.
+
+The exit scenario passes in the Flutter shell (`inspect_loop_test.dart`), with a real page:
+- a click in the page → the source at 11:9;
+- the agent's spacing fix → hot reload → `verified`, with a passing geometry check;
+- a wrong patch → `failed`;
+- the library's element shown as uncertain.
+
+P2 and P7 against M4 pass (`verification/M5.md`).
+
+Owed:
+- Windows;
+- the macOS CI results after the window fix;
+- the Flutter editor's idle CPU with a document open (27 % on Xvfb's software renderer, the same
+  in M4's Flutter build).
+
+**Next: CI green on PR 6 (`task/flutter`) and on `task/m5`, then merge both to main; then M6.**
+
+- **M5-ARCH-001:** protocol 0.5 (`preview/*`, `ui/*` with assertions); the adapter protocol
+  frozen for M5; new error kinds.
+- **M5-INSPECT-001:** `crates/inspect` (sessions, normalisation, source resolution); `axiomd`
+  serves `ui/*`.
+- **M5-WEB-001:** `inspectors/web` (the Vite plugin's source stamps and the in-page adapter).
+- **M5-PREVIEW-001:** `preview/start|stop|list` (Vite through a generated config); the
+  `inspect-react` fixture.
+- **M5-VERIFY-001:** `ui/verify` (quiescence, re-identification, geometry and property checks,
+  build and runtime clean, skipped pixel checks, the verdict rule).
+- **M5-AGENT-001:** the agent tools `preview.start`, `ui.snapshot`, `ui.inspect`,
+  `ui.selection` and `ui.verify`, assertion-first.
+- **M5-UI-001:** the Visual Inspector in the Flutter shell (start, inspect mode, selection,
+  hierarchy, properties, source jump, Ask AI, the latest verification).
+- **M5-QA-001:** the exit scenario through the UI, P2 and P7, `verification/M5.md`.
+
 ## FL — Flutter shell: complete (2026-11-22)
 
 The owner chose a full Flutter rewrite of the desktop shell (ADR-0020). The daemon and protocol
