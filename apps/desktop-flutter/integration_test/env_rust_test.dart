@@ -84,7 +84,13 @@ void main() {
     );
     expect(rust().selected, version);
     expect(rust().detected, isNull);
-    expect(named('Plan install…'), findsWidgets);
+    // The page shows it once a frame has rebuilt it (the store changes first).
+    await until(
+      tester,
+      () => named('Plan install…').evaluate().isNotEmpty,
+      what: 'Plan install…',
+      detail: () => 'destination ${app.destination}',
+    );
 
     // 2. The plan shows every step.
     await app.environments.planInstall('rust');
