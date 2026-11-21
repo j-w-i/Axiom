@@ -520,32 +520,56 @@ class _DocViewState extends State<_DocView> {
     return ListenableBuilder(
       listenable: s,
       builder: (context, _) => Focus(
+        // Follows focus inside the editor; not a stop of its own.
+        canRequestFocus: false,
+        skipTraversal: true,
+        includeSemantics: false,
         onFocusChange: (has) {
           if (has) _report();
         },
-        child: LspEditorFeatures(
-          doc: widget.doc,
-          controller: _controller,
-          geometry: CodeGeometry(
-            fontSize: s.editorFontSize.toDouble(),
-            gutterKey: _gutter,
-            scroll: _scroll,
-          ),
-          builder: (context, overrides) => CodeView(
-            controller: _controller,
-            language: widget.doc.language,
-            focusNode: widget.focusNode,
-            scrollController: _scroll,
-            findController: _find,
-            fontSize: s.editorFontSize.toDouble(),
-            fontFamily: s.editorFontFamily,
-            wordWrap: s.editorWordWrap,
-            findBuilder: (context, controller, readOnly) => FindBar(controller: controller),
-            onSave: () => app.documents.save(widget.doc.path),
-            overrides: overrides,
-            gutterKey: _gutter,
-            gitMarks: gitMarks,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ValueListenableBuilder(
+              valueListenable: _find,
+              builder: (context, v, _) =>
+                  v == null ? const SizedBox.shrink() : FindBar(controller: _find),
+            ),
+            Expanded(
+              child: LspEditorFeatures(
+                doc: widget.doc,
+                controller: _controller,
+                geometry: CodeGeometry(
+                  fontSize: s.editorFontSize.toDouble(),
+                  gutterKey: _gutter,
+                  scroll: _scroll,
+                ),
+                // re_editor's own node acts (tap, scroll) without a name: merged into one named node.
+                builder: (context, overrides) => MergeSemantics(
+                  child: Semantics(
+                    label: '${widget.doc.path}, editor${widget.group == 2 ? ' (right group)' : ''}',
+                    child: CodeView(
+                      controller: _controller,
+                      language: widget.doc.language,
+                      focusNode: widget.focusNode,
+                      scrollController: _scroll,
+                      findController: _find,
+                      fontSize: s.editorFontSize.toDouble(),
+                      fontFamily: s.editorFontFamily,
+                      wordWrap: s.editorWordWrap,
+                      // The bar is drawn above the editor (outside its merged node, so its fields
+                      // keep their own names); re_editor gets an empty one.
+                      findBuilder: (context, controller, readOnly) => const _NoFindBar(),
+                      onSave: () => app.documents.save(widget.doc.path),
+                      overrides: overrides,
+                      gutterKey: _gutter,
+                      gitMarks: gitMarks,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -553,6 +577,16 @@ class _DocViewState extends State<_DocView> {
 }
 
 /// The find (and replace) bar: Axiom's controls over re_editor's find controller.
+class _NoFindBar extends StatelessWidget implements PreferredSizeWidget {
+  const _NoFindBar();
+
+  @override
+  Size get preferredSize => Size.zero;
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
 class FindBar extends StatelessWidget implements PreferredSizeWidget {
   const FindBar({super.key, required this.controller});
   final CodeFindController controller;

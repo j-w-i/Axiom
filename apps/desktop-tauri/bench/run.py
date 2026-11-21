@@ -294,6 +294,10 @@ class App:
             env["XDG_CONFIG_HOME"] = str(Path(data_dir) / "config")
             env["XDG_DATA_HOME"] = str(Path(data_dir) / "share")
             env["XDG_CACHE_HOME"] = str(Path(data_dir) / "cache")
+        # AXIOM_BENCH_CACHE_DIR: one cache directory for every run (fontconfig, the GL shader
+        # cache): "cold" is then a fresh data directory on a machine that has run the app before.
+        if os.environ.get("AXIOM_BENCH_CACHE_DIR"):
+            env["XDG_CACHE_HOME"] = os.environ["AXIOM_BENCH_CACHE_DIR"]
         env.update(extra_env or {})
         self.t_launch = time.monotonic()
         self.proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)

@@ -5,7 +5,7 @@
 #   apps/desktop-flutter/scripts/e2e.sh [suite_test.dart ...]   (default: every suite)
 #
 # Linux: a private virtual KWin (Wayland, the GPU) when kwin_wayland exists, else a private Xvfb
-# (apps/desktop-tauri/scripts/headless.sh). macOS: the suites run in the session (CI).
+# (scripts/headless.sh). macOS: the suites run in the session (CI).
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -23,7 +23,7 @@ cleanup() { [[ -n "${kwin_pid:-}" ]] && kill "$kwin_pid" 2>/dev/null || true; }
 trap cleanup EXIT
 if [[ "$(uname -s)" == Linux ]]; then
   # shellcheck disable=SC1091
-  source "$root/apps/desktop-tauri/scripts/env.sh"
+  source "$root/scripts/env.sh"
   if command -v kwin_wayland >/dev/null && [[ "${AXIOM_E2E_DISPLAY:-}" != xvfb ]]; then
     sock="axiom-flutter-e2e-$$"
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts --socket "$sock" \
@@ -37,7 +37,7 @@ if [[ "$(uname -s)" == Linux ]]; then
     echo "[e2e] private virtual KWin: $sock"
   else
     # shellcheck disable=SC1091
-    source "$root/apps/desktop-tauri/scripts/headless.sh"
+    source "$root/scripts/headless.sh"
     echo "[e2e] private Xvfb: $DISPLAY"
   fi
 fi

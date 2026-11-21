@@ -79,6 +79,9 @@ class AppState {
   late final EnvironmentsStore environments;
   late final AgentStore agent;
 
+  /// Ctrl+M in the editor: Tab moves focus instead of indenting.
+  final tabMovesFocus = ValueNotifier(false);
+
   /// The hint line's text (the hovered or focused control's hint).
   final hint = ValueNotifier<String?>(null);
 

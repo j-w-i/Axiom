@@ -119,10 +119,13 @@ class _PaletteState extends State<Palette> {
         children: [
           // A click outside closes it.
           Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _close,
-              child: const SizedBox.expand(),
+            child: Semantics(
+              label: 'Close ${widget.label}',
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _close,
+                child: const SizedBox.expand(),
+              ),
             ),
           ),
           Align(

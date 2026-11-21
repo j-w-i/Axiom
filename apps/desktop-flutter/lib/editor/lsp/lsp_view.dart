@@ -777,8 +777,21 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       onInvoke: (_) {
         if (completing) {
           _accept();
+        } else if (app.tabMovesFocus.value) {
+          // Ctrl+M: Tab leaves the editor (as in Monaco), for keyboard navigation.
+          FocusScope.of(context).nextFocus();
         } else {
           widget.controller.applyIndent();
+        }
+        return null;
+      },
+    ),
+    CodeShortcutOutdentIntent: CallbackAction<CodeShortcutOutdentIntent>(
+      onInvoke: (_) {
+        if (app.tabMovesFocus.value) {
+          FocusScope.of(context).previousFocus();
+        } else {
+          widget.controller.applyOutdent();
         }
         return null;
       },
@@ -938,6 +951,9 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
           'complete',
         ),
         const SingleActivator(LogicalKeyboardKey.f12): const _LspIntent('definition'),
+        const SingleActivator(LogicalKeyboardKey.keyM, control: true): const _LspIntent(
+          'tab-focus',
+        ),
         const SingleActivator(LogicalKeyboardKey.f12, shift: true): const _LspIntent('references'),
         const SingleActivator(LogicalKeyboardKey.period, control: true): const _LspIntent(
           'actions',
@@ -962,6 +978,13 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
                   unawaited(complete());
                 case 'definition':
                   unawaited(definition());
+                case 'tab-focus':
+                  final on = app.tabMovesFocus.value = !app.tabMovesFocus.value;
+                  ToastHost.of(context).show(
+                    on
+                        ? 'Tab moves focus out of the editor (Ctrl+M to type tabs again)'
+                        : 'Tab inserts a tab (Ctrl+M to move focus with it)',
+                  );
                 case 'references':
                   unawaited(references());
                 case 'actions':

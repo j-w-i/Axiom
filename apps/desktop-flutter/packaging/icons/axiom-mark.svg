@@ -1,0 +1,7 @@
+<!-- The Axiom mark on its 16 px grid; colour comes from currentColor (in the app: var(--accent)).
+     Kept in sync with Icon.Logo in apps/desktop-tauri/src/ui/icons.tsx. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="8" cy="3" r="1.5"/>
+  <path d="M7.3 4.35L3.25 14M8.7 4.35l4.05 9.65"/>
+  <path d="M4.6 10.75Q8 12.4 11.4 10.75"/>
+</svg>

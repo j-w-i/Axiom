@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 import 'dart:ui' show AppExitResponse, AppExitType;
 
@@ -12,6 +13,7 @@ import 'state/settings.dart';
 import 'ui/gallery.dart';
 import 'ui/overlays.dart';
 import 'ui/pressable.dart';
+import 'daemon/client.dart';
 import 'ui/theme.dart';
 import 'ui/tokens.dart';
 
@@ -24,8 +26,34 @@ Future<void> main(List<String> argv) async {
     return;
   }
   final app = await AppState.create(args);
+  if (args.selfTest) {
+    // Package verification: find the daemon as an installed copy does, complete the handshake,
+    // report it, and quit (scripts/verify-package.sh).
+    final code = await selfTest(app);
+    exit(code);
+  }
   runApp(AxiomApp(app: app));
   unawaited(app.start());
+}
+
+/// Starts the daemon, waits for `initialize`, prints `connected <daemon> <version> <protocol>`
+/// (or why not) and shuts it down. 0 when connected.
+Future<int> selfTest(AppState app) async {
+  final program = app.client.config.program;
+  try {
+    await app.client.start().timeout(const Duration(seconds: 20));
+    final s = app.client.state.value;
+    if (s is DaemonReady) {
+      stdout.writeln('connected $program ${s.serverVersion} ${s.protocolVersion}');
+      await app.client.shutdown();
+      return 0;
+    }
+    stdout.writeln('not connected: $s');
+    return 1;
+  } on Object catch (e) {
+    stdout.writeln('not connected ($program): $e');
+    return 1;
+  }
 }
 
 class AxiomApp extends StatefulWidget {

@@ -10,7 +10,7 @@ export PATH="$HOME/.cargo/bin:$PATH:$HOME/flutter/bin"
 (cd "$root" && cargo build -q -p axiomd)
 export AXIOMD_UNDER_TEST="$root/target/debug/axiomd"
 # shellcheck disable=SC1091
-source "$root/apps/desktop-tauri/scripts/env.sh"
+source "$root/scripts/env.sh"
 command -v kwin_wayland >/dev/null || { echo "frames.sh: needs kwin_wayland (a private compositor)" >&2; exit 2; }
 sock="axiom-flutter-frames-$$"
 kwin_wayland --virtual --no-lockscreen --no-global-shortcuts --socket "$sock" \

@@ -81,6 +81,7 @@ final _physical = <LogicalKeyboardKey, PhysicalKeyboardKey>{
   LogicalKeyboardKey.keyW: PhysicalKeyboardKey.keyW,
   LogicalKeyboardKey.keyG: PhysicalKeyboardKey.keyG,
   LogicalKeyboardKey.period: PhysicalKeyboardKey.period,
+  LogicalKeyboardKey.keyM: PhysicalKeyboardKey.keyM,
   LogicalKeyboardKey.keyF: PhysicalKeyboardKey.keyF,
   LogicalKeyboardKey.digit1: PhysicalKeyboardKey.digit1,
   LogicalKeyboardKey.digit2: PhysicalKeyboardKey.digit2,
