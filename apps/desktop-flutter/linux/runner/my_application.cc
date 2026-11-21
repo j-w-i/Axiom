@@ -1,5 +1,7 @@
 #include "my_application.h"
 
+#include <cstdio>
+
 #include <flutter_linux/flutter_linux.h>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -22,7 +24,18 @@ static void my_application_activate(GApplication* application) {
 
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
-  gtk_window_set_default_size(window, 1180, 760);
+  // AXIOM_WINDOW_SIZE=WxH (logical pixels) sets the first size: the frame benchmark uses it
+  // to measure at a given window size inside its private compositor.
+  int width = 1180, height = 760;
+  const char* size = g_getenv("AXIOM_WINDOW_SIZE");
+  if (size != nullptr) {
+    int w = 0, h = 0;
+    if (sscanf(size, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {
+      width = w;
+      height = h;
+    }
+  }
+  gtk_window_set_default_size(window, width, height);
 
   // If you want to use a header bar, uncomment the following lines.
   // Header bars are commonly used in GNOME based desktop environments and

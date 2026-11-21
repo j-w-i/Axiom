@@ -4,6 +4,7 @@
 #        scripts/check.sh rust       (only the Rust workspace + repository guards)
 #        scripts/check.sh editor | tauri | flutter   (one part)
 #        scripts/check.sh e2e        (Tauri end-to-end test, headless, ~2 min)
+#        scripts/check.sh flutter-e2e   (the Flutter shell's end-to-end suites, private compositor)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -86,6 +87,12 @@ fi
 # X server, so it is opt-in: `scripts/check.sh e2e`. On Linux it runs twice:
 # through WebKitWebDriver (trusted OS-level key events) and through the
 # embedded driver that Windows and macOS CI use, so both paths stay honest.
+# The Flutter shell's end-to-end suites (a private compositor; opt-in like the Tauri e2e).
+if [[ "$what" == flutter-e2e ]]; then
+  step "flutter shell: end-to-end (private compositor)"
+  apps/desktop-flutter/scripts/e2e.sh
+fi
+
 if [[ "$what" == e2e ]]; then
   step "tauri shell: end-to-end (headless)"
   cargo build -p axiomd

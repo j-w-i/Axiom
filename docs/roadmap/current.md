@@ -19,6 +19,15 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
   (`docs/design/flutter/README.md`): Temporal Tactility's surfaces and motion with Precision
   Instrument's brass, Plex and hint line; every control keyboard-operable and named;
   contrast-checked tokens; golden images of the gallery in both themes.
+- **FL-SHELL-001 and FL-FILES-001 implemented (2026-11-22):**
+  - the shell: title row and menus, the rail with its ink underline, side bar and splitter, the
+    status bar with the hint line, the palette, Settings, layout in `shell-local.json`, the
+    quit path;
+  - the explorer (lazy tree, ignored entries, keyboard, external changes, restored after a
+    restart);
+  - `scripts/e2e.sh` (a private compositor) and `scripts/frames.sh`;
+  - at the owner's 125 % scale and window size, no frame over 16.7 ms in any measured
+    interaction (`verification/FL.md`).
 
 ## M2 — Environments and builds: complete (2026-11-21)
 

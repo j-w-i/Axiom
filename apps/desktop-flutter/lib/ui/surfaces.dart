@@ -180,3 +180,48 @@ class Hairline extends StatelessWidget {
     );
   }
 }
+
+/// Paints one sheet (its blurred shadow included) for the first few frames after start, nearly
+/// transparent, so the renderer prepares the blur before the first menu or palette opens.
+/// Measured: without it the first palette's frame took 33.7 ms to raster; later ones 2–5 ms.
+class SheetWarmup extends StatefulWidget {
+  const SheetWarmup({super.key});
+
+  @override
+  State<SheetWarmup> createState() => _SheetWarmupState();
+}
+
+class _SheetWarmupState extends State<SheetWarmup> {
+  int _frames = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick();
+  }
+
+  void _tick() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (++_frames >= 3) {
+        setState(() {});
+      } else {
+        setState(() {});
+        _tick();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_frames >= 3) return const SizedBox.shrink();
+    return const IgnorePointer(
+      child: ExcludeSemantics(
+        child: Opacity(
+          opacity: 0.01,
+          child: SizedBox(width: 48, height: 32, child: Sheet(child: SizedBox.expand())),
+        ),
+      ),
+    );
+  }
+}

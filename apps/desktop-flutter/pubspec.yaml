@@ -9,12 +9,15 @@ environment:
 # Widgets layer only: no Material or Cupertino (ADR-0020 §1). Every package here must be MIT,
 # BSD or Apache-2.0 (scripts/check_dart_licences.py).
 dependencies:
+  file_selector: ^1.1.0
   flutter:
     sdk: flutter
   path_parsing: ^1.1.0
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 

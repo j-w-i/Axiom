@@ -20,6 +20,7 @@ class AxSplitter extends StatefulWidget {
     this.vertical = true,
     this.invert = false,
     this.hint,
+    this.focusNode,
   });
 
   /// e.g. "Resize the side bar".
@@ -36,6 +37,7 @@ class AxSplitter extends StatefulWidget {
   /// The region grows when dragged towards the start (a panel below, a side bar on the right).
   final bool invert;
   final String? hint;
+  final FocusNode? focusNode;
 
   @override
   State<AxSplitter> createState() => _AxSplitterState();
@@ -63,6 +65,7 @@ class _AxSplitterState extends State<AxSplitter> {
       onDecrease: () => _set(widget.value - step),
       slider: true,
       child: FocusableActionDetector(
+        focusNode: widget.focusNode,
         mouseCursor: widget.vertical
             ? SystemMouseCursors.resizeColumn
             : SystemMouseCursors.resizeRow,

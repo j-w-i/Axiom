@@ -1,8 +1,8 @@
 ---
 id: FL-FILES-001
 title: Workspace and explorer: open, recent, lazy tree, ignored entries, file operations, Go to File
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux verified (shell_test, frames), CI pending
 depends_on: [FL-SHELL-001]
 order: 524
 scope: apps/desktop-flutter/lib/files/, apps/desktop-flutter/integration_test/files_test.dart

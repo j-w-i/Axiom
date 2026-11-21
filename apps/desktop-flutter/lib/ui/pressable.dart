@@ -4,6 +4,7 @@
 
 import 'dart:ui' show SemanticsRole;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -20,6 +21,28 @@ class HintScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(HintScope old) => old.hint != hint;
+}
+
+/// Whether focus rings show: after keyboard input, not after a pointer press (the web's
+/// `:focus-visible`). One per app, fed by the keyboard and the pointer router.
+final class FocusVisibility {
+  FocusVisibility._() {
+    HardwareKeyboard.instance.addHandler(_onKey);
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointer);
+  }
+  static FocusVisibility? _instance;
+  static FocusVisibility get instance => _instance ??= FocusVisibility._();
+
+  final keyboard = ValueNotifier<bool>(false);
+
+  bool _onKey(KeyEvent e) {
+    if (e is KeyDownEvent) keyboard.value = true;
+    return false;
+  }
+
+  void _onPointer(PointerEvent e) {
+    if (e is PointerDownEvent) keyboard.value = false;
+  }
 }
 
 /// The state a [Pressable] builds its look from.
@@ -46,6 +69,7 @@ class Pressable extends StatefulWidget {
     this.role = PressRole.button,
     this.selected,
     this.checked,
+    this.expanded,
     this.focusNode,
     this.autofocus = false,
     this.cursor = SystemMouseCursors.click,
@@ -62,6 +86,9 @@ class Pressable extends StatefulWidget {
   final PressRole role;
   final bool? selected;
   final bool? checked;
+
+  /// For tree rows and disclosure buttons.
+  final bool? expanded;
   final FocusNode? focusNode;
   final bool autofocus;
   final MouseCursor cursor;
@@ -72,9 +99,11 @@ class Pressable extends StatefulWidget {
 }
 
 class _PressableState extends State<Pressable> {
+  FocusNode? _own;
+  FocusNode get _focus => widget.focusNode ?? (_own ??= FocusNode(debugLabel: widget.label));
   bool _hovered = false;
   bool _pressed = false;
-  bool _focusVisible = false;
+  bool _focused = false;
 
   bool get _enabled => widget.onPressed != null;
 
@@ -89,6 +118,23 @@ class _PressableState extends State<Pressable> {
     }
   }
 
+  @override
+  void initState() {
+    super.initState();
+    FocusVisibility.instance.keyboard.addListener(_onModality);
+  }
+
+  void _onModality() {
+    if (_focused && mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    FocusVisibility.instance.keyboard.removeListener(_onModality);
+    _own?.dispose();
+    super.dispose();
+  }
+
   void _activate() {
     if (_enabled) widget.onPressed!();
   }
@@ -98,7 +144,7 @@ class _PressableState extends State<Pressable> {
     final state = PressState(
       hovered: _hovered && _enabled,
       pressed: _pressed && _enabled,
-      focused: _focusVisible,
+      focused: _focused && FocusVisibility.instance.keyboard.value,
       enabled: _enabled,
     );
     return Semantics(
@@ -110,6 +156,7 @@ class _PressableState extends State<Pressable> {
       checked: widget.role == PressRole.checkbox ? (widget.checked ?? false) : null,
       toggled: widget.role == PressRole.toggle ? (widget.checked ?? false) : null,
       enabled: _enabled,
+      expanded: widget.expanded,
       role: switch (widget.role) {
         PressRole.tab => SemanticsRole.tab,
         PressRole.menuItem => SemanticsRole.menuItem,
@@ -118,7 +165,7 @@ class _PressableState extends State<Pressable> {
       onTap: _enabled ? _activate : null,
       excludeSemantics: widget.excludeChildSemantics,
       child: FocusableActionDetector(
-        focusNode: widget.focusNode,
+        focusNode: _focus,
         autofocus: widget.autofocus,
         enabled: _enabled,
         mouseCursor: _enabled ? widget.cursor : SystemMouseCursors.basic,
@@ -126,8 +173,10 @@ class _PressableState extends State<Pressable> {
           setState(() => _hovered = v);
           _hint(v);
         },
-        onShowFocusHighlight: (v) => setState(() => _focusVisible = v),
-        onFocusChange: _hint,
+        onFocusChange: (v) {
+          setState(() => _focused = v);
+          _hint(v);
+        },
         shortcuts: const {
           SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
           SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
@@ -136,7 +185,13 @@ class _PressableState extends State<Pressable> {
         actions: {ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) => _activate())},
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTapDown: _enabled ? (_) => setState(() => _pressed = true) : null,
+          onTapDown: _enabled
+              ? (_) {
+                  // A click focuses the control (the ring shows only for keyboard focus).
+                  _focus.requestFocus();
+                  setState(() => _pressed = true);
+                }
+              : null,
           onTapUp: _enabled ? (_) => setState(() => _pressed = false) : null,
           onTapCancel: _enabled ? () => setState(() => _pressed = false) : null,
           onTap: _enabled ? _activate : null,

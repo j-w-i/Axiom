@@ -242,6 +242,12 @@ jobs:
       - name: Release build
         working-directory: apps/desktop-flutter
         run: flutter build ${{ runner.os == 'Linux' && 'linux' || 'macos' }} --release
+      - name: Xvfb for the end-to-end suites (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y xvfb
+      - name: End-to-end (integration_test against the real daemon)
+        env: { AXIOM_E2E_DISPLAY: xvfb }
+        run: apps/desktop-flutter/scripts/e2e.sh shell_test.dart
 
   deny:
     name: cargo-deny
