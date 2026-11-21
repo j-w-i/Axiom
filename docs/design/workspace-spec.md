@@ -367,7 +367,16 @@ console visibility is untouched and returns with Files.
 - **Empty states:**
   - No conversation selected: a centred "Start a conversation" (title), one line, and the
     composer.
-  - No model available: the first-run setup (UI-003).
+  - No model available: the first-run setup (M3-UI-003, built), titled "Connect a model to
+    start", with three cards:
+    - with an API key or a server (Anthropic | OpenAI-compatible, a password field; the
+      key leaves the UI on submit);
+    - a model on this computer (Find local servers: Ollama 11434, llama.cpp 8080, LM Studio
+      1234; each is added only if it answers);
+    - an agent you already use (Claude Code, Codex, Gemini CLI, with availability or an
+      install hint).
+  - Settings gains **Models** (M3-UI-003): default model, providers (key state, models or
+    error, Set/Replace key, Clear key, Remove), Add a provider, On this computer, Agents.
 - **Accessibility:**
   - The transcript is `role="log"` `aria-live="polite"` and announces only the turn end
     ("Answer complete"), never deltas.

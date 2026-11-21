@@ -12,6 +12,7 @@ import type {
   ImageData,
   ImageRef,
   ModelsResult,
+  ProviderConfig,
   ProviderKind,
   RestoreConflict,
   RestoreResult,
@@ -39,6 +40,31 @@ export interface ProviderOption {
   models: ModelOption[];
   /** Why it cannot be used now (one sentence), if so. */
   error?: string;
+  /** A key is stored (or its environment variable is set). The key itself never reaches the UI. */
+  hasKey: boolean;
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  /** Built into Axiom (the external agents of ADR-0016); not removable. */
+  builtin: boolean;
+}
+
+/** The local model servers the first-run setup looks for (ADR-0017 §5). */
+export const LOCAL_SERVERS = [
+  { id: "ollama", name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1" },
+  { id: "llama-cpp", name: "llama.cpp", baseUrl: "http://127.0.0.1:8080/v1" },
+  { id: "lm-studio", name: "LM Studio", baseUrl: "http://127.0.0.1:1234/v1" },
+] as const;
+
+/** A provider id from a name or URL: `[a-z0-9-]`, 1–40 (the daemon's rule). */
+export function providerId(from: string): string {
+  const id = from
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+  return id || "provider";
 }
 
 export interface ModelChoice {
@@ -199,6 +225,8 @@ export function filterSessions(sessions: SessionInfo[], search: string): Session
 }
 
 /** The provider options from `agent/models`. Pure. */
+const BUILTIN_AGENTS = ["claude-code", "codex", "gemini"];
+
 export function providerOptions(r: ModelsResult): ProviderOption[] {
   return r.providers.map((p) => ({
     providerId: p.config.id,
@@ -206,6 +234,10 @@ export function providerOptions(r: ModelsResult): ProviderOption[] {
     kind: p.config.kind,
     models: p.models.map((m) => ({ id: m.id, name: m.displayName, images: m.capabilities.images !== "no" })),
     error: p.error ?? undefined,
+    hasKey: p.hasKey,
+    baseUrl: p.config.baseUrl ?? undefined,
+    apiKeyEnv: p.config.apiKeyEnv ?? undefined,
+    builtin: p.config.kind === "acp" && BUILTIN_AGENTS.includes(p.config.id),
   }));
 }
 
@@ -413,6 +445,77 @@ export class AgentStore extends Observable<AgentState> {
     } catch (e) {
       this.set({ error: describeAgentError(e) });
     }
+  }
+
+  /** Adds or replaces a provider (the key goes to the OS credential store through the daemon;
+   * it is not kept here). Returns an error sentence, or "" on success. */
+  async configure(config: ProviderConfig, apiKey?: string): Promise<string> {
+    try {
+      await this.client.request("agent/configureProvider", { id: config.id, config, apiKey: apiKey || undefined });
+      await this.load();
+      const p = this.state.providers.find((x) => x.providerId === config.id);
+      if (p && !p.error && p.models.length && !this.state.activeId) {
+        const m0 = p.models[0];
+        if (m0) this.setModel({ providerId: p.providerId, model: m0.id });
+      }
+      return p?.error ?? "";
+    } catch (e) {
+      return describeAgentError(e);
+    }
+  }
+
+  /** Stores or clears a provider's key (`null` clears). */
+  async setKey(id: string, key: string | null): Promise<string> {
+    const p = this.state.providers.find((x) => x.providerId === id);
+    try {
+      const m = await this.client.request<ModelsResult>("agent/models", { providerId: id });
+      const config = m.providers[0]?.config;
+      if (!config || !p) return "That provider is gone.";
+      await this.client.request("agent/configureProvider", key === null ? { id, config, clearKey: true } : { id, config, apiKey: key });
+      await this.load();
+      return "";
+    } catch (e) {
+      return describeAgentError(e);
+    }
+  }
+
+  async removeProvider(id: string): Promise<string> {
+    try {
+      await this.client.request("agent/configureProvider", { id });
+      if (this.state.model?.providerId === id) this.set({ model: null });
+      await this.load();
+      return "";
+    } catch (e) {
+      return describeAgentError(e);
+    }
+  }
+
+  /** Looks for the local servers on their default ports: each is added, and removed again if it
+   * does not answer. Returns what was found ("Ollama: 3 models") and what was not. */
+  async detectLocal(): Promise<{ name: string; found: boolean; detail: string }[]> {
+    const out: { name: string; found: boolean; detail: string }[] = [];
+    for (const srv of LOCAL_SERVERS) {
+      const existing = this.state.providers.find((p) => p.providerId === srv.id);
+      if (existing && !existing.error) {
+        out.push({ name: srv.name, found: true, detail: `${existing.models.length} models (already added)` });
+        continue;
+      }
+      try {
+        await this.client.request("agent/configureProvider", { id: srv.id, config: { id: srv.id, kind: "openaiChat", name: srv.name, baseUrl: srv.baseUrl } });
+        const m = await this.client.request<ModelsResult>("agent/models", { providerId: srv.id });
+        const p = m.providers[0];
+        if (p && !p.error && p.models.length) {
+          out.push({ name: srv.name, found: true, detail: `${p.models.length} models` });
+        } else {
+          await this.client.request("agent/configureProvider", { id: srv.id });
+          out.push({ name: srv.name, found: false, detail: p?.error ? "not running" : "no models" });
+        }
+      } catch (e) {
+        out.push({ name: srv.name, found: false, detail: describeAgentError(e) });
+      }
+    }
+    await this.load();
+    return out;
   }
 
   /** Answers an approval request (the first answer wins; a late one is ignored). */

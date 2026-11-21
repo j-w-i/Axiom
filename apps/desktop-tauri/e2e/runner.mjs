@@ -29,7 +29,7 @@ const resolveSuite = (s) => (existsSync(s) ? resolve(s) : existsSync(join(here, 
 const customSuites = process.argv.slice(2).filter((a) => !a.startsWith("--")).map(resolveSuite);
 const suites = customSuites.length
   ? customSuites
-  : [join(here, "smoke.mjs"), join(here, "quit.mjs"), join(here, "geometry.mjs"), join(here, "parity.mjs"), join(here, "chat.mjs"), join(here, "dock.mjs")];
+  : [join(here, "smoke.mjs"), join(here, "quit.mjs"), join(here, "geometry.mjs"), join(here, "parity.mjs"), join(here, "chat.mjs"), join(here, "dock.mjs"), join(here, "models.mjs")];
 
 const children = [];
 const log = (msg) => console.error(`[e2e] ${msg}`);

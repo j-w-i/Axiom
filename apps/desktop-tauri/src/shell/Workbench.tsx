@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
 import { ChatPage, ChatSide } from "../components/Chat";
+import { ModelSetup } from "../components/Models";
 import { EditorArea } from "../components/EditorArea";
 import { attentionCount, EnvironmentPage, EnvironmentsSide } from "../components/Environments";
 import { Explorer } from "../components/Explorer";
@@ -192,7 +193,9 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             )}
           </div>
           {envPage && <EnvironmentPage store={environments} hasWorkspace={!!ws.id} onOpenFolder={() => void ctx.openFolder()} />}
-          {chatPage && <ChatPage store={ctx.app.agent} hasWorkspace={!!ws.id} dark={ctx.dark} onOpenLink={(url) => ctx.app.documents.openExternal(url)} />}
+          {chatPage && (
+            <ChatPage store={ctx.app.agent} hasWorkspace={!!ws.id} dark={ctx.dark} onOpenLink={(url) => ctx.app.documents.openExternal(url)} setup={<ModelSetup store={ctx.app.agent} hasWorkspace={!!ws.id} />} />
+          )}
         </div>
         {/* Chat is a full-window surface: no console (its visibility setting is untouched). */}
         {panel.mounted && !chatPage && (
@@ -240,7 +243,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             onCommit={(d) => store.update((l) => ({ ...l, dock: d }))}
           />
           <aside className="dock motion-in-right" data-region="dock" data-phase={dock.phase} aria-label="AI dock">
-            <ChatPage store={agent} hasWorkspace dark={ctx.dark} variant="dock" onOpenLink={(url) => ctx.app.documents.openExternal(url)} />
+            <ChatPage store={agent} hasWorkspace dark={ctx.dark} variant="dock" onOpenLink={(url) => ctx.app.documents.openExternal(url)} setup={<ModelSetup store={agent} hasWorkspace />} />
           </aside>
         </>
       )}

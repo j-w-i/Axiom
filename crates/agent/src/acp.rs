@@ -41,19 +41,19 @@ pub const BUILTIN: &[(&str, &str, &[&str], &str)] = &[
         "claude-code",
         "Claude Code",
         &["claude-agent-acp"],
-        "npm install -g @agentclientprotocol/claude-agent-acp (and sign in with `claude`)",
+        "npm install -g @agentclientprotocol/claude-agent-acp, then sign in by running claude once",
     ),
     (
         "codex",
         "Codex",
         &["codex-acp"],
-        "npm install -g @agentclientprotocol/codex-acp (and sign in with `codex login`)",
+        "npm install -g @agentclientprotocol/codex-acp, then sign in with codex login",
     ),
     (
         "gemini",
         "Gemini CLI",
         &["gemini", "--experimental-acp"],
-        "npm install -g @google/gemini-cli (and sign in with `gemini`)",
+        "npm install -g @google/gemini-cli, then sign in by running gemini once",
     ),
 ];
 

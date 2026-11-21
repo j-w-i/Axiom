@@ -114,7 +114,7 @@ export function App({ app }: { app: AppStores }) {
       <UnsavedDialog documents={documents} />
       <SettingsDialog settings={settings} open={settingsOpen || aboutOpen} section={aboutOpen ? "about" : "appearance"} info={info}
         onOpenChange={(o) => !o && (setSettingsOpen(false), setAboutOpen(false))} serverVersion={daemon.state === "ready" ? daemon.serverVersion : null}
-        onRestartBackend={() => void client.restart()} onOpenExternal={(url) => void host.openExternal(url)} />
+        onRestartBackend={() => void client.restart()} onOpenExternal={(url) => void host.openExternal(url)} agent={app.agent} hasWorkspace={!!ws.id} />
       <CommandPalette
         open={palette !== null}
         mode={palette ?? "commands"}
