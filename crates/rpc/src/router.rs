@@ -34,12 +34,15 @@ pub(crate) enum Out {
 pub(crate) type HandlerFn =
     Arc<dyn Fn(Value, RequestCtx) -> BoxFuture<'static, Result<Value, RpcError>> + Send + Sync>;
 pub(crate) type HookFn = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
+pub(crate) type InitHookFn =
+    Arc<dyn Fn(&axiom_protocol::lifecycle::InitializeParams, Notifier) + Send + Sync>;
 
 /// Method registry. Build once, share via `Arc` across connections.
 #[derive(Default)]
 pub struct Router {
     pub(crate) handlers: HashMap<&'static str, HandlerFn>,
     pub(crate) hooks: Vec<HookFn>,
+    pub(crate) init_hooks: Vec<InitHookFn>,
 }
 
 impl Router {
@@ -101,6 +104,17 @@ impl Router {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.hooks.push(Arc::new(move || hook().boxed()));
+        self
+    }
+
+    /// Called once per connection after a successful `initialize`, with the client's params
+    /// and the connection's notifier (protocol 0.3: the daemon learns which connections can
+    /// approve, ADR-0015 §1).
+    pub fn on_initialize<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(&axiom_protocol::lifecycle::InitializeParams, Notifier) + Send + Sync + 'static,
+    {
+        self.init_hooks.push(Arc::new(hook));
         self
     }
 

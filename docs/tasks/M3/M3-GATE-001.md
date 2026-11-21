@@ -1,8 +1,8 @@
 ---
 id: M3-GATE-001
 title: Permission gate: policy, evaluation, approval round trip, audit log
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: [M3-TOOLS-001]
 order: 406
 scope: crates/agent/, crates/axiomd/, crates/rpc/ (connection capabilities)

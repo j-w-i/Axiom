@@ -28,6 +28,14 @@ fn is_providers(v: &Value) -> bool {
     serde_json::from_value::<Vec<axiom_protocol::agent::ProviderConfig>>(v.clone()).is_ok()
 }
 
+fn is_policy(v: &Value) -> bool {
+    serde_json::from_value::<axiom_protocol::agent::Policy>(v.clone()).is_ok()
+}
+
+fn default_policy() -> Value {
+    serde_json::to_value(axiom_agent::gate::policy::default_policy()).unwrap_or(Value::Null)
+}
+
 pub const KNOWN: &[Known] = &[
     Known {
         key: "appearance.theme",
@@ -64,6 +72,12 @@ pub const KNOWN: &[Known] = &[
         key: "agent.providers",
         default: || json!([]),
         valid: is_providers,
+    },
+    // M3 (ADR-0015 §8): the user's agent permission policy.
+    Known {
+        key: "agent.policy",
+        default: default_policy,
+        valid: is_policy,
     },
 ];
 

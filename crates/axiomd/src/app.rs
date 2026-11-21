@@ -31,6 +31,10 @@ pub struct App {
 /// The agent runtime's daemon-wide state (M3).
 pub struct AgentServices {
     pub providers: axiom_agent::providers::Providers,
+    /// The one permission gate (ADR-0015 §8).
+    pub gate: axiom_agent::gate::Gate,
+    /// Connections that declared `capabilities.approvals`.
+    pub approvers: Arc<ConnApprovers>,
     /// Built-in tools (ADR-0015 §2), backed by this daemon's services.
     pub tools: axiom_agent::tools::Registry,
 }
@@ -39,7 +43,56 @@ pub struct AgentServices {
 /// offers the provider `scripted` that replays it.
 pub const SCRIPTED_MODEL_ENV: &str = "AXIOM_TEST_SCRIPTED_MODEL";
 
+/// The connections that can answer approvals; a closed one is dropped on the next send.
+#[derive(Default)]
+pub struct ConnApprovers(Mutex<Vec<Notifier>>);
+
+impl ConnApprovers {
+    pub fn add(&self, n: Notifier) {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).push(n);
+    }
+    fn all(&self) -> Vec<Notifier> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+}
+
+impl axiom_agent::gate::Approvers for ConnApprovers {
+    fn request<'a>(
+        &'a self,
+        req: &'a axiom_protocol::agent::ApprovalRequest,
+    ) -> futures_util::future::BoxFuture<'a, usize> {
+        Box::pin(async move {
+            let mut sent = 0;
+            let mut live = Vec::new();
+            for n in self.all() {
+                if n.notify::<axiom_protocol::agent::ApprovalRequested>(req.clone())
+                    .await
+                    .is_ok()
+                {
+                    sent += 1;
+                    live.push(n);
+                }
+            }
+            *self.0.lock().unwrap_or_else(|p| p.into_inner()) = live;
+            sent
+        })
+    }
+    fn resolved<'a>(
+        &'a self,
+        res: &'a axiom_protocol::agent::ApprovalResolution,
+    ) -> futures_util::future::BoxFuture<'a, ()> {
+        Box::pin(async move {
+            for n in self.all() {
+                let _ = n
+                    .notify::<axiom_protocol::agent::ApprovalResolved>(res.clone())
+                    .await;
+            }
+        })
+    }
+}
+
 fn agent_services(app: std::sync::Weak<App>) -> AgentServices {
+    let approvers = Arc::new(ConnApprovers::default());
     let scripted = std::env::var_os(SCRIPTED_MODEL_ENV).and_then(|p| {
         match axiom_agent::model::scripted::ScriptedProvider::from_file(
             axiom_agent::providers::SCRIPTED_ID,
@@ -61,6 +114,8 @@ fn agent_services(app: std::sync::Weak<App>) -> AgentServices {
             scripted,
         ),
         tools: crate::tools::registry(app),
+        gate: axiom_agent::gate::Gate::new(approvers.clone()),
+        approvers,
     }
 }
 

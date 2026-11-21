@@ -1,0 +1,249 @@
+//! The permission gate through the real daemon (M3-GATE-001): `agent/toolCall` under the policy,
+//! the approval round trip to a connection that declared `capabilities.approvals`, refusal
+//! without one, workspace rules that only tighten, and the audit log.
+
+mod common;
+
+use axiom_protocol::agent::{
+    ApprovalDecision, ApprovalRequest, Approve, ApproveParams, Decision, Effect, GetPolicy, Policy,
+    PolicyParams, PolicyRule, SetPolicy, ToolCall, ToolCallParams, ToolCallResult,
+};
+use axiom_protocol::lifecycle::{ClientCapabilities, Initialize};
+use axiom_protocol::{ErrorKind, RpcError, WorkspaceId};
+use common::{client_info, kind, Daemon, WAIT};
+use serde_json::{json, Value};
+
+async fn approving_daemon() -> Daemon {
+    let d = Daemon::spawn().await;
+    let mut info = client_info();
+    info.protocol_version = "0.3".into();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    d
+}
+
+fn call(ws: &WorkspaceId, tool: &str, input: Value) -> ToolCallParams {
+    ToolCallParams {
+        workspace_id: ws.clone(),
+        tool: tool.into(),
+        input,
+        principal: "mcp:test-client".into(),
+    }
+}
+
+/// Runs the call while answering its approval request with `decision`.
+async fn call_answering(
+    d: &Daemon,
+    p: ToolCallParams,
+    decision: ApprovalDecision,
+) -> (Result<ToolCallResult, RpcError>, ApprovalRequest) {
+    let req = d.client.request::<ToolCall>(p);
+    let answer = async {
+        let n = d.next_notification("agent/approvalRequested", WAIT).await;
+        let r: ApprovalRequest = serde_json::from_value(n).unwrap();
+        d.client
+            .request::<Approve>(ApproveParams {
+                request_id: r.request_id.clone(),
+                decision,
+            })
+            .await
+            .unwrap();
+        r
+    };
+    tokio::join!(req, answer)
+}
+
+#[tokio::test]
+async fn approval_once_executes_and_deny_does_not() {
+    let d = approving_daemon().await;
+    let f = d.open_fixture().await;
+
+    // Reads are allowed by the default policy: no approval.
+    let r = d
+        .client
+        .request::<ToolCall>(call(&f.id, "fs.read", json!({"path": "README.md"})))
+        .await
+        .unwrap();
+    assert!(!r.is_error, "{}", r.text);
+
+    // A write asks; approved once, it runs.
+    let (res, req) = call_answering(
+        &d,
+        call(
+            &f.id,
+            "fs.applyPatch",
+            json!({"path": "notes.txt", "create": "hello\n"}),
+        ),
+        ApprovalDecision::Once,
+    )
+    .await;
+    let res = res.unwrap();
+    assert!(!res.is_error, "{}", res.text);
+    assert_eq!(req.tool, "fs.applyPatch");
+    assert_eq!(req.effect, Effect::WriteWorkspace);
+    assert_eq!(req.targets, ["notes.txt"]);
+    assert_eq!(req.principal, "mcp:test-client");
+    assert!(req.preview.as_deref().unwrap().contains("+hello"));
+    assert!(req.can_remember && req.checkpoint_planned);
+    let resolved = d.next_notification("agent/approvalResolved", WAIT).await;
+    assert_eq!(resolved["decision"], "once");
+    assert_eq!(
+        std::fs::read_to_string(f.root.join("notes.txt")).unwrap(),
+        "hello\n"
+    );
+
+    // Denied, it does not run.
+    let (res, _) = call_answering(
+        &d,
+        call(
+            &f.id,
+            "fs.applyPatch",
+            json!({"path": "notes.txt", "edits": [{"search": "hello", "replace": "bye"}]}),
+        ),
+        ApprovalDecision::Deny,
+    )
+    .await;
+    assert_eq!(kind(&res.unwrap_err()), ErrorKind::ApprovalDenied);
+    assert_eq!(
+        std::fs::read_to_string(f.root.join("notes.txt")).unwrap(),
+        "hello\n"
+    );
+
+    // Answering again is not found.
+    let e = d
+        .client
+        .request::<Approve>(ApproveParams {
+            request_id: "r1".into(),
+            decision: ApprovalDecision::Once,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::NotFound);
+
+    // The audit log has every call with its decision.
+    let audit_dir = d.data_dir().join("audit");
+    let file = std::fs::read_dir(&audit_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let lines: Vec<Value> = std::fs::read_to_string(file)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let decisions: Vec<&str> = lines
+        .iter()
+        .map(|l| l["decision"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        decisions,
+        ["allowed by policy", "approved (once)", "denied"]
+    );
+    assert_eq!(lines[1]["principal"], "mcp:test-client");
+    assert_eq!(lines[2]["outcome"], "error");
+}
+
+#[tokio::test]
+async fn approval_for_session_is_remembered_for_the_same_target() {
+    let d = approving_daemon().await;
+    let f = d.open_fixture().await;
+    let (r, _) = call_answering(
+        &d,
+        call(&f.id, "task.run", json!({"argv": ["true"]})),
+        ApprovalDecision::Session,
+    )
+    .await;
+    assert!(!r.unwrap().is_error);
+    // Same argv: no second approval.
+    let r = tokio::time::timeout(
+        WAIT,
+        d.client
+            .request::<ToolCall>(call(&f.id, "task.run", json!({"argv": ["true"]}))),
+    )
+    .await
+    .expect("no approval asked the second time")
+    .unwrap();
+    assert!(!r.is_error);
+}
+
+#[tokio::test]
+async fn approval_required_when_no_connection_can_approve() {
+    // `initialize` without `capabilities.approvals`.
+    let d = Daemon::ready().await;
+    let f = d.open_fixture().await;
+    let e = d
+        .client
+        .request::<ToolCall>(call(
+            &f.id,
+            "fs.applyPatch",
+            json!({"path": "x.txt", "create": "x"}),
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::ApprovalRequired);
+    assert!(!f.root.join("x.txt").exists());
+}
+
+#[tokio::test]
+async fn approval_policy_and_workspace_rules() {
+    let d = approving_daemon().await;
+    let f = d.open_fixture().await;
+    // Default policy as shipped.
+    let p = d
+        .client
+        .request::<GetPolicy>(PolicyParams::default())
+        .await
+        .unwrap();
+    assert_eq!(p.user.default, Decision::Ask);
+    assert_eq!(p.user.rules[0].effect, Some(Effect::Read));
+
+    // The user allows `true`; the workspace denies it: the workspace wins (stricter).
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Ask,
+            rules: vec![PolicyRule {
+                effect: Some(Effect::Execute),
+                tool: None,
+                path: None,
+                argv_prefix: Some(vec!["true".into()]),
+                decision: Decision::Allow,
+            }],
+        })
+        .await
+        .unwrap();
+    let r = d
+        .client
+        .request::<ToolCall>(call(&f.id, "task.run", json!({"argv": ["true"]})))
+        .await
+        .unwrap();
+    assert!(!r.is_error, "allowed by the user rule: {}", r.text);
+    std::fs::create_dir_all(f.root.join(".axiom")).unwrap();
+    std::fs::write(
+        f.root.join(".axiom/project.toml"),
+        "[agent.policy]\n[[agent.policy.rule]]\neffect = \"execute\"\ndecision = \"deny\"\n",
+    )
+    .unwrap();
+    let e = d
+        .client
+        .request::<ToolCall>(call(&f.id, "task.run", json!({"argv": ["true"]})))
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::ApprovalDenied);
+    assert!(e.message.contains("workspace"), "{}", e.message);
+    let p = d
+        .client
+        .request::<GetPolicy>(PolicyParams {
+            workspace_id: Some(f.id.clone()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(p.workspace.unwrap().rules[0].decision, Decision::Deny);
+
+    // A principal may not pose as a session.
+    let mut bad = call(&f.id, "fs.read", json!({"path": "README.md"}));
+    bad.principal = "session:s1".into();
+    let e = d.client.request::<ToolCall>(bad).await.unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::InvalidParams);
+}

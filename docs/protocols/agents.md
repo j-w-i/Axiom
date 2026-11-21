@@ -143,8 +143,8 @@ decision = "deny"
 - A rule matches when every field it sets matches: `effect`; `tool` (exact, or a prefix ending
   in `.*`); `path` (workspace-relative glob, all targets must match); `argvPrefix` (for
   `execute`).
-- Among matching rules the most specific wins (a rule with `tool`, `path` or `argvPrefix` is
-  more specific than one without); among equals, deny > ask > allow. No match → `default`.
+- Among matching rules the most specific wins (more of `tool`, `path`, `argvPrefix` set; then
+  the longer `argvPrefix`); among equals, deny > ask > allow. No match → `default`.
 - The built-in user policy: `default = "ask"`, `read → allow`.
 - Workspace rules are merged so they can only turn allow into ask/deny or ask into deny.
 - "Allow for session" adds an in-memory rule for that tool and target set; never for

@@ -153,8 +153,7 @@ pub struct Allowed {
 }
 
 impl Allowed {
-    // The permission gate (M3-GATE-001) is the only caller outside tests.
-    #[allow(dead_code)]
+    /// Only the permission gate (`gate::Gate::check`) calls this.
     pub(crate) fn granted() -> Self {
         Self { _private: () }
     }

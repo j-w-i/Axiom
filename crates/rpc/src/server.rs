@@ -115,8 +115,11 @@ where
                         initialize(params, &router, &info)
                     };
                     match outcome {
-                        Ok(v) => {
+                        Ok((v, params)) => {
                             initialized = true;
+                            for hook in &router.init_hooks {
+                                hook(&params, notifier.clone());
+                            }
                             let _ = tx.send(Out::Line(codec::response_ok(id, v))).await;
                         }
                         Err(e) => send_err(&tx, id, e).await,
@@ -181,7 +184,7 @@ fn initialize(
     params: Option<Value>,
     router: &Router,
     info: &ServerInfo,
-) -> Result<Value, RpcError> {
+) -> Result<(Value, InitializeParams), RpcError> {
     let invalid = |reason: String| {
         RpcError::new(ErrorKind::InvalidParams, "Invalid parameters.")
             .with_details(serde_json::json!({ "reason": reason }))
@@ -216,7 +219,9 @@ fn initialize(
             path_separator: std::path::MAIN_SEPARATOR.to_string(),
         },
     };
-    serde_json::to_value(result).map_err(|_| RpcError::new(ErrorKind::Internal, "Internal error."))
+    serde_json::to_value(result)
+        .map(|v| (v, p))
+        .map_err(|_| RpcError::new(ErrorKind::Internal, "Internal error."))
 }
 
 fn params_or_empty(params: Option<Value>) -> Value {

@@ -51,7 +51,17 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(pagent::Models, agent::models);
     wire!(pagent::ConfigureProvider, agent::configure_provider);
     wire!(pagent::Tools, agent::tools);
+    wire!(pagent::GetPolicy, agent::get_policy);
+    wire!(pagent::SetPolicy, agent::set_policy);
+    wire!(pagent::Approve, agent::approve);
+    wire!(pagent::ToolCall, agent::tool_call, ctx);
 
+    let a = app.clone();
+    r.on_initialize(move |params, notifier| {
+        if params.capabilities.as_ref().is_some_and(|c| c.approvals) {
+            a.agent.approvers.add(notifier);
+        }
+    });
     let a = app;
     r.on_shutdown(move || {
         let a = a.clone();
@@ -76,12 +86,8 @@ pub const NOT_YET_SERVED: &[&str] = &[
     "agent/image",
     "agent/send",
     "agent/cancel",
-    "agent/approve",
     "agent/checkpoints",
     "agent/restore",
-    "agent/toolCall",
-    "agent/policy",
-    "agent/setPolicy",
 ];
 
 #[cfg(test)]

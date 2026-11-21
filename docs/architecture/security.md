@@ -143,20 +143,27 @@ waiting for still completes its own cleanup.
 - Every started task is recorded (command, cwd, time, initiator) in the audit
   log from M3.
 
-## Agent permissions (M3; contract in `docs/protocols/agents.md`)
-
-Each tool declares an *effect class*: `read`, `write_workspace`, `execute`,
-`install`, `network`, `write_outside`, `delete`, `credentials`, `deploy`.
-A policy maps effect class (and optional argument patterns) to
-`allow | ask | deny`. Defaults: `read` → allow; `write_workspace` → ask (allow
-after a checkpoint exists, if the user chose "auto-edit"); everything else →
-ask; `credentials` and `deploy` → ask every time, not rememberable.
-The gate lives in the tool registry in the daemon, so GUI-hosted agents, MCP
-clients and ACP agents all pass through the same code.
-
-API keys are stored in the OS keychain (`keyring` crate), are referenced by
-name in settings, and are never returned by any protocol method or shown to a
-model.
+## Agent permissions (M3; contract in `docs/protocols/agents.md`; as built by M3-GATE-001)
+- **One gate for every call.** Every tool call, from a session, `agent/toolCall` (MCP front
+  end, CLI) or, later, an ACP agent's request, goes through `axiom_agent::gate::call_tool`:
+  prepare (validate, resolve targets inside the workspace) → policy → ask → hook (the
+  checkpoint) → execute → audit.
+  - Tools run only with an `Allowed` token, which only the gate can create (`pub(crate)`). The
+    dev-dependency feature `test-support` exposes a constructor to tests.
+- **Policy.** The user's comes from settings `agent.policy`; built in: ask, reads allowed.
+  `.axiom/project.toml` `[agent.policy]` can only make a decision stricter (the stricter of
+  the two wins).
+- **Asking.** `ask` goes to connections that declared `capabilities.approvals`. With none, the
+  call fails `approval_required` and does not run. The first answer wins.
+- **"Allow for session".** It adds an exact rule (this tool, this argv or this single path)
+  for that principal only; never for `credentials`/`deploy`.
+- **Principals.** `agent/toolCall` accepts only `cli` and `mcp:<name>`, so an external client
+  can never use a session's grants.
+- **Audit log.** `<data dir>/audit/<workspace key>.jsonl`, append-only: time, principal, tool,
+  effect, targets, decision, rule, outcome, duration. Tool inputs and outputs are not logged
+  (they may hold secrets); only a one-line summary.
+- **Limit.** Approval is consent, not isolation: an allowed `task.run` runs with the user's
+  rights (ADR-0010 isolation backends are M6).
 
 ## Model credentials (M3; as built by M3-MODEL-002)
 - API keys live only in the OS credential store (`keyring` 3.6: Secret Service over pure-Rust
