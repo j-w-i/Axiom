@@ -11,9 +11,11 @@
 
 mod normalize;
 mod session;
+mod verify;
 
 pub use normalize::{normalize_node, Normalizer};
 pub use session::Session;
+pub use verify::{evaluate, find, verify, Observed};
 
 use axiom_protocol::inspection::{
     Capabilities, HighlightParams, HitTestParams, HitTestResult, MutationReason, NodeId, NodeRef,

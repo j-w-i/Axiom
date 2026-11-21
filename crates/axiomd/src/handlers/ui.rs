@@ -185,12 +185,53 @@ pub async fn notify_state(app: &App, info: PreviewInfo) {
     }
 }
 
+pub async fn verify(
+    app: Arc<App>,
+    p: axiom_protocol::ui::VerifyParams,
+) -> Result<axiom_protocol::inspection::VerificationReport, RpcError> {
+    if p.assertions.is_empty() {
+        return Err(RpcError::new(
+            ErrorKind::InvalidParams,
+            "State at least one check (a geometry or property assertion) before verifying.",
+        ));
+    }
+    let inspect = service(&app, &p.preview_id)?;
+    let errors = {
+        let app = app.clone();
+        let id = p.preview_id.clone();
+        move |since: u64| Some(app.previews.build_errors_since(&id, since))
+    };
+    let (report, _) = axiom_inspect::verify(&inspect, &p.preview_id, &p, errors)
+        .await
+        .map_err(map_err)?;
+    Ok(report)
+}
+
+/// Whether a line of the dev server's output reports a build error (Vite's transform and
+/// server errors, TypeScript, syntax errors).
+pub fn is_build_error(line: &str) -> bool {
+    let l = line.to_ascii_lowercase();
+    [
+        "internal server error",
+        "pre-transform error",
+        "transform failed",
+        "syntaxerror",
+        "error ts",
+        "[plugin:",
+        "error:",
+    ]
+    .iter()
+    .any(|p| l.contains(p))
+}
+
 /// The daemon's previews (M5-PREVIEW-001 starts them) and the inspection service, which starts
 /// with the first preview.
 #[derive(Default)]
 pub struct Previews {
     inner: std::sync::Mutex<std::collections::HashMap<PreviewId, PreviewInfo>>,
     inspect: tokio::sync::OnceCell<Arc<axiom_inspect::Inspect>>,
+    /// Build errors the dev server printed, with the daemon's time (ms since the epoch).
+    errors: std::sync::Mutex<std::collections::HashMap<PreviewId, Vec<(u64, String)>>>,
 }
 
 impl Previews {
@@ -243,6 +284,36 @@ impl Previews {
         let i = m.get_mut(id)?;
         f(i);
         Some(i.clone())
+    }
+
+    /// Records a line of the dev server's output if it is a build error.
+    pub fn record_output(&self, id: &PreviewId, line: &str) {
+        if !is_build_error(line) {
+            return;
+        }
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let mut m = self.errors.lock().unwrap_or_else(|p| p.into_inner());
+        let v = m.entry(id.clone()).or_default();
+        if v.len() < 500 {
+            v.push((ms, line.trim().chars().take(500).collect()));
+        }
+    }
+
+    pub fn build_errors_since(&self, id: &PreviewId, since: u64) -> Vec<String> {
+        self.errors
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(id)
+            .map(|v| {
+                v.iter()
+                    .filter(|(t, _)| *t >= since)
+                    .map(|(_, l)| l.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn of_workspace(&self, ws: &WorkspaceId) -> Vec<PreviewInfo> {

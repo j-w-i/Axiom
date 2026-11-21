@@ -41,6 +41,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(axiom_protocol::ui::HitTest, ui::hit_test);
     wire!(axiom_protocol::ui::NodeDetails, ui::node_details);
     wire!(axiom_protocol::ui::Highlight, ui::highlight);
+    wire!(axiom_protocol::ui::Verify, ui::verify);
     wire!(pws::Open, workspace::open, ctx);
     wire!(pws::Close, workspace::close);
     wire!(pws::Recent, workspace::recent);
@@ -115,12 +116,12 @@ pub fn build_router(app: Arc<App>) -> Router {
     r
 }
 
-/// Protocol 0.5 methods registered by M5-ARCH-001 whose handlers later M5 tasks add
-/// (M5-PREVIEW-001: `preview/*`; M5-VERIFY-001: `ui/verify`). Each task that wires
-/// one removes it here; the last M5 backend task leaves this empty. Clients feature-detect from
-/// `initialize.methods`, which lists only served methods.
+/// Protocol methods registered by a milestone's first task whose handlers later tasks add. Each
+/// task that wires one removes it here; the milestone's last backend task leaves this empty
+/// (M5-VERIFY-001 did for 0.5). Clients feature-detect from `initialize.methods`, which lists
+/// only served methods.
 #[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &["preview/start", "preview/stop", "preview/list", "ui/verify"];
+pub const NOT_YET_SERVED: &[&str] = &[];
 
 #[cfg(test)]
 mod tests {

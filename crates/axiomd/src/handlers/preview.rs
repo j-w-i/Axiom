@@ -236,6 +236,9 @@ pub async fn start(app: Arc<App>, p: StartParams) -> Result<PreviewInfo, RpcErro
                                 .unwrap_or(0);
                             tail.drain(..cut);
                         }
+                        for line in o.data.lines() {
+                            app.previews.record_output(&id, line);
+                        }
                         if url_tx.is_some() {
                             if let Some(u) = o.data.lines().find_map(find_url) {
                                 let _ = url_tx.take().map(|t| t.send(Ok(u)));

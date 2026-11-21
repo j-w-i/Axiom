@@ -1,8 +1,8 @@
 ---
 id: M5-VERIFY-001
 title: Verification: quiescence, re-identification, checks, verdict; ui/verify
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux (cargo test -p axiom-inspect --test verify 7/7; the real loop in tests/preview.rs, 4/4 runs)
 depends_on: [M5-INSPECT-001]
 order: 605
 scope: crates/inspect/, crates/axiomd/

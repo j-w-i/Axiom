@@ -45,6 +45,8 @@ pub struct Session {
     /// Hot reloads seen (ms since the epoch, the daemon's clock).
     reloads: Mutex<Vec<u64>>,
     connected_ms: u64,
+    /// The last `ui/verify` (ms since the epoch): the next one counts errors from here.
+    last_verify: AtomicU64,
     degraded: AtomicBool,
 }
 
@@ -86,6 +88,18 @@ impl Session {
 
     pub fn connected_ms(&self) -> u64 {
         self.connected_ms
+    }
+
+    /// The previous `ui/verify`, or the connection.
+    pub fn last_verify_ms(&self) -> u64 {
+        match self.last_verify.load(Ordering::SeqCst) {
+            0 => self.connected_ms,
+            t => t,
+        }
+    }
+
+    pub(crate) fn mark_verified(&self, ms: u64) {
+        self.last_verify.store(ms, Ordering::SeqCst);
     }
 
     /// Runtime errors reported at or after [since_ms].
@@ -240,6 +254,7 @@ pub(crate) async fn accept(inspect: Arc<Inspect>, stream: TcpStream) {
         errors: Mutex::new(Vec::new()),
         reloads: Mutex::new(Vec::new()),
         connected_ms: now_ms(),
+        last_verify: AtomicU64::new(0),
         degraded: AtomicBool::new(false),
     });
 

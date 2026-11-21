@@ -12,11 +12,13 @@
 
 mod common;
 
+use axiom_protocol::inspection::Verdict;
 use axiom_protocol::inspection::{MappingMethod, SourceRelation, SurfaceId, UiNode};
 use axiom_protocol::preview::{List, PreviewRef, PreviewState, Start, StartParams, Stop};
 use axiom_protocol::task::{ListTasks, ListTasksParams};
 use axiom_protocol::ui::{
-    HitTest, HitTestParams, InspectMode, InspectModeParams, SnapshotParams, TakeSnapshot,
+    Assertion, Comparison, Edge, EdgeRef, HitTest, HitTestParams, InspectMode, InspectModeParams,
+    NodeTarget, SnapshotParams, TakeSnapshot, Verify, VerifyParams,
 };
 use axiom_protocol::workspace::WorkspaceRef;
 use common::Daemon;
@@ -246,6 +248,62 @@ async fn a_vite_preview_runs_and_its_page_is_inspected() {
         })
         .await
         .unwrap();
+
+    // The loop: a spacing patch, the hot reload in the page, and objective verification.
+    let key_of = |tag: &str| {
+        snap.nodes
+            .iter()
+            .find(|n| n.type_name == tag)
+            .and_then(|n| n.stable_key.clone())
+            .unwrap()
+    };
+    let (button, amount) = (key_of("button"), key_of("span"));
+    let app_jsx = f.path("src/App.jsx");
+    let text = std::fs::read_to_string(&app_jsx).unwrap();
+    assert!(text.contains("marginLeft: 8 }"));
+    std::fs::write(
+        &app_jsx,
+        text.replace("marginLeft: 8 }", "marginLeft: 24 }"),
+    )
+    .unwrap();
+    let target = |k: &str| NodeTarget {
+        stable_key: Some(k.into()),
+        node: None,
+    };
+    let claim = |offset: f64| VerifyParams {
+        preview_id: id.clone(),
+        assertions: vec![Assertion::Geometry {
+            node: target(&button),
+            edge: Edge::Left,
+            op: Comparison::Eq,
+            value: None,
+            other: Some(EdgeRef {
+                node: target(&amount),
+                edge: Edge::Right,
+            }),
+            offset,
+        }],
+        target: Some(target(&button)),
+        timeout_ms: Some(5000),
+        since_ms: None,
+    };
+    let r = d.client.request::<Verify>(claim(24.0)).await.unwrap();
+    assert_eq!(r.verdict, Verdict::Verified, "{r:#?}");
+    let r = d.client.request::<Verify>(claim(8.0)).await.unwrap();
+    assert_eq!(r.verdict, Verdict::Failed, "{r:#?}");
+    let r = d
+        .client
+        .request::<Verify>(VerifyParams {
+            assertions: vec![Assertion::Property {
+                node: target(&button),
+                name: "css.margin-left".into(),
+                equals: serde_json::json!("24px"),
+            }],
+            ..claim(0.0)
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.verdict, Verdict::Verified, "{r:#?}");
 
     // Stop: the dev server ends; the user's config is untouched.
     d.client
