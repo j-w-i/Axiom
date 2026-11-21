@@ -1,7 +1,8 @@
 use crate::app::App;
-use crate::handlers::{build, env, fs, settings, task, workspace};
+use crate::handlers::{agent, build, env, fs, settings, task, workspace};
 use axiom_protocol::{
-    build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask, workspace as pws,
+    agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
+    workspace as pws,
 };
 use axiom_rpc::Router;
 use std::sync::Arc;
@@ -47,6 +48,8 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(penv::Resolve, env::resolve);
     wire!(pbuild::Tasks, build::tasks);
     wire!(pbuild::Run, build::run, ctx);
+    wire!(pagent::Models, agent::models);
+    wire!(pagent::ConfigureProvider, agent::configure_provider);
 
     let a = app;
     r.on_shutdown(move || {
@@ -64,8 +67,6 @@ pub fn build_router(app: Arc<App>) -> Router {
 /// feature-detect from `initialize.methods` (ADR-0015 §1), which lists only served methods.
 #[doc(hidden)]
 pub const NOT_YET_SERVED: &[&str] = &[
-    "agent/models",
-    "agent/configureProvider",
     "agent/sessionCreate",
     "agent/sessionList",
     "agent/sessionOpen",

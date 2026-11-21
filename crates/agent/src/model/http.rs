@@ -76,6 +76,7 @@ pub(crate) fn looks_like_context_overflow(message: &str) -> bool {
     m.contains("prompt is too long")
         || m.contains("context length")
         || m.contains("context window")
+        || m.contains("context size")
         || m.contains("maximum context")
         || m.contains("too many tokens")
 }

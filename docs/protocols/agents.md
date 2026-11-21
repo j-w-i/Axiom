@@ -59,6 +59,16 @@ Rules:
 - `ModelInfo` and `Capabilities` are the wire types (`agent.rs`). Capability profiles come from
   the provider kind and server (detected by base URL), overridable per provider configuration.
   A model with `tools: no` converses without tools.
+- Built-in profiles (M3-MODEL-002, `crates/agent/src/model/profiles.rs`):
+
+  | Kind / server | tools | streamed args | parallel | context |
+  |---------------|-------|---------------|----------|---------|
+  | anthropic | yes | yes | yes | 200 000 |
+  | openaiChat, api.openai.com | yes | yes | yes | 128 000 |
+  | openaiChat, port 11434 (Ollama) | unknown | no (whole calls) | unknown | unknown |
+  | openaiChat, port 8080 (llama.cpp), 1234 (LM Studio), other | unknown | unknown | unknown | unknown |
+
+  Only a definite `tools: no` stops the loop offering tools.
 - Provider configurations live in settings `agent.providers` (a JSON array of
   `ProviderConfig`); API keys live only in the OS credential store under `axiom/<provider id>`,
   or are read from the environment variable named by `apiKeyEnv`. A key never reaches settings,

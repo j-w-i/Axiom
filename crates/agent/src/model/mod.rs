@@ -3,6 +3,7 @@
 
 pub mod anthropic;
 pub(crate) mod http;
+pub mod openai;
 pub mod profiles;
 pub mod scripted;
 pub mod sse;

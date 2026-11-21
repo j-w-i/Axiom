@@ -1,0 +1,19 @@
+{
+  "model": "qwen3:8b",
+  "stream": true,
+  "stream_options": {"include_usage": true},
+  "max_tokens": 1024,
+  "messages": [
+    {"role": "system", "content": "You are Axiom's agent."},
+    {"role": "user", "content": "Read src/main.rs"},
+    {"role": "assistant", "content": "Let me read it.", "tool_calls": [
+      {"id": "call_abc", "type": "function", "function": {"name": "fs_read", "arguments": "{\"path\":\"src/main.rs\"}"}}
+    ]},
+    {"role": "tool", "tool_call_id": "call_abc", "content": "1  fn main() {}"},
+    {"role": "user", "content": "Now build it."}
+  ],
+  "tools": [
+    {"type": "function", "function": {"name": "fs_read", "description": "Read a file.",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}}
+  ]
+}

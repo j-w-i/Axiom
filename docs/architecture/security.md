@@ -158,6 +158,19 @@ API keys are stored in the OS keychain (`keyring` crate), are referenced by
 name in settings, and are never returned by any protocol method or shown to a
 model.
 
+## Model credentials (M3; as built by M3-MODEL-002)
+- API keys live only in the OS credential store (`keyring` 3.6: Secret Service over pure-Rust
+  D-Bus on Linux, Keychain on macOS, Credential Manager on Windows), service `axiom`, account =
+  provider id; or the provider names an environment variable (`apiKeyEnv`) read by the daemon.
+- `agent.providers` (settings) holds configurations only; `agent/models` reports `hasKey`, never
+  the key. Adapters' `Debug` output redacts keys; errors and logs never include them
+  (integration test `agent_models…keeps_the_key_out_of_settings_and_logs` scans the data dir and
+  a debug log).
+- Model base URLs are HTTPS, or HTTP to a loopback host (local servers).
+- Credential calls run on their own thread (the Secret Service backend drives its own executor).
+- TEST ONLY: `AXIOM_TEST_CREDENTIALS_FILE` replaces the store with a plain JSON file (daemon
+  integration tests); `AXIOM_TEST_SCRIPTED_MODEL` offers the scripted model.
+
 ## Isolation (ADR-0010)
 
 Axiom uses three distinct words and the UI must too:

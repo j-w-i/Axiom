@@ -31,7 +31,9 @@ async fn defaults_for_all_known_keys() {
     assert_eq!(v["editor.wordWrap"], json!(false));
     assert_eq!(v["workspace.reopenLast"], json!(true));
     assert_eq!(v["workspace.lastRoot"], Value::Null);
-    assert_eq!(v.len(), 6);
+    // M3-MODEL-002.
+    assert_eq!(v["agent.providers"], json!([]));
+    assert_eq!(v.len(), 7);
 }
 
 #[tokio::test]

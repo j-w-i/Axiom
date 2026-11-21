@@ -290,6 +290,7 @@ directory is reported, because `fs/list` lists such files. If the OS reports an 
 | `editor.wordWrap` | boolean | `false` | soft wrap |
 | `workspace.reopenLast` | boolean | `true` | reopen the last workspace at startup |
 | `workspace.lastRoot` | string or null | `null` | canonical root of the most recently opened workspace; written by the daemon on `workspace/open` |
+| `agent.providers` | array of `ProviderConfig` | `[]` | model provider configurations (M3); written by `agent/configureProvider`; never contains a key |
 
 Unknown keys are stored and returned unchanged, so clients can add settings
 without a protocol change; a key becomes "known" (typed, defaulted) by adding

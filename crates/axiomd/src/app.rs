@@ -17,6 +17,40 @@ pub struct App {
     /// drops the `WatchHandle` it owns.
     pub watchers: Mutex<HashMap<WorkspaceId, AbortHandle>>,
     pub env: EnvConfig,
+    pub agent: AgentServices,
+}
+
+/// The agent runtime's daemon-wide state (M3).
+pub struct AgentServices {
+    pub providers: axiom_agent::providers::Providers,
+}
+
+/// TEST ONLY: a script file for the scripted model provider (ADR-0015 §4). When set, the daemon
+/// offers the provider `scripted` that replays it.
+pub const SCRIPTED_MODEL_ENV: &str = "AXIOM_TEST_SCRIPTED_MODEL";
+
+fn agent_services() -> AgentServices {
+    let scripted = std::env::var_os(SCRIPTED_MODEL_ENV).and_then(|p| {
+        match axiom_agent::model::scripted::ScriptedProvider::from_file(
+            axiom_agent::providers::SCRIPTED_ID,
+            std::path::Path::new(&p),
+        ) {
+            Ok(s) => {
+                tracing::warn!("{SCRIPTED_MODEL_ENV} is set: the scripted test model is offered");
+                Some(Arc::new(s))
+            }
+            Err(e) => {
+                tracing::error!("{SCRIPTED_MODEL_ENV}: {e}");
+                None
+            }
+        }
+    });
+    AgentServices {
+        providers: axiom_agent::providers::Providers::new(
+            Arc::from(axiom_agent::credentials::platform_or_test()),
+            scripted,
+        ),
+    }
 }
 
 /// Where the environment services find their files.
@@ -69,6 +103,7 @@ impl App {
                 builtin: Builtin::Embedded,
                 installer,
             },
+            agent: agent_services(),
         })
     }
 

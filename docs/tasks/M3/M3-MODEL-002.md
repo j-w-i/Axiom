@@ -1,8 +1,8 @@
 ---
 id: M3-MODEL-002
 title: OpenAI Chat adapter, capability profiles, keychain credentials, agent/models and agent/configureProvider
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: [M3-MODEL-001]
 order: 403
 scope: crates/agent/, crates/axiomd/, crates/store/ (settings keys only), deny.toml

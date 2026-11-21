@@ -24,6 +24,10 @@ fn is_string_or_null(v: &Value) -> bool {
     v.is_string() || v.is_null()
 }
 
+fn is_providers(v: &Value) -> bool {
+    serde_json::from_value::<Vec<axiom_protocol::agent::ProviderConfig>>(v.clone()).is_ok()
+}
+
 pub const KNOWN: &[Known] = &[
     Known {
         key: "appearance.theme",
@@ -54,6 +58,12 @@ pub const KNOWN: &[Known] = &[
         key: "workspace.lastRoot",
         default: || Value::Null,
         valid: is_string_or_null,
+    },
+    // M3 (ADR-0015 §4): model provider configurations, never keys.
+    Known {
+        key: "agent.providers",
+        default: || json!([]),
+        valid: is_providers,
     },
 ];
 

@@ -17,10 +17,16 @@ futures-util.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
 url = "2"
+# ADR-0015 §3: platform stores; Secret Service over pure-Rust D-Bus (zbus) on Linux.
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tempfile.workspace = true
+
+[features]
+# Exercises the real OS credential store (a desktop session; M3-MODEL-002).
+keyring-live = []
 
 [lints]
 workspace = true
