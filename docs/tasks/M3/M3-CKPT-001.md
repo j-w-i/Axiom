@@ -4,7 +4,7 @@ title: Checkpoints: shadow git repository, create/list/restore with conflict det
 status: planned
 status_note:
 depends_on: [M3-ARCH-001]
-order: 406
+order: 407
 scope: crates/agent/
 ---
 

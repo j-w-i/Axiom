@@ -8,7 +8,7 @@ All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit sce
 
 ## M3 — Agent runtime: planned (2026-11-21)
 
-ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 12 tasks in `docs/tasks/M3/`. Branch `task/m3`, draft PR j-w-i/Axiom#4. Next task: the first READY `M3-*` by order.
+ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, draft PR j-w-i/Axiom#4. Next task: the first READY `M3-*` by order.
 
 - **M3-ARCH-001 tested (2026-11-21):** protocol 0.3 (`crates/protocol/src/agent.rs`: 14 methods, 4 notifications, 3 error kinds, optional `authToken`/`capabilities` on initialize); `agents.md` frozen; `agent`/`cli` edges. `axiomd::NOT_YET_SERVED` lists the agent methods until wired.
 - **M3-MODEL-001 tested (2026-11-21):** `crates/agent` with the message model, `ModelProvider`, an in-house SSE parser, the Anthropic Messages adapter (text, tools, opaque thinking, errors, cancel) and `ScriptedProvider`; tested against a loopback fixture server.

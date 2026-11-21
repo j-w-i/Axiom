@@ -4,7 +4,7 @@ title: Permission gate: policy, evaluation, approval round trip, audit log
 status: planned
 status_note:
 depends_on: [M3-TOOLS-001]
-order: 405
+order: 406
 scope: crates/agent/, crates/axiomd/, crates/rpc/ (connection capabilities)
 ---
 

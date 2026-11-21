@@ -4,7 +4,7 @@ title: Multi-client daemon (Unix socket + token) and the axiom CLI
 status: planned
 status_note:
 depends_on: [M3-LOOP-001]
-order: 408
+order: 409
 scope: crates/axiomd/, crates/rpc/, apps/cli/, Cargo.toml (members)
 ---
 

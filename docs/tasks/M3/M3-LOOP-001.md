@@ -3,8 +3,8 @@ id: M3-LOOP-001
 title: Agent loop and sessions: streaming, tools, cancellation, JSONL journal, resume, compaction
 status: planned
 status_note:
-depends_on: [M3-MODEL-002, M3-GATE-001, M3-CKPT-001]
-order: 407
+depends_on: [M3-MODEL-002, M3-ARCH-002, M3-GATE-001, M3-CKPT-001]
+order: 408
 scope: crates/agent/, crates/axiomd/, crates/store/ (migration 4)
 ---
 
@@ -15,7 +15,8 @@ scope: crates/agent/, crates/axiomd/, crates/store/ (migration 4)
 (system prompt, workspace info, the workspace's `AGENTS.md` capped at 32 KiB, compaction summary,
 messages), the loop (stream → tool calls → gate → checkpoint → execute → results → repeat until
 end turn, max 50 tool rounds per turn), cancellation, resume, compaction; the daemon serves
-`agent/sessionCreate|sessionList|sessionOpen|send|cancel|checkpoints|restore` and streams
+`agent/sessionCreate|sessionList|sessionOpen|sessionRename|sessionDelete|send|cancel|checkpoints|restore`
+(workspace-free sessions under `sessions/_chat/`, `fromTurn` rewinds, image blobs; ADR-0017) and streams
 `agent/event` to attached connections.
 
 ## Context
