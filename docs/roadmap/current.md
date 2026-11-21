@@ -6,6 +6,11 @@ _Last updated: 2026-11-21._
 
 All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).
 
+## M3 — Agent runtime: planned (2026-11-21)
+
+ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 12 tasks in `docs/tasks/M3/`. Branch `task/m3`. Next task: the first READY `M3-*` by order.
+
+
 
 ## M1.6 — Axiom Visual Experience: approved, Phase B ready (2026-11-17)
 

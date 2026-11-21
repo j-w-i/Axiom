@@ -184,6 +184,8 @@ nothing else. Provider contract suite passes for all bundled providers.
 
 ## M3 — Agent runtime
 
+**Status (2026-11-21):** planned — 12 task files in `docs/tasks/M3/`; decisions in `docs/decisions/ADR-0015-agent-runtime-m3.md` (accepted under the owner's autonomy instruction). Windows deferred.
+
 **Outcome.** A user can converse with a local or remote model that reads the
 workspace, proposes and applies patches under a permission policy, runs
 builds, and whose session can be resumed later. External agents can drive
