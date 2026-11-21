@@ -91,6 +91,9 @@ async function send(wd, text) {
 /** Answers approvals in the dock until the turn ends; returns the tools asked about. */
 async function answer(wd, decide) {
   const asked = [];
+  // The turn must have started (a send's response can come before the store marks it running):
+  // otherwise "not running" would read as "already ended" and an approval would go unanswered.
+  await wd.waitFor(`const s = ${appExpr}.agent.getSnapshot(); return s.active.running || s.approvals.length > 0`, [], 15000, "the turn's start");
   const end = Date.now() + 180000;
   while (Date.now() < end) {
     const s = await wd.exec(`const s = ${appExpr}.agent.getSnapshot(); return { running: s.active.running, card: !!document.querySelector('[data-testid=chat-dock] [data-testid=approval]'), tool: s.approvals[0]?.tool, argv: s.approvals[0]?.argv }`);

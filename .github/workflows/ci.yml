@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with: { components: "rustfmt, clippy" }
+        with: { components: "rustfmt, clippy, rust-analyzer" }
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       # `axiom-desktop-tauri` is excluded: tauri::generate_context! embeds the
@@ -28,7 +28,10 @@ jobs:
       - run: cargo clippy --workspace --all-targets --exclude axiom-desktop-tauri -- -D warnings
       # crates/desktop-bridge's tests spawn the real daemon binary.
       - run: cargo build -p axiomd
+      # M4-LSP-001: the real rust-analyzer test must run (not skip) on Linux and macOS.
       - run: cargo test --workspace --exclude axiom-desktop-tauri
+        env:
+          AXIOM_REQUIRE_LSP: ${{ runner.os != 'Windows' && '1' || '' }}
       # M2-ENV-003: a real managed Rust install (rustup-init + a minimal toolchain) into a
       # temp data dir with a temp HOME, then uninstall. Needs the internet.
       # On Linux it also installs the `tree` package with apt through a pkexec shim
@@ -130,6 +133,49 @@ jobs:
       # OpenAI-compatible server; "add a function and fix the build" through tools with the
       # scripted model and real cargo, checkpoints, a denied command, resume after a restart; an
       # MCP server's tools and an ACP agent (tests/helpers). Both Linux drivers.
+      # M4-TERM-002: the integrated terminal (a shell in a PTY). Linux and macOS; Windows (ConPTY)
+      # is deferred with the rest of Windows.
+      - name: End-to-end, terminal (terminal.mjs)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver all e2e/terminal.mjs
+      # M4-GIT-002: Git in the UI on a temporary repository. Linux and macOS.
+      - name: End-to-end, Git (git.mjs)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver all e2e/git.mjs
+      # M4-UX-001: workspace search and quick open. Linux and macOS.
+      - name: End-to-end, search (search.mjs)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver all e2e/search.mjs
+      # M4-UX-002: the split editor. Linux and macOS.
+      - name: End-to-end, split editor (split.mjs)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver all e2e/split.mjs
+      # M4-LSP-002: language servers in the editor. fake-lsp always; the real rust-analyzer and
+      # typescript-language-server must run here (AXIOM_REQUIRE_LSP=1 fails their absence).
+      - name: Language servers for the end-to-end run (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          rustup component add rust-analyzer
+          npm install -g typescript-language-server@6.0.0 typescript@6.0.3
+      - name: End-to-end, language servers (lsp.mjs)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          AXIOM_REQUIRE_LSP: "1"
+        run: scripts/e2e.sh --no-build --driver all e2e/lsp.mjs
+      # The M4 exit scenario (M4-QA-001): both real language servers, the terminal and Git in one
+      # session on one workspace.
+      - name: End-to-end, M4 exit scenario (editor.mjs)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          AXIOM_REQUIRE_LSP: "1"
+        run: scripts/e2e.sh --no-build --driver all e2e/editor.mjs
       - name: End-to-end, M3 exit scenario (agent.mjs)
         if: runner.os == 'Linux'
         shell: bash

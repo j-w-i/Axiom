@@ -27,6 +27,9 @@ import type { WorkspaceStore } from "./workspace";
 
 export const OPEN_PATHS_KEY = "editor.openPaths";
 export const ACTIVE_PATH_KEY = "editor.activePath";
+/** The right editor group's tabs and active one (M4-UX-002; additive workspace-state keys). */
+export const SPLIT_PATHS_KEY = "editor.splitPaths";
+export const SPLIT_ACTIVE_KEY = "editor.splitActive";
 const TAB_SAVE_DEBOUNCE_MS = 500;
 const BRIDGE_VERSION = 1;
 
@@ -53,6 +56,13 @@ export interface RecoveryPort {
   snapshotPut(path: string, text: string): void;
   snapshotClear(path: string): void;
   state(): Promise<{ recovered: boolean; snapshots: Record<string, string> }>;
+}
+
+/** The right editor group's editor (M4-UX-002), as the surface's host exposes it. */
+export interface SecondaryPort {
+  attach(el: HTMLElement | null): void;
+  show(path: string | null): void;
+  focus(): boolean;
 }
 
 /** Editor → shell (bridge-1 slots). */
@@ -82,6 +92,9 @@ export interface Prompt {
 export interface DocumentsState {
   docs: Doc[];
   activePath: string;
+  /** The right editor group (M4-UX-002): a subset of the open documents shown beside the left
+   * group (which shows them all), and the one it shows. Null when the editor is not split. */
+  split: { paths: string[]; active: string } | null;
   cursorText: string;
   editorReady: boolean;
   banner: string;
@@ -122,7 +135,7 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     private readonly workspace: WorkspaceStore,
   ) {
     super({
-      docs: [], activePath: "", cursorText: "", editorReady: false,
+      docs: [], split: null, activePath: "", cursorText: "", editorReady: false,
       banner: "", conflictName: null, prompt: null,
     });
     client.onNotification<DidChangeParams>("fs/didChange", (p) => this.onDidChange(p));
@@ -221,6 +234,28 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     void this.openInternal(path, false).then(reveal);
   }
 
+  private readonly savedListeners = new Set<(path: string) => void>();
+
+  /** Called after each successful save (the language servers get `didSave`). */
+  onSaved(fn: (path: string) => void): () => void {
+    this.savedListeners.add(fn);
+    return () => this.savedListeners.delete(fn);
+  }
+
+  /** Opens a document as a tab without activating it (a rename or a code action changing a file
+   * that was not open). Resolves once it is open, or at once if it cannot be. */
+  async openInBackground(path: string): Promise<void> {
+    if (this.index(path) >= 0) return;
+    this.background.add(path);
+    try {
+      await this.openInternal(path, true);
+    } finally {
+      this.background.delete(path);
+    }
+  }
+
+  private readonly background = new Set<string>();
+
   private async openInternal(path: string, silent: boolean): Promise<void> {
     if (!this.workspace.isOpen || this.opening.has(path)) return;
     this.opening.add(path);
@@ -245,10 +280,10 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
   private addDocument(path: string, text: string, version: string): void {
     if (this.index(path) >= 0) return;
     const doc: Doc = { path, title: titleOf(path), dirty: false, savedVersion: version, changedOnDisk: false };
-    const activate = this.state.activePath === "" || !this.restoring;
+    const activate = (this.state.activePath === "" || !this.restoring) && !this.background.has(path);
     this.set({ docs: [...this.state.docs, doc], banner: "" });
     if (this.editorUp) this.port?.openDocument({ path, text, version, activate, dirty: false });
-    if (activate || !this.state.activePath) this.setActive(path);
+    if (activate || (!this.state.activePath && !this.background.has(path))) this.setActive(path);
     this.scheduleTabSave();
   }
 
@@ -284,6 +319,79 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     this.scheduleTabSave();
   }
 
+  // ---- the right editor group (M4-UX-002) -------------------------------------
+
+  /** Shows `path` (default: the active document) in the right group, splitting the editor. */
+  splitRight(path: string = this.state.activePath): void {
+    if (!path || this.index(path) < 0) return;
+    const paths = this.state.split?.paths.includes(path) ? this.state.split.paths : [...(this.state.split?.paths ?? []), path];
+    this.set({ split: { paths, active: path } });
+    this.scheduleTabSave();
+  }
+
+  /** Shows one of the right group's documents. */
+  activateSplit(path: string): void {
+    if (!this.state.split?.paths.includes(path)) return;
+    this.set({ split: { ...this.state.split, active: path } });
+    this.scheduleTabSave();
+  }
+
+  /** Removes a document from the right group (it stays open on the left); the last one ends the
+   * split. */
+  closeInSplit(path: string): void {
+    const sp = this.state.split;
+    if (!sp?.paths.includes(path)) return;
+    const i = sp.paths.indexOf(path);
+    const paths = sp.paths.filter((p) => p !== path);
+    const active = sp.active === path ? (paths[Math.min(i, paths.length - 1)] ?? "") : sp.active;
+    this.set({ split: paths.length ? { paths, active } : null });
+    this.scheduleTabSave();
+  }
+
+  /** Ends the split. */
+  unsplit(): void {
+    if (!this.state.split) return;
+    this.set({ split: null });
+    this.scheduleTabSave();
+  }
+
+  // The right group's editor: the editor area gives the host element, the editor surface's host
+  // connects the editor that lives in it (either may come first).
+  private secondaryPort: SecondaryPort | null = null;
+  private secondaryEl: HTMLElement | null = null;
+  private secondaryPath: string | null = null;
+
+  connectSecondary(port: SecondaryPort | null): void {
+    this.secondaryPort = port;
+    if (port) {
+      port.attach(this.secondaryEl);
+      port.show(this.secondaryPath);
+    }
+  }
+
+  setSecondaryHost(el: HTMLElement | null): void {
+    if (el === this.secondaryEl) return;
+    this.secondaryEl = el;
+    this.secondaryPort?.attach(el);
+    this.secondaryPort?.show(this.secondaryPath);
+  }
+
+  showSecondary(path: string | null): void {
+    this.secondaryPath = path;
+    this.secondaryPort?.show(path);
+  }
+
+  /** Focuses the right group's editor (Mod+2); false when there is none. */
+  focusSecondary(): boolean {
+    return this.secondaryPort?.focus() ?? false;
+  }
+
+  /** The right group's editor reports where its cursor is (when it has focus). */
+  secondaryCursor(path: string, line: number, column: number, selectionLength: number): void {
+    if (path !== this.state.split?.active) return;
+    this.set({ cursorText: selectionLength > 0 ? `Ln ${line}, Col ${column} (${selectionLength} selected)` : `Ln ${line}, Col ${column}` });
+  }
+
   close(path: string): void {
     const d = this.state.docs.find((x) => x.path === path);
     if (!d) return;
@@ -296,6 +404,7 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     if (i < 0) return;
     const wasActive = this.state.activePath === path;
     const docs = this.state.docs.filter((d) => d.path !== path);
+    if (this.state.split?.paths.includes(path)) this.closeInSplit(path);
     this.awaitingSave.delete(path);
     this.snapshots.delete(path);
     this.recovery.snapshotClear(path);
@@ -318,7 +427,7 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     this.opening.clear();
     this.snapshots.clear();
     this.proceed = null;
-    this.set({ docs: [], activePath: "", cursorText: "", conflictName: null, prompt: null });
+    this.set({ docs: [], split: null, activePath: "", cursorText: "", conflictName: null, prompt: null });
   }
 
   // ---- editor commands -------------------------------------------------------
@@ -442,6 +551,7 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     if (this.index(path) >= 0) {
       this.updateDoc(path, { savedVersion: version, changedOnDisk: false });
       if (this.editorUp) this.port?.documentSaved({ path, version });
+      for (const fn of [...this.savedListeners]) fn(path);
     }
     this.awaitingSave.delete(path);
     if (this.awaitingSave.size === 0 && this.afterSave) {
@@ -579,6 +689,8 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
         values: {
           [OPEN_PATHS_KEY]: this.state.docs.map((d) => d.path),
           [ACTIVE_PATH_KEY]: this.state.activePath || null,
+          [SPLIT_PATHS_KEY]: this.state.split?.paths ?? null,
+          [SPLIT_ACTIVE_KEY]: this.state.split?.active || null,
         },
       });
     } catch {
@@ -619,7 +731,7 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
       values = (
         await this.client.request<{ values: Record<string, unknown> }>("workspace/getState", {
           workspaceId: this.wsId,
-          keys: [OPEN_PATHS_KEY, ACTIVE_PATH_KEY],
+          keys: [OPEN_PATHS_KEY, ACTIVE_PATH_KEY, SPLIT_PATHS_KEY, SPLIT_ACTIVE_KEY],
         })
       ).values;
     } catch {
@@ -651,5 +763,12 @@ export class DocumentsStore extends Observable<DocumentsState> implements Editor
     }
     this.restoring = false;
     if (active && this.index(active) >= 0) this.setActive(active);
+    // The right group, with the documents that came back.
+    const rawSplit = values[SPLIT_PATHS_KEY];
+    const splitPaths = Array.isArray(rawSplit) ? rawSplit.filter((x): x is string => typeof x === "string" && this.index(x) >= 0) : [];
+    if (splitPaths.length) {
+      const sa = typeof values[SPLIT_ACTIVE_KEY] === "string" ? (values[SPLIT_ACTIVE_KEY] as string) : "";
+      this.set({ split: { paths: splitPaths, active: splitPaths.includes(sa) ? sa : splitPaths[0]! } });
+    }
   }
 }

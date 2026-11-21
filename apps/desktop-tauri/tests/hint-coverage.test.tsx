@@ -17,6 +17,18 @@ const ctx = {
     tasks: { canRun: false },
     settings: {},
     environments: { subscribe: () => noop, activeInstall: null },
+    // The active file's language server has failed: the status bar offers Restart (M4-LSP-002).
+    lsp: {
+      subscribe: () => noop,
+      getSnapshot: () => ({ servers: [], problems: {}, progress: {}, languages: {} }),
+      serverForPath: () => ({ serverId: "rust-analyzer", providerId: "rust", languages: ["rust"], state: "failed", detail: "It crashed." }),
+      restart: async () => {},
+    },
+    // A repository on branch main, 2 ahead (M4-GIT-002): the branch segment is a button.
+    git: {
+      subscribe: () => noop,
+      getSnapshot: () => ({ status: { repo: true, branch: "main", ahead: 2, behind: 0, files: [] }, marks: {}, folders: {}, diff: null }),
+    },
   },
   ready: true,
   hasDoc: true,

@@ -1,12 +1,13 @@
 // The command palette's lists (Mod+K commands, Mod+P listed files).
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PaletteCommand } from "../components/CommandPalette";
 import type { DocumentsStore } from "../state/documents";
 import { providerTaskTitle } from "../state/tasks";
 import type { WorkspaceStore } from "../state/workspace";
 import type { ShellContext } from "./actions";
 import { MOD } from "./platform";
+import { requestSearchFocus } from "../components/Search";
 
 export type CommandEntry = PaletteCommand & { enabled?: boolean };
 
@@ -23,11 +24,15 @@ export function allCommands(ctx: ShellContext): CommandEntry[] {
     { id: "find", group: "Edit", label: "Find", run: () => documents.runCommand("find"), enabled: hasDoc },
     { id: "replace", group: "Edit", label: "Replace", run: () => documents.runCommand("replace"), enabled: hasDoc },
     { id: "format", group: "Edit", label: "Format Document", run: () => documents.runCommand("format"), enabled: hasDoc },
+    { id: "splitRight", group: "View", label: "Split Editor Right", shortcut: `${MOD}+\\`, run: () => documents.splitRight(), enabled: hasDoc },
+    { id: "unsplit", group: "View", label: "Close Right Group", run: () => documents.unsplit(), enabled: !!ctx.docs.split },
     { id: "chat", group: "View", label: "Open Chat", run: () => ctx.setDestination("chat"), enabled: ready },
     { id: "newChat", group: "View", label: "New Chat", shortcut: `${MOD}+N`, run: () => (ctx.app.agent.newChat(), ctx.setDestination("chat")), enabled: ready },
     { id: "sidebar", group: "View", label: "Toggle Side Bar", shortcut: `${MOD}+B`, run: ctx.toggleSidebar },
     { id: "panel", group: "View", label: "Toggle Panel", shortcut: `${MOD}+J`, run: ctx.togglePanel },
     { id: "dock", group: "View", label: "Toggle AI Dock", shortcut: `${MOD}+L`, run: ctx.toggleDock, enabled: !!ws.id },
+    { id: "search", group: "View", label: "Search in Files", shortcut: `${MOD}+Shift+F`, run: () => (ctx.setDestination("search"), requestSearchFocus()), enabled: !!ws.id },
+    { id: "terminal", group: "View", label: "Show Terminal", shortcut: `${MOD}+Shift+\``, run: ctx.showTerminal, enabled: !!ws.id },
     { id: "resetLayout", group: "View", label: "Reset Layout", run: ctx.resetLayout },
     { id: "theme", group: "View", label: dark ? "Switch to Light Theme" : "Switch to Dark Theme", run: () => void settings.setValue("appearance.theme", dark ? "light" : "dark") },
     { id: "run", group: "Run", label: "Run Command…", shortcut: `${MOD}+Shift+R`, run: ctx.focusRun, enabled: !!ws.id },
@@ -56,11 +61,10 @@ export function buildCommands(ctx: ShellContext): PaletteCommand[] {
 }
 
 /** Quick open: only files the explorer has listed (a workspace index is M4 epic 4.5). */
-export function buildFileCommands(workspace: WorkspaceStore, documents: DocumentsStore): PaletteCommand[] {
-  return workspace
-    .visibleRows()
-    .filter((r) => r.node.kind !== "directory")
-    .map((r) => ({ id: r.node.path, group: "File", label: r.node.path, run: () => documents.open(r.node.path) }));
+export function buildFileCommands(workspace: WorkspaceStore, documents: DocumentsStore, all?: readonly string[]): PaletteCommand[] {
+  // Every file the daemon lists (M4-UX-001); until that answer arrives, the explorer's rows.
+  const paths = all ?? workspace.visibleRows().filter((r) => r.node.kind !== "directory").map((r) => r.node.path);
+  return paths.map((path) => ({ id: path, group: "File", label: path, run: () => documents.open(path) }));
 }
 
 export function usePaletteCommands(ctx: ShellContext, palette: "commands" | "files" | null): PaletteCommand[] {
@@ -71,10 +75,25 @@ export function usePaletteCommands(ctx: ShellContext, palette: "commands" | "fil
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [ctx.ready, ctx.hasDoc, ctx.ws.id, ctx.ws.recent, ctx.dark, ctx.task.running, ctx.task.history, ctx.task.providerTasks, ctx.task.lastProvider, ctx.docs.activePath, documents, tasks, settings, client, ctx.openFolder],
   );
+  // The workspace's files from the daemon (`workspace/search`, files mode), fetched when Go to File
+  // opens and again when the tree changed.
+  const [listed, setListed] = useState<{ key: string; paths: string[] } | null>(null);
+  const listKey = `${ctx.ws.id}#${ctx.ws.treeVersion}`;
+  useEffect(() => {
+    if (palette !== "files" || !ctx.ws.id || listed?.key === listKey) return;
+    let live = true;
+    void client
+      .request<{ files: string[] }>("workspace/search", { workspaceId: ctx.ws.id, mode: "files" })
+      .then((r) => live && setListed({ key: listKey, paths: r.files }))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [palette, client, ctx.ws.id, listKey, listed?.key]);
   const files = useMemo(
-    () => (palette === "files" ? buildFileCommands(workspace, documents) : []),
+    () => (palette === "files" ? buildFileCommands(workspace, documents, listed?.key === listKey ? listed.paths : undefined) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [palette, workspace, documents, ctx.ws.treeVersion],
+    [palette, workspace, documents, ctx.ws.treeVersion, listed, listKey],
   );
   return palette === "files" ? files : commands;
 }

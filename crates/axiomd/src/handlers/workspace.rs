@@ -37,6 +37,13 @@ pub async fn close(app: Arc<App>, p: WorkspaceRef) -> Result<Empty, RpcError> {
     app.workspaces.get(&p.workspace_id)?;
     app.executor.cancel_all(&p.workspace_id).await;
     app.stop_watcher(&p.workspace_id);
+    app.lsp.close_workspace(&p.workspace_id).await;
+    app.terminals.close_workspace(&p.workspace_id);
+    crate::handlers::git::stop_watch(&app, &p.workspace_id);
+    app.external_reads
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&p.workspace_id);
     app.clients
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -90,4 +97,57 @@ pub async fn set_state(app: Arc<App>, p: SetStateParams) -> Result<Empty, RpcErr
     app.store_call(move |s| s.workspace_state_set(&root, &values))
         .await?;
     Ok(Empty {})
+}
+
+/// `workspace/search` (protocol 0.4, M4-UX-001): text matches or the file list. Cancelling the
+/// request (`$/cancel`) stops the walk between files.
+pub async fn search(
+    app: Arc<App>,
+    p: axiom_protocol::workspace::SearchParams,
+    ctx: axiom_rpc::RequestCtx,
+) -> Result<axiom_protocol::workspace::SearchResult, RpcError> {
+    use axiom_protocol::workspace::{SearchMatch, SearchMode, SearchResult};
+    let ws = app.workspaces.get(&p.workspace_id)?;
+    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let f2 = flag.clone();
+    let token = ctx.cancel.clone();
+    let watch = tokio::spawn(async move {
+        token.cancelled().await;
+        f2.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    let q = axiom_workspace::FindQuery {
+        query: p.query,
+        regex: p.regex,
+        case_sensitive: p.case_sensitive,
+        whole_word: p.whole_word,
+        include: p.include,
+        exclude: p.exclude,
+        files: p.mode == SearchMode::Files,
+        limit: p.limit.unwrap_or(0) as usize,
+    };
+    let r = ws.find(q, flag).await;
+    watch.abort();
+    let r = r.map_err(|e| match e {
+        axiom_workspace::WsError::InvalidPath(m) => {
+            RpcError::new(axiom_protocol::ErrorKind::InvalidParams, m)
+        }
+        other => other.into(),
+    })?;
+    Ok(SearchResult {
+        matches: r
+            .matches
+            .into_iter()
+            .map(|m| SearchMatch {
+                path: m.path,
+                line: m.line,
+                column: m.column,
+                end_column: m.end_column,
+                preview: m.preview,
+                preview_column: m.preview_column,
+            })
+            .collect(),
+        files: r.files,
+        truncated: r.truncated,
+        files_searched: r.files_searched,
+    })
 }

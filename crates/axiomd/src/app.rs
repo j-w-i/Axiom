@@ -28,6 +28,17 @@ pub struct App {
     /// Connections that opened each workspace, for daemon-initiated notifications
     /// (`agent/reveal`). Closed connections are dropped on the next send.
     pub clients: Mutex<HashMap<WorkspaceId, Vec<Notifier>>>,
+    /// Language servers (M4, ADR-0018 §2).
+    pub lsp: axiom_lsp::Manager,
+    /// Files outside each workspace that one of its language servers returned in a location:
+    /// readable (only) through `fs/readFile` with a `file://` path (ADR-0018 §2).
+    pub external_reads: Mutex<HashMap<WorkspaceId, std::collections::HashSet<PathBuf>>>,
+    /// `git/didChange` watches, one per workspace that asked for its status (M4-GIT-001).
+    pub git_watches: Mutex<HashMap<WorkspaceId, AbortHandle>>,
+    /// Integrated terminals (M4, ADR-0018 §4).
+    pub terminals: axiom_term::Terminals,
+    /// The language-server event forwarder runs (started with the first router).
+    pub lsp_forwarding: std::sync::atomic::AtomicBool,
 }
 
 /// The agent runtime's daemon-wide state (M3).
@@ -199,6 +210,11 @@ impl App {
             last_diagnostics: Mutex::default(),
             acp_terminals: Mutex::default(),
             clients: Mutex::default(),
+            lsp: axiom_lsp::Manager::default(),
+            external_reads: Mutex::default(),
+            git_watches: Mutex::default(),
+            terminals: axiom_term::Terminals::default(),
+            lsp_forwarding: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -233,6 +249,33 @@ impl App {
             .get(ws)
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// Records the `file://` URIs outside `root` that a language server returned, so the editor
+    /// may open them read-only.
+    pub fn allow_external_reads(&self, ws: &WorkspaceId, root: &std::path::Path, uris: &[String]) {
+        let mut m = self
+            .external_reads
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let set = m.entry(ws.clone()).or_default();
+        for u in uris {
+            let Some(path) = url::Url::parse(u).ok().and_then(|u| u.to_file_path().ok()) else {
+                continue;
+            };
+            if !path.starts_with(root) && set.len() < 10_000 {
+                set.insert(path);
+            }
+        }
+    }
+
+    /// Whether `path` (absolute) was returned by one of the workspace's language servers.
+    pub fn external_read_allowed(&self, ws: &WorkspaceId, path: &std::path::Path) -> bool {
+        self.external_reads
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(ws)
+            .is_some_and(|s| s.contains(path))
     }
 
     pub fn stop_watcher(&self, id: &WorkspaceId) {

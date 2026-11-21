@@ -302,10 +302,36 @@ describe("design tokens", () => {
     const block = /\/\* <generated:dark>[\s\S]*?\/\* <\/generated:dark> \*\//.exec(tokens)?.[0] ?? "";
     // Tokens added later (M3-UI-002: --ok-soft for diff additions) are new lines; without them
     // the block is the same bytes, so no existing dark value moved.
-    const added = ["  --ok-soft: rgb(143 191 127 / 0.11);\n"];
+    // M4-TERM-002: the terminal's ANSI palette.
+    const added = [
+      "  --ok-soft: rgb(143 191 127 / 0.11);\n",
+      "  --ansi-black: #2c2d30;\n",
+      "  --ansi-red: #e5645d;\n",
+      "  --ansi-green: #a9c47f;\n",
+      "  --ansi-yellow: #e0b45c;\n",
+      "  --ansi-blue: #7fa6d6;\n",
+      "  --ansi-magenta: #c58fb8;\n",
+      "  --ansi-cyan: #8ec2b2;\n",
+      "  --ansi-white: #cfcbc3;\n",
+      "  --ansi-bright-black: #8a867e;\n",
+      "  --ansi-bright-red: #f0857e;\n",
+      "  --ansi-bright-green: #bcd894;\n",
+      "  --ansi-bright-yellow: #f0c977;\n",
+      "  --ansi-bright-blue: #9fc0e8;\n",
+      "  --ansi-bright-magenta: #d9a8cc;\n",
+      "  --ansi-bright-cyan: #a6d6c7;\n",
+      "  --ansi-bright-white: #f1ede6;\n",
+    ];
     for (const line of added) expect(block).toContain(line);
     const original = added.reduce((b, line) => b.replace(line, ""), block);
     expect(createHash("sha256").update(original).digest("hex")).toBe("cdf1639b0303549a56b58724d3e2ac11450d1218f0aedc9cdd38fdcc6d65bd98");
+  });
+
+  it.each(THEMES)("the terminal's ANSI colours are ≥ 4.5:1 on the console (black and white exempt) (%s)", (theme) => {
+    const t = themeVars(theme);
+    const colours = ["red", "green", "yellow", "blue", "magenta", "cyan"].flatMap((c) => [`--ansi-${c}`, `--ansi-bright-${c}`]);
+    expect(contrastFailures(t, colours.map((c) => [c, ["--surface-panel"], 4.5] as [string, string[], number]))).toEqual([]);
+    for (const c of ["black", "white", "bright-black", "bright-white"]) expect(t.has(`--ansi-${c}`)).toBe(true);
   });
 
   it("§2.3 contrast pairs detect a failing pair (fixture)", () => {

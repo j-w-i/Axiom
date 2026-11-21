@@ -349,9 +349,9 @@ impl DaemonBridge {
         }
 
         // Handshake.
-        // Protocol 0.3 (ADR-0015): the GUI shows approval requests to a person (M3-UI-002).
+        // Protocol 0.4 (ADR-0018; 0.3, ADR-0015: the GUI shows approval requests to a person).
         let params = json!({
-            "protocolVersion": "0.3",
+            "protocolVersion": "0.4",
             "client": { "name": self.inner.config.client_name, "version": self.inner.config.client_version },
             "capabilities": { "approvals": true },
         });

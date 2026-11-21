@@ -492,12 +492,18 @@ try {
   {
     const HINT = `const h = document.querySelector('.sb__hint'); return { text: h.childNodes[0]?.textContent ?? '', keys: [...h.querySelectorAll('.kbd')].map((k) => k.textContent) };`;
     const rerun = `document.querySelector('[data-testid=transport] [data-hint^="Rerun"]')`;
+    // The hint line is React state: give each event its render (bounded) before reading it, or a
+    // slow runner reads the previous control's hint.
+    const settled = (text) => wd.waitFor(`return (document.querySelector('.sb__hint').childNodes[0]?.textContent ?? '') === arguments[0]`, [text], 2000, `hint "${text}"`).catch(() => {});
     await wd.exec(`${rerun}.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`);
+    await settled("Rerun the last command");
     const hovered = await wd.exec(HINT);
     await wd.exec(`document.body.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`);
     await wd.exec(`${rerun}.focus()`);
+    await settled("Rerun the last command");
     const focused = await wd.exec(HINT);
     await wd.exec(`document.querySelector('.monaco-editor textarea').focus()`);
+    await settled("");
     const editor = await wd.exec(HINT);
     check(
       "15 hint line follows hover and focus",
@@ -912,6 +918,9 @@ try {
       `${JSON.stringify(plan)}; after install: ${installed}`,
     );
 
+    // The first plan dialog's scrim animates out; a click before it is gone lands on it (seen on
+    // CI when the demo install finishes within the exit animation).
+    await wd.waitFor(`return !document.querySelector('[data-testid=install-plan], .overlay')`, [], 5000, "first plan dialog gone");
     await wd.click(await wd.find(`${row("slowdemo")} .btn--primary`));
     await wd.waitFor(`return !!document.querySelector('[data-testid=install-plan] [data-action=install]')`, [], 10000, "slow plan dialog");
     await wd.click(await wd.find('[data-testid=install-plan] [data-action=install]'));
@@ -982,6 +991,8 @@ try {
         `options=${JSON.stringify(options.slice(0, 4))} outcome=${ran} rerun="${transport}" problems=${count}`,
       );
 
+      // The palette's scrim animates out; a fast build can finish before it is gone (CI).
+      await wd.waitFor(`return !document.querySelector('[data-testid=palette], .overlay')`, [], 5000, "palette gone");
       await wd.click(await wd.find('[data-view=problems]'));
       await wd.waitFor(`return !!document.querySelector('[data-testid=problems] .problem')`, [], 5000, "problems listed");
       const row = await wd.exec(
@@ -1001,7 +1012,7 @@ try {
         .catch(() => null);
       check(
         "25b problems click to source: Enter on the E0308 row opens src/main.rs at line 2, column 18",
-        /^Error: mismatched types \(E0308\) at src\/main\.rs:2:18$/.test(row.name ?? "") && row.file === "src/main.rs" && row.selected === "true" && opened !== null,
+        /^Error: mismatched types \(E0308\) at src\/main\.rs:2:18, from rustc$/.test(row.name ?? "") && row.file === "src/main.rs" && row.selected === "true" && opened !== null,
         `${JSON.stringify(row)} → ${opened}`,
       );
       await wd.click(await wd.find('[data-view=output]'));
@@ -1021,13 +1032,20 @@ try {
   await wd.waitFor(`return ${appExpr}.settings.getSnapshot().editorFontSize === 15`, [], 3000, "font size");
   // Quit through the app's own path (flushes explorer + tab state, shuts the daemon down).
   await wd.execAsync(`const done = arguments[arguments.length-1]; ${appExpr}.workspace.flushState().then(() => ${appExpr}.documents.saveTabState()).then(() => done(true))`);
+  // What the daemon holds before the restart (for the macOS tab-restore failure, see below).
+  const savedTabs = await wd.execAsync(`const done = arguments[arguments.length - 1]; const w = ${appExpr}.workspace.getSnapshot(); ${appExpr}.client.request('workspace/getState', { workspaceId: w.id, keys: ['editor.openPaths', 'editor.activePath'] }).then(r => done({ ws: w.id, values: r.values, docs: ${appExpr}.documents.getSnapshot().docs.map(d => d.path) }), e => done(String(e)))`).catch((x) => String(x));
   await wd.quit();
   wd = null;
   await new Promise((r) => setTimeout(r, 500));
 
   wd = await launch();
   await wd.waitFor(`return document.querySelector('[data-path="src/nested"]') !== null`, [], 15000, "last workspace + expanded folders restored");
-  await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 2`, [], 8000, "tabs restored");
+  await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 2`, [], 8000, "tabs restored").catch(async (e) => {
+    // Seen twice on macOS CI (M3, M4): what was stored and what the store holds, for the next time.
+    const state = await wd.execAsync(`const done = arguments[arguments.length - 1]; const w = ${appExpr}.workspace.getSnapshot(); ${appExpr}.client.request('workspace/getState', { workspaceId: w.id, keys: ['editor.openPaths', 'editor.activePath'] }).then(r => done({ ws: w.id, values: r.values, docs: ${appExpr}.documents.getSnapshot().docs.map(d => d.path), banner: ${appExpr}.documents.getSnapshot().banner }), e => done(String(e)))`).catch((x) => String(x));
+    console.log("DIAG tabs restore:", JSON.stringify(state), "before the restart:", JSON.stringify(savedTabs));
+    throw e;
+  });
   const tabs = await wd.exec(`return [...document.querySelectorAll('[role=tab][data-path]')].map(t => t.dataset.path)`);
   const active = await wd.exec(`return document.querySelector('[role=tab][aria-selected=true]')?.dataset.path`);
   const fontSize = await wd.exec(`return ${appExpr}.settings.getSnapshot().editorFontSize`);

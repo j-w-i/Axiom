@@ -146,6 +146,77 @@ this workspace". The header and its tools are memoised so an output batch re-ren
 rows (P12). D6 adopted: stderr `--text-muted`, gutter `▏` in `--warn` at 55%; `--danger` is used
 only by the failure status line and error rows. CSS in `styles/components/console.css`.
 
+**Terminal (M4-TERM-002).** A third console view, **Terminal**, shown when a folder is open.
+- **Tabs and screen.** A strip of terminal tabs ("sh", "zsh 2", "… (ended)" after exit; each
+  with Close) and New terminal (+) sits over the xterm.js screen. The screen uses the code font
+  and the `--ansi-*` palette (16 colours per theme, clamped to 4.5:1 on the console except black
+  and white), on `--surface-panel`. The run prompt hides in this view.
+- **Opening.** Mod+Shift+\` (and "Show Terminal" in the palette) shows the view and focuses its
+  terminal, starting one if there is none. Mod+\` stays the console region (EDITOR-002) and
+  lands in the terminal when the Terminal view is shown.
+- **Keys.** Keys go to the shell except the app's global chords: Mod+K, P, J, B, \`, comma, L,
+  and every Cmd chord on macOS. Copy and paste are Ctrl+Shift+C/V (Cmd+C/V on macOS); Ctrl+C
+  stays the interrupt.
+- **Lifetime.** The screens live outside React: switching views or tabs keeps them. After a
+  reload the terminals come back with their backlog (`terminal/list`).
+- **Not done.** Links in the terminal are not clickable yet (no link addon).
+
+**Split editor (M4-UX-002).**
+- **Splitting.** Mod+\\ (or "Split Editor Right") shows the active document in a right group
+  beside the editor. The left group keeps every open document's tabs; the right group shows a
+  chosen subset in its own tab strip (`Right editor group`, ←/→/Home/End) and its own Monaco
+  editor over the same buffer, so typing on either side is one document.
+- **Closing.** Close on a right-hand tab removes it from that group only; closing a document on
+  the left closes it everywhere. The right group's last tab ends the split, as does "Close Right
+  Group".
+- **Keys and size.** Mod+1 focuses the left editor and Mod+2 the right one. Mod+S on the right
+  saves its document. The splitter between the groups answers ←/→ (±16), Shift (±48) and Home
+  (half), like the others.
+- **Restore.** The split, and the right group's tabs, come back after a restart (workspace state
+  `editor.splitPaths`, `editor.splitActive`).
+- **Not done.** Tabs are not dragged between groups. New documents open on the left.
+
+**Search (M4-UX-001).**
+- **Search page.** A rail destination when a folder is open, with Mod+Shift+F and the palette's
+  "Search in Files". It holds:
+  - the query, with Match case (Aa), Whole word (ab) and Regular expression (.*) toggles
+    (aria-pressed);
+  - files to include and to exclude (comma-separated globs);
+  - a status line ("3 results in 2 files", "(the first shown)" when truncated);
+  - matches grouped by file, each a row with the line number and a preview with the match
+    marked.
+- **Keys.** ↓ from the query enters the rows, ↑/↓/Home/End move, Enter opens the file at the
+  match. The search runs 200 ms after typing stops, and a new one cancels the last.
+  `.gitignore` is honoured.
+- **Go to File (Mod+P)** lists every file the daemon finds (`workspace/search`, files mode; not
+  only the explorer's loaded rows). It ranks them with a path-aware fuzzy scorer
+  (`ui/fuzzy.ts`): segment and word starts, camelCase, consecutive runs, the file name.
+
+**Git (M4-GIT-002).**
+- **Source Control.** The rail gains a destination when a folder is open (branch icon). Its side
+  bar page shows the branch (↑ahead ↓behind) and the changes, grouped as Conflicts, Staged,
+  Changes and Untracked. A row is a button: Enter opens the diff, Shift+Enter the file, and
+  ↑/↓/Home/End move. It is read-only in M4.
+- **Explorer and tabs.** A changed file shows its letter (M, A, D, R, U, C) in the git colour
+  and its name in that colour: added and untracked `--ok-text`, modified and renamed `--warn`,
+  deleted and conflicted `--danger`. The state is also in the accessible name (", modified").
+  A folder holding changes takes the colour of the most severe change inside. A tab shows the
+  same letter.
+- **Gutter.** Added and modified lines get a 3 px bar, deleted lines a small wedge, from a line
+  diff of the buffer against HEAD, recomputed 300 ms after typing stops. The overview ruler
+  shows the same marks.
+- **Diff view.** It sits over the editor area: a bar with "<name> HEAD ↔ Working Tree", Open the
+  file and Close (Esc), above Monaco's diff editor. It is side by side, or inline when narrow;
+  the right side is the file's own buffer, editable. It opens from Source Control and from a
+  chat diff block's "Open in diff editor". It is not a tab and is not restored after a restart.
+- **Status bar.** A branch segment opens Source Control.
+
+**Problems (M4-LSP-002).** The Problems view lists the latest run of each provider task and the
+language servers' diagnostics together, grouped by file, each row labelled with its source in a
+muted mono label (`rustc`, `rustc (rust-analyzer)`, `typescript (typescript-language-server)`);
+the row's accessible name ends with ", from <source>". Server diagnostics update live as the
+servers publish them and disappear when a server stops.
+
 ### 2.5 Status bar (SHELL-004)
 
 Segments separated by `--line-mid` hairlines, 12 px muted text, hover overlay on
@@ -156,6 +227,7 @@ interactive segments:
 | Backend | LED (on/run while starting/err) + "axiomd 0.1.0" / "Connecting…" / "Backend stopped" | click: restart if stopped |
 | Task | while running: stepped spinner + label; afterwards the last outcome (existing `statusText`, e.g. "✖ Failed with exit code 101 in 4.8 s"). Only one of the transport and this segment animates (`motion-system.md` §5.3): the spinner here is static when the transport is visible | click: show the console |
 | **Hint line** (flex) | hovered or focused control's `data-hint`: "Action — Shortcut", shortcut as keycaps; idle: empty | none; `aria-live="off"` |
+| Language server (M4-LSP-002) | the active document's server: LED + its id ("rust-analyzer"), "…: starting…", its `$/progress` title while it works ("rust-analyzer: Indexing"), "…: not installed" (the hint is the install command), "…: failed — Restart" / "…: stopped — Restart". Nothing for a language without a server | click (failed/stopped): restart it |
 | Cursor | Ln, Col | (M4: go to line) |
 | Encoding, language | "UTF-8" (as today) and the Monaco language of the active document; an EOL segment needs line-ending data the documents store does not expose yet, so it is omitted (no new store field in M1.6) | — |
 

@@ -168,7 +168,7 @@ try {
       "file at the error",
     )
     .catch(() => null);
-  check("5 the compile error is in Problems; Enter opens src/main.rs at line 2, column 18", /mismatched types \(E0308\) at src\/main\.rs:2:18$/.test(name) && at !== null, `${name} → ${at}`);
+  check("5 the compile error is in Problems; Enter opens src/main.rs at line 2, column 18", /mismatched types \(E0308\) at src\/main\.rs:2:18, from rustc$/.test(name) && at !== null, `${name} → ${at}`);
 
   // 5. Remove: exactly that directory goes.
   await wd.click(await wd.find('.rail [data-destination="environments"]'));

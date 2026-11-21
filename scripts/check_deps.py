@@ -23,9 +23,12 @@ ALLOWED = {
     "axiom-build": {"axiom-protocol", "axiom-exec", "axiom-env"},
     # M3 (ADR-0015 §2): the agent runtime calls services only through the tools axiomd registers.
     "axiom-agent": {"axiom-protocol", "axiom-store"},
+    # M4 (ADR-0018 §7): language servers and terminals.
+    "axiom-lsp": {"axiom-protocol"},
+    "axiom-term": {"axiom-protocol"},
     "axiomd": {
         "axiom-protocol", "axiom-rpc", "axiom-store", "axiom-workspace", "axiom-exec",
-        "axiom-env", "axiom-build", "axiom-agent",
+        "axiom-env", "axiom-build", "axiom-agent", "axiom-lsp", "axiom-term",
     },
     # The `axiom` command-line client (ADR-0015 §2, §6): a protocol client.
     "axiom-cli": {"axiom-protocol", "axiom-rpc"},
@@ -39,6 +42,8 @@ ALLOWED = {
     "fake-mcp": set(),
     # Test helper binary (tests/helpers/fake-acp): an ACP agent for the ACP client tests.
     "fake-acp": set(),
+    # Test helper binary (tests/helpers/fake-lsp): a language server for the LSP tests.
+    "fake-lsp": set(),
 }
 
 

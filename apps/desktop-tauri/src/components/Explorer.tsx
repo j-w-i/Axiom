@@ -4,7 +4,9 @@
 // errors) follow workspace-spec.md §6 (M1.6-SHELL-007).
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import type { GitState, GitStore } from "../state/git";
 import type { WorkspaceStore } from "../state/workspace";
+import "../styles/components/scm.css";
 import * as Icon from "../ui/icons";
 import { Button } from "../ui/primitives";
 import "../styles/components/glyph.css";
@@ -53,12 +55,18 @@ export const SKELETON_MS = 1000;
 /** Skeleton bar widths (% of the row): static, no shimmer (motion-system.md §5). */
 const SKELETON = [62, 48, 70, 40, 56, 44];
 
+const NO_GIT = { status: null, marks: {}, folders: {}, diff: null } as GitState;
+const noSub = () => () => {};
+
 export function Explorer({
   workspace,
   onOpenFile,
   dirty,
+  git,
   onReopen,
 }: {
+  /** Git marks (M4-GIT-002): a letter on changed files, colour on folders holding changes. */
+  git?: GitStore;
   workspace: WorkspaceStore;
   onOpenFile: (path: string) => void;
   /** Paths of documents open and dirty in the editor (the unsaved dot). */
@@ -67,6 +75,7 @@ export function Explorer({
   onReopen?: () => void;
 }) {
   const s = useSyncExternalStore(workspace.subscribe, workspace.getSnapshot);
+  const g = useSyncExternalStore(git?.subscribe ?? noSub, git?.getSnapshot ?? (() => NO_GIT), () => NO_GIT);
   const rows = useMemo(() => workspace.visibleRows(), [workspace, s.treeVersion]);
   const [focused, setFocused] = useState<string>("");
   const [selected, setSelected] = useState<string>("");
@@ -195,6 +204,9 @@ export function Explorer({
           const i = first + k;
           const isDir = node.kind === "directory";
           const unsaved = !isDir && !!dirty?.has(node.path);
+          const gm = isDir ? undefined : g.marks[node.path];
+          const gk = isDir ? g.folders[node.path] : gm?.kind;
+          const label = [node.name, unsaved ? "unsaved" : "", gm ? gm.word : gk ? "contains changes" : ""].filter(Boolean).join(", ");
           const glyph = glyphFor(node.name);
           return (
             <div key={node.path} style={{ position: "absolute", top: (slots.slot[i] ?? i) * ROW_H, left: 0, right: 0 }}>
@@ -205,7 +217,8 @@ export function Explorer({
                 aria-level={depth + 1}
                 aria-expanded={isDir ? node.expanded : undefined}
                 aria-selected={selected === node.path}
-                aria-label={unsaved ? `${node.name}, unsaved` : undefined}
+                aria-label={unsaved || gk ? label : undefined}
+                data-git={gk}
                 data-focused={focused === node.path}
                 data-ignored={node.ignored}
                 data-path={node.path}
@@ -237,6 +250,11 @@ export function Explorer({
                 {unsaved && (
                   <span className="tree-row__dot" aria-hidden="true">
                     ●
+                  </span>
+                )}
+                {gm && (
+                  <span className="tree-row__git" aria-hidden="true">
+                    {gm.letter}
                   </span>
                 )}
               </div>

@@ -218,6 +218,8 @@ model and hold a first-rate conversation in Chat entirely by keyboard (ADR-0017)
 
 ## M4 — Editor depth
 
+**Status (2026-11-22):** planned — 10 task files in `docs/tasks/M4/`; decisions in `docs/decisions/ADR-0018-editor-depth-m4.md` (protocol 0.4; the daemon owns language servers and the editor is its client; in-house LSP client over Monaco; `portable-pty` + xterm.js; Git through the `git` CLI instead of `gix`). Windows deferred.
+
 **Outcome.** Language intelligence, terminal and Git, bringing the editing
 experience to daily-driver level.
 

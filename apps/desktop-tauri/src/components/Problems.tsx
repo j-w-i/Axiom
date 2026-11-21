@@ -1,5 +1,6 @@
 // The console's Problems view (workspace-spec.md §2.4, §5.1; M2-UI-003): diagnostics of the
-// latest run of each provider task, grouped by file, severity first then position. A row is a
+// latest run of each provider task and of the language servers (M4-LSP-002), each labelled with
+// its source, grouped by file, severity first then position. A row is a
 // button: Enter or a click opens the file at the position. ↑/↓ move between rows (one Tab stop).
 
 import { useRef, useSyncExternalStore, type KeyboardEvent } from "react";
@@ -75,7 +76,7 @@ export function ProblemsView({ store, onOpen, id }: { store: ProblemsStore; onOp
                     data-severity={d.severity}
                     tabIndex={i === 0 ? 0 : -1}
                     aria-disabled={!d.location || undefined}
-                    aria-label={`${SEVERITY_NAME[d.severity]}: ${d.message}${d.code ? ` (${d.code})` : ""}${at ? ` at ${at}` : ""}`}
+                    aria-label={`${SEVERITY_NAME[d.severity]}: ${d.message}${d.code ? ` (${d.code})` : ""}${at ? ` at ${at}` : ""}, from ${d.source}`}
                     data-hint={d.location ? `Open ${at}` : d.message}
                     title={d.rendered ?? undefined}
                     onKeyDown={(e) => onKeyDown(e, i)}
@@ -86,6 +87,7 @@ export function ProblemsView({ store, onOpen, id }: { store: ProblemsStore; onOp
                     </span>
                     <span className="problem__message">{d.message}</span>
                     {d.code && <span className="problem__code">{d.code}</span>}
+                    <span className="problem__source">{d.source}</span>
                     {at && <span className="problem__at">{at}</span>}
                   </button>
                 </li>

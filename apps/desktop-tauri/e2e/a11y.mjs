@@ -253,10 +253,13 @@ try {
     const probTrav = await traverse(wd, false);
     const strip = await wd.exec(`const l = document.querySelector('[role=tablist][aria-label="Console views"]'); return { tabs: [...l.querySelectorAll('[role=tab]')].map(t => t.getAttribute('aria-label') + ':' + t.getAttribute('aria-selected')), panel: document.querySelector('[role=tabpanel]#console-problems')?.getAttribute('aria-label') }`);
     const probEls = probTrav.seen.filter((x) => x.cls.startsWith("problem") || x.cls.startsWith("console__view"));
+    const fullName = await wd.exec(`return document.querySelector('[data-testid=problems] .problem[data-severity=error]')?.getAttribute('aria-label')`);
     const badProb = probEls.filter((x) => !x.name || !x.role || !x.focus).map((x) => `${x.role} "${x.name}" focus=${x.focus}`);
     check(
       `S19 problems view (${theme}): named tabs and panel, rows reachable by Tab with names that carry severity and position, visible focus`,
-      strip.tabs.join() === "Output:false,Problems, 2:true" && strip.panel === "Problems" && probEls.some((x) => /^Error: mismatched types \(E0308\) at src\/main\.rs:2:18$/.test(x.name)) && badProb.length === 0,
+      strip.tabs.join() === "Output:false,Problems, 2:true,Terminal:false" && strip.panel === "Problems" && probEls.some((x) => x.name.startsWith("Error: mismatched types (E0308) at src/main.rs:2:18")) &&
+        // The full name (describe() shortens names to 60 characters): severity, message, code, position, source.
+        fullName === "Error: mismatched types (E0308) at src/main.rs:2:18, from rustc" && badProb.length === 0,
       `${JSON.stringify(strip)}; reached ${probEls.length}`,
       badProb,
     );

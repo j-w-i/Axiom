@@ -1,0 +1,14 @@
+[package]
+name = "fake-lsp"
+description = "Test helper: a language server driven by request methods and document text (M4-LSP-001)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

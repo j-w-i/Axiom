@@ -91,7 +91,7 @@ describe("stores against the real daemon", () => {
 
   afterEach(async () => {
     await transport.dispose();
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
 
   const names = () => app.workspace.visibleRows().map((r) => r.node.path);
@@ -156,6 +156,42 @@ describe("stores against the real daemon", () => {
     await waitFor(() => app.documents.getSnapshot().docs.length === 2, 3000, "tabs restored");
     expect(app.documents.getSnapshot().docs.map((d) => d.path)).toEqual(["README.md", "src/main.rs"]);
     await waitFor(() => app.documents.getSnapshot().activePath === "README.md", 3000, "active tab");
+  });
+
+  it("the right editor group: split, close in the group, close everywhere, restored after a restart (M4-UX-002)", async () => {
+    await app.workspace.openFolder(ws);
+    app.documents.open("README.md");
+    await waitFor(() => app.documents.getSnapshot().docs.length === 1);
+    app.documents.open("src/main.rs");
+    await waitFor(() => app.documents.getSnapshot().docs.length === 2);
+    app.documents.splitRight("src/main.rs");
+    app.documents.splitRight("README.md");
+    expect(app.documents.getSnapshot().split).toEqual({ paths: ["src/main.rs", "README.md"], active: "README.md" });
+    app.documents.activateSplit("src/main.rs");
+    // Closing in the right group keeps the document open on the left.
+    app.documents.closeInSplit("README.md");
+    expect(app.documents.getSnapshot().split).toEqual({ paths: ["src/main.rs"], active: "src/main.rs" });
+    expect(app.documents.getSnapshot().docs.map((d) => d.path)).toEqual(["README.md", "src/main.rs"]);
+    await app.documents.saveTabState();
+    // A restart brings the split back.
+    await transport.stop();
+    const dataDir = transport.dataDir;
+    transport = new NodeTransport();
+    (transport as unknown as { dataDir: string }).dataDir = dataDir;
+    app = createApp(transport);
+    editor = new FakeEditor(app.documents);
+    app.documents.attachEditor(editor);
+    app.documents.ready({ bridgeVersion: 1, monacoVersion: "test" });
+    await app.client.connect();
+    await waitFor(() => app.documents.getSnapshot().docs.length === 2, 5000, "tabs restored");
+    await waitFor(() => app.documents.getSnapshot().split?.active === "src/main.rs", 3000, "the split restored");
+    // Closing the document everywhere ends the split (it was the right group's last one).
+    app.documents.close("src/main.rs");
+    expect(app.documents.getSnapshot().split).toBeNull();
+    // A document that is not open cannot be split; unsplit is a no-op without a split.
+    app.documents.splitRight("nope.txt");
+    app.documents.unsplit();
+    expect(app.documents.getSnapshot().split).toBeNull();
   });
 
   it("documents.move reorders and saves tab state", async () => {

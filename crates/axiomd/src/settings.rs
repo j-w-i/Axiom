@@ -90,7 +90,18 @@ pub const KNOWN: &[Known] = &[
         default: || json!([]),
         valid: is_mcp_servers,
     },
+    // M4-LSP-001 (ADR-0018 §2): per language server, `settings` (workspace/configuration) and
+    // `initializationOptions`, keyed by server id.
+    Known {
+        key: "lsp.servers",
+        default: || json!({}),
+        valid: is_object,
+    },
 ];
+
+fn is_object(v: &Value) -> bool {
+    v.is_object()
+}
 
 pub fn known(key: &str) -> Option<&'static Known> {
     KNOWN.iter().find(|k| k.key == key)

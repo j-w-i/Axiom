@@ -6,9 +6,17 @@ _Last updated: 2026-11-22._
 
 All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).
 
+## M4 — Editor depth: planned (2026-11-22)
+
+ADR-0018 records the decisions (protocol 0.4 `lsp/*`, `terminal/*`, `git/*`, `workspace/search`; `crates/lsp` supervises servers and owns the protocol, and the editor is a client of the daemon; an in-house LSP client over Monaco's providers; `crates/term` on `portable-pty` with xterm.js in the console; Git through the `git` CLI). 10 tasks in `docs/tasks/M4/`. Branch `task/m4`, PR to main. Next task: the first READY `M4-*` by order.
+
+- **M4-ARCH-001 tested (2026-11-22):** protocol 0.4 (`lsp/*`, `terminal/*`, `git/*`, `workspace/search`; provider `[[lsp]]`), docs, module edges.
+- **M4-LSP-001 tested (2026-11-22):** `crates/lsp`: daemon-supervised language servers shared by every client (own ids, server requests answered, document mirror, diagnostics, restart policy), `lsp/*` served; rust-analyzer and typescript-language-server in the manifests. Real rust-analyzer test: CI.
+- **M4-LSP-002 tested (2026-11-22):** the editor's LSP client (sync, completion, hover, signature, definition, references, highlight, rename, formatting, code actions, symbols), diagnostics in Problems with their source, the status-bar server segment, themed suggest and hover widgets. e2e `lsp.mjs` 9/9 against fake-lsp; real servers: CI (Ubuntu).
+
 ## M3 — Agent runtime: complete (2026-11-22)
 
-ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4; merged to main once CI is green, under the owner's standing permission. **Next: M4 (editor depth)**, then M5.
+ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4, **merged to main 2026-11-22** (f45bae4; CI green on Linux, macOS and Windows) under the owner's standing permission. **Next: M4 (editor depth)**, then M5.
 
 - **M3-ARCH-001 tested (2026-11-21):** protocol 0.3 (`crates/protocol/src/agent.rs`: 14 methods, 4 notifications, 3 error kinds, optional `authToken`/`capabilities` on initialize); `agents.md` frozen; `agent`/`cli` edges. `axiomd::NOT_YET_SERVED` lists the agent methods until wired.
 - **M3-MODEL-001 tested (2026-11-21):** `crates/agent` with the message model, `ModelProvider`, an in-house SSE parser, the Anthropic Messages adapter (text, tools, opaque thinking, errors, cancel) and `ScriptedProvider`; tested against a loopback fixture server.

@@ -20,9 +20,16 @@ fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + st
     t
 }
 
+/// The 0.3 additions stay in every later 0.x (protocol 0.4, M4-ARCH-001, pins the exact version
+/// in `m4_contract.rs`).
 #[test]
-fn protocol_version_is_0_3() {
-    assert_eq!(PROTOCOL_VERSION, "0.3");
+fn protocol_version_is_0_3_or_later() {
+    let (major, minor) = PROTOCOL_VERSION.split_once('.').expect("MAJOR.MINOR");
+    assert_eq!(major, "0");
+    assert!(
+        minor.parse::<u32>().expect("minor") >= 3,
+        "{PROTOCOL_VERSION}"
+    );
 }
 
 #[test]
