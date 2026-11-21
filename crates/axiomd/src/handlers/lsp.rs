@@ -2,7 +2,7 @@
 //! providers' `[[lsp]]` definitions, run in the workspace's environment, shared by every client.
 
 use crate::app::{internal, App};
-use crate::handlers::env::{project_environment, registry, workspace};
+use crate::handlers::env::{process_environment, registry, workspace};
 use axiom_lsp::{Definition, LanguageServer, Launch};
 use axiom_protocol::lifecycle::Empty;
 use axiom_protocol::lsp::{
@@ -13,7 +13,6 @@ use axiom_protocol::workspace::WorkspaceRef;
 use axiom_protocol::{ErrorKind, RpcError, WorkspaceId};
 use axiom_rpc::RequestCtx;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -62,15 +61,7 @@ async fn launch(
     root: PathBuf,
     server_id: &str,
 ) -> Result<Launch, RpcError> {
-    let w = workspace(app, ws).await?;
-    let r = registry(app, Some(w)).await?;
-    let environment = project_environment(app, ws, &r).await?;
-    // The daemon's environment with the project's on top (as builds get it).
-    let mut env: BTreeMap<String, String> = std::env::vars().collect();
-    env.extend(axiom_env::project::process_env(
-        &environment,
-        std::env::var_os("PATH"),
-    ));
+    let env = process_environment(app, ws).await?;
     let all = app.store_call(|s| s.setting_get(SETTINGS_KEY)).await?;
     let mine = all
         .as_ref()

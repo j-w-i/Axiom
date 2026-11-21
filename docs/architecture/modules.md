@@ -250,7 +250,14 @@ before the task that needs them** (no empty scaffolding).
 - **Responsibility:** PTY terminals: spawn the person's shell (`portable-pty`, behind a `Pty`
   trait), stream UTF-8 output without splitting characters, coalesce it, keep a bounded backlog,
   resize, end the process group.
-- **Depends on:** `protocol`; `portable-pty`, `tokio`, `tracing`, `thiserror`.
+- **Depends on:** `protocol`; `portable-pty`, `tokio` (events), `nix` (signals, Unix), `thiserror`.
+- **Status:** built (M4-TERM-001). Two threads per terminal: one reads the PTY, the other
+  coalesces. A bounded channel between them makes a flooding shell wait instead of growing
+  memory. Close is SIGHUP to the process group, then SIGKILL after 2 s; a signal ends it without
+  an exit code. `axiomd` serves `terminal/*` and relays events to the workspace's clients. Tests:
+  `crates/term/tests/pty.rs`, `crates/axiomd/tests/terminal.rs` (Unix; ConPTY is owed with
+  Windows). `portable-pty` is used directly rather than behind a `Pty` trait: the tests run
+  real PTYs on Linux and macOS.
 - **Rule:** not an agent tool and not gated: a terminal is the person's own shell.
 
 `crates/workspace` gains a `git` module (M4-GIT-001) that runs the `git` program read-only;

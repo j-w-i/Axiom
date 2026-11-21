@@ -10,6 +10,7 @@ members = [
     "crates/build",
     "crates/agent",
     "crates/lsp",
+    "crates/term",
     "crates/axiomd",
     "crates/desktop-bridge",
     "apps/cli",

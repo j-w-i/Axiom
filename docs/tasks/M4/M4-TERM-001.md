@@ -1,8 +1,8 @@
 ---
 id: M4-TERM-001
 title: crates/term: PTY service (portable-pty), terminal/* served
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-22; see handoff
 depends_on: [M4-ARCH-001]
 order: 504
 scope: crates/term/, crates/axiomd/, Cargo.toml, deny.toml (if needed)

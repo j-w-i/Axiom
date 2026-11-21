@@ -6,4 +6,5 @@ pub mod lsp;
 pub mod sessions;
 pub mod settings;
 pub mod task;
+pub mod terminal;
 pub mod workspace;

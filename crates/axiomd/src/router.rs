@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::handlers::{agent, build, env, fs, lsp, sessions, settings, task, workspace};
+use crate::handlers::{agent, build, env, fs, lsp, sessions, settings, task, terminal, workspace};
 use axiom_protocol::{
     agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
     workspace as pws,
@@ -15,6 +15,7 @@ pub fn build_router(app: Arc<App>) -> Router {
         .swap(true, std::sync::atomic::Ordering::SeqCst)
     {
         lsp::spawn_forwarder(&app);
+        terminal::spawn_forwarder(&app);
     }
 
     macro_rules! wire {
@@ -40,6 +41,11 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(axiom_protocol::lsp::Request, lsp::request, ctx);
     wire!(axiom_protocol::lsp::Notify, lsp::notify);
     wire!(axiom_protocol::lsp::Restart, lsp::restart);
+    wire!(axiom_protocol::terminal::Create, terminal::create);
+    wire!(axiom_protocol::terminal::Write, terminal::write);
+    wire!(axiom_protocol::terminal::Resize, terminal::resize);
+    wire!(axiom_protocol::terminal::Close, terminal::close);
+    wire!(axiom_protocol::terminal::List, terminal::list);
     wire!(pfs::ReadFile, fs::read_file);
     wire!(pfs::WriteFile, fs::write_file);
     wire!(pfs::Watch, fs::watch, ctx);
@@ -88,6 +94,7 @@ pub fn build_router(app: Arc<App>) -> Router {
         async move {
             a.stop_all_watchers();
             a.lsp.stop_all().await;
+            a.terminals.close_all();
             a.executor.shutdown().await;
         }
     });
@@ -98,16 +105,7 @@ pub fn build_router(app: Arc<App>) -> Router {
 /// that wires one removes it here; the last M4 backend task leaves this empty. Clients
 /// feature-detect from `initialize.methods` (ADR-0018 §1), which lists only served methods.
 #[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &[
-    "terminal/create",
-    "terminal/write",
-    "terminal/resize",
-    "terminal/close",
-    "terminal/list",
-    "git/status",
-    "git/show",
-    "workspace/search",
-];
+pub const NOT_YET_SERVED: &[&str] = &["git/status", "git/show", "workspace/search"];
 
 #[cfg(test)]
 mod tests {
