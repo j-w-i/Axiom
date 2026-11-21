@@ -77,6 +77,57 @@ fn workspace() -> tempfile::TempDir {
     dir
 }
 
+/// Headless Chrome on `url` with a throw-away profile, and the adapter's capabilities once the
+/// page has connected (`preview/list`), or `None` after 30 s.
+async fn open_page(
+    d: &Daemon,
+    chrome: &Path,
+    ws: &axiom_protocol::WorkspaceId,
+    id: &axiom_protocol::preview::PreviewId,
+    url: &str,
+) -> (
+    tokio::process::Child,
+    tempfile::TempDir,
+    Option<axiom_protocol::inspection::Capabilities>,
+) {
+    let profile = tempfile::tempdir().unwrap();
+    let browser = tokio::process::Command::new(chrome)
+        .args([
+            "--headless=new",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-gpu",
+            "--window-size=1024,768",
+            &format!("--user-data-dir={}", profile.path().display()),
+            url,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut adapter = None;
+    for _ in 0..150 {
+        let l = d
+            .client
+            .request::<List>(WorkspaceRef {
+                workspace_id: ws.clone(),
+            })
+            .await
+            .unwrap();
+        adapter = l
+            .previews
+            .into_iter()
+            .find(|p| &p.preview_id == id)
+            .and_then(|p| p.adapter);
+        if adapter.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    (browser, profile, adapter)
+}
+
 #[tokio::test]
 async fn a_vite_preview_runs_and_its_page_is_inspected() {
     if !fixture().join("node_modules/.bin/vite").is_file()
@@ -120,43 +171,7 @@ async fn a_vite_preview_runs_and_its_page_is_inspected() {
     assert_eq!(again.preview_id, id);
 
     // A real page: headless Chrome, a throw-away profile.
-    let profile = tempfile::tempdir().unwrap();
-    let mut browser = tokio::process::Command::new(&chrome)
-        .args([
-            "--headless=new",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-gpu",
-            "--window-size=1024,768",
-            &format!("--user-data-dir={}", profile.path().display()),
-            &url,
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap();
-
-    // The adapter connects: `preview/state` with its capabilities (level 3: line and column).
-    let mut adapter = None;
-    for _ in 0..150 {
-        let l = d
-            .client
-            .request::<List>(WorkspaceRef {
-                workspace_id: f.id.clone(),
-            })
-            .await
-            .unwrap();
-        adapter = l
-            .previews
-            .into_iter()
-            .find(|p| p.preview_id == id)
-            .and_then(|p| p.adapter);
-        if adapter.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
+    let (mut browser, _profile, adapter) = open_page(&d, &chrome, &f.id, &id, &url).await;
     let caps = adapter.expect("the page's adapter connected");
     assert_eq!(
         caps.source,
@@ -348,5 +363,182 @@ async fn a_vite_preview_runs_and_its_page_is_inspected() {
         std::fs::read(f.path("vite.config.js")).unwrap(),
         config_before
     );
+    let _ = browser.kill().await;
+}
+
+/// The agent's loop over a real page (M5-AGENT-001), with the scripted model: `preview.start`
+/// (the running preview), `ui.selection` (nothing selected), `ui.snapshot` and `ui.inspect` by
+/// stable key (the button's margin), `fs.applyPatch`, then `ui.verify` with the geometry check
+/// stated before the patch → `verified`.
+#[tokio::test]
+async fn the_agent_inspects_patches_and_verifies_a_ui_change() {
+    use axiom_protocol::agent::{
+        AgentEvent, Decision, EventBody, Policy, Send, SendParams, SessionCreate,
+        SessionCreateParams, SetPolicy, TurnEndReason,
+    };
+    use serde_json::json;
+
+    if !fixture().join("node_modules/.bin/vite").is_file()
+        && skip("the fixture's dependencies are not installed (pnpm install in tests/fixtures/inspect-react)")
+    {
+        return;
+    }
+    let Some(chrome) = chrome() else {
+        if skip("no Chrome or Chromium on PATH") {
+            return;
+        }
+        unreachable!();
+    };
+    const BUTTON: &str = "src/App.jsx:11:9#0";
+    const AMOUNT: &str = "src/App.jsx:10:9#0";
+    let data = tempfile::tempdir().unwrap();
+    let script = data.path().join("script.json");
+    let key = |k: &str| json!({"stableKey": k});
+    std::fs::write(
+        &script,
+        json!({"turns": [
+            {"expect": {"userContains": "gap", "systemContains": "ui.verify",
+                        "toolsInclude": ["preview.start", "ui.snapshot", "ui.inspect", "ui.selection", "ui.verify"]},
+             "events": [{"type":"toolCall","id":"c1","name":"preview.start","input":{}}]},
+            {"expect": {"toolResult": {"callId":"c1","contains":"page: connected"}},
+             "events": [{"type":"toolCall","id":"c2","name":"ui.selection","input":{}}]},
+            {"expect": {"toolResult": {"callId":"c2","contains":"Nothing is selected"}},
+             "events": [{"type":"toolCall","id":"c3","name":"ui.snapshot","input":{}}]},
+            {"expect": {"toolResult": {"callId":"c3","contains":format!("key={BUTTON}")}},
+             "events": [{"type":"toolCall","id":"c4","name":"ui.inspect","input":{"stableKey": BUTTON}}]},
+            {"expect": {"toolResult": {"callId":"c4","contains":"css.margin-left: 8px"}},
+             "events": [{"type":"text","text":"Success means button.left == amount.right + 24."},
+                        {"type":"toolCall","id":"c5","name":"fs.applyPatch","input":{
+                 "path":"src/App.jsx",
+                 "edits":[{"search":"marginLeft: 8 }","replace":"marginLeft: 24 }"}]}}]},
+            {"expect": {"toolResult": {"callId":"c5","isError":false}},
+             "events": [{"type":"toolCall","id":"c6","name":"ui.verify","input":{
+                 "assertions":[{"kind":"geometry","node":key(BUTTON),"edge":"left","op":"eq",
+                                "other":{"node":key(AMOUNT),"edge":"right"},"offset":24}],
+                 "target": key(BUTTON)}}]},
+            {"expect": {"toolResult": {"callId":"c6","contains":"verdict: verified"}},
+             "events": [{"type":"text","text":"Verified: the gap is 24 px."}]}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("AXIOM_TEST_SCRIPTED_MODEL", &script);
+    })
+    .await;
+    d.initialize().await;
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Allow,
+            rules: vec![],
+        })
+        .await
+        .unwrap();
+    let dir = workspace();
+    // Checkpoints leave the linked dependencies alone.
+    std::fs::write(dir.path().join(".gitignore"), "node_modules\n").unwrap();
+    let f = d.open_dir(dir).await;
+
+    // The person's side: the preview runs and its page is open.
+    let info = d
+        .client
+        .request::<Start>(StartParams {
+            workspace_id: f.id.clone(),
+            argv: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(info.state, PreviewState::Ready, "{info:?}");
+    let (mut browser, _profile, adapter) = open_page(
+        &d,
+        &chrome,
+        &f.id,
+        &info.preview_id,
+        info.url.as_deref().unwrap(),
+    )
+    .await;
+    adapter.expect("the page's adapter connected");
+
+    let session = d
+        .client
+        .request::<SessionCreate>(SessionCreateParams {
+            workspace_id: Some(f.id.clone()),
+            provider_id: "scripted".into(),
+            model: "scripted".into(),
+            title: None,
+        })
+        .await
+        .unwrap()
+        .session_id;
+    d.client
+        .request::<Send>(SendParams {
+            workspace_id: Some(f.id.clone()),
+            session_id: session.clone(),
+            text: "Make the gap between the amount and the Pay button 24 px.".into(),
+            attachments: vec![],
+            images: vec![],
+            from_turn: None,
+        })
+        .await
+        .unwrap();
+    let mut evs = Vec::new();
+    loop {
+        let v = d
+            .next_notification("agent/event", Duration::from_secs(120))
+            .await;
+        let e: AgentEvent = serde_json::from_value(v).unwrap();
+        if e.session_id != session {
+            continue;
+        }
+        let end = matches!(e.event, EventBody::TurnEnd { .. });
+        evs.push(e);
+        if end {
+            break;
+        }
+    }
+    let errors: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match &e.event {
+            EventBody::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(
+            evs.last().map(|e| &e.event),
+            Some(EventBody::TurnEnd {
+                reason: TurnEndReason::EndTurn
+            })
+        ),
+        "errors: {errors:?}"
+    );
+    let tools: Vec<String> = evs
+        .iter()
+        .filter_map(|e| match &e.event {
+            EventBody::ToolCall { tool, .. } => Some(tool.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            "preview.start",
+            "ui.selection",
+            "ui.snapshot",
+            "ui.inspect",
+            "fs.applyPatch",
+            "ui.verify"
+        ]
+    );
+    assert!(std::fs::read_to_string(f.path("src/App.jsx"))
+        .unwrap()
+        .contains("marginLeft: 24 }"));
+
+    d.client
+        .request::<Stop>(PreviewRef {
+            preview_id: info.preview_id,
+        })
+        .await
+        .unwrap();
     let _ = browser.kill().await;
 }

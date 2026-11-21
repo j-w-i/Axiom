@@ -98,8 +98,20 @@ A tool is a typed operation with a declared effect (`Effect` in `agent.rs`):
 | `env.install` (an issued plan id only) | env | install |
 | `editor.open` (reveal a location: the `agent/reveal` notification) | clients | read |
 | `mcp.<server>.<tool>` (user-configured MCP servers) | MCP client | execute (+ network) |
+| `preview.start` (the dev server with the inspector; gated as the command it runs; returns the URL and whether a page is connected) | preview | execute |
+| `ui.snapshot` (the page's tree: id, type, text, stable key, bounds, best source), `ui.inspect` (one node by stable key or id: properties, accessibility, every source candidate), `ui.selection` (the person's selection in inspect mode, with ancestors) | inspect | read |
+| `ui.verify` (the checks stated before the patch, against the reloaded page; `verified` / `failed` / `inconclusive` and every check) | inspect | read |
 
-Later milestones add `preview.*`, `ui.*` (M5), `lsp.*` (M4), `debug.*` (M6).
+`ui.*` default to the workspace's running preview and refuse another workspace's.
+They are **assertion-first**:
+- the system prompt and `ui.verify`'s description tell the model to decide, before patching, the
+  checks that would show success;
+- the model calls `ui.verify` after `fs.applyPatch` and reports the verdict as it is.
+
+The person's selection reaches a chat turn as an `Attachment`: the selected node's source file
+and lines (the shell's Inspector, M5-UI-001).
+
+Later milestones add `debug.*` (M6).
 
 Tool result rules: results are bounded (`max_result_bytes`, default 32 KiB) with a
 `truncated` flag and a continuation cursor where the tool pages; errors are structured

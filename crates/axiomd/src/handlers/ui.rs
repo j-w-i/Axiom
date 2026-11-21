@@ -153,6 +153,7 @@ pub fn spawn_forwarder(app: &Arc<App>, inspect: &axiom_inspect::Inspect) {
                     let Some(ws) = app.previews.workspace(&preview) else {
                         continue;
                     };
+                    app.previews.set_selection(&preview, chain.clone());
                     let n = SelectedParams {
                         preview_id: preview,
                         chain,
@@ -232,6 +233,8 @@ pub struct Previews {
     inspect: tokio::sync::OnceCell<Arc<axiom_inspect::Inspect>>,
     /// Build errors the dev server printed, with the daemon's time (ms since the epoch).
     errors: std::sync::Mutex<std::collections::HashMap<PreviewId, Vec<(u64, String)>>>,
+    /// The person's latest selection in each page (inspect mode), `chain[0]` the node.
+    selections: std::sync::Mutex<std::collections::HashMap<PreviewId, Vec<UiNode>>>,
 }
 
 impl Previews {
@@ -271,6 +274,10 @@ impl Previews {
     }
 
     pub fn remove(&self, id: &PreviewId) -> Option<PreviewInfo> {
+        self.selections
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(id);
         self.lock().remove(id)
     }
 
@@ -314,6 +321,22 @@ impl Previews {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    pub fn set_selection(&self, id: &PreviewId, chain: Vec<UiNode>) {
+        self.selections
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(id.clone(), chain);
+    }
+
+    /// The person's latest selection in the preview's page (`ui.selection`).
+    pub fn selection(&self, id: &PreviewId) -> Option<Vec<UiNode>> {
+        self.selections
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(id)
+            .cloned()
     }
 
     pub fn of_workspace(&self, ws: &WorkspaceId) -> Vec<PreviewInfo> {

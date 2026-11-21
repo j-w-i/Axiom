@@ -1,6 +1,6 @@
 //! The agent's built-in tools (`docs/protocols/agents.md` §Tools; M3-TOOLS-001): thin adapters,
-//! one per tool, from a validated input to one service call (workspace, exec, build, env) and a
-//! bounded result. The registry and the gate are in `axiom-agent`; nothing here decides policy.
+//! one per tool, from a validated input to one service call (workspace, exec, build, env; preview
+//! and inspect from M5) and a bounded result. The registry and the gate are in `axiom-agent`; nothing here decides policy.
 
 use crate::app::App;
 use crate::handlers::env::{project_environment, registry as env_registry, workspace};
@@ -238,6 +238,46 @@ pub fn registry(app: Weak<App>) -> Registry {
             .boxed()
         },
         |a, c, i, _| editor_open(a, c, i).boxed(),
+    );
+    add(
+        "preview.start",
+        "Start the project's dev server with Axiom's inspector (Vite) and return its URL. The person opens the URL in their browser; ui.* tools work once the page is connected (`adapter` in the result). A second call returns the running preview.",
+        schema_of::<inputs::PreviewStartInput>(),
+        Effect::Execute,
+        |a, c, i| prepare_preview(a, c, i).boxed(),
+        |a, c, i, _| preview_start(a, c, i).boxed(),
+    );
+    add(
+        "ui.snapshot",
+        "The running page's element tree: per node its id, type, text, stable key, bounds (x, y, width x height in CSS px) and source location (file:line:column; `exact` from the build, else a guess with its confidence). Use stable keys, not ids, in ui.inspect and ui.verify: ids change on reload.",
+        schema_of::<inputs::UiSnapshotInput>(),
+        Effect::Read,
+        |_, _, i| async move { parse::<inputs::UiSnapshotInput>(i).map(|_| Targets::default()) }.boxed(),
+        |a, c, i, _| ui_snapshot(a, c, i).boxed(),
+    );
+    add(
+        "ui.inspect",
+        "One element of the running page in detail: bounds, computed layout properties (css.*), accessibility and every source candidate. Name it by `stableKey` (from ui.snapshot or ui.selection) or by `node` id.",
+        schema_of::<inputs::UiInspectInput>(),
+        Effect::Read,
+        |_, _, i| async move { parse::<inputs::UiInspectInput>(i).map(|_| Targets::default()) }.boxed(),
+        |a, c, i, _| ui_inspect(a, c, i).boxed(),
+    );
+    add(
+        "ui.selection",
+        "The element the person selected in the page (Axiom's inspect mode), with its ancestors and source location. Start here when they say \"this\" or \"the selected element\".",
+        schema_of::<inputs::UiSelectionInput>(),
+        Effect::Read,
+        |_, _, i| async move { parse::<inputs::UiSelectionInput>(i).map(|_| Targets::default()) }.boxed(),
+        |a, c, i, _| ui_selection(a, c, i).boxed(),
+    );
+    add(
+        "ui.verify",
+        "Verify a UI change objectively, after the patch. Decide the checks BEFORE patching: what the page must measure if the change worked (e.g. button.left == amount.right + 24; css.padding-left == \"16px\"). Call this after fs.applyPatch: it waits for the reload to settle and returns `verified` (a stated check passed, nothing failed), `failed` (a check failed, a build or runtime error) or `inconclusive` (the element was not found again, or nothing objective was stated). Report the verdict as it is; never claim success on `failed` or `inconclusive`.",
+        schema_of::<inputs::UiVerifyInput>(),
+        Effect::Read,
+        |_, _, i| async move { parse::<inputs::UiVerifyInput>(i).map(|_| Targets::default()) }.boxed(),
+        |a, c, i, _| ui_verify(a, c, i).boxed(),
     );
     register_acp(&mut r, app);
     r
@@ -960,6 +1000,389 @@ async fn editor_open(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<Tool
             "no editor attached"
         },
     ))
+}
+
+// ---------------------------------------------------------------- preview.* and ui.* (M5)
+
+const SNAPSHOT_NODES: u32 = 300;
+const SNAPSHOT_MAX_NODES: u32 = 2000;
+
+/// The command `preview/start` will run, for the gate (the same choice as the handler).
+fn preview_argv(root: &std::path::Path, argv: Option<Vec<String>>) -> Vec<String> {
+    match argv {
+        Some(a) if !a.is_empty() => a,
+        _ if root.join("node_modules/.bin/vite").is_file() => vec!["node_modules/.bin/vite".into()],
+        _ => ["npm", "run", "dev"].map(String::from).to_vec(),
+    }
+}
+
+async fn prepare_preview(
+    app: &Arc<App>,
+    ctx: &ToolCtx,
+    input: &Value,
+) -> Result<Targets, ToolError> {
+    let p: inputs::PreviewStartInput = parse(input)?;
+    let w = ws(app, ctx)?;
+    Ok(Targets {
+        argv: Some(preview_argv(w.root(), p.argv)),
+        ..Default::default()
+    })
+}
+
+fn preview_text(i: &axiom_protocol::preview::PreviewInfo) -> String {
+    let mut t = format!("preview {} ({:?})", i.preview_id.0, i.state);
+    if let Some(u) = &i.url {
+        t.push_str(&format!("\nurl: {u}"));
+    }
+    t.push_str(match &i.adapter {
+        Some(_) => "\npage: connected (ui.* tools are available)",
+        None => "\npage: not connected; ask the person to open the URL in their browser",
+    });
+    if let Some(m) = &i.message {
+        t.push_str(&format!("\n{m}"));
+    }
+    if let Some(o) = &i.output {
+        t.push_str(&format!("\noutput:\n{o}"));
+    }
+    t
+}
+
+async fn preview_start(
+    app: &Arc<App>,
+    ctx: &ToolCtx,
+    input: Value,
+) -> Result<ToolOutput, ToolError> {
+    let p: inputs::PreviewStartInput = parse(&input)?;
+    let info = crate::handlers::preview::start(
+        app.clone(),
+        axiom_protocol::preview::StartParams {
+            workspace_id: ctx.workspace_id.clone(),
+            argv: p.argv,
+        },
+    )
+    .await
+    .map_err(rpc)?;
+    Ok(ToolOutput {
+        output: serde_json::to_value(&info).unwrap_or_default(),
+        text: preview_text(&info),
+        summary: info.url.clone().unwrap_or_else(|| "preview".into()),
+        truncated: false,
+    })
+}
+
+/// The preview a `ui.*` call means: the given one if it is this workspace's, else the
+/// workspace's running preview.
+fn preview_of(
+    app: &App,
+    ctx: &ToolCtx,
+    id: Option<String>,
+) -> Result<axiom_protocol::preview::PreviewId, ToolError> {
+    use axiom_protocol::preview::PreviewState;
+    let mine = app.previews.of_workspace(&ctx.workspace_id);
+    match id {
+        Some(id) => mine
+            .iter()
+            .find(|i| i.preview_id.0 == id)
+            .map(|i| i.preview_id.clone())
+            .ok_or_else(|| {
+                ToolError::new(
+                    ErrorKind::NotFound,
+                    format!("This workspace has no preview {id}."),
+                )
+                .hint("Omit previewId to use the workspace's running preview.")
+            }),
+        None => mine
+            .into_iter()
+            .find(|i| i.state == PreviewState::Ready)
+            .map(|i| i.preview_id)
+            .ok_or_else(|| {
+                ToolError::new(
+                    ErrorKind::NotFound,
+                    "No preview is running in this workspace.",
+                )
+                .hint("Start one with preview.start; the person then opens its URL.")
+            }),
+    }
+}
+
+fn ui_err(e: RpcError) -> ToolError {
+    let kind = e.data.kind;
+    let t = rpc(e);
+    if kind == ErrorKind::AdapterUnavailable {
+        t.hint("Ask the person to open the preview's URL (preview.start returns it) in their browser, then try again.")
+    } else {
+        t
+    }
+}
+
+fn source_text(c: &axiom_protocol::inspection::SourceCandidate) -> String {
+    use axiom_protocol::inspection::MappingMethod;
+    let loc = format!(
+        "{}:{}:{}",
+        c.location.file.0,
+        c.location.line,
+        c.location.column.unwrap_or(1)
+    );
+    if c.method == MappingMethod::BuildInstrumentation && c.confidence >= 1.0 {
+        format!("{loc} (exact)")
+    } else {
+        format!(
+            "{loc} ({}, {:?}, confidence {:.2})",
+            serde_json::to_value(c.relation)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_default(),
+            c.method,
+            c.confidence
+        )
+    }
+}
+
+fn node_line(n: &axiom_protocol::inspection::UiNode) -> String {
+    let mut t = format!("[{}] {}", n.id.0, n.type_name);
+    if let Some(name) = &n.name {
+        t.push_str(&format!(" #{name}"));
+    }
+    if let Some(x) = &n.text {
+        let x: String = x.chars().take(60).collect();
+        t.push_str(&format!(" {x:?}"));
+    }
+    if let Some(k) = &n.stable_key {
+        t.push_str(&format!(" key={k}"));
+    }
+    if let Some(b) = &n.bounds {
+        t.push_str(&format!(
+            " at {},{} {}x{}",
+            round(b.x),
+            round(b.y),
+            round(b.width),
+            round(b.height)
+        ));
+    }
+    if let Some(c) = n.sources.first() {
+        t.push_str(&format!(" src={}", source_text(c)));
+    }
+    t
+}
+
+fn round(v: f64) -> f64 {
+    (v * 10.0).round() / 10.0
+}
+
+async fn ui_snapshot(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOutput, ToolError> {
+    let p: inputs::UiSnapshotInput = parse(&input)?;
+    let preview = preview_of(app, ctx, p.preview_id)?;
+    let max = p
+        .max_nodes
+        .unwrap_or(SNAPSHOT_NODES)
+        .clamp(1, SNAPSHOT_MAX_NODES);
+    let snap = crate::handlers::ui::snapshot(
+        app.clone(),
+        axiom_protocol::ui::SnapshotParams {
+            preview_id: preview.clone(),
+            max_nodes: Some(max),
+            include_invisible: false,
+        },
+    )
+    .await
+    .map_err(ui_err)?;
+    // Indent by depth (parents come before children).
+    let mut depth = std::collections::HashMap::new();
+    let mut text = String::new();
+    for n in &snap.nodes {
+        let d = n
+            .parent
+            .as_ref()
+            .and_then(|p| depth.get(&p.0).copied())
+            .map(|d: usize| d + 1)
+            .unwrap_or(0);
+        depth.insert(n.id.0.clone(), d);
+        text.push_str(&"  ".repeat(d.min(20)));
+        text.push_str(&node_line(n));
+        text.push('\n');
+    }
+    if snap.truncated {
+        text.push_str(&format!("[truncated at {max} nodes]\n"));
+    }
+    let (text, cut) = bound(&text, DEFAULT_MAX_RESULT_BYTES - 1024);
+    Ok(ToolOutput {
+        output: json!({"previewId": preview.0, "nodeCount": snap.nodes.len(), "truncated": snap.truncated || cut}),
+        text,
+        summary: format!("{} nodes", snap.nodes.len()),
+        truncated: snap.truncated || cut,
+    })
+}
+
+/// `text` cut at a line boundary within `max` bytes.
+fn bound(text: &str, max: usize) -> (String, bool) {
+    if text.len() <= max {
+        return (text.to_string(), false);
+    }
+    let mut cut = max;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let head = &text[..cut];
+    let head = head.rfind('\n').map(|i| &head[..=i]).unwrap_or(head);
+    (format!("{head}[truncated]\n"), true)
+}
+
+fn node_detail_text(n: &axiom_protocol::inspection::UiNode) -> String {
+    let mut t = node_line(n);
+    if n.sources.len() > 1 {
+        t.push_str("\nsources:");
+        for c in &n.sources {
+            t.push_str(&format!("\n  {}", source_text(c)));
+        }
+    }
+    if let Some(a) = &n.accessibility {
+        t.push_str(&format!(
+            "\naccessibility: {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ));
+    }
+    if !n.properties.is_empty() {
+        t.push_str("\nproperties:");
+        for (k, v) in &n.properties {
+            let v = v
+                .as_str()
+                .map(String::from)
+                .unwrap_or_else(|| v.to_string());
+            t.push_str(&format!("\n  {k}: {v}"));
+        }
+    }
+    t
+}
+
+async fn ui_inspect(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOutput, ToolError> {
+    use axiom_protocol::inspection::NodeId;
+    let p: inputs::UiInspectInput = parse(&input)?;
+    let preview = preview_of(app, ctx, p.preview_id)?;
+    let node = match (p.node, p.stable_key) {
+        (Some(id), _) => NodeId(id),
+        (None, Some(key)) => {
+            let snap = crate::handlers::ui::snapshot(
+                app.clone(),
+                axiom_protocol::ui::SnapshotParams {
+                    preview_id: preview.clone(),
+                    max_nodes: None,
+                    include_invisible: true,
+                },
+            )
+            .await
+            .map_err(ui_err)?;
+            snap.nodes
+                .into_iter()
+                .find(|n| n.stable_key.as_deref() == Some(key.as_str()))
+                .map(|n| n.id)
+                .ok_or_else(|| {
+                    ToolError::new(
+                        ErrorKind::NotFound,
+                        format!("No element has the key {key}."),
+                    )
+                    .hint("Take a ui.snapshot and use a key from it.")
+                })?
+        }
+        (None, None) => {
+            return Err(ToolError::invalid("Name the element.")
+                .hint("Give `stableKey` (from ui.snapshot or ui.selection) or `node`."))
+        }
+    };
+    let n = crate::handlers::ui::node_details(
+        app.clone(),
+        axiom_protocol::ui::NodeParams {
+            preview_id: preview,
+            node,
+        },
+    )
+    .await
+    .map_err(ui_err)?;
+    let (text, cut) = bound(&node_detail_text(&n), DEFAULT_MAX_RESULT_BYTES - 1024);
+    Ok(ToolOutput {
+        output: serde_json::to_value(&n).unwrap_or_default(),
+        text,
+        summary: n.type_name.clone(),
+        truncated: cut,
+    })
+}
+
+async fn ui_selection(
+    app: &Arc<App>,
+    ctx: &ToolCtx,
+    input: Value,
+) -> Result<ToolOutput, ToolError> {
+    let p: inputs::UiSelectionInput = parse(&input)?;
+    let preview = preview_of(app, ctx, p.preview_id)?;
+    let Some(chain) = app.previews.selection(&preview).filter(|c| !c.is_empty()) else {
+        return Ok(ToolOutput {
+            output: json!({"previewId": preview.0, "selected": null}),
+            text: "Nothing is selected. The person selects an element with Axiom's inspect mode; or find it with ui.snapshot.".into(),
+            summary: "nothing selected".into(),
+            truncated: false,
+        });
+    };
+    let mut text = format!("selected: {}", node_line(&chain[0]));
+    if chain.len() > 1 {
+        text.push_str("\nancestors:");
+        for n in &chain[1..] {
+            text.push_str(&format!("\n  {}", node_line(n)));
+        }
+    }
+    let (text, cut) = bound(&text, DEFAULT_MAX_RESULT_BYTES - 1024);
+    Ok(ToolOutput {
+        output: json!({"previewId": preview.0, "chain": chain}),
+        text,
+        summary: chain[0].type_name.clone(),
+        truncated: cut,
+    })
+}
+
+async fn ui_verify(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOutput, ToolError> {
+    let p: inputs::UiVerifyInput = parse(&input)?;
+    if p.assertions.is_empty() {
+        return Err(ToolError::invalid("No check is stated.").hint(
+            "State what the page must measure if the change worked: a geometry assertion (an edge against another node's edge plus an offset, or a value) or a property assertion (e.g. css.margin-left equals \"24px\").",
+        ));
+    }
+    let preview = preview_of(app, ctx, p.preview_id)?;
+    let report = crate::handlers::ui::verify(
+        app.clone(),
+        axiom_protocol::ui::VerifyParams {
+            preview_id: preview,
+            assertions: p.assertions,
+            target: p.target,
+            timeout_ms: p.timeout_ms,
+            since_ms: None,
+        },
+    )
+    .await
+    .map_err(ui_err)?;
+    let verdict = serde_json::to_value(report.verdict)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let mut text = format!("verdict: {verdict}");
+    for c in &report.checks {
+        let mark = if c.skipped {
+            "skipped"
+        } else if c.passed {
+            "pass"
+        } else {
+            "FAIL"
+        };
+        let kind = serde_json::to_value(c.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_default();
+        text.push_str(&format!("\n{mark} {kind}: {}", c.summary));
+    }
+    let (text, cut) = bound(&text, DEFAULT_MAX_RESULT_BYTES - 1024);
+    Ok(ToolOutput {
+        output: serde_json::to_value(&report).unwrap_or_default(),
+        text,
+        summary: verdict,
+        truncated: cut,
+    })
 }
 
 // ---------------------------------------------------------------- ACP bridge tools (hidden)
