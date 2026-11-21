@@ -7,6 +7,7 @@
 import 'dart:io';
 
 import 'package:axiom_desktop/editor/lsp/lsp_view.dart';
+import 'package:axiom_desktop/shell/palette.dart';
 import 'package:axiom_desktop/state/lsp.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -130,6 +131,89 @@ command = ["fake-lsp"]
     await key(tester, LogicalKeyboardKey.keyI, ctrl: true, shift: true);
     await until(tester, () => !main.text.split('\n').first.endsWith(' '), what: 'formatting');
 
+    // 7. The symbol under the caret is highlighted where it occurs.
+    final lsp = tester.state<LspEditorFeaturesState>(find.byType(LspEditorFeatures).first);
+    main.controller.selection = const CodeLineSelection.collapsed(index: 2, offset: 9);
+    await tester.pump();
+    await until(tester, () => main.highlights.length == 1, what: 'the highlight of total');
+    expect(main.highlights.single.start, (line: 2, character: 8));
+
+    // 8. Ctrl+Shift+Space: the signature, its first parameter active; Esc closes it.
+    main.controller.selection = const CodeLineSelection.collapsed(index: 2, offset: 22);
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.space, ctrl: true, shift: true);
+    await until(
+      tester,
+      () => lsp.signatureLabel == 'value(a: i32, b: i32) -> i32',
+      what: 'the signature',
+    );
+    expect(named('Signature: value(a: i32, b: i32) -> i32'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(lsp.signatureLabel, isNull);
+
+    // 9. Shift+F12 lists the references in both files; one opens there.
+    other.controller.undo(); // the rename's other half (step 4)
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(other.text, contains('fn value()'));
+    main.controller.selection = const CodeLineSelection.collapsed(index: 2, offset: 18);
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.f12, shift: true);
+    await until(tester, () => find.byType(Palette).evaluate().isNotEmpty, what: 'References');
+    expect(find.textContaining('src/main.rs:3'), findsWidgets);
+    expect(find.textContaining('src/other.rs:1'), findsWidgets);
+    await typeFocused(tester, 'other');
+    await tester.pump(const Duration(milliseconds: 100));
+    await key(tester, LogicalKeyboardKey.enter);
+    await until(
+      tester,
+      () =>
+          app.documents.activePath == 'src/other.rs' && app.documents.cursorText.startsWith('Ln 1'),
+      what: 'the reference opened',
+    );
+
+    // 10. Ctrl+Shift+O lists the document's symbols; one goes there.
+    await app.documents.open('src/main.rs');
+    await until(tester, () => app.documents.activePath == 'src/main.rs', what: 'main.rs');
+    await tester.pump(const Duration(milliseconds: 300));
+    main.controller.selection = const CodeLineSelection.collapsed(index: 0, offset: 0);
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.keyO, ctrl: true, shift: true);
+    await until(tester, () => find.byType(Palette).evaluate().isNotEmpty, what: 'Go to Symbol');
+    expect(find.text('helper'), findsOneWidget);
+    expect(find.text('total'), findsOneWidget);
+    await typeFocused(tester, 'total');
+    await tester.pump(const Duration(milliseconds: 100));
+    await key(tester, LogicalKeyboardKey.enter);
+    await until(
+      tester,
+      () => app.documents.cursorText.startsWith('Ln 3, Col 9'),
+      what: 'the symbol',
+      detail: () => app.documents.cursorText,
+    );
+
+    // 11. Ctrl+. offers the server's quick fix; it edits the line.
+    main.controller.selection = const CodeLineSelection.collapsed(index: 3, offset: 6);
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.period, ctrl: true);
+    await until(tester, () => find.text('Add a semicolon').evaluate().isNotEmpty, what: 'actions');
+    await key(tester, LogicalKeyboardKey.enter);
+    await until(
+      tester,
+      () => main.controller.codeLines[3].text == '    ERROR;',
+      what: 'the quick fix',
+    );
+
+    // 12. A tab dragged onto another takes its place.
+    final order = app.documents.docs.map((d) => d.path).toList();
+    expect(order, ['src/main.rs', 'src/other.rs']);
+    Finder tab(String label) => find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}(,|\$)'));
+    final from = tester.getCenter(tab('other.rs').first);
+    final to = tester.getCenter(tab('main.rs').first);
+    await tester.timedDragFrom(from, to - from, const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(app.documents.docs.map((d) => d.path).toList(), ['src/other.rs', 'src/main.rs']);
+
     // 6. The server received the sync and the requests.
     final got = File(log).readAsStringSync();
     for (final m in [
@@ -139,6 +223,11 @@ command = ["fake-lsp"]
       'textDocument/formatting',
       'textDocument/definition',
       'textDocument/completion',
+      'textDocument/references',
+      'textDocument/documentSymbol',
+      'textDocument/signatureHelp',
+      'textDocument/codeAction',
+      'textDocument/documentHighlight',
     ]) {
       expect(got, contains(m), reason: m);
     }

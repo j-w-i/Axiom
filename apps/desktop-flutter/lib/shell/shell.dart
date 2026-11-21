@@ -57,6 +57,10 @@ class _ShellState extends State<Shell> {
   bool _paletteOpen = false;
   String _paletteSeed = '';
   bool _filesMode = false;
+
+  /// A list from the editor (references, symbols, code actions) shown in the palette.
+  ({String label, String inputLabel, String placeholder, String empty, List<Command> items})?
+  _picker;
   bool _promptShown = false;
   bool _conflictShown = false;
 
@@ -69,6 +73,22 @@ class _ShellState extends State<Shell> {
       app.pickFolder = _pickFolder;
       app.openGoToFile = _goToFile;
       app.shellShortcut = _dispatch;
+      app.openPicker =
+          ({
+            required String label,
+            required String inputLabel,
+            required String placeholder,
+            required String empty,
+            required List<Command> items,
+          }) => setState(() {
+            _picker = (
+              label: label,
+              inputLabel: inputLabel,
+              placeholder: placeholder,
+              empty: empty,
+              items: items,
+            );
+          });
       app.documents.addListener(_onDocuments);
     });
   }
@@ -754,6 +774,16 @@ class _ShellState extends State<Shell> {
                   commands: commands(),
                   seed: _paletteSeed,
                   onClose: () => setState(() => _paletteOpen = false),
+                ),
+              if (_picker case final p?)
+                Palette(
+                  key: ValueKey('picker ${p.label}'),
+                  commands: p.items,
+                  label: p.label,
+                  inputLabel: p.inputLabel,
+                  placeholder: p.placeholder,
+                  empty: p.empty,
+                  onClose: () => setState(() => _picker = null),
                 ),
               if (_paletteOpen && _filesMode)
                 Palette(

@@ -37,7 +37,39 @@ List<Underline> underlinesOn(
 }
 
 /// [span] with [underlines] applied.
-TextSpan applyUnderlines(TextSpan span, List<Underline> underlines) {
+TextSpan applyUnderlines(TextSpan span, List<Underline> underlines) => _apply(
+  span,
+  underlines,
+  (style, u) => style.copyWith(
+    decoration: TextDecoration.underline,
+    decorationStyle: TextDecorationStyle.wavy,
+    decorationColor: u.color,
+    decorationThickness: 1.6,
+  ),
+);
+
+/// [span] with the document highlights on its line (the symbol under the caret, elsewhere)
+/// shown as a background.
+TextSpan applyHighlights(TextSpan span, List<({int start, int end})> ranges, Color background) =>
+    _apply(span, [
+      for (final r in ranges) (start: r.start, end: r.end, color: background),
+    ], (style, u) => style.copyWith(backgroundColor: u.color));
+
+/// The ranges of [highlights] (LSP ranges) on line [index].
+List<({int start, int end})> highlightsOn(int index, int length, List<LspRange> highlights) => [
+  for (final r in highlights)
+    if (index >= r.start.line && index <= r.end.line)
+      (
+        start: (index == r.start.line ? r.start.character : 0).clamp(0, length),
+        end: (index == r.end.line ? r.end.character : length).clamp(0, length),
+      ),
+];
+
+TextSpan _apply(
+  TextSpan span,
+  List<Underline> underlines,
+  TextStyle Function(TextStyle style, Underline u) mark,
+) {
   if (underlines.isEmpty) return span;
   final leaves = <(String, TextStyle?)>[];
   void flatten(InlineSpan s, TextStyle? inherited) {
@@ -71,17 +103,7 @@ TextSpan applyUnderlines(TextSpan span, List<Underline> underlines) {
       }
       final piece = text.substring(a - at, b - at);
       children.add(
-        TextSpan(
-          text: piece,
-          style: hit == null
-              ? style
-              : (style ?? const TextStyle()).copyWith(
-                  decoration: TextDecoration.underline,
-                  decorationStyle: TextDecorationStyle.wavy,
-                  decorationColor: hit.color,
-                  decorationThickness: 1.6,
-                ),
-        ),
+        TextSpan(text: piece, style: hit == null ? style : mark(style ?? const TextStyle(), hit)),
       );
     }
     at = end;

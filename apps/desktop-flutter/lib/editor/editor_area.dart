@@ -164,15 +164,32 @@ class _TabStrip extends StatelessWidget {
             container: true,
             child: Row(
               children: [
-                for (final p in paths)
-                  _Tab(
-                    doc: docs.doc(p)!,
-                    selected: p == active,
-                    onSelect: () => group == 1 ? docs.activate(p) : docs.activateSplit(p),
-                    onClose: () => group == 1 ? docs.close(p) : docs.closeInSplit(p),
-                    closeLabel: group == 1
-                        ? 'Close ${titleOf(p)}'
-                        : 'Close ${titleOf(p)} in the right group',
+                for (final (i, p) in paths.indexed)
+                  // A tab is dragged onto another to take its place (the left group's order;
+                  // Ctrl+Shift+PgUp/PgDn by keyboard).
+                  DragTarget<String>(
+                    onWillAcceptWithDetails: (d) => group == 1 && d.data != p,
+                    onAcceptWithDetails: (d) => docs.moveTab(d.data, i),
+                    builder: (context, over, _) {
+                      final tab = _Tab(
+                        doc: docs.doc(p)!,
+                        selected: p == active,
+                        dropTarget: over.isNotEmpty,
+                        onSelect: () => group == 1 ? docs.activate(p) : docs.activateSplit(p),
+                        onClose: () => group == 1 ? docs.close(p) : docs.closeInSplit(p),
+                        closeLabel: group == 1
+                            ? 'Close ${titleOf(p)}'
+                            : 'Close ${titleOf(p)} in the right group',
+                      );
+                      if (group != 1) return tab;
+                      return Draggable<String>(
+                        data: p,
+                        axis: Axis.horizontal,
+                        feedback: Opacity(opacity: 0.85, child: SizedBox(height: 32, child: tab)),
+                        childWhenDragging: Opacity(opacity: 0.4, child: tab),
+                        child: tab,
+                      );
+                    },
                   ),
               ],
             ),
@@ -187,12 +204,16 @@ class _Tab extends StatelessWidget {
   const _Tab({
     required this.doc,
     required this.selected,
+    this.dropTarget = false,
     required this.onSelect,
     required this.onClose,
     required this.closeLabel,
   });
   final Doc doc;
   final bool selected;
+
+  /// A dragged tab is over this one: it would go here.
+  final bool dropTarget;
   final VoidCallback onSelect;
   final VoidCallback onClose;
   final String closeLabel;
@@ -215,7 +236,7 @@ class _Tab extends StatelessWidget {
       if (doc.dirty) 'unsaved',
       if (doc.changedOnDisk) 'changed on disk',
     ].join(', ');
-    return Listener(
+    final tab = Listener(
       onPointerDown: (e) {
         if (e.buttons == kMiddleMouseButton) onClose();
       },
@@ -301,6 +322,14 @@ class _Tab extends StatelessWidget {
           return FocusRing(visible: s.focused, child: tab);
         },
       ),
+    );
+    if (!dropTarget) return tab;
+    return DecoratedBox(
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        border: Border(left: BorderSide(color: c.accent, width: 2)),
+      ),
+      child: tab,
     );
   }
 }
@@ -482,6 +511,7 @@ class _DocViewState extends State<_DocView> {
   Widget build(BuildContext context) {
     final s = app.settings;
     final c = context.colors;
+    widget.doc.highlightColor = c.accentSoft;
     widget.doc.underlineColor = (severity) => switch (severity) {
       1 => c.danger,
       2 => c.warn,

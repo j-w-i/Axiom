@@ -96,6 +96,16 @@ class AppState {
   /// Focuses the AI dock's composer (set by the dock while it is shown).
   VoidCallback? focusDock;
 
+  /// Shows [items] in the palette (references, symbols, code actions; set by the shell).
+  void Function({
+    required String label,
+    required String inputLabel,
+    required String placeholder,
+    required String empty,
+    required List<Command> items,
+  })?
+  openPicker;
+
   /// Focuses the Search page's query (set by the page).
   VoidCallback? focusSearch;
 

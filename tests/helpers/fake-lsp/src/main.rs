@@ -97,7 +97,9 @@ fn main() {
         match method.as_str() {
             "initialize" => reply(json!({"capabilities":{
                 "textDocumentSync":1,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"hoverProvider":true,
-                "renameProvider":true,"documentFormattingProvider":true},
+                "renameProvider":true,"documentFormattingProvider":true,
+                "referencesProvider":true,"documentSymbolProvider":true,"documentHighlightProvider":true,
+                "codeActionProvider":true,"signatureHelpProvider":{"triggerCharacters":["(",","]}},
                 "serverInfo":{"name":"fake-lsp","version":"0"}})),
             "textDocument/didOpen" => {
                 let td = &p["textDocument"];
@@ -215,6 +217,113 @@ fn main() {
                     }
                 }
                 reply(json!({"changes": changes}));
+            }
+            // Every occurrence of the word at the position, in every open document.
+            "textDocument/references" | "textDocument/documentHighlight" => {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let (line, ch) = (
+                    p["position"]["line"].as_u64().unwrap_or(0) as usize,
+                    p["position"]["character"].as_u64().unwrap_or(0) as usize,
+                );
+                let word = docs
+                    .get(uri)
+                    .and_then(|(t, _)| word_at(t, line, ch))
+                    .unwrap_or_default();
+                let range = |l: usize, c: usize| json!({"start":{"line":l,"character":c},"end":{"line":l,"character":c + word.len()}});
+                let mut out = Vec::new();
+                if !word.is_empty() {
+                    if method == "textDocument/references" {
+                        let mut uris: Vec<&String> = docs.keys().collect();
+                        uris.sort();
+                        for u in uris {
+                            for (l, c) in occurrences(&docs[u].0, &word) {
+                                out.push(json!({"uri":u,"range":range(l, c)}));
+                            }
+                        }
+                    } else if let Some((t, _)) = docs.get(uri) {
+                        for (l, c) in occurrences(t, &word) {
+                            out.push(json!({"range":range(l, c),"kind":1}));
+                        }
+                    }
+                }
+                reply(Value::Array(out));
+            }
+            // `fn name` lines as functions, `let name` inside them as their children.
+            "textDocument/documentSymbol" => {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let text = docs.get(uri).map(|(t, _)| t.clone()).unwrap_or_default();
+                let mut out: Vec<Value> = Vec::new();
+                for (i, l) in text.lines().enumerate() {
+                    let t = l.trim_start();
+                    let indent = l.len() - t.len();
+                    for (kw, kind) in [("fn ", 12), ("let ", 13)] {
+                        if let Some(rest) = t.strip_prefix(kw) {
+                            let name: String = rest
+                                .chars()
+                                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                                .collect();
+                            if name.is_empty() {
+                                continue;
+                            }
+                            let c = indent + kw.len();
+                            let r = json!({"start":{"line":i,"character":c},"end":{"line":i,"character":c + name.len()}});
+                            let sym = json!({"name":name,"kind":kind,"range":r,"selectionRange":r,"children":[]});
+                            if kind == 13 {
+                                if let Some(f) = out.last_mut() {
+                                    f["children"].as_array_mut().unwrap().push(sym);
+                                    continue;
+                                }
+                            }
+                            out.push(sym);
+                        }
+                    }
+                }
+                reply(Value::Array(out));
+            }
+            // One quick fix: a line without a trailing `;` gets one.
+            "textDocument/codeAction" => {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let line = p["range"]["start"]["line"].as_u64().unwrap_or(0) as usize;
+                let text = docs.get(uri).map(|(t, _)| t.clone()).unwrap_or_default();
+                let l = text.lines().nth(line).unwrap_or_default();
+                let t = l.trim_end();
+                if t.is_empty() || t.ends_with(';') || t.ends_with('{') || t.ends_with('}') {
+                    reply(json!([]));
+                } else {
+                    reply(
+                        json!([{"title":"Add a semicolon","kind":"quickfix","isPreferred":true,
+                        "edit":{"changes":{uri:[{"range":{"start":{"line":line,"character":t.len()},"end":{"line":line,"character":t.len()}},"newText":";"}]}}}]),
+                    );
+                }
+            }
+            // `value(a: i32, b: i32)`, the active parameter counted from the commas before the
+            // position on its line.
+            "textDocument/signatureHelp" => {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let (line, ch) = (
+                    p["position"]["line"].as_u64().unwrap_or(0) as usize,
+                    p["position"]["character"].as_u64().unwrap_or(0) as usize,
+                );
+                let text = docs.get(uri).map(|(t, _)| t.clone()).unwrap_or_default();
+                let before: String = text
+                    .lines()
+                    .nth(line)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(ch)
+                    .collect();
+                let open = before.rfind('(');
+                match open {
+                    None => reply(Value::Null),
+                    Some(o) => {
+                        let active = before[o..].matches(',').count();
+                        reply(
+                            json!({"signatures":[{"label":"value(a: i32, b: i32) -> i32",
+                            "parameters":[{"label":[6,12]},{"label":[14,20]}]}],
+                            "activeSignature":0,"activeParameter":active}),
+                        );
+                    }
+                }
             }
             "textDocument/formatting" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();

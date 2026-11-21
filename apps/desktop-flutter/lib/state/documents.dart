@@ -55,11 +55,30 @@ class Doc {
     required TextSpan textSpan,
     required TextStyle style,
   }) {
-    if (diagnostics.isEmpty) return textSpan;
+    var span = textSpan;
+    if (highlights.isNotEmpty) {
+      span = applyHighlights(
+        span,
+        highlightsOn(index, codeLine.text.length, highlights),
+        highlightColor,
+      );
+    }
+    if (diagnostics.isEmpty) return span;
     return applyUnderlines(
-      textSpan,
+      span,
       underlinesOn(index, codeLine.text.length, diagnostics, underlineColor),
     );
+  }
+
+  /// The symbol under the caret, everywhere it is in this document (`documentHighlight`).
+  List<LspRange> highlights = const [];
+  Color highlightColor = AxiomColors.dark.accentSoft;
+
+  void setHighlights(List<LspRange> list) {
+    if (list.isEmpty && highlights.isEmpty) return;
+    highlights = list;
+    controller.forceRepaint();
+    _secondary?.forceRepaint();
   }
 
   /// New diagnostics: redraw the lines.

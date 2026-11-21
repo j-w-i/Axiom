@@ -116,7 +116,32 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
 
   CodeLines? _lastLines;
 
+  // signature help
+  ({String label, List<(int, int)> params, int active, String? doc})? _signature;
+  CancelToken? _sigPending;
+
+  // document highlights
+  Timer? _highlightTimer;
+  CancelToken? _highlightPending;
+  CodeLinePosition? _lastCaret;
+
   bool get completing => _anchor != null;
+
+  /// The signature help shown (tests).
+  @visibleForTesting
+  String? get signatureLabel => _signature?.label;
+
+  Map<String, Object?>? get _caps {
+    final c = lsp.servers.where((s) => s.serverId == _server).firstOrNull?.capabilities;
+    return c is Map<String, Object?> ? c : (c is Map ? c.cast<String, Object?>() : null);
+  }
+
+  List<String> _capTriggers(String provider, {List<String> fallback = const []}) {
+    final p = _caps?[provider];
+    return p is Map
+        ? (p['triggerCharacters'] as List? ?? const []).whereType<String>().toList()
+        : fallback;
+  }
 
   /// The labels the popup shows (tests).
   @visibleForTesting
@@ -133,6 +158,9 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   void dispose() {
     widget.controller.removeListener(_onEdit);
     _pending?.cancel();
+    _sigPending?.cancel();
+    _highlightPending?.cancel();
+    _highlightTimer?.cancel();
     _hoverPending?.cancel();
     _quick?.cancel();
     _hoverTimer?.cancel();
@@ -175,6 +203,22 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     final typed = !identical(now, _lastLines);
     _lastLines = now;
     _hide();
+    _scheduleHighlight(edited: typed);
+    if (typed && c.selection.isCollapsed) {
+      final s = c.selection;
+      final line = c.codeLines[s.extentIndex].text;
+      final ch = s.extentOffset > 0 && s.extentOffset <= line.length
+          ? line[s.extentOffset - 1]
+          : '';
+      final sigTriggers = _capTriggers('signatureHelpProvider');
+      if (ch == ')') {
+        _closeSignature();
+      } else if (sigTriggers.contains(ch) || (_signature != null && ch == ',')) {
+        unawaited(signatureHelp());
+      }
+    } else if (_signature != null && c.selection.extentIndex != _lastCaret?.index) {
+      _closeSignature();
+    }
     if (!typed || !c.selection.isCollapsed) {
       if (completing &&
           (c.selection.extentIndex != _anchor!.line || c.selection.extentOffset < _anchor!.start)) {
@@ -329,6 +373,301 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   // ---- navigation and edits ------------------------------------------------------------------
 
   /// F12: the definition, in its file at its place.
+  /// Ctrl+Shift+Space, `(` or `,`: the signature of the call at the caret, its active parameter
+  /// in bold.
+  Future<void> signatureHelp() async {
+    final server = _server;
+    if (server == null) return;
+    _sigPending?.cancel();
+    final cancel = _sigPending = CancelToken();
+    try {
+      final r = await lsp.request(server, 'textDocument/signatureHelp', _docPos(), cancel: cancel);
+      if (!mounted || cancel.isCancelled) return;
+      final sigs = r is Map ? r['signatures'] : null;
+      if (sigs is! List || sigs.isEmpty) {
+        _closeSignature();
+        return;
+      }
+      final at = (r! as Map)['activeSignature'];
+      final sig = sigs[(at is int && at < sigs.length) ? at : 0];
+      if (sig is! Map) return;
+      final label = sig['label'] as String? ?? '';
+      final params = <(int, int)>[];
+      for (final p in sig['parameters'] as List? ?? const []) {
+        final l = p is Map ? p['label'] : null;
+        if (l is List && l.length == 2 && l[0] is int && l[1] is int) {
+          params.add((l[0] as int, l[1] as int));
+        } else if (l is String) {
+          final i = label.indexOf(l);
+          if (i >= 0) params.add((i, i + l.length));
+        }
+      }
+      final ap = sig['activeParameter'] ?? (r as Map)['activeParameter'];
+      final docs = sig['documentation'];
+      setState(() {
+        _lastCaret = widget.controller.selection.extent;
+        _signature = (
+          label: label,
+          params: params,
+          active: ap is int ? ap : 0,
+          doc: docs is String ? docs : (docs is Map ? docs['value'] as String? : null),
+        );
+      });
+    } on DaemonException {
+      // No signature here.
+    }
+  }
+
+  void _closeSignature() {
+    _sigPending?.cancel();
+    if (_signature != null && mounted) setState(() => _signature = null);
+  }
+
+  /// The symbol under the caret, highlighted wherever it is in the document (after a pause).
+  void _scheduleHighlight({bool edited = false}) {
+    _highlightTimer?.cancel();
+    if (edited) widget.doc.setHighlights(const []);
+    if (_caps?['documentHighlightProvider'] == null ||
+        _caps?['documentHighlightProvider'] == false) {
+      return;
+    }
+    _highlightTimer = Timer(const Duration(milliseconds: 250), () => unawaited(_highlight()));
+  }
+
+  Future<void> _highlight() async {
+    final server = _server;
+    if (server == null || !mounted) return;
+    _highlightPending?.cancel();
+    final cancel = _highlightPending = CancelToken();
+    try {
+      final r = await lsp.request(
+        server,
+        'textDocument/documentHighlight',
+        _docPos(),
+        cancel: cancel,
+      );
+      if (!mounted || cancel.isCancelled) return;
+      widget.doc.setHighlights([
+        if (r is List)
+          for (final h in r)
+            if (h is Map) lspRange(h['range']),
+      ]);
+    } on DaemonException {
+      widget.doc.setHighlights(const []);
+    }
+  }
+
+  Map<String, Object?> _diagnosticJson(LspDiagnostic d) => {
+    'range': {
+      'start': {'line': d.range.start.line, 'character': d.range.start.character},
+      'end': {'line': d.range.end.line, 'character': d.range.end.character},
+    },
+    'severity': d.severity,
+    'message': d.message,
+    'source': ?d.source,
+    'code': ?d.code,
+  };
+
+  /// Ctrl+.: the server's code actions for the selection (or the caret's line), in a picker;
+  /// one runs its edit and then its command.
+  Future<void> codeActions() async {
+    final server = _server;
+    if (server == null) return;
+    final c = widget.controller;
+    final sel = c.selection;
+    final start = sel.isCollapsed
+        ? (sel.extentIndex, sel.extentOffset)
+        : (sel.startIndex, sel.startOffset);
+    final end = sel.isCollapsed
+        ? (sel.extentIndex, sel.extentOffset)
+        : (sel.endIndex, sel.endOffset);
+    final diags = [
+      for (final d in widget.doc.diagnostics)
+        if (d.range.start.line <= end.$1 && d.range.end.line >= start.$1) _diagnosticJson(d),
+    ];
+    try {
+      final r = await lsp.request(server, 'textDocument/codeAction', {
+        'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
+        'range': {
+          'start': {'line': start.$1, 'character': start.$2},
+          'end': {'line': end.$1, 'character': end.$2},
+        },
+        'context': {'diagnostics': diags},
+      });
+      if (!mounted) return;
+      final actions = [
+        if (r is List)
+          for (final a in r)
+            if (a is Map && a['title'] is String) a,
+      ];
+      if (actions.isEmpty) {
+        ToastHost.of(context).show('No code actions here.');
+        return;
+      }
+      app.openPicker?.call(
+        label: 'Code actions',
+        inputLabel: 'Code action',
+        placeholder: 'Choose a code action',
+        empty: 'No matching action',
+        items: [
+          for (final (i, a) in actions.indexed)
+            Command(
+              id: 'action:$i',
+              title: a['title']! as String,
+              category: a['isPreferred'] == true ? 'Preferred' : (a['kind'] as String? ?? 'Action'),
+              run: () => unawaited(_runAction(server, a)),
+            ),
+        ],
+      );
+    } on DaemonException catch (e) {
+      if (mounted) ToastHost.of(context).show('Code actions: ${e.message}', kind: ToastKind.error);
+    }
+  }
+
+  Future<void> _runAction(String server, Map<Object?, Object?> a) async {
+    var action = a;
+    // A lazily resolved action.
+    if (action['edit'] == null && action['command'] is! String && action['data'] != null) {
+      try {
+        final r = await lsp.request(server, 'codeAction/resolve', action);
+        if (r is Map) action = r;
+      } on DaemonException {
+        // Use it as it is.
+      }
+    }
+    final edit = action['edit'];
+    if (edit != null) await _applyWorkspaceEdit(edit);
+    final cmd = action['command'];
+    final command = cmd is Map ? cmd : (cmd is String ? action : null);
+    if (command != null && command['command'] is String) {
+      try {
+        await lsp.request(server, 'workspace/executeCommand', {
+          'command': command['command'],
+          'arguments': ?command['arguments'],
+        });
+      } on DaemonException catch (e) {
+        if (mounted) {
+          ToastHost.of(context).show('${a['title']}: ${e.message}', kind: ToastKind.error);
+        }
+      }
+    }
+  }
+
+  Future<void> _applyWorkspaceEdit(Object? edit) async {
+    for (final e in workspaceEdits(edit).entries) {
+      final path = lsp.pathOf(e.key);
+      if (path == null) continue;
+      if (app.documents.doc(path) == null) {
+        await app.documents.open(path, background: true, focus: false);
+      }
+      final d = app.documents.doc(path);
+      if (d != null) applyEdits(d.controller, e.value);
+    }
+  }
+
+  /// Shift+F12: every reference to the symbol at the caret, in a picker; one opens there.
+  Future<void> references() async {
+    final server = _server;
+    if (server == null) return;
+    try {
+      final r = await lsp.request(server, 'textDocument/references', {
+        ..._docPos(),
+        'context': {'includeDeclaration': true},
+      });
+      if (!mounted) return;
+      final locs = <({String path, int line, int column})>[];
+      for (final l in r is List ? r : const []) {
+        if (l is! Map || l['uri'] is! String) continue;
+        final path = lsp.pathOf(l['uri']! as String);
+        if (path == null) continue;
+        final p = lspRange(l['range']).start;
+        locs.add((path: path, line: p.line + 1, column: p.character + 1));
+      }
+      if (locs.isEmpty) {
+        ToastHost.of(context).show('No references found.');
+        return;
+      }
+      String preview(String path, int line) {
+        final d = app.documents.doc(path);
+        if (d == null || line - 1 >= d.controller.codeLines.length) return '';
+        return d.controller.codeLines[line - 1].text.trim();
+      }
+
+      app.openPicker?.call(
+        label: 'References',
+        inputLabel: 'Reference',
+        placeholder: '${locs.length} reference${locs.length == 1 ? '' : 's'}',
+        empty: 'No matching reference',
+        items: [
+          for (final (i, l) in locs.indexed)
+            Command(
+              id: 'ref:$i',
+              title: '${l.path}:${l.line}  ${preview(l.path, l.line)}'.trim(),
+              category: 'Ln ${l.line}, Col ${l.column}',
+              run: () => unawaited(app.documents.open(l.path, line: l.line, column: l.column)),
+            ),
+        ],
+      );
+    } on DaemonException catch (e) {
+      if (mounted) ToastHost.of(context).show('References: ${e.message}', kind: ToastKind.error);
+    }
+  }
+
+  /// Ctrl+Shift+O: the document's symbols, in a picker; one goes there.
+  Future<void> symbols() async {
+    final server = _server;
+    if (server == null) return;
+    try {
+      final r = await lsp.request(server, 'textDocument/documentSymbol', {
+        'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
+      });
+      if (!mounted) return;
+      final out = <({String name, String where, int line, int column})>[];
+      void walk(Object? list, String container) {
+        for (final s in list is List ? list : const []) {
+          if (s is! Map || s['name'] is! String) continue;
+          final name = s['name']! as String;
+          final range =
+              s['selectionRange'] ??
+              s['range'] ??
+              (s['location'] is Map ? (s['location']! as Map)['range'] : null);
+          final p = lspRange(range).start;
+          out.add((
+            name: name,
+            where: container.isEmpty ? (s['containerName'] as String? ?? '') : container,
+            line: p.line + 1,
+            column: p.character + 1,
+          ));
+          walk(s['children'], container.isEmpty ? name : '$container.$name');
+        }
+      }
+
+      walk(r, '');
+      if (out.isEmpty) {
+        ToastHost.of(context).show('No symbols in this file.');
+        return;
+      }
+      final path = widget.doc.path;
+      app.openPicker?.call(
+        label: 'Go to Symbol',
+        inputLabel: 'Symbol',
+        placeholder: 'Symbols in ${path.split('/').last}',
+        empty: 'No matching symbol',
+        items: [
+          for (final (i, s) in out.indexed)
+            Command(
+              id: 'sym:$i',
+              title: s.name,
+              category: s.where.isEmpty ? 'Ln ${s.line}' : '${s.where} · Ln ${s.line}',
+              run: () => unawaited(app.documents.open(path, line: s.line, column: s.column)),
+            ),
+        ],
+      );
+    } on DaemonException catch (e) {
+      if (mounted) ToastHost.of(context).show('Symbols: ${e.message}', kind: ToastKind.error);
+    }
+  }
+
   Future<void> definition() async {
     final server = _server;
     if (server == null) return;
@@ -446,9 +785,10 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     ),
     CodeShortcutEscIntent: CallbackAction<CodeShortcutEscIntent>(
       onInvoke: (_) {
-        if (completing || _hover != null) {
+        if (completing || _hover != null || _signature != null) {
           _close();
           _hide();
+          _closeSignature();
         } else {
           widget.controller.cancelSelection();
         }
@@ -542,12 +882,70 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       );
     }
     final hover = _hover;
+    final sig = _signature;
+    Widget? sigCard;
+    if (sig != null) {
+      final sel = widget.controller.selection;
+      final at = g.at(
+        sel.extentIndex,
+        sel.extentOffset,
+        widget.controller.codeLines[sel.extentIndex].text,
+      );
+      final active = sig.active < sig.params.length ? sig.params[sig.active] : null;
+      final base = t.type.code.copyWith(fontSize: 12.5, color: c.ink2);
+      sigCard = Positioned(
+        left: (at.dx - 24).clamp(0, double.infinity),
+        top: (at.dy - 30).clamp(0, double.infinity),
+        child: Semantics(
+          liveRegion: true,
+          label: 'Signature: ${sig.label}',
+          excludeSemantics: true,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: Sheet(
+              radius: Metrics.radiusRaised,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              child: Text.rich(
+                active == null
+                    ? TextSpan(text: sig.label, style: base)
+                    : TextSpan(
+                        style: base,
+                        children: [
+                          TextSpan(
+                            text: sig.label.substring(0, active.$1.clamp(0, sig.label.length)),
+                          ),
+                          TextSpan(
+                            text: sig.label.substring(
+                              active.$1.clamp(0, sig.label.length),
+                              active.$2.clamp(0, sig.label.length),
+                            ),
+                            style: base.copyWith(color: c.ink, fontWeight: FontWeight.w700),
+                          ),
+                          TextSpan(text: sig.label.substring(active.$2.clamp(0, sig.label.length))),
+                        ],
+                      ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Shortcuts(
       shortcuts: {
         const SingleActivator(LogicalKeyboardKey.space, control: true): const _LspIntent(
           'complete',
         ),
         const SingleActivator(LogicalKeyboardKey.f12): const _LspIntent('definition'),
+        const SingleActivator(LogicalKeyboardKey.f12, shift: true): const _LspIntent('references'),
+        const SingleActivator(LogicalKeyboardKey.period, control: true): const _LspIntent(
+          'actions',
+        ),
+        const SingleActivator(LogicalKeyboardKey.keyO, control: true, shift: true):
+            const _LspIntent('symbols'),
+        const SingleActivator(LogicalKeyboardKey.space, control: true, shift: true):
+            const _LspIntent('signature'),
         const SingleActivator(LogicalKeyboardKey.f2): const _LspIntent('rename'),
         const SingleActivator(LogicalKeyboardKey.keyI, control: true, shift: true):
             const _LspIntent('format'),
@@ -564,6 +962,14 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
                   unawaited(complete());
                 case 'definition':
                   unawaited(definition());
+                case 'references':
+                  unawaited(references());
+                case 'actions':
+                  unawaited(codeActions());
+                case 'symbols':
+                  unawaited(symbols());
+                case 'signature':
+                  unawaited(signatureHelp());
                 case 'rename':
                   unawaited(rename());
                 case 'format':
@@ -579,6 +985,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
           child: Stack(
             children: [
               Positioned.fill(child: widget.builder(context, _overrides())),
+              ?sigCard,
               ?popup,
               if (hover != null)
                 Positioned(
