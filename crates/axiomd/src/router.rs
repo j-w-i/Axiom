@@ -1,6 +1,6 @@
 use crate::app::App;
 use crate::handlers::{
-    agent, build, env, fs, git, lsp, sessions, settings, task, terminal, ui, workspace,
+    agent, build, env, fs, git, lsp, preview, sessions, settings, task, terminal, ui, workspace,
 };
 use axiom_protocol::{
     agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
@@ -33,6 +33,9 @@ pub fn build_router(app: Arc<App>) -> Router {
         }};
     }
 
+    wire!(axiom_protocol::preview::Start, preview::start);
+    wire!(axiom_protocol::preview::Stop, preview::stop);
+    wire!(axiom_protocol::preview::List, preview::list);
     wire!(axiom_protocol::ui::InspectMode, ui::inspect_mode);
     wire!(axiom_protocol::ui::TakeSnapshot, ui::snapshot);
     wire!(axiom_protocol::ui::HitTest, ui::hit_test);

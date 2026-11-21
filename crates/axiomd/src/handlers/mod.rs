@@ -4,6 +4,7 @@ pub mod env;
 pub mod fs;
 pub mod git;
 pub mod lsp;
+pub mod preview;
 pub mod sessions;
 pub mod settings;
 pub mod task;

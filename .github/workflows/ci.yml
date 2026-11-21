@@ -25,10 +25,23 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # crates/desktop-bridge's tests spawn the real daemon binary.
       - run: cargo build -p axiomd
+      # M5-PREVIEW-001: the preview test runs the inspector fixture (React + Vite) in headless
+      # Chrome; required on Linux.
+      - uses: pnpm/action-setup@v4
+        if: runner.os != 'Windows'
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        if: runner.os != 'Windows'
+        with: { node-version: 22 }
+      - name: The inspector fixture's dependencies
+        if: runner.os != 'Windows'
+        working-directory: tests/fixtures/inspect-react
+        run: pnpm install --frozen-lockfile
       # M4-LSP-001: the real rust-analyzer test must run (not skip) on Linux and macOS.
       - run: cargo test --workspace
         env:
           AXIOM_REQUIRE_LSP: ${{ runner.os != 'Windows' && '1' || '' }}
+          AXIOM_REQUIRE_PREVIEW: ${{ runner.os == 'Linux' && '1' || '' }}
       # M2-ENV-003: a real managed Rust install (rustup-init + a minimal toolchain) into a
       # temp data dir with a temp HOME, then uninstall. Needs the internet.
       # On Linux it also installs the `tree` package with apt through a pkexec shim

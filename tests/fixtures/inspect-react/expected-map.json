@@ -1,0 +1,13 @@
+{
+  "$comment": "What the inspector must report for this fixture (M5): exact stamps for host elements, an uncertain owner for the library element.",
+  "exact": {
+    "main.app": "src/App.jsx:7:5",
+    "h1.title": "src/App.jsx:8:7",
+    "section.card": "src/App.jsx:9:7",
+    "span.amount": "src/App.jsx:10:9",
+    "button.pay": "src/App.jsx:11:9"
+  },
+  "uncertain": {
+    "em.badge": { "relation": "owner", "location": "src/App.jsx:7:5", "maxConfidence": 0.59 }
+  }
+}
