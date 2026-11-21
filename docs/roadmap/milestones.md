@@ -184,7 +184,7 @@ nothing else. Provider contract suite passes for all bundled providers.
 
 ## M3 — Agent runtime
 
-**Status (2026-11-21):** planned — 12 task files in `docs/tasks/M3/`; decisions in `docs/decisions/ADR-0015-agent-runtime-m3.md` (accepted under the owner's autonomy instruction); external agents (Claude Code, Codex, Gemini CLI) hosted through ACP moved into M3 by ADR-0016 (M3-ACP-001); Chat is a first-class full-window surface that works without a folder (ADR-0017). Windows deferred.
+**Status (2026-11-22):** complete — all 15 tasks in `docs/tasks/M3/` tested; decisions in ADR-0015 (agent runtime), ADR-0016 (external agents through ACP) and ADR-0017 (Chat, a first-class full-window surface). Exit scenario `e2e/agent.mjs` 13/13 on Linux (both drivers, CI on Ubuntu); P2 +19.6 / +7.5 ms against M2. Owed by the owner: a real local model and real Claude Code / Codex through ACP. Record: `docs/roadmap/verification/M3.md`. Windows deferred.
 
 **Outcome.** A user can converse with a local or remote model that reads the
 workspace, proposes and applies patches under a permission policy, runs

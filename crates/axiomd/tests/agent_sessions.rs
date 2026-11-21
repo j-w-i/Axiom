@@ -373,8 +373,16 @@ async fn agent_cancel_mid_stream_and_mid_tool() {
         .request::<Send>(send_params(Some(&f.id), &sid, "one"))
         .await
         .unwrap();
-    d.next_notification("agent/event", Duration::from_secs(10))
-        .await;
+    // Cancel once the model is streaming (its "Thinking"), not before it was asked: a cancel
+    // that wins the race against the model call leaves the script at its first turn.
+    loop {
+        let v = d
+            .next_notification("agent/event", Duration::from_secs(10))
+            .await;
+        if v["event"]["type"] == "textDelta" {
+            break;
+        }
+    }
     // A second send while running is refused.
     let e = d
         .client

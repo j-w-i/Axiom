@@ -1,14 +1,14 @@
 # Current state
 
-_Last updated: 2026-11-21._
+_Last updated: 2026-11-22._
 
 ## M2 — Environments and builds: complete (2026-11-21)
 
 All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).
 
-## M3 — Agent runtime: planned (2026-11-21)
+## M3 — Agent runtime: complete (2026-11-22)
 
-ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, draft PR j-w-i/Axiom#4. Next task: the first READY `M3-*` by order.
+ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4; merged to main once CI is green, under the owner's standing permission. **Next: M4 (editor depth)**, then M5.
 
 - **M3-ARCH-001 tested (2026-11-21):** protocol 0.3 (`crates/protocol/src/agent.rs`: 14 methods, 4 notifications, 3 error kinds, optional `authToken`/`capabilities` on initialize); `agents.md` frozen; `agent`/`cli` edges. `axiomd::NOT_YET_SERVED` lists the agent methods until wired.
 - **M3-MODEL-001 tested (2026-11-21):** `crates/agent` with the message model, `ModelProvider`, an in-house SSE parser, the Anthropic Messages adapter (text, tools, opaque thinking, errors, cancel) and `ScriptedProvider`; tested against a loopback fixture server.
@@ -24,6 +24,7 @@ ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cl
 - **M3-UI-001 tested (2026-11-21):** Chat — a full-window surface on the rail that works with no folder: conversation list (scope, search, rename, delete), Markdown + Monaco-coloured code, streaming, edit/regenerate, images, model picker. e2e `chat.mjs` 9/9 (in the default suites), a11y S20, shots S20/S20b.
 - **M3-UI-002 tested (2026-11-22):** the AI dock beside the editor (Mod+L), the approval card (diff, Allow once / for session / Deny, Esc), approvals from elsewhere in a stack, the rail badge, diff blocks, checkpoint Restore with the conflict dialog; the desktop bridge speaks 0.3 with approvals. e2e `dock.mjs` 7/7, a11y S21, shots S21.
 - **M3-UI-003 tested (2026-11-22):** first-run model setup in Chat (API key or server, local servers, agents) and Settings → Models; the key never reaches the webview. e2e `models.mjs` 9/9 against a fake OpenAI-compatible server, S22/S23 a11y.
+- **M3-QA-001 tested (2026-11-22):** the exit scenario `e2e/agent.mjs` (13/13, both Linux drivers, CI on Ubuntu): Chat with no folder by keyboard (first-run setup, Markdown, edit, regenerate, pasted image), "add a function and fix the build" through tools with real cargo, the checkpoint before the first write, a denied command, Restore, resume after restart, an MCP server's tools, an ACP agent under the gate. P2 against M2 +19.6 / +7.5 ms. Record: `verification/M3.md`. Owed: a real local model, real Claude Code / Codex (owner).
 
 
 

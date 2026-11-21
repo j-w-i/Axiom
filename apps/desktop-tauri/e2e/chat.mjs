@@ -96,8 +96,10 @@ try {
     JSON.stringify(shape),
   );
   check("2b the conversation is titled from the first message", shape.title === "Please show some markdown", shape.title);
-  await new Promise((r) => setTimeout(r, 400)); // Monaco colouring is coalesced
-  const coloured = await wd.exec(`return !!document.querySelector('.code-block__body span[class^="mtk"]')`);
+  // Monaco colouring is coalesced and loads its tokenizer on first use (slower on CI runners).
+  const coloured = await wd
+    .waitFor(`return !!document.querySelector('.code-block__body span[class^="mtk"]')`, [], 10000, "Monaco colouring")
+    .then(() => true, () => false);
   check("2c the code block is coloured by Monaco", coloured);
   writeFileSync(join(SHOTS, "chat-answer.png"), Buffer.from(await wd.screenshot(), "base64"));
 

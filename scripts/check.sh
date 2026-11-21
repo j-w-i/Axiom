@@ -69,6 +69,7 @@ if [[ "$what" == e2e ]]; then
   step "tauri shell: end-to-end (headless)"
   cargo build -p axiomd
   apps/desktop-tauri/scripts/e2e.sh --driver all
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all agent.mjs   # the M3 exit scenario
 fi
 
 # Packaging, as an installed copy behaves: unpack the package, launch it with no

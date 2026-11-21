@@ -949,6 +949,15 @@ function Composer({
     }
     area.current?.focus();
   }, [conversation]);
+  // When the composer becomes usable (the first-run setup just finished and unmounted the
+  // control that had focus), the keyboard continues here instead of at the page.
+  const wasDisabled = useRef(disabled);
+  useEffect(() => {
+    const was = wasDisabled.current;
+    wasDisabled.current = disabled;
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (was && !disabled && lost) area.current?.focus();
+  }, [disabled]);
   const rows = Math.min(8, Math.max(1, text.split("\n").length));
   const note = problem || error || (images.length > 0 && !imagesOk ? `${modelName} cannot see images; it will be told one was attached.` : "");
   return (

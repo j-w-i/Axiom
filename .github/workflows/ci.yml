@@ -126,6 +126,14 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: scripts/e2e.sh --no-build --driver external e2e/env.mjs
+      # The M3 exit scenario (M3-QA-001): Chat with no folder by keyboard against a fake
+      # OpenAI-compatible server; "add a function and fix the build" through tools with the
+      # scripted model and real cargo, checkpoints, a denied command, resume after a restart; an
+      # MCP server's tools and an ACP agent (tests/helpers). Both Linux drivers.
+      - name: End-to-end, M3 exit scenario (agent.mjs)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver all e2e/agent.mjs
 
       # ---- packages ---------------------------------------------------------------
       - name: Package
