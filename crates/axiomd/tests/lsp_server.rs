@@ -1,5 +1,7 @@
 //! The language-server supervisor (`axiom-lsp`) against tests/helpers/fake-lsp (M4-LSP-001).
 //! Here rather than in `crates/lsp` because the helper binary is found next to `axiomd`.
+// Unix only for now: Windows support is deferred.
+#![cfg(unix)]
 
 use axiom_lsp::{Definition, Event, LspError, Manager};
 use axiom_protocol::lsp::ServerState;

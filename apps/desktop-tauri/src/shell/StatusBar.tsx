@@ -3,8 +3,10 @@
 
 import { useSyncExternalStore } from "react";
 import type { DaemonState } from "../daemon/types";
+import type { GitStore } from "../state/git";
 import type { LspStore } from "../state/lsp";
 import { parseHint, useHint } from "../ui/hint";
+import * as Icon from "../ui/icons";
 import { Kbd, Led, type LedState } from "../ui/primitives";
 import type { ShellContext } from "./actions";
 import "../styles/components/statusbar.css";
@@ -59,6 +61,7 @@ export function StatusBar({ ctx, daemon }: { ctx: ShellContext; daemon: DaemonSt
           </span>
         )}
       </span>
+      {ws.id && <Branch git={ctx.app.git} onShow={() => ctx.setDestination("scm")} />}
       {docs.activePath && <LanguageServer lsp={ctx.app.lsp} path={docs.activePath} />}
       {docs.activePath && docs.cursorText && <span className="sb__seg">{docs.cursorText}</span>}
       {docs.activePath && <span className="sb__seg">UTF-8</span>}
@@ -94,5 +97,24 @@ function LanguageServer({ lsp, path }: { lsp: LspStore; path: string }) {
       <Led state={s.state === "ready" && !progress ? "on" : "run"} />
       {s.state === "ready" ? (progress ? `${s.serverId}: ${progress}` : s.serverId) : `${s.serverId}: starting…`}
     </span>
+  );
+}
+
+/** The repository's branch (M4-GIT-002): name or detached commit, ahead/behind; opens Source
+ * Control. Nothing outside a repository. */
+function Branch({ git, onShow }: { git: GitStore; onShow: () => void }) {
+  const s = useSyncExternalStore(git.subscribe, git.getSnapshot, git.getSnapshot);
+  const st = s.status;
+  if (!st?.repo) return null;
+  const name = st.branch ?? `detached at ${st.head ?? "?"}`;
+  const ab = `${(st.ahead ?? 0) > 0 ? ` ↑${st.ahead}` : ""}${(st.behind ?? 0) > 0 ? ` ↓${st.behind}` : ""}`;
+  const changes = st.files?.length ?? 0;
+  return (
+    <button type="button" className="sb__seg sb__seg--button" data-testid="git-branch" data-hint={`Branch ${name}${changes ? `, ${changes} changed file${changes === 1 ? "" : "s"}` : ""} — show Source Control`} onClick={onShow}
+      aria-label={`Branch ${name}${ab ? `,${(st.ahead ?? 0) > 0 ? ` ${st.ahead} ahead` : ""}${(st.behind ?? 0) > 0 ? ` ${st.behind} behind` : ""}` : ""}${changes ? `, ${changes} changed` : ""}`}>
+      <Icon.Branch width={12} height={12} aria-hidden="true" />
+      {name}
+      {ab}
+    </button>
   );
 }

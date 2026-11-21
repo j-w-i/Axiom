@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject, type WheelEvent } from "react";
 import type { Doc, DocumentsStore } from "../state/documents";
 import type { LspStore } from "../state/lsp";
+import type { GitState, GitStore } from "../state/git";
+import "../styles/components/scm.css";
 import * as Icon from "../ui/icons";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { glyphFor } from "./Explorer";
@@ -13,9 +15,13 @@ import "../styles/components/tabs.css";
 // Monaco is ~4 MB of JS: it loads when the first workspace opens, not at
 // startup, so cold start and idle memory do not pay for it.
 const MonacoHost = lazy(() => import("./MonacoHost"));
+const DiffHost = lazy(() => import("./DiffHost"));
+const NO_GIT = { status: null, marks: {}, folders: {}, diff: null } as GitState;
+const noSub = () => () => {};
 
-export function EditorArea({ documents, lsp, mod }: { documents: DocumentsStore; lsp?: LspStore; mod: string }) {
+export function EditorArea({ documents, lsp, git, mod }: { documents: DocumentsStore; lsp?: LspStore; git?: GitStore; mod: string }) {
   const s = useSyncExternalStore(documents.subscribe, documents.getSnapshot);
+  const g = useSyncExternalStore(git?.subscribe ?? noSub, git?.getSnapshot ?? (() => NO_GIT), () => NO_GIT);
   // Load Monaco only once a document exists (sticky), after the frame that
   // shows the explorer: parsing ~4 MB of editor code must not delay first paint.
   const [wantEditor, setWantEditor] = useState(false);
@@ -27,12 +33,13 @@ export function EditorArea({ documents, lsp, mod }: { documents: DocumentsStore;
   const active = s.docs.find((d) => d.path === s.activePath);
   return (
     <>
-      <TabStrip documents={documents} docs={s.docs} activePath={s.activePath} />
+      <TabStrip documents={documents} docs={s.docs} activePath={s.activePath} marks={g.marks} />
       {active && <Breadcrumbs path={active.path} />}
       <div className="editor-area">
         <ErrorBoundary label="editor">
           <Suspense fallback={null}>
-            {wantEditor && <MonacoHost documents={documents} lsp={lsp} hidden={s.docs.length === 0} />}
+            {wantEditor && <MonacoHost documents={documents} lsp={lsp} git={git} hidden={s.docs.length === 0} />}
+            {git && g.diff && <DiffHost key={g.diff} git={git} documents={documents} path={g.diff} />}
           </Suspense>
         </ErrorBoundary>
         {s.docs.length === 0 && (
@@ -253,7 +260,7 @@ function useTabDrag(strip: RefObject<HTMLDivElement | null>, docs: Doc[], docume
  * tab a raised key merging into the editor, and one brass lit edge placed over it by transform
  * (written to the DOM, no React state: a resize or activation costs no extra commit).
  */
-function TabStrip({ documents, docs, activePath }: { documents: DocumentsStore; docs: Doc[]; activePath: string }) {
+function TabStrip({ documents, docs, activePath, marks = {} }: { documents: DocumentsStore; docs: Doc[]; activePath: string; marks?: GitState["marks"] }) {
   const strip = useRef<HTMLDivElement>(null);
   const glide = useRef<HTMLSpanElement>(null);
   const placed = useRef<{ path: string; count: number } | null>(null);
@@ -350,6 +357,7 @@ function TabStrip({ documents, docs, activePath }: { documents: DocumentsStore; 
             title={d.path + (d.changedOnDisk ? " — changed on disk" : "")}
             data-path={d.path}
             data-dirty={d.dirty}
+            data-git={marks[d.path]?.kind}
             data-hint={`${d.path}${d.dirty ? " (unsaved)" : ""} — Mod+Tab`}
             onClick={() => documents.activate(d.path)}
             onAuxClick={(e) => e.button === 1 && documents.close(d.path)}
@@ -360,6 +368,14 @@ function TabStrip({ documents, docs, activePath }: { documents: DocumentsStore; 
               {glyph.label}
             </span>
             <span className="tab__title">{d.title}</span>
+            {marks[d.path] && (
+              <>
+                <span className="tab__git" aria-hidden="true">
+                  {marks[d.path]!.letter}
+                </span>
+                <span className="visually-hidden">, {marks[d.path]!.word}</span>
+              </>
+            )}
             {d.changedOnDisk && <span className="tab__badge">changed on disk</span>}
             <span
               className="tab__close"

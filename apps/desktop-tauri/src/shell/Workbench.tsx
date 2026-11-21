@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
 import { ChatPage, ChatSide } from "../components/Chat";
 import { ModelSetup } from "../components/Models";
+import { SourceControlSide } from "../components/SourceControl";
 import { shellStorage } from "../state/shell-storage";
 import { EditorArea } from "../components/EditorArea";
 import { attentionCount, EnvironmentPage, EnvironmentsSide } from "../components/Environments";
@@ -107,6 +108,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
   const { ws, ready, destination } = ctx;
   const envPage = destination === "environments";
   const chatPage = destination === "chat";
+  const scmSide = destination === "scm" && !!ws.id;
   const page = envPage || chatPage;
   const root = useRef<HTMLDivElement>(null);
   const dirtyPaths = useMemo(() => new Set(ctx.docs.docs.filter((d) => d.dirty).map((d) => d.path)), [ctx.docs.docs]);
@@ -141,12 +143,13 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
         subscribe={environments.subscribe}
         chatAttention={() => agent.getSnapshot().approvals.length}
         chatSubscribe={agent.subscribe}
+        scm={!!ws.id}
       />
       {side.mounted && (
         <>
           <Panel
             className="sidebar motion-in-left"
-            title={envPage ? "Environments" : chatPage ? "Chat" : "Files"}
+            title={envPage ? "Environments" : chatPage ? "Chat" : scmSide ? "Source Control" : "Files"}
             region="files"
             phase={side.phase}
             meta={chatPage ? undefined : ws.name || undefined}
@@ -160,6 +163,10 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
                   <IconButton label="Detect toolchains again" onClick={() => void environments.refresh()}>
                     <Icon.Refresh />
                   </IconButton>
+                ) : scmSide ? (
+                  <IconButton label="Read the repository again" onClick={() => void ctx.app.git.refresh()}>
+                    <Icon.Refresh />
+                  </IconButton>
                 ) : (
                   <IconButton label="Refresh explorer" onClick={() => workspace.applyChanges([""])}>
                     <Icon.Refresh />
@@ -169,9 +176,10 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             }
           >
             {/* The explorer stays mounted (expansion, scroll and its active row survive). */}
-            <div className="sidebar__view" hidden={page}>
-              <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} onReopen={() => documents.requestOpenFolder(ws.root)} />
+            <div className="sidebar__view" hidden={page || scmSide}>
+              <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} git={ctx.app.git} onReopen={() => documents.requestOpenFolder(ws.root)} />
             </div>
+            {scmSide && <SourceControlSide git={ctx.app.git} onOpenFile={(p) => (ctx.app.git.closeDiff(), documents.open(p))} />}
             {envPage && <EnvironmentsSide store={environments} />}
             {chatPage && <ChatSide store={ctx.app.agent} workspaceName={ws.id ? ws.name : ""} />}
           </Panel>
@@ -193,14 +201,15 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
           {/* The editor stays mounted (Monaco keeps its state) while the Environments page shows. */}
           <div className="editor-column__files" hidden={page}>
             {ws.id || ws.opening ? (
-              <EditorArea documents={documents} lsp={ctx.app.lsp} mod={MOD} />
+              <EditorArea documents={documents} lsp={ctx.app.lsp} git={ctx.app.git} mod={MOD} />
             ) : (
               <Welcome recent={ws.recent} ready={ready} onOpenFolder={() => void ctx.openFolder()} onOpenRecent={(r) => documents.requestOpenFolder(r)} onStartChat={() => ctx.setDestination("chat")} mod={MOD} />
             )}
           </div>
           {envPage && <EnvironmentPage store={environments} hasWorkspace={!!ws.id} onOpenFolder={() => void ctx.openFolder()} />}
           {chatPage && (
-            <ChatPage store={ctx.app.agent} hasWorkspace={!!ws.id} dark={ctx.dark} onOpenLink={(url) => ctx.app.documents.openExternal(url)} setup={<ModelSetup store={ctx.app.agent} hasWorkspace={!!ws.id} />} />
+            <ChatPage store={ctx.app.agent} hasWorkspace={!!ws.id} dark={ctx.dark} onOpenLink={(url) => ctx.app.documents.openExternal(url)}
+              onOpenDiff={ws.id ? (p) => (ctx.setDestination("files"), ctx.app.git.openDiff(p)) : undefined} setup={<ModelSetup store={ctx.app.agent} hasWorkspace={!!ws.id} />} />
           )}
         </div>
         {/* Chat is a full-window surface: no console (its visibility setting is untouched). */}
@@ -250,7 +259,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             onCommit={(d) => store.update((l) => ({ ...l, dock: d }))}
           />
           <aside className="dock motion-in-right" data-region="dock" data-phase={dock.phase} aria-label="AI dock">
-            <ChatPage store={agent} hasWorkspace dark={ctx.dark} variant="dock" onOpenLink={(url) => ctx.app.documents.openExternal(url)} setup={<ModelSetup store={agent} hasWorkspace />} />
+            <ChatPage store={agent} hasWorkspace dark={ctx.dark} variant="dock" onOpenLink={(url) => ctx.app.documents.openExternal(url)} onOpenDiff={(p) => ctx.app.git.openDiff(p)} setup={<ModelSetup store={agent} hasWorkspace />} />
           </aside>
         </>
       )}

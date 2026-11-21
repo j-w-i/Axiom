@@ -3,6 +3,10 @@
 //! workspace's clients, errors, reads outside the workspace, and closing the workspace. Then the
 //! real rust-analyzer, where it is installed (CI installs it).
 
+// Unix only for now: Windows (paths in `file://` URIs, `.cmd` launchers) is deferred with the
+// rest of Windows support.
+#![cfg(unix)]
+
 mod common;
 
 use axiom_protocol::fs::{ReadFile, ReadFileParams};

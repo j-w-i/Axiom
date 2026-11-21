@@ -161,6 +161,25 @@ only by the failure status line and error rows. CSS in `styles/components/consol
   reload the terminals come back with their backlog (`terminal/list`).
 - **Not done.** Links in the terminal are not clickable yet (no link addon).
 
+**Git (M4-GIT-002).**
+- **Source Control.** The rail gains a destination when a folder is open (branch icon). Its side
+  bar page shows the branch (↑ahead ↓behind) and the changes, grouped as Conflicts, Staged,
+  Changes and Untracked. A row is a button: Enter opens the diff, Shift+Enter the file, and
+  ↑/↓/Home/End move. It is read-only in M4.
+- **Explorer and tabs.** A changed file shows its letter (M, A, D, R, U, C) in the git colour
+  and its name in that colour: added and untracked `--ok-text`, modified and renamed `--warn`,
+  deleted and conflicted `--danger`. The state is also in the accessible name (", modified").
+  A folder holding changes takes the colour of the most severe change inside. A tab shows the
+  same letter.
+- **Gutter.** Added and modified lines get a 3 px bar, deleted lines a small wedge, from a line
+  diff of the buffer against HEAD, recomputed 300 ms after typing stops. The overview ruler
+  shows the same marks.
+- **Diff view.** It sits over the editor area: a bar with "<name> HEAD ↔ Working Tree", Open the
+  file and Close (Esc), above Monaco's diff editor. It is side by side, or inline when narrow;
+  the right side is the file's own buffer, editable. It opens from Source Control and from a
+  chat diff block's "Open in diff editor". It is not a tab and is not restored after a restart.
+- **Status bar.** A branch segment opens Source Control.
+
 **Problems (M4-LSP-002).** The Problems view lists the latest run of each provider task and the
 language servers' diagnostics together, grouped by file, each row labelled with its source in a
 muted mono label (`rustc`, `rustc (rust-analyzer)`, `typescript (typescript-language-server)`);

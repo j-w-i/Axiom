@@ -24,6 +24,11 @@ const ctx = {
       serverForPath: () => ({ serverId: "rust-analyzer", providerId: "rust", languages: ["rust"], state: "failed", detail: "It crashed." }),
       restart: async () => {},
     },
+    // A repository on branch main, 2 ahead (M4-GIT-002): the branch segment is a button.
+    git: {
+      subscribe: () => noop,
+      getSnapshot: () => ({ status: { repo: true, branch: "main", ahead: 2, behind: 0, files: [] }, marks: {}, folders: {}, diff: null }),
+    },
   },
   ready: true,
   hasDoc: true,
