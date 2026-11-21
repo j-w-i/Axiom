@@ -28,6 +28,7 @@ export function allCommands(ctx: ShellContext): CommandEntry[] {
     { id: "sidebar", group: "View", label: "Toggle Side Bar", shortcut: `${MOD}+B`, run: ctx.toggleSidebar },
     { id: "panel", group: "View", label: "Toggle Panel", shortcut: `${MOD}+J`, run: ctx.togglePanel },
     { id: "dock", group: "View", label: "Toggle AI Dock", shortcut: `${MOD}+L`, run: ctx.toggleDock, enabled: !!ws.id },
+    { id: "terminal", group: "View", label: "Show Terminal", shortcut: `${MOD}+Shift+\``, run: ctx.showTerminal, enabled: !!ws.id },
     { id: "resetLayout", group: "View", label: "Reset Layout", run: ctx.resetLayout },
     { id: "theme", group: "View", label: dark ? "Switch to Light Theme" : "Switch to Dark Theme", run: () => void settings.setValue("appearance.theme", dark ? "light" : "dark") },
     { id: "run", group: "Run", label: "Run Command…", shortcut: `${MOD}+Shift+R`, run: ctx.focusRun, enabled: !!ws.id },

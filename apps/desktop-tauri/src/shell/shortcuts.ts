@@ -36,6 +36,8 @@ export function useAppShortcuts(ctx: ShellContext): void {
       else if (mod && !e.shiftKey && !e.altKey && e.code === "Digit0") focusRegion("files", ctx);
       else if (mod && !e.shiftKey && !e.altKey && e.code === "Digit1") focusRegion("editor", ctx);
       else if (mod && !e.shiftKey && !e.altKey && e.code === "Backquote") focusRegion("console", ctx);
+      // M4-TERM-002: the Terminal view (Mod+` stays the console region, EDITOR-002).
+      else if (mod && e.shiftKey && !e.altKey && e.code === "Backquote") { if (wsId) ctx.showTerminal(); }
       else if (e.key === "F5" && !e.shiftKey) { if (tasks.canRun) tasks.rerunLast(); }
       else if (e.key === "F5" && e.shiftKey) tasks.stop();
       else handled = false;

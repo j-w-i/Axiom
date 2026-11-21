@@ -1,8 +1,8 @@
 ---
 id: M4-TERM-002
 title: Terminal view in the console (xterm.js), themes, tabs, Mod+`
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-22; see handoff
 depends_on: [M4-TERM-001]
 order: 505
 scope: apps/desktop-tauri/src/ (console, terminal component, tokens generator), apps/desktop-tauri/package.json, apps/desktop-tauri/e2e/terminal.mjs, apps/desktop-tauri/tests/

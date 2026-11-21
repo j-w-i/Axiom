@@ -71,6 +71,7 @@ if [[ "$what" == e2e ]]; then
   apps/desktop-tauri/scripts/e2e.sh --driver all
   apps/desktop-tauri/scripts/e2e.sh --no-build --driver all agent.mjs   # the M3 exit scenario
   apps/desktop-tauri/scripts/e2e.sh --no-build --driver all lsp.mjs     # language servers (M4)
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all terminal.mjs  # the terminal (M4)
 fi
 
 # Packaging, as an installed copy behaves: unpack the package, launch it with no

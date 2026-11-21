@@ -58,8 +58,13 @@ export function useLayout() {
     s.update((l) => (l.panelVisible ? l : { ...l, panelVisible: true }));
     setTimeout(() => panelRef.current?.focusCommand(), 0);
   };
+  /** Mod+Shift+`: the console's Terminal view, focused (a terminal is started if there is none). */
+  const showTerminal = () => {
+    s.update((l) => (l.panelVisible ? l : { ...l, panelVisible: true }));
+    setTimeout(() => panelRef.current?.showTerminal(), 0);
+  };
   const resetLayout = () => s.update(() => defaultLayout(windowSize()));
-  return { store: s, layout: { sidebarVisible, panelVisible, dockVisible }, panelRef, toggleSidebar, togglePanel, toggleDock, focusRun, resetLayout };
+  return { store: s, layout: { sidebarVisible, panelVisible, dockVisible }, panelRef, toggleSidebar, togglePanel, toggleDock, focusRun, showTerminal, resetLayout };
 }
 
 export type LayoutHandle = ReturnType<typeof useLayout>;
@@ -220,6 +225,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
                   tasks={tasks}
                   workspace={workspace}
                   problems={ctx.app.problems}
+                  terminals={ctx.app.terminals}
                   ready={ready}
                   onHide={ctx.togglePanel}
                   onOpenProblem={(d) => d.location && documents.openAt(d.location.file, d.location.line, d.location.column ?? 1)}

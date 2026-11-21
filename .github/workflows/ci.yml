@@ -133,6 +133,12 @@ jobs:
       # OpenAI-compatible server; "add a function and fix the build" through tools with the
       # scripted model and real cargo, checkpoints, a denied command, resume after a restart; an
       # MCP server's tools and an ACP agent (tests/helpers). Both Linux drivers.
+      # M4-TERM-002: the integrated terminal (a shell in a PTY). Linux and macOS; Windows (ConPTY)
+      # is deferred with the rest of Windows.
+      - name: End-to-end, terminal (terminal.mjs)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/e2e.sh --no-build --driver all e2e/terminal.mjs
       # M4-LSP-002: language servers in the editor. fake-lsp always; the real rust-analyzer and
       # typescript-language-server must run here (AXIOM_REQUIRE_LSP=1 fails their absence).
       - name: Language servers for the end-to-end run (Linux)

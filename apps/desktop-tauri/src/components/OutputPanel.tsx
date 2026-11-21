@@ -15,28 +15,36 @@ import { ContextMenu } from "../ui/overlays";
 import { Panel } from "../ui/panel";
 import { Count, IconButton, Led, type LedState } from "../ui/primitives";
 import { ProblemsView } from "./Problems";
+import { focusTerminal, TerminalView } from "./TerminalView";
+import type { TerminalsStore } from "../state/terminals";
 import "../styles/components/console.css";
 
 const ROW_H = 18;
 
 export interface OutputPanelHandle {
   focusCommand(): void;
+  /** Shows the Terminal view and focuses its terminal (one is started if there is none). */
+  showTerminal(): void;
 }
 
-export type ConsoleView = "output" | "problems";
+export type ConsoleView = "output" | "problems" | "terminal";
+const VIEWS: ConsoleView[] = ["output", "problems", "terminal"];
 
-/** Where ←/→/Home/End move between the view tabs. */
-export function viewTarget(key: string): ConsoleView | null {
-  if (key === "ArrowLeft" || key === "Home") return "output";
-  if (key === "ArrowRight" || key === "End") return "problems";
+/** Where ←/→/Home/End move among the shown view tabs (← and → wrap). */
+export function viewTarget(key: string, from: ConsoleView = "output", views: readonly ConsoleView[] = VIEWS): ConsoleView | null {
+  const i = Math.max(0, views.indexOf(from));
+  if (key === "Home") return views[0] ?? null;
+  if (key === "End") return views[views.length - 1] ?? null;
+  if (key === "ArrowLeft") return views[(i + views.length - 1) % views.length] ?? null;
+  if (key === "ArrowRight") return views[(i + 1) % views.length] ?? null;
   return null;
 }
 
 export const OutputPanel = forwardRef<
   OutputPanelHandle,
-  { tasks: TasksStore; workspace: WorkspaceStore; problems: ProblemsStore; ready: boolean; onHide: () => void; onOpenProblem: (d: Diagnostic) => void }
+  { tasks: TasksStore; workspace: WorkspaceStore; problems: ProblemsStore; terminals?: TerminalsStore; ready: boolean; onHide: () => void; onOpenProblem: (d: Diagnostic) => void }
 >(
-  function OutputPanel({ tasks, workspace, problems, ready, onHide, onOpenProblem }, ref) {
+  function OutputPanel({ tasks, workspace, problems, terminals, ready, onHide, onOpenProblem }, ref) {
     const s = useSyncExternalStore(tasks.subscribe, tasks.getSnapshot, tasks.getSnapshot);
     const w = useSyncExternalStore(workspace.subscribe, workspace.getSnapshot, workspace.getSnapshot);
     const [command, setCommand] = useState("");
@@ -49,9 +57,31 @@ export const OutputPanel = forwardRef<
     // The view strip (Output / Problems, M2-UI-003). The count re-renders only the strip.
     const [consoleView, setConsoleView] = useState<ConsoleView>("output");
     const problemCount = useSyncExternalStore(problems.subscribe, () => counts(problems.all()).total, () => 0);
-    const tabRefs = useRef<Record<ConsoleView, HTMLButtonElement | null>>({ output: null, problems: null });
+    const tabRefs = useRef<Record<ConsoleView, HTMLButtonElement | null>>({ output: null, problems: null, terminal: null });
 
-    useImperativeHandle(ref, () => ({ focusCommand: () => input.current?.focus() }), []);
+    useImperativeHandle(
+      ref,
+      () => ({
+        // The console's region shortcut (Mod+`) lands in the shown view: the terminal or the prompt.
+        focusCommand: () => {
+          const id = terminals?.getSnapshot().active ?? null;
+          if (consoleView === "terminal" && id) focusTerminal(id);
+          else input.current?.focus();
+        },
+        showTerminal: () => {
+          if (!terminals) return;
+          setConsoleView("terminal");
+          // After the view is shown (and a first terminal started, if needed).
+          const tryFocus = (n: number) => {
+            const id = terminals.getSnapshot().active;
+            if (id) requestAnimationFrame(() => focusTerminal(id));
+            else if (n > 0) setTimeout(() => tryFocus(n - 1), 50);
+          };
+          tryFocus(40);
+        },
+      }),
+      [terminals, consoleView],
+    );
 
     const copySelection = useCallback(() => {
       const text = window.getSelection()?.toString() ?? "";
@@ -124,9 +154,10 @@ export const OutputPanel = forwardRef<
       ),
       [empty, tasks],
     );
+    const shown = VIEWS.filter((v) => v !== "terminal" || (!!terminals && !!w.id));
     const heading = (
       <div className="console__views" role="tablist" aria-label="Console views">
-        {(["output", "problems"] as const).map((v) => (
+        {shown.map((v) => (
           <button
             key={v}
             ref={(el) => {
@@ -137,21 +168,21 @@ export const OutputPanel = forwardRef<
             className="console__view"
             id={`console-tab-${v}`}
             aria-selected={consoleView === v}
-            aria-controls={v === "output" ? "console-output" : "console-problems"}
+            aria-controls={`console-${v}`}
             tabIndex={consoleView === v ? 0 : -1}
             data-view={v}
-            aria-label={v === "output" ? "Output" : problemCount > 0 ? `Problems, ${problemCount}` : "Problems"}
-            data-hint={v === "output" ? "Show the command output" : "Show problems from the last build"}
+            aria-label={v === "output" ? "Output" : v === "terminal" ? "Terminal" : problemCount > 0 ? `Problems, ${problemCount}` : "Problems"}
+            data-hint={v === "output" ? "Show the command output" : v === "terminal" ? "Show the terminal — Mod+`" : "Show problems from the last build"}
             onClick={() => setConsoleView(v)}
             onKeyDown={(e) => {
-              const to = viewTarget(e.key);
+              const to = viewTarget(e.key, v, shown);
               if (!to) return;
               e.preventDefault();
               setConsoleView(to);
               tabRefs.current[to]?.focus();
             }}
           >
-            {v === "output" ? "Output" : "Problems"}
+            {v === "output" ? "Output" : v === "terminal" ? "Terminal" : "Problems"}
             {v === "problems" && problemCount > 0 && <Count value={problemCount} />}
           </button>
         ))}
@@ -161,6 +192,7 @@ export const OutputPanel = forwardRef<
       <Panel title="Console" heading={heading} className="console" testId="output-panel" meta={meta} tools={tools}
       >
         {consoleView === "problems" && <ProblemsView store={problems} onOpen={onOpenProblem} id="console-problems" />}
+        {terminals && w.id && <TerminalView store={terminals} id="console-terminal" visible={consoleView === "terminal"} />}
         <div
           ref={scroller}
           id="console-output"
@@ -207,7 +239,7 @@ export const OutputPanel = forwardRef<
             </div>
           )}
         </div>
-        <div className="prompt">
+        <div className="prompt" hidden={consoleView === "terminal"}>
           <span className="prompt__sigil" aria-hidden="true">$</span>
           <input
             ref={input}

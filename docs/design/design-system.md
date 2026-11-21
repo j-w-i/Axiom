@@ -293,3 +293,11 @@ M1 surface uses it. The others are specified here and prototyped in
 - Long lists are virtualised (existing explorer and output); restyling must keep
   fixed row heights.
 - No `backdrop-filter`, `filter`, `mix-blend-mode` or animated `box-shadow` in production.
+
+## Terminal colours (M4-TERM-002)
+`--ansi-{black,red,green,yellow,blue,magenta,cyan,white}` and their `--ansi-bright-*`
+counterparts, generated per theme by `scripts/gen-themes.mjs` (`ANSI`). The colours are clamped
+to 4.5:1 against the console surfaces (`tests/tokens.test.ts`); black, white and bright white
+are exempt, because programs use them as backgrounds and as the ends of the scale. The xterm
+theme is built from these tokens at runtime (`terminalTheme()` in `components/TerminalView.tsx`)
+and follows the appearance.

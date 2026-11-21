@@ -92,6 +92,10 @@
 }
 
 /* Prompt: recessed well, brass sigil, borderless mono input, quiet Run / Stop. */
+/* The Terminal view has its own input: the run prompt hides there (M4-TERM-002). */
+.prompt[hidden] {
+  display: none;
+}
 .prompt {
   display: flex;
   flex: none;

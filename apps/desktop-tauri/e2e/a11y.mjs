@@ -257,7 +257,7 @@ try {
     const badProb = probEls.filter((x) => !x.name || !x.role || !x.focus).map((x) => `${x.role} "${x.name}" focus=${x.focus}`);
     check(
       `S19 problems view (${theme}): named tabs and panel, rows reachable by Tab with names that carry severity and position, visible focus`,
-      strip.tabs.join() === "Output:false,Problems, 2:true" && strip.panel === "Problems" && probEls.some((x) => x.name.startsWith("Error: mismatched types (E0308) at src/main.rs:2:18")) &&
+      strip.tabs.join() === "Output:false,Problems, 2:true,Terminal:false" && strip.panel === "Problems" && probEls.some((x) => x.name.startsWith("Error: mismatched types (E0308) at src/main.rs:2:18")) &&
         // The full name (describe() shortens names to 60 characters): severity, message, code, position, source.
         fullName === "Error: mismatched types (E0308) at src/main.rs:2:18, from rustc" && badProb.length === 0,
       `${JSON.stringify(strip)}; reached ${probEls.length}`,

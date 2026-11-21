@@ -277,6 +277,22 @@ function rgba(rgb, a) {
 }
 
 /** Builds one theme: { primitives: [[name, value]], semantic: [[name, value]] }. */
+// ANSI palette of the integrated terminal (M4-TERM-002; ADR-0018 §4): 16 colours per theme in
+// the instrument's warm register. The colours (red…cyan, normal and bright) are clamped to the §2.3
+// text minimum (4.5:1) against the console surfaces; black and white are exempt: programs use them
+// as backgrounds and as the faint or bright end of the scale.
+const ANSI = {
+  dark: {
+    black: "#2c2d30", red: "#e5645d", green: "#a9c47f", yellow: "#e0b45c", blue: "#7fa6d6", magenta: "#c58fb8", cyan: "#8ec2b2", white: "#cfcbc3",
+    "bright-black": "#77736c", "bright-red": "#f0857e", "bright-green": "#bcd894", "bright-yellow": "#f0c977", "bright-blue": "#9fc0e8", "bright-magenta": "#d9a8cc", "bright-cyan": "#a6d6c7", "bright-white": "#f1ede6",
+  },
+  light: {
+    black: "#2b2925", red: "#b23a33", green: "#4f7a1f", yellow: "#8a6100", blue: "#2b5d9c", magenta: "#8e3d7c", cyan: "#1f7468", white: "#d8d4cc",
+    "bright-black": "#6f6a62", "bright-red": "#c4463e", "bright-green": "#5e8a26", "bright-yellow": "#9a6d00", "bright-blue": "#3a6cab", "bright-magenta": "#9e4a8b", "bright-cyan": "#2a8274", "bright-white": "#f6f3ee",
+  },
+};
+const ANSI_EXEMPT = new Set(["black", "white", "bright-white"]);
+
 export function build(theme, input) {
   const dark = theme === "dark";
   const { hue: bh, chroma: bc } = input.base;
@@ -321,6 +337,7 @@ export function build(theme, input) {
   sem.set("--editor-lnum-active", "var(--text-muted)");
   for (const n of ["text", "comment", "keyword", "type", "string", "number", "punct", "macro"]) sem.set(`--syn-${n}`, FIXED[theme][`syn-${n}`]);
   for (const n of ["rs", "md", "toml", "other"]) sem.set(`--glyph-${n}`, FIXED[theme][`glyph-${n}`]);
+  for (const [n, hex] of Object.entries(ANSI[theme])) sem.set(`--ansi-${n}`, ANSI_EXEMPT.has(n) ? hex : clampContrast(hex, textSurfaces, 4.5, dark));
 
   // Resolve a token or primitive to #rrggbb (for translucent sources).
   const resolve = (name) => {

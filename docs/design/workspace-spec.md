@@ -146,6 +146,21 @@ this workspace". The header and its tools are memoised so an output batch re-ren
 rows (P12). D6 adopted: stderr `--text-muted`, gutter `▏` in `--warn` at 55%; `--danger` is used
 only by the failure status line and error rows. CSS in `styles/components/console.css`.
 
+**Terminal (M4-TERM-002).** A third console view, **Terminal**, shown when a folder is open.
+- **Tabs and screen.** A strip of terminal tabs ("sh", "zsh 2", "… (ended)" after exit; each
+  with Close) and New terminal (+) sits over the xterm.js screen. The screen uses the code font
+  and the `--ansi-*` palette (16 colours per theme, clamped to 4.5:1 on the console except black
+  and white), on `--surface-panel`. The run prompt hides in this view.
+- **Opening.** Mod+Shift+\` (and "Show Terminal" in the palette) shows the view and focuses its
+  terminal, starting one if there is none. Mod+\` stays the console region (EDITOR-002) and
+  lands in the terminal when the Terminal view is shown.
+- **Keys.** Keys go to the shell except the app's global chords: Mod+K, P, J, B, \`, comma, L,
+  and every Cmd chord on macOS. Copy and paste are Ctrl+Shift+C/V (Cmd+C/V on macOS); Ctrl+C
+  stays the interrupt.
+- **Lifetime.** The screens live outside React: switching views or tabs keeps them. After a
+  reload the terminals come back with their backlog (`terminal/list`).
+- **Not done.** Links in the terminal are not clickable yet (no link addon).
+
 **Problems (M4-LSP-002).** The Problems view lists the latest run of each provider task and the
 language servers' diagnostics together, grouped by file, each row labelled with its source in a
 muted mono label (`rustc`, `rustc (rust-analyzer)`, `typescript (typescript-language-server)`);
