@@ -169,6 +169,16 @@ waiting for still completes its own cleanup.
 - **Limit.** Approval is consent, not isolation: an allowed `task.run` runs with the user's
   rights (ADR-0010 isolation backends are M6).
 
+## External agents (ACP; M3-ACP-001)
+- **Inside the gate.** Their file reads, writes and terminals are gated tools (`acp.*`) under
+  the session's principal, checkpointed and audited. Paths outside the workspace are refused.
+- **Their permission prompts are Axiom's approval cards.** An approval covers only the
+  requested paths, or the next command, for that turn.
+- **Credentials.** Axiom passes no credentials; agents use their own sign-in. Their processes
+  get no stdin other than the ACP stream and are killed with the session or the daemon.
+- **Limit.** What an agent does without the ACP fs/terminal methods is outside Axiom's gate.
+  This is stated in ADR-0016 and must be stated in the approval UI (M3-UI-002).
+
 ## Model credentials (M3; as built by M3-MODEL-002)
 - API keys live only in the OS credential store (`keyring` 3.6: Secret Service over pure-Rust
   D-Bus on Linux, Keychain on macOS, Credential Manager on Windows), service `axiom`, account =

@@ -23,6 +23,8 @@ pub struct App {
     pub agent: AgentServices,
     /// The newest build's diagnostics per workspace (`build.diagnostics` tool).
     pub last_diagnostics: Mutex<HashMap<WorkspaceId, (TaskId, Vec<Diagnostic>)>>,
+    /// Terminals ACP agents created (`terminal/create`).
+    pub acp_terminals: Mutex<HashMap<String, Arc<crate::acp::Terminal>>>,
     /// Connections that opened each workspace, for daemon-initiated notifications
     /// (`agent/reveal`). Closed connections are dropped on the next send.
     pub clients: Mutex<HashMap<WorkspaceId, Vec<Notifier>>>,
@@ -41,6 +43,10 @@ pub struct AgentServices {
     pub shadows: Mutex<HashMap<PathBuf, Arc<axiom_agent::checkpoint::Shadow>>>,
     /// Running MCP servers per session, with their tools (started on the session's first turn).
     pub mcp: tokio::sync::Mutex<HashMap<axiom_protocol::agent::SessionId, Vec<RunningMcp>>>,
+    /// External agents attached to sessions (ADR-0016), started on the first turn.
+    pub acp: tokio::sync::Mutex<
+        HashMap<axiom_protocol::agent::SessionId, Arc<axiom_agent::acp::AcpSession>>,
+    >,
     /// Which connection is attached to which session (one forwarder each).
     pub attached: Mutex<Vec<(axiom_protocol::agent::SessionId, Notifier)>>,
     /// Built-in tools (ADR-0015 §2), backed by this daemon's services.
@@ -133,6 +139,7 @@ fn agent_services(app: std::sync::Weak<App>, data_dir: &std::path::Path) -> Agen
         sessions: axiom_agent::live::Sessions::new(data_dir.join("sessions")),
         shadows: Mutex::default(),
         mcp: Default::default(),
+        acp: Default::default(),
         attached: Mutex::default(),
     }
 }
@@ -190,6 +197,7 @@ impl App {
             },
             agent: agent_services(weak.clone(), &sessions_dir),
             last_diagnostics: Mutex::default(),
+            acp_terminals: Mutex::default(),
             clients: Mutex::default(),
         })
     }

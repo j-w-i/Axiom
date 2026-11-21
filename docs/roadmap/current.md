@@ -20,6 +20,7 @@ ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cl
 - **M3-LOOP-001 tested (2026-11-21):** session journal, context (rewinds, compaction, images), the agent loop (tools through the gate, checkpoint before the first write of a turn, cancel, resume with repair), store migration 4; every protocol 0.3 method served (`NOT_YET_SERVED` removed). Scripted "add a function and fix the build" passes against real cargo.
 - **M3-DAEMON-001 tested (2026-11-21):** Unix socket (`<data dir>/run/`, token) shared by more clients; the `axiom` CLI (`task run`, `build`, `agent send|sessions`).
 - **M3-MCP-001 tested (2026-11-21):** `axiom mcp` MCP server (Claude Code, Codex… drive Axiom's tools under the same gate; approvals surface in the app) and the MCP client for `agent.mcpServers`; `docs/contributing/connect-agents.md`.
+- **M3-ACP-001 tested (2026-11-21):** Claude Code / Codex / Gemini CLI as provider kind `acp`: their fs and terminal requests through Axiom's gate and checkpoints, their permission prompts as Axiom's approvals (asked once), Axiom's MCP offered to them. Tested with an in-repo fake agent; real agents owed by the owner (not installed here).
 
 
 

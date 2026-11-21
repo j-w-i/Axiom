@@ -75,7 +75,13 @@ async fn agent_models_configure_round_trip_keeps_the_key_out_of_settings_and_log
         .request::<Models>(ModelsParams::default())
         .await
         .unwrap();
-    assert!(before.providers.is_empty());
+    // Only the built-in external agents (ADR-0016) before anything is configured.
+    let ids: Vec<_> = before
+        .providers
+        .iter()
+        .map(|p| p.config.id.as_str())
+        .collect();
+    assert_eq!(ids, ["claude-code", "codex", "gemini"]);
 
     d.client
         .request::<ConfigureProvider>(ConfigureProviderParams {
@@ -99,7 +105,9 @@ async fn agent_models_configure_round_trip_keeps_the_key_out_of_settings_and_log
 
     let after = d
         .client
-        .request::<Models>(ModelsParams::default())
+        .request::<Models>(ModelsParams {
+            provider_id: Some("local".into()),
+        })
         .await
         .unwrap();
     assert_eq!(after.providers.len(), 1);

@@ -236,8 +236,36 @@ ADR-0015 §7.
     tool errors (`isError`) are tool errors. Conversations without a workspace get no MCP
     tools in M3 (ADR-0017 §2 said they would; recorded in the MCP-001 handoff).
   - Usage: `docs/contributing/connect-agents.md`.
-- **ACP:** M3, ADR-0016 (M3-ACP-001). The UI consumes the generic `agent/event` stream, not
-  loop internals.
+- **ACP:** external agents inside Axiom (ADR-0016; as built by M3-ACP-001).
+  - **Built-in providers.** `claude-code` (`claude-agent-acp`), `codex` (`codex-acp`) and
+    `gemini` (`gemini --experimental-acp`) are listed by `agent/models`: available when the
+    program is on `PATH`, else with an install hint. A user configuration with the same id
+    overrides one.
+  - **Connection.** ACP protocol version 1. The client capabilities are fs read/write and
+    terminal. `session/new` gets the workspace as `cwd` and Axiom's own MCP server
+    (`axiom mcp`, when the CLI is installed next to the daemon). `session/load` is used when
+    the agent offers it, else a notice says it starts fresh. The agent's session id is kept
+    next to the journal (`<id>.acp`).
+  - **Agent requests.** `fs/read_text_file`, `fs/write_text_file` and `terminal/create` are the
+    hidden tools `acp.readFile`, `acp.writeFile` and `acp.terminal` (never listed or offered to
+    a model), so they get the gate, the turn's checkpoint and the audit log. Paths outside the
+    workspace are refused. `terminal/output|wait_for_exit|kill|release` operate on the
+    executor task.
+  - **Permission requests.** `session/request_permission` is decided by the gate as the policy
+    tool `<provider id>.<agent tool name>`, with the effect from the ACP `kind`. An approval
+    adds one-turn grants: `acp.writeFile` on the requested paths and, for `execute`, the next
+    terminal. So the person is asked once, not twice.
+  - **Updates.** Message and thought chunks become `textDelta` + `assistantText` (thoughts with
+    `kind: thought`). The final `plan` becomes `assistantText` with `kind: plan`. `tool_call`
+    and `tool_call_update` become `toolCall`/`toolResult` (diffs rendered as unified diffs).
+    The stop reason becomes `turnEnd`. A biased select handles every update the agent sent
+    before its prompt response.
+  - **Cancel and edits.** Cancel sends `session/cancel`; a pending permission is answered
+    `cancelled`; the agent is killed if it has not answered after 10 s. Edit/regenerate
+    (`fromTurn`) is `unsupported` for external agents: they keep their own history.
+  - **Limit.** An agent that changes files without the ACP fs methods (its own internal
+    tools) is outside the gate. The adapters route Claude Code's and Codex's edits and shell
+    through the client when it advertises the capabilities, as Axiom does.
 
 ## Client-facing protocol (protocol 0.3)
 

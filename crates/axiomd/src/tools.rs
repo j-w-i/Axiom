@@ -239,6 +239,7 @@ pub fn registry(app: Weak<App>) -> Registry {
         },
         |a, c, i, _| editor_open(a, c, i).boxed(),
     );
+    register_acp(&mut r, app);
     r
 }
 
@@ -958,5 +959,195 @@ async fn editor_open(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<Tool
         } else {
             "no editor attached"
         },
+    ))
+}
+
+// ---------------------------------------------------------------- ACP bridge tools (hidden)
+
+/// The hidden tools an external ACP agent's file and terminal requests become (ADR-0016 §3):
+/// gated and checkpointed like the others, never offered to a model.
+pub fn register_acp(r: &mut Registry, app: Weak<App>) {
+    let mut add = |name: &str, effect, prep: Prep, run: Run| {
+        r.register_hidden(Arc::new(DaemonTool {
+            spec: ToolSpec {
+                name: name.into(),
+                description: format!("ACP client request ({name})"),
+                input_schema: json!({"type": "object"}),
+                effect,
+                max_result_bytes: 4 * 1024 * 1024,
+            },
+            app: app.clone(),
+            prep,
+            run,
+        }))
+    };
+    add(
+        "acp.readFile",
+        Effect::Read,
+        |a, c, i| acp_target(a, c, i).boxed(),
+        |a, c, i, _| acp_read(a, c, i).boxed(),
+    );
+    add(
+        "acp.writeFile",
+        Effect::WriteWorkspace,
+        |a, c, i| acp_prepare_write(a, c, i).boxed(),
+        |a, c, i, t| acp_write(a, c, i, t).boxed(),
+    );
+    add(
+        "acp.terminal",
+        Effect::Execute,
+        |a, c, i| acp_prepare_terminal(a, c, i).boxed(),
+        |a, c, i, _| acp_terminal(a, c, i).boxed(),
+    );
+}
+
+fn acp_rel(app: &App, ctx: &ToolCtx, abs: &Value) -> Result<WorkspacePath, ToolError> {
+    let abs = abs
+        .as_str()
+        .ok_or_else(|| ToolError::invalid("`path` must be an absolute path."))?;
+    let w = ws(app, ctx)?;
+    let rel = axiom_agent::acp::workspace_path(w.root(), abs).ok_or_else(|| {
+        ToolError::new(
+            ErrorKind::PermissionDenied,
+            format!("`{abs}` is outside the workspace."),
+        )
+    })?;
+    let p = WorkspacePath(rel);
+    w.resolve(&p).map_err(ws_err)?;
+    Ok(p)
+}
+
+async fn acp_target(app: &Arc<App>, ctx: &ToolCtx, input: &Value) -> Result<Targets, ToolError> {
+    Ok(Targets {
+        paths: vec![acp_rel(app, ctx, &input["path"])?],
+        ..Default::default()
+    })
+}
+
+async fn acp_read(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOutput, ToolError> {
+    let p = acp_rel(app, ctx, &input["path"])?;
+    let f = ws(app, ctx)?.read_text(&p).await.map_err(ws_err)?;
+    let content = match (input["line"].as_u64(), input["limit"].as_u64()) {
+        (None, None) => f.text,
+        (line, limit) => {
+            let start = line.unwrap_or(1).max(1) as usize - 1;
+            let n = limit.map_or(usize::MAX, |l| l as usize);
+            f.text.split_inclusive('\n').skip(start).take(n).collect()
+        }
+    };
+    Ok(ToolOutput {
+        summary: format!("read {}", p.0),
+        text: String::new(),
+        output: json!({"content": content}),
+        truncated: false,
+    })
+}
+
+async fn acp_prepare_write(
+    app: &Arc<App>,
+    ctx: &ToolCtx,
+    input: &Value,
+) -> Result<Targets, ToolError> {
+    let p = acp_rel(app, ctx, &input["path"])?;
+    let new = input["content"]
+        .as_str()
+        .ok_or_else(|| ToolError::invalid("`content` is required."))?;
+    let w = ws(app, ctx)?;
+    let (old, version) = match w.read_text(&p).await {
+        Ok(f) => (f.text, Some(f.version)),
+        Err(WsError::NotFound(_)) => (String::new(), None),
+        Err(e) => return Err(ws_err(e)),
+    };
+    let (diff, _, _) = patch::diff(&p.0, &old, new);
+    Ok(Targets {
+        paths: vec![p.clone()],
+        preview: Some(diff),
+        versions: vec![(p, version)],
+        ..Default::default()
+    })
+}
+
+async fn acp_write(
+    app: &Arc<App>,
+    ctx: &ToolCtx,
+    input: Value,
+    targets: &Targets,
+) -> Result<ToolOutput, ToolError> {
+    let p = acp_rel(app, ctx, &input["path"])?;
+    let new = input["content"].as_str().unwrap_or_default();
+    let expected = targets
+        .versions
+        .iter()
+        .find(|(q, _)| *q == p)
+        .and_then(|(_, v)| v.clone());
+    let w = ws(app, ctx)?;
+    let v = w
+        .write_text(&p, new, expected.as_ref(), false)
+        .await
+        .map_err(ws_err)?;
+    Ok(ToolOutput::json(
+        json!({"path": p, "version": v}),
+        format!("wrote {}", p.0),
+    ))
+}
+
+fn acp_argv(input: &Value) -> Result<Vec<String>, ToolError> {
+    let cmd = input["command"]
+        .as_str()
+        .filter(|c| !c.is_empty())
+        .ok_or_else(|| ToolError::invalid("`command` is required."))?;
+    let mut argv = vec![cmd.to_string()];
+    for a in input["args"].as_array().into_iter().flatten() {
+        argv.push(a.as_str().unwrap_or_default().to_string());
+    }
+    Ok(argv)
+}
+
+async fn acp_prepare_terminal(
+    _app: &Arc<App>,
+    _ctx: &ToolCtx,
+    input: &Value,
+) -> Result<Targets, ToolError> {
+    Ok(Targets {
+        argv: Some(acp_argv(input)?),
+        ..Default::default()
+    })
+}
+
+async fn acp_terminal(
+    app: &Arc<App>,
+    ctx: &ToolCtx,
+    input: Value,
+) -> Result<ToolOutput, ToolError> {
+    let argv = acp_argv(&input)?;
+    let w = ws(app, ctx)?;
+    let cwd = match input["cwd"].as_str() {
+        Some(c) => w.resolve(&acp_rel(app, ctx, &json!(c))?).map_err(ws_err)?,
+        None => w.root().to_path_buf(),
+    };
+    let mut env = spawn_env(app, ctx).await?;
+    for e in input["env"].as_array().into_iter().flatten() {
+        if let (Some(n), Some(v)) = (e["name"].as_str(), e["value"].as_str()) {
+            env.insert(n.into(), v.into());
+        }
+    }
+    let limit = input["outputByteLimit"].as_u64().unwrap_or(1024 * 1024) as usize;
+    let (task_id, rx) = app
+        .executor
+        .start(
+            ctx.workspace_id.clone(),
+            SpawnSpec {
+                command: Command::Argv(argv.clone()),
+                cwd,
+                env,
+                label: Some(format!("agent: {}", argv.join(" "))),
+            },
+        )
+        .await
+        .map_err(|e| rpc(e.into()))?;
+    let id = crate::acp::Terminal::start(app, task_id, rx, limit);
+    Ok(ToolOutput::json(
+        json!({"terminalId": id}),
+        format!("started {}", argv.join(" ")),
     ))
 }

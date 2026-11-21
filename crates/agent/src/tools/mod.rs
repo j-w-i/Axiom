@@ -196,6 +196,9 @@ pub struct Prepared {
 #[derive(Default, Clone)]
 pub struct Registry {
     tools: BTreeMap<String, Arc<dyn Tool>>,
+    /// Tools for the daemon's own bridges (ACP file and terminal access): callable and gated
+    /// like the others, never offered to a model or listed.
+    hidden: std::collections::BTreeSet<String>,
 }
 
 impl Registry {
@@ -213,18 +216,31 @@ impl Registry {
         );
     }
 
+    /// Registers a tool that is never listed or offered (see `hidden`).
+    pub fn register_hidden(&mut self, tool: Arc<dyn Tool>) {
+        let name = tool.spec().name.clone();
+        self.register(tool);
+        self.hidden.insert(name);
+    }
+
     pub fn get(&self, name: &str) -> Option<&Arc<dyn Tool>> {
         self.tools.get(name)
     }
 
     pub fn names(&self) -> Vec<String> {
-        self.tools.keys().cloned().collect()
+        self.visible().map(|t| t.spec().name.clone()).collect()
+    }
+
+    fn visible(&self) -> impl Iterator<Item = &Arc<dyn Tool>> {
+        self.tools
+            .iter()
+            .filter(|(n, _)| !self.hidden.contains(*n))
+            .map(|(_, t)| t)
     }
 
     /// For `agent/tools` and MCP `tools/list`.
     pub fn infos(&self) -> Vec<ToolInfo> {
-        self.tools
-            .values()
+        self.visible()
             .map(|t| {
                 let s = t.spec();
                 ToolInfo {
@@ -239,8 +255,7 @@ impl Registry {
 
     /// For a model request.
     pub fn defs(&self) -> Vec<crate::model::ToolDef> {
-        self.tools
-            .values()
+        self.visible()
             .map(|t| {
                 let s = t.spec();
                 crate::model::ToolDef {

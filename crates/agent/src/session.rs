@@ -131,8 +131,9 @@ impl Journal {
         Ok(out)
     }
 
-    /// Removes the journal and its blobs.
+    /// Removes the journal, its blobs and an external agent's saved session id.
     pub fn delete(&self) -> Result<(), JournalError> {
+        let _ = std::fs::remove_file(self.path.with_extension("acp"));
         match std::fs::remove_file(&self.path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

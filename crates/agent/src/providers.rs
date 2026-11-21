@@ -84,6 +84,12 @@ impl Providers {
             .filter(|c| c.kind != ProviderKind::Scripted)
             .cloned()
             .collect();
+        // The built-in external agents (ADR-0016), unless the user configured the same id.
+        for b in crate::acp::builtin_configs() {
+            if !v.iter().any(|c| c.id == b.id) {
+                v.push(b);
+            }
+        }
         if self.scripted.is_some() {
             v.push(scripted_config());
         }
@@ -202,6 +208,23 @@ impl Providers {
                 out.push(status);
                 continue;
             }
+            if config.kind == ProviderKind::Acp {
+                let program = config.command.first().cloned().unwrap_or_default();
+                if crate::acp::find_program(&program).is_some() {
+                    status.models = vec![axiom_protocol::agent::ModelInfo {
+                        id: "default".into(),
+                        display_name: config.name.clone(),
+                        capabilities: profiles::profile(ProviderKind::Acp, "", "default"),
+                    }];
+                } else {
+                    status.error = Some(match crate::acp::install_hint(&config.id) {
+                        Some(h) => format!("Not installed. Install it: {h}."),
+                        None => format!("`{program}` is not installed."),
+                    });
+                }
+                out.push(status);
+                continue;
+            }
             match self.get(user, &config.id).await {
                 Ok(p) => match tokio::time::timeout(LIST_TIMEOUT, p.models()).await {
                     Ok(Ok(models)) => status.models = models,
@@ -246,8 +269,14 @@ impl Providers {
                 if c.name.trim().is_empty() {
                     return Err(ProvidersError::Invalid("A provider needs a name.".into()));
                 }
+                if c.kind == ProviderKind::Acp && c.command.is_empty() {
+                    return Err(ProvidersError::Invalid(
+                        "An external agent needs its command.".into(),
+                    ));
+                }
                 // Validates the base URL the same way the adapter will.
                 let check = match c.kind {
+                    ProviderKind::Acp => Ok(()),
                     ProviderKind::Anthropic => Anthropic::new(c, None).map(|_| ()),
                     _ => OpenAiChat::new(c, None).map(|_| ()),
                 };
@@ -396,13 +425,15 @@ mod tests {
     #[tokio::test]
     async fn the_scripted_provider_is_listed_only_when_enabled() {
         let ps = Providers::new(Arc::new(MemoryCredentials::default()), None);
-        assert!(ps.all(&[]).is_empty());
+        // Only the built-in external agents (ADR-0016).
+        assert!(ps.all(&[]).iter().all(|c| c.kind == ProviderKind::Acp));
+        assert!(!ps.all(&[]).iter().any(|c| c.id == SCRIPTED_ID));
         let s = Arc::new(ScriptedProvider::new(
             SCRIPTED_ID,
             serde_json::from_value(serde_json::json!({"turns":[]})).unwrap(),
         ));
         let ps = Providers::new(Arc::new(MemoryCredentials::default()), Some(s));
-        assert_eq!(ps.all(&[])[0].id, SCRIPTED_ID);
+        assert!(ps.all(&[]).iter().any(|c| c.id == SCRIPTED_ID));
         assert!(ps.get(&[], SCRIPTED_ID).await.is_ok());
     }
 }

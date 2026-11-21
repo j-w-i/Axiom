@@ -37,6 +37,8 @@ ALLOWED = {
     "emit": set(),
     # Test helper binary (tests/helpers/fake-mcp): an MCP server for the MCP client tests.
     "fake-mcp": set(),
+    # Test helper binary (tests/helpers/fake-acp): an ACP agent for the ACP client tests.
+    "fake-acp": set(),
 }
 
 

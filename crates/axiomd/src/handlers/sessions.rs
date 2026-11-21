@@ -163,10 +163,10 @@ pub async fn create(
                 format!("No provider `{}` is configured.", p.provider_id),
             )
         })?;
-    if config.kind == ProviderKind::Acp {
+    if config.kind == ProviderKind::Acp && root.is_none() {
         return Err(RpcError::new(
-            ErrorKind::Unsupported,
-            "External agents are not available in this build yet.",
+            ErrorKind::InvalidParams,
+            format!("{} works in a folder: open one first.", config.name),
         ));
     }
     if p.model.trim().is_empty() {
@@ -244,8 +244,11 @@ pub async fn delete(app: Arc<App>, p: SessionRef) -> Result<Empty, RpcError> {
         .sessions
         .delete(&p.session_id, root.as_deref())
         .map_err(journal_error)?;
-    // Stops its MCP servers (their processes are killed when dropped).
+    // Stops its MCP servers and external agent (their processes are killed when dropped).
     app.agent.mcp.lock().await.remove(&p.session_id);
+    if let Some(a) = app.agent.acp.lock().await.remove(&p.session_id) {
+        a.conn.kill().await;
+    }
     let id = p.session_id.0.clone();
     app.store_call(move |s| s.session_delete(&id)).await?;
     Ok(Empty {})
@@ -356,6 +359,19 @@ pub async fn send(app: Arc<App>, p: SendParams, ctx: RequestCtx) -> Result<Empty
         }
     }
     let configs = provider_configs(&app).await?;
+    let config = app
+        .agent
+        .providers
+        .config(&configs, &row.provider)
+        .ok_or_else(|| {
+            RpcError::new(
+                ErrorKind::NotFound,
+                format!("No provider `{}` is configured.", row.provider),
+            )
+        })?;
+    if config.kind == ProviderKind::Acp {
+        return send_acp(app, p, row, root, live, config).await;
+    }
     let provider = app
         .agent
         .providers
@@ -447,6 +463,163 @@ pub async fn send(app: Arc<App>, p: SendParams, ctx: RequestCtx) -> Result<Empty
             cancel,
         };
         agent_loop::run(t, turn).await;
+        live.end();
+    });
+    Ok(Empty {})
+}
+
+/// Axiom's own MCP server for an external agent: the `axiom` CLI next to this daemon, if
+/// present, serving this workspace through this daemon's socket.
+fn axiom_mcp(app: &App, root: &std::path::Path) -> Option<axiom_agent::acp::AxiomMcp> {
+    let exe = std::env::current_exe().ok()?;
+    let cli = exe
+        .parent()?
+        .join(if cfg!(windows) { "axiom.exe" } else { "axiom" });
+    cli.is_file().then(|| axiom_agent::acp::AxiomMcp {
+        command: cli,
+        args: vec![
+            "mcp".into(),
+            "--workspace".into(),
+            root.to_string_lossy().into_owned(),
+        ],
+        env: vec![(
+            "AXIOM_DATA_DIR".into(),
+            app.env.data_dir.to_string_lossy().into_owned(),
+        )],
+    })
+}
+
+/// A turn of an external agent (ADR-0016).
+async fn send_acp(
+    app: Arc<App>,
+    p: SendParams,
+    mut row: SessionRow,
+    root: Option<PathBuf>,
+    live: Arc<Live>,
+    config: axiom_protocol::agent::ProviderConfig,
+) -> Result<Empty, RpcError> {
+    let (Some(ws), Some(root)) = (p.workspace_id.clone(), root) else {
+        return Err(RpcError::new(
+            ErrorKind::InvalidParams,
+            "External agents work in a folder.",
+        ));
+    };
+    let attached = attached_text(&app, &ws, &p).await?;
+    let mut images = Vec::new();
+    for im in &p.images {
+        images.push(live.journal.put_image(im).map_err(journal_error)?);
+    }
+    if p.from_turn.is_some() {
+        return Err(RpcError::new(
+            ErrorKind::Unsupported,
+            "An external agent keeps its own history: editing an earlier message is not possible. Send a new message instead.",
+        ));
+    }
+    let Some(cancel) = live.begin() else {
+        return Err(RpcError::new(
+            ErrorKind::Conflict,
+            "A turn is already running in this session.",
+        ));
+    };
+    let input = UserInput {
+        text: p.text.clone(),
+        attachments: p.attachments.clone(),
+        attached_text: attached.clone(),
+        images,
+        from_turn: None,
+    };
+    let turn = match agent_loop::begin(&live, &input) {
+        Ok(t) => t,
+        Err(e) => {
+            live.end();
+            return Err(journal_error(e));
+        }
+    };
+    if turn == 1 && row.title == DEFAULT_TITLE {
+        row.title = title_from(&p.text);
+    }
+    row.updated_ms = now_ms();
+    let r2 = row.clone();
+    app.store_call(move |s| s.session_put(&r2)).await?;
+    let policies = policies(&app, &ws).await?;
+    let a = app.clone();
+    tokio::spawn(async move {
+        let saved_path = live.journal.path().with_extension("acp");
+        let session = {
+            let mut m = a.agent.acp.lock().await;
+            match m.get(&live.id) {
+                Some(s) => Ok(s.clone()),
+                None => {
+                    let saved = std::fs::read_to_string(&saved_path).ok();
+                    match axiom_agent::acp::connect(
+                        &config,
+                        &root,
+                        saved.as_deref().map(str::trim),
+                        axiom_mcp(&a, &root).as_ref(),
+                    )
+                    .await
+                    {
+                        Ok((s, resumed)) => {
+                            if saved.is_some() && !resumed {
+                                let _ = live.emit(EventBody::Error {
+                                    kind: "notice".into(),
+                                    model_kind: None,
+                                    message: format!("{} cannot resume its earlier conversation, so it starts fresh; the history above is kept.", config.name),
+                                });
+                            }
+                            let _ = std::fs::write(&saved_path, &s.agent_session);
+                            let s = Arc::new(s);
+                            m.insert(live.id.clone(), s.clone());
+                            Ok(s)
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+        };
+        match session {
+            Ok(session) => {
+                let images: Vec<ImageData> = p.images.clone();
+                let prompt = axiom_agent::acp::prompt_blocks(
+                    &p.text,
+                    attached.as_deref(),
+                    &images,
+                    &session.caps,
+                );
+                let terminals = crate::acp::Terminals(a.clone());
+                let t = axiom_agent::acp::AcpTurn {
+                    live: &live,
+                    session: &session,
+                    agent_id: config.id.clone(),
+                    agent_name: config.name.clone(),
+                    root: root.clone(),
+                    registry: &a.agent.tools,
+                    gate: &a.agent.gate,
+                    policies,
+                    ctx: ToolCtx {
+                        workspace_id: ws,
+                        principal: format!("session:{}", live.id.0),
+                        cancel: cancel.clone(),
+                    },
+                    shadow: shadow(&a, &root),
+                    audit: audit_path(&a, &root),
+                    terminals: &terminals,
+                    cancel,
+                    turn,
+                };
+                axiom_agent::acp::run_turn(t, prompt).await;
+            }
+            Err(message) => {
+                let _ = live.emit(EventBody::Error {
+                    kind: "model_error".into(),
+                    model_kind: None,
+                    message,
+                });
+                let _ = live.emit(EventBody::TurnEnd {
+                    reason: axiom_protocol::agent::TurnEndReason::Error,
+                });
+            }
+        }
         live.end();
     });
     Ok(Empty {})

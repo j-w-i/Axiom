@@ -92,11 +92,22 @@ pub fn begin(live: &Live, input: &UserInput) -> Result<u32, session::JournalErro
 }
 
 /// The checkpoint before the first writing tool of the turn.
-struct Checkpoint<'a> {
+pub(crate) struct Checkpoint<'a> {
     live: &'a Live,
     shadow: &'a Shadow,
     turn: u32,
     done: AtomicBool,
+}
+
+impl<'a> Checkpoint<'a> {
+    pub(crate) fn new(live: &'a Live, shadow: &'a Shadow, turn: u32) -> Self {
+        Self {
+            live,
+            shadow,
+            turn,
+            done: AtomicBool::new(false),
+        }
+    }
 }
 
 impl BeforeExecute for Checkpoint<'_> {

@@ -115,10 +115,37 @@ impl Gate {
         checkpoint_planned: bool,
         cancel: &CancellationToken,
     ) -> Result<(Allowed, Via, Option<String>), Refusal> {
-        let grants = lock(&self.grants)
+        self.check_with(
+            principal,
+            session,
+            prepared,
+            policies,
+            checkpoint_planned,
+            cancel,
+            &[],
+        )
+        .await
+    }
+
+    /// [`Gate::check`] with extra allow rules that hold for this call only: what the user already
+    /// approved for it through another prompt (an ACP agent's own permission request). They
+    /// can never override a deny: the workspace's stricter rules still apply.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn check_with(
+        &self,
+        principal: &str,
+        session: Option<&SessionId>,
+        prepared: &Prepared,
+        policies: &Policies,
+        checkpoint_planned: bool,
+        cancel: &CancellationToken,
+        extra: &[PolicyRule],
+    ) -> Result<(Allowed, Via, Option<String>), Refusal> {
+        let mut grants = lock(&self.grants)
             .get(principal)
             .cloned()
             .unwrap_or_default();
+        grants.extend(extra.iter().cloned());
         let call = policy::Call {
             tool: &prepared.name,
             effect: prepared.effect,
@@ -260,6 +287,63 @@ impl Gate {
             .push(rule);
     }
 
+    /// Asks directly (an ACP agent's permission request, which has no Axiom tool). Returns the
+    /// policy decision if it does not ask.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn decide_or_ask(
+        &self,
+        principal: &str,
+        session: Option<&SessionId>,
+        call: &policy::Call<'_>,
+        targets: Vec<String>,
+        preview: Option<String>,
+        policies: &Policies,
+        cancel: &CancellationToken,
+    ) -> Result<(Via, Option<String>), Refusal> {
+        let grants = lock(&self.grants)
+            .get(principal)
+            .cloned()
+            .unwrap_or_default();
+        let (decision, rule) =
+            policy::decide(&policies.user, &grants, policies.workspace.as_ref(), call);
+        match decision {
+            Decision::Allow => Ok((Via::Policy, rule)),
+            Decision::Deny => Err(Refusal {
+                kind: ErrorKind::ApprovalDenied,
+                message: format!(
+                    "The agent policy denies `{}`{}.",
+                    call.tool,
+                    rule.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
+                ),
+                rule,
+            }),
+            Decision::Ask => {
+                let can_remember = !matches!(call.effect, Effect::Credentials | Effect::Deploy);
+                let request = ApprovalRequest {
+                    request_id: format!("r{}", self.next.fetch_add(1, Ordering::Relaxed)),
+                    session_id: session.cloned(),
+                    principal: principal.to_string(),
+                    tool: call.tool.to_string(),
+                    effect: call.effect,
+                    targets,
+                    argv: call.argv.map(<[String]>::to_vec),
+                    preview,
+                    rule: rule.clone(),
+                    checkpoint_planned: call.effect != Effect::Read,
+                    can_remember,
+                };
+                match self.ask(request, cancel).await? {
+                    ApprovalDecision::Deny => Err(Refusal {
+                        kind: ErrorKind::ApprovalDenied,
+                        message: format!("The user denied `{}`.", call.tool),
+                        rule,
+                    }),
+                    d => Ok((Via::Approved(d), rule)),
+                }
+            }
+        }
+    }
+
     pub fn clear_grants(&self, principal: &str) {
         lock(&self.grants).remove(principal);
     }
@@ -364,6 +448,35 @@ pub async fn run_prepared(
     audit: Option<&PathBuf>,
     started: Instant,
 ) -> CallOutcome {
+    run_prepared_with(
+        registry,
+        gate,
+        ctx,
+        session,
+        prepared,
+        policies,
+        hook,
+        audit,
+        started,
+        &[],
+    )
+    .await
+}
+
+/// [`run_prepared`] with one-call grants (see [`Gate::check_with`]).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_prepared_with(
+    registry: &Registry,
+    gate: &Gate,
+    ctx: &ToolCtx,
+    session: Option<&SessionId>,
+    prepared: Prepared,
+    policies: &Policies,
+    hook: &dyn BeforeExecute,
+    audit: Option<&PathBuf>,
+    started: Instant,
+    extra: &[PolicyRule],
+) -> CallOutcome {
     let (name, effect, targets) = (
         prepared.name.clone(),
         prepared.effect,
@@ -371,13 +484,14 @@ pub async fn run_prepared(
     );
     let planned = effect != Effect::Read;
     let (allowed, via, rule) = match gate
-        .check(
+        .check_with(
             &ctx.principal,
             session,
             &prepared,
             policies,
             planned,
             &ctx.cancel,
+            extra,
         )
         .await
     {
