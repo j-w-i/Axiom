@@ -39,6 +39,8 @@ pub struct AgentServices {
     pub sessions: axiom_agent::live::Sessions,
     /// One shadow repository per workspace root (checkpoints).
     pub shadows: Mutex<HashMap<PathBuf, Arc<axiom_agent::checkpoint::Shadow>>>,
+    /// Running MCP servers per session, with their tools (started on the session's first turn).
+    pub mcp: tokio::sync::Mutex<HashMap<axiom_protocol::agent::SessionId, Vec<RunningMcp>>>,
     /// Which connection is attached to which session (one forwarder each).
     pub attached: Mutex<Vec<(axiom_protocol::agent::SessionId, Notifier)>>,
     /// Built-in tools (ADR-0015 §2), backed by this daemon's services.
@@ -48,6 +50,12 @@ pub struct AgentServices {
 /// TEST ONLY: a script file for the scripted model provider (ADR-0015 §4). When set, the daemon
 /// offers the provider `scripted` that replays it.
 pub const SCRIPTED_MODEL_ENV: &str = "AXIOM_TEST_SCRIPTED_MODEL";
+
+/// A started MCP server and the tools it listed.
+pub type RunningMcp = (
+    Arc<axiom_agent::mcp_client::McpClient>,
+    Vec<axiom_agent::mcp_client::RemoteTool>,
+);
 
 /// The connections that can answer approvals; a closed one is dropped on the next send.
 #[derive(Default)]
@@ -124,6 +132,7 @@ fn agent_services(app: std::sync::Weak<App>, data_dir: &std::path::Path) -> Agen
         approvers,
         sessions: axiom_agent::live::Sessions::new(data_dir.join("sessions")),
         shadows: Mutex::default(),
+        mcp: Default::default(),
         attached: Mutex::default(),
     }
 }

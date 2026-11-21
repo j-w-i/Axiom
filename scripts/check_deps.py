@@ -35,6 +35,8 @@ ALLOWED = {
     "axiom-desktop-tauri": {"axiom-desktop-bridge"},
     # Test helper binary (tests/helpers/emit): depends on nothing in the workspace.
     "emit": set(),
+    # Test helper binary (tests/helpers/fake-mcp): an MCP server for the MCP client tests.
+    "fake-mcp": set(),
 }
 
 

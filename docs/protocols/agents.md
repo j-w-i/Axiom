@@ -225,7 +225,19 @@ ADR-0015 §7.
 - **Client:** settings `agent.mcpServers` (`[{name, argv, env}]`); servers start per session on
   first use; their tools are `mcp.<server>.<tool>` with effect `execute` (annotations never lower
   it). Workspace-configured MCP servers are not supported in M3.
-- **ACP** (M6+): deferred; the UI consumes the generic `agent/event` stream, not loop internals.
+- As built (M3-MCP-001):
+  - **Server.** `axiom mcp [--workspace DIR]` (apps/cli) speaks MCP revisions 2025-06-18,
+    2025-03-26 and 2024-11-05: initialize, ping, `tools/list` (with annotations derived from
+    the effect: readOnly, destructive, openWorld), `tools/call` (`content` text +
+    `structuredContent`; a gate refusal is a result with `isError`, not a protocol error).
+    `axiomd --mcp` was not built: the CLI is the one front end.
+  - **Client.** `agent.mcpServers` servers start on a workspace session's first turn and stop
+    when the session is deleted or the daemon exits. Paged `tools/list` is followed. Server
+    tool errors (`isError`) are tool errors. Conversations without a workspace get no MCP
+    tools in M3 (ADR-0017 §2 said they would; recorded in the MCP-001 handoff).
+  - Usage: `docs/contributing/connect-agents.md`.
+- **ACP:** M3, ADR-0016 (M3-ACP-001). The UI consumes the generic `agent/event` stream, not
+  loop internals.
 
 ## Client-facing protocol (protocol 0.3)
 

@@ -598,3 +598,75 @@ async fn agent_sessions_are_bound_to_their_workspace() {
         .unwrap_err();
     assert_eq!(kind(&e), ErrorKind::NotFound);
 }
+
+fn fake_mcp() -> PathBuf {
+    let dir = Path::new(env!("CARGO_BIN_EXE_axiomd"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let p = dir.join(if cfg!(windows) {
+        "fake-mcp.exe"
+    } else {
+        "fake-mcp"
+    });
+    if !p.exists() {
+        assert!(std::process::Command::new(env!("CARGO"))
+            .args(["build", "-q", "-p", "fake-mcp"])
+            .status()
+            .unwrap()
+            .success());
+    }
+    p
+}
+
+#[tokio::test]
+async fn agent_uses_the_tools_of_a_configured_mcp_server() {
+    let tmp = tempfile::tempdir().unwrap();
+    let s = script(
+        tmp.path(),
+        "s.json",
+        json!({"turns": [
+            {"expect": {"toolsInclude": ["mcp.fake.echo", "mcp.fake.fail", "fs.read"]},
+             "events": [{"type":"toolCall","id":"m1","name":"mcp.fake.echo","input":{"text":"hi"}}]},
+            {"expect": {"toolResult": {"callId":"m1","contains":"echo: hi","isError":false}},
+             "events": [{"type":"toolCall","id":"m2","name":"mcp.fake.fail","input":{}}]},
+            {"expect": {"toolResult": {"callId":"m2","contains":"it failed","isError":true}},
+             "events": [{"type":"text","text":"done"}]}
+        ]}),
+    );
+    let d = daemon(tmp.path(), &s).await;
+    allow_all(&d).await;
+    d.client
+        .request::<axiom_protocol::settings::Set>(axiom_protocol::settings::SetParams {
+            values: [(
+                "agent.mcpServers".to_string(),
+                json!([{"name": "fake", "argv": [fake_mcp().to_string_lossy()]}]),
+            )]
+            .into_iter()
+            .collect(),
+        })
+        .await
+        .unwrap();
+    let f = d.open_fixture().await;
+    let sid = create(&d, Some(&f.id)).await;
+    d.client
+        .request::<Send>(send_params(Some(&f.id), &sid, "use the server"))
+        .await
+        .unwrap();
+    let evs = turn_events(&d, &sid).await;
+    assert_eq!(
+        end_reason(&evs),
+        TurnEndReason::EndTurn,
+        "{:?}",
+        errors(&evs)
+    );
+    let effect = evs.iter().find_map(|e| match &e.event {
+        EventBody::ToolCall { tool, effect, .. } if tool == "mcp.fake.echo" => Some(*effect),
+        _ => None,
+    });
+    assert_eq!(
+        effect,
+        Some(axiom_protocol::agent::Effect::Execute),
+        "annotations never lower the effect"
+    );
+}

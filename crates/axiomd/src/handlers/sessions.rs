@@ -9,7 +9,7 @@ use axiom_agent::agent_loop::{self, ToolEnv, Turn, UserInput};
 use axiom_agent::checkpoint::{CheckpointError, Shadow};
 use axiom_agent::live::{now_ms, Live};
 use axiom_agent::session::JournalError;
-use axiom_agent::tools::ToolCtx;
+use axiom_agent::tools::{Tool, ToolCtx};
 use axiom_protocol::agent::{
     CheckpointsResult, Event, EventBody, ImageData, ImageParams, ProviderKind, RestoreParams,
     RestoreResult, SendParams, SessionCreateParams, SessionId, SessionInfo, SessionListParams,
@@ -244,6 +244,8 @@ pub async fn delete(app: Arc<App>, p: SessionRef) -> Result<Empty, RpcError> {
         .sessions
         .delete(&p.session_id, root.as_deref())
         .map_err(journal_error)?;
+    // Stops its MCP servers (their processes are killed when dropped).
+    app.agent.mcp.lock().await.remove(&p.session_id);
     let id = p.session_id.0.clone();
     app.store_call(move |s| s.session_delete(&id)).await?;
     Ok(Empty {})
@@ -418,8 +420,13 @@ pub async fn send(app: Arc<App>, p: SendParams, ctx: RequestCtx) -> Result<Empty
     let a = app.clone();
     let model = row.model.clone();
     tokio::spawn(async move {
+        // Built-in tools plus the session's MCP servers' (started on first use).
+        let registry = match &tools {
+            Some((_, root, _)) => session_registry(&a, &live, root).await,
+            None => a.agent.tools.clone(),
+        };
         let env = tools.map(|(ws, root, policies)| ToolEnv {
-            registry: &a.agent.tools,
+            registry: &registry,
             gate: &a.agent.gate,
             policies,
             ctx: ToolCtx {
@@ -443,6 +450,54 @@ pub async fn send(app: Arc<App>, p: SendParams, ctx: RequestCtx) -> Result<Empty
         live.end();
     });
     Ok(Empty {})
+}
+
+const MCP_KEY: &str = "agent.mcpServers";
+
+/// The built-in registry plus the tools of every configured MCP server, which are started once
+/// per session. A server that fails to start is reported as an error event; the turn goes on.
+async fn session_registry(
+    app: &App,
+    live: &Live,
+    root: &std::path::Path,
+) -> axiom_agent::tools::Registry {
+    let mut reg = app.agent.tools.clone();
+    let configs: Vec<axiom_agent::mcp_client::ServerConfig> = app
+        .store_call(|s| s.setting_get(MCP_KEY))
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    if configs.is_empty() {
+        return reg;
+    }
+    let mut running = app.agent.mcp.lock().await;
+    let entry = running.entry(live.id.clone()).or_default();
+    for cfg in &configs {
+        if entry.iter().any(|(c, _)| c.name == cfg.name) {
+            continue;
+        }
+        match axiom_agent::mcp_client::McpClient::start(cfg, root).await {
+            Ok(started) => entry.push(started),
+            Err(e) => {
+                let _ = live.emit(EventBody::Error {
+                    kind: "io".into(),
+                    model_kind: None,
+                    message: format!("{e}; its tools are not available."),
+                });
+            }
+        }
+    }
+    for (client, tools) in entry.iter() {
+        for t in tools {
+            let tool = axiom_agent::mcp_client::McpTool::new(client.clone(), t.clone());
+            if reg.get(&tool.spec().name).is_none() {
+                reg.register(Arc::new(tool));
+            }
+        }
+    }
+    reg
 }
 
 pub async fn cancel(app: Arc<App>, p: SessionRef) -> Result<Empty, RpcError> {

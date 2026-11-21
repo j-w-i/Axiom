@@ -35,7 +35,9 @@ async fn defaults_for_all_known_keys() {
     assert_eq!(v["agent.providers"], json!([]));
     // M3-GATE-001: the built-in policy.
     assert_eq!(v["agent.policy"]["default"], json!("ask"));
-    assert_eq!(v.len(), 8);
+    // M3-MCP-001.
+    assert_eq!(v["agent.mcpServers"], json!([]));
+    assert_eq!(v.len(), 9);
 }
 
 #[tokio::test]

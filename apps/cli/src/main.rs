@@ -3,6 +3,7 @@
 //! desktop app's workspaces, tasks and sessions), else one it starts over stdio.
 
 mod conn;
+mod mcp;
 
 use axiom_protocol::agent::{
     AgentEvent, ApprovalDecision, ApprovalRequest, Approve, ApproveParams, EventBody, Models,
@@ -127,13 +128,9 @@ async fn open(c: &Client, path: Option<PathBuf>) -> Result<WorkspaceId, String> 
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let data_dir = conn::data_dir(cli.data_dir);
+    // `axiom mcp` owns stdin (the MCP stream), so it never asks for approvals itself: they go to
+    // the Axiom window.
     let approvals = matches!(cli.command, Cmd::Agent { .. }) && std::io::stdin().is_terminal();
-    if let Cmd::Mcp { workspace } = cli.command {
-        return match mcp_unavailable(workspace) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => fail(e),
-        };
-    }
     let conn = match conn::connect(&data_dir, approvals).await {
         Ok(c) => c,
         Err(e) => return fail(e),
@@ -148,17 +145,18 @@ async fn main() -> ExitCode {
             workspace,
         } => build(&conn.client, task, provider, workspace).await,
         Cmd::Agent { what } => agent(&conn.client, what, approvals).await,
-        Cmd::Mcp { .. } => unreachable!("handled above"),
+        Cmd::Mcp { workspace } => match open(&conn.client, workspace).await {
+            Ok(ws) => mcp::serve(conn.client.clone(), ws)
+                .await
+                .map(|()| ExitCode::SUCCESS),
+            Err(e) => Err(e),
+        },
     };
     conn.close().await;
     match code {
         Ok(c) => c,
         Err(e) => fail(e),
     }
-}
-
-fn mcp_unavailable(_workspace: Option<PathBuf>) -> Result<(), String> {
-    Err("`axiom mcp` is not available in this build yet".into())
 }
 
 /// Prints a task's output as it arrives and returns its exit status.

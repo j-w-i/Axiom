@@ -14,6 +14,7 @@ members = [
     "apps/cli",
     "apps/desktop-tauri/src-tauri",
     "tests/helpers/emit",
+    "tests/helpers/fake-mcp",
 ]
 exclude = ["experiments"]
 

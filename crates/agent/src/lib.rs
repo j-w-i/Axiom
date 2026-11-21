@@ -8,6 +8,7 @@ pub mod checkpoint;
 pub mod credentials;
 pub mod gate;
 pub mod live;
+pub mod mcp_client;
 pub mod model;
 pub mod providers;
 pub mod session;
