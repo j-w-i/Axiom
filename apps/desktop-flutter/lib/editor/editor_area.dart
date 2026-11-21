@@ -21,6 +21,7 @@ import '../ui/text_input.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
 import 'code_view.dart';
+import 'lsp/lsp_view.dart';
 
 class EditorArea extends StatefulWidget {
   const EditorArea({super.key});
@@ -429,26 +430,45 @@ class _DocViewState extends State<_DocView> {
     );
   }
 
+  final _gutter = GlobalKey();
+
   @override
   Widget build(BuildContext context) {
     final s = app.settings;
+    final c = context.colors;
+    widget.doc.underlineColor = (severity) => switch (severity) {
+      1 => c.danger,
+      2 => c.warn,
+      _ => c.accent,
+    };
     return ListenableBuilder(
       listenable: s,
       builder: (context, _) => Focus(
         onFocusChange: (has) {
           if (has) _report();
         },
-        child: CodeView(
+        child: LspEditorFeatures(
+          doc: widget.doc,
           controller: _controller,
-          language: widget.doc.language,
-          focusNode: widget.focusNode,
-          scrollController: _scroll,
-          findController: _find,
-          fontSize: s.editorFontSize.toDouble(),
-          fontFamily: s.editorFontFamily,
-          wordWrap: s.editorWordWrap,
-          findBuilder: (context, controller, readOnly) => FindBar(controller: controller),
-          onSave: () => app.documents.save(widget.doc.path),
+          geometry: CodeGeometry(
+            fontSize: s.editorFontSize.toDouble(),
+            gutterKey: _gutter,
+            scroll: _scroll,
+          ),
+          builder: (context, overrides) => CodeView(
+            controller: _controller,
+            language: widget.doc.language,
+            focusNode: widget.focusNode,
+            scrollController: _scroll,
+            findController: _find,
+            fontSize: s.editorFontSize.toDouble(),
+            fontFamily: s.editorFontFamily,
+            wordWrap: s.editorWordWrap,
+            findBuilder: (context, controller, readOnly) => FindBar(controller: controller),
+            onSave: () => app.documents.save(widget.doc.path),
+            overrides: overrides,
+            gutterKey: _gutter,
+          ),
         ),
       ),
     );

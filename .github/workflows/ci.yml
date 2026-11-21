@@ -245,9 +245,17 @@ jobs:
       - name: Xvfb for the end-to-end suites (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get install -y xvfb
+      - name: Language servers for the end-to-end run (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          rustup component add rust-analyzer
+          npm install -g typescript-language-server@6.0.0 typescript@6.0.3
       - name: End-to-end (integration_test against the real daemon)
-        env: { AXIOM_E2E_DISPLAY: xvfb }
-        run: apps/desktop-flutter/scripts/e2e.sh shell_test.dart
+        env:
+          AXIOM_E2E_DISPLAY: xvfb
+          # Ubuntu: the real servers must run (a missing one fails instead of being skipped).
+          AXIOM_REQUIRE_LSP: ${{ runner.os == 'Linux' && '1' || '0' }}
+        run: apps/desktop-flutter/scripts/e2e.sh
 
   deny:
     name: cargo-deny

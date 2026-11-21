@@ -11,13 +11,16 @@
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:re_editor/re_editor.dart';
 
 import '../daemon/client.dart';
 import '../daemon/protocol.g.dart';
 import '../editor/code_view.dart';
+import '../editor/lsp/underline.dart';
+import '../ui/tokens.dart';
+import 'lsp.dart';
 import 'workspace.dart';
 
 const openPathsKey = 'editor.openPaths';
@@ -30,13 +33,42 @@ String titleOf(String path) => path.split('/').last;
 
 class Doc {
   Doc({required this.path, required String text, required this.savedVersion})
-    : controller = CodeLineEditingController.fromText(text),
-      _savedText = text,
-      language = languageOf(path);
+    : _savedText = text,
+      language = languageOf(path) {
+    controller = CodeLineEditingController(codeLines: CodeLines.fromText(text), spanBuilder: _span);
+  }
 
   final String path;
   final String? language;
-  final CodeLineEditingController controller;
+  late final CodeLineEditingController controller;
+
+  /// The language servers' diagnostics on this document (set by the LSP layer).
+  List<LspDiagnostic> diagnostics = const [];
+
+  /// Underline colours by LSP severity (set by the editor from the theme).
+  Color Function(int severity) underlineColor = (_) => AxiomColors.dark.danger;
+
+  TextSpan _span({
+    required BuildContext context,
+    required int index,
+    required CodeLine codeLine,
+    required TextSpan textSpan,
+    required TextStyle style,
+  }) {
+    if (diagnostics.isEmpty) return textSpan;
+    return applyUnderlines(
+      textSpan,
+      underlinesOn(index, codeLine.text.length, diagnostics, underlineColor),
+    );
+  }
+
+  /// New diagnostics: redraw the lines.
+  void setDiagnostics(List<LspDiagnostic> list) {
+    diagnostics = list;
+    controller.forceRepaint();
+    _secondary?.forceRepaint();
+  }
+
   String savedVersion;
   String _savedText;
   bool dirty = false;
@@ -51,7 +83,7 @@ class Doc {
   CodeLineEditingController get secondary {
     final existing = _secondary;
     if (existing != null) return existing;
-    final c = CodeLineEditingController(codeLines: controller.codeLines);
+    final c = CodeLineEditingController(codeLines: controller.codeLines, spanBuilder: _span);
     void fromPrimary() {
       if (_syncing || identical(c.codeLines, controller.codeLines)) return;
       _syncing = true;
@@ -153,6 +185,9 @@ class DocumentsStore extends ChangeNotifier {
   String? focusRequest;
 
   VoidCallback? onQuitConfirmed;
+
+  /// A document was saved (the language servers are told).
+  void Function(String path)? onSaved;
   final _opening = <String>{};
   int _generation = 0;
   bool _restoring = false;
@@ -424,6 +459,7 @@ class DocumentsStore extends ChangeNotifier {
       );
       if (gen != _generation) return false;
       d.markSaved(r.version, text);
+      onSaved?.call(d.path);
       notifyListeners();
       return true;
     } on DaemonException catch (e) {

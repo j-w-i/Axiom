@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../daemon/client.dart';
+import '../editor/lsp/lsp_editor.dart';
 import '../state/documents.dart';
+import '../state/lsp.dart';
+import '../state/problems.dart';
 import '../state/settings.dart';
 import '../state/workspace.dart';
 import '../ui/tokens.dart';
@@ -42,6 +45,10 @@ class AppState {
     : settings = SettingsStore(client),
       workspace = WorkspaceStore(client) {
     documents = DocumentsStore(client, workspace);
+    lsp = LspStore(client, workspace);
+    lspSync = LspSync(docs: documents, lsp: lsp);
+    documents.onSaved = lspSync.saved;
+    problems = ProblemsStore(lsp);
   }
 
   final AppArgs args;
@@ -50,6 +57,9 @@ class AppState {
   final SettingsStore settings;
   final WorkspaceStore workspace;
   late final DocumentsStore documents;
+  late final LspStore lsp;
+  late final LspSync lspSync;
+  late final ProblemsStore problems;
 
   /// The hint line's text (the hovered or focused control's hint).
   final hint = ValueNotifier<String?>(null);
@@ -60,7 +70,8 @@ class AppState {
   Future<void> Function()? pickFolder;
   VoidCallback? openGoToFile;
 
-  static Future<AppState> create(AppArgs args) async {
+  /// [daemonEnvironment]: extra variables for the daemon (the end-to-end suites' fake servers).
+  static Future<AppState> create(AppArgs args, {Map<String, String>? daemonEnvironment}) async {
     final program = locateDaemon(explicit: args.daemon);
     final client = DaemonClient(
       DaemonConfig(
@@ -68,6 +79,7 @@ class AppState {
         args: [
           if (args.dataDir != null) ...['--data-dir', args.dataDir!],
         ],
+        environment: daemonEnvironment,
       ),
     );
     final prefs = await LocalPrefs.load(args.shellDir());
@@ -112,6 +124,14 @@ class AppState {
 
   double get sideWidth => prefs.number('side.width', sideDefault);
   set sideWidth(double v) => prefs.set('side.width', v);
+
+  static const consoleDefault = 220.0;
+
+  bool get consoleVisible => prefs.flag('console.visible', false);
+  set consoleVisible(bool v) => prefs.set('console.visible', v);
+
+  double get consoleHeight => prefs.number('console.height', consoleDefault);
+  set consoleHeight(double v) => prefs.set('console.height', v);
 
   MotionMode get motion => settings.motion;
 }

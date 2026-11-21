@@ -14,6 +14,7 @@ import '../app/app_state.dart';
 import '../daemon/client.dart';
 import '../daemon/protocol.g.dart' show Methods, SearchMode, SearchParams;
 import '../editor/code_view.dart';
+import '../console/console.dart';
 import '../editor/editor_area.dart';
 import '../files/explorer.dart';
 import '../state/documents.dart';
@@ -217,6 +218,22 @@ class _ShellState extends State<Shell> {
         run: () => setState(() => app.sideVisible = !app.sideVisible),
       ),
       Command(
+        id: 'toggle-console',
+        title: 'Toggle Console',
+        shortcut: 'Mod+J',
+        category: 'View',
+        run: () => app.consoleVisible = !app.consoleVisible,
+      ),
+      Command(
+        id: 'problems',
+        title: 'Show Problems',
+        category: 'View',
+        run: () {
+          app.prefs.set('console.tab', 'problems');
+          app.consoleVisible = true;
+        },
+      ),
+      Command(
         id: 'files',
         title: 'Show Files',
         category: 'View',
@@ -372,6 +389,7 @@ class _ShellState extends State<Shell> {
         _mod(LogicalKeyboardKey.keyK): const _CommandIntent('palette'),
         _mod(LogicalKeyboardKey.keyP, shift: true): const _CommandIntent('palette'),
         _mod(LogicalKeyboardKey.keyB): const _CommandIntent('toggle-side'),
+        _mod(LogicalKeyboardKey.keyJ): const _CommandIntent('toggle-console'),
         _mod(LogicalKeyboardKey.comma): const _CommandIntent('settings'),
         _mod(LogicalKeyboardKey.keyO): const _CommandIntent('open-folder'),
         _mod(LogicalKeyboardKey.keyP): const _CommandIntent('go-to-file'),
@@ -465,7 +483,30 @@ class _ShellState extends State<Shell> {
                                 onChanged: (v) => app.sideWidth = v,
                               ),
                             ],
-                            Expanded(child: _Main(editor: _editor)),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(child: _Main(editor: _editor)),
+                                  if (app.consoleVisible) ...[
+                                    AxSplitter(
+                                      label: 'Resize the console',
+                                      vertical: false,
+                                      invert: true,
+                                      value: app.consoleHeight,
+                                      min: 90,
+                                      max: 640,
+                                      defaultValue: AppState.consoleDefault,
+                                      onChanged: (v) => app.consoleHeight = v,
+                                    ),
+                                    SizedBox(
+                                      height: app.consoleHeight,
+                                      child: const ConsoleRegion(),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -979,6 +1020,8 @@ class _StatusBar extends StatelessWidget {
                   }
                   return Row(
                     children: [
+                      const LspStatus(),
+                      const SizedBox(width: Metrics.s5),
                       if (app.documents.cursorText.isNotEmpty)
                         Semantics(
                           label: app.documents.cursorText,

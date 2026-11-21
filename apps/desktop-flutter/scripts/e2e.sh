@@ -11,7 +11,9 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 root="$(cd "$here/../.." && pwd)"
 export PATH="$HOME/.cargo/bin:$PATH:$HOME/flutter/bin"
 cd "$root"
-cargo build -q -p axiomd
+cargo build -q -p axiomd -p fake-lsp
+# The fake language server (tests/helpers/fake-lsp) is found on PATH by the daemon.
+export PATH="$root/target/debug:$PATH"
 export AXIOMD_UNDER_TEST="${AXIOMD_UNDER_TEST:-$root/target/debug/axiomd}"
 cd "$here"
 suites=("$@")

@@ -1,8 +1,8 @@
 ---
 id: FL-EDIT-002
 title: Language servers in the editor: diagnostics, completion, hover, signature, definition, rename, formatting, code actions; Problems
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux verified (lsp_test with fake-lsp); real servers CI Ubuntu
 depends_on: [FL-EDIT-001]
 order: 526
 scope: apps/desktop-flutter/lib/editor/lsp/, apps/desktop-flutter/lib/problems/, apps/desktop-flutter/integration_test/lsp_test.dart

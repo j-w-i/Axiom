@@ -19,8 +19,11 @@ String daemonPath() {
 }
 
 /// Boots the app (as `axiom --daemon … --data-dir <dataDir>`) and waits until it is connected.
-Future<AppState> boot(WidgetTester tester, String dataDir) async {
-  final app = await AppState.create(AppArgs(daemon: daemonPath(), dataDir: dataDir));
+Future<AppState> boot(WidgetTester tester, String dataDir, {Map<String, String>? env}) async {
+  final app = await AppState.create(
+    AppArgs(daemon: daemonPath(), dataDir: dataDir),
+    daemonEnvironment: env,
+  );
   await tester.pumpWidget(AxiomApp(app: app));
   await app.start();
   await until(tester, () => app.client.isReady && app.settings.loaded, what: 'the backend');
@@ -80,6 +83,11 @@ final _physical = <LogicalKeyboardKey, PhysicalKeyboardKey>{
   LogicalKeyboardKey.pageUp: PhysicalKeyboardKey.pageUp,
   LogicalKeyboardKey.pageDown: PhysicalKeyboardKey.pageDown,
   LogicalKeyboardKey.backquote: PhysicalKeyboardKey.backquote,
+  LogicalKeyboardKey.space: PhysicalKeyboardKey.space,
+  LogicalKeyboardKey.f2: PhysicalKeyboardKey.f2,
+  LogicalKeyboardKey.f12: PhysicalKeyboardKey.f12,
+  LogicalKeyboardKey.keyI: PhysicalKeyboardKey.keyI,
+  LogicalKeyboardKey.keyZ: PhysicalKeyboardKey.keyZ,
 };
 
 Future<void> _down(WidgetTester t, LogicalKeyboardKey k) =>

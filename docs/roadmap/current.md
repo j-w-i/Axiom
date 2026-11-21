@@ -34,6 +34,10 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
     replace, Go to File, go to line;
   - no frame over 16.7 ms while scrolling, typing or switching tabs on 5000-line files at the
     owner's scale. The Tauri editor ran at 44 fps there.
+- **FL-EDIT-002 implemented (2026-11-22):** language servers in the Flutter editor:
+  - sync, diagnostic underlines and the Problems panel (the console region, Mod+J);
+  - completion, hover, F12, F2 across files as one undo, formatting, the status segment;
+  - `lsp_test.dart` against fake-lsp; the real servers required in CI on Ubuntu.
 
 ## M2 — Environments and builds: complete (2026-11-21)
 

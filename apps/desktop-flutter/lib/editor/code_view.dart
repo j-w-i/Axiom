@@ -176,6 +176,8 @@ class CodeView extends StatelessWidget {
     this.onChanged,
     this.findBuilder,
     this.onSave,
+    this.overrides = const {},
+    this.gutterKey,
   });
 
   final CodeLineEditingController controller;
@@ -192,6 +194,12 @@ class CodeView extends StatelessWidget {
 
   /// Mod+S inside the editor (re_editor takes the key for its save intent).
   final VoidCallback? onSave;
+
+  /// Extra key overrides (the completion popup takes the arrows, Enter, Tab and Escape).
+  final Map<Type, Action<Intent>> overrides;
+
+  /// Measures the gutter (popups are placed relative to the text).
+  final GlobalKey? gutterKey;
 
   @override
   Widget build(BuildContext context) {
@@ -210,6 +218,7 @@ class CodeView extends StatelessWidget {
       onChanged: onChanged,
       padding: const EdgeInsets.only(left: 6, right: 12, top: 6, bottom: 64),
       shortcutOverrideActions: {
+        ...overrides,
         if (onSave != null)
           CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
             onInvoke: (_) {
@@ -238,6 +247,7 @@ class CodeView extends StatelessWidget {
               ),
       ),
       indicatorBuilder: (context, editingController, chunkController, notifier) => Row(
+        key: gutterKey,
         children: [
           DefaultCodeLineNumber(
             controller: editingController,
