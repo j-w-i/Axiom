@@ -1,0 +1,26 @@
+[package]
+name = "axiom-agent"
+description = "The agent runtime: model providers, tool registry, permission gate, checkpoints, sessions and the loop (ADR-0007, ADR-0015)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-protocol = { path = "../protocol" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

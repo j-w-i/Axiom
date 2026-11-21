@@ -209,7 +209,7 @@ before the task that needs them** (no empty scaffolding).
 ## M3 modules
 
 ### `crates/agent` — `axiom-agent` (M3-MODEL-001…, M3-LOOP-001)
-- **Status:** planned (M3-ARCH-001 froze its contract).
+- **Status:** model layer built (M3-MODEL-001: message model, SSE, Anthropic, scripted, profiles).
 - **Responsibility:** the agent runtime: message model, `ModelProvider` and its adapters
   (Anthropic Messages, OpenAI Chat, scripted for tests), credentials, the tool registry types
   and result bounding, the permission gate and audit log, checkpoints (shadow git), the session

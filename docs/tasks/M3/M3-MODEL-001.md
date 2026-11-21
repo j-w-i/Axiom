@@ -1,8 +1,8 @@
 ---
 id: M3-MODEL-001
 title: crates/agent: message model, ModelProvider, ScriptedProvider, Anthropic adapter
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: [M3-ARCH-001]
 order: 402
 scope: crates/agent/, Cargo.toml (members), deny.toml
