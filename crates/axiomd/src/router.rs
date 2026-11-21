@@ -75,6 +75,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(pagent::GetPolicy, agent::get_policy);
     wire!(pagent::SetPolicy, agent::set_policy);
     wire!(pagent::Approve, agent::approve);
+    wire!(pagent::InstallAgent, agent::install_agent);
     wire!(pagent::ToolCall, agent::tool_call, ctx);
     wire!(pagent::SessionCreate, sessions::create, ctx);
     wire!(pagent::SessionList, sessions::list);

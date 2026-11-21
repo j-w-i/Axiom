@@ -837,6 +837,18 @@ export interface InitializeResult {
   protocolVersion: string;
   server: PeerInfo;
 }
+export interface InstallAgentParams {
+  /**
+   * A built-in agent's provider id (`claude-code`, `codex`, `gemini`).
+   */
+  providerId: string;
+}
+export interface InstallAgentResult {
+  /**
+   * The installed program.
+   */
+  program: string;
+}
 export interface InstallParams {
   planId: string;
 }

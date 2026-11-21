@@ -239,8 +239,17 @@ ADR-0015 §7.
 - **ACP:** external agents inside Axiom (ADR-0016; as built by M3-ACP-001).
   - **Built-in providers.** `claude-code` (`claude-agent-acp`), `codex` (`codex-acp`) and
     `gemini` (`gemini --experimental-acp`) are listed by `agent/models`: available when the
-    program is on `PATH`, else with an install hint. A user configuration with the same id
-    overrides one.
+    program is on `PATH` or in `<data dir>/agents/node_modules/.bin`, else with an install
+    hint. A user configuration with the same id overrides one.
+  - **Installing (ADR-0020 §6).** `agent/installAgent { providerId }` runs
+    `npm install --prefix <data dir>/agents <package>`, bounded to 10 minutes. The packages
+    are `@agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp` and
+    `@google/gemini-cli`. The answer is the installed program. The person still signs in to the
+    agent themselves.
+  - **Without a folder (ADR-0020 §6).** A conversation without a workspace may use an external
+    agent. Its first turn creates `<data dir>/scratch/<session id>` and opens it as a workspace
+    inside the daemon; the agent runs there, with the gate, checkpoints and terminals as in a
+    folder.
   - **Connection.** ACP protocol version 1. The client capabilities are fs read/write and
     terminal. `session/new` gets the workspace as `cwd` and Axiom's own MCP server
     (`axiom mcp`, when the CLI is installed next to the daemon). `session/load` is used when

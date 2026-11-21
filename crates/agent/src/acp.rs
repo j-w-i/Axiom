@@ -79,10 +79,38 @@ pub fn install_hint(id: &str) -> Option<&'static str> {
 }
 
 /// The program on `PATH` (or as given, if it has a directory part).
+/// Where `agent/installAgent` installs agents (`<data dir>/agents`, an npm prefix), set once
+/// by the daemon at startup. Its `node_modules/.bin` is searched before `PATH`.
+static AGENTS_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn set_agents_dir(dir: PathBuf) {
+    let _ = AGENTS_DIR.set(dir);
+}
+
+pub fn agents_dir() -> Option<&'static Path> {
+    AGENTS_DIR.get().map(PathBuf::as_path)
+}
+
+/// The npm package of a built-in agent (ADR-0016 §2), for `agent/installAgent`.
+pub fn builtin_package(id: &str) -> Option<&'static str> {
+    match id {
+        "claude-code" => Some("@agentclientprotocol/claude-agent-acp"),
+        "codex" => Some("@agentclientprotocol/codex-acp"),
+        "gemini" => Some("@google/gemini-cli"),
+        _ => None,
+    }
+}
+
 pub fn find_program(program: &str) -> Option<PathBuf> {
     let p = Path::new(program);
     if p.components().count() > 1 {
         return p.is_file().then(|| p.to_path_buf());
+    }
+    if let Some(bin) = agents_dir().map(|d| d.join("node_modules").join(".bin")) {
+        let c = bin.join(program);
+        if c.is_file() {
+            return Some(c);
+        }
     }
     let exts: Vec<String> = if cfg!(windows) {
         vec![".exe".into(), ".cmd".into(), ".bat".into(), String::new()]

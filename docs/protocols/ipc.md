@@ -208,6 +208,7 @@ runtime).
 | `agent/send` | `SendParams → {}` | `not_found`, `conflict` (turn running), `prerequisite_missing` |
 | `agent/cancel` | `SessionRef → {}` | `not_found` |
 | `agent/approve` | `ApproveParams → {}` | `not_found` |
+| `agent/installAgent` | `InstallAgentParams → InstallAgentResult` (ADR-0020 §6, additive) | `not_found`, `prerequisite_missing` (npm), `io`, `timeout` |
 | `agent/checkpoints` | `SessionRef → CheckpointsResult` | `not_found` |
 | `agent/restore` | `RestoreParams → RestoreResult` | `not_found`, `checkpoint_conflict`, `prerequisite_missing` |
 | `agent/tools` | `WorkspaceRef → ToolsResult` | `workspace_not_open` |

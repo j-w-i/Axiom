@@ -1730,6 +1730,36 @@ final class InitializeResult implements Wire {
   };
 }
 
+final class InstallAgentParams implements Wire {
+  const InstallAgentParams({required this.providerId});
+
+  /// A built-in agent's provider id (`claude-code`, `codex`, `gemini`).
+  final String providerId;
+
+  static InstallAgentParams fromJson(Object? json) {
+    final m = asMap(json);
+    return InstallAgentParams(providerId: m['providerId'] as String);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'providerId': providerId};
+}
+
+final class InstallAgentResult implements Wire {
+  const InstallAgentResult({required this.program});
+
+  /// The installed program.
+  final String program;
+
+  static InstallAgentResult fromJson(Object? json) {
+    final m = asMap(json);
+    return InstallAgentResult(program: m['program'] as String);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'program': program};
+}
+
 final class InstallParams implements Wire {
   const InstallParams({required this.planId});
 
@@ -4634,6 +4664,10 @@ abstract final class Methods {
     Empty.fromJson,
   );
   static const agentImage = Method<ImageParams, ImageData>('agent/image', ImageData.fromJson);
+  static const agentInstallAgent = Method<InstallAgentParams, InstallAgentResult>(
+    'agent/installAgent',
+    InstallAgentResult.fromJson,
+  );
   static const agentModels = Method<ModelsParams, ModelsResult>(
     'agent/models',
     ModelsResult.fromJson,

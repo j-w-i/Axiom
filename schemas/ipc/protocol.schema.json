@@ -1613,6 +1613,30 @@
       ],
       "type": "object"
     },
+    "InstallAgentParams": {
+      "properties": {
+        "providerId": {
+          "description": "A built-in agent's provider id (`claude-code`, `codex`, `gemini`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "providerId"
+      ],
+      "type": "object"
+    },
+    "InstallAgentResult": {
+      "properties": {
+        "program": {
+          "description": "The installed program.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "program"
+      ],
+      "type": "object"
+    },
     "InstallParams": {
       "properties": {
         "planId": {
@@ -4309,6 +4333,14 @@
       },
       "result": {
         "$ref": "#/$defs/ImageData"
+      }
+    },
+    "agent/installAgent": {
+      "params": {
+        "$ref": "#/$defs/InstallAgentParams"
+      },
+      "result": {
+        "$ref": "#/$defs/InstallAgentResult"
       }
     },
     "agent/models": {

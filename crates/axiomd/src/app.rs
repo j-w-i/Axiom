@@ -179,6 +179,7 @@ impl App {
     }
 
     pub fn with_data_dir(store: Store, data_dir: PathBuf) -> Arc<App> {
+        axiom_agent::acp::set_agents_dir(data_dir.join("agents"));
         let allow_http = std::env::var(INSECURE_LOOPBACK_ENV).is_ok_and(|v| v == "1");
         if allow_http {
             tracing::warn!("{INSECURE_LOOPBACK_ENV}=1: plain HTTP to loopback hosts is allowed");

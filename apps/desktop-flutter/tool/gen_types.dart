@@ -136,7 +136,7 @@ void main(List<String> args) {
     // Inside the package, so the formatter uses analysis_options.yaml's page width.
     final tmp = File('${Directory('.dart_tool').createTempSync('gen').path}/protocol.g.dart')
       ..writeAsStringSync(out.toString());
-    Process.runSync('dart', ['format', tmp.path]);
+    Process.runSync(Platform.resolvedExecutable, ['format', tmp.path]);
     final text = tmp.readAsStringSync();
     tmp.parent.deleteSync(recursive: true);
     if (!file.existsSync() || file.readAsStringSync() != text) {
@@ -146,7 +146,7 @@ void main(List<String> args) {
     return;
   }
   file.writeAsStringSync(out.toString());
-  Process.runSync('dart', ['format', _outPath]);
+  Process.runSync(Platform.resolvedExecutable, ['format', _outPath]);
   stdout.writeln('wrote $_outPath (${names.length} definitions)');
 }
 

@@ -80,6 +80,7 @@ pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
         m::<agent::Send>(g),
         m::<agent::Cancel>(g),
         m::<agent::Approve>(g),
+        m::<agent::InstallAgent>(g),
         m::<agent::Checkpoints>(g),
         m::<agent::Restore>(g),
         m::<agent::Tools>(g),
