@@ -15,6 +15,10 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
 - **FL-CORE-001 implemented (2026-11-22):** the Dart daemon client (lifecycle, wire order,
   cancel, timeout, crash and restart, bounded shutdown) and generated wire types for all 170
   definitions with typed method and notification descriptors; 10 tests against the real axiomd.
+- **FL-DS-001 implemented (2026-11-22):** the design system in Flutter
+  (`docs/design/flutter/README.md`): Temporal Tactility's surfaces and motion with Precision
+  Instrument's brass, Plex and hint line; every control keyboard-operable and named;
+  contrast-checked tokens; golden images of the gallery in both themes.
 
 ## M2 — Environments and builds: complete (2026-11-21)
 
