@@ -8,6 +8,8 @@ import '../state/agent.dart';
 import '../state/documents.dart';
 import '../state/lsp.dart';
 import '../state/problems.dart';
+import '../state/tasks.dart';
+import '../state/terminals.dart';
 import '../state/settings.dart';
 import '../state/workspace.dart';
 import '../ui/tokens.dart';
@@ -49,7 +51,9 @@ class AppState {
     lsp = LspStore(client, workspace);
     lspSync = LspSync(docs: documents, lsp: lsp);
     documents.onSaved = lspSync.saved;
-    problems = ProblemsStore(lsp);
+    problems = ProblemsStore(lsp, client: client, workspace: workspace);
+    tasks = TasksStore(client, workspace)..onProviderStart = problems.begin;
+    terminals = TerminalsStore(client, workspace);
     agent = AgentStore(client, workspace);
   }
 
@@ -62,6 +66,8 @@ class AppState {
   late final LspStore lsp;
   late final LspSync lspSync;
   late final ProblemsStore problems;
+  late final TasksStore tasks;
+  late final TerminalsStore terminals;
   late final AgentStore agent;
 
   /// The hint line's text (the hovered or focused control's hint).
@@ -80,6 +86,16 @@ class AppState {
 
   /// Focuses the AI dock's composer (set by the dock while it is shown).
   VoidCallback? focusDock;
+
+  /// Focuses the run prompt (set by the Output view).
+  VoidCallback? focusRunPrompt;
+
+  /// Focuses the shown terminal, creating one when there is none (set by the Terminal view).
+  Future<void> Function()? focusTerminal;
+
+  /// Runs the window's command bound to [e], if one is (set by the shell; the terminal hands it
+  /// the window's chords).
+  bool Function(KeyEvent e)? shellShortcut;
 
   /// [daemonEnvironment]: extra variables for the daemon (the end-to-end suites' fake servers).
   static Future<AppState> create(AppArgs args, {Map<String, String>? daemonEnvironment}) async {

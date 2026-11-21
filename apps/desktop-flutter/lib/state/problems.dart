@@ -1,23 +1,54 @@
 import 'package:flutter/foundation.dart';
 
+import '../daemon/client.dart';
 import '../daemon/protocol.g.dart';
 import 'lsp.dart';
+import 'workspace.dart';
 
-/// Problems from every source: the language servers now, builds and tasks (FL-CONSOLE-001).
+/// Problems from every source: the language servers, and provider tasks' diagnostics
+/// (`build/diagnostics`; each run of a task replaces its last run's).
 class ProblemsStore extends ChangeNotifier {
-  ProblemsStore(this.lsp) {
+  ProblemsStore(this.lsp, {DaemonClient? client, WorkspaceStore? workspace})
+    : _workspace = workspace {
     lsp.addListener(_changed);
+    _off = client?.on(Notifications.buildDiagnostics, (p) {
+      final prev = _byTask[p.taskId] ?? const [];
+      _byTask[p.taskId] = [...prev, ...p.diagnostics];
+      if (_runs.values.any((r) => r.taskId == p.taskId)) notifyListeners();
+    });
+    workspace?.addListener(_onWorkspace);
   }
 
   final LspStore lsp;
-  List<Diagnostic> _build = const [];
+  final WorkspaceStore? _workspace;
+  void Function()? _off;
   int _seen = -1;
 
-  /// Build and task diagnostics (replaced per run).
-  void setBuild(List<Diagnostic> list) {
-    _build = list;
+  /// provider/task → its latest run.
+  final _runs = <String, ({String taskId, String label})>{};
+  final _byTask = <String, List<Diagnostic>>{};
+  bool _wasOpen = false;
+
+  void _onWorkspace() {
+    final open = _workspace?.isOpen ?? false;
+    if (_wasOpen && !open) {
+      _runs.clear();
+      _byTask.clear();
+      notifyListeners();
+    }
+    _wasOpen = open;
+  }
+
+  /// A new run of [key] (provider/task) started as [taskId]: its problems replace the last run's.
+  void begin(String key, String taskId, String label) {
+    _runs[key] = (taskId: taskId, label: label);
+    // The replaced run's diagnostics, and any of tasks that are no run's, go.
+    final live = {for (final r in _runs.values) r.taskId};
+    _byTask.removeWhere((id, _) => !live.contains(id));
     notifyListeners();
   }
+
+  List<Diagnostic> get _build => [for (final r in _runs.values) ...?_byTask[r.taskId]];
 
   void _changed() {
     if (lsp.diagnosticsVersion == _seen) return;
@@ -48,6 +79,8 @@ class ProblemsStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    _off?.call();
+    _workspace?.removeListener(_onWorkspace);
     lsp.removeListener(_changed);
     super.dispose();
   }

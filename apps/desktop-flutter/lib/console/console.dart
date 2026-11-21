@@ -9,6 +9,8 @@ import '../app/app_state.dart';
 import '../daemon/protocol.g.dart';
 import '../editor/lsp/lsp_editor.dart';
 import '../state/problems.dart';
+import 'output.dart';
+import 'terminal_view.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/pressable.dart';
@@ -26,7 +28,7 @@ class ConsoleRegion extends StatelessWidget {
     final t = context.axiom;
     final c = t.colors;
     return ListenableBuilder(
-      listenable: Listenable.merge([app.prefs, app.problems]),
+      listenable: Listenable.merge([app.prefs, app.problems, app.tasks, app.terminals]),
       builder: (context, _) {
         final tab = app.prefs.string('console.tab', 'problems');
         final errors = app.problems.count(Severity.error);
@@ -52,11 +54,25 @@ class ConsoleRegion extends StatelessWidget {
                             height: 30,
                             tabs: [
                               TabItem(
+                                id: 'output',
+                                label: 'Output',
+                                trailing: app.tasks.running
+                                    ? const StatusDot(DotState.running)
+                                    : null,
+                              ),
+                              TabItem(
                                 id: 'problems',
                                 label: 'Problems',
                                 trailing: errors + warnings == 0
                                     ? null
                                     : AxBadge(errors + warnings, attention: errors > 0),
+                              ),
+                              TabItem(
+                                id: 'terminal',
+                                label: 'Terminal',
+                                trailing: app.terminals.terminals.isEmpty
+                                    ? null
+                                    : AxBadge(app.terminals.terminals.length, attention: false),
                               ),
                             ],
                             selected: tab,
@@ -76,7 +92,13 @@ class ConsoleRegion extends StatelessWidget {
                   ),
                 ),
                 const Groove(),
-                const Expanded(child: ProblemsView()),
+                Expanded(
+                  child: switch (tab) {
+                    'output' => const OutputView(),
+                    'terminal' => const TerminalPane(),
+                    _ => const ProblemsView(),
+                  },
+                ),
               ],
             ),
           ),

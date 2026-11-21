@@ -94,6 +94,9 @@ final _physical = <LogicalKeyboardKey, PhysicalKeyboardKey>{
   LogicalKeyboardKey.keyN: PhysicalKeyboardKey.keyN,
   LogicalKeyboardKey.keyE: PhysicalKeyboardKey.keyE,
   LogicalKeyboardKey.delete: PhysicalKeyboardKey.delete,
+  LogicalKeyboardKey.keyR: PhysicalKeyboardKey.keyR,
+  LogicalKeyboardKey.keyC: PhysicalKeyboardKey.keyC,
+  LogicalKeyboardKey.f5: PhysicalKeyboardKey.f5,
 };
 
 Future<void> _down(WidgetTester t, LogicalKeyboardKey k) =>

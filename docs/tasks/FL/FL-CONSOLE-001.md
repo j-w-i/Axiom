@@ -1,8 +1,8 @@
 ---
 id: FL-CONSOLE-001
 title: Console: Output and task runs, Problems, Terminal (xterm.dart)
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; Linux verified (console_test 3/3 in KWin and Xvfb); macOS in CI
 depends_on: [FL-SHELL-001]
 order: 527
 scope: apps/desktop-flutter/lib/console/, apps/desktop-flutter/integration_test/console_test.dart

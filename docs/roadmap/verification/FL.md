@@ -77,6 +77,28 @@ the whole answer and rebuilt the whole transcript. Three changes fixed it:
 After the change, `frames_test.dart` (the shell's interactions) still has no frame over budget.
 
 ## End to end
+`console_test.dart`: 3/3, in a private virtual KWin and in a private Xvfb, against the real
+daemon.
+- **Output:**
+  - Mod+Shift+R focuses the prompt; a command's stdout and stderr stay apart, and the exit
+    status shows ("Failed with exit code 2");
+  - Shift+F5 stops a running command within seconds;
+  - a missing program is a structured error;
+  - the transport shows the label and an advancing time, then success; a failure shows as
+    such; Rerun names the last command.
+- **Provider tasks:** "Build: cargo build" from the palette builds a broken crate and fails;
+  the transport offers "Rerun: Build: cargo build"; the E0308 row reads "Error: mismatched types
+  (E0308) at src/main.rs:2:18, from rustc" and opens the file at Ln 2, Col 18.
+- **Terminal:**
+  - Mod+Shift+` opens a shell in the folder, and `pwd` prints it;
+  - `stty size` matches the screen, and hiding the side bar gives more columns;
+  - a typed key's echo is on screen within p95 30 / 16 / 33 ms across three runs (the
+    criterion is 50 ms);
+  - a second terminal is a tab, and Mod+` focuses it;
+  - Mod+K from the terminal opens the palette;
+  - `exit` marks the tab "(ended)";
+  - after quitting, no shell process is left.
+
 `chat_test.dart`: 3/3, in a private virtual KWin and in a private Xvfb, against the real daemon.
 - **No folder, the scripted model:**
   - Chat is on the rail under Files and opens with a model chosen;

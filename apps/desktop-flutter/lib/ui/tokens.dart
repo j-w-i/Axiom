@@ -336,3 +336,44 @@ final class AxiomMotion {
   bool get animates => mode != MotionMode.off;
   Curve get curve => const Cubic(0.2, 0.8, 0.2, 1);
 }
+
+/// The terminal's 16 ANSI colours (black, red, green, yellow, blue, magenta, cyan, white, then the
+/// bright ones): the Tauri shell's tokens.css values, contrast-checked there (M4-TERM-002).
+abstract final class AnsiColors {
+  static const dark = [
+    Color(0xFF2C2D30),
+    Color(0xFFE5645D),
+    Color(0xFFA9C47F),
+    Color(0xFFE0B45C),
+    Color(0xFF7FA6D6),
+    Color(0xFFC58FB8),
+    Color(0xFF8EC2B2),
+    Color(0xFFCFCBC3),
+    Color(0xFF8A867E),
+    Color(0xFFF0857E),
+    Color(0xFFBCD894),
+    Color(0xFFF0C977),
+    Color(0xFF9FC0E8),
+    Color(0xFFD9A8CC),
+    Color(0xFFA6D6C7),
+    Color(0xFFF1EDE6),
+  ];
+  static const light = [
+    Color(0xFF2B2925),
+    Color(0xFFB23A33),
+    Color(0xFF477113),
+    Color(0xFF875E00),
+    Color(0xFF2B5D9C),
+    Color(0xFF8E3D7C),
+    Color(0xFF1C7266),
+    Color(0xFFD8D4CC),
+    Color(0xFF6A655D),
+    Color(0xFFB73A33),
+    Color(0xFF477100),
+    Color(0xFF8A5D00),
+    Color(0xFF3567A6),
+    Color(0xFF9B4788),
+    Color(0xFF147365),
+    Color(0xFFF6F3EE),
+  ];
+}

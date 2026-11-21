@@ -20,6 +20,8 @@ import '../editor/editor_area.dart';
 import '../files/explorer.dart';
 import '../state/documents.dart';
 import '../state/settings.dart';
+import '../state/tasks.dart';
+import '../console/output.dart';
 import '../ui/controls.dart';
 import '../ui/icon_data.dart';
 import '../ui/icons.dart';
@@ -63,6 +65,7 @@ class _ShellState extends State<Shell> {
       app.openSettings = _showSettings;
       app.pickFolder = _pickFolder;
       app.openGoToFile = _goToFile;
+      app.shellShortcut = _dispatch;
       app.documents.addListener(_onDocuments);
     });
   }
@@ -243,6 +246,92 @@ class _ShellState extends State<Shell> {
       ),
       Command(id: 'chat', title: 'Show Chat', category: 'View', run: () => _go(Destination.chat)),
       Command(
+        id: 'run-command',
+        title: 'Run Command…',
+        shortcut: 'Mod+Shift+R',
+        category: 'Run',
+        enabled: () => ws.isOpen,
+        run: () {
+          app.prefs.set('console.tab', 'output');
+          app.consoleVisible = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) => app.focusRunPrompt?.call());
+        },
+      ),
+      Command(
+        id: 'rerun',
+        title: app.tasks.lastLabel.isEmpty ? 'Rerun Last' : 'Rerun: ${app.tasks.lastLabel}',
+        shortcut: 'F5',
+        category: 'Run',
+        enabled: () => app.tasks.canRun && app.tasks.lastLabel.isNotEmpty,
+        run: () {
+          app.prefs.set('console.tab', 'output');
+          app.consoleVisible = true;
+          app.tasks.rerunLast();
+        },
+      ),
+      Command(
+        id: 'stop',
+        title: 'Stop',
+        shortcut: 'Shift+F5',
+        category: 'Run',
+        enabled: () => app.tasks.running,
+        run: app.tasks.stop,
+      ),
+      for (final t in app.tasks.providerTasks)
+        Command(
+          id: 'task:${t.providerId}:${t.id}',
+          title: providerTaskTitle(t),
+          category: 'Run',
+          enabled: () => app.tasks.canRun,
+          run: () {
+            app.prefs.set('console.tab', 'output');
+            app.consoleVisible = true;
+            app.tasks.runProvider(t);
+          },
+        ),
+      Command(
+        id: 'new-terminal',
+        title: 'New Terminal',
+        shortcut: 'Mod+Shift+`',
+        category: 'View',
+        enabled: () => ws.isOpen,
+        run: () {
+          app.prefs.set('console.tab', 'terminal');
+          app.consoleVisible = true;
+          unawaited(_newTerminal());
+        },
+      ),
+      Command(
+        id: 'show-terminal',
+        title: 'Show Terminal',
+        category: 'View',
+        enabled: () => ws.isOpen,
+        run: () {
+          app.prefs.set('console.tab', 'terminal');
+          app.consoleVisible = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) => app.focusTerminal?.call());
+        },
+      ),
+      Command(
+        id: 'focus-console',
+        title: 'Focus the Console',
+        shortcut: 'Mod+`',
+        category: 'View',
+        run: () {
+          app.consoleVisible = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            switch (app.prefs.string('console.tab', 'problems')) {
+              case 'terminal':
+                app.focusTerminal?.call();
+              case 'output':
+                app.focusRunPrompt?.call();
+              default:
+                break;
+            }
+          });
+        },
+      ),
+      Command(
         id: 'toggle-dock',
         title: 'Toggle AI Dock',
         shortcut: 'Mod+L',
@@ -396,6 +485,14 @@ class _ShellState extends State<Shell> {
     ];
   }
 
+  /// A new terminal in the folder, focused once the Terminal view shows it.
+  Future<void> _newTerminal() async {
+    final id = await app.terminals.create();
+    if (id != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => app.focusTerminal?.call());
+    }
+  }
+
   /// The dock opens beside the editor (leaving Chat for the files when Chat is showing).
   void _toggleDock() {
     final open = app.dockVisible && app.destination != Destination.chat;
@@ -418,51 +515,73 @@ class _ShellState extends State<Shell> {
     if (d == Destination.chat) app.focusComposer?.call();
   }
 
+  /// The window's keys.
+  late final Map<ShortcutActivator, Intent> _shortcuts = {
+    _mod(LogicalKeyboardKey.keyK): const _CommandIntent('palette'),
+    _mod(LogicalKeyboardKey.keyP, shift: true): const _CommandIntent('palette'),
+    _mod(LogicalKeyboardKey.keyB): const _CommandIntent('toggle-side'),
+    _mod(LogicalKeyboardKey.keyE, shift: true): const _CommandIntent('files'),
+    _mod(LogicalKeyboardKey.keyL): const _CommandIntent('toggle-dock'),
+    _mod(LogicalKeyboardKey.keyN): const _CommandIntent('new-chat'),
+    _mod(LogicalKeyboardKey.keyJ): const _CommandIntent('toggle-console'),
+    _mod(LogicalKeyboardKey.comma): const _CommandIntent('settings'),
+    _mod(LogicalKeyboardKey.keyO): const _CommandIntent('open-folder'),
+    _mod(LogicalKeyboardKey.keyP): const _CommandIntent('go-to-file'),
+    _mod(LogicalKeyboardKey.keyS): const _CommandIntent('save'),
+    SingleActivator(LogicalKeyboardKey.keyS, control: !_isMac, meta: _isMac, alt: true):
+        const _CommandIntent('save-all'),
+    _mod(LogicalKeyboardKey.keyW): const _CommandIntent('close-editor'),
+    const SingleActivator(LogicalKeyboardKey.keyG, control: true): const _CommandIntent(
+      'go-to-line',
+    ),
+    const SingleActivator(LogicalKeyboardKey.tab, control: true): const _CommandIntent('next-tab'),
+    const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true): const _CommandIntent(
+      'prev-tab',
+    ),
+    const SingleActivator(LogicalKeyboardKey.pageUp, control: true, shift: true):
+        const _CommandIntent('move-tab-left'),
+    const SingleActivator(LogicalKeyboardKey.pageDown, control: true, shift: true):
+        const _CommandIntent('move-tab-right'),
+    _mod(LogicalKeyboardKey.backslash): const _CommandIntent('split-right'),
+    _mod(LogicalKeyboardKey.digit1): const _CommandIntent('focus-left'),
+    _mod(LogicalKeyboardKey.digit2): const _CommandIntent('focus-right'),
+    _mod(LogicalKeyboardKey.keyR, shift: true): const _CommandIntent('run-command'),
+    const SingleActivator(LogicalKeyboardKey.f5): const _CommandIntent('rerun'),
+    const SingleActivator(LogicalKeyboardKey.f5, shift: true): const _CommandIntent('stop'),
+    _mod(LogicalKeyboardKey.backquote, shift: true): const _CommandIntent('new-terminal'),
+    _mod(LogicalKeyboardKey.backquote): const _CommandIntent('focus-console'),
+  };
+
+  void _invoke(String id) {
+    if (id == 'palette') {
+      _showPalette();
+      return;
+    }
+    final cmd = commands().where((x) => x.id == id).firstOrNull;
+    if (cmd != null && cmd.isEnabled) cmd.run();
+  }
+
+  /// The command bound to [e], run (the terminal hands the window its chords).
+  bool _dispatch(KeyEvent e) {
+    for (final MapEntry(key: a, value: i) in _shortcuts.entries) {
+      if (i is _CommandIntent && a.accepts(e, HardwareKeyboard.instance)) {
+        _invoke(i.id);
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     return Shortcuts(
-      shortcuts: {
-        _mod(LogicalKeyboardKey.keyK): const _CommandIntent('palette'),
-        _mod(LogicalKeyboardKey.keyP, shift: true): const _CommandIntent('palette'),
-        _mod(LogicalKeyboardKey.keyB): const _CommandIntent('toggle-side'),
-        _mod(LogicalKeyboardKey.keyE, shift: true): const _CommandIntent('files'),
-        _mod(LogicalKeyboardKey.keyL): const _CommandIntent('toggle-dock'),
-        _mod(LogicalKeyboardKey.keyN): const _CommandIntent('new-chat'),
-        _mod(LogicalKeyboardKey.keyJ): const _CommandIntent('toggle-console'),
-        _mod(LogicalKeyboardKey.comma): const _CommandIntent('settings'),
-        _mod(LogicalKeyboardKey.keyO): const _CommandIntent('open-folder'),
-        _mod(LogicalKeyboardKey.keyP): const _CommandIntent('go-to-file'),
-        _mod(LogicalKeyboardKey.keyS): const _CommandIntent('save'),
-        SingleActivator(LogicalKeyboardKey.keyS, control: !_isMac, meta: _isMac, alt: true):
-            const _CommandIntent('save-all'),
-        _mod(LogicalKeyboardKey.keyW): const _CommandIntent('close-editor'),
-        const SingleActivator(LogicalKeyboardKey.keyG, control: true): const _CommandIntent(
-          'go-to-line',
-        ),
-        const SingleActivator(LogicalKeyboardKey.tab, control: true): const _CommandIntent(
-          'next-tab',
-        ),
-        const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true):
-            const _CommandIntent('prev-tab'),
-        const SingleActivator(LogicalKeyboardKey.pageUp, control: true, shift: true):
-            const _CommandIntent('move-tab-left'),
-        const SingleActivator(LogicalKeyboardKey.pageDown, control: true, shift: true):
-            const _CommandIntent('move-tab-right'),
-        _mod(LogicalKeyboardKey.backslash): const _CommandIntent('split-right'),
-        _mod(LogicalKeyboardKey.digit1): const _CommandIntent('focus-left'),
-        _mod(LogicalKeyboardKey.digit2): const _CommandIntent('focus-right'),
-      },
+      shortcuts: _shortcuts,
       child: Actions(
         actions: {
           _CommandIntent: CallbackAction<_CommandIntent>(
             onInvoke: (i) {
-              if (i.id == 'palette') {
-                _showPalette();
-              } else {
-                final cmd = commands().firstWhere((x) => x.id == i.id);
-                if (cmd.isEnabled) cmd.run();
-              }
+              _invoke(i.id);
               return null;
             },
           ),
@@ -718,6 +837,8 @@ class _TitleRow extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(width: Metrics.s4),
+              const Transport(),
               const Spacer(),
               AxIconButton(
                 icon: AxiomIcons.sidebar,

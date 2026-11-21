@@ -38,6 +38,13 @@ are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity g
   - sync, diagnostic underlines and the Problems panel (the console region, Mod+J);
   - completion, hover, F12, F2 across files as one undo, formatting, the status segment;
   - `lsp_test.dart` against fake-lsp; the real servers required in CI on Ubuntu.
+- **FL-CONSOLE-001 implemented (2026-11-22):** the console's Output view and the Terminal:
+  - Output: the run prompt with its history, stdout and stderr apart, the exit status, Stop,
+    Rerun; the title row's transport;
+  - provider tasks in the palette, and their diagnostics in Problems;
+  - terminals on `xterm` (tabs, the size reaching the shell, the window's chords passing
+    through, copy and paste);
+  - `console_test.dart` 3/3; a typed key's echo is on screen in 33 ms or less (p95).
 - **FL-CHAT-001 implemented (2026-11-22):** Chat, first-party, on the rail under Files:
   - conversations with or without a folder, streamed Markdown, edit, regenerate, images,
     rename and delete;
