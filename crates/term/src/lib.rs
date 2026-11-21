@@ -240,25 +240,24 @@ impl Default for Terminals {
 }
 
 /// The person's login shell: `$SHELL`, else `/bin/sh` (`-l` on macOS, as Terminal.app starts it).
+#[cfg(not(windows))]
 pub fn default_shell(env: &BTreeMap<String, String>) -> Vec<String> {
-    #[cfg(windows)]
-    {
-        let _ = env;
-        return vec![std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())];
+    let shell = env
+        .get("SHELL")
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .unwrap_or_else(|| "/bin/sh".into());
+    if cfg!(target_os = "macos") {
+        vec![shell, "-l".into()]
+    } else {
+        vec![shell]
     }
-    #[cfg(not(windows))]
-    {
-        let shell = env
-            .get("SHELL")
-            .filter(|s| !s.is_empty())
-            .cloned()
-            .unwrap_or_else(|| "/bin/sh".into());
-        if cfg!(target_os = "macos") {
-            vec![shell, "-l".into()]
-        } else {
-            vec![shell]
-        }
-    }
+}
+
+/// The person's shell on Windows: `%COMSPEC%` (cmd.exe). Windows support is deferred.
+#[cfg(windows)]
+pub fn default_shell(_env: &BTreeMap<String, String>) -> Vec<String> {
+    vec![std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())]
 }
 
 impl Terminals {

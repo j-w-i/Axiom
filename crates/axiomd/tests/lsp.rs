@@ -314,7 +314,7 @@ async fn real_rust_analyzer_definition_and_diagnostics() {
     // while rust-analyzer is still loading the project (it answers null or an empty list then).
     let mut found = Value::Null;
     for _ in 0..60 {
-        let r = d
+        let r = match d
             .client
             .request::<Request>(RequestParams {
                 workspace_id: f.id.clone(),
@@ -323,7 +323,15 @@ async fn real_rust_analyzer_definition_and_diagnostics() {
                 params: json!({"textDocument":{"uri":main_uri},"position":{"line":3,"character":25}}),
             })
             .await
-            .unwrap();
+        {
+            Ok(r) => r,
+            // ContentModified (-32801) while it loads the project: clients ask again.
+            Err(e) if e.data.details.as_ref().is_some_and(|d| d["code"] == -32801) => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+            Err(e) => panic!("{e:?}"),
+        };
         let first = if r.result.is_array() {
             r.result[0].clone()
         } else {

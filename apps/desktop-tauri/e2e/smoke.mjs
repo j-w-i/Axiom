@@ -912,6 +912,9 @@ try {
       `${JSON.stringify(plan)}; after install: ${installed}`,
     );
 
+    // The first plan dialog's scrim animates out; a click before it is gone lands on it (seen on
+    // CI when the demo install finishes within the exit animation).
+    await wd.waitFor(`return !document.querySelector('[data-testid=install-plan], .overlay')`, [], 5000, "first plan dialog gone");
     await wd.click(await wd.find(`${row("slowdemo")} .btn--primary`));
     await wd.waitFor(`return !!document.querySelector('[data-testid=install-plan] [data-action=install]')`, [], 10000, "slow plan dialog");
     await wd.click(await wd.find('[data-testid=install-plan] [data-action=install]'));
@@ -1027,7 +1030,12 @@ try {
 
   wd = await launch();
   await wd.waitFor(`return document.querySelector('[data-path="src/nested"]') !== null`, [], 15000, "last workspace + expanded folders restored");
-  await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 2`, [], 8000, "tabs restored");
+  await wd.waitFor(`return document.querySelectorAll('[role=tab][data-path]').length === 2`, [], 8000, "tabs restored").catch(async (e) => {
+    // Seen twice on macOS CI (M3, M4): what was stored and what the store holds, for the next time.
+    const state = await wd.execAsync(`const done = arguments[arguments.length - 1]; const w = ${appExpr}.workspace.getSnapshot(); ${appExpr}.client.request('workspace/getState', { workspaceId: w.id, keys: ['editor.openPaths', 'editor.activePath'] }).then(r => done({ ws: w.id, values: r.values, docs: ${appExpr}.documents.getSnapshot().docs.map(d => d.path), banner: ${appExpr}.documents.getSnapshot().banner }), e => done(String(e)))`).catch((x) => String(x));
+    console.log("DIAG tabs restore:", JSON.stringify(state));
+    throw e;
+  });
   const tabs = await wd.exec(`return [...document.querySelectorAll('[role=tab][data-path]')].map(t => t.dataset.path)`);
   const active = await wd.exec(`return document.querySelector('[role=tab][aria-selected=true]')?.dataset.path`);
   const fontSize = await wd.exec(`return ${appExpr}.settings.getSnapshot().editorFontSize`);
