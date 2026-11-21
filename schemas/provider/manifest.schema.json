@@ -347,6 +347,46 @@
         }
       ]
     },
+    "LspServerSpec": {
+      "additionalProperties": false,
+      "description": "A language server the daemon may start for a workspace this provider applies to.",
+      "properties": {
+        "command": {
+          "description": "argv, resolved in the workspace's environment (the provider's tools first); never a\nshell.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "description": "Unique across providers, e.g. `rust-analyzer`.",
+          "type": "string"
+        },
+        "initialization_options": {
+          "description": "Sent as `initializationOptions` (merged under settings `lsp.<id>.initializationOptions`)."
+        },
+        "install_hint": {
+          "description": "One sentence shown when the command is not found.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "languages": {
+          "description": "Language ids (Monaco's, which are LSP's) the server handles, e.g. `[\"rust\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "languages",
+        "command"
+      ],
+      "type": "object"
+    },
     "Platform": {
       "additionalProperties": false,
       "properties": {
@@ -583,6 +623,13 @@
       "description": "Ways to obtain the toolchain, in order of preference.",
       "items": {
         "$ref": "#/$defs/InstallMethod"
+      },
+      "type": "array"
+    },
+    "lsp": {
+      "description": "Language servers for the provider's languages (M4, ADR-0018 §2; additive to\n`axiom.provider/1`: a manifest without it is unchanged).",
+      "items": {
+        "$ref": "#/$defs/LspServerSpec"
       },
       "type": "array"
     },

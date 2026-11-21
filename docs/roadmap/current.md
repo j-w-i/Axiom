@@ -6,6 +6,10 @@ _Last updated: 2026-11-22._
 
 All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).
 
+## M4 — Editor depth: planned (2026-11-22)
+
+ADR-0018 records the decisions (protocol 0.4 `lsp/*`, `terminal/*`, `git/*`, `workspace/search`; `crates/lsp` supervises servers and owns the protocol, and the editor is a client of the daemon; an in-house LSP client over Monaco's providers; `crates/term` on `portable-pty` with xterm.js in the console; Git through the `git` CLI). 10 tasks in `docs/tasks/M4/`. Branch `task/m4` (cut from `task/m3`). Next task: the first READY `M4-*` by order.
+
 ## M3 — Agent runtime: complete (2026-11-22)
 
 ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4; merged to main once CI is green, under the owner's standing permission. **Next: M4 (editor depth)**, then M5.

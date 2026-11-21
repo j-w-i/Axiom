@@ -1,7 +1,7 @@
 //! Toolchain provider manifest (`provider.toml`). Normative prose:
 //! `docs/protocols/providers.md`.
 //!
-//! Frozen for M2 (M2-ARCH-001; `axiom.provider/1`). A manifest is pure data: the
+//! Frozen for M2 (M2-ARCH-001; `axiom.provider/1`); M4-ARCH-001 added the optional `lsp` table. A manifest is pure data: the
 //! daemon interprets it; a manifest can never run code other than the
 //! commands it declares, and each such command passes the permission gate.
 
@@ -44,6 +44,29 @@ pub struct ProviderManifest {
     /// Project operations offered (build, run, test...).
     #[serde(default)]
     pub tasks: Vec<TaskTemplate>,
+    /// Language servers for the provider's languages (M4, ADR-0018 §2; additive to
+    /// `axiom.provider/1`: a manifest without it is unchanged).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lsp: Vec<LspServerSpec>,
+}
+
+/// A language server the daemon may start for a workspace this provider applies to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LspServerSpec {
+    /// Unique across providers, e.g. `rust-analyzer`.
+    pub id: String,
+    /// Language ids (Monaco's, which are LSP's) the server handles, e.g. `["rust"]`.
+    pub languages: Vec<String>,
+    /// argv, resolved in the workspace's environment (the provider's tools first); never a
+    /// shell.
+    pub command: Vec<String>,
+    /// Sent as `initializationOptions` (merged under settings `lsp.<id>.initializationOptions`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initialization_options: Option<serde_json::Value>,
+    /// One sentence shown when the command is not found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

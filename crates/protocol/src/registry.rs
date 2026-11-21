@@ -39,7 +39,7 @@ where
     }
 }
 
-/// Every request method in protocol 0.3 (0.1, the M2 and the M3 additions). Add new methods here.
+/// Every request method in protocol 0.4 (0.1 and the M2, M3 and M4 additions). Add new methods here.
 pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
     use crate::{agent, build, env, fs, lifecycle, settings, task, workspace};
     vec![
@@ -86,10 +86,23 @@ pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
         m::<agent::ToolCall>(g),
         m::<agent::GetPolicy>(g),
         m::<agent::SetPolicy>(g),
+        // 0.4 (ADR-0018)
+        m::<crate::lsp::Servers>(g),
+        m::<crate::lsp::Request>(g),
+        m::<crate::lsp::Notify>(g),
+        m::<crate::lsp::Restart>(g),
+        m::<crate::terminal::Create>(g),
+        m::<crate::terminal::Write>(g),
+        m::<crate::terminal::Resize>(g),
+        m::<crate::terminal::Close>(g),
+        m::<crate::terminal::List>(g),
+        m::<crate::git::Status>(g),
+        m::<crate::git::Show>(g),
+        m::<crate::workspace::Search>(g),
     ]
 }
 
-/// Every notification in protocol 0.3. Add new notifications here.
+/// Every notification in protocol 0.4. Add new notifications here.
 pub fn notifications(g: &mut SchemaGenerator) -> Vec<NotificationSpec> {
     use crate::{agent, build, env, fs, lifecycle, settings, task};
     vec![
@@ -106,6 +119,11 @@ pub fn notifications(g: &mut SchemaGenerator) -> Vec<NotificationSpec> {
         n::<agent::ApprovalRequested>(g),
         n::<agent::ApprovalResolved>(g),
         n::<agent::Reveal>(g),
+        n::<crate::lsp::LspNotification>(g),
+        n::<crate::lsp::ServerStateChanged>(g),
+        n::<crate::terminal::Output>(g),
+        n::<crate::terminal::Exited>(g),
+        n::<crate::git::DidChange>(g),
     ]
 }
 

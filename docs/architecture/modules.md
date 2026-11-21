@@ -19,7 +19,8 @@ crates/
   env/                     provider registry, detection, installation      M2
   build/                   task templates, diagnostics parsing             M2
   agent/                   model providers, agent loop, tools, permissions M3
-  lsp/                     language-server supervision and relay           M4
+  lsp/                     language-server supervision and protocol client M4
+  term/                    PTY terminals                                   M4
   inspect/                 inspection sessions, source resolution, verify  M5
 apps/
   desktop/                 Qt shell (C++/QML) - retired by M1.5 task T-15  M1
@@ -231,24 +232,46 @@ before the task that needs them** (no empty scaffolding).
   `directories` (the data dir, as the store finds it).
 - **Rule:** no business logic; everything is a protocol call.
 
+### `crates/lsp` — `axiom-lsp` (M4-LSP-001; ADR-0018 §2)
+- **Responsibility:** language servers as daemon children, one per (workspace, server
+  definition): LSP base-protocol framing, `initialize` with one fixed client-capability set, a
+  shared id space with a pending map (many clients, one server), answers to server→client
+  requests, a mirror of open documents, diagnostics per URI, a bounded restart policy.
+- **Depends on:** `protocol`; `tokio`, `serde_json`, `tracing`, `thiserror`.
+- **Rule:** the daemon owns the conversation with each server; clients use `lsp/request` and
+  `lsp/notify`, never the server's own ids.
+
+### `crates/term` — `axiom-term` (M4-TERM-001; ADR-0018 §4)
+- **Responsibility:** PTY terminals: spawn the person's shell (`portable-pty`, behind a `Pty`
+  trait), stream UTF-8 output without splitting characters, coalesce it, keep a bounded backlog,
+  resize, end the process group.
+- **Depends on:** `protocol`; `portable-pty`, `tokio`, `tracing`, `thiserror`.
+- **Rule:** not an agent tool and not gated: a terminal is the person's own shell.
+
+`crates/workspace` gains a `git` module (M4-GIT-001) that runs the `git` program read-only;
+no new edge.
+
 ## Dependency matrix (allowed edges)
 
-| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | desktop-bridge | axiomd |
-|---|---|---|---|---|---|---|---|---|---|---|
-| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
-| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
-| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ |
-| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
-| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
-| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
-| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | lsp | term | desktop-bridge | axiomd |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
+| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
+| lsp       | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
+| term      | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
+| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
+| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
+| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 
-The `env` and `build` rows are ADR-0014 §4; the `agent` and `cli` rows are ADR-0015 §2.
+The `env` and `build` rows are ADR-0014 §4; the `agent` and `cli` rows are ADR-0015 §2; the
+`lsp` and `term` rows and `axiomd → lsp, term` are ADR-0018 §7.
 
 Later service crates follow the same rule: they may depend on `protocol` and
 on *lower* service crates listed in their task spec (e.g. `build` → `exec`,
@@ -269,5 +292,4 @@ change to record here.
 
 | Module | Contract today | Detailed design when |
 |--------|----------------|----------------------|
-| `lsp` | ADR-0004 §Language intelligence | start of M4 |
 | `inspect` | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | start of M5 |
