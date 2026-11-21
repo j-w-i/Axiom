@@ -3,6 +3,7 @@
 # Usage: scripts/check.sh            (everything: the Rust workspace and the desktop shell)
 #        scripts/check.sh rust       (only the Rust workspace + repository guards)
 #        scripts/check.sh flutter    (only the desktop shell, apps/desktop-flutter)
+#        scripts/check.sh inspectors (only the web inspector, inspectors/web)
 #        scripts/check.sh e2e        (the shell's end-to-end suites, private compositor)
 #        scripts/check.sh package    (build the packages and verify them as installed copies)
 set -euo pipefail
@@ -34,6 +35,16 @@ if [[ "$what" == all || "$what" == rust ]]; then
     cargo deny check
   else
     echo "SKIPPED: cargo-deny is not installed (cargo install cargo-deny --locked). CI always runs it."
+  fi
+fi
+
+# The web inspector (M5, ADR-0019): the Vite plugin and the in-page adapter.
+if [[ "$what" == all || "$what" == rust || "$what" == inspectors ]]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    step "web inspector: plugin and adapter tests"
+    (cd inspectors/web && pnpm install --frozen-lockfile >/dev/null && pnpm test)
+  else
+    echo "SKIPPED: the web inspector's tests (pnpm is not installed). CI always runs them."
   fi
 fi
 

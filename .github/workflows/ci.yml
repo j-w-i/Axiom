@@ -102,6 +102,22 @@ jobs:
             target/bundle/*.zip
           if-no-files-found: error
 
+  inspectors:
+    name: Web inspector (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: inspectors/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: inspectors/web/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
