@@ -28,6 +28,7 @@ export function useAppShortcuts(ctx: ShellContext): void {
       else if (mod && !e.shiftKey && e.key === "PageUp") documents.cycle(-1);
       else if (mod && !e.shiftKey && e.key === "PageDown") documents.cycle(1);
       else if (mod && !e.shiftKey && k === "q") documents.requestQuit();
+      else if (mod && !e.shiftKey && k === "n" && ctx.destination === "chat") ctx.app.agent.newChat();
       else if (mod && k === "tab") documents.cycle(e.shiftKey ? -1 : 1);
       // Region focus (EDITOR-002; workspace-spec.md §1). Physical keys (e.code), so the chords
       // work on any layout. Monaco has no binding of its own for them (see the handoff table).
@@ -46,7 +47,7 @@ export function useAppShortcuts(ctx: ShellContext): void {
     return () => window.removeEventListener("keydown", onKey, true);
     // Same dependencies as before the split: the setters and toggles are stable in effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, wsId, hasDoc, activePath, documents, tasks, openFolder]);
+  }, [ready, wsId, hasDoc, activePath, documents, tasks, openFolder, ctx.destination]);
 }
 
 /** Moves keyboard focus to a region, showing it first if it is hidden. */

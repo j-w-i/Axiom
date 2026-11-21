@@ -37,6 +37,13 @@ export const Archive = (p: P) => (<svg {...base(p)}><rect x="2" y="3" width="12"
 export const Terminal = (p: P) => (<svg {...base(p)}><rect x="2" y="3" width="12" height="10" rx="1.2" /><path d="M4.5 6.5l2 1.5-2 1.5M8 10h3" /></svg>);
 export const Shield = (p: P) => (<svg {...base(p)}><path d="M8 2l5 2v3.5c0 3-2.2 5.3-5 6.5-2.8-1.2-5-3.5-5-6.5V4z" /></svg>);
 export const Warning = (p: P) => (<svg {...base(p)}><path d="M8 2.5l6 11H2z" /><path d="M8 6.5v3M8 11.5v.2" /></svg>);
+export const Chat = (p: P) => (<svg {...base(p)}><path d="M2.5 4a1 1 0 011-1h9a1 1 0 011 1v6a1 1 0 01-1 1H7l-3 2.5V11h-.5a1 1 0 01-1-1z" /></svg>);
+export const Plus = (p: P) => (<svg {...base(p)}><path d="M8 3v10M3 8h10" /></svg>);
+export const Send = (p: P) => (<svg {...base(p)}><path d="M2.5 8L13.5 3l-3 10.5-2.5-4.5z" /><path d="M8 9l5.5-6" /></svg>);
+export const Image = (p: P) => (<svg {...base(p)}><rect x="2" y="3" width="12" height="10" rx="1.2" /><circle cx="6" cy="6.5" r="1.2" /><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3" /></svg>);
+export const Edit = (p: P) => (<svg {...base(p)}><path d="M3 13l.6-2.6L10.5 3.5l2 2-6.9 6.9z" /><path d="M9.5 4.5l2 2" /></svg>);
+export const More = (p: P) => (<svg {...base(p)}><circle cx="4" cy="8" r=".6" fill="currentColor" /><circle cx="8" cy="8" r=".6" fill="currentColor" /><circle cx="12" cy="8" r=".6" fill="currentColor" /></svg>);
+export const ArrowDown = (p: P) => (<svg {...base(p)}><path d="M8 3v10M4 9l4 4 4-4" /></svg>);
 export const Collapse = (p: P) => (<svg {...base(p)}><path d="M5 7l3-3 3 3M5 12l3-3 3 3" /></svg>);
 // The Axiom mark, a drafting divider (pivot, two legs, arc of travel) that reads
 // as an A. Source of the app icons: src-tauri/icons/source/ (keep in sync).

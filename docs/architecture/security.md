@@ -169,6 +169,20 @@ waiting for still completes its own cleanup.
 - **Limit.** Approval is consent, not isolation: an allowed `task.run` runs with the user's
   rights (ADR-0010 isolation backends are M6).
 
+## Model output in the webview (Chat; M3-UI-001)
+- **Markdown.** Assistant text is rendered with `react-markdown` + `remark-gfm`. Raw HTML in
+  model output is shown as escaped text, never as elements; no `rehype-raw`.
+- **Links.** They open only through the host's `open_external` (http/https only), never in the
+  webview.
+- **Images.** Remote images in Markdown are not loaded; they render as `[image: alt]` (no
+  tracking pixels).
+- **Code blocks.** They are coloured by Monaco's `colorize`, whose output escapes the text. That
+  is the only `dangerouslySetInnerHTML`.
+- **Images the user attaches.** They are read by the webview from a paste, a drop or a file
+  picker the user operates; they go to the daemon as base64 and are stored content-addressed
+  next to the journal. The webview reads no other files.
+- Tests: `tests/chat.test.tsx` covers scripts, event handlers, raw tags and remote images.
+
 ## External agents (ACP; M3-ACP-001)
 - **Inside the gate.** Their file reads, writes and terminals are gated tools (`acp.*`) under
   the session's principal, checkpointed and audited. Paths outside the workspace are refused.

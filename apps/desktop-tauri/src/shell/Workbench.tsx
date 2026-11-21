@@ -2,6 +2,7 @@
 // console, with the per-machine layout state; and the banner strip above it.
 
 import { useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
+import { ChatPage, ChatSide } from "../components/Chat";
 import { EditorArea } from "../components/EditorArea";
 import { attentionCount, EnvironmentPage, EnvironmentsSide } from "../components/Environments";
 import { Explorer } from "../components/Explorer";
@@ -93,6 +94,8 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
   const { workspace, documents, tasks, environments } = ctx.app;
   const { ws, ready, destination } = ctx;
   const envPage = destination === "environments";
+  const chatPage = destination === "chat";
+  const page = envPage || chatPage;
   const root = useRef<HTMLDivElement>(null);
   const dirtyPaths = useMemo(() => new Set(ctx.docs.docs.filter((d) => d.dirty).map((d) => d.path)), [ctx.docs.docs]);
   const layout = clampLayout(useSyncExternalStore(store.subscribe, store.get), windowSize());
@@ -117,12 +120,16 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
         <>
           <Panel
             className="sidebar motion-in-left"
-            title={envPage ? "Environments" : "Files"}
+            title={envPage ? "Environments" : chatPage ? "Chat" : "Files"}
             region="files"
             phase={side.phase}
-            meta={ws.name || undefined}
+            meta={chatPage ? undefined : ws.name || undefined}
             tools={
-              ws.id ? (
+              chatPage ? (
+                <IconButton label="New chat" shortcut="Mod+N" onClick={() => ctx.app.agent.newChat()}>
+                  <Icon.Plus />
+                </IconButton>
+              ) : ws.id ? (
                 envPage ? (
                   <IconButton label="Detect toolchains again" onClick={() => void environments.refresh()}>
                     <Icon.Refresh />
@@ -136,10 +143,11 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             }
           >
             {/* The explorer stays mounted (expansion, scroll and its active row survive). */}
-            <div className="sidebar__view" hidden={envPage}>
+            <div className="sidebar__view" hidden={page}>
               <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} onReopen={() => documents.requestOpenFolder(ws.root)} />
             </div>
             {envPage && <EnvironmentsSide store={environments} />}
+            {chatPage && <ChatSide store={ctx.app.agent} workspaceName={ws.id ? ws.name : ""} />}
           </Panel>
           <Splitter
             orientation="vertical"
@@ -157,16 +165,18 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
       <main className="main">
         <div className="editor-column" data-region="editor">
           {/* The editor stays mounted (Monaco keeps its state) while the Environments page shows. */}
-          <div className="editor-column__files" hidden={envPage}>
+          <div className="editor-column__files" hidden={page}>
             {ws.id || ws.opening ? (
               <EditorArea documents={documents} mod={MOD} />
             ) : (
-              <Welcome recent={ws.recent} ready={ready} onOpenFolder={() => void ctx.openFolder()} onOpenRecent={(r) => documents.requestOpenFolder(r)} mod={MOD} />
+              <Welcome recent={ws.recent} ready={ready} onOpenFolder={() => void ctx.openFolder()} onOpenRecent={(r) => documents.requestOpenFolder(r)} onStartChat={() => ctx.setDestination("chat")} mod={MOD} />
             )}
           </div>
           {envPage && <EnvironmentPage store={environments} hasWorkspace={!!ws.id} onOpenFolder={() => void ctx.openFolder()} />}
+          {chatPage && <ChatPage store={ctx.app.agent} hasWorkspace={!!ws.id} dark={ctx.dark} onOpenLink={(url) => ctx.app.documents.openExternal(url)} />}
         </div>
-        {panel.mounted && (
+        {/* Chat is a full-window surface: no console (its visibility setting is untouched). */}
+        {panel.mounted && !chatPage && (
           <>
             <Splitter
               orientation="horizontal"

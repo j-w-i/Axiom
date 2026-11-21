@@ -290,6 +290,80 @@ from fixed semantic slots); Inspector (M5) as a dock page with preview in the
 editor area; debug toolbar inside the transport (M6); user theming from the
 generator inputs (M7). None needs a new region.
 
+### 5.4 Chat (M3-UI-001; ADR-0017) — a first-class, full-window surface
+
+**Status: built (M3-UI-001, 2026-11-21).** `src/components/Chat.tsx`, `src/state/agent.ts`,
+`src/styles/components/chat.css`; shots S20/S20b; a11y S20; e2e `chat.mjs`.
+
+A rail destination (**Chat**, between Files and Environments) and the Welcome screen's
+"Start a chat". Works with no folder open. The console is not shown in Chat; the layout's
+console visibility is untouched and returns with Files.
+
+- **Side bar (Panel "Chat")**:
+  - Header tool: **New chat** (IconButton, Mod+N while in Chat).
+  - A search Field ("Search conversations").
+  - With a folder open, a Segmented scope: **General** (conversations without a workspace:
+    no tools) | **<folder name>** (the agent works in the folder: tools, checkpoints).
+  - The list: rows at `--row-h`, title (truncated, tooltip), then the relative time in
+    `--text-faint` with tabular numbers. Selected = `--selected` + left marker. A running
+    conversation shows a `--run` LED; one waiting for approval shows an `--attention` LED.
+  - Keyboard: ↑/↓/Home/End roving focus; Enter opens; F2 renames inline (Field in the row;
+    Enter commits, Esc cancels); Delete asks in a Dialog ("Delete “title”? Its history is
+    removed.", Delete is danger and not the default).
+- **Main**:
+  - **Header (flat, `--head-h`):** the title (`--text-small` 600) and the model picker on the
+    right. The picker is a Menu button showing "Provider · model". Its menu lists providers
+    as headings with their models. Unavailable providers are disabled, with their reason as
+    the item hint. External agents are marked "Agent" and offered only in a folder scope.
+  - **Transcript:** a centred column, `max-width: 72ch` of the body font, on
+    `--surface-editor`.
+    - **User message:** a recessed well (`--surface-well`, 1 px `--line` display border), text pre-wrapped, images as 96 px thumbnails. On hover or focus: Edit
+      (IconButton). Edit turns the well into a Field with Save and Cancel; saving resends from
+      that turn.
+    - **Assistant message:** flat prose. Markdown: headings at body+1, lists, tables with
+      `--line-mid` rules, blockquotes with a 2 px `--line-strong` rule, inline code in
+      `--surface-well`. Actions under the last assistant message: Copy, Regenerate.
+    - **Code blocks:** recessed. A header strip shows the language (mono, `--text-faint`),
+      and Copy. (Inserting into the editor needs an editor-bridge message that bridge 1 does
+      not have; not in M3.) The body is coloured by
+      Monaco's `colorize` with the editor theme. It scrolls horizontally; no wrapping.
+    - **Plans and thoughts** (external agents): collapsed by default under a disclosure
+      ("Plan", "Thinking"), in `--text-muted`.
+    - **Tool rows:** one-line recessed strips: a state glyph (Spinner, Check in `--ok`, Close
+      in `--danger`), the tool name in mono, the targets (mono, truncated), then the summary
+      in `--text-faint`. Enter or click expands the output (pre, `--out-size`, at most 30
+      lines with "Show all").
+    - **Checkpoint markers:** a hairline with "Checkpoint n · label · time" (Restore comes in
+      UI-002).
+    - **Errors:** a row with Warning in `--danger`, the message, and Retry when it is the last
+      turn.
+    - **Streaming:** text appears per animation frame, followed by one stepped caret (a
+      `--accent` block, steps(2) blink at 1 Hz, Off/Reduced: static). No shimmer, no
+      typewriter delay.
+    - **Following:** the view stays at the end while it streams unless the person scrolls up.
+      Then a raised "Jump to latest" button floats at the bottom centre.
+  - **Composer** (bottom, the same measure as the transcript):
+    - **Field:** a recessed multi-line Field that grows to 8 lines, placeholder "Message
+      <model>…".
+    - **Attachments:** image chips (thumbnail + remove), added by paste, drop or the Attach
+      IconButton.
+    - **Buttons:** Send (primary IconButton) becomes Stop (danger-quiet) while a turn runs.
+    - **Keys:** Enter sends, Shift+Enter is a newline, Esc stops a running turn, ↑ in an empty
+      composer edits the last user message.
+    - **Images and the model.** When the model cannot take images, the chips show a warning
+      and the hint says the image will be described as missing.
+- **Empty states:**
+  - No conversation selected: a centred "Start a conversation" (title), one line, and the
+    composer.
+  - No model available: the first-run setup (UI-003).
+- **Accessibility:**
+  - The transcript is `role="log"` `aria-live="polite"` and announces only the turn end
+    ("Answer complete"), never deltas.
+  - Every message is an `article` named "You" / "Assistant".
+  - Tool rows are buttons named "<tool> <targets>, <state>".
+  - The composer Field is named "Message".
+  - Every control has a name and a hint.
+
 ## 6. Empty, loading and error states (SHELL-005)
 
 | State | Where | Design |

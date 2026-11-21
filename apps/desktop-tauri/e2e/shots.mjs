@@ -80,6 +80,8 @@ const CATALOGUE = [
   ["s18c", "Environments page, a failed install (the store's own failure set from the harness)"],
   ["s18d", "Install plan dialog (M2-UI-002) for a managed Rust install (the plan the daemon returns for rust 1.84.0 on Linux)"],
   ["s19", "Console Problems view (M2-UI-003): a failing build's diagnostics grouped by file (the store's own state set from the harness)"],
+  ["s20", "Chat (M3-UI-001): a conversation with no folder open: Markdown answer with a table and a code block (scripted model)"],
+  ["s20b", "Chat (M3-UI-001): a new conversation's empty state"],
   ["focused-region", "Focused-region rule", "SHELL-002 / EDITOR-002: no focused-region treatment yet"],
 ];
 const states = new Map(
@@ -507,7 +509,10 @@ async function main() {
   }
 
   // ---- everything else: one real session ------------------------------------------
-  const { wd, data } = await launchPlain(["--daemon", DAEMON]);
+  // The scripted model answers the Chat states (s20).
+  const chatScript = join(BASE, "chat-script.json");
+  writeFileSync(chatScript, JSON.stringify({ turns: [{ events: [{ type: "text", text: "Here is a summary:\n\n| Step | Time |\n|------|------|\n| Build | 4.1 s |\n| Test | 12.8 s |\n\n```rust\nfn total(steps: &[f64]) -> f64 {\n    steps.iter().sum()\n}\n```\n\nThe tests take **three times** as long as the build." }] }] }));
+  const { wd, data } = await launchPlain(["--daemon", DAEMON], { AXIOM_TEST_SCRIPTED_MODEL: chatScript });
   try {
     await boot(wd);
     engine = await wd.exec(`return navigator.userAgent`);
@@ -758,6 +763,24 @@ async function main() {
         await bothThemes(wd, "s19");
         await wd.click(await wd.find('[data-view=output]'));
         await wd.exec(`${STORES}.problems.set({ runs: {}, byTask: {} })`);
+      });
+
+      await state(wd, "s20", async () => {
+        await wd.click(await wd.find('.rail [data-destination="chat"]'));
+        await waitFor(wd, `return ${STORES}.agent.getSnapshot().status === 'ready' && !!${STORES}.agent.getSnapshot().model`, "chat ready");
+        await wd.exec(`${STORES}.agent.newChat("general"); ${STORES}.agent.send("How long do the build and the tests take?")`);
+        await waitFor(wd, `return !!document.querySelector('[data-testid=chat-log] .code-block__body span') && ${STORES}.agent.getSnapshot().active.running === false`, "chat answer");
+        await parkPointer(wd);
+        await sleep(300);
+        await bothThemes(wd, "s20");
+      });
+
+      await state(wd, "s20b", async () => {
+        await wd.exec(`${STORES}.agent.newChat("general")`);
+        await waitFor(wd, `return !!document.querySelector('.chat__empty')`, "empty chat");
+        await parkPointer(wd);
+        await bothThemes(wd, "s20b");
+        await wd.click(await wd.find('.rail [data-destination="files"]'));
       });
 
       await state(wd, "s12", async () => {

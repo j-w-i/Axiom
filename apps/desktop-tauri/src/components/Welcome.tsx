@@ -16,12 +16,15 @@ export function Welcome({
   ready,
   onOpenFolder,
   onOpenRecent,
+  onStartChat,
   mod,
 }: {
   recent: RecentWorkspace[];
   ready: boolean;
   onOpenFolder: () => void;
   onOpenRecent: (root: string) => void;
+  /** Chat needs no folder (ADR-0017). */
+  onStartChat?: () => void;
   mod: string;
 }) {
   // Not `disabled` while waiting: a disabled button cannot be hovered or focused, so its
@@ -49,7 +52,14 @@ export function Welcome({
         <Icon.Logo className="welcome__mark" />
         <h1 className="welcome__title">Open a folder to start</h1>
         <p className="welcome__line">Axiom opens folders through its backend, axiomd.</p>
-        <div className="welcome__actions">{ready ? open : <Tooltip label={WAITING}>{open}</Tooltip>}</div>
+        <div className="welcome__actions">
+          {ready ? open : <Tooltip label={WAITING}>{open}</Tooltip>}
+          {onStartChat && (
+            <Button aria-disabled={!ready || undefined} data-hint={ready ? "Talk to a model — no folder needed" : WAITING} onClick={() => ready && onStartChat()} data-testid="welcome-chat">
+              Start a chat
+            </Button>
+          )}
+        </div>
         {recent.length > 0 && (
           <section className="welcome__recent" aria-labelledby="welcome-recent">
             <h2 className="welcome__label" id="welcome-recent">

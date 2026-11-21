@@ -41,6 +41,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const data = mkdtempSync(join(tmpdir(), "axiom-a11y-data-"));
 const ws = mkdtempSync(join(tmpdir(), "axiom-a11y-ws-"));
+// S20 (Chat, M3-UI-001): the scripted model answers once per theme with Markdown and code.
+const chatScript = join(data, "chat-script.json");
+const chatAnswer = { type: "text", text: "A **short** answer:\n\n```sh\necho hi\n```\n\n- one\n- two" };
+writeFileSync(chatScript, JSON.stringify({ turns: [{ events: [chatAnswer] }, { events: [chatAnswer] }] }));
 mkdirSync(join(ws, "src"), { recursive: true });
 writeFileSync(join(ws, "src", "main.rs"), 'fn main() {\n    println!("hello");\n}\n');
 writeFileSync(join(ws, "README.md"), "# Demo\n\nA small workspace.\n");
@@ -90,6 +94,12 @@ window.__a11y = (() => {
     // Borderless inputs inside a recessed well: the well draws the ring on focus-within.
     const well = el.closest(".prompt, .palette__bar");
     if (well && getComputedStyle(well).boxShadow.split("inset").length > 2) return "well ring";
+    // The Chat composer's box draws a 2 px focus outline on focus-within (M3-UI-001).
+    const box = el.closest(".composer__box");
+    if (box) {
+      const bs = getComputedStyle(box);
+      if (bs.outlineStyle !== "none" && parseFloat(bs.outlineWidth) >= 2) return "box outline";
+    }
     return "";
   };
   const clipped = (el) => {
@@ -225,7 +235,7 @@ const regionOrder = (seen) => seen.map((d) => d.region).filter((r, i, a) => r !=
 let wd;
 const record = { themes: {} };
 try {
-  wd = await WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", data], {}, log);
+  wd = await WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", data], { AXIOM_TEST_SCRIPTED_MODEL: chatScript }, log);
   await wd.waitFor(`return document.querySelector('[data-testid=status]')?.dataset.state === 'ready'`, [], 20000, "connected");
   await wd.exec(HELPERS);
   // S2: Welcome with one recent folder (open and close it once).
@@ -388,6 +398,35 @@ try {
     await wd.click(await wd.find('[data-view=output]'));
     await wd.exec(`window.__axiom.problems.set({ runs: {}, byTask: {} })`);
 
+    // ---- S20: Chat (M3-UI-001; workspace-spec.md §5.4) ------------------------------------
+    await wd.click(await wd.find('.rail [data-destination="chat"]'));
+    await wd.waitFor(`return window.__axiom.agent.getSnapshot().status === 'ready' && !!window.__axiom.agent.getSnapshot().model`, [], 10000, "chat ready");
+    await wd.exec(`window.__axiom.agent.newChat("general"); window.__axiom.agent.send("Answer briefly")`);
+    await wd.waitFor(`return !!document.querySelector('[data-testid=chat-log] .code-block') && window.__axiom.agent.getSnapshot().active.running === false`, [], 10000, "chat answer");
+    await sleep(500);
+    contrast[`S20 ${theme}`] = await wd.exec(`return window.__a11y.contrastScan()`);
+    await wd.exec(`document.activeElement?.blur()`);
+    const chatTrav = await traverse(wd, false);
+    const chatEls = chatTrav.seen.filter((x) => x.region === "files" || x.region === "editor-area");
+    const badChat = chatEls.filter((x) => !x.name || !x.role || !x.focus).map((x) => `${x.region} ${x.role} "${x.name}" focus=${x.focus}`);
+    const sem = await wd.exec(`return {
+      log: document.querySelector('[role=log]')?.getAttribute('aria-label'),
+      articles: [...document.querySelectorAll('[data-testid=chat-log] article')].map(a => a.getAttribute('aria-label')),
+      composer: !!document.querySelector('textarea[aria-label="Message"]'),
+      list: document.querySelector('[role=list][aria-label=Conversations]') !== null,
+      status: !!document.querySelector('.chat [role=status][aria-live=polite]'),
+    }`);
+    const names = chatEls.map((x) => x.name);
+    check(
+      `S20 chat (${theme}): log, named messages, conversation list, composer; every control reached by Tab is named with a role and visible focus`,
+      sem.log === "Conversation" && sem.articles.join() === "You,Assistant" && sem.composer && sem.list && sem.status &&
+        names.includes("Message") && names.includes("Copy code") && names.includes("Search conversations") && badChat.length === 0,
+      `${JSON.stringify(sem)}; reached ${chatEls.length}`,
+      badChat,
+    );
+    await wd.click(await wd.find('.rail [data-destination="files"]'));
+    await wd.waitFor(`return document.querySelector('.editor-column__files')?.hidden === false`, [], 3000, "back to files");
+
     // ---- 5: not by colour alone ----------------------------------------------------------
     const marks = await wd.exec(`
       const dirty = document.querySelector('[role=tab][data-dirty=true] .tab__close')?.getAttribute('aria-label') ?? '';
@@ -405,7 +444,7 @@ try {
     t.targets = await wd.exec(`return window.__a11y.targets()`);
   }
 
-  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d, S19 in both themes -----
+  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d, S19, S20 in both themes ---
   for (const [state, fails] of Object.entries(contrast)) {
     check(`4 rendered contrast ${state}`, fails.length === 0, `${fails.length} text node(s) below the minimum`, fails.map((f) => `${f.region} .${f.cls} "${f.text}" ${f.ratio}:1 < ${f.need} (${f.color})`));
   }

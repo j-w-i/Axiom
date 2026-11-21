@@ -23,6 +23,8 @@ export function allCommands(ctx: ShellContext): CommandEntry[] {
     { id: "find", group: "Edit", label: "Find", run: () => documents.runCommand("find"), enabled: hasDoc },
     { id: "replace", group: "Edit", label: "Replace", run: () => documents.runCommand("replace"), enabled: hasDoc },
     { id: "format", group: "Edit", label: "Format Document", run: () => documents.runCommand("format"), enabled: hasDoc },
+    { id: "chat", group: "View", label: "Open Chat", run: () => ctx.setDestination("chat"), enabled: ready },
+    { id: "newChat", group: "View", label: "New Chat", shortcut: `${MOD}+N`, run: () => (ctx.app.agent.newChat(), ctx.setDestination("chat")), enabled: ready },
     { id: "sidebar", group: "View", label: "Toggle Side Bar", shortcut: `${MOD}+B`, run: ctx.toggleSidebar },
     { id: "panel", group: "View", label: "Toggle Panel", shortcut: `${MOD}+J`, run: ctx.togglePanel },
     { id: "resetLayout", group: "View", label: "Reset Layout", run: ctx.resetLayout },

@@ -21,6 +21,7 @@ ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cl
 - **M3-DAEMON-001 tested (2026-11-21):** Unix socket (`<data dir>/run/`, token) shared by more clients; the `axiom` CLI (`task run`, `build`, `agent send|sessions`).
 - **M3-MCP-001 tested (2026-11-21):** `axiom mcp` MCP server (Claude Code, Codex… drive Axiom's tools under the same gate; approvals surface in the app) and the MCP client for `agent.mcpServers`; `docs/contributing/connect-agents.md`.
 - **M3-ACP-001 tested (2026-11-21):** Claude Code / Codex / Gemini CLI as provider kind `acp`: their fs and terminal requests through Axiom's gate and checkpoints, their permission prompts as Axiom's approvals (asked once), Axiom's MCP offered to them. Tested with an in-repo fake agent; real agents owed by the owner (not installed here).
+- **M3-UI-001 tested (2026-11-21):** Chat — a full-window surface on the rail that works with no folder: conversation list (scope, search, rename, delete), Markdown + Monaco-coloured code, streaming, edit/regenerate, images, model picker. e2e `chat.mjs` 9/9 (in the default suites), a11y S20, shots S20/S20b.
 
 
 

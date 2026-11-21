@@ -1,6 +1,5 @@
 // The activity rail (D4, M2-UI-001; design-system.md ActivityRail): the top-level
-// destinations. It exists because a second real destination exists (Environments); every
-// item does something. A `nav` whose current item carries aria-current="page"; ↑/↓ move
+// destinations (Files, Chat — M3, ADR-0017 — and Environments); every item does something. A `nav` whose current item carries aria-current="page"; ↑/↓ move
 // between items (roving tabindex), Enter/Space activate.
 
 import { useRef, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
@@ -8,7 +7,7 @@ import * as Icon from "../ui/icons";
 import { Tooltip } from "../ui/overlays";
 import "../styles/components/rail.css";
 
-export type Destination = "files" | "environments";
+export type Destination = "files" | "chat" | "environments";
 
 interface Item {
   id: Destination;
@@ -49,6 +48,7 @@ export function Rail({
   const missing = useSyncExternalStore(subscribe, attention, attention);
   const items: Item[] = [
     { id: "files", label: "Files", icon: <Icon.Files /> },
+    { id: "chat", label: "Chat", icon: <Icon.Chat /> },
     { id: "environments", label: "Environments", icon: <Icon.Layers />, badge: missing },
   ];
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
