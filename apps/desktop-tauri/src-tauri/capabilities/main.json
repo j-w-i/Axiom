@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The only window. Grants the shell's own commands, a folder picker, the native title bar's theme and (macOS overlay title bar) dragging the window by its title row and zooming it with a double-click there; nothing that touches workspace files, processes or arbitrary URLs.",
+  "description": "The only window. Grants the shell's own commands (including the host-kept shell-local preferences), a folder picker, the native title bar's theme and (macOS overlay title bar) dragging the window by its title row and zooming it with a double-click there; nothing that touches workspace files, processes or arbitrary URLs.",
   "windows": [
     "main"
   ],
@@ -18,6 +18,8 @@
     "allow-snapshot-put",
     "allow-snapshot-clear",
     "allow-recovery-state",
+    "allow-local-all",
+    "allow-local-set",
     "core:event:allow-listen",
     "dialog:allow-open",
     "core:window:allow-set-theme",

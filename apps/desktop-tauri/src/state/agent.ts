@@ -24,6 +24,7 @@ import type {
 import { RpcError } from "../daemon/types";
 import { Observable } from "./observable";
 import type { WorkspaceStore } from "./workspace";
+import { shellStorage } from "./shell-storage";
 
 export type Scope = "general" | "workspace";
 
@@ -267,7 +268,7 @@ export class AgentStore extends Observable<AgentState> {
   private flushScheduled = false;
   private loadSeq = 0;
   /** Where the chosen model is remembered (tests set null). */
-  storage: Pick<Storage, "getItem" | "setItem"> | null = typeof localStorage === "undefined" ? null : localStorage;
+  storage: Pick<Storage, "getItem" | "setItem"> | null = shellStorage;
 
   constructor(
     private readonly client: DaemonClient,

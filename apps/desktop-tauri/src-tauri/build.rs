@@ -15,6 +15,8 @@ fn main() {
             "snapshot_put",
             "snapshot_clear",
             "recovery_state",
+            "local_all",
+            "local_set",
         ]));
     if let Err(e) = tauri_build::try_build(attributes) {
         panic!("tauri-build failed: {e}");
