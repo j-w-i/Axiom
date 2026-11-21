@@ -100,6 +100,18 @@ async function server(wd, { name, ok, open, completion, error, definition, renam
         model: e.getModel()?.uri.toString(), line: e.getModel()?.getLineContent(arguments[0]),
         servers: window.__axiom.lsp.getSnapshot().servers.map(s => s.id + ':' + s.state) }`, [completion.line]);
     console.log("COMPLETION", name, JSON.stringify(why));
+    // The server's own answer at that position, straight through lsp/request.
+    const raw = await wd.execAsync(`const done = arguments[arguments.length - 1];
+      const lsp = window.__axiom.lsp; const s = lsp.getSnapshot();
+      const root = window.__axiom.workspace.getSnapshot().root;
+      const path = window.__axiom.documents.getSnapshot().activePath;
+      const server = s.servers.find(x => x.state === 'ready' && (x.languages ?? []).some(l => path.endsWith(l === 'rust' ? '.rs' : '.ts')));
+      const uri = 'file://' + root + '/' + path;
+      if (!server) { done({ servers: s.servers }); return; }
+      lsp.request(server.serverId ?? server.id, 'textDocument/completion', { textDocument: { uri }, position: { line: arguments[0] - 1, character: arguments[1] - 1 } })
+        .then(r => done({ server: server.serverId ?? server.id, uri, count: Array.isArray(r) ? r.length : (r?.items?.length ?? null), first: (Array.isArray(r) ? r : r?.items ?? []).slice(0, 5).map(i => i.label), incomplete: r?.isIncomplete }),
+              e => done({ server: server.serverId ?? server.id, uri, error: String(e?.message ?? e) }));`, [completion.line, completion.column]).catch((e) => String(e));
+    console.log("COMPLETION raw", name, JSON.stringify(raw));
   }
   check(`${name}: completion offers ${completion.expect}`, labels.some((l) => l.includes(completion.expect)), JSON.stringify(labels.slice(0, 5)));
   await caret(wd, definition.line, definition.column);
