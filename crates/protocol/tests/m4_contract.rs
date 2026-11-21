@@ -94,7 +94,7 @@ fn lsp_shapes() {
         "method":"textDocument/hover","params":{"textDocument":{"uri":"file:///p/src/main.rs"},"position":{"line":1,"character":4}}}));
     round_trip::<lsp::RequestResult>(json!({"result":null}));
     round_trip::<lsp::NotifyParams>(
-        json!({"workspaceId":"w1","serverId":"rust-analyzer","method":"$/cancelRequest","params":{"id":7}}),
+        json!({"workspaceId":"w1","serverId":"rust-analyzer","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///p/a.rs"}}}),
     );
     round_trip::<lsp::LspNotificationParams>(json!({"workspaceId":"w1","serverId":"rust-analyzer",
         "method":"textDocument/publishDiagnostics","params":{"uri":"file:///p/src/main.rs","diagnostics":[]}}));

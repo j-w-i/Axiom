@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with: { components: "rustfmt, clippy" }
+        with: { components: "rustfmt, clippy, rust-analyzer" }
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       # `axiom-desktop-tauri` is excluded: tauri::generate_context! embeds the
@@ -28,7 +28,10 @@ jobs:
       - run: cargo clippy --workspace --all-targets --exclude axiom-desktop-tauri -- -D warnings
       # crates/desktop-bridge's tests spawn the real daemon binary.
       - run: cargo build -p axiomd
+      # M4-LSP-001: the real rust-analyzer test must run (not skip) on Linux and macOS.
       - run: cargo test --workspace --exclude axiom-desktop-tauri
+        env:
+          AXIOM_REQUIRE_LSP: ${{ runner.os != 'Windows' && '1' || '' }}
       # M2-ENV-003: a real managed Rust install (rustup-init + a minimal toolchain) into a
       # temp data dir with a temp HOME, then uninstall. Needs the internet.
       # On Linux it also installs the `tree` package with apt through a pkexec shim

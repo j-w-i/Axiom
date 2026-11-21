@@ -4,7 +4,7 @@ schema = "axiom.provider/1"
 id = "rust"
 name = "Rust"
 description = "Rust toolchains managed through rustup; build, run and test through Cargo."
-version = "0.2.0"
+version = "0.3.0"
 homepage = "https://www.rust-lang.org"
 
 [project]
@@ -103,3 +103,11 @@ id = "run"
 kind = "run"
 label = "cargo run"
 command = ["cargo", "run"]
+
+# M4 (ADR-0018 §2): rust-analyzer from the workspace's environment (the managed toolchain's
+# rustup proxy, or the system's).
+[[lsp]]
+id = "rust-analyzer"
+languages = ["rust"]
+command = ["rust-analyzer"]
+install_hint = "Install it with: rustup component add rust-analyzer"

@@ -280,9 +280,8 @@ terminal,git}.rs` and `workspace.rs` (`workspace/search`).
 | `git/didChange` | daemon → clients of the workspace | `workspace` |
 
 - **Language servers.** LSP payloads are JSON values whose contract is LSP 3.17, with absolute
-  `file://` URIs. The daemon owns each server's ids: a client's `$/cancelRequest` names the
-  client's own `lsp/request` id (the JSON-RPC id of that request on this connection), and the
-  daemon maps it. Document sync is per server: a client sends `didOpen` for a document once per
+  `file://` URIs. The daemon owns each server's ids; cancelling an `lsp/request` with `$/cancel`
+  sends `$/cancelRequest` for the daemon's id to the server. Document sync is per server: a client sends `didOpen` for a document once per
   server that handles its language. The daemon answers the server's own requests (ADR-0018 §2);
   `workspace/applyEdit` is refused in 0.4.
 - **Reads outside the workspace.** `fs/readFile` accepts an absolute `file://` path that one of the
@@ -354,6 +353,7 @@ directory is reported, because `fs/list` lists such files. If the OS reports an 
 | `workspace.lastRoot` | string or null | `null` | canonical root of the most recently opened workspace; written by the daemon on `workspace/open` |
 | `agent.policy` | `Policy` | ask, reads allowed | the user's agent permission policy (M3); `agent/setPolicy` writes it |
 | `agent.mcpServers` | array of `{name, argv, env}` | `[]` | MCP servers whose tools join workspace sessions as `mcp.<name>.<tool>` (M3) |
+| `lsp.servers` | object `{<serverId>: {settings?, initializationOptions?}}` | `{}` | Per language server: `settings` answers its `workspace/configuration`; `initializationOptions` merge over the manifest's (M4) |
 | `agent.providers` | array of `ProviderConfig` | `[]` | model provider configurations (M3); written by `agent/configureProvider`; never contains a key |
 
 Unknown keys are stored and returned unchanged, so clients can add settings

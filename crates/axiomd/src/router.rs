@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::handlers::{agent, build, env, fs, sessions, settings, task, workspace};
+use crate::handlers::{agent, build, env, fs, lsp, sessions, settings, task, workspace};
 use axiom_protocol::{
     agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
     workspace as pws,
@@ -10,6 +10,12 @@ use std::sync::Arc;
 /// Registers one handler per protocol method plus the shutdown hook.
 pub fn build_router(app: Arc<App>) -> Router {
     let mut r = Router::new();
+    if !app
+        .lsp_forwarding
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        lsp::spawn_forwarder(&app);
+    }
 
     macro_rules! wire {
         // handler takes (app, params)
@@ -30,6 +36,10 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(pws::GetState, workspace::get_state);
     wire!(pws::SetState, workspace::set_state);
     wire!(pfs::List, fs::list);
+    wire!(axiom_protocol::lsp::Servers, lsp::servers);
+    wire!(axiom_protocol::lsp::Request, lsp::request, ctx);
+    wire!(axiom_protocol::lsp::Notify, lsp::notify);
+    wire!(axiom_protocol::lsp::Restart, lsp::restart);
     wire!(pfs::ReadFile, fs::read_file);
     wire!(pfs::WriteFile, fs::write_file);
     wire!(pfs::Watch, fs::watch, ctx);
@@ -77,6 +87,7 @@ pub fn build_router(app: Arc<App>) -> Router {
         let a = a.clone();
         async move {
             a.stop_all_watchers();
+            a.lsp.stop_all().await;
             a.executor.shutdown().await;
         }
     });
@@ -88,10 +99,6 @@ pub fn build_router(app: Arc<App>) -> Router {
 /// feature-detect from `initialize.methods` (ADR-0018 §1), which lists only served methods.
 #[doc(hidden)]
 pub const NOT_YET_SERVED: &[&str] = &[
-    "lsp/servers",
-    "lsp/request",
-    "lsp/notify",
-    "lsp/restart",
     "terminal/create",
     "terminal/write",
     "terminal/resize",

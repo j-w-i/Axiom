@@ -9,6 +9,7 @@ members = [
     "crates/env",
     "crates/build",
     "crates/agent",
+    "crates/lsp",
     "crates/axiomd",
     "crates/desktop-bridge",
     "apps/cli",
@@ -16,6 +17,7 @@ members = [
     "tests/helpers/emit",
     "tests/helpers/fake-mcp",
     "tests/helpers/fake-acp",
+    "tests/helpers/fake-lsp",
 ]
 exclude = ["experiments"]
 

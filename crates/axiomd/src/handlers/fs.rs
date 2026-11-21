@@ -18,7 +18,55 @@ pub async fn list(app: Arc<App>, p: ListParams) -> Result<ListResult, RpcError> 
 
 pub async fn read_file(app: Arc<App>, p: ReadFileParams) -> Result<ReadFileResult, RpcError> {
     let ws = app.workspaces.get(&p.workspace_id)?;
+    if p.path.0.starts_with("file://") {
+        return read_external(&app, &p).await;
+    }
     Ok(ws.read_text(&p.path).await?)
+}
+
+/// A file outside the workspace that one of its language servers returned in a location
+/// (protocol 0.4, ADR-0018 §2): read-only, and only those.
+async fn read_external(app: &App, p: &ReadFileParams) -> Result<ReadFileResult, RpcError> {
+    let denied = || {
+        RpcError::new(
+            axiom_protocol::ErrorKind::PermissionDenied,
+            "Only files a language server pointed to can be read outside the workspace.",
+        )
+    };
+    let path = url::Url::parse(&p.path.0)
+        .ok()
+        .and_then(|u| u.to_file_path().ok())
+        .ok_or_else(denied)?;
+    if !app.external_read_allowed(&p.workspace_id, &path) {
+        return Err(denied());
+    }
+    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+        RpcError::new(
+            if e.kind() == std::io::ErrorKind::NotFound {
+                axiom_protocol::ErrorKind::NotFound
+            } else {
+                axiom_protocol::ErrorKind::Io
+            },
+            format!("{} cannot be read: {e}", path.display()),
+        )
+    })?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err(RpcError::new(
+            axiom_protocol::ErrorKind::TooLarge,
+            "The file is over 16 MiB.",
+        ));
+    }
+    let version = {
+        use sha2::Digest;
+        axiom_protocol::fs::FileVersion(hex::encode(sha2::Sha256::digest(&bytes)))
+    };
+    let text = String::from_utf8(bytes).map_err(|_| {
+        RpcError::new(
+            axiom_protocol::ErrorKind::UnsupportedEncoding,
+            "The file is not UTF-8 text.",
+        )
+    })?;
+    Ok(ReadFileResult { text, version })
 }
 
 pub async fn write_file(app: Arc<App>, p: WriteFileParams) -> Result<WriteFileResult, RpcError> {

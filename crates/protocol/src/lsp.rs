@@ -16,15 +16,15 @@ method!(
 );
 method!(
     /// One LSP request to a server, started if needed (waits up to 60 s for it to be ready).
-    /// The result is the server's `result`. Errors: `workspace_not_open`, `not_found` (no such
+    /// The result is the server's `result`. Cancelling this request (`$/cancel`) sends
+    /// `$/cancelRequest` to the server. Errors: `workspace_not_open`, `not_found` (no such
     /// server), `server_unavailable` (missing, failed or stopped; details `{ "state" }`),
     /// `lsp_error` (the server's error; details `{ "code", "data"? }`), `cancelled`.
     Request, "lsp/request", RequestParams => RequestResult
 );
 method!(
     /// One LSP notification to a server: document sync (`textDocument/didOpen`, `didChange`,
-    /// `didClose`, `didSave`) and `$/cancelRequest` (whose `id` is the client's own `lsp/request`
-    /// id; the daemon maps it). A `didOpen` for a language a server handles starts it. Errors:
+    /// `didClose`, `didSave`). A `didOpen` for a language a server handles starts it. Errors:
     /// `workspace_not_open`, `not_found`, `server_unavailable`.
     Notify, "lsp/notify", NotifyParams => crate::lifecycle::Empty
 );

@@ -237,7 +237,12 @@ before the task that needs them** (no empty scaffolding).
   definition): LSP base-protocol framing, `initialize` with one fixed client-capability set, a
   shared id space with a pending map (many clients, one server), answers to server→client
   requests, a mirror of open documents, diagnostics per URI, a bounded restart policy.
-- **Depends on:** `protocol`; `tokio`, `serde_json`, `tracing`, `thiserror`.
+- **Depends on:** `protocol`; `tokio`, `tokio-util` (cancellation), `serde_json`, `url`,
+  `tracing`, `thiserror`.
+- **Status:** built (M4-LSP-001). `axiomd` serves `lsp/*`, resolves each server's command in the
+  workspace's environment (the daemon's plus the project's, as builds), and relays events to the
+  workspace's clients. Tests: `crates/axiomd/tests/{lsp_server,lsp}.rs` against
+  `tests/helpers/fake-lsp`, plus the real rust-analyzer where installed.
 - **Rule:** the daemon owns the conversation with each server; clients use `lsp/request` and
   `lsp/notify`, never the server's own ids.
 

@@ -401,6 +401,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-lsp"
+version = "0.1.0"
+dependencies = [
+ "axiom-protocol",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "axiom-protocol"
 version = "0.1.0"
 dependencies = [
@@ -459,6 +473,7 @@ dependencies = [
  "axiom-build",
  "axiom-env",
  "axiom-exec",
+ "axiom-lsp",
  "axiom-protocol",
  "axiom-rpc",
  "axiom-store",
@@ -476,6 +491,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1463,6 +1479,13 @@ dependencies = [
 
 [[package]]
 name = "fake-acp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "fake-lsp"
 version = "0.1.0"
 dependencies = [
  "serde_json",

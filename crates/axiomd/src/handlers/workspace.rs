@@ -37,6 +37,11 @@ pub async fn close(app: Arc<App>, p: WorkspaceRef) -> Result<Empty, RpcError> {
     app.workspaces.get(&p.workspace_id)?;
     app.executor.cancel_all(&p.workspace_id).await;
     app.stop_watcher(&p.workspace_id);
+    app.lsp.close_workspace(&p.workspace_id).await;
+    app.external_reads
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&p.workspace_id);
     app.clients
         .lock()
         .unwrap_or_else(|p| p.into_inner())
