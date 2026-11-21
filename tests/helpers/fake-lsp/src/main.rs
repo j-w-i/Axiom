@@ -193,9 +193,15 @@ fn main() {
             }
             "textDocument/rename" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
-                let (line, ch) = (p["position"]["line"].as_u64().unwrap_or(0) as usize, p["position"]["character"].as_u64().unwrap_or(0) as usize);
+                let (line, ch) = (
+                    p["position"]["line"].as_u64().unwrap_or(0) as usize,
+                    p["position"]["character"].as_u64().unwrap_or(0) as usize,
+                );
                 let new = p["newName"].as_str().unwrap_or_default();
-                let word = docs.get(uri).and_then(|(t, _)| word_at(t, line, ch)).unwrap_or_default();
+                let word = docs
+                    .get(uri)
+                    .and_then(|(t, _)| word_at(t, line, ch))
+                    .unwrap_or_default();
                 let mut changes = serde_json::Map::new();
                 if !word.is_empty() {
                     for (u, (t, _)) in &docs {
