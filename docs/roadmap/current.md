@@ -14,6 +14,7 @@ ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cl
 - **M3-MODEL-001 tested (2026-11-21):** `crates/agent` with the message model, `ModelProvider`, an in-house SSE parser, the Anthropic Messages adapter (text, tools, opaque thinking, errors, cancel) and `ScriptedProvider`; tested against a loopback fixture server.
 - **M3-MODEL-002 tested (2026-11-21):** OpenAI Chat adapter (Ollama/llama.cpp/LM Studio profiles), keychain credentials (keyring, verified against KWallet), `agent.providers`; `agent/models` and `agent/configureProvider` served.
 - **M3-TOOLS-001 tested (2026-11-21):** tool registry (prepare → gate token → execute, bounded results, structured errors with hints) and the 12 built-in tools over the services; `agent/tools` served; `workspace` gains search and `remove_file`.
+- **M3-ARCH-002 tested (2026-11-21):** protocol additions for Chat and external agents: workspace-free sessions, `agent/sessionRename|sessionDelete|image`, `fromTurn` + `rewind`, images (both adapters), `ProviderKind::Acp` with `command`/`env`.
 
 
 

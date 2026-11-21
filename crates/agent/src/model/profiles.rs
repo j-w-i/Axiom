@@ -65,6 +65,16 @@ pub fn profile(kind: ProviderKind, base_url: &str, model: &str) -> Capabilities 
             },
             Server::LlamaCpp | Server::LmStudio | Server::Other => Capabilities::default(),
         },
+        // An external agent brings its own model; Axiom offers it no tools of its own through
+        // the model API (its tools come through ACP and MCP; ADR-0016).
+        ProviderKind::Acp => Capabilities {
+            tools: No,
+            streaming_tool_args: No,
+            parallel_tool_calls: No,
+            images: Unknown,
+            context_window: None,
+            max_output: None,
+        },
         ProviderKind::Scripted => Capabilities {
             tools: Yes,
             streaming_tool_args: Yes,

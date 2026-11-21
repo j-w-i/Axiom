@@ -226,6 +226,10 @@ fn request_body_with(req: &TurnRequest, names: &ToolNames) -> Value {
                         "is_error":is_error
                     })),
                     Block::Opaque { provider, raw } if provider == OPAQUE_TAG => Some(raw.clone()),
+                    Block::Image { media_type, data } => Some(json!({
+                        "type":"image",
+                        "source":{"type":"base64","media_type":media_type,"data":data}
+                    })),
                     Block::Opaque { .. } => None,
                 })
                 .collect();

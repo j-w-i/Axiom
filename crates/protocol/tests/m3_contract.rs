@@ -41,6 +41,9 @@ fn m3_methods_and_notifications_are_registered() {
         (agent::Tools::NAME, "agent/tools"),
         (agent::ToolCall::NAME, "agent/toolCall"),
         (agent::GetPolicy::NAME, "agent/policy"),
+        (agent::SessionRename::NAME, "agent/sessionRename"),
+        (agent::SessionDelete::NAME, "agent/sessionDelete"),
+        (agent::Image::NAME, "agent/image"),
         (agent::SetPolicy::NAME, "agent/setPolicy"),
     ];
     let names = registry::method_names();
@@ -179,4 +182,36 @@ fn approval_and_policy_wire_shapes() {
     }));
     round_trip::<ToolCallResult>(json!({"output":{},"text":"","isError":true}));
     round_trip::<RevealParams>(json!({"workspaceId":"w1","path":"a","line":3,"column":1}));
+}
+
+/// M3-ARCH-002 (ADR-0016, ADR-0017): workspace-free sessions, rename/delete, edit and regenerate,
+/// images, ACP providers. Every shape accepted before still parses.
+#[test]
+fn chat_additions_wire_shapes() {
+    // Without a workspace.
+    round_trip::<SessionCreateParams>(json!({"providerId":"a","model":"m"}));
+    round_trip::<SessionRef>(json!({"sessionId":"s1"}));
+    round_trip::<SessionListParams>(json!({}));
+    // The workspace-ref shape of 0.3 as frozen by ARCH-001 still parses as the list params.
+    let p: SessionListParams = round_trip(json!({"workspaceId":"w1"}));
+    assert_eq!(p.workspace_id.unwrap().0, "w1");
+    round_trip::<SessionRenameParams>(json!({"sessionId":"s1","title":"Trip plan"}));
+    round_trip::<SendParams>(json!({
+        "sessionId":"s1","text":"again","fromTurn":3,
+        "images":[{"mediaType":"image/png","data":"iVBORw0KGgo="}]
+    }));
+    round_trip::<ImageParams>(json!({"sessionId":"s1","sha256":"ab"}));
+    round_trip::<ImageData>(json!({"mediaType":"image/png","data":"iVBORw0KGgo="}));
+    for body in [
+        json!({"type":"rewind","fromTurn":3}),
+        json!({"type":"user","text":"look","images":[{"mediaType":"image/png","sha256":"ab","bytes":12}]}),
+        json!({"type":"assistantText","text":"1. read","kind":"plan"}),
+    ] {
+        round_trip::<AgentEvent>(json!({"sessionId":"s1","seq":1,"tsMs":1,"turn":1,"event":body}));
+    }
+    let c: ProviderConfig = round_trip(json!({
+        "id":"claude-code","kind":"acp","name":"Claude Code","command":["claude-agent-acp"],
+        "env":{"NO_COLOR":"1"}
+    }));
+    assert_eq!(c.kind, ProviderKind::Acp);
 }

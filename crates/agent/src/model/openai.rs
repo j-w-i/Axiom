@@ -208,6 +208,7 @@ fn request_body_with(req: &TurnRequest, names: &ToolNames, server: Server) -> Va
                 // Tool results are their own `tool` messages and come first (they answer the
                 // previous assistant message); any text follows as a user message.
                 let mut text = Vec::new();
+                let mut images = Vec::new();
                 for b in &m.blocks {
                     match b {
                         Block::ToolResult {
@@ -216,10 +217,22 @@ fn request_body_with(req: &TurnRequest, names: &ToolNames, server: Server) -> Va
                             "role":"tool","tool_call_id":call_id,"content":content
                         })),
                         Block::Text(t) if !t.text.is_empty() => text.push(t.text.as_str()),
+                        Block::Image { media_type, data } => images.push(json!({
+                            "type":"image_url",
+                            "image_url":{"url":format!("data:{media_type};base64,{data}")}
+                        })),
                         _ => {}
                     }
                 }
-                if !text.is_empty() {
+                if !images.is_empty() {
+                    // With images the content is an array of parts.
+                    let mut parts = Vec::new();
+                    if !text.is_empty() {
+                        parts.push(json!({"type":"text","text":text.join("\n\n")}));
+                    }
+                    parts.extend(images);
+                    messages.push(json!({"role":"user","content":parts}));
+                } else if !text.is_empty() {
                     messages.push(json!({"role":"user","content":text.join("\n\n")}));
                 }
             }

@@ -32,6 +32,8 @@ fn provider(url: &str, key: Option<&str>) -> OpenAiChat {
             api_key_env: None,
             models: vec![],
             capabilities: None,
+            command: vec![],
+            env: Default::default(),
         },
         key.map(String::from),
     )
@@ -265,4 +267,27 @@ async fn openai_models_from_the_server_with_the_ollama_profile() {
     assert_eq!(ids, ["llama3.2", "qwen3:8b"]);
     assert_eq!(models[0].capabilities.tools, Support::Unknown);
     assert_eq!(server.requests()[0].path, "/v1/models");
+}
+
+#[tokio::test]
+async fn openai_images_make_the_user_content_an_array_of_parts() {
+    let mut req = turn();
+    req.messages = vec![Message {
+        role: Role::User,
+        blocks: vec![
+            Block::text("What is this?"),
+            Block::Image {
+                media_type: "image/jpeg".into(),
+                data: "/9j/4AAQ".into(),
+            },
+        ],
+    }];
+    let body = request_body(&req, "http://127.0.0.1:11434/v1");
+    assert_eq!(
+        body["messages"][1]["content"],
+        json!([
+            {"type":"text","text":"What is this?"},
+            {"type":"image_url","image_url":{"url":"data:image/jpeg;base64,/9j/4AAQ"}}
+        ])
+    );
 }

@@ -1,8 +1,8 @@
 ---
 id: M3-ARCH-002
 title: Chat additions to protocol 0.3: workspace-free sessions, rename/delete, edit and regenerate, images
-status: planned
-status_note:
+status: tested
+status_note: 2026-11-21; see handoff
 depends_on: [M3-ARCH-001]
 order: 404
 scope: crates/protocol/, schemas/ (regenerated), apps/desktop-tauri/src/daemon/protocol.gen.ts (regenerated), crates/agent/src/model/ (image blocks), crates/axiomd/src/router.rs (NOT_YET_SERVED), docs/protocols/{ipc,agents}.md

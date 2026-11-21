@@ -797,6 +797,12 @@
               },
               "type": "array"
             },
+            "images": {
+              "items": {
+                "$ref": "#/$defs/ImageRef"
+              },
+              "type": "array"
+            },
             "text": {
               "type": "string"
             },
@@ -808,6 +814,25 @@
           "required": [
             "type",
             "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Turns from `fromTurn` on are replaced by what follows (edit, regenerate). Clients show\nthe latest branch; the journal keeps the earlier one.",
+          "properties": {
+            "fromTurn": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "rewind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "fromTurn"
           ],
           "type": "object"
         },
@@ -831,6 +856,17 @@
         {
           "description": "A complete assistant text block.",
           "properties": {
+            "kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For an external agent's plan or reasoning (ADR-0016); absent for the answer."
+            },
             "text": {
               "type": "string"
             },
@@ -1268,6 +1304,71 @@
         "windows"
       ],
       "type": "string"
+    },
+    "ImageData": {
+      "description": "An image, base64-encoded.",
+      "properties": {
+        "data": {
+          "description": "Base64 (standard alphabet, padded). At most 5 MiB decoded.",
+          "type": "string"
+        },
+        "mediaType": {
+          "description": "`image/png`, `image/jpeg`, `image/gif` or `image/webp`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mediaType",
+        "data"
+      ],
+      "type": "object"
+    },
+    "ImageParams": {
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "ImageRef": {
+      "description": "An image stored with a session (shown with its `user` event; fetched with `agent/image`).",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mediaType",
+        "sha256",
+        "bytes"
+      ],
+      "type": "object"
     },
     "InitializeParams": {
       "properties": {
@@ -1952,6 +2053,20 @@
           ],
           "description": "Overrides of the detected capability profile, applied to every model."
         },
+        "command": {
+          "description": "`acp` only: the agent's program and arguments (ADR-0016).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "`acp` only: extra environment variables for the agent process (no secrets: agents use\ntheir own sign-in).",
+          "type": "object"
+        },
         "id": {
           "description": "Stable id chosen by the user, `[a-z0-9-]+`.",
           "type": "string"
@@ -2058,6 +2173,11 @@
         {
           "const": "scripted",
           "description": "TEST ONLY: replays a script; offered only when `AXIOM_TEST_SCRIPTED_MODEL` is set.",
+          "type": "string"
+        },
+        {
+          "const": "acp",
+          "description": "An external agent spoken to over the Agent Client Protocol (Claude Code, Codex, Gemini\nCLI; ADR-0016). Its one model is `default`.",
           "type": "string"
         }
       ]
@@ -2309,11 +2429,18 @@
           "type": "boolean"
         },
         "workspaceId": {
-          "$ref": "#/$defs/WorkspaceId"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Required in practice (checkpoints exist only for workspace sessions); optional on the\nwire with the other session references (ADR-0017 §2)."
         }
       },
       "required": [
-        "workspaceId",
         "sessionId",
         "checkpoint"
       ],
@@ -2442,6 +2569,22 @@
           },
           "type": "array"
         },
+        "fromTurn": {
+          "description": "Edit / regenerate: this message replaces turn N and every later turn in the context\n(a `rewind` event is journalled first). Errors: `invalid_params` if N is not a turn.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "images": {
+          "description": "Pasted or dropped images (ADR-0017 §3).",
+          "items": {
+            "$ref": "#/$defs/ImageData"
+          },
+          "type": "array"
+        },
         "sessionId": {
           "$ref": "#/$defs/SessionId"
         },
@@ -2449,11 +2592,17 @@
           "type": "string"
         },
         "workspaceId": {
-          "$ref": "#/$defs/WorkspaceId"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "workspaceId",
         "sessionId",
         "text"
       ],
@@ -2474,11 +2623,18 @@
           ]
         },
         "workspaceId": {
-          "$ref": "#/$defs/WorkspaceId"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent: a conversation without a workspace (no workspace tools; ADR-0017)."
         }
       },
       "required": [
-        "workspaceId",
         "providerId",
         "model"
       ],
@@ -2536,6 +2692,22 @@
       ],
       "type": "object"
     },
+    "SessionListParams": {
+      "properties": {
+        "workspaceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent: the conversations without a workspace."
+        }
+      },
+      "type": "object"
+    },
     "SessionListResult": {
       "properties": {
         "sessions": {
@@ -2582,12 +2754,45 @@
           "$ref": "#/$defs/SessionId"
         },
         "workspaceId": {
-          "$ref": "#/$defs/WorkspaceId"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent for a conversation without a workspace."
         }
       },
       "required": [
-        "workspaceId",
         "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionRenameParams": {
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "title": {
+          "description": "1–120 characters.",
+          "type": "string"
+        },
+        "workspaceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "title"
       ],
       "type": "object"
     },
@@ -2977,6 +3182,13 @@
       ],
       "type": "object"
     },
+    "TextKind": {
+      "enum": [
+        "plan",
+        "thought"
+      ],
+      "type": "string"
+    },
     "ToolCallParams": {
       "properties": {
         "input": true,
@@ -3359,6 +3571,14 @@
         "$ref": "#/$defs/Empty"
       }
     },
+    "agent/image": {
+      "params": {
+        "$ref": "#/$defs/ImageParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ImageData"
+      }
+    },
     "agent/models": {
       "params": {
         "$ref": "#/$defs/ModelsParams"
@@ -3399,9 +3619,17 @@
         "$ref": "#/$defs/SessionInfo"
       }
     },
+    "agent/sessionDelete": {
+      "params": {
+        "$ref": "#/$defs/SessionRef"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
     "agent/sessionList": {
       "params": {
-        "$ref": "#/$defs/WorkspaceRef"
+        "$ref": "#/$defs/SessionListParams"
       },
       "result": {
         "$ref": "#/$defs/SessionListResult"
@@ -3413,6 +3641,14 @@
       },
       "result": {
         "$ref": "#/$defs/SessionOpenResult"
+      }
+    },
+    "agent/sessionRename": {
+      "params": {
+        "$ref": "#/$defs/SessionRenameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SessionInfo"
       }
     },
     "agent/setPolicy": {

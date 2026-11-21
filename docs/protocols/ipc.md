@@ -200,8 +200,11 @@ runtime).
 | `agent/models` | `ModelsParams → ModelsResult` | — (an unreachable provider is listed with `error`) |
 | `agent/configureProvider` | `ConfigureProviderParams → {}` | `invalid_params`, `unsupported` (no credential store) |
 | `agent/sessionCreate` | `SessionCreateParams → SessionInfo` | `workspace_not_open`, `not_found` |
-| `agent/sessionList` | `WorkspaceRef → SessionListResult` | `workspace_not_open` |
+| `agent/sessionList` | `SessionListParams → SessionListResult` | `workspace_not_open` |
 | `agent/sessionOpen` | `SessionRef → SessionOpenResult` | `workspace_not_open`, `not_found` |
+| `agent/sessionRename` | `SessionRenameParams → SessionInfo` | `not_found`, `invalid_params` |
+| `agent/sessionDelete` | `SessionRef → {}` | `not_found` |
+| `agent/image` | `ImageParams → ImageData` | `not_found` |
 | `agent/send` | `SendParams → {}` | `not_found`, `conflict` (turn running), `prerequisite_missing` |
 | `agent/cancel` | `SessionRef → {}` | `not_found` |
 | `agent/approve` | `ApproveParams → {}` | `not_found` |
@@ -229,6 +232,17 @@ runtime).
   `agent/approvalRequested` to every connection that declared `capabilities.approvals` and waits
   for the first `agent/approve`; then `agent/approvalResolved` goes to the same connections. With
   no approving connection the call fails with `approval_required` and does not run.
+- **Chat additions (M3-ARCH-002; ADR-0016, ADR-0017).**
+  - `workspaceId` is optional in `SessionCreateParams`, `SessionRef`, `SendParams`,
+    `RestoreParams` and `SessionListParams`. A session without one is a conversation with no
+    workspace tools.
+  - `SendParams` gains `images` (base64, ≤ 5 MiB each) and `fromTurn` (edit/regenerate: a
+    `rewind` event, then the new turn replaces turn N on).
+  - `user` events carry `images` as `ImageRef`s, fetched with `agent/image`.
+  - `assistantText` may carry `kind: plan|thought` (external agents).
+  - `ProviderKind` gains `acp`, with `ProviderConfig.command` and `env`.
+  These changes are additive or required → optional: every message valid before is still
+  valid.
 - New error kinds: `approval_required` (-32023), `checkpoint_conflict` (-32024, details
   `{conflicts}`), `model_error` (-32025, details `{kind}`).
 - Not in ADR-0015 §1's table, added by M3-ARCH-001: `agent/approvalResolved` (so every approving

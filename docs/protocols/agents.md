@@ -42,6 +42,8 @@ pub enum Block {
     /// Provider-native content sent back verbatim to the same provider kind and dropped for any
     /// other (Anthropic thinking / redacted_thinking).
     Opaque { provider: String, raw: serde_json::Value },
+    /// A user image, base64 (ADR-0017): Anthropic `image` block, OpenAI `image_url` data URL.
+    Image { media_type: String, data: String },
 }
 pub enum TurnEvent {
     TextDelta(String),
@@ -168,6 +170,11 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
 
 ## Sessions
 
+Workspace-free conversations (ADR-0017) live in `<data dir>/sessions/_chat/`; images are
+content-addressed blobs in `<session dir>/blobs/<sha256>`. A `rewind` event (edit/regenerate)
+drops turns from `fromTurn` on from the context; the journal keeps them.
+
+
 `<data dir>/sessions/<workspace hash>/<session id>.jsonl`, append-only, one versioned record
 per line (`v`, `seq`, `ts`, `turn`, the event). The journal stores everything needed to resume:
 the wire `AgentEvent`s plus internal records (provider-native opaque blocks, the exact
@@ -197,7 +204,7 @@ ADR-0015 §7.
 ## Client-facing protocol (protocol 0.3)
 
 Requests: `agent/models`, `agent/configureProvider`, `agent/sessionCreate`,
-`agent/sessionList`, `agent/sessionOpen`, `agent/send`, `agent/cancel`, `agent/approve`,
+`agent/sessionList`, `agent/sessionOpen`, `agent/sessionRename`, `agent/sessionDelete`, `agent/image`, `agent/send`, `agent/cancel`, `agent/approve`,
 `agent/checkpoints`, `agent/restore`, `agent/tools`, `agent/toolCall`, `agent/policy`,
 `agent/setPolicy`. Notifications: `agent/event`, `agent/approvalRequested`,
 `agent/approvalResolved`, `agent/reveal`. Exact types: `crates/protocol/src/agent.rs`.

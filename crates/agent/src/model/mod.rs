@@ -62,6 +62,12 @@ pub enum Block {
         provider: String,
         raw: Value,
     },
+    /// An image in a user message (ADR-0017 §3): base64 data.
+    #[serde(rename_all = "camelCase")]
+    Image {
+        media_type: String,
+        data: String,
+    },
 }
 
 /// Newtype so `Block::Text` serialises as `{"type":"text","text":…}`.

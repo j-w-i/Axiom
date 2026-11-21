@@ -50,6 +50,8 @@ pub fn scripted_config() -> ProviderConfig {
         api_key_env: None,
         models: vec![],
         capabilities: None,
+        command: vec![],
+        env: Default::default(),
     }
 }
 
@@ -118,6 +120,12 @@ impl Providers {
                 Some(s) => s.clone(),
                 None => return Err(ProvidersError::NotFound(id.into())),
             },
+            // ACP agents run their own loop (M3-ACP-001); they are not model providers.
+            ProviderKind::Acp => {
+                return Err(ProvidersError::Invalid(format!(
+                    "`{id}` is an external agent, not a model API."
+                )))
+            }
             ProviderKind::Anthropic => Arc::new(
                 Anthropic::new(&config, self.key(&config).await?)
                     .map_err(ProvidersError::Invalid)?,
@@ -155,7 +163,7 @@ impl Providers {
                             .unwrap_or(crate::model::openai::DEFAULT_BASE_URL),
                     ) == Server::OpenAi
                 }
-                ProviderKind::Scripted => false,
+                ProviderKind::Scripted | ProviderKind::Acp => false,
             };
             let mut status = ProviderStatus {
                 config: config.clone(),
@@ -273,6 +281,8 @@ mod tests {
             api_key_env: None,
             models: vec!["m1".into()],
             capabilities: None,
+            command: vec![],
+            env: Default::default(),
         }
     }
 

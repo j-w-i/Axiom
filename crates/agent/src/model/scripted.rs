@@ -51,6 +51,8 @@ pub struct Expect {
     pub tools_include: Vec<String>,
     /// The last message carries a tool result matching this.
     pub tool_result: Option<ExpectToolResult>,
+    /// The last user message carries this many images.
+    pub user_images: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -168,6 +170,25 @@ fn check(expect: &Expect, req: &TurnRequest) -> Result<(), String> {
         if !last_user.contains(s.as_str()) {
             return Err(format!(
                 "last user text {last_user:?} does not contain {s:?}"
+            ));
+        }
+    }
+    if let Some(n) = expect.user_images {
+        let got = req
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::User)
+            .map(|m| {
+                m.blocks
+                    .iter()
+                    .filter(|b| matches!(b, Block::Image { .. }))
+                    .count()
+            })
+            .unwrap_or(0);
+        if got != n {
+            return Err(format!(
+                "the last user message has {got} images, expected {n}"
             ));
         }
     }

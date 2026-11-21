@@ -32,6 +32,8 @@ fn provider(url: &str) -> Anthropic {
             api_key_env: None,
             models: vec![],
             capabilities: None,
+            command: vec![],
+            env: Default::default(),
         },
         Some("sk-test-secret".into()),
     )
@@ -299,4 +301,24 @@ async fn anthropic_models_listed_from_the_server_with_profiles() {
     assert_eq!(models[0].display_name, "Claude Sonnet 4.5");
     assert_eq!(models[0].capabilities.context_window, Some(200_000));
     assert_eq!(server.requests()[0].path, "/v1/models?limit=100");
+}
+
+#[tokio::test]
+async fn anthropic_images_are_base64_image_blocks() {
+    let mut req = turn();
+    req.messages = vec![Message {
+        role: Role::User,
+        blocks: vec![
+            Block::text("What is this?"),
+            Block::Image {
+                media_type: "image/png".into(),
+                data: "iVBORw0KGgo=".into(),
+            },
+        ],
+    }];
+    let body = request_body(&req);
+    assert_eq!(
+        body["messages"][0]["content"][1],
+        json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}})
+    );
 }

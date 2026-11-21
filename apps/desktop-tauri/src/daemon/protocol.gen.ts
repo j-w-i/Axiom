@@ -7,14 +7,23 @@
 export type EventBody =
   | {
       attachments?: Attachment[];
+      images?: ImageRef[];
       text: string;
       type: "user";
+    }
+  | {
+      fromTurn: number;
+      type: "rewind";
     }
   | {
       text: string;
       type: "textDelta";
     }
   | {
+      /**
+       * For an external agent's plan or reasoning (ADR-0016); absent for the answer.
+       */
+      kind?: TextKind | null;
       text: string;
       type: "assistantText";
     }
@@ -104,6 +113,7 @@ export type EventBody =
  * outside the root with [`ErrorKind::PermissionDenied`].
  */
 export type WorkspacePath = string;
+export type TextKind = "plan" | "thought";
 /**
  * What a tool can do. Ordered from least to most consequential for display only; the gate
  * decides by rule, not by order.
@@ -150,7 +160,7 @@ export type Command =
   | {
       shell: string;
     };
-export type ProviderKind = "anthropic" | "openaiChat" | "scripted";
+export type ProviderKind = "anthropic" | "openaiChat" | "scripted" | "acp";
 export type Decision = "allow" | "ask" | "deny";
 export type ToolLocation =
   | {
@@ -288,6 +298,14 @@ export interface Attachment {
    */
   lines?: [unknown, unknown] | null;
   path: WorkspacePath;
+}
+/**
+ * An image stored with a session (shown with its `user` event; fetched with `agent/image`).
+ */
+export interface ImageRef {
+  bytes: number;
+  mediaType: string;
+  sha256: string;
 }
 export interface ApprovalRequest {
   argv?: string[] | null;
@@ -470,6 +488,17 @@ export interface ProviderConfig {
    * Overrides of the detected capability profile, applied to every model.
    */
   capabilities?: CapabilityOverrides | null;
+  /**
+   * `acp` only: the agent's program and arguments (ADR-0016).
+   */
+  command?: string[];
+  /**
+   * `acp` only: extra environment variables for the agent process (no secrets: agents use
+   * their own sign-in).
+   */
+  env?: {
+    [k: string]: string;
+  };
   /**
    * Stable id chosen by the user, `[a-z0-9-]+`.
    */
@@ -657,6 +686,24 @@ export interface HostInfo {
    * `/` or `\`. For display only; the protocol itself always uses `/`.
    */
   pathSeparator: string;
+}
+/**
+ * An image, base64-encoded.
+ */
+export interface ImageData {
+  /**
+   * Base64 (standard alphabet, padded). At most 5 MiB decoded.
+   */
+  data: string;
+  /**
+   * `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
+   */
+  mediaType: string;
+}
+export interface ImageParams {
+  sessionId: SessionId;
+  sha256: string;
+  workspaceId?: WorkspaceId | null;
 }
 export interface InitializeParams {
   /**
@@ -967,7 +1014,11 @@ export interface RestoreParams {
    * Restore the files without conflicts and leave the others.
    */
   skipConflicts?: boolean;
-  workspaceId: WorkspaceId;
+  /**
+   * Required in practice (checkpoints exist only for workspace sessions); optional on the
+   * wire with the other session references (ADR-0017 §2).
+   */
+  workspaceId?: WorkspaceId | null;
 }
 export interface RevealParams {
   /**
@@ -994,15 +1045,27 @@ export interface SendParams {
    * Context the user attached (an editor selection, a file).
    */
   attachments?: Attachment[];
+  /**
+   * Edit / regenerate: this message replaces turn N and every later turn in the context
+   * (a `rewind` event is journalled first). Errors: `invalid_params` if N is not a turn.
+   */
+  fromTurn?: number | null;
+  /**
+   * Pasted or dropped images (ADR-0017 §3).
+   */
+  images?: ImageData[];
   sessionId: SessionId;
   text: string;
-  workspaceId: WorkspaceId;
+  workspaceId?: WorkspaceId | null;
 }
 export interface SessionCreateParams {
   model: string;
   providerId: string;
   title?: string | null;
-  workspaceId: WorkspaceId;
+  /**
+   * Absent: a conversation without a workspace (no workspace tools; ADR-0017).
+   */
+  workspaceId?: WorkspaceId | null;
 }
 export interface SessionInfo {
   /**
@@ -1023,6 +1086,12 @@ export interface SessionInfo {
   title: string;
   updatedMs: number;
 }
+export interface SessionListParams {
+  /**
+   * Absent: the conversations without a workspace.
+   */
+  workspaceId?: WorkspaceId | null;
+}
 export interface SessionListResult {
   sessions: SessionInfo[];
 }
@@ -1040,7 +1109,18 @@ export interface SessionOpenResult {
 }
 export interface SessionRef {
   sessionId: SessionId;
-  workspaceId: WorkspaceId;
+  /**
+   * Absent for a conversation without a workspace.
+   */
+  workspaceId?: WorkspaceId | null;
+}
+export interface SessionRenameParams {
+  sessionId: SessionId;
+  /**
+   * 1–120 characters.
+   */
+  title: string;
+  workspaceId?: WorkspaceId | null;
 }
 export interface SetParams {
   values: {

@@ -18,6 +18,7 @@ use crate::{method, notification, WorkspaceId, WorkspacePath};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 method!(
     /// Configured model providers, each with its models (listed from the server where the
@@ -36,8 +37,23 @@ method!(
     SessionCreate, "agent/sessionCreate", SessionCreateParams => SessionInfo
 );
 method!(
-    /// The workspace's sessions, most recently updated first. Errors: `workspace_not_open`.
-    SessionList, "agent/sessionList", WorkspaceRef => SessionListResult
+    /// The workspace's sessions (or, without `workspaceId`, the conversations that have no
+    /// workspace), most recently updated first. Errors: `workspace_not_open`.
+    SessionList, "agent/sessionList", SessionListParams => SessionListResult
+);
+method!(
+    /// Renames a session. Errors: `not_found`, `invalid_params` (empty title).
+    SessionRename, "agent/sessionRename", SessionRenameParams => SessionInfo
+);
+method!(
+    /// Deletes a session's journal and index row (its checkpoints stay with the workspace's).
+    /// A running turn is cancelled first. Errors: `not_found`.
+    SessionDelete, "agent/sessionDelete", SessionRef => Empty
+);
+method!(
+    /// An image attached to a session (by its `sha256` from a `user` event).
+    /// Errors: `not_found`.
+    Image, "agent/image", ImageParams => ImageData
 );
 method!(
     /// Attaches this connection to a session and returns its persisted events (the replay).
@@ -134,6 +150,9 @@ pub enum ProviderKind {
     OpenaiChat,
     /// TEST ONLY: replays a script; offered only when `AXIOM_TEST_SCRIPTED_MODEL` is set.
     Scripted,
+    /// An external agent spoken to over the Agent Client Protocol (Claude Code, Codex, Gemini
+    /// CLI; ADR-0016). Its one model is `default`.
+    Acp,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -156,6 +175,13 @@ pub struct ProviderConfig {
     /// Overrides of the detected capability profile, applied to every model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<CapabilityOverrides>,
+    /// `acp` only: the agent's program and arguments (ADR-0016).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+    /// `acp` only: extra environment variables for the agent process (no secrets: agents use
+    /// their own sign-in).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
@@ -251,7 +277,9 @@ pub struct ConfigureProviderParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionCreateParams {
-    pub workspace_id: WorkspaceId,
+    /// Absent: a conversation without a workspace (no workspace tools; ADR-0017).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<WorkspaceId>,
     pub provider_id: String,
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -261,8 +289,56 @@ pub struct SessionCreateParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRef {
-    pub workspace_id: WorkspaceId,
+    /// Absent for a conversation without a workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<WorkspaceId>,
     pub session_id: SessionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionListParams {
+    /// Absent: the conversations without a workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<WorkspaceId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRenameParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<WorkspaceId>,
+    pub session_id: SessionId,
+    /// 1–120 characters.
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<WorkspaceId>,
+    pub session_id: SessionId,
+    pub sha256: String,
+}
+
+/// An image, base64-encoded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageData {
+    /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
+    pub media_type: String,
+    /// Base64 (standard alphabet, padded). At most 5 MiB decoded.
+    pub data: String,
+}
+
+/// An image stored with a session (shown with its `user` event; fetched with `agent/image`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageRef {
+    pub media_type: String,
+    pub sha256: String,
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -302,12 +378,20 @@ pub struct SessionOpenResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SendParams {
-    pub workspace_id: WorkspaceId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<WorkspaceId>,
     pub session_id: SessionId,
     pub text: String,
     /// Context the user attached (an editor selection, a file).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
+    /// Pasted or dropped images (ADR-0017 §3).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ImageData>,
+    /// Edit / regenerate: this message replaces turn N and every later turn in the context
+    /// (a `rewind` event is journalled first). Errors: `invalid_params` if N is not a turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_turn: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -339,6 +423,14 @@ pub enum EventBody {
         text: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<Attachment>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ImageRef>,
+    },
+    /// Turns from `fromTurn` on are replaced by what follows (edit, regenerate). Clients show
+    /// the latest branch; the journal keeps the earlier one.
+    #[serde(rename_all = "camelCase")]
+    Rewind {
+        from_turn: u32,
     },
     /// Streamed assistant text (ephemeral).
     TextDelta {
@@ -347,6 +439,9 @@ pub enum EventBody {
     /// A complete assistant text block.
     AssistantText {
         text: String,
+        /// For an external agent's plan or reasoning (ADR-0016); absent for the answer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<TextKind>,
     },
     /// The model called a tool (written before the tool runs).
     #[serde(rename_all = "camelCase")]
@@ -420,6 +515,13 @@ pub enum EventBody {
         model_kind: Option<ModelErrorKind>,
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum TextKind {
+    Plan,
+    Thought,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -535,7 +637,10 @@ pub struct CheckpointsResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreParams {
-    pub workspace_id: WorkspaceId,
+    /// Required in practice (checkpoints exist only for workspace sessions); optional on the
+    /// wire with the other session references (ADR-0017 §2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<WorkspaceId>,
     pub session_id: SessionId,
     pub checkpoint: u32,
     /// Restore the files without conflicts and leave the others.
