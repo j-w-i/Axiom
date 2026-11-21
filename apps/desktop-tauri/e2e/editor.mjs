@@ -87,9 +87,19 @@ async function server(wd, { name, ok, open, completion, error, definition, renam
   await wd.waitFor(`return ${appExpr}.problems.all().some(p => p.location?.file === arguments[0] && p.location.line === arguments[1] && p.severity === 'error')`, [error.file, error.line], 180000, `${name}: the type error`);
   check(`${name}: a diagnostic (the type error) is in Problems`, true);
   let labels = [];
-  for (let i = 0; i < 20 && !labels.some((l) => l.includes(completion.expect)); i++) {
+  for (let i = 0; i < 5 && !labels.some((l) => l.includes(completion.expect)); i++) {
     labels = await suggestions(wd, completion.line, completion.column).catch(() => []);
     if (!labels.some((l) => l.includes(completion.expect))) await new Promise((r) => setTimeout(r, 3000));
+  }
+  if (!labels.some((l) => l.includes(completion.expect))) {
+    // Why (CI only so far): focus, the widget, the caret's line on screen, the servers, the text.
+    const why = await wd.exec(`const e = window.__axiomEditor.editor; const a = document.activeElement;
+      const w = document.querySelector('.suggest-widget');
+      return { focus: a?.closest('.monaco-editor') ? 'editor' : a?.closest('[data-testid=terminal]') ? 'terminal' : (a?.tagName + '.' + a?.className),
+        widget: w ? w.className : null, position: e.getPosition(), visible: e.getVisibleRanges().map(r => [r.startLineNumber, r.endLineNumber]),
+        model: e.getModel()?.uri.toString(), line: e.getModel()?.getLineContent(arguments[0]),
+        servers: window.__axiom.lsp.getSnapshot().servers.map(s => s.id + ':' + s.state) }`, [completion.line]);
+    console.log("COMPLETION", name, JSON.stringify(why));
   }
   check(`${name}: completion offers ${completion.expect}`, labels.some((l) => l.includes(completion.expect)), JSON.stringify(labels.slice(0, 5)));
   await caret(wd, definition.line, definition.column);
