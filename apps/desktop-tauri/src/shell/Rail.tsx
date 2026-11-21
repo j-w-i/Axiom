@@ -7,7 +7,7 @@ import * as Icon from "../ui/icons";
 import { Tooltip } from "../ui/overlays";
 import "../styles/components/rail.css";
 
-export type Destination = "files" | "scm" | "chat" | "environments";
+export type Destination = "files" | "search" | "scm" | "chat" | "environments";
 
 interface Item {
   id: Destination;
@@ -58,7 +58,8 @@ export function Rail({
   const items: Item[] = [
     { id: "files", label: "Files", icon: <Icon.Files /> },
     // M4-GIT-002: the side bar's Source Control page (the editor stays).
-    ...(scm ? [{ id: "scm" as const, label: "Source Control", icon: <Icon.Branch /> }] : []),
+    // M4-UX-001: the Search page; M4-GIT-002: Source Control (both need a folder).
+    ...(scm ? [{ id: "search" as const, label: "Search", icon: <Icon.Search /> }, { id: "scm" as const, label: "Source Control", icon: <Icon.Branch /> }] : []),
     { id: "chat", label: "Chat", icon: <Icon.Chat />, badge: waiting },
     { id: "environments", label: "Environments", icon: <Icon.Layers />, badge: missing },
   ];

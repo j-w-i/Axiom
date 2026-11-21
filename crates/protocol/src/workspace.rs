@@ -27,7 +27,8 @@ method!(
 method!(
     /// Text or regular-expression search over the workspace's files (honouring `.gitignore`;
     /// binary and very large files skipped), or with `mode: files` the file paths themselves
-    /// (for quick open). Bounded by `limit` (default 2 000, at most 20 000); `truncated` says
+    /// (for quick open). Bounded by `limit` (default 2 000 matches, or 20 000 paths in files mode;
+    /// at most 20 000); `truncated` says
     /// more exist. A newer search from the same client is not cancelled implicitly: cancel the
     /// request (`$/cancelRequest`). Protocol 0.4 (ADR-0018 §6). Errors: `workspace_not_open`,
     /// `invalid_params` (a bad regular expression, with the reason).

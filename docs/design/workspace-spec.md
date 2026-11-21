@@ -161,6 +161,22 @@ only by the failure status line and error rows. CSS in `styles/components/consol
   reload the terminals come back with their backlog (`terminal/list`).
 - **Not done.** Links in the terminal are not clickable yet (no link addon).
 
+**Search (M4-UX-001).**
+- **Search page.** A rail destination when a folder is open, with Mod+Shift+F and the palette's
+  "Search in Files". It holds:
+  - the query, with Match case (Aa), Whole word (ab) and Regular expression (.*) toggles
+    (aria-pressed);
+  - files to include and to exclude (comma-separated globs);
+  - a status line ("3 results in 2 files", "(the first shown)" when truncated);
+  - matches grouped by file, each a row with the line number and a preview with the match
+    marked.
+- **Keys.** ↓ from the query enters the rows, ↑/↓/Home/End move, Enter opens the file at the
+  match. The search runs 200 ms after typing stops, and a new one cancels the last.
+  `.gitignore` is honoured.
+- **Go to File (Mod+P)** lists every file the daemon finds (`workspace/search`, files mode; not
+  only the explorer's loaded rows). It ranks them with a path-aware fuzzy scorer
+  (`ui/fuzzy.ts`): segment and word starts, camelCase, consecutive runs, the file name.
+
 **Git (M4-GIT-002).**
 - **Source Control.** The rail gains a destination when a folder is open (branch icon). Its side
   bar page shows the branch (↑ahead ↓behind) and the changes, grouped as Conflicts, Staged,

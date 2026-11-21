@@ -43,6 +43,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(axiom_protocol::lsp::Request, lsp::request, ctx);
     wire!(axiom_protocol::lsp::Notify, lsp::notify);
     wire!(axiom_protocol::lsp::Restart, lsp::restart);
+    wire!(pws::Search, workspace::search, ctx);
     wire!(axiom_protocol::git::Status, git::status);
     wire!(axiom_protocol::git::Show, git::show);
     wire!(axiom_protocol::terminal::Create, terminal::create);
@@ -109,7 +110,7 @@ pub fn build_router(app: Arc<App>) -> Router {
 /// that wires one removes it here; the last M4 backend task leaves this empty. Clients
 /// feature-detect from `initialize.methods` (ADR-0018 §1), which lists only served methods.
 #[doc(hidden)]
-pub const NOT_YET_SERVED: &[&str] = &["workspace/search"];
+pub const NOT_YET_SERVED: &[&str] = &[];
 
 #[cfg(test)]
 mod tests {

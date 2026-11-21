@@ -143,3 +143,218 @@ fn search_blocking(root: &std::path::Path, q: &SearchQuery) -> Result<SearchResu
         files_searched: files,
     })
 }
+
+// ---- `workspace/search` (protocol 0.4, M4-UX-001) ---------------------------------------------
+
+/// What the Search page and quick open ask for.
+#[derive(Debug, Clone, Default)]
+pub struct FindQuery {
+    pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    /// Comma-separated globs a path must match.
+    pub include: Option<String>,
+    /// Comma-separated globs of paths to skip.
+    pub exclude: Option<String>,
+    /// List file paths instead of matching text.
+    pub files: bool,
+    pub limit: usize,
+}
+
+/// One match, with UTF-16 columns (Monaco's) and a preview trimmed around it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindMatch {
+    pub path: WorkspacePath,
+    pub line: u32,
+    pub column: u32,
+    pub end_column: u32,
+    pub preview: String,
+    pub preview_column: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FindResult {
+    pub matches: Vec<FindMatch>,
+    pub files: Vec<WorkspacePath>,
+    pub truncated: bool,
+    pub files_searched: u32,
+}
+
+/// Default and largest number of results.
+pub const FIND_DEFAULT_LIMIT: usize = 2000;
+pub const FIND_MAX_LIMIT: usize = 20_000;
+/// Characters of context kept before a match in its preview.
+const PREVIEW_BEFORE: usize = 60;
+
+impl Workspace {
+    /// Text search or the file list, honouring `.gitignore`; `cancel` stops it between files.
+    pub async fn find(
+        &self,
+        q: FindQuery,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<FindResult, WsError> {
+        let root = self.root().to_path_buf();
+        tokio::task::spawn_blocking(move || find_blocking(&root, &q, &cancel))
+            .await
+            .map_err(|e| WsError::Io(std::io::Error::other(e.to_string())))?
+    }
+}
+
+fn utf16_len(s: &str) -> u32 {
+    s.encode_utf16().count() as u32
+}
+
+fn overrides(
+    root: &std::path::Path,
+    include: Option<&str>,
+    exclude: Option<&str>,
+) -> Result<Option<ignore::overrides::Override>, WsError> {
+    let split = |s: Option<&str>| -> Vec<String> {
+        s.unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let (inc, exc) = (split(include), split(exclude));
+    if inc.is_empty() && exc.is_empty() {
+        return Ok(None);
+    }
+    let mut b = ignore::overrides::OverrideBuilder::new(root);
+    for g in &inc {
+        b.add(g)
+            .map_err(|e| WsError::InvalidPath(format!("invalid glob {g}: {e}")))?;
+    }
+    if inc.is_empty() {
+        // Exclusions alone: everything else is included.
+        b.add("**")
+            .map_err(|e| WsError::InvalidPath(e.to_string()))?;
+    }
+    for g in &exc {
+        b.add(&format!("!{g}"))
+            .map_err(|e| WsError::InvalidPath(format!("invalid glob {g}: {e}")))?;
+    }
+    b.build()
+        .map(Some)
+        .map_err(|e| WsError::InvalidPath(format!("invalid glob: {e}")))
+}
+
+fn find_blocking(
+    root: &std::path::Path,
+    q: &FindQuery,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<FindResult, WsError> {
+    use std::sync::atomic::Ordering;
+    // Text: 2 000 by default; the file list (quick open): everything up to the maximum.
+    let limit = match (q.limit, q.files) {
+        (0, true) => FIND_MAX_LIMIT,
+        (0, false) => FIND_DEFAULT_LIMIT,
+        (n, _) => n.min(FIND_MAX_LIMIT),
+    };
+    let re = if q.files {
+        None
+    } else {
+        if q.query.is_empty() {
+            return Ok(FindResult::default());
+        }
+        let mut pat = if q.regex {
+            q.query.clone()
+        } else {
+            regex::escape(&q.query)
+        };
+        if q.whole_word {
+            pat = format!(r"\b(?:{pat})\b");
+        }
+        Some(
+            regex::RegexBuilder::new(&pat)
+                .case_insensitive(!q.case_sensitive)
+                .size_limit(1 << 20)
+                .build()
+                .map_err(|e| WsError::InvalidPath(format!("invalid pattern: {e}")))?,
+        )
+    };
+    let filter = overrides(root, q.include.as_deref(), q.exclude.as_deref())?;
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(false)
+        .git_global(false)
+        .git_ignore(true)
+        .git_exclude(true)
+        .ignore(true)
+        .require_git(false)
+        .parents(false)
+        .sort_by_file_path(|a, b| a.cmp(b))
+        .filter_entry(|e| e.file_name() != ".git")
+        .build();
+    let mut out = FindResult::default();
+    for entry in walker {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let Ok(rel) = entry.path().strip_prefix(root) else {
+            continue;
+        };
+        if let Some(f) = &filter {
+            if !f.matched(rel, false).is_whitelist() {
+                continue;
+            }
+        }
+        let rel_s = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        let Some(re) = &re else {
+            if out.files.len() == limit {
+                out.truncated = true;
+                break;
+            }
+            out.files.push(WorkspacePath(rel_s));
+            out.files_searched += 1;
+            continue;
+        };
+        if entry.metadata().map(|m| m.len()).unwrap_or(u64::MAX) > MAX_FILE_BYTES {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        if bytes[..bytes.len().min(8192)].contains(&0) {
+            continue;
+        }
+        let Ok(text) = String::from_utf8(bytes) else {
+            continue;
+        };
+        out.files_searched += 1;
+        for (i, line) in text.lines().enumerate() {
+            for m in re.find_iter(line) {
+                if m.start() == m.end() {
+                    continue;
+                }
+                if out.matches.len() == limit {
+                    out.truncated = true;
+                    return Ok(out);
+                }
+                // The preview starts at most PREVIEW_BEFORE characters before the match.
+                let before: Vec<(usize, char)> = line[..m.start()].char_indices().collect();
+                let from = before.len().saturating_sub(PREVIEW_BEFORE);
+                let start_byte = before.get(from).map_or(m.start(), |(b, _)| *b);
+                let preview: String = line[start_byte..].chars().take(MAX_LINE_CHARS).collect();
+                out.matches.push(FindMatch {
+                    path: WorkspacePath(rel_s.clone()),
+                    line: i as u32 + 1,
+                    column: utf16_len(&line[..m.start()]) + 1,
+                    end_column: utf16_len(&line[..m.end()]) + 1,
+                    preview,
+                    preview_column: utf16_len(&line[start_byte..m.start()]) + 1,
+                });
+            }
+        }
+    }
+    Ok(out)
+}

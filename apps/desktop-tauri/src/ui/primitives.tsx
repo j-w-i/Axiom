@@ -7,6 +7,7 @@
 // (tests/ui-imports.test.ts).
 
 import {
+  type Ref,
   type ButtonHTMLAttributes,
   type CSSProperties,
   type InputHTMLAttributes,
@@ -203,10 +204,11 @@ export function Field({
   invalid = false,
   describedBy,
   className,
+  ref,
   ...rest
-}: InputHTMLAttributes<HTMLInputElement> & { mono?: boolean; invalid?: boolean; describedBy?: string }) {
+}: InputHTMLAttributes<HTMLInputElement> & { mono?: boolean; invalid?: boolean; describedBy?: string; ref?: Ref<HTMLInputElement> }) {
   const cls = ["input", mono && "input--mono", className].filter(Boolean).join(" ");
-  return <input className={cls} aria-invalid={invalid || undefined} aria-describedby={describedBy} {...rest} />;
+  return <input ref={ref} className={cls} aria-invalid={invalid || undefined} aria-describedby={describedBy} {...rest} />;
 }
 
 /** On/off setting: role="switch"; click, Space and Enter toggle. */

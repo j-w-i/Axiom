@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent } from "react";
 import { ChatPage, ChatSide } from "../components/Chat";
 import { ModelSetup } from "../components/Models";
+import { SearchSide } from "../components/Search";
 import { SourceControlSide } from "../components/SourceControl";
 import { shellStorage } from "../state/shell-storage";
 import { EditorArea } from "../components/EditorArea";
@@ -109,6 +110,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
   const envPage = destination === "environments";
   const chatPage = destination === "chat";
   const scmSide = destination === "scm" && !!ws.id;
+  const searchSide = destination === "search" && !!ws.id;
   const page = envPage || chatPage;
   const root = useRef<HTMLDivElement>(null);
   const dirtyPaths = useMemo(() => new Set(ctx.docs.docs.filter((d) => d.dirty).map((d) => d.path)), [ctx.docs.docs]);
@@ -149,7 +151,7 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
         <>
           <Panel
             className="sidebar motion-in-left"
-            title={envPage ? "Environments" : chatPage ? "Chat" : scmSide ? "Source Control" : "Files"}
+            title={envPage ? "Environments" : chatPage ? "Chat" : scmSide ? "Source Control" : searchSide ? "Search" : "Files"}
             region="files"
             phase={side.phase}
             meta={chatPage ? undefined : ws.name || undefined}
@@ -176,9 +178,10 @@ export function Workbench({ ctx, layout: { store, panelRef } }: { ctx: ShellCont
             }
           >
             {/* The explorer stays mounted (expansion, scroll and its active row survive). */}
-            <div className="sidebar__view" hidden={page || scmSide}>
+            <div className="sidebar__view" hidden={page || scmSide || searchSide}>
               <Explorer workspace={workspace} onOpenFile={(p) => documents.open(p)} dirty={dirtyPaths} git={ctx.app.git} onReopen={() => documents.requestOpenFolder(ws.root)} />
             </div>
+            {searchSide && <SearchSide store={ctx.app.search} onOpen={(p, line, column) => (ctx.app.git.closeDiff(), documents.openAt(p, line, column))} />}
             {scmSide && <SourceControlSide git={ctx.app.git} onOpenFile={(p) => (ctx.app.git.closeDiff(), documents.open(p))} />}
             {envPage && <EnvironmentsSide store={environments} />}
             {chatPage && <ChatSide store={ctx.app.agent} workspaceName={ws.id ? ws.name : ""} />}

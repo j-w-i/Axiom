@@ -6,6 +6,7 @@ import { AgentStore } from "./agent";
 import { DocumentsStore } from "./documents";
 import { EnvironmentsStore } from "./environments";
 import { GitStore } from "./git";
+import { SearchStore } from "./search";
 import { LspStore } from "./lsp";
 import { ProblemsStore } from "./problems";
 import { SettingsStore } from "./settings";
@@ -25,6 +26,7 @@ export interface AppStores {
   lsp: LspStore;
   terminals: TerminalsStore;
   git: GitStore;
+  search: SearchStore;
 }
 
 export function createApp(transport: Transport): AppStores {
@@ -40,6 +42,7 @@ export function createApp(transport: Transport): AppStores {
   problems.attach(lsp);
   const terminals = new TerminalsStore(client, workspace);
   const git = new GitStore(client, workspace);
+  const search = new SearchStore(client, workspace);
   tasks.onProviderStart = (key, taskId, label) => problems.begin(key, taskId, label);
   // Once per launch: reopen the last workspace when the setting says so.
   let reopened = false;
@@ -49,5 +52,5 @@ export function createApp(transport: Transport): AppStores {
       void workspace.reopenLast();
     }
   });
-  return { client, workspace, documents, tasks, settings, environments, problems, agent, lsp, terminals, git };
+  return { client, workspace, documents, tasks, settings, environments, problems, agent, lsp, terminals, git, search };
 }

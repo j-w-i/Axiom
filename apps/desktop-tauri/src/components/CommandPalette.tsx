@@ -1,4 +1,5 @@
-// Command palette (Mod+K) and quick open of already-listed files (Mod+P), as designed in
+// Command palette (Mod+K) and quick open of the workspace's files (Mod+P; M4-UX-001: every file
+// the daemon lists, fuzzy-ranked), as designed in
 // workspace-spec.md §3 (M1.6-SURFACES-001): overlay material, a mode chip, grouped rows with
 // keycaps, one gliding selection, match highlighting in file mode, a footer of keys,
 // recent-first commands and designed empty states. Quick open searches only what the
@@ -14,6 +15,7 @@ import { glyphFor } from "./Explorer";
 import "../styles/components/glyph.css";
 import "../styles/components/palette.css";
 import { shellStorage } from "../state/shell-storage";
+import { fuzzyMatch, rankFuzzy } from "../ui/fuzzy";
 
 export interface PaletteCommand {
   id: string;
@@ -128,7 +130,7 @@ function highlight(text: string, ranges: [number, number][], offset: number): Re
 /** What the list shows when nothing matches. `openFolder` is set when it offers that action. */
 export function emptyState(mode: PaletteMode, hasWorkspace: boolean): { title: string; hint: string; openFolder: boolean } {
   if (mode === "files" && !hasWorkspace) return { title: "Open a folder to search files", hint: "", openFolder: true };
-  if (mode === "files") return { title: "No matching files", hint: "Only files listed in the explorer are searched", openFolder: false };
+  if (mode === "files") return { title: "No matching files", hint: "Files ignored by .gitignore are not listed", openFolder: false };
   return { title: "No matching commands", hint: "Try fewer letters", openFolder: false };
 }
 
@@ -158,6 +160,8 @@ export function CommandPalette({
   const results = useMemo(() => {
     if (mode === "files" && !hasWorkspace) return [openFolderRow];
     const ordered = mode === "commands" && !query ? orderByMru(commands, mru) : commands;
+    // Files rank by the path-aware fuzzy scorer (M4-UX-001); commands keep theirs.
+    if (mode === "files") return query ? rankFuzzy(ordered, query, (c) => c.label).map((r) => r.item) : ordered.slice(0, 200);
     return filterCommands(ordered, query);
     // openFolderRow is rebuilt each render; its identity does not matter here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,7 +203,7 @@ export function CommandPalette({
             <input
               className="palette__input"
               autoFocus
-              placeholder={mode === "files" ? "Go to a listed file…" : "Type a command…"}
+              placeholder={mode === "files" ? "Go to file…" : "Type a command…"}
               value={query}
               role="combobox"
               aria-expanded
@@ -279,7 +283,7 @@ function FileRow({ c, query, selected, onHover, onChoose }: { c: PaletteCommand;
   const cut = path.lastIndexOf("/");
   const name = path.slice(cut + 1);
   const dir = cut >= 0 ? path.slice(0, cut) : "";
-  const ranges = matchRanges(query, path);
+  const ranges = fuzzyMatch(query, path)?.ranges ?? [];
   const glyph = glyphFor(name);
   return (
     <li id={`pal-${c.id}`} className="palette__item" role="option" aria-selected={selected} onMouseMove={onHover} onClick={onChoose}>

@@ -73,6 +73,7 @@ if [[ "$what" == e2e ]]; then
   apps/desktop-tauri/scripts/e2e.sh --no-build --driver all lsp.mjs     # language servers (M4)
   apps/desktop-tauri/scripts/e2e.sh --no-build --driver all terminal.mjs  # the terminal (M4)
   apps/desktop-tauri/scripts/e2e.sh --no-build --driver all git.mjs       # Git in the UI (M4)
+  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all search.mjs    # search, quick open (M4)
 fi
 
 # Packaging, as an installed copy behaves: unpack the package, launch it with no

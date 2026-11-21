@@ -4,6 +4,7 @@
 import { useEffect } from "react";
 import type { ShellContext } from "./actions";
 import { IS_MAC } from "./platform";
+import { requestSearchFocus } from "../components/Search";
 
 export function useAppShortcuts(ctx: ShellContext): void {
   const { documents, tasks } = ctx.app;
@@ -38,6 +39,8 @@ export function useAppShortcuts(ctx: ShellContext): void {
       else if (mod && !e.shiftKey && !e.altKey && e.code === "Backquote") focusRegion("console", ctx);
       // M4-TERM-002: the Terminal view (Mod+` stays the console region, EDITOR-002).
       else if (mod && e.shiftKey && !e.altKey && e.code === "Backquote") { if (wsId) ctx.showTerminal(); }
+      // M4-UX-001: the Search page, its query focused.
+      else if (mod && e.shiftKey && !e.altKey && k === "f") { if (wsId) { ctx.setDestination("search"); requestSearchFocus(); } }
       else if (e.key === "F5" && !e.shiftKey) { if (tasks.canRun) tasks.rerunLast(); }
       else if (e.key === "F5" && e.shiftKey) tasks.stop();
       else handled = false;
