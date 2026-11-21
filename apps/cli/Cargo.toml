@@ -1,0 +1,25 @@
+[package]
+name = "axiom-cli"
+description = "The `axiom` command-line client: a protocol client of the daemon (ADR-0015 §6)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "axiom"
+path = "src/main.rs"
+
+[dependencies]
+axiom-protocol = { path = "../../crates/protocol" }
+axiom-rpc = { path = "../../crates/rpc" }
+tokio = { version = "1", features = ["full"] }
+clap.workspace = true
+serde_json.workspace = true
+directories.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

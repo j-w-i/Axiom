@@ -1,7 +1,8 @@
 use crate::app::App;
-use crate::handlers::{build, env, fs, settings, task, workspace};
+use crate::handlers::{agent, build, env, fs, sessions, settings, task, workspace};
 use axiom_protocol::{
-    build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask, workspace as pws,
+    agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
+    workspace as pws,
 };
 use axiom_rpc::Router;
 use std::sync::Arc;
@@ -23,7 +24,7 @@ pub fn build_router(app: Arc<App>) -> Router {
         }};
     }
 
-    wire!(pws::Open, workspace::open);
+    wire!(pws::Open, workspace::open, ctx);
     wire!(pws::Close, workspace::close);
     wire!(pws::Recent, workspace::recent);
     wire!(pws::GetState, workspace::get_state);
@@ -47,7 +48,30 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(penv::Resolve, env::resolve);
     wire!(pbuild::Tasks, build::tasks);
     wire!(pbuild::Run, build::run, ctx);
+    wire!(pagent::Models, agent::models);
+    wire!(pagent::ConfigureProvider, agent::configure_provider);
+    wire!(pagent::Tools, agent::tools);
+    wire!(pagent::GetPolicy, agent::get_policy);
+    wire!(pagent::SetPolicy, agent::set_policy);
+    wire!(pagent::Approve, agent::approve);
+    wire!(pagent::ToolCall, agent::tool_call, ctx);
+    wire!(pagent::SessionCreate, sessions::create, ctx);
+    wire!(pagent::SessionList, sessions::list);
+    wire!(pagent::SessionOpen, sessions::open, ctx);
+    wire!(pagent::SessionRename, sessions::rename);
+    wire!(pagent::SessionDelete, sessions::delete);
+    wire!(pagent::Image, sessions::image);
+    wire!(pagent::Send, sessions::send, ctx);
+    wire!(pagent::Cancel, sessions::cancel);
+    wire!(pagent::Checkpoints, sessions::checkpoints);
+    wire!(pagent::Restore, sessions::restore);
 
+    let a = app.clone();
+    r.on_initialize(move |params, notifier| {
+        if params.capabilities.as_ref().is_some_and(|c| c.approvals) {
+            a.agent.approvers.add(notifier);
+        }
+    });
     let a = app;
     r.on_shutdown(move || {
         let a = a.clone();

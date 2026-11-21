@@ -33,6 +33,20 @@ Editor development in a plain browser (fake host, sample document):
 scripts/run.sh                # builds the editor bundle, the UI, axiomd and the host, then launches
 ```
 
+## The command line (`axiom`)
+
+`cargo build -p axiom-cli -p axiomd` builds `target/debug/axiom` next to the daemon. With the
+desktop app running it shares the app's daemon (the socket in the data dir); otherwise it
+starts one for the command.
+
+```sh
+target/debug/axiom task run -- cargo test               # in the current folder; exits with the code
+target/debug/axiom build build                          # a provider task
+target/debug/axiom agent send --chat "Explain RAII"     # a conversation without a workspace
+target/debug/axiom agent send "Fix the failing test"    # the agent in the current folder
+target/debug/axiom agent sessions
+```
+
 ## Headless GUI tests
 
 End-to-end and benchmark runs go through `apps/desktop-tauri/scripts/headless.sh`

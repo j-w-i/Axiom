@@ -1,0 +1,39 @@
+[package]
+name = "axiom-agent"
+description = "The agent runtime: model providers, tool registry, permission gate, checkpoints, sessions and the loop (ADR-0007, ADR-0015)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-protocol = { path = "../protocol" }
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+similar.workspace = true
+sha2.workspace = true
+hex.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+url = "2"
+# ADR-0015 §3: platform stores; Secret Service over pure-Rust D-Bus (zbus) on Linux.
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile.workspace = true
+
+[features]
+# Lets tests outside this crate call tools without the gate (dev-dependency use only).
+test-support = []
+# Exercises the real OS credential store (a desktop session; M3-MODEL-002).
+keyring-live = []
+
+[lints]
+workspace = true

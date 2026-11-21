@@ -227,6 +227,43 @@ impl Workspace {
         map.entry(abs.to_path_buf()).or_default().clone()
     }
 
+    /// Removes a file (not a directory), only if it still has `expected` (M3: `fs.applyPatch`
+    /// with `delete`). Same lock as `write_text`.
+    pub async fn remove_file(
+        &self,
+        file: &WorkspacePath,
+        expected: &FileVersion,
+    ) -> Result<(), WsError> {
+        let abs = {
+            let (ws, file) = (self.clone(), file.clone());
+            tokio::task::spawn_blocking(move || ws.resolve(&file))
+                .await
+                .map_err(join_err)??
+        };
+        let lock = self.lock_for(&abs);
+        let _guard = lock.lock().await;
+        let rel = file.0.clone();
+        let expected = expected.clone();
+        tokio::task::spawn_blocking(move || {
+            let md = std::fs::symlink_metadata(&abs).map_err(|e| WsError::from_io(e, &rel))?;
+            if md.is_dir() {
+                return Err(WsError::IsADirectory(display_path(&rel)));
+            }
+            let bytes = std::fs::read(&abs).map_err(|e| WsError::from_io(e, &rel))?;
+            let current = version_of(&bytes);
+            if current != expected {
+                return Err(WsError::Conflict {
+                    current: Some(current),
+                });
+            }
+            std::fs::remove_file(&abs).map_err(|e| WsError::from_io(e, &rel))
+        })
+        .await
+        .map_err(join_err)??;
+        self.inner.ignores.invalidate_for_write(&file.0);
+        Ok(())
+    }
+
     /// Implements the decision table in `docs/protocols/ipc.md` §`fs/writeFile`.
     pub async fn write_text(
         &self,

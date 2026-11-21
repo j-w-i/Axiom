@@ -97,8 +97,10 @@ async fn connects_and_reports_ready() {
             methods,
         } => {
             assert!(!server_version.is_empty());
-            assert_eq!(protocol_version, "0.1");
+            // The bridge asks for 0.3 since M3-UI-002 (approvals): the daemon speaks it.
+            assert_eq!(protocol_version, "0.3");
             assert!(methods.iter().any(|m| m == "fs/readFile"));
+            assert!(methods.iter().any(|m| m == "agent/approve"));
         }
         other => panic!("not ready: {other:?}"),
     }

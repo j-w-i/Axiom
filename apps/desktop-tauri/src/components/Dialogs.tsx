@@ -1,3 +1,5 @@
+import type { AgentStore } from "../state/agent";
+import { ModelsPane } from "./Models";
 import * as RDialog from "@radix-ui/react-dialog";
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import type { DocumentsStore } from "../state/documents";
@@ -55,11 +57,12 @@ export function UnsavedDialog({ documents }: { documents: DocumentsStore }) {
   );
 }
 
-/** The settings sections (workspace-spec.md §4); no Agents (M3) or Environments (M2) yet. */
+/** The settings sections (workspace-spec.md §4); Models since M3-UI-003. */
 export const SETTINGS_SECTIONS = [
   { id: "appearance", label: "Appearance" },
   { id: "editor", label: "Editor" },
   { id: "workspace", label: "Workspace" },
+  { id: "models", label: "Models" },
   { id: "about", label: "About" },
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
@@ -89,7 +92,12 @@ export function SettingsDialog({
   serverVersion,
   onRestartBackend,
   onOpenExternal,
+  agent,
+  hasWorkspace = false,
 }: {
+  /** The Models section's providers (M3-UI-003). */
+  agent?: AgentStore;
+  hasWorkspace?: boolean;
   settings: SettingsStore;
   open: boolean;
   section: SettingsSection;
@@ -265,6 +273,12 @@ export function SettingsDialog({
                     "On launch, open the last folder with its tabs and expanded directories.",
                     <Switch label="Reopen last workspace" checked={s.reopenLast} onChange={(v) => void apply("workspace.reopenLast", v)} />,
                   )}
+                </>
+              )}
+              {section === "models" && (
+                <>
+                  <h2 className="settings__heading">Models</h2>
+                  {agent ? <ModelsPane store={agent} hasWorkspace={hasWorkspace} /> : null}
                 </>
               )}
               {section === "about" && (

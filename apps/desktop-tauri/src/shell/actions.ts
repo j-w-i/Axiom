@@ -23,6 +23,8 @@ export interface ShellContext {
   openFolder: () => Promise<void>;
   toggleSidebar: () => void;
   togglePanel: () => void;
+  /** The AI dock beside the editor (M3-UI-002; Mod+L). */
+  toggleDock: () => void;
   resetLayout: () => void;
   focusRun: () => void;
   setSettingsOpen: (open: boolean) => void;
@@ -45,6 +47,7 @@ export function runMenuAction(id: string, ctx: ShellContext): void {
     case "find": if (ctx.hasDoc) documents.runCommand("find"); break;
     case "toggle-sidebar": ctx.toggleSidebar(); break;
     case "toggle-panel": ctx.togglePanel(); break;
+    case "toggle-dock": ctx.toggleDock(); break;
     case "run-command": ctx.focusRun(); break;
     case "rerun": if (tasks.canRun) tasks.rerunLast(); break;
     case "stop": tasks.stop(); break;

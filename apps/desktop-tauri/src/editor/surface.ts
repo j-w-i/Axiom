@@ -42,6 +42,26 @@ function defineThemes(): void {
   }
 }
 
+let chatThemes = false;
+
+/** Monaco's colouring of a code block for the Chat transcript (M3-UI-001): HTML with Monaco's
+ * own escaping, in the app's theme. `language` is a Markdown fence label (`rs`, `ts`, `sh`…). */
+export async function colorizeCode(code: string, language: string, dark: boolean): Promise<string> {
+  if (!chatThemes) {
+    defineThemes();
+    chatThemes = true;
+  }
+  monaco.editor.setTheme(dark ? "axiom-dark" : "axiom-light");
+  const alias: Record<string, string> = {
+    rs: "rust", ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", py: "python",
+    sh: "shell", bash: "shell", zsh: "shell", console: "shell", yml: "yaml", md: "markdown", "c++": "cpp",
+    "c#": "csharp", cs: "csharp", golang: "go", kt: "kotlin", rb: "ruby", toml: "ini",
+  };
+  const id = alias[language.toLowerCase()] ?? language.toLowerCase();
+  const known = monaco.languages.getLanguages().some((l) => l.id === id);
+  return monaco.editor.colorize(code, known ? id : "plaintext", { tabSize: 4 });
+}
+
 /** The default code font when the setting is empty (design-system.md §5): --font-code, 13 / 20. */
 function codeFont(): { family: string; size: number; leading: number } {
   const css = getComputedStyle(document.documentElement);

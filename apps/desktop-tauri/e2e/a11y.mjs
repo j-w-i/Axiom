@@ -20,6 +20,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { Keys, WebDriver, appLogger, removeDir } from "./webdriver.mjs";
+import { HELPERS } from "./a11y-helpers.mjs";
 
 const repo = resolve(import.meta.dirname, "../../..");
 const EXE = process.platform === "win32" ? ".exe" : "";
@@ -41,6 +42,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const data = mkdtempSync(join(tmpdir(), "axiom-a11y-data-"));
 const ws = mkdtempSync(join(tmpdir(), "axiom-a11y-ws-"));
+// S20 (Chat, M3-UI-001): the scripted model answers once per theme with Markdown and code.
+const chatScript = join(data, "chat-script.json");
+const chatAnswer = { type: "text", text: "A **short** answer:\n\n```sh\necho hi\n```\n\n- one\n- two" };
+// S21 (approval card, M3-UI-002): an edit asks; Esc denies it; the model hears the denial.
+const ask = { events: [{ type: "toolCall", id: "a1", name: "fs.applyPatch", input: { path: "README.md", edits: [{ search: "# Demo", replace: "# Demo!" }] } }] };
+const heard = { expect: { toolResult: { callId: "a1", isError: true } }, events: [{ type: "text", text: "Left it." }] };
+writeFileSync(chatScript, JSON.stringify({ turns: [{ events: [chatAnswer] }, ask, heard, { events: [chatAnswer] }, ask, heard] }));
 mkdirSync(join(ws, "src"), { recursive: true });
 writeFileSync(join(ws, "src", "main.rs"), 'fn main() {\n    println!("hello");\n}\n');
 writeFileSync(join(ws, "README.md"), "# Demo\n\nA small workspace.\n");
@@ -51,139 +59,6 @@ mkdirSync(join(ws, "target"), { recursive: true });
 
 // ---- in-page helpers -------------------------------------------------------------------
 
-const HELPERS = `
-window.__a11y = (() => {
-  const region = (el) => {
-    if (!el || el === document.body) return "body";
-    if (el.closest('[role=dialog]')) return "dialog";
-    if (el.closest('.titlerow')) return "title";
-    if (el.closest('[data-region=files]')) return "files";
-    if (el.closest('.tabs')) return "tabs";
-    if (el.closest('.monaco-editor')) return "editor";
-    if (el.closest('[data-region=editor]')) return "editor-area";
-    if (el.closest('[data-region=console]')) return "console";
-    if (el.closest('.statusbar')) return "status";
-    return "other";
-  };
-  const text = (el) => (el?.textContent ?? "").replace(/\\s+/g, " ").trim();
-  const name = (el) => {
-    if (!el) return "";
-    const by = el.getAttribute("aria-labelledby");
-    if (by) return by.split(/\\s+/).map((id) => text(document.getElementById(id))).join(" ").trim();
-    return (el.getAttribute("aria-label") || (el.labels && el.labels[0] && text(el.labels[0])) || text(el) || el.getAttribute("title") || el.getAttribute("placeholder") || "").trim();
-  };
-  const IMPLICIT = { BUTTON: "button", A: "link", INPUT: "textbox", TEXTAREA: "textbox", SELECT: "combobox" };
-  const role = (el) => el?.getAttribute("role") || IMPLICIT[el?.tagName] || "";
-  const describe = (el) => ({ region: region(el), role: role(el), name: name(el).slice(0, 60), tag: el?.tagName?.toLowerCase(), cls: (el?.className?.baseVal ?? el?.className ?? "").toString().slice(0, 40) });
-
-  // Focus indication: an outline ≥ 2 px, a box-shadow ring, or (rows) the focused row's ring.
-  const focusVisible = (el) => {
-    const cs = getComputedStyle(el);
-    if (cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) >= 2) return "outline " + cs.outlineWidth;
-    if (cs.boxShadow && cs.boxShadow !== "none") return "ring";
-    if (el.getAttribute("role") === "tree") {
-      const row = document.getElementById(el.getAttribute("aria-activedescendant") || "");
-      if (row && getComputedStyle(row).boxShadow !== "none") return "row ring";
-      if (row && getComputedStyle(row, "::after").content !== "none") return "row marker";
-    }
-    if (el.closest(".monaco-editor")) return "caret";
-    // Borderless inputs inside a recessed well: the well draws the ring on focus-within.
-    const well = el.closest(".prompt, .palette__bar");
-    if (well && getComputedStyle(well).boxShadow.split("inset").length > 2) return "well ring";
-    return "";
-  };
-  const clipped = (el) => {
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) return "zero-size";
-    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
-      const cs = getComputedStyle(p);
-      if (!/(auto|scroll|hidden)/.test(cs.overflow + cs.overflowX + cs.overflowY)) continue;
-      const pr = p.getBoundingClientRect();
-      if (r.right < pr.left + 1 || r.left > pr.right - 1 || r.bottom < pr.top + 1 || r.top > pr.bottom - 1) return "outside its scroll container";
-    }
-    return "";
-  };
-
-  // ---- colour ----
-  const parse = (c) => {
-    const m = /rgba?\\(([^)]+)\\)/.exec(c || "");
-    if (!m) return null;
-    const p = m[1].split(/[\\s,/]+/).filter(Boolean).map(Number);
-    return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1];
-  };
-  const over = (top, bottom) => {
-    const a = top[3];
-    return [0, 1, 2].map((i) => top[i] * a + bottom[i] * (1 - a)).concat(1);
-  };
-  const lum = (c) => {
-    const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
-    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
-  };
-  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
-  // The backgrounds under an element: fills from the element up, composited; a gradient
-  // contributes each of its stops (the check takes the worst).
-  const backgrounds = (el) => {
-    const layers = [];
-    for (let p = el; p; p = p.parentElement) {
-      const cs = getComputedStyle(p);
-      const stops = (cs.backgroundImage.match(/rgba?\\([^)]+\\)/g) || []).map(parse).filter(Boolean);
-      const fill = parse(cs.backgroundColor);
-      layers.push({ fill: fill && fill[3] > 0 ? fill : null, stops });
-      if ((fill && fill[3] >= 1) || stops.some((s) => s[3] >= 1)) break;
-    }
-    let bases = [[255, 255, 255, 1]];
-    for (const l of layers.reverse()) {
-      if (l.stops.length) bases = bases.flatMap((b) => l.stops.map((s) => over(s, b)));
-      if (l.fill) bases = bases.map((b) => over(l.fill, b));
-    }
-    return bases;
-  };
-  const opacity = (el) => { let o = 1; for (let p = el; p; p = p.parentElement) o *= parseFloat(getComputedStyle(p).opacity); return o; };
-  const visuallyHidden = (el) => { const r = el.getBoundingClientRect(); return r.width <= 1 || r.height <= 1; };
-  const faint = () => { const s = document.createElement("span"); s.style.color = "var(--text-faint)"; document.body.appendChild(s); const c = getComputedStyle(s).color; s.remove(); return c; };
-
-  const contrastScan = () => {
-    const FAINT = faint();
-    const out = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const seen = new Set();
-    let n;
-    while ((n = walker.nextNode())) {
-      if (!n.nodeValue.trim()) continue;
-      const el = n.parentElement;
-      if (!el || seen.has(el)) continue;
-      seen.add(el);
-      if (el.closest("[aria-hidden=true], [hidden], .visually-hidden, script, style, .monaco-editor .view-overlays, .minimap")) continue;
-      if (el.closest("[disabled], [aria-disabled=true], :disabled")) continue; // inactive controls are exempt (WCAG 1.4.3)
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0 || r.bottom < 0 || r.top > innerHeight || visuallyHidden(el)) continue;
-      const cs = getComputedStyle(el);
-      if (cs.visibility === "hidden" || parseFloat(cs.opacity) === 0) continue;
-      const fg = parse(cs.color);
-      if (!fg) continue;
-      const o = opacity(el);
-      const nonessential = cs.color === FAINT || el.closest(".line-numbers") !== null;
-      const large = parseFloat(cs.fontSize) >= 24 || (parseFloat(cs.fontSize) >= 18.66 && parseInt(cs.fontWeight) >= 700);
-      const need = nonessential || large ? 3 : 4.5;
-      let worst = Infinity;
-      for (const bg of backgrounds(el)) worst = Math.min(worst, ratio(over([fg[0], fg[1], fg[2], fg[3] * o], bg), bg));
-      if (worst < need) out.push({ text: n.nodeValue.trim().slice(0, 40), ratio: +worst.toFixed(2), need, region: region(el), cls: (el.className?.baseVal ?? el.className ?? "").toString().slice(0, 40), color: cs.color });
-    }
-    return out;
-  };
-
-  const targets = () => {
-    const out = [];
-    for (const el of document.querySelectorAll("button, [role=button], [role=tab], [role=menuitem], [role=switch], [role=radio], input, a[href], [role=treeitem]")) {
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0 || el.closest("[aria-hidden=true], .monaco-editor")) continue;
-      if (r.width < 24 || r.height < 24) out.push({ ...describe(el), w: Math.round(r.width), h: Math.round(r.height) });
-    }
-    return out;
-  };
-  return { region, describe, focusVisible, clipped, contrastScan, targets };
-})();
-true;`;
 
 async function setTheme(wd, theme) {
   await wd.exec(`window.__axiom.settings.setValue("appearance.theme", arguments[0])`, [theme]);
@@ -225,7 +100,7 @@ const regionOrder = (seen) => seen.map((d) => d.region).filter((r, i, a) => r !=
 let wd;
 const record = { themes: {} };
 try {
-  wd = await WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", data], {}, log);
+  wd = await WebDriver.start(APP, ["--daemon", DAEMON, "--data-dir", data], { AXIOM_TEST_SCRIPTED_MODEL: chatScript }, log);
   await wd.waitFor(`return document.querySelector('[data-testid=status]')?.dataset.state === 'ready'`, [], 20000, "connected");
   await wd.exec(HELPERS);
   // S2: Welcome with one recent folder (open and close it once).
@@ -388,6 +263,64 @@ try {
     await wd.click(await wd.find('[data-view=output]'));
     await wd.exec(`window.__axiom.problems.set({ runs: {}, byTask: {} })`);
 
+    // ---- S20: Chat (M3-UI-001; workspace-spec.md §5.4) ------------------------------------
+    await wd.click(await wd.find('.rail [data-destination="chat"]'));
+    await wd.waitFor(`return window.__axiom.agent.getSnapshot().status === 'ready' && !!window.__axiom.agent.getSnapshot().model`, [], 10000, "chat ready");
+    await wd.exec(`window.__axiom.agent.newChat("general"); window.__axiom.agent.send("Answer briefly")`);
+    await wd.waitFor(`return !!document.querySelector('[data-testid=chat-log] .code-block') && window.__axiom.agent.getSnapshot().active.running === false`, [], 10000, "chat answer").catch(async (e) => {
+      console.log("S20 state:", JSON.stringify(await wd.exec(`const s = window.__axiom.agent.getSnapshot(); return { scope: s.scope, active: s.activeId, err: s.sendError, error: s.error, model: s.model, n: s.active.events.map(e => e.event.type), page: !!document.querySelector('[data-testid=chat-page]') }`)));
+      throw e;
+    });
+    await sleep(500);
+    contrast[`S20 ${theme}`] = await wd.exec(`return window.__a11y.contrastScan()`);
+    await wd.exec(`document.activeElement?.blur()`);
+    const chatTrav = await traverse(wd, false);
+    const chatEls = chatTrav.seen.filter((x) => x.region === "files" || x.region === "editor-area");
+    const badChat = chatEls.filter((x) => !x.name || !x.role || !x.focus).map((x) => `${x.region} ${x.role} "${x.name}" focus=${x.focus}`);
+    const sem = await wd.exec(`return {
+      log: document.querySelector('[role=log]')?.getAttribute('aria-label'),
+      articles: [...document.querySelectorAll('[data-testid=chat-log] article')].map(a => a.getAttribute('aria-label')),
+      composer: !!document.querySelector('textarea[aria-label="Message"]'),
+      list: document.querySelector('[role=list][aria-label=Conversations]') !== null,
+      status: !!document.querySelector('.chat [role=status][aria-live=polite]'),
+    }`);
+    const names = chatEls.map((x) => x.name);
+    check(
+      `S20 chat (${theme}): log, named messages, conversation list, composer; every control reached by Tab is named with a role and visible focus`,
+      sem.log === "Conversation" && sem.articles.join() === "You,Assistant" && sem.composer && sem.list && sem.status &&
+        names.includes("Message") && names.includes("Copy code") && names.includes("Search conversations") && badChat.length === 0,
+      `${JSON.stringify(sem)}; reached ${chatEls.length}`,
+      badChat,
+    );
+    await wd.click(await wd.find('.rail [data-destination="files"]'));
+    await wd.waitFor(`return document.querySelector('.editor-column__files')?.hidden === false`, [], 3000, "back to files");
+
+    // ---- S21: the AI dock and the approval card (M3-UI-002; workspace-spec.md §5.2) -------
+    if (!(await wd.exec(`return !!document.querySelector('[data-region=dock]')`))) await wd.exec(`document.querySelector('[aria-label="Toggle AI dock"]').click()`);
+    await wd.waitFor(`return !!document.querySelector('[data-testid=chat-dock]') && window.__axiom.agent.getSnapshot().scope === 'workspace'`, [], 5000, "the dock");
+    await wd.exec(`document.activeElement?.blur(); window.__axiom.agent.newChat("workspace"); window.__axiom.agent.send("Edit the readme")`);
+    await wd.waitFor(`return !!document.querySelector('[data-testid=chat-dock] [data-testid=approval]')`, [], 10000, "approval card");
+    await sleep(300);
+    contrast[`S21 ${theme}`] = await wd.exec(`return window.__a11y.contrastScan()`);
+    const cardA11y = await wd.exec(`const c = document.querySelector('[data-testid=approval]'); const a = document.activeElement; return {
+      role: c.getAttribute('role'), name: c.getAttribute('aria-label'),
+      focused: a?.dataset.answer ?? null, focus: window.__a11y.focusVisible(a),
+      buttons: [...c.querySelectorAll('button')].map(b => window.__a11y.describe(b).name),
+      badge: document.querySelector('.rail [data-destination=chat]').getAttribute('aria-label') }`);
+    await wd.keys([Keys.ESC]);
+    await wd.waitFor(`return !document.querySelector('[data-testid=approval]') && window.__axiom.agent.getSnapshot().active.running === false`, [], 10000, "denied");
+    const denied = await wd.exec(`return [...document.querySelectorAll('[data-testid=chat-dock] .tool-row')].map(r => r.dataset.state)`);
+    check(
+      `S21 approval card (${theme}): an alert named for the tool and target, focused on Allow once (not typing), all actions named, the rail badge says it; Esc denies`,
+      cardA11y.role === "alert" && cardA11y.name === "Approval needed: fs.applyPatch on README.md" && cardA11y.focused === "once" && !!cardA11y.focus &&
+        cardA11y.buttons.join() === "Allow once,Allow for session,Deny" && /need attention/.test(cardA11y.badge) && denied.join() === "error",
+      JSON.stringify({ ...cardA11y, denied }),
+    );
+    await wd.exec(`document.querySelector('[aria-label="Toggle AI dock"]').click()`);
+    await wd.waitFor(`return !document.querySelector('[data-region=dock]')`, [], 5000, "dock closed");
+    // Leave keyboard focus where S20 leaves it (the rail), so the next traversal starts alike.
+    await wd.click(await wd.find('.rail [data-destination="files"]'));
+
     // ---- 5: not by colour alone ----------------------------------------------------------
     const marks = await wd.exec(`
       const dirty = document.querySelector('[role=tab][data-dirty=true] .tab__close')?.getAttribute('aria-label') ?? '';
@@ -405,7 +338,7 @@ try {
     t.targets = await wd.exec(`return window.__a11y.targets()`);
   }
 
-  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d, S19 in both themes -----
+  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d, S19, S20, S21, both themes -
   for (const [state, fails] of Object.entries(contrast)) {
     check(`4 rendered contrast ${state}`, fails.length === 0, `${fails.length} text node(s) below the minimum`, fails.map((f) => `${f.region} .${f.cls} "${f.text}" ${f.ratio}:1 < ${f.need} (${f.color})`));
   }

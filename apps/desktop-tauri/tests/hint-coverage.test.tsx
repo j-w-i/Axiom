@@ -46,7 +46,7 @@ describe("hint coverage", () => {
   it("every control of the title row and the status bar has a hint", () => {
     const html = renderToStaticMarkup(
       <>
-        <TitleRow ctx={ctx} layout={{ sidebarVisible: true, panelVisible: true }} />
+        <TitleRow ctx={ctx} layout={{ sidebarVisible: true, panelVisible: true, dockVisible: false }} />
         <StatusBar ctx={ctx} daemon={{ state: "failed", message: "x" }} />
         <Splitter label="Resize side bar" value={252} min={180} max={480} defaultValue={252} orientation="vertical" target={{ current: null }} cssVar="--side-w" onCommit={noop} />
       </>,

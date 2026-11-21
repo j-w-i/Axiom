@@ -21,16 +21,24 @@ ALLOWED = {
     # M2 (ADR-0014 §4).
     "axiom-env": {"axiom-protocol", "axiom-store"},
     "axiom-build": {"axiom-protocol", "axiom-exec", "axiom-env"},
+    # M3 (ADR-0015 §2): the agent runtime calls services only through the tools axiomd registers.
+    "axiom-agent": {"axiom-protocol", "axiom-store"},
     "axiomd": {
         "axiom-protocol", "axiom-rpc", "axiom-store", "axiom-workspace", "axiom-exec",
-        "axiom-env", "axiom-build",
+        "axiom-env", "axiom-build", "axiom-agent",
     },
+    # The `axiom` command-line client (ADR-0015 §2, §6): a protocol client.
+    "axiom-cli": {"axiom-protocol", "axiom-rpc"},
     # The GUI's daemon client (ADR-0012): protocol only.
     "axiom-desktop-bridge": {"axiom-protocol"},
     # Tauri shell host: bridge only (plus third-party crates).
     "axiom-desktop-tauri": {"axiom-desktop-bridge"},
     # Test helper binary (tests/helpers/emit): depends on nothing in the workspace.
     "emit": set(),
+    # Test helper binary (tests/helpers/fake-mcp): an MCP server for the MCP client tests.
+    "fake-mcp": set(),
+    # Test helper binary (tests/helpers/fake-acp): an ACP agent for the ACP client tests.
+    "fake-acp": set(),
 }
 
 

@@ -22,6 +22,9 @@ struct Cli {
     data_dir: Option<PathBuf>,
     #[arg(long, value_enum, default_value = "warn")]
     log_level: Level,
+    /// Do not listen on the local socket for other clients (ADR-0015 §6).
+    #[arg(long)]
+    no_listen: bool,
 }
 
 fn main() {
@@ -76,12 +79,31 @@ fn main() {
         }
     };
     let code = rt.block_on(async {
-        let app = App::with_data_dir(store, data_dir);
+        let app = App::with_data_dir(store, data_dir.clone());
         let router = Arc::new(build_router(app));
         let info = ServerInfo {
             name: "axiomd".into(),
             version: env!("CARGO_PKG_VERSION").into(),
         };
+        // Other clients (the CLI, the MCP front end) reach this daemon through the socket.
+        #[cfg(unix)]
+        let _listening = if cli.no_listen {
+            None
+        } else {
+            match axiomd::socket::listen(&data_dir, router.clone(), info.clone()).await {
+                Ok(Some(l)) => Some(l),
+                Ok(None) => {
+                    tracing::info!("another daemon owns this data dir's socket; not listening");
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!("cannot listen on the local socket: {e}");
+                    None
+                }
+            }
+        };
+        #[cfg(not(unix))]
+        let _ = cli.no_listen;
         match serve(tokio::io::stdin(), tokio::io::stdout(), router, info).await {
             Ok(()) => 0,
             Err(e) => {

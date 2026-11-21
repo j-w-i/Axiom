@@ -142,6 +142,13 @@ pub enum ErrorKind {
     ApprovalDenied,
     /// Details: `{ "missing": [toolId] }`.
     PrerequisiteMissing,
+    // Domain level, protocol 0.3 (ADR-0015).
+    /// The gate asked for approval and no connection can give it; the tool did not run.
+    ApprovalRequired,
+    /// Details: `{ "conflicts": [RestoreConflict] }`.
+    CheckpointConflict,
+    /// Details: `{ "kind": ModelErrorKind }`.
+    ModelError,
     #[serde(other)]
     Unknown,
 }
@@ -171,6 +178,9 @@ impl ErrorKind {
             Self::UnsupportedPlatform => -32020,
             Self::ApprovalDenied => -32021,
             Self::PrerequisiteMissing => -32022,
+            Self::ApprovalRequired => -32023,
+            Self::CheckpointConflict => -32024,
+            Self::ModelError => -32025,
             Self::Unknown => -32099,
         }
     }

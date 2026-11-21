@@ -59,6 +59,8 @@ async fn negotiated_version_is_min_of_minors() {
                 name: "t".into(),
                 version: "0".into(),
             },
+            auth_token: None,
+            capabilities: None,
         })
         .await
         .unwrap();

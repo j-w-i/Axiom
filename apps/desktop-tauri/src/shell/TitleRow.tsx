@@ -16,7 +16,7 @@ import "../styles/components/titlerow.css";
 /** Drag-region attribute for non-interactive parts of the row (macOS overlay title bar only). */
 const drag = IS_MAC ? { "data-tauri-drag-region": true } : {};
 
-export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layout, "sidebarVisible" | "panelVisible"> }) {
+export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layout, "sidebarVisible" | "panelVisible" | "dockVisible"> }) {
   const { client, documents, tasks, settings } = ctx.app;
   const { ready, hasDoc, dark, ws, docs, task, prefs, openFolder } = ctx;
 
@@ -71,6 +71,7 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layo
           items={[
             { label: "Toggle Side Bar", shortcut: `${MOD}+B`, onSelect: ctx.toggleSidebar },
             { label: "Toggle Panel", shortcut: `${MOD}+J`, onSelect: ctx.togglePanel },
+            { label: "Toggle AI Dock", shortcut: `${MOD}+L`, onSelect: ctx.toggleDock, disabled: !ws.id },
             { label: "Reset Layout", onSelect: ctx.resetLayout },
             { separator: true },
             { label: "Light Theme", disabled: !dark, onSelect: () => void settings.setValue("appearance.theme", "light") },
@@ -139,6 +140,11 @@ export function TitleRow({ ctx, layout }: { ctx: ShellContext; layout: Pick<Layo
         <IconButton label="Toggle panel" shortcut={`${MOD}+J`} pressed={layout.panelVisible} onClick={ctx.togglePanel}>
           <Icon.Panel />
         </IconButton>
+        {ws.id && (
+          <IconButton label="Toggle AI dock" shortcut={`${MOD}+L`} pressed={layout.dockVisible} onClick={ctx.toggleDock}>
+            <Icon.Dock />
+          </IconButton>
+        )}
         <IconButton label="Settings" shortcut={`${MOD}+,`} onClick={() => ctx.setSettingsOpen(true)}>
           <Icon.Gear />
         </IconButton>

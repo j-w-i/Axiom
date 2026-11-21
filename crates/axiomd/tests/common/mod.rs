@@ -36,6 +36,8 @@ pub fn client_info() -> InitializeParams {
             name: "axiomd-tests".into(),
             version: "0".into(),
         },
+        auth_token: None,
+        capabilities: None,
     }
 }
 
@@ -80,13 +82,26 @@ impl Daemon {
 
     /// Spawns with extra process configuration (e.g. a controlled `PATH`).
     pub async fn spawn_configured(data_dir: &Path, configure: impl FnOnce(&mut Command)) -> Daemon {
+        Self::spawn_logged(data_dir, configure, None).await
+    }
+
+    /// As `spawn_configured`, with the daemon's stderr (its log) written to `log`.
+    pub async fn spawn_logged(
+        data_dir: &Path,
+        configure: impl FnOnce(&mut Command),
+        log: Option<&Path>,
+    ) -> Daemon {
         let mut cmd = axiomd();
         configure(&mut cmd);
+        let stderr = match log {
+            Some(p) => Stdio::from(std::fs::File::create(p).expect("log file")),
+            None => Stdio::null(),
+        };
         let mut child = cmd
             .env("AXIOM_DATA_DIR", data_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(stderr)
             .spawn()
             .expect("spawn axiomd");
         let stdin = child.stdin.take().unwrap();

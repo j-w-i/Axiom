@@ -274,3 +274,30 @@ fn build_history_keeps_the_newest_twenty_per_workspace() {
     assert_eq!(a.last().unwrap().started_ms, 5);
     assert_eq!(s.build_history("/b").unwrap(), [run(99)]);
 }
+
+#[test]
+fn agent_sessions_index_round_trip() {
+    let s = Store::open_in_memory().unwrap();
+    let row = |id: &str, root: Option<&str>, t: u64| SessionRow {
+        id: id.into(),
+        root: root.map(String::from),
+        title: format!("t{id}"),
+        provider: "p".into(),
+        model: "m".into(),
+        created_ms: 1,
+        updated_ms: t,
+    };
+    s.session_put(&row("a", Some("/w"), 5)).unwrap();
+    s.session_put(&row("b", Some("/w"), 9)).unwrap();
+    s.session_put(&row("c", None, 7)).unwrap();
+    let ids = |v: Vec<SessionRow>| v.into_iter().map(|r| r.id).collect::<Vec<_>>();
+    assert_eq!(ids(s.session_list(Some("/w")).unwrap()), ["b", "a"]);
+    assert_eq!(ids(s.session_list(None).unwrap()), ["c"]);
+    let mut a = s.session_get("a").unwrap().unwrap();
+    a.title = "renamed".into();
+    s.session_put(&a).unwrap();
+    assert_eq!(s.session_get("a").unwrap().unwrap().title, "renamed");
+    assert!(s.session_delete("a").unwrap());
+    assert!(!s.session_delete("a").unwrap());
+    assert_eq!(s.session_get("a").unwrap(), None);
+}

@@ -48,6 +48,8 @@ fn client_info() -> InitializeParams {
             name: "t".into(),
             version: "0".into(),
         },
+        auth_token: None,
+        capabilities: None,
     }
 }
 

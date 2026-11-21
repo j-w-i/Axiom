@@ -22,13 +22,17 @@ axiom-workspace = { path = "../workspace" }
 axiom-exec = { path = "../exec" }
 axiom-env = { path = "../env" }
 axiom-build = { path = "../build" }
+axiom-agent = { path = "../agent" }
 tokio = { version = "1", features = ["full"] }
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 serde_json.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
+tokio-util.workspace = true
+axiom-agent = { path = "../agent", features = ["test-support"] }
 tempfile.workspace = true
 dunce.workspace = true
 tar.workspace = true

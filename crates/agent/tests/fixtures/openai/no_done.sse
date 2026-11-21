@@ -1,0 +1,2 @@
+data: {"id":"c4","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
+

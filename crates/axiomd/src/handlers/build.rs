@@ -1,8 +1,7 @@
 use crate::app::App;
-use crate::handlers::env::{project_file, registry, workspace};
+use crate::handlers::env::{project_environment, registry, workspace};
 use axiom_build::{BuildEvent, Counts};
 use axiom_protocol::build::{Diagnostics, RunParams, RunResult, TasksResult};
-use axiom_protocol::env::Environment;
 use axiom_protocol::task::{Exited, Output};
 use axiom_protocol::workspace::WorkspaceRef;
 use axiom_protocol::RpcError;
@@ -27,20 +26,7 @@ pub async fn run(app: Arc<App>, p: RunParams, ctx: RequestCtx) -> Result<RunResu
     let ws = workspace(&app, &p.workspace_id).await?;
     let root = ws.0.clone();
     let r = registry(&app, Some(ws)).await?;
-    let environment = match project_file(&app, &p.workspace_id).await? {
-        Some(selection) => {
-            let path = std::env::var_os("PATH");
-            axiom_env::project::resolve(
-                &r,
-                &selection,
-                &app.env.data_dir.join("toolchains"),
-                path.as_deref(),
-            )
-            .await?
-            .0
-        }
-        None => Environment::default(),
-    };
+    let environment = project_environment(&app, &p.workspace_id, &r).await?;
     let prepared = axiom_build::prepare(
         &r,
         &p.provider_id,
@@ -65,6 +51,7 @@ pub async fn run(app: Arc<App>, p: RunParams, ctx: RequestCtx) -> Result<RunResu
     let notifier = ctx.notifier.clone();
     let history_root = root.to_string_lossy().into_owned();
     let (provider, task) = (p.provider_id, p.task);
+    let ws_id = p.workspace_id.clone();
     // Notifications may only follow the response to this request.
     ctx.after_response(async move {
         let mut counts = Counts::default();
@@ -76,6 +63,7 @@ pub async fn run(app: Arc<App>, p: RunParams, ctx: RequestCtx) -> Result<RunResu
                 }
                 BuildEvent::Diagnostics(d) => {
                     counts.add(&d.diagnostics);
+                    app.record_diagnostics(&ws_id, &d);
                     if connected {
                         connected = notifier.notify::<Diagnostics>(d).await.is_ok();
                     }

@@ -215,14 +215,14 @@ const INK = [40, 30, 10];
 const ALPHA = {
   dark: {
     "--edge": ["white", 0.055], "--edge-strong": ["white", 0.085], "--hover": ["white", 0.045], "--selected": ["white", 0.075], "--press": ["black", 0.28],
-    "--accent-soft": ["--accent", 0.13], "--accent-line": ["--accent", 0.55], "--danger-soft": ["--danger", 0.12],
+    "--accent-soft": ["--accent", 0.13], "--accent-line": ["--accent", 0.55], "--danger-soft": ["--danger", 0.12], "--ok-soft": ["--ok", 0.11],
     "--scrim": [[6, 6, 7], 0.5], "--scroll-thumb": ["white", 0.11], "--scroll-thumb-hover": ["white", 0.2], "--tree-guide": ["white", 0.05],
     "--editor-line": ["white", 0.028], "--editor-selection": ["--accent", 0.2], "--editor-guide": ["white", 0.045], "--editor-guide-active": ["white", 0.14],
     "--glyph-rs-bg": ["--syn-keyword", 0.17], "--glyph-md-bg": ["--steel", 0.16], "--glyph-toml-bg": ["--syn-type", 0.15], "--glyph-other-bg": ["white", 0.07],
   },
   light: {
     "--edge": ["white", 0.9], "--edge-strong": ["white", 1], "--hover": ["ink", 0.05], "--selected": ["ink", 0.08], "--press": ["ink", 0.1],
-    "--accent-soft": ["--accent", 0.14], "--accent-line": [[150, 110, 40], 0.55], "--danger-soft": ["--danger", 0.1],
+    "--accent-soft": ["--accent", 0.14], "--accent-line": [[150, 110, 40], 0.55], "--danger-soft": ["--danger", 0.1], "--ok-soft": ["--ok", 0.12],
     "--scrim": [[60, 55, 45], 0.18], "--scroll-thumb": ["black", 0.14], "--scroll-thumb-hover": ["black", 0.26], "--tree-guide": ["black", 0.07],
     "--editor-line": [[60, 45, 20], 0.035], "--editor-selection": ["--accent", 0.22], "--editor-guide": ["black", 0.06], "--editor-guide-active": ["black", 0.18],
     "--glyph-rs-bg": ["--syn-keyword", 0.12], "--glyph-md-bg": ["--steel", 0.12], "--glyph-toml-bg": ["--syn-type", 0.12], "--glyph-other-bg": ["black", 0.06],

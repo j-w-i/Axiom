@@ -24,6 +24,23 @@ fn is_string_or_null(v: &Value) -> bool {
     v.is_string() || v.is_null()
 }
 
+fn is_providers(v: &Value) -> bool {
+    serde_json::from_value::<Vec<axiom_protocol::agent::ProviderConfig>>(v.clone()).is_ok()
+}
+
+fn is_policy(v: &Value) -> bool {
+    serde_json::from_value::<axiom_protocol::agent::Policy>(v.clone()).is_ok()
+}
+
+fn is_mcp_servers(v: &Value) -> bool {
+    serde_json::from_value::<Vec<axiom_agent::mcp_client::ServerConfig>>(v.clone())
+        .is_ok_and(|l| l.iter().all(|c| c.validate().is_ok()))
+}
+
+fn default_policy() -> Value {
+    serde_json::to_value(axiom_agent::gate::policy::default_policy()).unwrap_or(Value::Null)
+}
+
 pub const KNOWN: &[Known] = &[
     Known {
         key: "appearance.theme",
@@ -54,6 +71,24 @@ pub const KNOWN: &[Known] = &[
         key: "workspace.lastRoot",
         default: || Value::Null,
         valid: is_string_or_null,
+    },
+    // M3 (ADR-0015 §4): model provider configurations, never keys.
+    Known {
+        key: "agent.providers",
+        default: || json!([]),
+        valid: is_providers,
+    },
+    // M3 (ADR-0015 §8): the user's agent permission policy.
+    Known {
+        key: "agent.policy",
+        default: default_policy,
+        valid: is_policy,
+    },
+    // M3-MCP-001: MCP servers whose tools join workspace sessions.
+    Known {
+        key: "agent.mcpServers",
+        default: || json!([]),
+        valid: is_mcp_servers,
     },
 ];
 

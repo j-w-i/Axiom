@@ -8,7 +8,8 @@
  * frame, so a side bar or toast that appeared while the window was unfocused stayed at opacity 0
  * (geometry check 7 on macOS, 2026-11-18). */
 [data-idle="true"] .spinner,
-[data-idle="true"] .led {
+[data-idle="true"] .led,
+[data-idle="true"] .msg__caret {
   animation-play-state: paused !important;
 }
 

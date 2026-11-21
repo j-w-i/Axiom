@@ -1,18 +1,23 @@
 # Agent runtime, tools and permissions
 
-**State: draft.** Frozen by the first task of M3. Research:
-`docs/research/agents.md`. Decision: ADR-0007.
+**State: frozen for M3** (M3-ARCH-001, 2026-11-21). Decisions: ADR-0007, ADR-0015. Wire types:
+`crates/protocol/src/agent.rs` (protocol 0.3, `ipc.md` §Protocol 0.3). Research:
+`docs/research/agents.md`. Sections marked *as built* are filled in by the task named.
 
-## Components (all in `crates/agent`, hosted by `axiomd`)
+## Components
+
+All in `crates/agent` (`axiom-agent`), hosted by `axiomd`. `agent` depends only on `protocol`
+and `store`; `axiomd` registers the tools as thin adapters over the services (ADR-0015 §2).
 
 ```
-ModelProvider (trait)  ── adapters: anthropic, openai-responses, openai-chat (covers Ollama,
-                          llama.cpp, LM Studio, vLLM, MLX-LM through per-server profiles)
-Session                ── transcript (JSONL), context assembly, compaction
-AgentLoop              ── request → stream → tool calls → gate → execute → results → repeat
-ToolRegistry           ── typed tools backed by daemon services
-PermissionGate         ── policy evaluation, approval requests to the client
-Checkpoints            ── recoverable workspace snapshots
+ModelProvider (trait)  ── adapters: anthropic, openai_chat (Ollama, llama.cpp, LM Studio, vLLM
+                          through capability profiles), scripted (tests only)
+Session                ── JSONL journal, context assembly, compaction
+AgentLoop              ── request → stream → tool calls → gate → checkpoint → execute → results → repeat
+ToolRegistry           ── typed tools; implementations registered by axiomd
+PermissionGate         ── policy evaluation, approval requests, audit log
+Checkpoints            ── shadow git repository through the `git` CLI
+mcp                    ── MCP codec: server half (used by `axiom mcp`) and client half
 ```
 
 ## Model provider interface
@@ -22,26 +27,23 @@ Checkpoints            ── recoverable workspace snapshots
 pub trait ModelProvider: Send + Sync {
     fn id(&self) -> &str;
     async fn models(&self) -> Result<Vec<ModelInfo>, ProviderError>;
-    /// Streams one assistant turn. Dropping the stream cancels the request.
+    /// Streams one assistant turn. Dropping the stream or cancelling the token cancels the request.
     async fn stream(&self, req: TurnRequest, cancel: CancellationToken)
         -> Result<BoxStream<'static, Result<TurnEvent, ProviderError>>, ProviderError>;
 }
 
-pub struct ModelInfo { id, display_name, context_window: Option<u32>, max_output: Option<u32>,
-                       tools: Support, images: Support, streaming_tool_args: Support }
-pub enum Support { Yes, No, Unknown }
-
 pub struct TurnRequest { model, system: String, messages: Vec<Message>, tools: Vec<ToolSpec>,
                          max_output_tokens: Option<u32>, temperature: Option<f32> }
-pub struct Message { role: Role, blocks: Vec<Block> }
+pub struct Message { role: Role, blocks: Vec<Block> }          // Role: User | Assistant
 pub enum Block {
     Text(String),
-    Image { media_type, data_ref },
     ToolCall { id, name, input: serde_json::Value },
-    ToolResult { call_id, content: Vec<Block>, is_error: bool },
-    /// Provider-native content that must be sent back verbatim to the same
-    /// provider (e.g. signed reasoning blocks) and dropped for any other.
+    ToolResult { call_id, content: String, is_error: bool },
+    /// Provider-native content sent back verbatim to the same provider kind and dropped for any
+    /// other (Anthropic thinking / redacted_thinking).
     Opaque { provider: String, raw: serde_json::Value },
+    /// A user image, base64 (ADR-0017): Anthropic `image` block, OpenAI `image_url` data URL.
+    Image { media_type: String, data: String },
 }
 pub enum TurnEvent {
     TextDelta(String),
@@ -54,137 +56,221 @@ pub enum ProviderError { Auth, RateLimited { retry_after }, ContextTooLong, Unav
                          InvalidRequest(String), Transport(String) }
 ```
 
-Rules: adapters never retry tool-executing turns themselves; the loop decides.
-`Opaque` blocks are persisted in the transcript so a session can resume.
-Capabilities are probed per server/model and may be overridden in settings,
-because "OpenAI-compatible" servers differ in tool-call streaming and
-parallel calls (research §1).
+Rules:
+- Adapters never retry; the loop decides (ADR-0015 §9 and M3-LOOP-001).
+- `ModelInfo` and `Capabilities` are the wire types (`agent.rs`). Capability profiles come from
+  the provider kind and server (detected by base URL), overridable per provider configuration.
+  A model with `tools: no` converses without tools.
+- Built-in profiles (M3-MODEL-002, `crates/agent/src/model/profiles.rs`):
 
-First adapters: Anthropic Messages and OpenAI Chat Completions (the latter
-gives Ollama/llama.cpp/LM Studio immediately). Tests use a deterministic
-`ScriptedProvider` that replays recorded `TurnEvent`s; no network in CI.
+  | Kind / server | tools | streamed args | parallel | context |
+  |---------------|-------|---------------|----------|---------|
+  | anthropic | yes | yes | yes | 200 000 |
+  | openaiChat, api.openai.com | yes | yes | yes | 128 000 |
+  | openaiChat, port 11434 (Ollama) | unknown | no (whole calls) | unknown | unknown |
+  | openaiChat, port 8080 (llama.cpp), 1234 (LM Studio), other | unknown | unknown | unknown | unknown |
+
+  Only a definite `tools: no` stops the loop offering tools.
+- Provider configurations live in settings `agent.providers` (a JSON array of
+  `ProviderConfig`); API keys live only in the OS credential store under `axiom/<provider id>`,
+  or are read from the environment variable named by `apiKeyEnv`. A key never reaches settings,
+  SQLite, the journal, the audit log, logs or test fixtures.
+- Base URLs are HTTPS, or HTTP to a loopback host (local servers).
+- Tests never use the network: `ScriptedProvider` replays turns; adapters are tested against a
+  loopback fixture server with recorded SSE streams. The daemon offers a `scripted` provider
+  only when `AXIOM_TEST_SCRIPTED_MODEL=<script file>` is set.
 
 ## Tools
 
-A tool is a typed operation with a declared effect:
+A tool is a typed operation with a declared effect (`Effect` in `agent.rs`):
+`read`, `writeWorkspace`, `execute`, `install`, `network`, `writeOutside`, `delete`,
+`credentials`, `deploy`.
 
-```rust
-pub struct ToolSpec { name: &'static str,          // "fs.read", "build.run"
-                      description: &'static str,
-                      input_schema: schemars::Schema, output_schema: schemars::Schema,
-                      effect: Effect, max_result_bytes: usize }
-pub enum Effect { Read, WriteWorkspace, Execute, Install, Network,
-                  WriteOutside, Delete, Credentials, Deploy }
-```
+| Tool | Backed by | Effect |
+|------|-----------|--------|
+| `workspace.info` | workspace | read |
+| `workspace.search` (literal or regex, glob filter, paged) | workspace search | read |
+| `fs.list`, `fs.read` (line range, paged, numbered lines) | workspace | read |
+| `fs.applyPatch` (search/replace blocks against the current version; create; delete) | workspace | writeWorkspace |
+| `task.run` (argv only; waits up to a timeout; exit status, output tail, diagnostics) | exec, build | execute |
+| `build.run` (a provider task; waits; status + diagnostics), `build.diagnostics` | build | execute / read |
+| `env.detect`, `env.planInstall` | env | read |
+| `env.install` (an issued plan id only) | env | install |
+| `editor.open` (reveal a location: the `agent/reveal` notification) | clients | read |
+| `mcp.<server>.<tool>` (user-configured MCP servers) | MCP client | execute (+ network) |
 
-Tool names use `.`; they map 1:1 onto service operations and reuse the
-protocol's types, so a tool result is the same structure the GUI gets.
+Later milestones add `preview.*`, `ui.*` (M5), `lsp.*` (M4), `debug.*` (M6).
 
-| Tool | Backed by | Effect | Milestone |
-|------|-----------|--------|-----------|
-| `workspace.info` | workspace | Read | M3 |
-| `workspace.search` (text/regex, glob filter, paged) | workspace (`grep-searcher`) | Read | M3 |
-| `fs.list`, `fs.read` (line range, paged) | workspace | Read | M3 |
-| `fs.applyPatch` (search/replace blocks against `expectedVersion`) | workspace | WriteWorkspace | M3 |
-| `task.run` (argv only; waits; returns exit status + truncated tail + diagnostics) | exec, build | Execute | M3 |
-| `build.run`, `build.diagnostics` | build | Execute / Read | M3 |
-| `env.detect`, `env.planInstall` | env | Read | M3 |
-| `env.install` | env | Install | M3 |
-| `editor.open` (reveal a location in the user's editor) | client notification | Read | M3 |
-| `preview.launch`, `preview.capture` | inspect | Execute / Read | M5 |
-| `ui.snapshot`, `ui.hitTest`, `ui.nodeDetails`, `ui.resolveSource` | inspect | Read | M5 |
-| `ui.verify` (evaluate `Check[]`) | inspect | Read | M5 |
-| `lsp.definition`, `lsp.references`, `lsp.diagnostics` | lsp | Read | M4+ |
-| `debug.*` | DAP | Execute | M6 |
+Tool result rules: results are bounded (`max_result_bytes`, default 32 KiB) with a
+`truncated` flag and a continuation cursor where the tool pages; errors are structured
+(`kind`, a one-sentence `message`, a `hint` telling the model what to do differently);
+`fs.applyPatch` fails when a search block does not match exactly once, and its hint shows the
+closest region. Every path goes through `Workspace::resolve`.
 
-Tool result rules (from research §5): results are bounded
-(`max_result_bytes`, default 32 KiB) with an explicit `truncated` flag and a
-continuation cursor; errors are structured (`kind`, one-sentence message, and
-a `hint` field telling the model what to do differently); file edits fail
-loudly when the search block does not match exactly once.
-
-## Execution pipeline (every tool call, every client)
+## Execution pipeline (every tool call, every principal)
 
 ```
-validate input against schema
-→ resolve targets (WorkspacePath → host path via Workspace::resolve)
-→ PermissionGate.check(effect, tool, resolved targets)  → Allow | Deny | Ask
-   Ask → notification `agent/approvalRequested` to the client → user decides
-→ if effect ≥ WriteWorkspace and no checkpoint exists for this turn: create one
+validate input against the tool's schema                     → invalid_params + hint
+→ resolve targets (workspace paths, argv)
+→ PermissionGate.check(principal, tool, effect, targets)    → Allow | Deny | Ask
+   Ask → agent/approvalRequested to approving connections → first agent/approve wins
+         no approving connection → approval_required (does not run)
+→ if effect ≠ read and this turn has no checkpoint yet: create one (git missing → prerequisite_missing)
+→ journal: tool intent
 → execute through the service
-→ append to audit log (who, tool, targets, decision, outcome)
+→ if effect ≠ read: post-state snapshot (what the agent left)
+→ journal: tool result; audit log: principal, tool, targets, decision, rule, outcome, duration
 → bound and return the result
 ```
 
+Principals: `session:<id>` (the loop), `mcp:<client name>` (the MCP front end through
+`agent/toolCall`), `cli`.
+
 ## Permission policy
 
-Stored in settings (`agent.policy`), overridable per workspace in
-`.axiom/project.toml` only towards *stricter*.
+User policy: settings `agent.policy` (the `Policy` wire type). Workspace rules:
+`.axiom/project.toml`, which may only make the user policy **stricter**:
 
 ```toml
 [agent.policy]
 default = "ask"
 [[agent.policy.rule]]
-effect = "read";            decision = "allow"
-[[agent.policy.rule]]
-effect = "write_workspace"; decision = "ask"      # "allow" in auto-edit mode
-[[agent.policy.rule]]
-effect = "execute"; argv_prefix = ["cargo", "build"]; decision = "allow"
-[[agent.policy.rule]]
-effect = "credentials";     decision = "ask"; remember = false
+effect = "execute"
+argvPrefix = ["cargo", "publish"]
+decision = "deny"
 ```
 
-First matching rule wins; rules with patterns are evaluated before rules
-without. "Allow for this session" adds an in-memory rule. `credentials` and
-`deploy` can never be remembered. Content read from files, tool results or
-web pages cannot change policy.
+- A rule matches when every field it sets matches: `effect`; `tool` (exact, or a prefix ending
+  in `.*`); `path` (workspace-relative glob, all targets must match); `argvPrefix` (for
+  `execute`).
+- Among matching rules the most specific wins (more of `tool`, `path`, `argvPrefix` set; then
+  the longer `argvPrefix`); among equals, deny > ask > allow. No match → `default`.
+- The built-in user policy: `default = "ask"`, `read → allow`.
+- Workspace rules are merged so they can only turn allow into ask/deny or ask into deny.
+- "Allow for session" adds an in-memory rule for that tool and target set; never for
+  `credentials` or `deploy`.
+- Content a model reads (files, tool results, web pages) cannot change policy.
+- Audit log: `<data dir>/audit/<workspace hash>.jsonl`, append-only.
 
 ## Checkpoints
 
-Mechanism: a **shadow git repository** at
-`<data dir>/checkpoints/<workspace hash>/` using the workspace as its work
-tree (`GIT_DIR` + `GIT_WORK_TREE`), honouring the workspace's ignore rules.
-It never touches the user's `.git`, index, branches or stash, and works for
-workspaces that are not git repositories. A checkpoint is a commit in the
-shadow repo; restore checks out that tree for the files the agent changed
-since, after confirming none of them were modified by someone else in the
-meantime (hash comparison) — otherwise it reports a conflict per file instead
-of overwriting.
+ADR-0015 §5. A **shadow git repository** at `<data dir>/checkpoints/<workspace hash>/`, driven
+through the `git` program with an isolated environment (its own `GIT_DIR` and index,
+`GIT_WORK_TREE` = workspace root, no system/global config, hooks disabled). It never reads or
+writes the user's `.git`, index, refs or stash, and works for workspaces that are not git
+repositories. The workspace's `.gitignore` files apply; files over 16 MiB are skipped and listed.
 
-Multiple concurrent agents (M6+) each work in their own `git worktree` of the
-user's repository when the workspace is a git repo; merging back is an
-explicit, reviewed step. Without git, concurrent write-capable agents on one
-workspace are not offered.
+- A checkpoint (`refs/axiom/<session>/<n>`) is taken before the first tool with an effect other
+  than `read` in each turn.
+- Restore to checkpoint C: every file that differs between C and the workspace now is restored
+  if its content equals what the agent last left; otherwise it is a conflict
+  (`modifiedSinceAgent`, `deletedSinceAgent`, `createdSinceAgent`). With conflicts nothing is
+  restored unless `skipConflicts`. Restore takes a checkpoint first.
+- As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir; the agent's
+  latest state is `refs/axiom/<session>/post`, taken after each writing tool; a restore with
+  conflicts changes nothing (not even the undo checkpoint) unless `skipConflicts`. Nested
+  repositories are recorded as git links and never restored. First checkpoint of this
+  repository: 0.94 s; later ones: 21 ms.
+- Concurrent write-capable agents on one workspace are not offered in M3 (worktrees: M6).
 
 ## Sessions
 
-`<data dir>/sessions/<workspace hash>/<session id>.jsonl`: one event per line
-(`user`, `assistant_block`, `tool_call`, `tool_result`, `approval`,
-`checkpoint`, `compaction`, `usage`). Append-only; a session resumes by
-replaying the file. An index row in SQLite (id, workspace, title, updated)
-supports listing. Compaction replaces a prefix with a summary event and keeps
-the original lines in the file.
+Workspace-free conversations (ADR-0017) live in `<data dir>/sessions/_chat/`; images are
+content-addressed blobs in `<session dir>/blobs/<sha256>`. A `rewind` event (edit/regenerate)
+drops turns from `fromTurn` on from the context; the journal keeps them.
 
-Project memory for agents is the repository's own `AGENTS.md` (read at
-session start) — the same convention this repository uses.
+
+`<data dir>/sessions/<workspace hash>/<session id>.jsonl`, append-only, one versioned record
+per line (`v`, `seq`, `ts`, `turn`, the event). The journal stores everything needed to resume:
+the wire `AgentEvent`s plus internal records (provider-native opaque blocks, the exact
+messages sent). Store migration 4 keeps an index (id, workspace root, title, provider, model,
+created, updated).
+
+- Tool intent is written before execution and the result after; a resumed session whose last
+  tool call has no result gets an `interrupted` event and the call is never re-run.
+- Compaction: when a turn's input tokens exceed 75 % of the context window (32 768 when
+  unknown), the loop asks the model for a summary of everything but the last two exchanges and
+  appends a `compaction` event; the journal keeps the original events.
+- Context: system prompt (tool rules, workspace name and root-relative layout), the workspace's
+  `AGENTS.md` if present (capped at 32 KiB), the latest compaction summary, then the messages.
+- As built (M3-LOOP-001):
+  - Journal records are `event` (a wire `AgentEvent`), `assistant` (the exact blocks of one
+    model round, opaque ones included), `toolResults` and `attached` (attached file contents),
+    each with `v: 1`. The internal records carry `atSeq`, the newest event's seq.
+  - Every write is `sync_data`'d. A torn last line is dropped on read; any other bad line is an
+    error.
+  - **The loop:**
+    - It journals a `toolCall` (with its resolved targets) before the gate, and `toolResult`
+      after it.
+    - The turn's checkpoint is taken in the gate's before-execute hook, so a refused call
+      takes none. The post-state is recorded after each successful non-read call.
+    - At most 50 tool rounds per turn.
+    - A rate limit before any tool ran is retried once when the wait is ≤ 30 s.
+    - An incomplete round (an error, a cancel, or a stream that ended early) keeps its text
+      but drops its unconfirmed tool calls.
+  - **Compaction** when the last `usage` exceeds 75 % of the window, keeping the last two
+    turns.
+  - **Resume:** a session loaded with an open turn gets `interrupted` for each unanswered call
+    (and an error result for the model), then `turnEnd` (`error`).
+  - **External calls:** `agent/toolCall` writes are checkpointed too, under
+    `ext-<principal>`.
 
 ## External agents and MCP
 
-- **MCP server** (M3): `axiomd --mcp` (stdio) exposes the ToolRegistry so
-  Claude Code, Codex CLI, etc. can drive Axiom. Same gate, same audit log;
-  approvals surface in the Axiom GUI if it is attached, else follow policy
-  with `ask` treated as `deny`.
-- **MCP client** (M3+): user-configured MCP servers appear as additional
-  tools with effect `Execute` + `Network` unless annotated.
-- **ACP** (M6+): hosting external agents inside the Axiom UI. Deferred;
-  nothing in M3 may preclude it (the UI consumes a generic event stream, not
-  loop internals).
+ADR-0015 §7.
+- **Server:** `axiom mcp` (also `axiomd --mcp`) speaks MCP over stdio and is a protocol client
+  of a daemon (the shared one on the local socket, else one it starts). `tools/list` →
+  `agent/tools`; `tools/call` → `agent/toolCall` with principal `mcp:<clientInfo.name>`. Same
+  gate, same audit log; an `ask` surfaces in an attached GUI, otherwise it is denied with a hint.
+- **Client:** settings `agent.mcpServers` (`[{name, argv, env}]`); servers start per session on
+  first use; their tools are `mcp.<server>.<tool>` with effect `execute` (annotations never lower
+  it). Workspace-configured MCP servers are not supported in M3.
+- As built (M3-MCP-001):
+  - **Server.** `axiom mcp [--workspace DIR]` (apps/cli) speaks MCP revisions 2025-06-18,
+    2025-03-26 and 2024-11-05: initialize, ping, `tools/list` (with annotations derived from
+    the effect: readOnly, destructive, openWorld), `tools/call` (`content` text +
+    `structuredContent`; a gate refusal is a result with `isError`, not a protocol error).
+    `axiomd --mcp` was not built: the CLI is the one front end.
+  - **Client.** `agent.mcpServers` servers start on a workspace session's first turn and stop
+    when the session is deleted or the daemon exits. Paged `tools/list` is followed. Server
+    tool errors (`isError`) are tool errors. Conversations without a workspace get no MCP
+    tools in M3 (ADR-0017 §2 said they would; recorded in the MCP-001 handoff).
+  - Usage: `docs/contributing/connect-agents.md`.
+- **ACP:** external agents inside Axiom (ADR-0016; as built by M3-ACP-001).
+  - **Built-in providers.** `claude-code` (`claude-agent-acp`), `codex` (`codex-acp`) and
+    `gemini` (`gemini --experimental-acp`) are listed by `agent/models`: available when the
+    program is on `PATH`, else with an install hint. A user configuration with the same id
+    overrides one.
+  - **Connection.** ACP protocol version 1. The client capabilities are fs read/write and
+    terminal. `session/new` gets the workspace as `cwd` and Axiom's own MCP server
+    (`axiom mcp`, when the CLI is installed next to the daemon). `session/load` is used when
+    the agent offers it, else a notice says it starts fresh. The agent's session id is kept
+    next to the journal (`<id>.acp`).
+  - **Agent requests.** `fs/read_text_file`, `fs/write_text_file` and `terminal/create` are the
+    hidden tools `acp.readFile`, `acp.writeFile` and `acp.terminal` (never listed or offered to
+    a model), so they get the gate, the turn's checkpoint and the audit log. Paths outside the
+    workspace are refused. `terminal/output|wait_for_exit|kill|release` operate on the
+    executor task.
+  - **Permission requests.** `session/request_permission` is decided by the gate as the policy
+    tool `<provider id>.<agent tool name>`, with the effect from the ACP `kind`. An approval
+    adds one-turn grants: `acp.writeFile` on the requested paths and, for `execute`, the next
+    terminal. So the person is asked once, not twice.
+  - **Updates.** Message and thought chunks become `textDelta` + `assistantText` (thoughts with
+    `kind: thought`). The final `plan` becomes `assistantText` with `kind: plan`. `tool_call`
+    and `tool_call_update` become `toolCall`/`toolResult` (diffs rendered as unified diffs).
+    The stop reason becomes `turnEnd`. A biased select handles every update the agent sent
+    before its prompt response.
+  - **Cancel and edits.** Cancel sends `session/cancel`; a pending permission is answered
+    `cancelled`; the agent is killed if it has not answered after 10 s. Edit/regenerate
+    (`fromTurn`) is `unsupported` for external agents: they keep their own history.
+  - **Limit.** An agent that changes files without the ACP fs methods (its own internal
+    tools) is outside the gate. The adapters route Claude Code's and Codex's edits and shell
+    through the client when it advertises the capabilities, as Axiom does.
 
-## Client-facing protocol additions (M3)
+## Client-facing protocol (protocol 0.3)
 
-Requests: `agent/sessionCreate`, `agent/sessionList`, `agent/send`,
-`agent/cancel`, `agent/approve`, `agent/checkpointList`,
-`agent/checkpointRestore`, `agent/providersList`, `agent/providerConfigure`.
-Notifications: `agent/event` (streamed transcript events),
-`agent/approvalRequested`. Exact types are written into `crates/protocol`
-by M3-AGENT-001.
+Requests: `agent/models`, `agent/configureProvider`, `agent/sessionCreate`,
+`agent/sessionList`, `agent/sessionOpen`, `agent/sessionRename`, `agent/sessionDelete`, `agent/image`, `agent/send`, `agent/cancel`, `agent/approve`,
+`agent/checkpoints`, `agent/restore`, `agent/tools`, `agent/toolCall`, `agent/policy`,
+`agent/setPolicy`. Notifications: `agent/event`, `agent/approvalRequested`,
+`agent/approvalResolved`, `agent/reveal`. Exact types: `crates/protocol/src/agent.rs`.

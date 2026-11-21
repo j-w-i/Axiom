@@ -31,7 +31,13 @@ async fn defaults_for_all_known_keys() {
     assert_eq!(v["editor.wordWrap"], json!(false));
     assert_eq!(v["workspace.reopenLast"], json!(true));
     assert_eq!(v["workspace.lastRoot"], Value::Null);
-    assert_eq!(v.len(), 6);
+    // M3-MODEL-002.
+    assert_eq!(v["agent.providers"], json!([]));
+    // M3-GATE-001: the built-in policy.
+    assert_eq!(v["agent.policy"]["default"], json!("ask"));
+    // M3-MCP-001.
+    assert_eq!(v["agent.mcpServers"], json!([]));
+    assert_eq!(v.len(), 9);
 }
 
 #[tokio::test]

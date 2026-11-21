@@ -1,10 +1,31 @@
 # Current state
 
-_Last updated: 2026-11-21._
+_Last updated: 2026-11-22._
 
 ## M2 — Environments and builds: complete (2026-11-21)
 
 All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).
+
+## M3 — Agent runtime: complete (2026-11-22)
+
+ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4; merged to main once CI is green, under the owner's standing permission. **Next: M4 (editor depth)**, then M5.
+
+- **M3-ARCH-001 tested (2026-11-21):** protocol 0.3 (`crates/protocol/src/agent.rs`: 14 methods, 4 notifications, 3 error kinds, optional `authToken`/`capabilities` on initialize); `agents.md` frozen; `agent`/`cli` edges. `axiomd::NOT_YET_SERVED` lists the agent methods until wired.
+- **M3-MODEL-001 tested (2026-11-21):** `crates/agent` with the message model, `ModelProvider`, an in-house SSE parser, the Anthropic Messages adapter (text, tools, opaque thinking, errors, cancel) and `ScriptedProvider`; tested against a loopback fixture server.
+- **M3-MODEL-002 tested (2026-11-21):** OpenAI Chat adapter (Ollama/llama.cpp/LM Studio profiles), keychain credentials (keyring, verified against KWallet), `agent.providers`; `agent/models` and `agent/configureProvider` served.
+- **M3-TOOLS-001 tested (2026-11-21):** tool registry (prepare → gate token → execute, bounded results, structured errors with hints) and the 12 built-in tools over the services; `agent/tools` served; `workspace` gains search and `remove_file`.
+- **M3-ARCH-002 tested (2026-11-21):** protocol additions for Chat and external agents: workspace-free sessions, `agent/sessionRename|sessionDelete|image`, `fromTurn` + `rewind`, images (both adapters), `ProviderKind::Acp` with `command`/`env`.
+- **M3-GATE-001 tested (2026-11-21):** permission gate (policy with specificity, stricter-only workspace rules, session grants), approvals to connections that declared `capabilities.approvals`, the `call_tool` pipeline and audit log; `agent/policy|setPolicy|approve|toolCall` served.
+- **M3-CKPT-001 tested (2026-11-21):** shadow-git checkpoints through the `git` CLI (isolated env; user's `.git` byte-identical in tests), restore with per-file conflicts and an undo checkpoint; 0.94 s first / 21 ms later on this repository.
+- **M3-LOOP-001 tested (2026-11-21):** session journal, context (rewinds, compaction, images), the agent loop (tools through the gate, checkpoint before the first write of a turn, cancel, resume with repair), store migration 4; every protocol 0.3 method served (`NOT_YET_SERVED` removed). Scripted "add a function and fix the build" passes against real cargo.
+- **M3-DAEMON-001 tested (2026-11-21):** Unix socket (`<data dir>/run/`, token) shared by more clients; the `axiom` CLI (`task run`, `build`, `agent send|sessions`).
+- **M3-MCP-001 tested (2026-11-21):** `axiom mcp` MCP server (Claude Code, Codex… drive Axiom's tools under the same gate; approvals surface in the app) and the MCP client for `agent.mcpServers`; `docs/contributing/connect-agents.md`.
+- **M3-ACP-001 tested (2026-11-21):** Claude Code / Codex / Gemini CLI as provider kind `acp`: their fs and terminal requests through Axiom's gate and checkpoints, their permission prompts as Axiom's approvals (asked once), Axiom's MCP offered to them. Tested with an in-repo fake agent; real agents owed by the owner (not installed here).
+- **M3-UI-001 tested (2026-11-21):** Chat — a full-window surface on the rail that works with no folder: conversation list (scope, search, rename, delete), Markdown + Monaco-coloured code, streaming, edit/regenerate, images, model picker. e2e `chat.mjs` 9/9 (in the default suites), a11y S20, shots S20/S20b.
+- **M3-UI-002 tested (2026-11-22):** the AI dock beside the editor (Mod+L), the approval card (diff, Allow once / for session / Deny, Esc), approvals from elsewhere in a stack, the rail badge, diff blocks, checkpoint Restore with the conflict dialog; the desktop bridge speaks 0.3 with approvals. e2e `dock.mjs` 7/7, a11y S21, shots S21.
+- **M3-UI-003 tested (2026-11-22):** first-run model setup in Chat (API key or server, local servers, agents) and Settings → Models; the key never reaches the webview. e2e `models.mjs` 9/9 against a fake OpenAI-compatible server, S22/S23 a11y.
+- **M3-QA-001 tested (2026-11-22):** the exit scenario `e2e/agent.mjs` (13/13, both Linux drivers, CI on Ubuntu): Chat with no folder by keyboard (first-run setup, Markdown, edit, regenerate, pasted image), "add a function and fix the build" through tools with real cargo, the checkpoint before the first write, a denied command, Restore, resume after restart, an MCP server's tools, an ACP agent under the gate. P2 against M2 +19.6 / +7.5 ms. Record: `verification/M3.md`. Owed: a real local model, real Claude Code / Codex (owner).
+
 
 
 ## M1.6 — Axiom Visual Experience: approved, Phase B ready (2026-11-17)

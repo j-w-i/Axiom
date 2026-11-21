@@ -538,5 +538,7 @@ export const Keys = {
   F5: "\uE035",
   HOME: "\uE011",
   UP: "\uE013",
+  RIGHT: "\uE014",
+  TAB: "\uE004",
   DELETE: "\uE017",
 };

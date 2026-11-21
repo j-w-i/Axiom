@@ -1,0 +1,10 @@
+data: {"id":"c3","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"fs_read","arguments":""}},{"index":1,"id":"call_2","type":"function","function":{"name":"workspace_search","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"c3","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"query\":\"fn main\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"c3","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"a.rs\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"c3","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

@@ -1,5 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { ApprovalsStack } from "./components/Chat";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConflictDialog, SettingsDialog, UnsavedDialog } from "./components/Dialogs";
 import { host, type AppInfo } from "./daemon/tauri-transport";
@@ -93,7 +94,7 @@ export function App({ app }: { app: AppStores }) {
   const ctx: ShellContext = {
     app, ready, dark, ws, docs, task, prefs, openFolder, setSettingsOpen, setAboutOpen, setPalette, destination, setDestination,
     hasDoc: docs.docs.length > 0 && docs.editorReady,
-    toggleSidebar: layout.toggleSidebar, togglePanel: layout.togglePanel, resetLayout: layout.resetLayout, focusRun: layout.focusRun,
+    toggleSidebar: layout.toggleSidebar, togglePanel: layout.togglePanel, toggleDock: layout.toggleDock, resetLayout: layout.resetLayout, focusRun: layout.focusRun,
   };
   useNativeMenu(ctx);
   useAppShortcuts(ctx);
@@ -105,11 +106,15 @@ export function App({ app }: { app: AppStores }) {
       <Banners ctx={ctx} daemon={daemon} />
       <Workbench ctx={ctx} layout={layout} />
       <StatusBar ctx={ctx} daemon={daemon} />
+      <ApprovalsStack store={app.agent} onShow={(id) => {
+        setDestination("chat");
+        void app.agent.open(id);
+      }} />
       <ConflictDialog documents={documents} />
       <UnsavedDialog documents={documents} />
       <SettingsDialog settings={settings} open={settingsOpen || aboutOpen} section={aboutOpen ? "about" : "appearance"} info={info}
         onOpenChange={(o) => !o && (setSettingsOpen(false), setAboutOpen(false))} serverVersion={daemon.state === "ready" ? daemon.serverVersion : null}
-        onRestartBackend={() => void client.restart()} onOpenExternal={(url) => void host.openExternal(url)} />
+        onRestartBackend={() => void client.restart()} onOpenExternal={(url) => void host.openExternal(url)} agent={app.agent} hasWorkspace={!!ws.id} />
       <CommandPalette
         open={palette !== null}
         mode={palette ?? "commands"}

@@ -1,0 +1,146 @@
+/* Model providers (M3-UI-003): Chat's first-run setup and the Models pane of Settings. Tokens only. */
+.models-setup {
+  max-width: 72ch;
+  margin: var(--s-5) auto;
+  padding: 0 var(--s-4);
+}
+.models-setup__title {
+  margin: 0 0 var(--s-1);
+  font-size: var(--text-title);
+  line-height: var(--leading-title);
+  font-weight: var(--weight-strong);
+}
+.models-setup__line,
+.models-setup__hint {
+  margin: 0 0 var(--s-3);
+  color: var(--text-muted);
+}
+.models-setup__card {
+  margin-top: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line-mid);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+.models-setup__card h4 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--text-body);
+  font-weight: var(--weight-strong);
+}
+.models-add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.models-add__row {
+  display: grid;
+  grid-template-columns: 8em 1fr;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--text-muted);
+  font-size: var(--text-small);
+}
+.models-add__row .input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.models-add__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.models__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-small);
+}
+.models-local {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+.models-local__list,
+.models-agents,
+.models-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.models-local__list li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  color: var(--text-muted);
+  font-size: var(--text-small);
+}
+.models-local__list svg,
+.models-row svg {
+  width: var(--icon);
+  height: var(--icon);
+  flex: none;
+}
+.models-agents__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-1) 0;
+  font-size: var(--text-small);
+}
+.models-agents__name {
+  flex: none;
+  white-space: nowrap;
+}
+.models-agents__state {
+  color: var(--text-muted);
+  text-align: right;
+}
+.models-pane__heading {
+  margin: var(--s-4) 0 var(--s-2);
+  font-size: var(--text-body);
+  font-weight: var(--weight-strong);
+}
+.models-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-1) var(--s-3);
+  padding: var(--s-2) 0;
+  border-top: 1px solid var(--line-mid);
+}
+.models-row__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.models-row__name {
+  font-weight: var(--weight-medium);
+}
+.models-row__kind,
+.models-row__url {
+  color: var(--text-muted);
+  font-size: var(--text-small);
+}
+.models-row__url {
+  font-family: var(--font-code);
+  overflow-wrap: anywhere;
+}
+.models-row__state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  color: var(--text-muted);
+  font-size: var(--text-small);
+}
+.models-row__err {
+  color: var(--danger);
+}
+.models-row__actions,
+.models-row__key {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--s-2);
+}
+.models-row__key .input {
+  flex: 1;
+}

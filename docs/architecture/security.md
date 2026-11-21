@@ -125,11 +125,15 @@ waiting for still completes its own cleanup.
 ## Daemon endpoint
 
 - M1: stdio of a child process. Only the parent can talk to it.
-- M3+: local socket. Unix: created inside a `0700` directory under
-  `$XDG_RUNTIME_DIR` (or the per-user temp dir on macOS), socket mode `0600`.
-  Windows: named pipe with an ACL granting only the current user. Clients
-  must present a per-launch token (read from a `0600` file next to the
-  socket) in `initialize`. No TCP listener, ever, by default.
+- M3+: local socket (as built by M3-DAEMON-001).
+  - Unix: `<data dir>/run/axiomd.sock`, mode `0600`, in the `0700` directory `run/`.
+  - Clients must present the per-launch token (`run/axiomd.token`, `0600`, 32 random bytes
+    from `/dev/urandom` as hex) in `initialize.authToken`. A connection without it, or with a
+    wrong one, gets `permission_denied` and is closed before anything else is served.
+  - Anyone who can read the token file (the same user) can drive the daemon: the same trust
+    boundary as the user's files.
+  - Windows named pipe: deferred.
+  - No TCP listener, ever, by default.
 
 ## Processes
 
@@ -143,20 +147,64 @@ waiting for still completes its own cleanup.
 - Every started task is recorded (command, cwd, time, initiator) in the audit
   log from M3.
 
-## Agent permissions (M3; contract in `docs/protocols/agents.md`)
+## Agent permissions (M3; contract in `docs/protocols/agents.md`; as built by M3-GATE-001)
+- **One gate for every call.** Every tool call, from a session, `agent/toolCall` (MCP front
+  end, CLI) or, later, an ACP agent's request, goes through `axiom_agent::gate::call_tool`:
+  prepare (validate, resolve targets inside the workspace) → policy → ask → hook (the
+  checkpoint) → execute → audit.
+  - Tools run only with an `Allowed` token, which only the gate can create (`pub(crate)`). The
+    dev-dependency feature `test-support` exposes a constructor to tests.
+- **Policy.** The user's comes from settings `agent.policy`; built in: ask, reads allowed.
+  `.axiom/project.toml` `[agent.policy]` can only make a decision stricter (the stricter of
+  the two wins).
+- **Asking.** `ask` goes to connections that declared `capabilities.approvals`. With none, the
+  call fails `approval_required` and does not run. The first answer wins.
+- **"Allow for session".** It adds an exact rule (this tool, this argv or this single path)
+  for that principal only; never for `credentials`/`deploy`.
+- **Principals.** `agent/toolCall` accepts only `cli` and `mcp:<name>`, so an external client
+  can never use a session's grants.
+- **Audit log.** `<data dir>/audit/<workspace key>.jsonl`, append-only: time, principal, tool,
+  effect, targets, decision, rule, outcome, duration. Tool inputs and outputs are not logged
+  (they may hold secrets); only a one-line summary.
+- **Limit.** Approval is consent, not isolation: an allowed `task.run` runs with the user's
+  rights (ADR-0010 isolation backends are M6).
 
-Each tool declares an *effect class*: `read`, `write_workspace`, `execute`,
-`install`, `network`, `write_outside`, `delete`, `credentials`, `deploy`.
-A policy maps effect class (and optional argument patterns) to
-`allow | ask | deny`. Defaults: `read` → allow; `write_workspace` → ask (allow
-after a checkpoint exists, if the user chose "auto-edit"); everything else →
-ask; `credentials` and `deploy` → ask every time, not rememberable.
-The gate lives in the tool registry in the daemon, so GUI-hosted agents, MCP
-clients and ACP agents all pass through the same code.
+## Model output in the webview (Chat; M3-UI-001)
+- **Markdown.** Assistant text is rendered with `react-markdown` + `remark-gfm`. Raw HTML in
+  model output is shown as escaped text, never as elements; no `rehype-raw`.
+- **Links.** They open only through the host's `open_external` (http/https only), never in the
+  webview.
+- **Images.** Remote images in Markdown are not loaded; they render as `[image: alt]` (no
+  tracking pixels).
+- **Code blocks.** They are coloured by Monaco's `colorize`, whose output escapes the text. That
+  is the only `dangerouslySetInnerHTML`.
+- **Images the user attaches.** They are read by the webview from a paste, a drop or a file
+  picker the user operates; they go to the daemon as base64 and are stored content-addressed
+  next to the journal. The webview reads no other files.
+- Tests: `tests/chat.test.tsx` covers scripts, event handlers, raw tags and remote images.
 
-API keys are stored in the OS keychain (`keyring` crate), are referenced by
-name in settings, and are never returned by any protocol method or shown to a
-model.
+## External agents (ACP; M3-ACP-001)
+- **Inside the gate.** Their file reads, writes and terminals are gated tools (`acp.*`) under
+  the session's principal, checkpointed and audited. Paths outside the workspace are refused.
+- **Their permission prompts are Axiom's approval cards.** An approval covers only the
+  requested paths, or the next command, for that turn.
+- **Credentials.** Axiom passes no credentials; agents use their own sign-in. Their processes
+  get no stdin other than the ACP stream and are killed with the session or the daemon.
+- **Limit.** What an agent does without the ACP fs/terminal methods is outside Axiom's gate.
+  This is stated in ADR-0016 and must be stated in the approval UI (M3-UI-002).
+
+## Model credentials (M3; as built by M3-MODEL-002)
+- API keys live only in the OS credential store (`keyring` 3.6: Secret Service over pure-Rust
+  D-Bus on Linux, Keychain on macOS, Credential Manager on Windows), service `axiom`, account =
+  provider id; or the provider names an environment variable (`apiKeyEnv`) read by the daemon.
+- `agent.providers` (settings) holds configurations only; `agent/models` reports `hasKey`, never
+  the key. Adapters' `Debug` output redacts keys; errors and logs never include them
+  (integration test `agent_models…keeps_the_key_out_of_settings_and_logs` scans the data dir and
+  a debug log).
+- Model base URLs are HTTPS, or HTTP to a loopback host (local servers).
+- Credential calls run on their own thread (the Secret Service backend drives its own executor).
+- TEST ONLY: `AXIOM_TEST_CREDENTIALS_FILE` replaces the store with a plain JSON file (daemon
+  integration tests); `AXIOM_TEST_SCRIPTED_MODEL` offers the scripted model.
 
 ## Isolation (ADR-0010)
 

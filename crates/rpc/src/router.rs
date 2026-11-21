@@ -34,12 +34,15 @@ pub(crate) enum Out {
 pub(crate) type HandlerFn =
     Arc<dyn Fn(Value, RequestCtx) -> BoxFuture<'static, Result<Value, RpcError>> + Send + Sync>;
 pub(crate) type HookFn = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
+pub(crate) type InitHookFn =
+    Arc<dyn Fn(&axiom_protocol::lifecycle::InitializeParams, Notifier) + Send + Sync>;
 
 /// Method registry. Build once, share via `Arc` across connections.
 #[derive(Default)]
 pub struct Router {
     pub(crate) handlers: HashMap<&'static str, HandlerFn>,
     pub(crate) hooks: Vec<HookFn>,
+    pub(crate) init_hooks: Vec<InitHookFn>,
 }
 
 impl Router {
@@ -104,6 +107,17 @@ impl Router {
         self
     }
 
+    /// Called once per connection after a successful `initialize`, with the client's params
+    /// and the connection's notifier (protocol 0.3: the daemon learns which connections can
+    /// approve, ADR-0015 §1).
+    pub fn on_initialize<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(&axiom_protocol::lifecycle::InitializeParams, Notifier) + Send + Sync + 'static,
+    {
+        self.init_hooks.push(Arc::new(hook));
+        self
+    }
+
     /// Registered methods plus `initialize` and `shutdown`, sorted.
     pub fn method_names(&self) -> Vec<String> {
         let mut v: Vec<String> = self.handlers.keys().map(|s| s.to_string()).collect();
@@ -153,6 +167,16 @@ pub struct Notifier {
 }
 
 impl Notifier {
+    /// The connection is gone.
+    pub fn is_closed(&self) -> bool {
+        self.tx.is_closed()
+    }
+
+    /// Whether both notifiers send on the same connection.
+    pub fn same_connection(&self, other: &Notifier) -> bool {
+        self.tx.same_channel(&other.tx)
+    }
+
     /// Queues a notification. Waits while the queue (1024 messages) is full:
     /// this is the backpressure path for task output.
     pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<(), Closed> {

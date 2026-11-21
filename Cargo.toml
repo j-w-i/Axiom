@@ -8,10 +8,14 @@ members = [
     "crates/exec",
     "crates/env",
     "crates/build",
+    "crates/agent",
     "crates/axiomd",
     "crates/desktop-bridge",
+    "apps/cli",
     "apps/desktop-tauri/src-tauri",
     "tests/helpers/emit",
+    "tests/helpers/fake-mcp",
+    "tests/helpers/fake-acp",
 ]
 exclude = ["experiments"]
 
@@ -45,6 +49,8 @@ flate2 = "1"
 xz2 = "0.1"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 hex = "0.4"
+# M3 (ADR-0015): unified diffs for fs.applyPatch.
+similar = "3"
 dunce = "1"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = "0.3"

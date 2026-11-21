@@ -728,7 +728,7 @@ try {
     const onTab = await wd.exec(`return document.activeElement?.getAttribute('role')`);
     await wd.keys(["\uE015"]); // ArrowDown → Editor
     const editor = await wd.exec(`return { tab: document.activeElement?.textContent, fontSize: !!document.querySelector('[role=tabpanel] #font-size') }`);
-    await wd.keys(["\uE015", "\uE015"]); // → Workspace → About
+    await wd.keys(["\uE015", "\uE015", "\uE015"]); // → Workspace → Models (M3-UI-003) → About
     const about = await wd.exec(`return document.querySelector('[role=tabpanel] .about-grid')?.textContent ?? ''`);
     await wd.keys(["\uE015"]); // wraps to Appearance
     const wrapped = await wd.exec(`return document.activeElement?.textContent`);

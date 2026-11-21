@@ -58,6 +58,23 @@ connections that subscribed. Workspace handles are reference-counted across
 connections. This is deliberately not built in M1, but M1 code must not
 assume a single connection in service crates — only `axiomd`'s `main` may.
 
+**As built (M3-DAEMON-001, Unix):**
+- **Where.** The socket is `<data dir>/run/axiomd.sock` (0600) in `<data dir>/run/` (0700),
+  with the token in `run/axiomd.token` (0600), regenerated at every start. Using the data dir
+  rather than `$XDG_RUNTIME_DIR` ties the socket to the store it serves.
+- **Who listens.** The daemon started by the desktop app listens unless `--no-listen`. A
+  second daemon on the same data dir finds the live socket and does not listen. A stale
+  socket file (no listener) is replaced. The owner removes both files when it exits.
+- **What a socket connection shares and does not.** Socket connections share the workspace
+  registry, executor, sessions and gate. They do not run the daemon's shutdown hooks when they
+  end (`ServeOptions.run_hooks = false`). The daemon ends with its stdio client.
+- **Closed clients.** Each connection's notifications go only to it. Session events go to
+  attached connections; approvals go to connections that declared `capabilities.approvals`.
+  `axiom_rpc::Client` now fails a request sent after its connection closed instead of waiting.
+- **The CLI.** `axiom` uses the socket when a daemon listens, else it starts `axiomd
+  --no-listen` over stdio for the command.
+- **Windows (deferred):** no listener; every client starts its own daemon.
+
 ## Remote execution (M6 onwards)
 
 `axiomd` runs on the remote host; the shell connects through an SSH-forwarded

@@ -14,4 +14,4 @@ mod server;
 
 pub use client::Client;
 pub use router::{Closed, Notifier, RequestCtx, Router, ServerInfo};
-pub use server::{serve, ServeError};
+pub use server::{serve, serve_with, ServeError, ServeOptions};

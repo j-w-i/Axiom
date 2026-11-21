@@ -184,6 +184,8 @@ nothing else. Provider contract suite passes for all bundled providers.
 
 ## M3 — Agent runtime
 
+**Status (2026-11-22):** complete — all 15 tasks in `docs/tasks/M3/` tested; decisions in ADR-0015 (agent runtime), ADR-0016 (external agents through ACP) and ADR-0017 (Chat, a first-class full-window surface). Exit scenario `e2e/agent.mjs` 13/13 on Linux (both drivers, CI on Ubuntu); P2 +19.6 / +7.5 ms against M2. Owed by the owner: a real local model and real Claude Code / Codex through ACP. Record: `docs/roadmap/verification/M3.md`. Windows deferred.
+
 **Outcome.** A user can converse with a local or remote model that reads the
 workspace, proposes and applies patches under a permission policy, runs
 builds, and whose session can be resumed later. External agents can drive
@@ -201,13 +203,16 @@ Draft contract: `docs/protocols/agents.md`.
 | 3.5 Agent loop + sessions | Streaming loop, cancellation, JSONL transcripts, resume, compaction |
 | 3.6 Multi-client daemon | Local socket transport with token auth; `apps/cli` (thin client: `axiom task run`, `axiom agent …`) |
 | 3.7 MCP | `axiomd --mcp` server over the registry; MCP client for user-configured servers |
-| 3.8 UI | AI workspace: conversation, tool activity, diff review, approvals, checkpoints, model configuration |
+| 3.7b External agents (ADR-0016) | ACP client: Claude Code, Codex, Gemini CLI as provider kind `acp`, their fs/terminal/permissions through Axiom's gate and checkpoints |
+| 3.8 UI | **Chat** (full-window, no folder needed: Markdown, code, streaming, edit/regenerate, images, first-run setup; ADR-0017) and the AI dock beside the editor: tool activity, diff review, approvals, checkpoints, model configuration |
 
 **Exit criteria.** With a scripted provider in CI and a real local model
 manually: "add a function and fix the build" completes through tools only;
 every write was preceded by a checkpoint and can be restored; denied
 operations do not execute; the session resumes after restart; an external
-MCP client can list and call tools subject to the same policy.
+MCP client can list and call tools subject to the same policy; Claude Code / Codex run inside
+Axiom through ACP under the same gate (ADR-0016); with no folder open, a person can configure a
+model and hold a first-rate conversation in Chat entirely by keyboard (ADR-0017).
 
 ---
 

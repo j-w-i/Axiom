@@ -83,7 +83,9 @@ before the task that needs them** (no empty scaffolding).
   containment; directory listing with ignore rules; text file read/write with
   version checks; file watching.
 - **Depends on:** `axiom-protocol`, `tokio`, `ignore`, `notify`, `sha2`,
-  `thiserror`, `tempfile`.
+  `thiserror`, `tempfile`; from M3 (`search`, for the `workspace.search` tool) `regex`; the
+  `ignore` walker does the traversal (M3-TOOLS-001 chose this over the grep crates ADR-0015 §3
+  named: no new dependency).
 - **Public interface:** `Workspaces` (registry) with `open`, `close`, `get`;
   `Workspace` with `resolve(&WorkspacePath) -> Result<PathBuf>`, `list`,
   `read_text`, `write_text`, `watch() -> WatchHandle` (exact signatures:
@@ -205,22 +207,48 @@ before the task that needs them** (no empty scaffolding).
   environment, and parse their output into `Diagnostic`s (`build/diagnostics`).
 - **Depends on:** `protocol`, `exec`, `env`; `regex`.
 
+## M3 modules
+
+### `crates/agent` — `axiom-agent` (M3-MODEL-001…, M3-LOOP-001)
+- **Status:** model layer, providers and credentials (MODEL-001/002), tools (TOOLS-001), gate (GATE-001), checkpoints (CKPT-001), sessions and the loop (LOOP-001) built; MCP and ACP to come.
+- **Responsibility:** the agent runtime: message model, `ModelProvider` and its adapters
+  (Anthropic Messages, OpenAI Chat, scripted for tests), credentials, the tool registry types
+  and result bounding, the permission gate and audit log, checkpoints (shadow git), the session
+  journal and compaction, the loop, and the MCP codec (server and client halves).
+- **Depends on:** `protocol`, `store`; `reqwest` (rustls), `keyring`, `tokio`, `serde_json`,
+  `futures-util` (ADR-0015 §3). Runs the `git` program for checkpoints.
+- **Must not know:** the workspace, exec, env or build crates. Tools reach services only through
+  the closures `axiomd` registers (`modules.md` rule "agent → none").
+- **Rule:** no tool executes without a gate decision; no write without a checkpoint.
+
+### `apps/cli` — `axiom-cli`, binary `axiom` (M3-DAEMON-001, M3-MCP-001)
+- **Status:** built: `task run`, `build`, `agent sessions|send` (M3-DAEMON-001); `mcp` follows
+  (M3-MCP-001).
+- **Responsibility:** the command-line client: `task run`, `build`, `agent send|sessions`,
+  `mcp` (the MCP server front end). Connects to a running daemon's local socket, else spawns
+  its own `axiomd` over stdio.
+- **Depends on:** `protocol`, `rpc` (codec and typed client); `clap`, `tokio`, `serde_json`,
+  `directories` (the data dir, as the store finds it).
+- **Rule:** no business logic; everything is a protocol call.
+
 ## Dependency matrix (allowed edges)
 
-| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | desktop-bridge | axiomd |
-|---|---|---|---|---|---|---|---|---|---|
-| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
-| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
-| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
-| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ |
-| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
-| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
-| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | desktop-bridge | axiomd |
+|---|---|---|---|---|---|---|---|---|---|---|
+| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
+| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
+| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ |
+| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
+| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
+| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
+| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| desktop-tauri | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 
-The `env` and `build` rows are ADR-0014 §4.
+The `env` and `build` rows are ADR-0014 §4; the `agent` and `cli` rows are ADR-0015 §2.
 
 Later service crates follow the same rule: they may depend on `protocol` and
 on *lower* service crates listed in their task spec (e.g. `build` → `exec`,
@@ -241,6 +269,5 @@ change to record here.
 
 | Module | Contract today | Detailed design when |
 |--------|----------------|----------------------|
-| `agent` | `docs/protocols/agents.md` | start of M3 |
 | `lsp` | ADR-0004 §Language intelligence | start of M4 |
 | `inspect` | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | start of M5 |

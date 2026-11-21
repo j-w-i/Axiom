@@ -4,7 +4,104 @@
 //   cargo run -p axiom-protocol --example export_schema
 // then regenerate this file. `pnpm run check:types` fails when it is stale (ADR-0005).
 
-export type ArchiveFormat = ("tar.gz" | "tar.xz" | "zip") | "file";
+export type EventBody =
+  | {
+      attachments?: Attachment[];
+      images?: ImageRef[];
+      text: string;
+      type: "user";
+    }
+  | {
+      fromTurn: number;
+      type: "rewind";
+    }
+  | {
+      text: string;
+      type: "textDelta";
+    }
+  | {
+      /**
+       * For an external agent's plan or reasoning (ADR-0016); absent for the answer.
+       */
+      kind?: TextKind | null;
+      text: string;
+      type: "assistantText";
+    }
+  | {
+      callId: string;
+      effect: Effect2;
+      input: unknown;
+      /**
+       * Resolved targets, for display: workspace paths, or the argv joined.
+       */
+      targets?: string[];
+      tool: string;
+      type: "toolCall";
+    }
+  | {
+      callId: string;
+      isError: boolean;
+      /**
+       * The structured result (the tool's output type), or `{kind, message, hint}`.
+       */
+      output: {
+        [k: string]: unknown;
+      };
+      /**
+       * The policy rule that decided, for display.
+       */
+      rule?: string | null;
+      /**
+       * One line for the tool row ("42 lines", "exit 0 · 3.1 s", "denied by policy").
+       */
+      summary: string;
+      truncated?: boolean;
+      type: "toolResult";
+    }
+  | {
+      callId: string;
+      type: "interrupted";
+    }
+  | {
+      request: ApprovalRequest;
+      type: "approval";
+    }
+  | {
+      resolution: ApprovalResolution;
+      type: "approvalResolved";
+    }
+  | {
+      checkpoint: CheckpointInfo;
+      type: "checkpoint";
+    }
+  | {
+      result: RestoreResult;
+      type: "restored";
+    }
+  | {
+      summary: string;
+      /**
+       * Events up to and including this `seq` are replaced by the summary in the context.
+       */
+      throughSeq: number;
+      type: "compaction";
+    }
+  | {
+      cachedInputTokens?: number | null;
+      inputTokens: number;
+      outputTokens: number;
+      type: "usage";
+    }
+  | {
+      reason: TurnEndReason;
+      type: "turnEnd";
+    }
+  | {
+      kind: string;
+      message: string;
+      modelKind?: ModelErrorKind | null;
+      type: "error";
+    };
 /**
  * A path inside a workspace: relative to the workspace root, `/`-separated,
  * UTF-8, with no `.`/`..` segments, no leading `/`, and no trailing `/`.
@@ -16,6 +113,31 @@ export type ArchiveFormat = ("tar.gz" | "tar.xz" | "zip") | "file";
  * outside the root with [`ErrorKind::PermissionDenied`].
  */
 export type WorkspacePath = string;
+export type TextKind = "plan" | "thought";
+/**
+ * What a tool can do. Ordered from least to most consequential for display only; the gate
+ * decides by rule, not by order.
+ */
+export type Effect2 =
+  | "read"
+  | "writeWorkspace"
+  | "execute"
+  | "install"
+  | "network"
+  | "writeOutside"
+  | "delete"
+  | "credentials"
+  | "deploy";
+/**
+ * Opaque session identifier.
+ */
+export type SessionId = string;
+export type ApprovalDecision = "once" | "session" | "deny";
+export type ConflictReason = "modifiedSinceAgent" | "deletedSinceAgent" | "createdSinceAgent";
+export type TurnEndReason = ("maxTokens" | "refusal" | "cancelled" | "error") | "endTurn" | "toolLimit";
+export type ModelErrorKind =
+  "auth" | "rateLimited" | "contextTooLong" | "unavailable" | "invalidRequest" | "transport";
+export type ArchiveFormat = ("tar.gz" | "tar.xz" | "zip") | "file";
 export type Severity = "error" | "warning" | "info" | "hint";
 /**
  * Opaque identifier of a running or finished task, minted by `task/start`.
@@ -26,6 +148,7 @@ export type TaskId = string;
  * client's in-flight requests on one connection.
  */
 export type RequestId = number | string;
+export type Support = "yes" | "no" | "unknown";
 export type ChangeKind = "created" | "modified" | "removed";
 /**
  * What to run. `argv` is preferred: it involves no shell and no quoting.
@@ -37,6 +160,8 @@ export type Command =
   | {
       shell: string;
     };
+export type ProviderKind = "anthropic" | "openaiChat" | "scripted" | "acp";
+export type Decision = "allow" | "ask" | "deny";
 export type ToolLocation =
   | {
       kind: "managed";
@@ -81,7 +206,10 @@ export type ErrorKind =
       | "approval_denied"
       | "unknown"
     )
-  | "prerequisite_missing";
+  | "prerequisite_missing"
+  | "approval_required"
+  | "checkpoint_conflict"
+  | "model_error";
 export type Outcome = "succeeded" | "failed" | "cancelled";
 /**
  * Opaque content fingerprint (lowercase hex SHA-256 of the file bytes).
@@ -147,6 +275,109 @@ export type Stream = "stdout" | "stderr";
 export type ProviderSource = "builtin" | "user" | "workspace";
 export type TaskKind = "build" | "run" | "test" | "clean" | "other";
 
+/**
+ * One journal event. `seq` increases by one per persisted event within a session;
+ * a `textDelta` carries the `seq` of the event it will become part of and is never persisted.
+ */
+export interface AgentEvent {
+  event: EventBody;
+  seq: number;
+  sessionId: SessionId;
+  tsMs: number;
+  /**
+   * 1-based turn number (a turn starts with a `user` event).
+   */
+  turn: number;
+}
+export interface Attachment {
+  /**
+   * 1-based inclusive line range; absent means the whole file.
+   *
+   * @minItems 2
+   * @maxItems 2
+   */
+  lines?: [unknown, unknown] | null;
+  path: WorkspacePath;
+}
+/**
+ * An image stored with a session (shown with its `user` event; fetched with `agent/image`).
+ */
+export interface ImageRef {
+  bytes: number;
+  mediaType: string;
+  sha256: string;
+}
+export interface ApprovalRequest {
+  argv?: string[] | null;
+  /**
+   * "Allow for session" is offered (never for `credentials` or `deploy`).
+   */
+  canRemember: boolean;
+  /**
+   * A checkpoint will be taken before the tool runs.
+   */
+  checkpointPlanned: boolean;
+  effect: Effect2;
+  /**
+   * For edits: the unified diff that would be applied.
+   */
+  preview?: string | null;
+  /**
+   * Who asked: `session:<id>`, `mcp:<client name>`, `cli`.
+   */
+  principal: string;
+  requestId: string;
+  /**
+   * The rule that decided `ask` (display), or absent for the default.
+   */
+  rule?: string | null;
+  sessionId?: SessionId | null;
+  /**
+   * Resolved targets: workspace paths, or the argv joined.
+   */
+  targets: string[];
+  tool: string;
+}
+export interface ApprovalResolution {
+  /**
+   * Absent when withdrawn (cancelled, or the asking connection went away).
+   */
+  decision?: ApprovalDecision | null;
+  requestId: string;
+}
+export interface CheckpointInfo {
+  createdMs: number;
+  /**
+   * Why it was taken ("before fs.applyPatch", "before restore to 2").
+   */
+  label: string;
+  /**
+   * 1-based within the session.
+   */
+  number: number;
+  /**
+   * Files too large to capture (over 16 MiB).
+   */
+  skipped?: WorkspacePath[];
+  turn: number;
+}
+export interface RestoreResult {
+  checkpoint: number;
+  conflicts?: RestoreConflict[];
+  restored: WorkspacePath[];
+  /**
+   * The checkpoint taken just before restoring.
+   */
+  undoCheckpoint: number;
+}
+export interface RestoreConflict {
+  path: WorkspacePath;
+  reason: ConflictReason;
+}
+export interface ApproveParams {
+  decision: ApprovalDecision;
+  requestId: string;
+}
 export interface BuildDiagnostics {
   /**
    * No more diagnostics follow for this task.
@@ -199,6 +430,88 @@ export interface RelatedInfo {
 }
 export interface CancelParams {
   id: RequestId;
+}
+export interface Capabilities {
+  contextWindow?: number | null;
+  images: Support;
+  maxOutput?: number | null;
+  parallelToolCalls: Support;
+  streamingToolArgs: Support;
+  tools: Support;
+}
+export interface CapabilityOverrides {
+  contextWindow?: number | null;
+  images?: Support | null;
+  maxOutput?: number | null;
+  parallelToolCalls?: Support | null;
+  streamingToolArgs?: Support | null;
+  tools?: Support | null;
+}
+export interface CheckpointsResult {
+  checkpoints: CheckpointInfo[];
+}
+/**
+ * Protocol 0.3 (ADR-0015).
+ */
+export interface ClientCapabilities {
+  /**
+   * The client shows `agent/approvalRequested` to a person and answers with `agent/approve`.
+   */
+  approvals?: boolean;
+}
+export interface ConfigureProviderParams {
+  /**
+   * Stores this key in the credential store.
+   */
+  apiKey?: string | null;
+  /**
+   * Deletes the stored key.
+   */
+  clearKey?: boolean;
+  /**
+   * The new configuration (its `id` must equal `id`); absent removes the provider and its
+   * stored key.
+   */
+  config?: ProviderConfig | null;
+  id: string;
+}
+export interface ProviderConfig {
+  /**
+   * Read the API key from this environment variable instead of the credential store.
+   */
+  apiKeyEnv?: string | null;
+  /**
+   * API base URL; default per kind. HTTPS, or HTTP to a loopback host.
+   */
+  baseUrl?: string | null;
+  /**
+   * Overrides of the detected capability profile, applied to every model.
+   */
+  capabilities?: CapabilityOverrides | null;
+  /**
+   * `acp` only: the agent's program and arguments (ADR-0016).
+   */
+  command?: string[];
+  /**
+   * `acp` only: extra environment variables for the agent process (no secrets: agents use
+   * their own sign-in).
+   */
+  env?: {
+    [k: string]: string;
+  };
+  /**
+   * Stable id chosen by the user, `[a-z0-9-]+`.
+   */
+  id: string;
+  kind: ProviderKind;
+  /**
+   * Models to offer when the server cannot list them (or to restrict the list).
+   */
+  models?: string[];
+  /**
+   * Display name.
+   */
+  name: string;
 }
 export interface DetectResult {
   /**
@@ -311,7 +624,10 @@ export interface ErrorData {
         | "approval_denied"
         | "unknown"
       )
-    | "prerequisite_missing";
+    | "prerequisite_missing"
+    | "approval_required"
+    | "checkpoint_conflict"
+    | "model_error";
   /**
    * Whether retrying the identical request may succeed.
    */
@@ -371,7 +687,34 @@ export interface HostInfo {
    */
   pathSeparator: string;
 }
+/**
+ * An image, base64-encoded.
+ */
+export interface ImageData {
+  /**
+   * Base64 (standard alphabet, padded). At most 5 MiB decoded.
+   */
+  data: string;
+  /**
+   * `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
+   */
+  mediaType: string;
+}
+export interface ImageParams {
+  sessionId: SessionId;
+  sha256: string;
+  workspaceId?: WorkspaceId | null;
+}
 export interface InitializeParams {
+  /**
+   * Protocol 0.3: required on the daemon's local socket (the token in
+   * `<data dir>/axiomd.token`); ignored on stdio.
+   */
+  authToken?: string | null;
+  /**
+   * Protocol 0.3: what this client can do.
+   */
+  capabilities?: ClientCapabilities | null;
   client: PeerInfo;
   /**
    * Highest protocol version the client speaks, `MAJOR.MINOR`.
@@ -514,6 +857,33 @@ export interface Notification {
   method: string;
   params?: unknown;
 }
+export interface ModelInfo {
+  capabilities: Capabilities;
+  displayName: string;
+  id: string;
+}
+export interface ModelsParams {
+  /**
+   * Only this provider.
+   */
+  providerId?: string | null;
+}
+export interface ModelsResult {
+  providers: ProviderStatus[];
+}
+export interface ProviderStatus {
+  config: ProviderConfig;
+  /**
+   * Why the models could not be listed (one sentence).
+   */
+  error?: string | null;
+  /**
+   * A key is stored in the credential store (or `apiKeyEnv` is set in the daemon's
+   * environment). The key itself is never sent.
+   */
+  hasKey: boolean;
+  models: ModelInfo[];
+}
 export interface OpenParams {
   /**
    * Absolute host path in host-native form.
@@ -544,6 +914,44 @@ export interface PlanInstallParams {
   method?: number | null;
   providerId: string;
   version: string;
+}
+export interface Policy {
+  /**
+   * Decision when no rule matches.
+   */
+  default: "allow" | "ask" | "deny";
+  rules?: PolicyRule[];
+}
+/**
+ * A rule matches a call when every field it sets matches. Rules with a `tool`, `path` or
+ * `argvPrefix` are more specific than rules without; among matching rules of equal
+ * specificity, deny > ask > allow.
+ */
+export interface PolicyRule {
+  /**
+   * Matches an `Execute` call whose argv starts with these elements.
+   */
+  argvPrefix?: string[] | null;
+  decision: Decision;
+  effect?: Effect2 | null;
+  /**
+   * Workspace-relative glob (`src/**`); matches when every target path matches.
+   */
+  path?: string | null;
+  /**
+   * Exact tool name, or a prefix ending in `.*` (`mcp.github.*`).
+   */
+  tool?: string | null;
+}
+export interface PolicyParams {
+  workspaceId?: WorkspaceId | null;
+}
+export interface PolicyResult {
+  user: Policy;
+  /**
+   * The workspace's rules (they can only make `user` stricter).
+   */
+  workspace?: Policy | null;
 }
 export interface ProviderInfo {
   description: string;
@@ -599,6 +1007,31 @@ export interface RecentWorkspace {
   name: string;
   root: string;
 }
+export interface RestoreParams {
+  checkpoint: number;
+  sessionId: SessionId;
+  /**
+   * Restore the files without conflicts and leave the others.
+   */
+  skipConflicts?: boolean;
+  /**
+   * Required in practice (checkpoints exist only for workspace sessions); optional on the
+   * wire with the other session references (ADR-0017 §2).
+   */
+  workspaceId?: WorkspaceId | null;
+}
+export interface RevealParams {
+  /**
+   * 1-based.
+   */
+  column?: number;
+  /**
+   * 1-based.
+   */
+  line: number;
+  path: WorkspacePath;
+  workspaceId: WorkspaceId;
+}
 export interface RunParams {
   providerId: string;
   task: string;
@@ -606,6 +1039,88 @@ export interface RunParams {
 }
 export interface RunResult {
   taskId: TaskId;
+}
+export interface SendParams {
+  /**
+   * Context the user attached (an editor selection, a file).
+   */
+  attachments?: Attachment[];
+  /**
+   * Edit / regenerate: this message replaces turn N and every later turn in the context
+   * (a `rewind` event is journalled first). Errors: `invalid_params` if N is not a turn.
+   */
+  fromTurn?: number | null;
+  /**
+   * Pasted or dropped images (ADR-0017 §3).
+   */
+  images?: ImageData[];
+  sessionId: SessionId;
+  text: string;
+  workspaceId?: WorkspaceId | null;
+}
+export interface SessionCreateParams {
+  model: string;
+  providerId: string;
+  title?: string | null;
+  /**
+   * Absent: a conversation without a workspace (no workspace tools; ADR-0017).
+   */
+  workspaceId?: WorkspaceId | null;
+}
+export interface SessionInfo {
+  /**
+   * Milliseconds since the Unix epoch.
+   */
+  createdMs: number;
+  model: string;
+  /**
+   * Approvals waiting for an answer.
+   */
+  pendingApprovals: number;
+  providerId: string;
+  /**
+   * A turn is running.
+   */
+  running: boolean;
+  sessionId: SessionId;
+  title: string;
+  updatedMs: number;
+}
+export interface SessionListParams {
+  /**
+   * Absent: the conversations without a workspace.
+   */
+  workspaceId?: WorkspaceId | null;
+}
+export interface SessionListResult {
+  sessions: SessionInfo[];
+}
+export interface SessionOpenResult {
+  /**
+   * Every persisted event, in `seq` order.
+   */
+  events: AgentEvent[];
+  /**
+   * Approvals of this session still waiting (also re-sent as `agent/approvalRequested`
+   * to an approving connection).
+   */
+  pending?: ApprovalRequest[];
+  session: SessionInfo;
+}
+export interface SessionRef {
+  sessionId: SessionId;
+  /**
+   * Absent for a conversation without a workspace.
+   */
+  workspaceId?: WorkspaceId | null;
+}
+export interface SessionRenameParams {
+  sessionId: SessionId;
+  /**
+   * 1–120 characters.
+   */
+  title: string;
+  workspaceId?: WorkspaceId | null;
 }
 export interface SetParams {
   values: {
@@ -658,6 +1173,46 @@ export interface TaskRef {
 }
 export interface TasksResult {
   tasks: TaskInfo2[];
+}
+export interface ToolCallParams {
+  input: unknown;
+  /**
+   * Recorded in the audit log and shown in approvals, e.g. `mcp:claude-code`.
+   */
+  principal: string;
+  tool: string;
+  workspaceId: WorkspaceId;
+}
+export interface ToolCallResult {
+  isError: boolean;
+  /**
+   * The structured result, or `{kind, message, hint}` when `isError`.
+   */
+  output: {
+    [k: string]: unknown;
+  };
+  /**
+   * The same result rendered as text for a model.
+   */
+  text: string;
+  truncated?: boolean;
+}
+export interface ToolInfo {
+  description: string;
+  effect: Effect2;
+  /**
+   * JSON Schema of the input object.
+   */
+  inputSchema: {
+    [k: string]: unknown;
+  };
+  /**
+   * Dotted name, e.g. `fs.read`.
+   */
+  name: string;
+}
+export interface ToolsResult {
+  tools: ToolInfo[];
 }
 export interface TrustParams {
   trusted: boolean;
