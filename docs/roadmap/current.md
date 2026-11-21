@@ -2,6 +2,17 @@
 
 _Last updated: 2026-11-22._
 
+## FL — Flutter shell: in progress (2026-11-22)
+
+The owner chose a full Flutter rewrite of the desktop shell (ADR-0020): the daemon and protocol
+are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity gate. 12 tasks in
+`docs/tasks/FL/`, branch `task/flutter` (from `task/m4`). M5 waits for the switch. Flutter
+3.50.1 is installed in `~/flutter` (dev-setup.md §Flutter).
+
+- **FL-ARCH-001 implemented (2026-11-22):** `apps/desktop-flutter` (widgets layer only; a test
+  rejects Material and Cupertino), `scripts/check.sh flutter` (format, analyze, tests,
+  licences), `scripts/check_dart_licences.py`, the CI job on Ubuntu and macOS, the docs.
+
 ## M2 — Environments and builds: complete (2026-11-21)
 
 All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).

@@ -2,7 +2,7 @@
 # The single quality gate. Every task must leave this passing.
 # Usage: scripts/check.sh            (everything: Rust + editor + the Tauri shell)
 #        scripts/check.sh rust       (only the Rust workspace + repository guards)
-#        scripts/check.sh editor | tauri   (one part)
+#        scripts/check.sh editor | tauri | flutter   (one part)
 #        scripts/check.sh e2e        (Tauri end-to-end test, headless, ~2 min)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -59,6 +59,24 @@ if [[ ( "$what" == all || "$what" == tauri ) && -f apps/desktop-tauri/package.js
   cargo clippy -p axiom-desktop-tauri --all-targets -- -D warnings
   cargo clippy -p axiom-desktop-tauri --all-targets --features e2e -- -D warnings
   cargo test -p axiom-desktop-tauri   # includes the release guard
+fi
+
+# The Flutter shell (ADR-0020). Flutter is looked for on PATH, then in ~/flutter (dev-setup.md).
+if [[ ( "$what" == all || "$what" == flutter ) && -f apps/desktop-flutter/pubspec.yaml ]]; then
+  export PATH="$PATH:$HOME/flutter/bin"
+  if ! command -v flutter >/dev/null 2>&1; then
+    if [[ "$what" == flutter ]]; then
+      echo "flutter is not installed (docs/contributing/dev-setup.md §Flutter)" >&2; exit 1
+    fi
+    echo "SKIPPED: the Flutter shell (flutter is not installed; see dev-setup.md). CI always runs it."
+  else
+    step "flutter shell: dependencies (lockfile enforced), format, analyze, tests, licences"
+    (cd apps/desktop-flutter && flutter pub get --enforce-lockfile >/dev/null \
+      && dart format --output=none --set-exit-if-changed lib test \
+      && flutter analyze --fatal-infos \
+      && flutter test)
+    python3 scripts/check_dart_licences.py apps/desktop-flutter >/dev/null
+  fi
 fi
 
 # End-to-end (real app, real webview, real daemon, real input). Needs a private

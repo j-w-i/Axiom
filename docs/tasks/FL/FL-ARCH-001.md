@@ -1,8 +1,8 @@
 ---
 id: FL-ARCH-001
 title: Flutter shell: docs, module edges, toolchain in dev-setup, CI and check.sh
-status: planned
-status_note:
+status: implemented
+status_note: 2026-11-22; CI pending
 depends_on: []
 order: 520
 scope: docs/architecture/, docs/contributing/dev-setup.md, docs/roadmap/, .github/workflows/ci.yml, scripts/check.sh, scripts/check_dart_licences.py, apps/desktop-flutter/ (empty app, analysis options)

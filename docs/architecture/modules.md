@@ -24,7 +24,8 @@ crates/
   inspect/                 inspection sessions, source resolution, verify  M5
 apps/
   desktop/                 Qt shell (C++/QML) - retired by M1.5 task T-15  M1
-  desktop-tauri/           Tauri shell: Rust host + React webview          M1.5
+  desktop-tauri/           Tauri shell: Rust host + React webview          M1.5 (retired by FL-QA-001)
+  desktop-flutter/         Flutter shell (Dart, widgets layer only)         FL (ADR-0020)
   cli/                     `axiom` command-line client (Rust)              M3
 editor/                    editor surface (TypeScript, Monaco)             M1
 providers/<id>/            provider manifests (+ optional helper)          rust/ EXISTS
@@ -177,6 +178,18 @@ before the task that needs them** (no empty scaffolding).
 - **Rule:** the webview never touches the filesystem, never spawns a process
   and never speaks the wire protocol itself; it calls the host's commands.
   No business logic in either half.
+
+### `apps/desktop-flutter` — Flutter shell (ADR-0020)
+- **Responsibility:** the desktop shell that replaces `apps/desktop-tauri` once FL-QA-001's gate
+  passes. One Dart process that presents daemon state and forwards user intent.
+- **Parts:** `lib/daemon/` (spawns and supervises `axiomd`, JSON-RPC over its stdio, wire types
+  generated from `schemas/`), `lib/ui/` (the design system), `lib/state/` (stores), and one
+  folder per surface (`shell`, `files`, `editor`, `console`, `scm`, `search`, `env`, `chat`).
+- **Depends on:** Flutter's `widgets` layer and Dart packages that are MIT, BSD or Apache-2.0
+  (`scripts/check_dart_licences.py`); no Material or Cupertino (a test enforces it).
+- **Rule:** like the Tauri shell, it never touches workspace files and never runs processes
+  other than `axiomd`; no business logic. It has no Rust dependency: the daemon is the only
+  edge, over the process boundary.
 
 ### `editor/` — package `@axiom/editor`
 - **Responsibility:** the editor surface: Monaco setup, workers, document

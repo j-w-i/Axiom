@@ -239,6 +239,23 @@ are visible and diffable.
 
 ---
 
+## FL — Flutter shell
+
+**Status (2026-11-22):** planned — ADR-0020 (owner's decision: a full Flutter rewrite of the
+desktop shell); 12 task files in `docs/tasks/FL/`. Windows deferred.
+
+**Outcome.** The desktop shell is a Flutter app (`apps/desktop-flutter`) over the unchanged
+daemon, in a visual language that combines Precision Instrument with Temporal Tactility, with
+Chat under Files reaching Axiom's agent and external agent harnesses, and every interaction at
+the display's refresh rate.
+
+**Exit criterion.** The M1–M4 exit scenarios pass in the Flutter shell on Linux and macOS; no
+frame over 16.7 ms in the listed interactions at 125 % scale; a11y in both themes; packages
+verified. Then `scripts/run.sh` launches it and the Tauri shell is retired
+(`tauri-shell-final`).
+
+---
+
 ## M5 — Visual intelligence (web)
 
 **Outcome.** The closed loop of the product vision, for React + Vite apps.

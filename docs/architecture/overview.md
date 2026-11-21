@@ -1,6 +1,9 @@
 # Architecture overview
 
-Status: **decided** for the desktop shell (ADR-0012); **directional** for later
+Status: **migrating**: ADR-0020 moves the desktop shell to Flutter (`apps/desktop-flutter`),
+gated so that the Tauri shell below stays the app `scripts/run.sh` launches until FL-QA-001.
+The daemon side of this picture does not change. Earlier status: **decided** for the desktop
+shell (ADR-0012); **directional** for later
 milestones, with contracts drafted in `crates/protocol`. M1's shell was Qt
 (`apps/desktop`); milestone M1.5 replaces it with Tauri 2 + React
 (`apps/desktop-tauri`), gated so that Qt remains the release artifact until
