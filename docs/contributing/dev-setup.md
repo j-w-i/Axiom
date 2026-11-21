@@ -8,30 +8,31 @@ shape and are exercised by CI; report corrections.
 | Tool | Version | Notes |
 |------|---------|-------|
 | Rust | stable ≥ 1.85 | `rustup`; `rust-toolchain.toml` selects stable + rustfmt + clippy |
-| Node.js | ≥ 22 | for the editor bundle |
-| pnpm | ≥ 9 | `npm i -g pnpm` |
-| Python 3 | ≥ 3.9 | `scripts/tasks.py`, `scripts/check_deps.py` |
-| Linux only | WebKitGTK 4.1 + GTK 3 dev packages | for the Tauri shell; without root run `apps/desktop-tauri/scripts/sysroot.sh` |
-| macOS / Windows | Xcode CLT / WebView2 runtime + MSVC build tools | see the CI `tauri` job for the exact steps |
-| Flutter | stable 3.50.1 | the Flutter shell (ADR-0020); see §Flutter |
+| Flutter | stable 3.50.1 | the desktop shell (ADR-0020); see §Flutter |
+| Python 3 | ≥ 3.9 | `scripts/tasks.py`, `scripts/check_deps.py`, `scripts/check_dart_licences.py` |
+| Linux only | clang, CMake, Ninja, pkg-config, GTK 3 dev packages | for the shell's Linux build; without root (Fedora) run `scripts/sysroot.sh`; `xvfb` (or `kwin_wayland`) for the end-to-end suites |
+| macOS | Xcode | for the shell's macOS build; see the CI `flutter` job |
+| Node.js | optional | only for the real TypeScript language server in `lsp_test.dart` and for agent harnesses the daemon installs with `npm` |
+
+Windows: the Rust workspace builds and is tested in CI; there is no Windows desktop build of the
+shell yet (deferred by the owner).
 
 ## Build and check
 
 ```sh
-scripts/check.sh              # everything: fmt, clippy, tests, schema freshness, editor, Tauri shell
-scripts/check.sh rust         # Rust only
-scripts/check.sh editor       # editor only: install --frozen-lockfile, check, build, test
-scripts/check.sh tauri        # the Tauri shell only (Linux needs WebKitGTK 4.1 / GTK 3 dev packages)
-scripts/check.sh flutter      # the Flutter shell only: format, analyze, tests, licences
+scripts/check.sh              # everything: the Rust workspace and the shell
+scripts/check.sh rust         # Rust only (+ schema freshness, task board, dependency matrix, deny)
+scripts/check.sh flutter      # the shell only: lockfile, wire types, format, analyze, tests, licences
+scripts/check.sh e2e          # the shell's end-to-end suites, in a private compositor (also: flutter-e2e)
+scripts/check.sh package      # build the deb + rpm (macOS: Axiom.app) and verify them as installed copies
 scripts/run.sh                # launch the desktop app
 ```
-Editor development in a plain browser (fake host, sample document):
-`cd editor && pnpm install && pnpm dev`.
-`check.sh` is the gate for every task and for CI.
+`check.sh` is the gate for every task and for CI. `scripts/run.sh -- --gallery` shows the
+design system's gallery (`lib/ui/gallery.dart`) instead of the app.
 
 ## Flutter
 
-The Flutter shell (`apps/desktop-flutter`, ADR-0020) needs the Flutter SDK. The scripts look
+The desktop shell (`apps/desktop-flutter`, ADR-0020) needs the Flutter SDK. The scripts look
 for it on `PATH`, then in `~/flutter`:
 
 ```sh
@@ -42,14 +43,29 @@ git clone --depth 1 -b stable https://github.com/flutter/flutter.git ~/flutter
 
 The Linux desktop build also needs clang, CMake, Ninja, pkg-config and the GTK 3 development
 files (Fedora: `clang cmake ninja-build gtk3-devel`; Ubuntu: `clang cmake ninja-build
-libgtk-3-dev`). Without root, the GTK 3 files from `apps/desktop-tauri/scripts/sysroot.sh` work:
-`source apps/desktop-tauri/scripts/env.sh` before `flutter build linux`.
+libgtk-3-dev`). Without root on Fedora, `scripts/sysroot.sh` downloads the GTK 3 development
+files and Xvfb into `.toolchains/gtk-sysroot`; `source scripts/env.sh` before
+`flutter build linux` (the scripts do it themselves).
+
+After a protocol change, regenerate the shell's wire types from `schemas/`:
+`cd apps/desktop-flutter && dart run tool/gen_types.dart` (`--check` is what `check.sh` runs).
 
 ## Running the app
 
 ```sh
-scripts/run.sh                # builds the editor bundle, the UI, axiomd and the host, then launches
+scripts/run.sh                # builds a debug axiomd and a release build of the shell, then launches
+scripts/run.sh -- <app args>  # e.g. -- --data-dir /tmp/axiom-try
 ```
+On Linux it also keeps a desktop entry and the icons in `~/.local/share` (`dev.axiom.Axiom`) so
+the window shows Axiom's name and icon; `AXIOM_NO_DESKTOP_ENTRY=1` skips that. This opens a
+real window; tests never use it.
+
+Packages: `scripts/bundle.sh [out-dir]` (default `target/bundle`) builds a `.deb` and an `.rpm`
+on Linux (`/usr/lib/axiom/` with `axiom` and `axiomd` side by side, `/usr/bin/axiom`, the
+desktop entry `dev.axiom.Axiom.desktop`, hicolor icons) and a zipped `Axiom.app` on macOS
+(`axiomd` in `Contents/MacOS`). `scripts/verify-package.sh <package>` unpacks a deb or rpm
+into a prefix (`--app Axiom.app` checks the bundle in place) and runs it with `--self-test`,
+which must find the sibling `axiomd` and print `connected …`.
 
 ## The command line (`axiom`)
 
@@ -67,10 +83,19 @@ target/debug/axiom agent sessions
 
 ## Headless GUI tests
 
-End-to-end and benchmark runs go through `apps/desktop-tauri/scripts/headless.sh`
-(a private Xvfb on Linux); never open a window on your own desktop from a test.
-`scripts/check.sh e2e` runs the suites; `scripts/check.sh package` checks the deb
-and rpm as installed copies.
+Never open a window on your own desktop from a test. On Linux:
+- `apps/desktop-flutter/scripts/e2e.sh [suite_test.dart …]` (= `scripts/check.sh e2e`) runs
+  the end-to-end suites in a private `kwin_wayland --virtual` when it is installed, else in a
+  private Xvfb (`scripts/headless.sh`); `AXIOM_E2E_DISPLAY=xvfb` forces Xvfb.
+  `AXIOM_E2E_NETWORK=1` adds the M2 install scenario (`env_rust_test.dart`, needs the internet);
+  `AXIOM_REQUIRE_LSP=1` makes a missing real language server fail instead of skip.
+- `apps/desktop-flutter/scripts/frames.sh` measures frame timings in a profile build in a
+  private virtual KWin at 2560×1440, 125 % (`AXIOM_FRAMES_TARGET=editor_frames_test.dart` or
+  `chat_frames_test.dart` for the other benchmarks); it needs `kwin_wayland`.
+- Anything else GUI: `source scripts/env.sh; source scripts/headless.sh` (a private Xvfb,
+  Wayland removed, private XDG directories; it refuses to run without Xvfb), then
+  `headless_stop`.
+`scripts/check.sh package` checks the deb and rpm as installed copies.
 
 ## Data locations
 

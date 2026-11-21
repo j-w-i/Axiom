@@ -4,6 +4,10 @@ Status: **Accepted** (2026-11-22) by the project owner ("Switch the entire app's
 then "Full Flutter rewrite" when asked to choose between a full rewrite, a Flutter shell with the
 editor in a web view, and keeping Tauri with a Flutter look).
 
+**Implemented** (2026-11-22, FL-QA-001): the gate of §7 is recorded in
+`docs/roadmap/verification/FL.md`. The Flutter shell is the app, and the Tauri shell and `editor/`
+are retired; their last commit is tagged `tauri-shell-final`.
+
 Supersedes ADR-0012 decision 1 (shell technology); the process split it kept is unchanged.
 Amends:
 - ADR-0004: the editor is no longer Monaco, and editor-bridge-1 retires with the Tauri shell;

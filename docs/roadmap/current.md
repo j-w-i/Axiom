@@ -2,12 +2,31 @@
 
 _Last updated: 2026-11-22._
 
-## FL — Flutter shell: in progress (2026-11-22)
+## FL — Flutter shell: complete (2026-11-22)
 
-The owner chose a full Flutter rewrite of the desktop shell (ADR-0020): the daemon and protocol
-are unchanged; the Tauri shell stays the launched app until FL-QA-001's parity gate. 12 tasks in
-`docs/tasks/FL/`, branch `task/flutter` (from `task/m4`). M5 waits for the switch. Flutter
-3.50.1 is installed in `~/flutter` (dev-setup.md §Flutter).
+The owner chose a full Flutter rewrite of the desktop shell (ADR-0020). The daemon and protocol
+are unchanged. **The Flutter shell is now the app.** `scripts/run.sh` launches it, and the Tauri
+shell and `editor/` are retired (tag `tauri-shell-final`). 12 tasks in `docs/tasks/FL/`, branch
+`task/flutter` (from `task/m4`, so it carries M4). Flutter 3.50.1 is in `~/flutter`
+(dev-setup.md §Flutter).
+
+The gate is recorded in `verification/FL.md`:
+- the M1–M4 exit scenarios pass in Flutter;
+- no frame is over 16.7 ms at 125 %;
+- accessibility in both themes passes;
+- the .deb and .rpm verify as installed copies;
+- startup is about 180 ms faster than the Tauri shell, except a first-ever launch that compiles
+  its shaders.
+
+Owed: Windows (deferred by the owner); the CI run's macOS and real-Rust-install results.
+**Next: merge `task/flutter` (M4 + FL) to main once CI is green, then M5.**
+
+- **FL-QA-001 implemented (2026-11-22):**
+  - parity: signature help, code actions, references, symbols, highlights, tab drag;
+  - `a11y_test`, and `agent_test` (the M3 exit scenario);
+  - packaging: `scripts/bundle.sh` and `scripts/verify-package.sh` with `--self-test`;
+  - startup measured against Tauri;
+  - Flutter became the default and Tauri was retired.
 
 - **FL-ARCH-001 implemented (2026-11-22):** `apps/desktop-flutter` (widgets layer only; a test
   rejects Material and Cupertino), `scripts/check.sh flutter` (format, analyze, tests,

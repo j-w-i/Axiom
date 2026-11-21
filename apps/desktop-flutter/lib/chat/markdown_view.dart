@@ -373,6 +373,17 @@ TextSpan _inline(BuildContext context, _Links links, List<md.Node>? nodes, TextS
         );
         return;
       }
+      if (n.tag == 'img') {
+        // Remote images are not loaded: their alt text stands in, as in the Tauri shell.
+        final alt = n.attributes['alt'] ?? '';
+        out.add(
+          TextSpan(
+            text: '[image: ${alt.isEmpty ? 'no description' : alt}]',
+            style: s.copyWith(color: c.ink2),
+          ),
+        );
+        return;
+      }
       if (n.tag == 'br') {
         out.add(TextSpan(text: '\n', style: s));
         return;

@@ -4,13 +4,13 @@
 
 | Component | Trust | Why |
 |-----------|-------|-----|
-| `axiom`, `axiomd`, bundled editor assets | trusted | we build and ship them |
+| `axiom`, `axiomd`, bundled fonts and icons | trusted | we build and ship them |
 | Workspace contents (source, build scripts, config) | **untrusted data** | opening a folder must be safe; *running* it is a user decision |
 | Task/build processes | run with the user's full privileges (M1) | same as a terminal; isolation is opt-in later (ADR-0010) |
 | Provider manifests | untrusted data, interpreted | a manifest cannot execute anything but its declared argv, each through the permission gate |
 | Provider helper processes, language servers, MCP servers | untrusted code | separate processes; started only after the user enabled that provider/server |
 | Model output, tool results, file contents read by an agent | untrusted data | text can never grant permissions (prompt-injection rule) |
-| Pages shown in the preview (M5) | untrusted | isolated webview/profile, no bridge object, no host commands |
+| Pages shown in the preview (M5) | untrusted | opened in the person's browser, not in the shell (ADR-0020 §8); the injected adapter talks only to the daemon |
 
 ## Paths (M1, enforced in `axiom-workspace`)
 
@@ -59,7 +59,32 @@ waiting for still completes its own cleanup.
 | Manager choice | The distribution's own manager (os-release `ID`/`ID_LIKE`) when present, else the first of apt, dnf, pacman; brew on macOS; winget on Windows | `detects_manager` |
 | Verified | Each required tool is re-detected on `PATH` afterwards | `runs_only_approved_plan`; CI: `ci_install.rs` `system_package_install_through_pkexec_shim` (real apt `hello` on Ubuntu) |
 
-## Shell webview (Tauri, M1.5)
+## The shell process (Flutter, since FL-QA-001)
+
+- **No web view.** The shell renders its own widgets (ADR-0020); it loads no HTML, runs no
+  JavaScript and has no CSP, asset protocol or host-command list. Its assets (fonts, icons) are
+  bundled in the build.
+- **One native process with the person's rights.** Unlike the Tauri page, the UI code is not
+  sandboxed from the file system: what keeps it from touching workspace files or running
+  processes is the architecture rule (`modules.md`, review), not a capability boundary. What it
+  does outside the protocol:
+  - spawns and supervises `axiomd` (`lib/daemon/client.dart`);
+  - opens an `http`/`https` link the person clicked in the system browser, through the OS
+    opener (`xdg-open`, `open`; `lib/app/open_link.dart`), refusing every other scheme;
+  - shows the system folder picker and image picker (`file_selector`) and reads only the
+    images the person picked (Chat attachments);
+  - reads and writes its own layout file, `shell-local.json` (`lib/app/local_prefs.dart`).
+- **Protocol access.** Any part of the UI can issue any method a client may issue (including
+  `fs/writeFile` and `task/start`), as the Tauri page could; the code is our own, with no
+  remote content.
+- **Release builds.** The end-to-end suites (`integration_test/`) are compiled only by
+  `flutter test` / `flutter drive`; the release build has no test driver, and Flutter's VM
+  service (the debugging port) exists only in debug and profile builds. `--self-test` (package verification) only connects to the daemon, prints the
+  result and quits.
+
+## Shell webview (Tauri, M1.5; retired by FL-QA-001, tag `tauri-shell-final`)
+
+The Tauri shell's controls, kept as the record of how it was built:
 
 - Assets are bundled and served by Tauri's asset protocol from `dist/`; there
   is no custom scheme handler of ours and no filesystem path reaches the page.
@@ -108,7 +133,7 @@ waiting for still completes its own cleanup.
   page, no `frame-src`).
 - Webview remote debugging is never enabled by a release build.
 
-## Editor surface (Qt, until T-15)
+## Editor surface (Qt, retired by T-15)
 
 - Loaded only from `axiom://editor/…`, a custom scheme registered as
   `SecureScheme | CorsEnabled | FetchApiAllowed` (not `LocalAccessAllowed`).
@@ -169,19 +194,22 @@ waiting for still completes its own cleanup.
 - **Limit.** Approval is consent, not isolation: an allowed `task.run` runs with the user's
   rights (ADR-0010 isolation backends are M6).
 
-## Model output in the webview (Chat; M3-UI-001)
-- **Markdown.** Assistant text is rendered with `react-markdown` + `remark-gfm`. Raw HTML in
-  model output is shown as escaped text, never as elements; no `rehype-raw`.
-- **Links.** They open only through the host's `open_external` (http/https only), never in the
-  webview.
-- **Images.** Remote images in Markdown are not loaded; they render as `[image: alt]` (no
+## Model output in the shell (Chat; M3-UI-001, FL-CHAT-001)
+- **Markdown.** Assistant text is parsed by the `markdown` package (GitHub-flavoured) and drawn
+  with Axiom's own widgets (`lib/chat/markdown_view.dart`). There is no HTML renderer: raw HTML
+  in model output stays text, never elements.
+- **Links.** Only `http`/`https` links are tappable; they open through `openExternal` in the
+  system browser. Other links are shown, not followed.
+- **Images.** Images in Markdown are never loaded (the renderer draws no image element, so no
   tracking pixels).
-- **Code blocks.** They are coloured by Monaco's `colorize`, whose output escapes the text. That
-  is the only `dangerouslySetInnerHTML`.
-- **Images the user attaches.** They are read by the webview from a paste, a drop or a file
-  picker the user operates; they go to the daemon as base64 and are stored content-addressed
-  next to the journal. The webview reads no other files.
-- Tests: `tests/chat.test.tsx` covers scripts, event handlers, raw tags and remote images.
+- **Code blocks.** They are coloured with `re_highlight` into text spans; nothing is
+  interpreted.
+- **Images the user attaches.** They are read by the shell from an image file the user picks
+  (PNG, JPEG, GIF or WebP, at most 5 MiB); they go to the daemon as base64 and are stored
+  content-addressed next to the journal.
+- Tests: `test/chat/markdown_test.dart` covers the structure; the HTML, link and image rules
+  above have no Flutter test yet (the Tauri suite `tests/chat.test.tsx`, which covered them,
+  retired with that shell).
 
 ## External agents (ACP; M3-ACP-001)
 - **Inside the gate.** Their file reads, writes and terminals are gated tools (`acp.*`) under
@@ -235,13 +263,19 @@ Axiom uses three distinct words and the UI must too:
 - Managed installs require a SHA-256 for every artifact (`provider.rs`
   `Checksum`); no checksum, no install. Archives are extracted with path
   traversal and link checks into a staging directory, then renamed.
-- The editor bundle pins exact npm versions with a lockfile; Rust uses
-  `Cargo.lock`; `cargo deny` (licences + advisories) is added in M1-CI-001.
+- The shell pins its Dart packages with `pubspec.lock` (`flutter pub get --enforce-lockfile`
+  in `scripts/check.sh`), and `scripts/check_dart_licences.py` rejects any licence but MIT,
+  BSD or Apache-2.0; Rust uses `Cargo.lock`; `cargo deny` (licences + advisories) is added in
+  M1-CI-001.
 
 
 ## Test-only code in the desktop shell
 
-The end-to-end suites drive the app through an **embedded W3C WebDriver
+Flutter shell: the end-to-end suites are `integration_test` programs that link the app's own
+library and drive it in-process; nothing test-only is compiled into the release build, so there
+is no driver to guard against. The section below is the Tauri shell's (retired by FL-QA-001).
+
+The Tauri end-to-end suites drove the app through an **embedded W3C WebDriver
 server** (`tauri-plugin-wdio-webdriver`, MIT, pinned `=2.0.0-next.0`). It can
 run arbitrary JavaScript in the page, so it is treated as a capability that
 must never reach a user:
@@ -263,8 +297,9 @@ must never reach a user:
 
 - M1 has no isolation at all for tasks: equivalent to a terminal.
 - TOCTOU on path containment (above).
-- The shell now depends on three web engines (WebKitGTK, WebView2, WKWebView)
-  whose patch cadence it does not control. The UI loads no remote content,
-  which bounds the exposure. The M5 preview *does* load arbitrary pages and
-  must use an isolated profile/webview; its engine on Tauri is unresolved
-  (ADR-0012 Consequences, spike M5-PRE-001).
+- The shell's UI code runs with the person's full rights and no sandbox (above); the
+  no-files, no-processes rule is enforced by review, not by a capability boundary.
+- Unsaved text is not kept across a shell crash: the Tauri host's in-memory snapshots
+  (`snapshot_put`) have no Flutter counterpart.
+- Since FL-QA-001 the shell depends on no web engine. The M5 preview *does* load arbitrary
+  pages; it opens in the person's browser (ADR-0020 §8), whose isolation is that browser's.

@@ -1,7 +1,7 @@
 # Axiom
 
-An open-source, cross-platform, LLM-native development platform: a Tauri 2
-desktop application (React + Monaco) over a Rust service daemon that manages workspaces,
+An open-source, cross-platform, LLM-native development platform: a Flutter
+desktop application over a Rust service daemon that manages workspaces,
 toolchains and builds, hosts AI agents with structured tools and
 permissions, and can map elements of a running UI back to their source so
 that AI-made changes are verified rather than assumed.
@@ -16,24 +16,26 @@ usable yet. See [`docs/roadmap/current.md`](docs/roadmap/current.md).
 - Setup: [`docs/contributing/dev-setup.md`](docs/contributing/dev-setup.md).
 
 ```sh
-scripts/check.sh               # the gate: Rust, editor and the desktop shell
+scripts/check.sh               # the gate: Rust and the desktop shell
 scripts/run.sh                 # launch the desktop app
 scripts/tasks.py               # task board
 ```
 
-On Linux the Tauri shell needs the WebKitGTK 4.1 / GTK 3 development packages
-(`apps/desktop-tauri/scripts/sysroot.sh` extracts them locally without root).
-The earlier Qt shell was retired by task T-15; it lives on at the tag `qt-shell-final`.
+The desktop shell is `apps/desktop-flutter` (Flutter, ADR-0020); it needs the Flutter SDK, and
+on Linux the GTK 3 development packages (`scripts/sysroot.sh` extracts them locally without
+root on Fedora). Linux and macOS for now; Windows is deferred.
+The earlier shells are retired: Qt by task T-15 (tag `qt-shell-final`), Tauri by FL-QA-001
+(tag `tauri-shell-final`).
 
 ## Licence
 
 Dual-licensed under MIT or Apache-2.0, at your option
 ([`LICENSE-MIT`](LICENSE-MIT), [`LICENSE-APACHE`](LICENSE-APACHE)). Dependency
-licensing: [`docs/decisions/ADR-0012-desktop-shell-tauri.md`](docs/decisions/ADR-0012-desktop-shell-tauri.md)
-and [`ADR-0011`](docs/decisions/ADR-0011-licensing.md).
+licensing: [`ADR-0011`](docs/decisions/ADR-0011-licensing.md) and
+[`ADR-0020`](docs/decisions/ADR-0020-flutter-shell.md) §10.
 
 Bundled fonts: IBM Plex Sans and IBM Plex Mono, © 2017 IBM Corp. with Reserved Font
 Name "Plex", under the SIL Open Font License 1.1
-([`OFL.txt`](apps/desktop-tauri/src/assets/fonts/ibm-plex/OFL.txt); IBM's unmodified files,
-source and checksums in [`SOURCE.md`](apps/desktop-tauri/src/assets/fonts/ibm-plex/SOURCE.md);
+([`OFL.txt`](apps/desktop-flutter/assets/fonts/OFL.txt); IBM's unmodified files,
+source and checksums in [`SOURCE.md`](apps/desktop-flutter/assets/fonts/SOURCE.md);
 ADR-0013 §6).

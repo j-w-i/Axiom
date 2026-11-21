@@ -1,6 +1,103 @@
-# FL verification — the Flutter shell (in progress)
+# FL verification — the Flutter shell
 
-_Started 2026-11-22. Each task adds its evidence; FL-QA-001 completes the record._
+_2026-11-22. Each task added its evidence; FL-QA-001 completed the record (§The gate). Linux:
+Fedora 44, KDE Wayland, NVIDIA RTX 3060 Ti; the suites in a private virtual KWin and a private
+Xvfb. macOS: CI. Windows: owed (deferred by the owner)._
+
+## The gate (ADR-0020 §7, FL-QA-001)
+
+| Criterion | Evidence | Result |
+|-----------|----------|--------|
+| M1 exit scenario: folder, explorer, editor with save, conflicts and restore, tasks with streamed output | `shell_test`, `editor_test`, `console_test` | pass |
+| M2 exit scenario: Rust missing, plan, managed install, build inside it, Problems, Remove | `env_test` (fixture providers) passes here; `env_rust_test` (the real Rust install) needs the internet and runs in CI on Ubuntu | fixture pass; real install: CI |
+| M3 exit scenario: tools-only fix, checkpoint before writes, denial, Restore, resume after restart, MCP, ACP | `agent_test`, `chat_test` | pass |
+| M4 exit scenario: language servers, the terminal, Git, Search, the split | `lsp_test` (fake-lsp here; rust-analyzer and typescript-language-server required in CI on Ubuntu), `console_test`, `git_test`, `search_test`, `editor_test` | pass |
+| Frame budget (16.7 ms) at 125 % in every listed interaction | §Frame timings: shell, editor, Chat streaming | no frame over |
+| Accessibility: names, roles, focus order, contrast, both themes | `a11y_test` (every page, the console views, Settings, the palette, in both themes; Tab never stuck; Ctrl+M); `tokens_test` (contrast) | pass |
+| Packages: .deb and .rpm (desktop entry and icons named after the app id), macOS app bundle | `scripts/bundle.sh` and `scripts/verify-package.sh` (4/4 each for the .deb and the .rpm here); the macOS bundle in CI | Linux pass; macOS: CI |
+| Startup no worse than the Tauri shell's P2 | §Startup | pass, with one caveat |
+| `scripts/check.sh` passes without the Tauri shell | the full gate, after the removal | pass (actionlint not installed here; CI runs it) |
+
+**Owed:** Windows, no build exists (deferred by the owner); the macOS results of the CI run
+after this push; the M2 real-install scenario's CI run.
+
+**Parity: the deferred editor features are now in.**
+- Signature help: Ctrl+Shift+Space, `(` and `,`.
+- Code actions: Ctrl+., in a picker, with resolve and executeCommand.
+- References: Shift+F12. Go to Symbol: Ctrl+Shift+O.
+- Document highlights.
+- Dragging a tab onto another moves it there.
+
+All are in `lsp_test` against fake-lsp, which now answers them.
+
+**Deviations from the Tauri shell:**
+- **No image paste in Chat.** Flutter's clipboard is text only; images attach through the file
+  picker.
+- **The diff view is drawn by the shell** from the HEAD text, with no highlighting within a line.
+- **No form for a custom ACP agent's command;** it is set through `agent/configureProvider`, as
+  before.
+- **Tab in the editor indents.** Ctrl+M makes it move focus instead, as in Monaco.
+
+**Owed (found by the documentation pass, not in the gate):**
+- **Window size and position are not restored.** The Tauri shell kept them in `window.json`; the
+  GTK runner opens at 1180×760.
+- **No recovery of unsaved text after a crash of the shell.** The Tauri shell had
+  `snapshot_put`.
+
+Both are follow-ups for the Flutter shell.
+
+### Startup
+The Tauri bench harness (black box: X DAMAGE on a private Xvfb, the daemon's wire through a tap)
+compared the Flutter release build (`base`) and the Tauri release build. They ran interleaved, 5
+pairs, against the same release axiomd, measuring startup to the explorer painted with the last
+folder reopened.
+
+Run 1: each cold run had a fresh `XDG_CACHE_HOME`, as the harness defines "cold":
+
+| | Flutter | Tauri |
+|--|--:|--:|
+| Cold | 1124.7 | ≈457 |
+| Warm | 246.1 | ≈430 |
+
+Run 2: one cache directory for all runs (`AXIOM_BENCH_CACHE_DIR`), so "cold" is a fresh data
+directory on a machine that has run the app before:
+
+| | Flutter | Tauri |
+|--|--:|--:|
+| Cold | 258.3 | 454.1 |
+| Warm | 252.6 | 434.9 |
+
+Times are medians in ms.
+
+The difference is the first launch ever, with an empty GL shader cache, on Xvfb's software
+renderer: Flutter compiles its shaders once (1084.9 ms that run, then 250–258 ms). That is a
+one-time cost per machine and driver. Every later start, cold or warm, is about 180 ms faster than
+the Tauri shell. The results files are in the tag `tauri-shell-final`
+(`apps/desktop-tauri/bench/results/JWI-Fedora-20261122-0658*.json`, `…-070046.json`); the harness
+was retired with the Tauri shell.
+
+### Packages
+`scripts/bundle.sh` built `axiom_0.1.0_amd64.deb` and `axiom-0.1.0-1.x86_64.rpm`.
+`scripts/verify-package.sh` passed 4/4 on each:
+- `/usr/lib/axiom/{axiom, axiomd}` sit side by side, with `/usr/bin/axiom` linking to the shell;
+- the desktop entry `dev.axiom.Axiom.desktop` has `StartupWMClass` and `Icon` set to the app id;
+- the hicolor icons come in 5 sizes;
+- unpacked and run as an installed copy with no `--daemon`, the shell starts the packaged axiomd
+  and completes the handshake. `--self-test` printed `connected …/usr/lib/axiom/axiomd 0.1.0 0.4`.
+
+The rpm build found a real defect: a Flutter plugin library carried an absolute RUNPATH into the
+build tree. The plugins now link with `$ORIGIN` (`linux/CMakeLists.txt`). The macOS app now has
+Axiom's icon; it had Flutter's.
+
+### Accessibility
+`a11y_test` found three gaps, all fixed:
+- the editor's node acted without a name: it is now "src/main.rs, editor", with the find bar
+  outside the merged node so its fields keep their names;
+- the palette's scrim was unnamed: it is now "Close Command palette";
+- the editor's wrapper was an unnamed focus stop.
+
+With them fixed, every node a person can act on is named on every page in both themes, and Tab
+never sticks outside the editor.
 
 ## Frame timings (ADR-0020 §5)
 `apps/desktop-flutter/scripts/frames.sh`:

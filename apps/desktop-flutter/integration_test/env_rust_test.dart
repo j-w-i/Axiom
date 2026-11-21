@@ -13,6 +13,7 @@ import 'dart:io';
 import 'package:axiom_desktop/env/env_page.dart';
 import 'package:axiom_desktop/shell/palette.dart';
 import 'package:axiom_desktop/state/environments.dart';
+import 'package:axiom_desktop/ui/controls.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -70,7 +71,11 @@ void main() {
     ToolchainRow rust() => app.environments.rows().firstWhere((r) => r.providerId == 'rust');
 
     // 1. Rust is missing, selected by .axiom/project.toml, with Plan install…
-    await tester.tap(named(environmentsRailLabel(1)));
+    // The rail's Environments (its name carries the count once detection has run).
+    Finder rail() =>
+        find.byWidgetPredicate((w) => w is AxIconButton && w.label.startsWith('Environments'));
+    await until(tester, () => app.environments.status == 'ready', what: 'detection');
+    await tester.tap(rail());
     await until(
       tester,
       () => app.environments.status == 'ready' && rust().kind == RowKind.missing,
@@ -145,7 +150,7 @@ void main() {
     );
 
     // 6. Remove deletes that directory and nothing else; HOME has no .cargo or .rustup.
-    await tester.tap(named(environmentsRailLabel(0)));
+    await tester.tap(rail());
     await until(tester, () => named('Remove Rust $version').evaluate().isNotEmpty, what: 'Remove');
     await tester.tap(named('Remove Rust $version'));
     await until(tester, () => named('Remove').evaluate().isNotEmpty, what: 'the question');

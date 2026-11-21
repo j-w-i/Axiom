@@ -2,7 +2,7 @@
 
 IBM's own, **unmodified** TTF files (`fonts/complete/ttf/`), extracted byte for byte from the
 same official release archives the Tauri shell's WOFF2 files come from
-(`apps/desktop-tauri/src/assets/fonts/ibm-plex/SOURCE.md`; archive SHA-256 values re-checked on
+(`apps/desktop-tauri/src/assets/fonts/ibm-plex/SOURCE.md` at the tag `tauri-shell-final`; archive SHA-256 values re-checked on
 download, 2026-11-22). Flutter cannot load WOFF2, and converting the web files would change them
 (ADR-0013 §6: the licence reserves the font name "Plex"), so the complete TTFs are used.
 Licence: SIL Open Font License 1.1, [`OFL.txt`](OFL.txt) (`fonts/complete/ttf/license.txt`,

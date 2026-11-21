@@ -10,16 +10,14 @@ and in CI. A task is not Tested until it passes.
 | Contract (shape) | Wire JSON shapes, error codes, schema freshness | `crates/protocol/tests/contract.rs`, `drafts.rs` | everything |
 | Unit | One crate's logic | `crates/<name>/tests/`, `src/**` `#[cfg(test)]` | other crates' internals |
 | RPC | Framing, dispatch, cancellation, backpressure | `crates/rpc/tests/` (in-process duplex streams) | a daemon |
-| Daemon integration (behaviour contract) | Every behaviour in `docs/protocols/ipc.md`, against the real `axiomd` binary over stdio | `crates/axiomd/tests/` | Qt |
-| Editor unit | Bridge logic (dirty tracking, throttling) against a fake host | `editor/` (Vitest) | Qt, a browser |
-| Bridge client | Process supervision, framing, correlation, cancel, timeout, crash/restart, bounded shutdown against the real `axiomd` | `crates/desktop-bridge/tests/bridge.rs` | a webview, a display |
-| UI state | The shell's stores (workspace, documents, tasks, settings) against the real `axiomd`, no webview | `apps/desktop-tauri/tests/*.test.ts` (Vitest + a Node stdio transport) | a webview, a display |
-| Web design guard | No literal colours, both themes define every token, WCAG AA contrast | `apps/desktop-tauri/tests/tokens.test.ts` | — |
-| Shell component (Qt) | C++ models and `DaemonClient` against the real daemon | `apps/desktop/tests/tst_*.cpp` (Qt Test, offscreen) | a display |
-| GUI smoke (Qt) | The real window, real editor bundle, real daemon: open → type → save → run | `apps/desktop/tests/tst_smoke_*.cpp` (offscreen) | a display |
-| Packaged app (Tauri) | A macOS `.app` checked structurally (sidecar beside `CFBundleExecutable`, identifier/version against `tauri.conf.json`, icon) — the part that decides whether `locate_daemon` works on a user's Mac. A `.deb` **or** `.rpm` unpacked to a prefix and run as an installed copy: it finds its sidecar daemon with no `--daemon`, the initialize handshake is observed on the wire through `bench/daemon_tap.py`, and its window is on the private display | `apps/desktop-tauri/scripts/verify-package.sh` (7 checks, `scripts/check.sh package`) | a display |
-| End-to-end parity (Tauri) | The real menus (Edit undo/redo/find/replace/select all, Help ▸ About), task shortcuts (F5, Shift+F5, Ctrl/Cmd+Shift+R) and the accessibility guard (accessible names, region roles, visible focus ring) driven through the real window | `apps/desktop-tauri/e2e/parity.mjs` (13 checks) | a display, a model |
-| End-to-end (Tauri) | The real Tauri app, real webview, real daemon, real key events, driven over WebDriver: open, edit, save, conflicts, commands, themes, palette, restore, quit with unsaved work, geometry, webview-crash recovery | `apps/desktop-tauri/e2e/{smoke,quit,geometry,parity}.mjs` through `e2e/runner.mjs`; two WebDriver servers, see below | a model; macOS crash kill (see below) |
+| Daemon integration (behaviour contract) | Every behaviour in `docs/protocols/ipc.md`, against the real `axiomd` binary over stdio | `crates/axiomd/tests/` | a shell |
+| Bridge client | Process supervision, framing, correlation, cancel, timeout, crash/restart, bounded shutdown against the real `axiomd` (the Rust client no shell links today; it still pins the lifecycle) | `crates/desktop-bridge/tests/bridge.rs` | a shell, a display |
+| Shell daemon client | The same lifecycle in the shell's Dart client, and every generated wire type round-tripped against what the real `axiomd` sends | `apps/desktop-flutter/test/daemon/{client,roundtrip}_test.dart` (`flutter test`) | a display |
+| Shell unit and widget | Stores' logic (task output assembly, Git, agent events), the LSP editor layer, Markdown, controls' keyboard and semantics, fuzzy matching | `apps/desktop-flutter/test/{state,editor,chat,ui}/` (`flutter_test`) | a daemon (mostly), a display |
+| Shell design guard | No literal colours outside `lib/ui/tokens.dart`, WCAG contrast of every text token on every surface in both themes, no Material or Cupertino import, golden images of the gallery in both themes (Linux) | `test/ui/tokens_test.dart`, `test/no_material_test.dart`, `test/ui/gallery_golden_test.dart` | — |
+| End-to-end (Flutter) | The real app (`AxiomApp` and its state, as `main` builds them), the real daemon with a temporary data dir, real key events through the window's shortcuts: `shell`, `editor`, `lsp` (fake-lsp; the real servers where installed), `console`, `git`, `search`, `env` (loopback fixture), `env_rust` (the M2 exit scenario, needs `AXIOM_E2E_NETWORK=1`), `chat`, `agent` (the M3 exit scenario), `a11y` (named controls on every page in both themes, Tab never stuck) | `apps/desktop-flutter/integration_test/*_test.dart` through `apps/desktop-flutter/scripts/e2e.sh` (`scripts/check.sh e2e`) | a model (scripted), the developer's display |
+| Frame budget | No frame over 16.7 ms (build and raster, `FrameTiming`) in the listed interactions, in a profile build at 125 % scale | `integration_test/{frames,editor_frames,chat_frames}_test.dart` through `apps/desktop-flutter/scripts/frames.sh` (private virtual KWin) | the developer's display |
+| Packaged app | A `.deb` **or** `.rpm` unpacked to a prefix: the shell and `axiomd` in one directory and `/usr/bin/axiom`; the desktop entry named after the app id with `StartupWMClass` and `Icon`; the hicolor icons; run with no `--daemon` on a private X display, `--self-test` finds the sibling `axiomd` and prints `connected …`. A macOS `Axiom.app`: the shell and `axiomd` in `Contents/MacOS`, the bundle id, the icon, and `--self-test` against the bundled daemon | `scripts/verify-package.sh` (`scripts/check.sh package`) | a display |
 | Provider contract (M2) | Every manifest under `providers/` | `crates/env/tests/provider_contract.rs` | network (except opt-in install tests) |
 | Agent (M3) | Loop, tools, permissions, checkpoints with a scripted model | `crates/agent/tests/` | network, a real model |
 | Inspection (M5) | Select → source → patch → verify on fixture apps with known element→source maps | `tests/fixtures/inspect-*`, `crates/inspect/tests/` | a real model |
@@ -31,8 +29,11 @@ and in CI. A task is not Tested until it passes.
    drive the real app with real input. Mocks are for third parties we cannot
    run in CI (model APIs → `ScriptedProvider`).
    **Never a window on a developer's desktop:** every GUI/E2E/benchmark run on
-   Linux must go through `apps/desktop-tauri/scripts/headless.sh` (private
-   Xvfb, Wayland removed), which refuses to run otherwise.
+   Linux goes through a private compositor: `apps/desktop-flutter/scripts/e2e.sh`
+   (a private `kwin_wayland --virtual`, else `scripts/headless.sh`),
+   `apps/desktop-flutter/scripts/frames.sh` (a private virtual KWin), or
+   `scripts/headless.sh` directly (private Xvfb, Wayland removed, private XDG
+   directories), which fails closed when no private display can be started.
 2. **Fail closed.** A timeout is a failure, never a pass (lesson from E1).
    Waits are bounded and assert on the awaited condition.
 3. **No sleeps as synchronisation.** Wait for an event or poll a condition
@@ -40,93 +41,56 @@ and in CI. A task is not Tested until it passes.
 4. **Isolation.** Every test uses its own temp directories and
    `AXIOM_DATA_DIR`; nothing touches the user's profile; tests are
    parallel-safe.
-   The webview keeps its own store (localStorage holds the layout) outside
-   `AXIOM_DATA_DIR`: on Linux every e2e suite (`e2e/runner.mjs`) and every
-   `headless.sh` run (benchmarks) gets a private `XDG_DATA_HOME` /
-   `XDG_CACHE_HOME` / `XDG_CONFIG_HOME`, removed afterwards (M1.6-INTERACTION-002;
-   until then runs wrote the developer's `~/.local/share/<identifier>`). macOS and
-   Windows runs still use the per-user webview store.
+   The shell keeps its own layout file (`shell-local.json`) in the data dir
+   when it is given one (`--data-dir` or `AXIOM_DATA_DIR`), else in the
+   per-user config dir; every end-to-end suite boots with a temporary data dir
+   (`integration_test/support.dart`), and `headless.sh` runs also get a
+   private `XDG_DATA_HOME` / `XDG_CACHE_HOME` / `XDG_CONFIG_HOME`, removed
+   afterwards.
 5. **Fixtures are tiny and committed** (`tests/fixtures/`, each described in
    its README). Inspection fixtures carry an `expected-map.json` of
    element → exact source location.
-6. **Platform coverage is stated, not assumed.** CI runs Linux, macOS and
-   Windows. A report says which OS a test actually ran on; platform-gated
-   tests (`#[cfg(unix)]`, `QSKIP`) are listed in the handoff.
+6. **Platform coverage is stated, not assumed.** CI runs the Rust workspace
+   on Linux, macOS and Windows and the shell on Linux and macOS (there is no
+   Windows desktop build; deferred by the owner). A report says which OS a
+   test actually ran on; platform-gated tests (`#[cfg(unix)]`, Dart `skip:`)
+   are listed in the handoff.
 7. **Tests are part of the contract.** Changing an existing expectation in
    `contract.rs` or the daemon integration suite is a protocol change and
    follows `governance.md`.
 8. **Flakiness is a defect.** New async/IO tests are looped (10–20 runs)
    before the task is reported Tested.
 
-### End-to-end: two WebDriver servers, and what each proves
+### End-to-end: how the Flutter suites run
 
-| Server | Where | Key events | How it is selected |
-|--------|-------|-----------|--------------------|
-| `external`: tauri-driver → WebKitWebDriver | Linux | **trusted** (WebKit's own automation) | default on Linux |
-| `embedded`: `tauri-plugin-wdio-webdriver`, compiled into the app under the `e2e` Cargo feature, 127.0.0.1 only | Linux, Windows, macOS | synthetic (`isTrusted === false`), dispatched by script | default on Windows and macOS |
+- **Where.** On Linux, `e2e.sh` starts a private `kwin_wayland --virtual` (Wayland, the GPU) when
+  it exists, else a private Xvfb through `scripts/headless.sh`; `AXIOM_E2E_DISPLAY=xvfb` forces
+  Xvfb (CI does). On macOS the suites run in the session (CI). Each suite is one
+  `flutter test integration_test/<suite> -d linux|macos`; with no arguments `e2e.sh` runs every
+  `*_test.dart` except the frame benchmarks.
+- **The daemon and its helpers.** `e2e.sh` builds `axiomd`, `fake-lsp`, `fake-acp` and `fake-mcp`,
+  puts `target/debug` on `PATH` and passes `AXIOMD_UNDER_TEST`; a suite refuses to start
+  without it.
+- **Input.** Commands go through their real keys (the window's shortcuts). Text is put into the
+  editor through the document's controller, because simulated key presses carry no text input
+  on desktop; say so when a criterion is about typing itself.
+- **Opt-in parts.** `env_rust_test.dart` installs a real Rust toolchain and runs only with
+  `AXIOM_E2E_NETWORK=1` (CI on Ubuntu); `lsp_test.dart`'s real-server part skips a missing server
+  unless `AXIOM_REQUIRE_LSP=1` (CI on Ubuntu).
+- **Fail closed.** Every wait is `until(…)` with a deadline (`integration_test/support.dart`).
 
-Linux runs the suites through **both** (`scripts/e2e.sh --driver all`, also in
-CI), so the embedded path is compared with the trusted one on every change.
-Check 4b reports which kind of input it saw; on the embedded server the
-trusted-input claim is reported **N/A**, never as a pass. The input fidelity
-of a server is measured, not assumed: `e2e/input-probe.mjs` types every
-printable ASCII character into Monaco, saves, and compares the bytes on disk.
-(That probe found that `tauri-plugin-wdio-webdriver` 1.5.1 sent `keyCode` =
-character code, so `p` arrived as F1 and opened Monaco's command palette
-mid-typing; fixed upstream in 2.0.0-next.0, which is what the app pins.)
-
-**One editor input path.** `src/editor/surface.ts` sets `editContext: false`,
-so Monaco types through its classic textarea on all three engines. Monaco
-0.53+ would otherwise use Chromium's EditContext API wherever it exists —
-only WebView2 on Windows has it — which makes the Windows build take a
-different path for every keystroke than Linux and macOS, leaves its typing
-undrivable by scripted input, and exposes it to Chromium regressions that
-wedge that path mid-session (stablyai/orca#7747). Smoke check 4a' asserts the
-textarea path on every OS, so losing the option fails the build.
-
-**Script channel.** Suites run page scripts through W3C Execute Script,
-except on macOS with the embedded server: there the plugin's Execute Script
-awaits one `evaluateJavaScript` completion, which WKWebView on macOS 26.4
-runners intermittently reclaims (the call then hangs to its timeout; seen in
-CI run 43135274089, upstream #540). macOS uses the plugin's `/wdio/eval`
-instead, its out-of-band channel with bounded re-dispatch and the one
-@wdio/tauri-service uses. `e2e/eval-contract.mjs` proves both channels return
-the same values and errors for every shape the suites use, and runs before
-the suites wherever the embedded server is used.
-
-**Exercising another platform's channel.** `/wdio/eval` is selected only on
-macOS, so a Linux run normally uses W3C Execute Script. `AXIOM_DIRECT_EVAL=1`
-forces the macOS channel (with the embedded server), which is how the macOS
-script path is kept under test between CI runs:
-`AXIOM_DIRECT_EVAL=1 AXIOM_WEBDRIVER=embedded scripts/e2e.sh`.
-
-**One binary, two builds.** The end-to-end suite drives a release binary built
-with the `e2e` feature; `scripts/bundle.sh` builds the same path *without* it.
-So packaging invalidates the binary the suite needs: run the end-to-end step
-before packaging (CI does), and rebuild with `--features e2e` if you ran
-`scripts/check.sh package` first. The symptom is a suite that cannot reach a
-WebDriver server at all.
-
-The crash check (11) kills the webview's content process. Linux and Windows
-find it as a descendant of the app (`e2e/processes.mjs`, unit-tested for all
-three OSes in `tests/processes.test.ts`). On macOS WebContent is a
-launchd-owned XPC service, not a descendant, and cannot be told apart from
-another app's: the check is reported **N/A** there rather than killing an
-arbitrary process. The macOS host reacts to WebKit's own termination callback
-(`on_web_content_process_terminate`), the same recovery path as Linux.
-
-The embedded server must never ship: `src-tauri/tests/release_guard.rs` fails
-if a default build depends on it, and `scripts/bundle.sh` refuses to package a
-binary that contains it.
+The Tauri shell's end-to-end machinery (two WebDriver servers, the embedded driver's release
+guard, the script channels, the webview-crash check, the editor input-path assertion) retired
+with it in FL-QA-001; this file at the tag `tauri-shell-final` describes it.
 
 ## What CI runs
 
 | Job | OS | Added by |
 |-----|----|----------|
 | `rust`: fmt, clippy, tests, schema check (+ deps matrix, cargo-deny, task board) | Linux, macOS, Windows | exists; guards by M1-CI-001 |
-| `editor`: typecheck, build, unit tests | Linux | M1-EDITOR-001 |
-| `desktop`: build + Qt tests + GUI smoke, offscreen | Linux, macOS, Windows | M1-CI-002 |
-| `tauri`: typecheck, bundle, UI-state tests (real daemon), token + process-lookup tests, host clippy (with and without `e2e`) and tests incl. the release guard, end-to-end (Linux: both WebDriver servers; Windows, macOS: embedded), packages (deb+rpm / nsis / app) | Linux, macOS, Windows | M1.5 T-09, T-13 |
+| `flutter`: `scripts/check.sh flutter` (lockfile, wire types, format, analyze, tests, licences), a release build, end-to-end (Linux: Xvfb, real language servers required, the M2 install scenario), packages and their verification (deb + rpm / app), uploaded as artifacts | Linux, macOS | FL-ARCH-001, FL-QA-001 |
+| `deny`: `cargo deny check` | Linux | M1-CI-001 |
+| (retired) `editor`, `desktop` (Qt), `tauri` | — | removed with their shells (T-15, FL-QA-001) |
 
 ## Manual verification
 

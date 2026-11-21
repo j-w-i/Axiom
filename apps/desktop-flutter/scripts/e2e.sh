@@ -11,13 +11,16 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 root="$(cd "$here/../.." && pwd)"
 export PATH="$HOME/.cargo/bin:$PATH:$HOME/flutter/bin"
 cd "$root"
-cargo build -q -p axiomd -p fake-lsp -p fake-acp
+cargo build -q -p axiomd -p fake-lsp -p fake-acp -p fake-mcp
 # The fake language server (tests/helpers/fake-lsp) is found on PATH by the daemon.
 export PATH="$root/target/debug:$PATH"
 export AXIOMD_UNDER_TEST="${AXIOMD_UNDER_TEST:-$root/target/debug/axiomd}"
 cd "$here"
 suites=("$@")
-if [[ ${#suites[@]} -eq 0 ]]; then mapfile -t suites < <(cd integration_test && ls *_test.dart | grep -v frames_test); fi
+if [[ ${#suites[@]} -eq 0 ]]; then
+  # Every suite but the frame benchmarks (bash 3.2 on macOS: no mapfile).
+  while IFS= read -r f; do suites+=("$f"); done < <(cd integration_test && ls -- *_test.dart | grep -v frames_test)
+fi
 
 cleanup() { [[ -n "${kwin_pid:-}" ]] && kill "$kwin_pid" 2>/dev/null || true; }
 trap cleanup EXIT

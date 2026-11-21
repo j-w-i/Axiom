@@ -35,6 +35,18 @@ void main() {
     expect(a.last, 'Partial sen');
   });
 
+  testWidgets('an image is its alt text (never loaded); raw HTML is text', (tester) async {
+    await tester.pumpWidget(
+      const AxiomApp(
+        home: SingleChildScrollView(
+          child: MarkdownView('See ![a chart](https://example.com/x.png) and <b>bold</b>.'),
+        ),
+      ),
+    );
+    expect(find.textContaining('[image: a chart]', findRichText: true), findsOneWidget);
+    expect(find.textContaining('<b>bold</b>', findRichText: true), findsOneWidget);
+  });
+
   testWidgets('renders headings, lists, a table, inline code and a code block', (tester) async {
     await tester.pumpWidget(
       const AxiomApp(

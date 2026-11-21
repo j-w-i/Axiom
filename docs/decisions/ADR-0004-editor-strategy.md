@@ -1,6 +1,9 @@
 # ADR-0004: Editor — Monaco first, language servers in the daemon, extension host later
 
-Status: Amended by ADR-0012 (2026-11-12). The staged plan and the bridge-1
+Status: Superseded by ADR-0020 (FL-QA-001, 2026-11-22): the editor is `re_editor` in the
+Flutter shell; Monaco and editor-bridge-1 retired with the Tauri shell (tag
+`tauri-shell-final`). Language servers still run in the daemon. Earlier:
+Amended by ADR-0012 (2026-11-12). The staged plan and the bridge-1
 contract are unchanged; the host of the editor surface is now the Tauri
 webview rather than Qt WebEngine, and the bridge is an in-process TypeScript
 interface. Language servers (stage 2) still run in the daemon.

@@ -1,6 +1,13 @@
 # Editor bridge 1 (shell ↔ editor surface)
 
-**State: frozen for M1.** Validated in outline by experiment E1.
+**State: retired (FL-QA-001, 2026-11-22; ADR-0020).** The Flutter shell has no web view and no
+editor bridge: the editor (`re_editor`) is a widget in the same Dart process, and the open
+documents live in `apps/desktop-flutter/lib/state/documents.dart`. `editor/` (Monaco) and the
+Tauri shell that implemented this contract were removed; both are at the tag
+`tauri-shell-final`. The rest of this document is the historical record of the contract as
+frozen for M1 and kept through M1.5–M4.
+
+Before that: frozen for M1, validated in outline by experiment E1.
 
 The editor surface is a web page (`editor/`, loaded from
 `axiom://editor/index.html`) inside a Qt WebEngine view. It communicates with

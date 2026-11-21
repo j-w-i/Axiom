@@ -4,9 +4,9 @@
 
 | Process | Language | Started by | Lifetime | Talks to | If it dies |
 |---------|----------|-----------|----------|----------|------------|
-| `axiom` (shell) | Rust host (Tauri) + React webview | user | app session | `axiomd` (stdio, via `crates/desktop-bridge`), its webview processes | daemon sees stdin EOF, cancels tasks, exits |
-| webview processes | WebKitGTK / WebView2 / WKWebView | the OS webview, per content process | while a window exists | the shell UI only | the host detects termination, reloads the page and replays unsaved-text snapshots (T-08); the daemon is unaffected |
-| `axiom` (Qt shell) | C++/QML | user | app session | `axiomd` (stdio), Qt WebEngine renderer (QWebChannel) | same as the Tauri host; kept until task T-15 |
+| `axiom` (shell) | Dart (Flutter, `apps/desktop-flutter`) | user | app session | `axiomd` (stdio, via `lib/daemon/client.dart`) | daemon sees stdin EOF, cancels tasks, exits; unsaved text is lost with the process (there is no separate renderer process to survive it) |
+| `axiom` (Tauri shell, retired) | Rust host (Tauri) + React webview | user | app session | `axiomd` (stdio, via `crates/desktop-bridge`), its webview processes | until FL-QA-001 (tag `tauri-shell-final`); its webview-crash recovery (T-08) has no Flutter counterpart because there is no webview |
+| `axiom` (Qt shell, retired) | C++/QML | user | app session | `axiomd` (stdio), Qt WebEngine renderer (QWebChannel) | until task T-15 (tag `qt-shell-final`) |
 | `axiomd` (daemon) | Rust | shell (M1); may be pre-existing from M3 | while ≥1 client is connected | children below | shell shows a blocking banner with *Restart backend*; editor buffers are untouched; on restart the shell re-opens the workspace and re-reads state |
 | task processes | any | daemon `exec` | until exit/cancel | daemon (pipes) | `task/exited` |
 | language servers (M4) | any | daemon | per workspace + language | daemon (LSP over stdio) | restart with backoff (max 5 in 3 min), then surface an error |
@@ -16,8 +16,11 @@
 ## Daemon lifecycle (M1)
 
 1. Shell resolves the daemon binary: `--daemon <path>` argument, then
-   `$AXIOMD`, then a sibling of the shell executable, then `PATH`. Both shells
-   use the same order (`crates/desktop-bridge::locate_daemon`).
+   `$AXIOMD`, then a sibling of the shell executable, then `PATH`
+   (`locateDaemon` in `apps/desktop-flutter/lib/daemon/client.dart`, the same
+   order as `crates/desktop-bridge::locate_daemon`). The packages put `axiomd`
+   beside the shell (`scripts/bundle.sh`: `/usr/lib/axiom/` on Linux,
+   `Axiom.app/Contents/MacOS/` on macOS).
 2. Shell spawns it with piped stdin/stdout. **stdout carries protocol
    messages only.** stderr is free-form log text which the shell appends to
    its own log; nothing parses it.
@@ -36,17 +39,20 @@ daemon exit by design: they are killed.
 
 ## Threads and async
 
-- **Shell:** the Tauri host runs the bridge on a Tokio runtime; the webview's
-  UI thread only receives ordered events on one IPC channel. Nothing in the
-  UI calls a blocking wait on the daemon. (Qt shell: one GUI thread,
+- **Shell:** one Dart isolate on the UI thread; the daemon client reads the
+  child's stdout asynchronously and delivers responses and notifications in
+  wire order. Nothing in the UI calls a blocking wait on the daemon. (Tauri
+  shell, retired: the host ran `crates/desktop-bridge` on a Tokio runtime and
+  forwarded ordered events to the webview. Qt shell: one GUI thread,
   `DaemonClient` on `QProcess` signals.)
 - **Daemon:** Tokio multi-thread runtime. One reader task and one writer task
   per connection; each request runs in its own task so a slow request never
   blocks the connection. Blocking filesystem and SQLite calls go through
   `tokio::task::spawn_blocking`. SQLite is accessed through a single
   dedicated connection behind a mutex (state volume is tiny).
-- **Editor surface:** Monaco's own web workers (editor worker, TS/JSON/CSS/HTML
-  workers). Verified working under the `axiom://` scheme in E1.
+- **Editor surface:** `re_editor` lays out and paints in the shell's UI
+  thread; there are no editor workers (Monaco's web workers went with the
+  Tauri shell).
 
 ## Multi-client (M3 onwards)
 

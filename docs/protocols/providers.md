@@ -218,7 +218,7 @@ An optional table, additive to `axiom.provider/1`:
 ```toml
 [[lsp]]
 id = "rust-analyzer"          # unique across providers
-languages = ["rust"]          # Monaco/LSP language ids
+languages = ["rust"]          # LSP language ids (the shell maps file extensions to them)
 command = ["rust-analyzer"]   # argv, resolved in the workspace's environment
 install_hint = "Install it with: rustup component add rust-analyzer"
 # initialization_options = { ... }   # merged under settings lsp.<id>.initializationOptions

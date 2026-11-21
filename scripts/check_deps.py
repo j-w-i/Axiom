@@ -32,10 +32,10 @@ ALLOWED = {
     },
     # The `axiom` command-line client (ADR-0015 §2, §6): a protocol client.
     "axiom-cli": {"axiom-protocol", "axiom-rpc"},
-    # The GUI's daemon client (ADR-0012): protocol only.
+    # The Tauri shell's daemon client (ADR-0012): protocol only. No shell links it since the
+    # Flutter shell (ADR-0020), whose Dart client keeps its observable behaviour; its tests still
+    # pin the daemon's lifecycle from a client's side.
     "axiom-desktop-bridge": {"axiom-protocol"},
-    # Tauri shell host: bridge only (plus third-party crates).
-    "axiom-desktop-tauri": {"axiom-desktop-bridge"},
     # Test helper binary (tests/helpers/emit): depends on nothing in the workspace.
     "emit": set(),
     # Test helper binary (tests/helpers/fake-mcp): an MCP server for the MCP client tests.

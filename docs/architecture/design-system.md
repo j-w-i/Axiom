@@ -1,19 +1,31 @@
 # Design system
 
-Two implementations of one vocabulary:
+Three implementations over the project's life; the first is current:
 
-- **Tauri shell (M1.5+, normative for new work):** CSS custom-property tokens
-  and React components. Specification, component list, accessibility rules,
-  guards and library evaluation:
-  `docs/migration/qt-to-tauri/design-system.md`.
-- **Qt shell (M1, until T-15):** the QML module `Axiom.Ui` described below.
+- **Flutter shell (normative, since FL-QA-001):** ADR-0020 §4 ("Precision
+  Instrument × Temporal Tactility"), implemented in
+  `apps/desktop-flutter/lib/ui/`: every colour, size and duration in
+  `tokens.dart`, the controls in `controls.dart`, `surfaces.dart`, `tabs.dart`
+  and the rest of that folder, and a gallery (`gallery.dart`) whose golden
+  images are the visual record. How the two directions meet, the deviations
+  from the owner's starting values and the rules the tests enforce:
+  `docs/design/flutter/README.md`.
+- **Tauri shell (M1.5–M4, retired by FL-QA-001, tag `tauri-shell-final`):** CSS
+  custom-property tokens and React components, specified in
+  `docs/migration/qt-to-tauri/design-system.md` and restyled by M1.6
+  (`docs/design/`, ADR-0013).
+- **Qt shell (M1, retired by T-15, tag `qt-shell-final`):** the QML module
+  `Axiom.Ui`. The sections below are its record.
 
-The semantic token names are shared (`bg`, `bgSubtle`/`bg-subtle`, `text`,
-`textMuted`/`text-muted`, `accent`, `danger`, …), as are the spacing scale,
-type sizes, motion durations and the accessibility rules. A rule stated here
-(no literal colours in views, every interactive item named, focus always
-visible, no information by colour alone, truncated text has a tooltip) applies
-to **both** shells.
+The rules stated here (no literal colours in views, every interactive item
+named, focus always visible, no information by colour alone, truncated text
+has a tooltip) apply to the Flutter shell. The tests check what they can:
+`test/ui/tokens_test.dart` (no literal colour outside `lib/ui/tokens.dart`;
+contrast of every text token on every surface, both themes),
+`test/no_material_test.dart` (widgets layer only), `test/ui/controls_test.dart` (keyboard
+operation and names of the controls) and the accessibility suite
+`integration_test/a11y_test.dart` (every actionable node named, Tab never stuck); the rest is
+reviewed.
 
 ## Qt shell (Axiom.Ui)
 
