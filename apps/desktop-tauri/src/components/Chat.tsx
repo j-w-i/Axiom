@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ImageData, ImageRef, SessionInfo } from "../daemon/protocol.gen";
+import type { ApprovalRequest, ImageData, ImageRef, SessionInfo } from "../daemon/protocol.gen";
 import { filterSessions, lastUser, type AgentStore, type Item, type ProviderOption } from "../state/agent";
 import * as Icon from "../ui/icons";
 import { Dialog, Menu, type MenuEntry } from "../ui/overlays";
@@ -194,6 +194,7 @@ export function ChatPage({
   dark,
   onOpenLink,
   setup,
+  variant = "page",
 }: {
   store: AgentStore;
   hasWorkspace: boolean;
@@ -201,6 +202,8 @@ export function ChatPage({
   onOpenLink: (url: string) => void;
   /** What to show when no model is available (the first-run setup, M3-UI-003). */
   setup?: ReactNode;
+  /** "dock": beside the editor (workspace-spec.md §5.2): the header switches conversations. */
+  variant?: "page" | "dock";
 }) {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   useEffect(() => {
@@ -221,11 +224,25 @@ export function ChatPage({
   }, [s.active.running]);
   const locked = s.activeId !== null; // a conversation keeps its model
   return (
-    <section className="chat" aria-label="Chat" data-testid="chat-page">
+    <section className={variant === "dock" ? "chat chat--dock" : "chat"} aria-label={variant === "dock" ? "Agent" : "Chat"} data-testid={variant === "dock" ? "chat-dock" : "chat-page"}>
       <header className="chat__head">
-        <h2 className="chat__title" title={title}>
-          {title}
-        </h2>
+        {variant === "dock" ? (
+          <Menu
+            label={`Conversation: ${title}`}
+            triggerClassName="btn btn--quiet btn--sm chat__switch"
+            trigger={<span className="chat__title">{title}</span>}
+            hint="Switch conversations in this folder"
+            items={[
+              { label: "New conversation", onSelect: () => store.newChat("workspace") },
+              ...(s.sessions.length ? [{ separator: true } as MenuEntry] : []),
+              ...s.sessions.slice(0, 20).map((x) => ({ label: x.title, onSelect: () => void store.open(x.sessionId) })),
+            ]}
+          />
+        ) : (
+          <h2 className="chat__title" title={title}>
+            {title}
+          </h2>
+        )}
         <ModelPicker
           providers={s.providers}
           scopeWorkspace={s.scope === "workspace"}
@@ -246,8 +263,36 @@ export function ChatPage({
       {noModel && setup ? (
         <div className="chat__setup">{setup}</div>
       ) : (
-        <Transcript store={store} items={items} streaming={s.active.streaming} running={s.active.running} images={s.images} dark={dark} onOpenLink={onOpenLink} hasWorkspace={hasWorkspace} empty={noModel ? "No model is available. Add one in Settings → Models." : null} />
+        <Transcript store={store} items={items} streaming={s.active.streaming} running={s.active.running} images={s.images} dark={dark} onOpenLink={onOpenLink} hasWorkspace={hasWorkspace} empty={noModel ? "No model is available. Add one in Settings → Models." : null}
+          approvals={s.approvals.filter((a) => a.sessionId === s.activeId)} external={modelOf?.kind === "acp" ? modelOf.name : null} />
       )}
+      <Dialog
+        open={s.restoreConflict !== null}
+        title={(s.restoreConflict?.conflicts.length ?? 0) === 1 ? "1 file changed since the agent wrote it" : `${s.restoreConflict?.conflicts.length ?? 0} files changed since the agent wrote them`}
+        description={
+          <>
+            Restoring checkpoint {s.restoreConflict?.checkpoint} would overwrite them, so nothing was restored. You can restore the other files and leave these as they are:
+            <ul className="chat__conflicts">
+              {s.restoreConflict?.conflicts.map((c) => (
+                <li key={c.path}>
+                  <code>{c.path}</code> — {c.reason === "modifiedSinceAgent" ? "edited" : c.reason === "deletedSinceAgent" ? "deleted" : "created"} after the agent
+                </li>
+              ))}
+            </ul>
+          </>
+        }
+        buttons={[
+          { action: "cancel", text: "Cancel", variant: "primary" },
+          { action: "rest", text: "Restore the others" },
+        ]}
+        dismissAction="cancel"
+        testId="restore-conflict"
+        onChoose={(a) => {
+          const rc = s.restoreConflict;
+          if (a === "rest" && rc) void store.restore(rc.checkpoint, true);
+          else store.dismissRestoreConflict();
+        }}
+      />
       <p className="visually-hidden" role="status" aria-live="polite">
         {announce}
       </p>
@@ -320,6 +365,8 @@ function Transcript({
   onOpenLink,
   hasWorkspace,
   empty,
+  approvals,
+  external,
 }: {
   store: AgentStore;
   items: Item[];
@@ -330,6 +377,9 @@ function Transcript({
   onOpenLink: (url: string) => void;
   hasWorkspace: boolean;
   empty: string | null;
+  approvals: ApprovalRequest[];
+  /** The external agent's name when the conversation is with one (ADR-0016). */
+  external: string | null;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
@@ -340,7 +390,7 @@ function Transcript({
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && following) el.scrollTop = el.scrollHeight;
-  }, [items, streaming, following]);
+  }, [items, streaming, following, approvals.length]);
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
@@ -368,7 +418,10 @@ function Transcript({
             <span className="msg__caret" aria-hidden="true" />
           </article>
         )}
-        {running && !streaming && (
+        {approvals.map((a) => (
+          <ApprovalCard key={a.requestId} request={a} external={external} onAnswer={(d) => void store.approve(a.requestId, d)} />
+        ))}
+        {running && !streaming && approvals.length === 0 && (
           <p className="chat__working">
             <Spinner /> Working…
           </p>
@@ -417,12 +470,16 @@ function ItemView({ item, store, images, dark, onOpenLink, last, running }: { it
           <span>
             Checkpoint {item.number} · {item.label} · {new Date(item.createdMs).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
           </span>
+          <Button size="sm" variant="quiet" disabled={running} onClick={() => void store.restore(item.number)} data-hint="Put the files the agent changed since this point back" data-testid={`restore-${item.number}`}>
+            Restore
+          </Button>
         </p>
       );
     case "error":
       return (
         <p className={item.notice ? "chat__notice" : "chat__fail"} role={item.notice ? undefined : "alert"}>
-          {!item.notice && <Icon.Warning />} {item.message}
+          {!item.notice && <Icon.Warning />}
+          {item.message}
         </p>
       );
   }
@@ -485,8 +542,20 @@ function outputText(output: unknown): string {
   return output === null || output === undefined ? "" : JSON.stringify(output, null, 2);
 }
 
+function diffOf(output: unknown): string | null {
+  if (output && typeof output === "object") {
+    const o = output as Record<string, unknown>;
+    if (typeof o.diff === "string" && o.diff.startsWith("---")) return o.diff;
+    if (typeof o.text === "string" && o.text.startsWith("--- a/")) return o.text;
+  }
+  return null;
+}
+
 function ToolRow({ item }: { item: Item & { kind: "tool" } }) {
-  const [open, setOpen] = useState(false);
+  const diff = diffOf(item.output);
+  // A finished edit shows its diff until the person closes it (the row first renders running).
+  const [chosen, setOpen] = useState<boolean | null>(null);
+  const open = chosen ?? (diff !== null && item.state === "ok");
   const [all, setAll] = useState(false);
   const stateName = item.state === "running" ? "running" : item.state === "ok" ? "done" : "failed";
   const out = outputText(item.output);
@@ -501,7 +570,8 @@ function ToolRow({ item }: { item: Item & { kind: "tool" } }) {
         <span className="tool-row__targets">{item.targets.join(", ")}</span>
         <span className="tool-row__summary">{item.summary}</span>
       </button>
-      {open && out && (
+      {open && diff && <DiffBlock diff={diff} />}
+      {open && !diff && out && (
         <pre className="tool-row__out">
           {all || lines.length <= TOOL_PREVIEW_LINES ? out : lines.slice(0, TOOL_PREVIEW_LINES).join("\n")}
           {!all && lines.length > TOOL_PREVIEW_LINES && (
@@ -532,6 +602,202 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     >
       {done ? <Icon.Check /> : <Icon.Copy />}
     </IconButton>
+  );
+}
+
+// ---- approvals and diffs -------------------------------------------------------------
+
+const EFFECT_NAMES: Record<string, string> = {
+  read: "reads files",
+  writeWorkspace: "changes files in the folder",
+  execute: "runs a program",
+  install: "installs a toolchain",
+  network: "uses the network",
+  writeOutside: "changes files outside the folder",
+  delete: "deletes files",
+  credentials: "uses credentials",
+  deploy: "deploys",
+};
+
+/** The approval card (workspace-spec.md §5.2): the only brass card in the log. Focused when it
+ * appears; Enter allows once, Esc denies. */
+export function ApprovalCard({
+  request,
+  external,
+  context,
+  onAnswer,
+}: {
+  request: ApprovalRequest;
+  /** The external agent asking, if any (its own tools are outside Axiom's gate; ADR-0016). */
+  external: string | null;
+  /** Where it comes from, when not the open conversation ("Claude Code over MCP"…). */
+  context?: string;
+  onAnswer: (d: "once" | "session" | "deny") => void;
+}) {
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Focus moves to the card only when the person is not typing: an Enter meant for a text
+    // field or the editor must never approve. The card is announced either way (role=alert).
+    // An empty composer is someone waiting, not typing.
+    const a = document.activeElement as HTMLElement | null;
+    const emptyComposer = a instanceof HTMLTextAreaElement && a.classList.contains("composer__field") && a.value === "";
+    const typing = !!a && !emptyComposer && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || !!a.closest(".monaco-editor"));
+    if (!typing) card.current?.querySelector<HTMLButtonElement>("[data-answer=once]")?.focus();
+  }, []);
+  const targets = request.targets.join(", ");
+  return (
+    <div
+      ref={card}
+      className="approval"
+      role="alert"
+      aria-label={`Approval needed: ${request.tool} on ${targets}`}
+      data-testid="approval"
+      data-request={request.requestId}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          onAnswer("deny");
+        }
+      }}
+    >
+      <div className="approval__head">
+        <Icon.Shield />
+        <span className="approval__title">
+          Allow <code>{request.tool}</code>
+          {targets ? (
+            <>
+              {" "}on <code>{targets}</code>
+            </>
+          ) : null}
+          ?
+        </span>
+      </div>
+      <p className="approval__meta">
+        It {EFFECT_NAMES[request.effect] ?? request.effect}
+        {request.rule ? ` · rule: ${request.rule}` : " · the policy asks by default"}
+        {request.checkpointPlanned ? " · a checkpoint is taken first" : ""}
+        {context ? ` · ${context}` : ""}
+      </p>
+      {external && <p className="approval__meta">{external} is an external agent: what it does without asking Axiom is outside this check.</p>}
+      {request.preview && request.preview.startsWith("---") ? <DiffBlock diff={request.preview} /> : request.argv ? <pre className="approval__argv">{request.argv.join(" ")}</pre> : null}
+      <div className="approval__actions">
+        <Button variant="primary" data-answer="once" onClick={() => onAnswer("once")} data-hint="Allow this call — Enter">
+          Allow once
+        </Button>
+        {request.canRemember && (
+          <Button data-answer="session" onClick={() => onAnswer("session")} data-hint="Allow this tool on these targets for the rest of the session">
+            Allow for session
+          </Button>
+        )}
+        <Button data-answer="deny" onClick={() => onAnswer("deny")} data-hint="Refuse — Esc">
+          Deny
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface DiffRow {
+  kind: "add" | "del" | "ctx" | "hunk";
+  text: string;
+  old?: number;
+  new?: number;
+}
+
+/** A unified diff as rows with line numbers (pure; exported for tests). */
+export function parseDiff(diff: string): { file: string; added: number; removed: number; rows: DiffRow[] } {
+  const rows: DiffRow[] = [];
+  let file = "";
+  let added = 0;
+  let removed = 0;
+  let o = 0;
+  let n = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      file = line.slice(4).replace(/^b\//, "");
+      continue;
+    }
+    if (line.startsWith("--- ")) {
+      if (!file) file = line.slice(4).replace(/^a\//, "");
+      continue;
+    }
+    const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (h) {
+      o = Number(h[1]);
+      n = Number(h[2]);
+      rows.push({ kind: "hunk", text: line });
+      continue;
+    }
+    if (line.startsWith("+")) {
+      rows.push({ kind: "add", text: line.slice(1), new: n++ });
+      added++;
+    } else if (line.startsWith("-")) {
+      rows.push({ kind: "del", text: line.slice(1), old: o++ });
+      removed++;
+    } else if (line.startsWith(" ")) {
+      rows.push({ kind: "ctx", text: line.slice(1), old: o++, new: n++ });
+    }
+  }
+  return { file, added, removed, rows };
+}
+
+export function DiffBlock({ diff }: { diff: string }) {
+  const d = useMemo(() => parseDiff(diff), [diff]);
+  return (
+    <figure className="diff" aria-label={`Diff of ${d.file}: ${d.added} added, ${d.removed} removed`}>
+      <figcaption className="diff__head">
+        <span className="diff__file">{d.file}</span>
+        <span className="diff__stat">
+          <span className="diff__plus">+{d.added}</span> <span className="diff__minus">−{d.removed}</span>
+        </span>
+      </figcaption>
+      <div className="diff__body" role="table" aria-label="Changed lines">
+        {d.rows.map((r, i) =>
+          r.kind === "hunk" ? (
+            <div key={i} className="diff__row diff__row--hunk" role="row">
+              <span role="cell">{r.text}</span>
+            </div>
+          ) : (
+            <div key={i} className={`diff__row diff__row--${r.kind}`} role="row">
+              <span className="diff__num" role="cell">{r.old ?? ""}</span>
+              <span className="diff__num" role="cell">{r.new ?? ""}</span>
+              <span className="diff__sign" role="cell" aria-label={r.kind === "add" ? "added" : r.kind === "del" ? "removed" : "unchanged"}>
+                {r.kind === "add" ? "+" : r.kind === "del" ? "−" : " "}
+              </span>
+              <span className="diff__text" role="cell">{r.text}</span>
+            </div>
+          ),
+        )}
+      </div>
+    </figure>
+  );
+}
+
+/** Approvals not shown in an open conversation: other conversations', and external callers'
+ * (MCP clients). A stack at the window's bottom right. */
+export function ApprovalsStack({ store, onShow }: { store: AgentStore; onShow: (sessionId: string) => void }) {
+  const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const others = useMemo(() => store.otherApprovals(), [store, s.approvals, s.activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (others.length === 0) return null;
+  return (
+    <section className="approvals" aria-label="Approvals waiting">
+      {others.slice(0, 3).map((a) => {
+        const session = a.sessionId ? s.sessions.find((x) => x.sessionId === a.sessionId) : undefined;
+        const from = a.principal.startsWith("mcp:") ? `asked by ${a.principal.slice(4)} over MCP` : session ? `in “${session.title}”` : `asked by ${a.principal}`;
+        return (
+          <div key={a.requestId} className="approvals__item">
+            <ApprovalCard request={a} external={null} context={from} onAnswer={(d) => void store.approve(a.requestId, d)} />
+            {a.sessionId && (
+              <Button size="sm" variant="quiet" onClick={() => onShow(a.sessionId as string)}>
+                Show the conversation
+              </Button>
+            )}
+          </div>
+        );
+      })}
+      {others.length > 3 && <p className="approvals__more">{others.length - 3} more waiting</p>}
+    </section>
   );
 }
 

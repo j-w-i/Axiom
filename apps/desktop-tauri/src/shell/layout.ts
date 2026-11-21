@@ -1,5 +1,5 @@
 // Workbench layout state (workspace-spec.md §1; M1.6-SHELL-002): side bar width and
-// visibility, console height and visibility. Shell-local, per machine, in localStorage
+// visibility, console height and visibility, and (M3-UI-002) the AI dock's width and visibility. Shell-local, per machine, in localStorage
 // `axiom.layout.v2` (migrated once from v1). Pure functions, unit-tested.
 
 export interface Layout {
@@ -7,6 +7,9 @@ export interface Layout {
   panel: number;
   sidebarVisible: boolean;
   panelVisible: boolean;
+  /** The AI dock beside the editor (workspace-spec.md §5.2; M3-UI-002). */
+  dock: number;
+  dockVisible: boolean;
 }
 
 export const LAYOUT_KEY = "axiom.layout.v2";
@@ -16,6 +19,7 @@ export const LAYOUT_V1_KEY = "axiom.layout.v1";
 export const LIMITS = {
   sidebar: { min: 180, max: 480, def: 252 },
   panel: { min: 120, max: 520, def: 232 },
+  dock: { min: 300, max: 640, def: 352 },
 } as const;
 
 /** Below this window width the side bar starts hidden. */
@@ -27,14 +31,15 @@ export interface WindowSize {
 }
 
 export function defaultLayout(win: WindowSize): Layout {
-  return { sidebar: LIMITS.sidebar.def, panel: LIMITS.panel.def, sidebarVisible: win.width >= NARROW, panelVisible: true };
+  return { sidebar: LIMITS.sidebar.def, panel: LIMITS.panel.def, sidebarVisible: win.width >= NARROW, panelVisible: true, dock: LIMITS.dock.def, dockVisible: false };
 }
 
 /** The largest side bar / console the window allows (the editor keeps room to work). */
-export function maxSizes(win: WindowSize): { sidebar: number; panel: number } {
+export function maxSizes(win: WindowSize): { sidebar: number; panel: number; dock: number } {
   return {
     sidebar: Math.max(LIMITS.sidebar.min, Math.min(LIMITS.sidebar.max, win.width - 400)),
     panel: Math.max(LIMITS.panel.min, Math.min(LIMITS.panel.max, win.height - 260)),
+    dock: Math.max(LIMITS.dock.min, Math.min(LIMITS.dock.max, win.width - 480)),
   };
 }
 
@@ -43,7 +48,12 @@ export const clamp = (v: number, min: number, max: number): number => Math.max(m
 /** Sizes within their limits and the window. Visibility is kept. */
 export function clampLayout(l: Layout, win: WindowSize): Layout {
   const max = maxSizes(win);
-  return { ...l, sidebar: clamp(l.sidebar, LIMITS.sidebar.min, max.sidebar), panel: clamp(l.panel, LIMITS.panel.min, max.panel) };
+  return {
+    ...l,
+    sidebar: clamp(l.sidebar, LIMITS.sidebar.min, max.sidebar),
+    panel: clamp(l.panel, LIMITS.panel.min, max.panel),
+    dock: clamp(l.dock, LIMITS.dock.min, max.dock),
+  };
 }
 
 type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -59,6 +69,8 @@ function parse(text: string | null): Partial<Layout> | null {
     if (typeof o.panel === "number") out.panel = o.panel;
     if (typeof o.sidebarVisible === "boolean") out.sidebarVisible = o.sidebarVisible;
     if (typeof o.panelVisible === "boolean") out.panelVisible = o.panelVisible;
+    if (typeof o.dock === "number") out.dock = o.dock;
+    if (typeof o.dockVisible === "boolean") out.dockVisible = o.dockVisible;
     return out;
   } catch {
     return null;

@@ -39,16 +39,22 @@ export function Rail({
   onSelect,
   attention,
   subscribe,
+  chatAttention = () => 0,
+  chatSubscribe = () => () => {},
 }: {
   current: Destination;
   onSelect: (d: Destination) => void;
   attention: () => number;
   subscribe: (fn: () => void) => () => void;
+  /** Approvals waiting (M3-UI-002). */
+  chatAttention?: () => number;
+  chatSubscribe?: (fn: () => void) => () => void;
 }) {
   const missing = useSyncExternalStore(subscribe, attention, attention);
+  const waiting = useSyncExternalStore(chatSubscribe, chatAttention, chatAttention);
   const items: Item[] = [
     { id: "files", label: "Files", icon: <Icon.Files /> },
-    { id: "chat", label: "Chat", icon: <Icon.Chat /> },
+    { id: "chat", label: "Chat", icon: <Icon.Chat />, badge: waiting },
     { id: "environments", label: "Environments", icon: <Icon.Layers />, badge: missing },
   ];
   const refs = useRef<(HTMLButtonElement | null)[]>([]);

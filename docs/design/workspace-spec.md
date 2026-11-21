@@ -261,6 +261,18 @@ under the row. Esc or "Done" closes. Agents (M3) and Environments (M2) sections 
 
 ### 5.2 AI workspace (M3 epic 3.8) — `concepts/r-workspace-dark.png` (right dock)
 
+**Status: built (M3-UI-002, 2026-11-22).**
+- **The dock:** `data-region=dock`, Mod+L (also in the title row, View menu and palette),
+  300–640 px, persisted in layout v2. It shows the folder-scope conversation, with a header menu
+  that switches conversations instead of tabs.
+- **The approval card, as built:** Deny is a default raised button (danger-quiet text on the
+  brass tint measured 3.9:1).
+- **Focus:** the card takes focus only when the person is not typing; an empty composer counts
+  as not typing.
+- **Elsewhere:** approvals from other conversations or MCP clients appear in a stack at the
+  window's bottom right; the rail's Chat item shows the count.
+- Shots S21; a11y S21; e2e `dock.mjs`.
+
 - Dock on the right (`--dock-w` 352, resizable 300–640), toggled with Ctrl+L.
 - Session tabs: LED (waiting = attention) + title + badge for pending approvals.
   Concurrent sessions are tabs, and a session waiting on you raises the rail/dock

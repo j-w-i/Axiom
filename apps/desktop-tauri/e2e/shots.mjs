@@ -80,6 +80,7 @@ const CATALOGUE = [
   ["s18c", "Environments page, a failed install (the store's own failure set from the harness)"],
   ["s18d", "Install plan dialog (M2-UI-002) for a managed Rust install (the plan the daemon returns for rust 1.84.0 on Linux)"],
   ["s19", "Console Problems view (M2-UI-003): a failing build's diagnostics grouped by file (the store's own state set from the harness)"],
+  ["s21", "AI dock beside the editor (M3-UI-002): the agent asks to edit src/lib.rs; the approval card with its diff"],
   ["s20", "Chat (M3-UI-001): a conversation with no folder open: Markdown answer with a table and a code block (scripted model)"],
   ["s20b", "Chat (M3-UI-001): a new conversation's empty state"],
   ["focused-region", "Focused-region rule", "SHELL-002 / EDITOR-002: no focused-region treatment yet"],
@@ -511,7 +512,9 @@ async function main() {
   // ---- everything else: one real session ------------------------------------------
   // The scripted model answers the Chat states (s20).
   const chatScript = join(BASE, "chat-script.json");
-  writeFileSync(chatScript, JSON.stringify({ turns: [{ events: [{ type: "text", text: "Here is a summary:\n\n| Step | Time |\n|------|------|\n| Build | 4.1 s |\n| Test | 12.8 s |\n\n```rust\nfn total(steps: &[f64]) -> f64 {\n    steps.iter().sum()\n}\n```\n\nThe tests take **three times** as long as the build." }] }] }));
+  // s21 (M3-UI-002): in the dock, the agent asks to edit src/lib.rs.
+  const s21 = { events: [{ type: "text", text: "I'll export the error type's kind as well." }, { type: "toolCall", id: "s21", name: "fs.applyPatch", input: { path: "src/lib.rs", edits: [{ search: "pub use error::ExecError;", replace: "pub use error::{ExecError, ExecErrorKind};" }] } }] };
+  writeFileSync(chatScript, JSON.stringify({ turns: [s21, { events: [{ type: "text", text: "Here is a summary:\n\n| Step | Time |\n|------|------|\n| Build | 4.1 s |\n| Test | 12.8 s |\n\n```rust\nfn total(steps: &[f64]) -> f64 {\n    steps.iter().sum()\n}\n```\n\nThe tests take **three times** as long as the build." }] }] }));
   const { wd, data } = await launchPlain(["--daemon", DAEMON], { AXIOM_TEST_SCRIPTED_MODEL: chatScript });
   try {
     await boot(wd);
@@ -763,6 +766,21 @@ async function main() {
         await bothThemes(wd, "s19");
         await wd.click(await wd.find('[data-view=output]'));
         await wd.exec(`${STORES}.problems.set({ runs: {}, byTask: {} })`);
+      });
+
+      await state(wd, "s21", async () => {
+        await wd.exec(`document.querySelector('[aria-label="Toggle AI dock"]').click()`);
+        await waitFor(wd, `return !!document.querySelector('[data-testid=chat-dock]') && ${STORES}.agent.getSnapshot().scope === 'workspace' && !!${STORES}.agent.getSnapshot().model`, "the dock");
+        await wd.exec(`${STORES}.agent.newChat("workspace"); ${STORES}.agent.send("Export the error kind too")`);
+        await waitFor(wd, `return !!document.querySelector('[data-testid=chat-dock] [data-testid=approval] .diff')`, "the approval card");
+        await parkPointer(wd);
+        await sleep(300);
+        await bothThemes(wd, "s21");
+        // Cancel: the approval is withdrawn and the model is not asked again (s20 has its own turn).
+        await wd.exec(`${STORES}.agent.stop()`);
+        await waitFor(wd, `return ${STORES}.agent.getSnapshot().active.running === false`, "cancelled");
+        await wd.exec(`document.querySelector('[aria-label="Toggle AI dock"]').click()`);
+        await waitFor(wd, `return !document.querySelector('[data-region=dock]')`, "the dock closed");
       });
 
       await state(wd, "s20", async () => {

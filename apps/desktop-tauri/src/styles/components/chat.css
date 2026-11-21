@@ -578,3 +578,192 @@
 .composer__stop {
   color: var(--danger);
 }
+
+/* ---- the dock (workspace-spec.md §5.2; M3-UI-002) ---- */
+.dock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: var(--dock-w);
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: var(--surface-panel);
+}
+.chat--dock {
+  background: var(--surface-panel);
+}
+.chat--dock .chat__head {
+  background: var(--surface-panel);
+  padding-left: var(--s-1);
+}
+.chat--dock .chat__log,
+.chat--dock .composer {
+  max-width: none;
+}
+.chat--dock .chat__log {
+  padding: var(--s-3);
+}
+.chat--dock .composer {
+  padding: var(--s-2) var(--s-3) var(--s-3);
+}
+.chat--dock .msg--user {
+  max-width: 100%;
+}
+.chat__switch {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+}
+.chat__conflicts {
+  margin: var(--s-2) 0 0;
+  padding-left: var(--s-4);
+}
+.chat__conflicts code {
+  font-family: var(--font-code);
+  font-size: var(--out-size);
+}
+
+/* ---- the approval card: the only brass card in the log ---- */
+.approval {
+  padding: var(--s-3);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-2);
+  background: var(--accent-soft);
+}
+.approval__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--accent-text);
+}
+.approval__title {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.approval__title code,
+.approval__argv {
+  font-family: var(--font-code);
+  font-size: var(--out-size);
+}
+.approval__meta {
+  margin: var(--s-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-small);
+}
+.approval__argv {
+  margin: var(--s-2) 0 0;
+  padding: var(--s-2);
+  background: var(--surface-well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  white-space: pre-wrap;
+}
+.approval .diff {
+  margin-top: var(--s-2);
+}
+.approval__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.approvals {
+  position: fixed;
+  right: var(--s-4);
+  bottom: calc(var(--status-h) + var(--s-4));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: min(420px, calc(100vw - 2 * var(--s-4)));
+}
+.approvals__item {
+  padding: var(--s-1);
+  background: var(--surface-overlay);
+  border-radius: var(--r-3);
+  box-shadow: var(--overlay-shadow);
+}
+.approvals__more {
+  margin: 0;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: var(--text-small);
+}
+
+/* ---- diffs ---- */
+.diff {
+  margin: 0;
+  border-top: 1px solid var(--line-mid);
+  font-family: var(--font-code);
+  font-size: var(--out-size);
+  line-height: var(--out-leading);
+}
+.approval .diff {
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--surface-well);
+}
+.diff__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  border-bottom: 1px solid var(--line-mid);
+}
+.diff__file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff__plus {
+  color: var(--ok-text);
+}
+.diff__minus {
+  color: var(--danger);
+}
+.diff__body {
+  max-height: 360px;
+  overflow: auto;
+}
+.diff__row {
+  display: grid;
+  grid-template-columns: 4ch 4ch 2ch 1fr;
+  white-space: pre;
+}
+.diff__row--add {
+  background: var(--ok-soft);
+}
+.diff__row--del {
+  background: var(--danger-soft);
+}
+.diff__row--hunk {
+  display: block;
+  padding: 0 var(--s-3);
+  color: var(--text-faint);
+}
+.diff__num {
+  padding-right: var(--s-1);
+  text-align: right;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.diff__sign {
+  text-align: center;
+  color: var(--text-muted);
+  user-select: none;
+}
+.diff__text {
+  padding-right: var(--s-3);
+}
+
+/* Icons carry no size of their own: inside Chat they are the standard 16 px, never shrunk. */
+.chat svg,
+.approval svg {
+  width: var(--icon);
+  height: var(--icon);
+  flex: none;
+}

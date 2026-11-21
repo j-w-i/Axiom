@@ -62,3 +62,38 @@ describe("chat helpers", () => {
     expect(await readImage(big)).toMatch(/larger than 5 MiB/);
   });
 });
+
+import { ApprovalCard, DiffBlock, parseDiff } from "../src/components/Chat";
+
+describe("approvals and diffs (M3-UI-002)", () => {
+  const diff = "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,3 +1,4 @@\n fn a() {}\n-fn b() {}\n+pub fn b() {}\n+fn c() {}\n fn d() {}\n";
+
+  it("parses a unified diff with line numbers and stats", () => {
+    const d = parseDiff(diff);
+    expect(d.file).toBe("src/lib.rs");
+    expect([d.added, d.removed]).toEqual([2, 1]);
+    expect(d.rows.map((r) => `${r.kind}:${r.old ?? ""}:${r.new ?? ""}`)).toEqual(["hunk::", "ctx:1:1", "del:2:", "add::2", "add::3", "ctx:3:4"]);
+    const html = renderToStaticMarkup(<DiffBlock diff={diff} />);
+    expect(html).toContain('aria-label="Diff of src/lib.rs: 2 added, 1 removed"');
+    expect(html).toContain('aria-label="removed"');
+  });
+
+  it("the approval card names the tool, targets and effect; offers session only when it may", () => {
+    const req = {
+      requestId: "r1", sessionId: "s1", principal: "session:s1", tool: "fs.applyPatch", effect: "writeWorkspace" as const,
+      targets: ["src/lib.rs"], preview: diff, rule: undefined, checkpointPlanned: true, canRemember: true,
+    };
+    const html = renderToStaticMarkup(<ApprovalCard request={req} external={null} onAnswer={() => {}} />);
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('aria-label="Approval needed: fs.applyPatch on src/lib.rs"');
+    expect(html).toContain("changes files in the folder");
+    expect(html).toContain("a checkpoint is taken first");
+    expect(html).toContain('data-answer="once"');
+    expect(html).toContain('data-answer="session"');
+    expect(html).toContain('data-answer="deny"');
+    expect(html).toContain('class="diff"');
+    const noSession = renderToStaticMarkup(<ApprovalCard request={{ ...req, canRemember: false, effect: "deploy" }} external="Claude Code" onAnswer={() => {}} />);
+    expect(noSession).not.toContain('data-answer="session"');
+    expect(noSession).toContain("Claude Code is an external agent");
+  });
+});

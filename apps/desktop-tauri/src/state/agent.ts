@@ -13,6 +13,8 @@ import type {
   ImageRef,
   ModelsResult,
   ProviderKind,
+  RestoreConflict,
+  RestoreResult,
   SessionInfo,
   SessionListResult,
   SessionOpenResult,
@@ -85,8 +87,10 @@ export interface AgentState {
   sendError: string;
   /** sha256 → data URL of images shown in the transcript. */
   images: Record<string, string>;
-  /** Approvals waiting, by request id (shown by M3-UI-002). */
+  /** Approvals waiting, by request id (M3-UI-002). */
   approvals: ApprovalRequest[];
+  /** A restore refused because of conflicts, waiting for the person's choice. */
+  restoreConflict: { checkpoint: number; conflicts: RestoreConflict[] } | null;
 }
 
 const EMPTY: Conversation = { events: [], streaming: "", running: false };
@@ -105,6 +109,7 @@ const initial: AgentState = {
   sendError: "",
   images: {},
   approvals: [],
+  restoreConflict: null,
 };
 
 /** The transcript of a session's persisted events (rewinds applied). Pure. */
@@ -164,6 +169,13 @@ export function transcript(events: AgentEvent[]): Item[] {
       case "error":
         items.push({ kind: "error", key, turn: e.turn, message: b.message, notice: b.kind === "notice" });
         break;
+      case "restored": {
+        const n = b.result.restored.length;
+        const skipped = b.result.conflicts?.length ?? 0;
+        const message = `Restored checkpoint ${b.result.checkpoint}: ${n} file${n === 1 ? "" : "s"}${skipped ? `, ${skipped} left as they were` : ""}. Checkpoint ${b.result.undoCheckpoint} undoes this.`;
+        items.push({ kind: "error", key, turn: e.turn, message, notice: true });
+        break;
+      }
       default:
         break; // usage, turnEnd, compaction, approvals: not shown as items
     }
@@ -401,6 +413,45 @@ export class AgentStore extends Observable<AgentState> {
     } catch (e) {
       this.set({ error: describeAgentError(e) });
     }
+  }
+
+  /** Answers an approval request (the first answer wins; a late one is ignored). */
+  async approve(requestId: string, decision: "once" | "session" | "deny"): Promise<void> {
+    this.set({ approvals: this.state.approvals.filter((a) => a.requestId !== requestId) });
+    try {
+      await this.client.request("agent/approve", { requestId, decision });
+    } catch {
+      /* already answered elsewhere, or withdrawn */
+    }
+  }
+
+  /** Restores a checkpoint of the open conversation. Conflicts are held for the person's
+   * choice (`restoreConflict`); `skipConflicts` restores the rest. Returns the result. */
+  async restore(checkpoint: number, skipConflicts = false): Promise<RestoreResult | null> {
+    const id = this.state.activeId;
+    if (!id) return null;
+    try {
+      const r = await this.client.request<RestoreResult>("agent/restore", { workspaceId: this.wsId, sessionId: id, checkpoint, skipConflicts });
+      this.set({ restoreConflict: null });
+      return r;
+    } catch (e) {
+      if (e instanceof RpcError && e.kind === "checkpoint_conflict") {
+        const conflicts = (Array.isArray(e.details.conflicts) ? e.details.conflicts : []) as RestoreConflict[];
+        this.set({ restoreConflict: { checkpoint, conflicts } });
+      } else {
+        this.set({ error: describeAgentError(e), restoreConflict: null });
+      }
+      return null;
+    }
+  }
+
+  dismissRestoreConflict(): void {
+    this.set({ restoreConflict: null });
+  }
+
+  /** Approvals of conversations other than the open one, and of external principals (MCP). */
+  otherApprovals(): ApprovalRequest[] {
+    return this.state.approvals.filter((a) => !a.sessionId || a.sessionId !== this.state.activeId);
   }
 
   /** Fetches an image of the open conversation for display (once). */

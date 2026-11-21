@@ -20,6 +20,7 @@ export function useAppShortcuts(ctx: ShellContext): void {
       else if (mod && !e.shiftKey && k === "o") { if (ready) void openFolder(); }
       else if (mod && !e.shiftKey && k === "b") ctx.toggleSidebar();
       else if (mod && !e.shiftKey && k === "j") ctx.togglePanel();
+      else if (mod && !e.shiftKey && k === "l") { if (wsId) ctx.toggleDock(); }
       else if (mod && !e.shiftKey && k === ",") ctx.setSettingsOpen(true);
       else if (mod && e.shiftKey && k === "r") { if (wsId) ctx.focusRun(); }
       else if (mod && !e.shiftKey && k === "s") { if (hasDoc) documents.save(activePath); }

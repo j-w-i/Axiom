@@ -300,7 +300,12 @@ describe("design tokens", () => {
   it("dark generator output unchanged", () => {
     // SURFACES-003 must not move a dark value: the generated dark block is pinned byte for byte.
     const block = /\/\* <generated:dark>[\s\S]*?\/\* <\/generated:dark> \*\//.exec(tokens)?.[0] ?? "";
-    expect(createHash("sha256").update(block).digest("hex")).toBe("cdf1639b0303549a56b58724d3e2ac11450d1218f0aedc9cdd38fdcc6d65bd98");
+    // Tokens added later (M3-UI-002: --ok-soft for diff additions) are new lines; without them
+    // the block is the same bytes, so no existing dark value moved.
+    const added = ["  --ok-soft: rgb(143 191 127 / 0.11);\n"];
+    for (const line of added) expect(block).toContain(line);
+    const original = added.reduce((b, line) => b.replace(line, ""), block);
+    expect(createHash("sha256").update(original).digest("hex")).toBe("cdf1639b0303549a56b58724d3e2ac11450d1218f0aedc9cdd38fdcc6d65bd98");
   });
 
   it("§2.3 contrast pairs detect a failing pair (fixture)", () => {

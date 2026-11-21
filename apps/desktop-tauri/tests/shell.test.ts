@@ -40,7 +40,7 @@ function ctx(f: Fixture): ShellContext {
     prefs: { theme: f.dark ? "dark" : "light" } as unknown as ShellContext["prefs"],
     openFolder: async () => {},
     toggleSidebar: noop,
-    togglePanel: noop,
+    togglePanel: noop, toggleDock: () => {},
     resetLayout: noop,
     focusRun: noop,
     destination: "files",
@@ -75,6 +75,7 @@ describe("shell commands", () => {
       ["newChat", "View", "New Chat", "Ctrl+N", false],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
+      ["dock", "View", "Toggle AI Dock", "Ctrl+L", false], // added by M3-UI-002
       ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Light Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", false],
@@ -99,6 +100,7 @@ describe("shell commands", () => {
       ["newChat", "View", "New Chat", "Ctrl+N", true],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
+      ["dock", "View", "Toggle AI Dock", "Ctrl+L", false], // added by M3-UI-002
       ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Dark Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", false],
@@ -124,6 +126,7 @@ describe("shell commands", () => {
       ["newChat", "View", "New Chat", "Ctrl+N", true],
       ["sidebar", "View", "Toggle Side Bar", "Ctrl+B", undefined],
       ["panel", "View", "Toggle Panel", "Ctrl+J", undefined],
+      ["dock", "View", "Toggle AI Dock", "Ctrl+L", true], // added by M3-UI-002
       ["resetLayout", "View", "Reset Layout", undefined, undefined], // added by SHELL-002
       ["theme", "View", "Switch to Light Theme", undefined, undefined],
       ["run", "Run", "Run Command…", "Ctrl+Shift+R", true],

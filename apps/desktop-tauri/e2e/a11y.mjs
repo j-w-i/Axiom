@@ -44,7 +44,10 @@ const ws = mkdtempSync(join(tmpdir(), "axiom-a11y-ws-"));
 // S20 (Chat, M3-UI-001): the scripted model answers once per theme with Markdown and code.
 const chatScript = join(data, "chat-script.json");
 const chatAnswer = { type: "text", text: "A **short** answer:\n\n```sh\necho hi\n```\n\n- one\n- two" };
-writeFileSync(chatScript, JSON.stringify({ turns: [{ events: [chatAnswer] }, { events: [chatAnswer] }] }));
+// S21 (approval card, M3-UI-002): an edit asks; Esc denies it; the model hears the denial.
+const ask = { events: [{ type: "toolCall", id: "a1", name: "fs.applyPatch", input: { path: "README.md", edits: [{ search: "# Demo", replace: "# Demo!" }] } }] };
+const heard = { expect: { toolResult: { callId: "a1", isError: true } }, events: [{ type: "text", text: "Left it." }] };
+writeFileSync(chatScript, JSON.stringify({ turns: [{ events: [chatAnswer] }, ask, heard, { events: [chatAnswer] }, ask, heard] }));
 mkdirSync(join(ws, "src"), { recursive: true });
 writeFileSync(join(ws, "src", "main.rs"), 'fn main() {\n    println!("hello");\n}\n');
 writeFileSync(join(ws, "README.md"), "# Demo\n\nA small workspace.\n");
@@ -402,7 +405,10 @@ try {
     await wd.click(await wd.find('.rail [data-destination="chat"]'));
     await wd.waitFor(`return window.__axiom.agent.getSnapshot().status === 'ready' && !!window.__axiom.agent.getSnapshot().model`, [], 10000, "chat ready");
     await wd.exec(`window.__axiom.agent.newChat("general"); window.__axiom.agent.send("Answer briefly")`);
-    await wd.waitFor(`return !!document.querySelector('[data-testid=chat-log] .code-block') && window.__axiom.agent.getSnapshot().active.running === false`, [], 10000, "chat answer");
+    await wd.waitFor(`return !!document.querySelector('[data-testid=chat-log] .code-block') && window.__axiom.agent.getSnapshot().active.running === false`, [], 10000, "chat answer").catch(async (e) => {
+      console.log("S20 state:", JSON.stringify(await wd.exec(`const s = window.__axiom.agent.getSnapshot(); return { scope: s.scope, active: s.activeId, err: s.sendError, error: s.error, model: s.model, n: s.active.events.map(e => e.event.type), page: !!document.querySelector('[data-testid=chat-page]') }`)));
+      throw e;
+    });
     await sleep(500);
     contrast[`S20 ${theme}`] = await wd.exec(`return window.__a11y.contrastScan()`);
     await wd.exec(`document.activeElement?.blur()`);
@@ -427,6 +433,32 @@ try {
     await wd.click(await wd.find('.rail [data-destination="files"]'));
     await wd.waitFor(`return document.querySelector('.editor-column__files')?.hidden === false`, [], 3000, "back to files");
 
+    // ---- S21: the AI dock and the approval card (M3-UI-002; workspace-spec.md §5.2) -------
+    if (!(await wd.exec(`return !!document.querySelector('[data-region=dock]')`))) await wd.exec(`document.querySelector('[aria-label="Toggle AI dock"]').click()`);
+    await wd.waitFor(`return !!document.querySelector('[data-testid=chat-dock]') && window.__axiom.agent.getSnapshot().scope === 'workspace'`, [], 5000, "the dock");
+    await wd.exec(`document.activeElement?.blur(); window.__axiom.agent.newChat("workspace"); window.__axiom.agent.send("Edit the readme")`);
+    await wd.waitFor(`return !!document.querySelector('[data-testid=chat-dock] [data-testid=approval]')`, [], 10000, "approval card");
+    await sleep(300);
+    contrast[`S21 ${theme}`] = await wd.exec(`return window.__a11y.contrastScan()`);
+    const cardA11y = await wd.exec(`const c = document.querySelector('[data-testid=approval]'); const a = document.activeElement; return {
+      role: c.getAttribute('role'), name: c.getAttribute('aria-label'),
+      focused: a?.dataset.answer ?? null, focus: window.__a11y.focusVisible(a),
+      buttons: [...c.querySelectorAll('button')].map(b => window.__a11y.describe(b).name),
+      badge: document.querySelector('.rail [data-destination=chat]').getAttribute('aria-label') }`);
+    await wd.keys([Keys.ESC]);
+    await wd.waitFor(`return !document.querySelector('[data-testid=approval]') && window.__axiom.agent.getSnapshot().active.running === false`, [], 10000, "denied");
+    const denied = await wd.exec(`return [...document.querySelectorAll('[data-testid=chat-dock] .tool-row')].map(r => r.dataset.state)`);
+    check(
+      `S21 approval card (${theme}): an alert named for the tool and target, focused on Allow once (not typing), all actions named, the rail badge says it; Esc denies`,
+      cardA11y.role === "alert" && cardA11y.name === "Approval needed: fs.applyPatch on README.md" && cardA11y.focused === "once" && !!cardA11y.focus &&
+        cardA11y.buttons.join() === "Allow once,Allow for session,Deny" && /need attention/.test(cardA11y.badge) && denied.join() === "error",
+      JSON.stringify({ ...cardA11y, denied }),
+    );
+    await wd.exec(`document.querySelector('[aria-label="Toggle AI dock"]').click()`);
+    await wd.waitFor(`return !document.querySelector('[data-region=dock]')`, [], 5000, "dock closed");
+    // Leave keyboard focus where S20 leaves it (the rail), so the next traversal starts alike.
+    await wd.click(await wd.find('.rail [data-destination="files"]'));
+
     // ---- 5: not by colour alone ----------------------------------------------------------
     const marks = await wd.exec(`
       const dirty = document.querySelector('[role=tab][data-dirty=true] .tab__close')?.getAttribute('aria-label') ?? '';
@@ -444,7 +476,7 @@ try {
     t.targets = await wd.exec(`return window.__a11y.targets()`);
   }
 
-  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d, S19, S20 in both themes ---
+  // ---- 4: rendered contrast across S2, S4, S7, S11, S12, S18, S18d, S19, S20, S21, both themes -
   for (const [state, fails] of Object.entries(contrast)) {
     check(`4 rendered contrast ${state}`, fails.length === 0, `${fails.length} text node(s) below the minimum`, fails.map((f) => `${f.region} .${f.cls} "${f.text}" ${f.ratio}:1 < ${f.need} (${f.color})`));
   }
