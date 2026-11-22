@@ -686,6 +686,7 @@ class _DocViewState extends State<_DocView> {
     final s = app.settings;
     final c = context.colors;
     widget.doc.highlightColor = c.accentSoft;
+    widget.doc.syntax = c.syntax;
     widget.doc.underlineColor = (severity) => switch (severity) {
       1 => c.danger,
       2 => c.warn,

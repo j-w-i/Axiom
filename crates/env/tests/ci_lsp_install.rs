@@ -143,3 +143,20 @@ async fn every_server_provider_plans() {
         }
     }
 }
+
+/// Swift on Linux (M5.5): swiftly bootstrapped into the root (its SHA-256 pinned, `init` with this
+/// host's platform), then the toolchain through it; SourceKit-LSP from that toolchain answers.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn swift_installs_through_swiftly_and_sourcekit_lsp_answers() {
+    let r = registry();
+    let data = tempfile::tempdir().unwrap();
+    let inst = Installer::new(
+        data.path().to_path_buf(),
+        Http::new(HttpConfig::default()).unwrap(),
+    );
+    let root = install(&inst, &r, "swift").await;
+    let bin = root.join("toolchains/6.4.3/usr/bin");
+    assert!(bin.join("swift").is_file(), "{}", bin.display());
+    initializes(&bin.join("sourcekit-lsp"), &[], Some(&bin));
+}

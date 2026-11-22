@@ -81,6 +81,7 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                 env,
                 provides,
                 setup,
+                linux_names,
             } => {
                 for t in provides {
                     if !m.tools.iter().any(|x| &x.id == t) {
@@ -90,7 +91,13 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                     }
                 }
                 for s in setup {
-                    check_template(s, &format!("{at} setup"), &mut errors);
+                    // `${linux}` is the method's own name for the host (its `linux_names`).
+                    let s = if linux_names.is_empty() {
+                        s.clone()
+                    } else {
+                        s.replace("${linux}", "")
+                    };
+                    check_template(&s, &format!("{at} setup"), &mut errors);
                 }
                 match versions {
                     VersionSource::Static { versions } if versions.is_empty() => {

@@ -139,7 +139,7 @@ pub fn managed_overlay(
     let mut dirs = Vec::new();
     let mut vars = BTreeMap::new();
     for (dir, e) in detect::managed_layouts(m) {
-        let d = root.join(&dir);
+        let d = root.join(detect::bin_dir(&dir, version));
         // Only the layouts this install has: a per-platform method's variables (macOS Java's
         // `Contents/Home`) do not leak into another platform's install.
         if !d.is_dir() {
@@ -199,7 +199,7 @@ pub async fn resolve(
         let layouts = managed_layouts(m);
         let mut vars = BTreeMap::new();
         for (dir, e) in &layouts {
-            let d = root.join(dir);
+            let d = root.join(detect::bin_dir(dir, selected));
             if d.is_dir() {
                 let s = d.to_string_lossy().into_owned();
                 if !env.path_prepend.contains(&s) {
@@ -208,7 +208,10 @@ pub async fn resolve(
             }
             vars.extend(detect::expand_env(e, selected, &root));
         }
-        let dirs: Vec<String> = layouts.iter().map(|(d, _)| d.clone()).collect();
+        let dirs: Vec<String> = layouts
+            .iter()
+            .map(|(d, _)| detect::bin_dir(d, selected))
+            .collect();
         for t in m.tools.iter().filter(|t| t.required) {
             match detect::tool_version_in_root(t, &root, &dirs, &vars).await {
                 Some(version) => {

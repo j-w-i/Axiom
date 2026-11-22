@@ -74,6 +74,45 @@ TextSpan applyStyles(
   return _apply(span, ranges, (style, u) => style.merge(styleOf[u]));
 }
 
+/// [span] with the structure the grammar left plain coloured, as VS Code's grammars do: a name
+/// followed by `(` (a call) in [function], a name after `.` (a member) in [variable]. Only text
+/// in [plain] (the grammar's text colour) changes: keywords, strings and comments keep theirs.
+/// Many highlight.js grammars (C#, Java, Kotlin, Swift, Go, Dart…) scope neither (2026-11-22).
+TextSpan applyStructure(TextSpan span, Color plain, Color function, Color variable) {
+  final leaves = <(int, int, bool)>[];
+  final text = StringBuffer();
+  void flatten(InlineSpan s, Color? inherited) {
+    if (s is! TextSpan) return;
+    final colour = s.style?.color ?? inherited;
+    final t = s.text;
+    if (t != null && t.isNotEmpty) {
+      leaves.add((text.length, text.length + t.length, colour == null || colour == plain));
+      text.write(t);
+    }
+    for (final c in s.children ?? const <InlineSpan>[]) {
+      flatten(c, colour);
+    }
+  }
+
+  flatten(span, null);
+  final line = text.toString();
+  bool isPlain(int start, int end) => leaves.every((l) => l.$3 || l.$2 <= start || l.$1 >= end);
+  final ranges = <Underline>[];
+  for (final m in _call.allMatches(line)) {
+    if (isPlain(m.start, m.end)) ranges.add((start: m.start, end: m.end, color: function));
+  }
+  for (final m in _member.allMatches(line)) {
+    if (isPlain(m.start, m.end) && !ranges.any((r) => r.start == m.start)) {
+      ranges.add((start: m.start, end: m.end, color: variable));
+    }
+  }
+  if (ranges.isEmpty) return span;
+  return _apply(span, ranges, (style, u) => style.copyWith(color: u.color));
+}
+
+final _call = RegExp(r'\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()');
+final _member = RegExp(r'(?<=\.)[A-Za-z_][A-Za-z0-9_]*\b');
+
 /// The ranges of [highlights] (LSP ranges) on line [index].
 List<({int start, int end})> highlightsOn(int index, int length, List<LspRange> highlights) => [
   for (final r in highlights)

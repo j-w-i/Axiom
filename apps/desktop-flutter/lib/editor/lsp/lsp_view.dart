@@ -165,6 +165,10 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   @visibleForTesting
   List<String> get shownLabels => [for (final s in _shown) s.item.label];
 
+  /// The list holds the document's words, not a server's items (tests).
+  bool get wordsOnly => _wordsOnly;
+  bool _wordsOnly = false;
+
   /// The selected item's label (tests).
   String? get activeLabel =>
       _shown.isEmpty ? null : _shown[_active.clamp(0, _shown.length - 1)].item.label;
@@ -373,6 +377,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final now = widget.controller.selection;
       if (!now.isCollapsed || now.extentIndex != line || now.extentOffset < start) return;
       _items = parseCompletion(r);
+      _wordsOnly = false;
       _anchor = (line: line, start: start);
       _filter();
     } on DaemonException {
@@ -382,6 +387,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
 
   /// Where no server serves the language: the document's words (ADR-0021 §7).
   void _completeWords() {
+    _wordsOnly = true;
     final c = widget.controller;
     final s = c.selection;
     final start = _wordStart();

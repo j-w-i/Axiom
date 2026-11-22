@@ -35,14 +35,7 @@ final _cases = <(String, String, int, String, String, String?)>[
   ('java', 'src/main/java/fixture/Main.java', 6, '\n        List.o', 'of', null),
   ('csharp', 'Program.cs', 3, '\nnumbers.Order', 'OrderBy', null),
   ('kotlin', 'src/main/kotlin/Main.kt', 2, '\n    names.sor', 'sorted', null),
-  (
-    'swift',
-    'Sources/Fixture/main.swift',
-    3,
-    '\nwords.join',
-    'joined',
-    Platform.isMacOS ? null : 'SourceKit-LSP comes with a Swift toolchain',
-  ),
+  ('swift', 'Sources/Fixture/main.swift', 3, '\nwords.join', 'joined', null),
   ('dart', 'bin/main.dart', 3, '\n  ma', 'max', null),
 ];
 
@@ -72,7 +65,16 @@ void main() {
       for (final f in src.listSync(recursive: true).whereType<File>()) {
         writeFile(ws, f.path.substring(src.path.length + 1), f.readAsStringSync());
       }
-      final app = await boot(tester, data.path);
+      // Swift on Linux is installed by Axiom (swiftly into its data directory): a Swift already
+      // on this computer, through the person's own swiftly, is taken off the daemon's PATH.
+      final path = Platform.environment['PATH'] ?? '';
+      final app = await boot(
+        tester,
+        data.path,
+        env: folder == 'swift' && Platform.isLinux
+            ? {'PATH': path.split(':').where((d) => !d.contains('swiftly')).join(':')}
+            : null,
+      );
       // A failed case still stops its daemon and the servers it started.
       var quitted = false;
       addTearDown(() async {
@@ -102,7 +104,9 @@ void main() {
       // The symbol's item: its name, or its name and parameters as some servers label it
       // (rust-analyzer's `new()`).
       bool isWant(String? label) => label == want || (label?.startsWith('$want(') ?? false);
-      bool offered() => features.shownLabels.any(isWant);
+      // The server's own items: the document's words (shown while it is not ready) may hold the
+      // name too.
+      bool offered() => !features.wordsOnly && features.shownLabels.any(isWant);
       final started = DateTime.now();
       // Servers index on first use: the first answer may be slow; the 300 ms budget is measured
       // on a second request, once the list has been shown.

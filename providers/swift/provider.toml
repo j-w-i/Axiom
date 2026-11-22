@@ -1,0 +1,140 @@
+schema = "axiom.provider/1"
+id = "swift"
+name = "Swift"
+description = "The Swift toolchain (Apache-2.0) with SourceKit-LSP: detected on this computer, or installed by Axiom on Linux through swiftly, Swift's own installer, which checks each toolchain's signature."
+version = "0.1.0"
+homepage = "https://www.swift.org"
+
+[project]
+any_file = ["Package.swift"]
+
+[[tools]]
+id = "swift"
+program = "swift"
+version_regex = 'Swift version (\d+\.\d+(?:\.\d+)?)'
+
+[[tools]]
+id = "swiftly"
+program = "swiftly"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+# The toolchain, installed by swiftly into this root (SWIFTLY_TOOLCHAINS_DIR); its usr/bin has
+# swift and sourcekit-lsp. swiftly's home and proxies stay in the root too: nothing global
+# (no profile, no ~/.local/share/swiftly) changes.
+[[install]]
+kind = "delegate"
+using = "swiftly"
+scope = "managed"
+# System packages a toolchain wants (Fedora: libcurl-devel, libedit-devel…) are written to
+# swiftly-post-install.sh rather than failing the install: SourceKit-LSP runs without them;
+# `swift build` of some packages needs them.
+install = ["swiftly", "install", "--assume-yes", "--post-install-file", "${root}/swiftly-post-install.sh", "${version}"]
+uninstall = []
+list_versions = ["swiftly", "list-available"]
+versions = { kind = "static", versions = ["6.4.3"] }
+bin_dirs = ["toolchains/${version}/usr/bin"]
+env = { SWIFTLY_HOME_DIR = "${root}/swiftly-home", SWIFTLY_BIN_DIR = "${root}/swiftly-bin", SWIFTLY_TOOLCHAINS_DIR = "${root}/toolchains" }
+
+# Bootstraps the delegate: swiftly 1.2.0, its SHA-256 pinned after checking swift.org's
+# signature (Swift Automatic Signing Key #4, E813C892820A6FA13755B268F167DF1ACF9CE069; swift.org
+# publishes signatures, not checksums), set up in the same root without a toolchain. The
+# digest is listed under each Swift version the delegate installs. Linux only: on macOS, Xcode
+# (or its command line tools) brings Swift.
+[[install]]
+kind = "archive"
+provides = ["swiftly"]
+versions = { kind = "static", versions = ["6.4.3"] }
+# `swiftly init` moves the extracted swiftly into SWIFTLY_BIN_DIR: the delegate is there (swiftly-bin).
+bin_dirs = ["swiftly-bin"]
+setup = ["${root}/swiftly", "init", "--assume-yes", "--no-modify-profile", "--skip-install", "--quiet-shell-followup", "--platform", "${linux}"]
+env = { SWIFTLY_HOME_DIR = "${root}/swiftly-home", SWIFTLY_BIN_DIR = "${root}/swiftly-bin", SWIFTLY_TOOLCHAINS_DIR = "${root}/toolchains" }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://download.swift.org/swiftly/linux/swiftly-1.2.0-x86_64.tar.gz"
+format = "tar.gz"
+checksum = { kind = "sha256", values = { "6.4.3" = "0b26b568811404374c7d7f07276b6aad4145db5d1893a45f307de6a94ca8d9c3" } }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://download.swift.org/swiftly/linux/swiftly-1.2.0-aarch64.tar.gz"
+format = "tar.gz"
+checksum = { kind = "sha256", values = { "6.4.3" = "590d855e03807791f1b84aab77471bf7e31f9e3b22151972526077da296ecf96" } }
+
+# swiftly's platforms (swiftly 1.2.0: ubuntu18.04–26.04, debian12/13, fedora39/41, ubi9,
+# amazonlinux2), newest that the host is at least; a newer release of a distribution uses its
+# newest build (Fedora 44 → fedora41, as swiftly does not know it yet).
+[[install.linux_names]]
+ids = ["fedora"]
+min_version = "41"
+name = "fedora41"
+
+[[install.linux_names]]
+ids = ["fedora"]
+min_version = "39"
+name = "fedora39"
+
+[[install.linux_names]]
+ids = ["ubuntu"]
+min_version = "26.04"
+name = "ubuntu26.04"
+
+[[install.linux_names]]
+ids = ["ubuntu"]
+min_version = "24.04"
+name = "ubuntu24.04"
+
+[[install.linux_names]]
+ids = ["ubuntu"]
+min_version = "22.04"
+name = "ubuntu22.04"
+
+[[install.linux_names]]
+ids = ["ubuntu"]
+min_version = "20.04"
+name = "ubuntu20.04"
+
+[[install.linux_names]]
+ids = ["debian"]
+min_version = "13"
+name = "debian13"
+
+[[install.linux_names]]
+ids = ["debian"]
+min_version = "12"
+name = "debian12"
+
+[[install.linux_names]]
+ids = ["rhel", "centos", "rocky", "almalinux", "ol"]
+min_version = "9"
+name = "ubi9"
+
+[[install.linux_names]]
+ids = ["amzn"]
+name = "amazonlinux2"
+
+# Derivatives (Linux Mint, Pop!_OS…) by what they are like: their own versions are not Ubuntu's.
+[[install.linux_names]]
+ids = ["ubuntu"]
+name = "ubuntu24.04"
+
+[[install.linux_names]]
+ids = ["debian"]
+name = "debian12"
+
+[[install.linux_names]]
+ids = ["fedora"]
+name = "fedora41"
+
+[[tasks]]
+id = "build"
+kind = "build"
+label = "swift build"
+command = ["swift", "build"]
+
+[[tasks]]
+id = "test"
+kind = "test"
+label = "swift test"
+command = ["swift", "test"]

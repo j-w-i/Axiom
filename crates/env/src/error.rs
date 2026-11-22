@@ -36,7 +36,7 @@ pub enum EnvError {
     },
     #[error("{0}")]
     Spawn(String),
-    #[error("`{command}` failed (exit code {code:?}).")]
+    #[error("`{command}` failed ({}){}", exit_text(*code), output_tail(output))]
     CommandFailed {
         command: String,
         code: Option<i32>,
@@ -93,4 +93,24 @@ impl From<EnvError> for RpcError {
             EnvError::Cancelled => RpcError::new(ErrorKind::Cancelled, msg),
         }
     }
+}
+
+/// `exit code 1`, or how it ended without one (a signal).
+fn exit_text(code: Option<i32>) -> String {
+    code.map_or_else(|| "ended by a signal".into(), |c| format!("exit code {c}"))
+}
+
+/// The last lines a failed command printed, for the message: the reason is usually there.
+fn output_tail(output: &str) -> String {
+    let lines: Vec<&str> = output
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return ".".into();
+    }
+    let tail = lines[lines.len().saturating_sub(3)..].join(" ");
+    let tail: String = tail.chars().take(400).collect();
+    format!(": {tail}")
 }

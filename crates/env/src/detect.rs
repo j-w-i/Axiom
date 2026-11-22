@@ -204,7 +204,7 @@ fn managed_candidates(
     for (version, root) in versions {
         for (d, env) in &layouts {
             for name in executable_names(program) {
-                let p = root.join(d).join(&name);
+                let p = root.join(bin_dir(d, &version)).join(&name);
                 if p.is_file() {
                     out.push((root.clone(), p, expand_env(env, &version, &root)));
                 }
@@ -212,6 +212,12 @@ fn managed_candidates(
         }
     }
     out
+}
+
+/// A method's bin dir for one version: `${version}` expands (a toolchain manager's
+/// `toolchains/${version}/usr/bin`, Swift's under swiftly). M5.5.
+pub fn bin_dir(dir: &str, version: &str) -> String {
+    dir.replace("${version}", version)
 }
 
 /// `env` with `${version}` and `${root}` expanded for one managed root.

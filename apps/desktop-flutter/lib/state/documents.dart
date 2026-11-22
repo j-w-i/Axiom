@@ -48,6 +48,45 @@ String _languageName(String path) => path.startsWith('jdt://')
     ? '${titleOf(path).replaceAll(RegExp(r'\.cs$'), '')}.cs'
     : path;
 
+/// Languages whose calls and members get their colours from the structural pass when the grammar
+/// leaves them plain ([applyStructure]), by highlight.js name: code, not data or prose.
+const structuredLanguages = {
+  'arduino',
+  'bash',
+  'c',
+  'cpp',
+  'crystal',
+  'csharp',
+  'd',
+  'dart',
+  'elixir',
+  'erlang',
+  'fsharp',
+  'go',
+  'groovy',
+  'haskell',
+  'java',
+  'javascript',
+  'julia',
+  'kotlin',
+  'lua',
+  'nim',
+  'objectivec',
+  'ocaml',
+  'perl',
+  'php',
+  'powershell',
+  'python',
+  'r',
+  'ruby',
+  'rust',
+  'scala',
+  'sql',
+  'swift',
+  'typescript',
+  'vbnet',
+};
+
 /// The file's line break: the first one in it (CRLF, CR or LF), LF when it has none. The
 /// editor joins lines with it, so a CRLF file is the same bytes until edited and is saved with
 /// CRLF (requirement E-3; audit finding 2).
@@ -140,6 +179,9 @@ class Doc {
   /// Underline colours by LSP severity (set by the editor from the theme).
   Color Function(int severity) underlineColor = (_) => AxiomColors.dark.danger;
 
+  /// The code colours (set by the editor from the theme).
+  SyntaxColors syntax = AxiomColors.dark.syntax;
+
   TextSpan _span({
     required BuildContext context,
     required int index,
@@ -148,6 +190,9 @@ class Doc {
     required TextStyle style,
   }) {
     var span = textSpan;
+    if (structuredLanguages.contains(language.hljs)) {
+      span = applyStructure(span, syntax.text, syntax.function, syntax.variable);
+    }
     final sem = semantic[index];
     if (sem != null && sem.isNotEmpty) span = applyStyles(span, sem, codeLine.text.length);
     if (highlights.isNotEmpty) {

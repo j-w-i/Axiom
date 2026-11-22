@@ -49,44 +49,63 @@ Map<String, TextStyle> syntaxTheme(SyntaxColors y) {
       TextStyle(color: col, fontStyle: italic ? FontStyle.italic : null);
   return {
     'root': TextStyle(color: y.text),
+    // Comments and documentation.
     'comment': c(y.comment, italic: true),
     'quote': c(y.comment, italic: true),
     'doctag': c(y.keyword),
+    // Keywords and markup names.
     'keyword': c(y.keyword),
     'selector-tag': c(y.keyword),
     'section': c(y.keyword),
     'name': c(y.keyword),
+    'variable.language': c(y.keyword),
+    'deletion': c(y.keyword),
+    // Types.
     'type': c(y.type),
     'title.class': c(y.type),
     'title.class.inherited': c(y.type),
     'built_in': c(y.type),
     'class': c(y.type),
-    'title': c(y.text),
-    'title.function': c(y.text),
+    'selector-class': c(y.type),
+    // Functions: declared (`title`, `title.function`) and called (`title.function.invoke`).
+    'title': c(y.function),
+    'title.function': c(y.function),
+    'title.function.invoke': c(y.function),
+    'selector-id': c(y.function),
+    // Variables, parameters, properties, keys and attributes.
+    'variable': c(y.variable),
+    'params': c(y.variable),
+    'property': c(y.variable),
+    'attr': c(y.variable),
+    'attribute': c(y.variable),
+    'selector-attr': c(y.variable),
+    'template-variable': c(y.variable),
+    // Strings.
     'string': c(y.string),
-    'regexp': c(y.string),
     'template-tag': c(y.string),
+    'meta.string': c(y.string),
+    'addition': c(y.string),
+    'code': c(y.string),
     'subst': c(y.text),
+    // Numbers and constants.
     'number': c(y.number),
     'literal': c(y.number),
     'symbol': c(y.number),
     'bullet': c(y.number),
-    'char.escape': c(y.number),
-    'operator': c(y.punct),
-    'punctuation': c(y.punct),
+    'variable.constant': c(y.number),
+    // Preprocessor, annotations, escapes and patterns.
     'meta': c(y.macro),
     'meta.keyword': c(y.macro),
-    'meta.string': c(y.string),
-    'attr': c(y.macro),
-    'attribute': c(y.macro),
-    'variable': c(y.text),
-    'variable.language': c(y.keyword),
-    'params': c(y.text),
-    'property': c(y.text),
+    'char.escape': c(y.macro),
+    'regexp': c(y.macro),
+    'selector-pseudo': c(y.macro),
+    'link': c(y.macro),
+    // Punctuation.
+    'operator': c(y.punct),
+    'punctuation': c(y.punct),
     'tag': c(y.punct),
     'emphasis': const TextStyle(fontStyle: FontStyle.italic),
     'strong': const TextStyle(fontWeight: FontWeight.w600),
-    'link': c(y.macro),
   };
 }
 

@@ -146,9 +146,15 @@ pub enum InstallMethod {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         provides: Vec<String>,
         /// argv run once after extraction, inside the new root, with `env`; `${root}` and
-        /// `${version}` expand. Never through a shell. Added in M2-ENV-003.
+        /// `${version}` expand, and `${linux}` (see `linux_names`). Never through a shell. Added
+        /// in M2-ENV-003.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         setup: Vec<String>,
+        /// The provider's names for Linux hosts, as `${linux}` in `setup`: the first entry that
+        /// matches this host's os-release. A host none matches cannot use the method (unsupported
+        /// platform). M5.5, additive (swiftly's `--platform`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        linux_names: Vec<LinuxName>,
     },
     /// Delegate to the ecosystem's own installer (rustup, swiftly, uv...).
     /// Runs with managed HOME-style variables so nothing global is modified
@@ -248,6 +254,18 @@ pub enum ArchiveFormat {
     /// URL's last segment without `.gz` (or the artifact's `file_name`), executable. M5.5.
     #[serde(rename = "gz")]
     Gz,
+}
+
+/// One name for a family of Linux hosts. Matches when os-release `ID` is in `ids` and
+/// `VERSION_ID` is at least `min_version` (if given), or, for an entry without `min_version`,
+/// when one of `ID_LIKE` is in `ids`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LinuxName {
+    pub ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_version: Option<String>,
+    pub name: String,
 }
 
 /// Integrity is mandatory: an artifact without a verifiable SHA-256 (or SHA-512) is not
