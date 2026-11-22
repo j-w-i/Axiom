@@ -1,0 +1,4 @@
+size=50000 bytes: search took 1798 ms; result keys=['files', 'filesSearched', 'matches', 'truncated']; total=None
+size=100000 bytes: search took 7086 ms; result keys=['files', 'filesSearched', 'matches', 'truncated']; total=None
+size=200000 bytes: search took 33016 ms; result keys=['files', 'filesSearched', 'matches', 'truncated']; total=None
+size=400000 bytes: search took 134151 ms; result keys=['files', 'filesSearched', 'matches', 'truncated']; total=None
