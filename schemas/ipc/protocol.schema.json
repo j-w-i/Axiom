@@ -193,6 +193,11 @@
           "const": "file",
           "description": "The download is the file itself (a single executable, e.g. `rustup-init`), placed at\nthe root under its URL's last path segment, executable. Added in M2-ENV-003.",
           "type": "string"
+        },
+        {
+          "const": "gz",
+          "description": "One gzip-compressed file (rust-analyzer's releases): decompressed to the root under the\nURL's last segment without `.gz` (or the artifact's `file_name`), executable. M5.5.",
+          "type": "string"
         }
       ]
     },
@@ -3828,6 +3833,13 @@
             "null"
           ]
         },
+        "installProvider": {
+          "description": "When `missing`: the provider whose install would make it run (the server's own, or the\none supplying a tool it `requires`). M5.5, ADR-0021 §5.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "languages": {
           "description": "Monaco/LSP language ids it serves, e.g. `[\"rust\"]`.",
           "items": {
@@ -4471,6 +4483,13 @@
         {
           "description": "Extract the preceding download into the staging root.",
           "properties": {
+            "fileName": {
+              "description": "For `file` and `gz`: the name the file gets (M5.5, additive).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "format": {
               "$ref": "#/$defs/ArchiveFormat"
             },

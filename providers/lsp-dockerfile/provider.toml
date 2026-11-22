@@ -1,0 +1,37 @@
+schema = "axiom.provider/1"
+id = "lsp-dockerfile"
+name = "Dockerfile language server"
+description = "Dockerfile language server (MIT)."
+version = "0.1.0"
+homepage = "https://github.com/rcjsuen/dockerfile-language-server-nodejs"
+
+# The server is an npm package, installed pinned into its own root with the npm of an
+# installed Node (ADR-0021 §4); it runs with that Node (`requires`).
+[[tools]]
+id = "docker-langserver"
+program = "docker-langserver"
+version_regex = '(\d+\.\d+\.\d+)'
+version_args = []
+required = false
+
+[[tools]]
+id = "npm"
+program = "npm"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "delegate"
+using = "npm"
+scope = "managed"
+install = ["npm", "install", "--prefix", "${root}", "--no-fund", "--no-audit", "--no-save", "dockerfile-language-server-nodejs@${version}"]
+uninstall = []
+list_versions = ["npm", "view", "dockerfile-language-server-nodejs", "versions", "--json"]
+versions = { kind = "static", versions = ["0.15.0"] }
+bin_dirs = ["node_modules/.bin"]
+
+[[lsp]]
+id = "docker-langserver"
+languages = ["dockerfile"]
+command = ["docker-langserver", "--stdio"]
+requires = ["node"]

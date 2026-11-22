@@ -1,0 +1,37 @@
+schema = "axiom.provider/1"
+id = "lsp-yaml"
+name = "YAML language server"
+description = "YAML language server (Red Hat, MIT)."
+version = "0.1.0"
+homepage = "https://github.com/redhat-developer/yaml-language-server"
+
+# The server is an npm package, installed pinned into its own root with the npm of an
+# installed Node (ADR-0021 §4); it runs with that Node (`requires`).
+[[tools]]
+id = "yaml-language-server"
+program = "yaml-language-server"
+version_regex = '(\d+\.\d+\.\d+)'
+version_args = []
+required = false
+
+[[tools]]
+id = "npm"
+program = "npm"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "delegate"
+using = "npm"
+scope = "managed"
+install = ["npm", "install", "--prefix", "${root}", "--no-fund", "--no-audit", "--no-save", "yaml-language-server@${version}"]
+uninstall = []
+list_versions = ["npm", "view", "yaml-language-server", "versions", "--json"]
+versions = { kind = "static", versions = ["2.0.0"] }
+bin_dirs = ["node_modules/.bin"]
+
+[[lsp]]
+id = "yaml-language-server"
+languages = ["yaml"]
+command = ["yaml-language-server", "--stdio"]
+requires = ["node"]

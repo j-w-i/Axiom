@@ -204,7 +204,8 @@ enum ArchiveFormat {
   tarGz('tar.gz'),
   tarXz('tar.xz'),
   zip('zip'),
-  file('file');
+  file('file'),
+  gz('gz');
 
   const ArchiveFormat(this.wire);
   final String wire;
@@ -4019,6 +4020,7 @@ final class ServerInfo implements Wire {
     this.capabilities,
     this.detail,
     this.installHint,
+    this.installProvider,
     required this.languages,
     required this.providerId,
     required this.serverId,
@@ -4033,6 +4035,10 @@ final class ServerInfo implements Wire {
 
   /// How to get the server when it is `missing`.
   final String? installHint;
+
+  /// When `missing`: the provider whose install would make it run (the server's own, or the
+  /// one supplying a tool it `requires`). M5.5, ADR-0021 §5.
+  final String? installProvider;
 
   /// Monaco/LSP language ids it serves, e.g. `["rust"]`.
   final List<String> languages;
@@ -4050,6 +4056,7 @@ final class ServerInfo implements Wire {
       capabilities: m['capabilities'] == null ? null : m['capabilities'],
       detail: m['detail'] == null ? null : m['detail'] as String,
       installHint: m['installHint'] == null ? null : m['installHint'] as String,
+      installProvider: m['installProvider'] == null ? null : m['installProvider'] as String,
       languages: [for (final x in asList(m['languages'])) x as String],
       providerId: m['providerId'] as String,
       serverId: m['serverId'] as String,
@@ -4062,6 +4069,7 @@ final class ServerInfo implements Wire {
     if (capabilities != null) 'capabilities': capabilities,
     if (detail != null) 'detail': detail!,
     if (installHint != null) 'installHint': installHint!,
+    if (installProvider != null) 'installProvider': installProvider!,
     'languages': languages,
     'providerId': providerId,
     'serverId': serverId,
@@ -4758,14 +4766,17 @@ final class StepDownload extends Step {
 
 /// Extract the preceding download into the staging root.
 final class StepExtract extends Step {
-  const StepExtract({required this.format, required this.stripComponents});
+  const StepExtract({this.fileName, required this.format, required this.stripComponents});
 
+  /// For `file` and `gz`: the name the file gets (M5.5, additive).
+  final String? fileName;
   final ArchiveFormat format;
   final int stripComponents;
 
   static StepExtract fromJson(Object? json) {
     final m = asMap(json);
     return StepExtract(
+      fileName: m['fileName'] == null ? null : m['fileName'] as String,
       format: ArchiveFormat.fromJson(m['format']),
       stripComponents: (m['stripComponents'] as num).toInt(),
     );
@@ -4774,6 +4785,7 @@ final class StepExtract extends Step {
   @override
   Map<String, Object?> toJson() => {
     'kind': 'extract',
+    if (fileName != null) 'fileName': fileName!,
     'format': format.toJson(),
     'stripComponents': stripComponents,
   };

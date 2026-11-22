@@ -36,6 +36,8 @@ pub struct Definition {
     pub command: Vec<String>,
     pub initialization_options: Option<Value>,
     pub install_hint: Option<String>,
+    /// Tool ids that must resolve for the server to run (M5.5, ADR-0021 §6).
+    pub requires: Vec<String>,
 }
 
 /// Where and how the process runs: resolved by the daemon (the workspace's environment).
@@ -48,6 +50,11 @@ pub struct Launch {
     pub settings: Value,
     /// Settings `lsp.<id>.initializationOptions`, merged over the manifest's.
     pub initialization_options: Option<Value>,
+    /// Why the server cannot run yet, and the provider whose install would fix it (a required
+    /// tool that does not resolve). The server is `missing` with that detail.
+    pub blocked: Option<(String, String)>,
+    /// The provider to install when the command itself is not found (the server's own).
+    pub install_provider: Option<String>,
 }
 
 /// The client capabilities Axiom declares: what the editor's client implements (M4-LSP-002).
@@ -245,6 +252,22 @@ impl LanguageServer {
         })
     }
 
+    /// Another server serves this one's languages: it is `standby` and never starts (M5.5,
+    /// ADR-0021 §3); `false` returns it to `idle` when it was on standby.
+    pub fn set_standby(&self, on: bool) {
+        let now = self.state();
+        if on
+            && matches!(
+                now,
+                ServerState::Idle | ServerState::Missing | ServerState::Stopped
+            )
+        {
+            self.set_state(ServerState::Standby, None);
+        } else if !on && now == ServerState::Standby {
+            self.set_state(ServerState::Idle, None);
+        }
+    }
+
     /// Replaces how the next start runs (the environment or settings changed).
     pub fn set_launch(&self, launch: Launch) {
         *lock(&self.launch) = launch;
@@ -260,6 +283,15 @@ impl LanguageServer {
             detail: i.detail.clone(),
             install_hint: (i.state == ServerState::Missing)
                 .then(|| self.def.install_hint.clone())
+                .flatten(),
+            install_provider: (i.state == ServerState::Missing)
+                .then(|| {
+                    let l = lock(&self.launch);
+                    l.blocked
+                        .as_ref()
+                        .map(|(_, p)| p.clone())
+                        .or_else(|| l.install_provider.clone())
+                })
                 .flatten(),
             capabilities: i.capabilities.clone(),
         }
@@ -359,6 +391,11 @@ impl LanguageServer {
             self.ready.send_modify(|v| *v += 1);
             return;
         };
+        if let Some((detail, _)) = &launch.blocked {
+            self.set_state(ServerState::Missing, Some(detail.clone()));
+            self.ready.send_modify(|v| *v += 1);
+            return;
+        }
         let Some(exe) = which(program, &launch.env) else {
             self.set_state(
                 ServerState::Missing,
@@ -407,14 +444,31 @@ impl LanguageServer {
         let caps = match result {
             Ok(v) => v.get("capabilities").cloned().unwrap_or(Value::Null),
             Err(e) => {
-                let tail = conn.stderr_tail(5);
+                let mut tail = conn.stderr_tail(5);
+                if tail.is_empty() {
+                    // A process that exits at once may not have had its stderr read yet.
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                    tail = conn.stderr_tail(5);
+                }
                 let _ = conn.child.lock().await.start_kill();
                 let detail = if tail.is_empty() {
                     e.to_string()
                 } else {
                     format!("{e} {tail}")
                 };
-                self.set_state(ServerState::Failed, Some(detail));
+                // A toolchain manager's stub for a component that is not installed (rustup's
+                // proxy: "Unknown binary 'rust-analyzer' in official toolchain") means the server
+                // is missing, not broken: the shell offers its install (ADR-0021 §5).
+                let missing = tail.contains("Unknown binary")
+                    || tail.contains("is not installed for the toolchain");
+                self.set_state(
+                    if missing {
+                        ServerState::Missing
+                    } else {
+                        ServerState::Failed
+                    },
+                    Some(detail),
+                );
                 self.ready.send_modify(|v| *v += 1);
                 return;
             }

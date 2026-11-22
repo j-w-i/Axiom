@@ -1,0 +1,39 @@
+schema = "axiom.provider/1"
+id = "lsp-typescript"
+name = "TypeScript language server"
+description = "TypeScript and JavaScript language server (typescript-language-server with TypeScript 6)."
+version = "0.1.0"
+homepage = "https://github.com/typescript-language-server/typescript-language-server"
+
+# The server is an npm package, installed pinned into its own root with the npm of an
+# installed Node (ADR-0021 §4); it runs with that Node (`requires`).
+[[tools]]
+id = "typescript-language-server"
+program = "typescript-language-server"
+version_regex = '(\d+\.\d+\.\d+)'
+
+[[tools]]
+id = "npm"
+program = "npm"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "delegate"
+using = "npm"
+scope = "managed"
+install = ["npm", "install", "--prefix", "${root}", "--no-fund", "--no-audit", "--no-save", "typescript-language-server@${version}", "typescript@6.0.3"]
+uninstall = []
+list_versions = ["npm", "view", "typescript-language-server", "versions", "--json"]
+versions = { kind = "static", versions = ["6.1.0"] }
+bin_dirs = ["node_modules/.bin"]
+
+[[lsp]]
+id = "typescript-language-server"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+command = ["typescript-language-server", "--stdio"]
+requires = ["node"]
+
+# F2 renames the symbol everywhere it is used (see the M4 note in providers/node before M5.5).
+[lsp.initialization_options.preferences]
+providePrefixAndSuffixTextForRename = false

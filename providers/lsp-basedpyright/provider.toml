@@ -1,0 +1,35 @@
+schema = "axiom.provider/1"
+id = "lsp-basedpyright"
+name = "basedpyright"
+description = "Python language server (basedpyright, MIT)."
+version = "0.1.0"
+homepage = "https://github.com/DetachHead/basedpyright"
+
+# The server is an npm package, installed pinned into its own root with the npm of an
+# installed Node (ADR-0021 §4); it runs with that Node (`requires`).
+[[tools]]
+id = "basedpyright"
+program = "basedpyright"
+version_regex = 'basedpyright (\d+\.\d+\.\d+)'
+
+[[tools]]
+id = "npm"
+program = "npm"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "delegate"
+using = "npm"
+scope = "managed"
+install = ["npm", "install", "--prefix", "${root}", "--no-fund", "--no-audit", "--no-save", "basedpyright@${version}"]
+uninstall = []
+list_versions = ["npm", "view", "basedpyright", "versions", "--json"]
+versions = { kind = "static", versions = ["1.40.2"] }
+bin_dirs = ["node_modules/.bin"]
+
+[[lsp]]
+id = "basedpyright"
+languages = ["python"]
+command = ["basedpyright-langserver", "--stdio"]
+requires = ["node"]

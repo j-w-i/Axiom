@@ -14,6 +14,11 @@
           "const": "file",
           "description": "The download is the file itself (a single executable, e.g. `rustup-init`), placed at\nthe root under its URL's last path segment, executable. Added in M2-ENV-003.",
           "type": "string"
+        },
+        {
+          "const": "gz",
+          "description": "One gzip-compressed file (rust-analyzer's releases): decompressed to the root under the\nURL's last segment without `.gz` (or the artifact's `file_name`), executable. M5.5.",
+          "type": "string"
         }
       ]
     },
@@ -22,6 +27,13 @@
       "properties": {
         "checksum": {
           "$ref": "#/$defs/Checksum"
+        },
+        "file_name": {
+          "description": "For `file` and `gz`: the executable's name in the root, when the URL's last segment is\nnot it (`marksman-linux-x64` → `marksman`). M5.5, additive.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "format": {
           "$ref": "#/$defs/ArchiveFormat"

@@ -1,0 +1,36 @@
+schema = "axiom.provider/1"
+id = "lsp-clangd"
+name = "clangd"
+description = "C, C++ and Objective-C language server (LLVM, Apache-2.0 WITH LLVM-exception). Reads compile_commands.json."
+version = "0.1.0"
+homepage = "https://clangd.llvm.org"
+
+[[tools]]
+id = "clangd"
+program = "clangd"
+version_regex = 'clangd version (\d+\.\d+\.\d+)'
+
+[[install]]
+kind = "archive"
+versions = { kind = "static", versions = ["23.1.0"] }
+bin_dirs = ["bin"]
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://github.com/clangd/clangd/releases/download/${version}/clangd-linux-${version}.zip"
+format = "zip"
+strip_components = 1
+checksum = { kind = "sha256", values = { "23.1.0" = "e53b1a96196095faedb7642cf64964f7fb9ad4a0c1f00dd2c172a3d9dcbafdfd" } }
+
+[[install.artifacts]]
+platform = { os = "macos" }
+url = "https://github.com/clangd/clangd/releases/download/${version}/clangd-mac-${version}.zip"
+format = "zip"
+strip_components = 1
+checksum = { kind = "sha256", values = { "23.1.0" = "1082e6638223b785ca2daf0939f13afcd0bb95c84ee9a4bbaff4745365159253" } }
+
+[[lsp]]
+id = "clangd"
+languages = ["c", "cpp", "objective-c", "objective-cpp"]
+command = ["clangd", "--background-index"]
+install_hint = "No clangd build is published for Linux on ARM; install clangd from your distribution."

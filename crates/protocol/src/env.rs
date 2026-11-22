@@ -221,6 +221,9 @@ pub enum Step {
     Extract {
         format: ArchiveFormat,
         strip_components: u32,
+        /// For `file` and `gz`: the name the file gets (M5.5, additive).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_name: Option<String>,
     },
     /// Run a program (never through a shell) with these extra variables.
     Run {

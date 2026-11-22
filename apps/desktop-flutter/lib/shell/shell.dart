@@ -14,9 +14,9 @@ import '../app/app_state.dart';
 import '../chat/chat_page.dart';
 import '../daemon/client.dart';
 import '../daemon/protocol.g.dart' show Methods, SearchMode, SearchParams;
-import '../editor/code_view.dart';
 import '../console/console.dart';
 import '../editor/editor_area.dart';
+import '../editor/languages.dart';
 import '../files/explorer.dart';
 import '../state/documents.dart';
 import '../state/settings.dart';
@@ -1675,7 +1675,37 @@ class _StatusBar extends StatelessWidget {
                         ),
                       ],
                       seam,
-                      seg(Text(languageName(doc.language), style: t.type.small)),
+                      // The language: a button that lists every language (ADR-0021 §1).
+                      Pressable(
+                        label: 'Language: ${doc.language.name}',
+                        hint: 'Change the language of ${titleOf(doc.path)}',
+                        onPressed: () => app.openPicker?.call(
+                          label: 'Language',
+                          inputLabel: 'Language name',
+                          placeholder: 'Choose a language for ${titleOf(doc.path)}',
+                          empty: 'No such language',
+                          items: [
+                            for (final l in Languages.instance.all)
+                              Command(
+                                id: 'language ${l.id}',
+                                title: l.id == doc.language.id ? '${l.name} (current)' : l.name,
+                                run: () => app.documents.setLanguage(doc.path, l),
+                              ),
+                          ],
+                        ),
+                        builder: (context, s) => FocusRing(
+                          visible: s.focused,
+                          child: ColoredBox(
+                            color: s.hovered ? c.hover : c.hover.withValues(alpha: 0),
+                            child: seg(
+                              Text(
+                                doc.language.name,
+                                style: t.type.small.copyWith(color: s.hovered ? c.ink : null),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   );
                 },

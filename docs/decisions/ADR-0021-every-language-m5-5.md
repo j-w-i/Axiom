@@ -24,7 +24,7 @@ installing a server, with a setting that installs automatically instead.
 id where LSP defines one, else the highlight.js name), its display name, its highlight.js
 grammar, and how files are recognised: extensions, exact file names (`Dockerfile`, `Makefile`,
 `CMakeLists.txt`), name patterns (`*.d.ts`, `.env.*`), shebang interpreters (`python3`, `node`,
-`bash`) and a first-line pattern (`<?xml`). All 197 grammars `re_highlight` 0.0.3 ships are
+`bash`) and a first-line pattern (`<?xml`). All 195 grammars `re_highlight` 0.0.3 ships are
 registered; a file no rule matches is plain text. The status bar names the language and opens a
 picker; a choice is kept per document for the session. The registry replaces `languageOf` and
 `lspLanguageId`; the LSP id of a document is the registry's id when a server serves it.
@@ -46,8 +46,9 @@ styles. Files over 1 MiB keep the grammar alone.
 `lsp/servers` lists the `[[lsp]]` entries of every active provider, whether or not the provider
 detects the workspace; the shell starts a server when a document of one of its languages opens
 (unchanged). Providers whose only purpose is a server need no `[project]` table. Two servers may
-claim a language; the first in registry order (built-in before user before workspace, then by
-id) is used and the others are listed as `standby`.
+claim a language; the one from the more specific source is used (workspace, then user, then
+built-in; then by id), as a provider in a later source overrides an earlier one, and the others
+are listed as `standby`.
 
 ### 4. A server is a provider: its install is the provider's install
 

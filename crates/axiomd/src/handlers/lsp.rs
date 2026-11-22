@@ -13,6 +13,7 @@ use axiom_protocol::workspace::WorkspaceRef;
 use axiom_protocol::{ErrorKind, RpcError, WorkspaceId};
 use axiom_rpc::RequestCtx;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -28,8 +29,22 @@ async fn definitions(app: &App, ws: &WorkspaceId) -> Result<(PathBuf, Vec<Defini
     let root2 = root.clone();
     let defs = tokio::task::spawn_blocking(move || {
         let mut out: Vec<Definition> = Vec::new();
-        for (_, m) in r.active() {
-            if m.lsp.is_empty() || !axiom_env::detect::applies(m, &root2) {
+        // M5.5 (ADR-0021 §3): every active provider's servers, whether or not it detects the
+        // workspace; the shell starts one when a document of its language opens.
+        let _ = &root2;
+        // The more specific source first (workspace, user, built-in; each by id): a server the
+        // person added claims its languages before a built-in one (ADR-0021 §3).
+        let mut active: Vec<_> = r.active().collect();
+        active.sort_by_key(|(e, m)| {
+            let rank = match e.info.source {
+                axiom_protocol::env::ProviderSource::Workspace => 0,
+                axiom_protocol::env::ProviderSource::User => 1,
+                axiom_protocol::env::ProviderSource::Builtin => 2,
+            };
+            (rank, m.id.clone())
+        });
+        for (_, m) in active {
+            if m.lsp.is_empty() {
                 continue;
             }
             for s in &m.lsp {
@@ -43,6 +58,7 @@ async fn definitions(app: &App, ws: &WorkspaceId) -> Result<(PathBuf, Vec<Defini
                     command: s.command.clone(),
                     initialization_options: s.initialization_options.clone(),
                     install_hint: s.install_hint.clone(),
+                    requires: s.requires.clone(),
                 });
             }
         }
@@ -59,9 +75,71 @@ async fn launch(
     app: &App,
     ws: &WorkspaceId,
     root: PathBuf,
-    server_id: &str,
+    def: &Definition,
 ) -> Result<Launch, RpcError> {
-    let env = process_environment(app, ws).await?;
+    let server_id = def.id.as_str();
+    let mut env = process_environment(app, ws).await?;
+    // M5.5 (ADR-0021 §4, §6): not in the workspace's environment → the newest managed install of
+    // the server's provider; each required tool likewise from its provider's install.
+    let r = registry(app, Some(workspace(app, ws).await?)).await?;
+    let installer = app.env.installer.clone();
+    let overlay = |provider: &str, env: &mut BTreeMap<String, String>| -> bool {
+        let Some(m) = r.get(provider) else {
+            return false;
+        };
+        let Some(version) = installer.installed(provider).into_iter().next() else {
+            return false;
+        };
+        let at = installer.toolchains_dir().join(provider).join(&version);
+        let (dirs, vars) = axiom_env::project::managed_overlay(m, &at, &version);
+        let path = env.get("PATH").cloned().unwrap_or_default();
+        let mut parts = dirs;
+        if !path.is_empty() {
+            parts.push(path);
+        }
+        env.insert(
+            "PATH".into(),
+            parts.join(if cfg!(windows) { ";" } else { ":" }),
+        );
+        for (k, v) in vars {
+            env.entry(k).or_insert(v);
+        }
+        true
+    };
+    // The server's own managed install wins over PATH: a person who installed it through Axiom
+    // gets that one (rustup's `rust-analyzer` stub on PATH runs nothing without the component).
+    overlay(&def.provider_id, &mut env);
+    let mut blocked = None;
+    for tool in &def.requires {
+        let supplier = r
+            .active()
+            .find(|(_, m)| m.tools.iter().any(|t| &t.id == tool))
+            .map(|(_, m)| {
+                (
+                    m.id.clone(),
+                    m.name.clone(),
+                    m.tools
+                        .iter()
+                        .find(|t| &t.id == tool)
+                        .map(|t| t.program.clone())
+                        .unwrap_or_default(),
+                )
+            });
+        let Some((pid, pname, prog)) = supplier else {
+            blocked = Some((
+                format!("{server_id} needs {tool}, which no provider supplies."),
+                def.provider_id.clone(),
+            ));
+            break;
+        };
+        if axiom_lsp::server::which(&prog, &env).is_none() && !overlay(&pid, &mut env) {
+            blocked = Some((
+                format!("{server_id} needs {pname} ({tool}), which is not installed."),
+                pid,
+            ));
+            break;
+        }
+    }
     let all = app.store_call(|s| s.setting_get(SETTINGS_KEY)).await?;
     let mine = all
         .as_ref()
@@ -73,6 +151,8 @@ async fn launch(
         env,
         settings: mine.get("settings").cloned().unwrap_or_else(|| json!({})),
         initialization_options: mine.get("initializationOptions").cloned(),
+        blocked,
+        install_provider: Some(def.provider_id.clone()),
     })
 }
 
@@ -95,21 +175,28 @@ async fn server(
                 format!("No language server \"{server_id}\" applies to this workspace."),
             )
         })?;
-    let l = launch(app, ws, root, server_id).await?;
+    let l = launch(app, ws, root, &def).await?;
     Ok(app.lsp.server(ws, def, l))
 }
 
 pub async fn servers(app: Arc<App>, p: WorkspaceRef) -> Result<ServersResult, RpcError> {
     let (root, defs) = definitions(&app, &p.workspace_id).await?;
     let mut servers = Vec::new();
+    // The first server (registry order) to claim a language serves it; a server whose every
+    // language is already claimed is on standby (ADR-0021 §3).
+    let mut claimed: std::collections::BTreeSet<String> = Default::default();
     for def in defs {
+        let standby =
+            !def.languages.is_empty() && def.languages.iter().all(|l| claimed.contains(l));
+        claimed.extend(def.languages.iter().cloned());
         let s = match app.lsp.get(&p.workspace_id, &def.id) {
             Some(s) => s,
             None => {
-                let l = launch(&app, &p.workspace_id, root.clone(), &def.id).await?;
+                let l = launch(&app, &p.workspace_id, root.clone(), &def).await?;
                 app.lsp.server(&p.workspace_id, def, l)
             }
         };
+        s.set_standby(standby);
         servers.push(s.info());
     }
     Ok(ServersResult { servers })
@@ -142,7 +229,7 @@ pub async fn restart(app: Arc<App>, p: ServerRef) -> Result<Empty, RpcError> {
     let s = server(&app, &p.workspace_id, &p.server_id).await?;
     // The environment or settings may have changed since it was created.
     let root = app.workspaces.get(&p.workspace_id)?.root().to_path_buf();
-    s.set_launch(launch(&app, &p.workspace_id, root, &p.server_id).await?);
+    s.set_launch(launch(&app, &p.workspace_id, root, &s.def).await?);
     s.restart().await;
     Ok(Empty {})
 }

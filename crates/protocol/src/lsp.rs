@@ -69,6 +69,10 @@ pub struct ServerInfo {
     /// How to get the server when it is `missing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install_hint: Option<String>,
+    /// When `missing`: the provider whose install would make it run (the server's own, or the
+    /// one supplying a tool it `requires`). M5.5, ADR-0021 §5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_provider: Option<String>,
     /// The server's `ServerCapabilities` once `ready`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<Value>,

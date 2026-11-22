@@ -4,6 +4,7 @@
 // third_party/re_editor/PATCHES.md.
 
 import 'package:axiom_desktop/editor/code_view.dart';
+import 'package:axiom_desktop/editor/languages.dart';
 import 'package:axiom_desktop/ui/theme.dart';
 import 'package:axiom_desktop/ui/tokens.dart';
 import 'package:flutter/widgets.dart';
@@ -34,7 +35,11 @@ class _Editor {
         debugShowCheckedModeBanner: false,
         pageRouteBuilder: <T>(s, b) =>
             PageRouteBuilder<T>(settings: s, pageBuilder: (c, _, _) => b(c)),
-        home: CodeView(controller: controller, language: 'rust', focusNode: focus),
+        home: CodeView(
+          controller: controller,
+          language: Languages.instance.byId('rust'),
+          focusNode: focus,
+        ),
         builder: (context, child) => AxiomTheme(data: theme, child: child!),
       ),
     );

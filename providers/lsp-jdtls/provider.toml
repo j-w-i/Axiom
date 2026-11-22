@@ -1,0 +1,36 @@
+schema = "axiom.provider/1"
+id = "lsp-jdtls"
+name = "Eclipse JDT Language Server"
+description = "Java language server (Eclipse, EPL-2.0). Needs Java 21 or later."
+version = "0.1.0"
+homepage = "https://github.com/eclipse-jdtls/eclipse.jdt.ls"
+
+[[tools]]
+id = "jdtls"
+program = "jdtls"
+version_regex = '(\d+\.\d+\.\d+)'
+version_args = []
+required = false
+
+[[install]]
+kind = "archive"
+versions = { kind = "static", versions = ["1.63.0"] }
+bin_dirs = ["bin"]
+
+[[install.artifacts]]
+platform = { os = "linux" }
+url = "https://download.eclipse.org/jdtls/milestones/${version}/jdt-language-server-${version}-202610191322.tar.gz"
+format = "tar.gz"
+checksum = { kind = "sha256", values = { "1.63.0" = "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4" } }
+
+[[install.artifacts]]
+platform = { os = "macos" }
+url = "https://download.eclipse.org/jdtls/milestones/${version}/jdt-language-server-${version}-202610191322.tar.gz"
+format = "tar.gz"
+checksum = { kind = "sha256", values = { "1.63.0" = "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4" } }
+
+[[lsp]]
+id = "jdtls"
+languages = ["java"]
+command = ["jdtls"]
+requires = ["java"]

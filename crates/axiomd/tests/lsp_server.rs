@@ -57,6 +57,8 @@ fn launch(root: &Path, log: &Path, extra: &[(&str, String)], settings: Value) ->
         env,
         settings,
         initialization_options: None,
+        blocked: None,
+        install_provider: None,
     }
 }
 
@@ -68,6 +70,7 @@ fn def(command: &str) -> Definition {
         command: vec![command.into()],
         initialization_options: None,
         install_hint: Some("Install the fake server.".into()),
+        requires: vec![],
     }
 }
 

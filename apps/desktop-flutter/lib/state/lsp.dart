@@ -149,6 +149,8 @@ class LspStore extends ChangeNotifier {
       _ => languageId,
     };
     for (final s in servers) {
+      // A standby server (another serves the language, ADR-0021 §3) is never used.
+      if (s.state == ServerState.standby) continue;
       if (s.languages.contains(languageId) || s.languages.contains(base)) return s;
     }
     return null;

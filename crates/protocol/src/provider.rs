@@ -225,6 +225,10 @@ pub struct Artifact {
     /// Leading path components to strip on extraction.
     #[serde(default)]
     pub strip_components: u32,
+    /// For `file` and `gz`: the executable's name in the root, when the URL's last segment is
+    /// not it (`marksman-linux-x64` → `marksman`). M5.5, additive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
     pub checksum: Checksum,
 }
 
@@ -240,6 +244,10 @@ pub enum ArchiveFormat {
     /// the root under its URL's last path segment, executable. Added in M2-ENV-003.
     #[serde(rename = "file")]
     File,
+    /// One gzip-compressed file (rust-analyzer's releases): decompressed to the root under the
+    /// URL's last segment without `.gz` (or the artifact's `file_name`), executable. M5.5.
+    #[serde(rename = "gz")]
+    Gz,
 }
 
 /// Integrity is mandatory: an artifact without a verifiable SHA-256 is not

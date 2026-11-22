@@ -1,0 +1,43 @@
+schema = "axiom.provider/1"
+id = "lsp-marksman"
+name = "Marksman"
+description = "Markdown language server (MIT): links, headings, references."
+version = "0.1.0"
+homepage = "https://github.com/artempyanykh/marksman"
+
+[[tools]]
+id = "marksman"
+program = "marksman"
+version_regex = '(\d+[-.]\d+[-.]\d+)'
+required = false
+
+[[install]]
+kind = "archive"
+versions = { kind = "static", versions = ["2026-02-08"] }
+bin_dirs = ["."]
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://github.com/artempyanykh/marksman/releases/download/${version}/marksman-linux-x64"
+format = "file"
+file_name = "marksman"
+checksum = { kind = "sha256", values = { "2026-02-08" = "be5098e8213219269c47fc0d916a66fa31ce0602ec967475c722260aabf26087" } }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://github.com/artempyanykh/marksman/releases/download/${version}/marksman-linux-arm64"
+format = "file"
+file_name = "marksman"
+checksum = { kind = "sha256", values = { "2026-02-08" = "db8e124527f7f8048e3e6c91821b9c52ef173d92c01e47d221bf1337afd962fb" } }
+
+[[install.artifacts]]
+platform = { os = "macos" }
+url = "https://github.com/artempyanykh/marksman/releases/download/${version}/marksman-macos"
+format = "file"
+file_name = "marksman"
+checksum = { kind = "sha256", values = { "2026-02-08" = "6a801c17b5ac0dba69787c5282b3b3bd416e66c96253fae098d311c6bbd1833b" } }
+
+[[lsp]]
+id = "marksman"
+languages = ["markdown"]
+command = ["marksman", "server"]

@@ -17,7 +17,7 @@ import 'package:re_editor/re_editor.dart';
 
 import '../daemon/client.dart';
 import '../daemon/protocol.g.dart';
-import '../editor/code_view.dart';
+import '../editor/languages.dart';
 import '../editor/lsp/underline.dart';
 import '../ui/tokens.dart';
 import 'lsp.dart';
@@ -31,15 +31,26 @@ const _tabSaveDebounce = Duration(milliseconds: 500);
 
 String titleOf(String path) => path.split('/').last;
 
+String _firstLine(String text) {
+  final i = text.indexOf('\n');
+  return i < 0 ? text : text.substring(0, i);
+}
+
 class Doc {
   Doc({required this.path, required String text, required this.savedVersion})
     : _savedText = text,
-      language = languageOf(path) {
+      languageNotifier = ValueNotifier(
+        Languages.instance.detect(path, firstLine: _firstLine(text)),
+      ) {
     controller = CodeLineEditingController(codeLines: CodeLines.fromText(text), spanBuilder: _span);
   }
 
   final String path;
-  final String? language;
+
+  /// The document's language: detected from its name and first line; the status bar's picker
+  /// changes it for the session.
+  final ValueNotifier<Language> languageNotifier;
+  Language get language => languageNotifier.value;
   late final CodeLineEditingController controller;
 
   /// The language servers' diagnostics on this document (set by the LSP layer).
@@ -299,6 +310,14 @@ class DocumentsStore extends ChangeNotifier {
     activePath = path;
     cursorText = '';
     _scheduleTabSave();
+  }
+
+  /// Sets [path]'s language for the session (the status bar's picker).
+  void setLanguage(String path, Language language) {
+    final d = doc(path);
+    if (d == null || d.language.id == language.id) return;
+    d.languageNotifier.value = language;
+    notifyListeners();
   }
 
   void activate(String path) {

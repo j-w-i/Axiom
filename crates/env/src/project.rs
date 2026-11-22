@@ -18,6 +18,7 @@ use crate::install::{valid_version, RECEIPT};
 use crate::manifest;
 use crate::registry::Registry;
 use axiom_protocol::env::{Environment, ToolLocation, Toolchain};
+use axiom_protocol::provider::ProviderManifest;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -125,6 +126,29 @@ impl Lock {
         let body = toml::to_string(self).unwrap_or_default();
         format!("# Written by Axiom from .axiom/project.toml. Do not edit.\n{body}")
     }
+}
+
+/// The environment overlay of one managed install of [m] at [root] ([version]): the install's
+/// existing `bin_dirs` (to prepend to `PATH`) and its methods' `env`, expanded for that root.
+/// M5.5 (ADR-0021 §4): a language server not on the workspace's `PATH` runs from here.
+pub fn managed_overlay(
+    m: &ProviderManifest,
+    root: &Path,
+    version: &str,
+) -> (Vec<String>, BTreeMap<String, String>) {
+    let mut dirs = Vec::new();
+    let mut vars = BTreeMap::new();
+    for (dir, e) in detect::managed_layouts(m) {
+        let d = root.join(&dir);
+        if d.is_dir() {
+            let s = d.to_string_lossy().into_owned();
+            if !dirs.contains(&s) {
+                dirs.push(s);
+            }
+        }
+        vars.extend(detect::expand_env(&e, version, root));
+    }
+    (dirs, vars)
 }
 
 /// Resolves a project's selections. `toolchains_dir` holds managed installs; `path` is the

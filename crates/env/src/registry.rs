@@ -13,6 +13,70 @@ pub const BUILTIN: &[(&str, &str)] = &[
         include_str!("../../../providers/cmake/provider.toml"),
     ),
     (
+        "lsp-basedpyright",
+        include_str!("../../../providers/lsp-basedpyright/provider.toml"),
+    ),
+    (
+        "lsp-bash",
+        include_str!("../../../providers/lsp-bash/provider.toml"),
+    ),
+    (
+        "lsp-clangd",
+        include_str!("../../../providers/lsp-clangd/provider.toml"),
+    ),
+    (
+        "lsp-csharp",
+        include_str!("../../../providers/lsp-csharp/provider.toml"),
+    ),
+    (
+        "lsp-dart",
+        include_str!("../../../providers/lsp-dart/provider.toml"),
+    ),
+    (
+        "lsp-dockerfile",
+        include_str!("../../../providers/lsp-dockerfile/provider.toml"),
+    ),
+    (
+        "lsp-gopls",
+        include_str!("../../../providers/lsp-gopls/provider.toml"),
+    ),
+    (
+        "lsp-jdtls",
+        include_str!("../../../providers/lsp-jdtls/provider.toml"),
+    ),
+    (
+        "lsp-kotlin",
+        include_str!("../../../providers/lsp-kotlin/provider.toml"),
+    ),
+    (
+        "lsp-marksman",
+        include_str!("../../../providers/lsp-marksman/provider.toml"),
+    ),
+    (
+        "lsp-rust-analyzer",
+        include_str!("../../../providers/lsp-rust-analyzer/provider.toml"),
+    ),
+    (
+        "lsp-sourcekit",
+        include_str!("../../../providers/lsp-sourcekit/provider.toml"),
+    ),
+    (
+        "lsp-taplo",
+        include_str!("../../../providers/lsp-taplo/provider.toml"),
+    ),
+    (
+        "lsp-typescript",
+        include_str!("../../../providers/lsp-typescript/provider.toml"),
+    ),
+    (
+        "lsp-web",
+        include_str!("../../../providers/lsp-web/provider.toml"),
+    ),
+    (
+        "lsp-yaml",
+        include_str!("../../../providers/lsp-yaml/provider.toml"),
+    ),
+    (
         "ninja",
         include_str!("../../../providers/ninja/provider.toml"),
     ),

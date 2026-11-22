@@ -1,0 +1,50 @@
+schema = "axiom.provider/1"
+id = "lsp-rust-analyzer"
+name = "rust-analyzer"
+description = "Rust language server (MIT OR Apache-2.0)."
+version = "0.1.0"
+homepage = "https://rust-analyzer.github.io"
+
+[[tools]]
+id = "rust-analyzer"
+program = "rust-analyzer"
+version_regex = '(\d+\.\d+\.\d+)'
+
+[[install]]
+kind = "archive"
+versions = { kind = "static", versions = ["2026-11-16"] }
+bin_dirs = ["."]
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/${version}/rust-analyzer-x86_64-unknown-linux-gnu.gz"
+format = "gz"
+file_name = "rust-analyzer"
+checksum = { kind = "sha256", values = { "2026-11-16" = "4a08727a03094e5114db4438e4bd1d6182cc26eff37d6962115ea1ec1a491ca3" } }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/${version}/rust-analyzer-aarch64-unknown-linux-gnu.gz"
+format = "gz"
+file_name = "rust-analyzer"
+checksum = { kind = "sha256", values = { "2026-11-16" = "73d8b9b87384b3115a183a8a51db9f7c205ce4c89ea511f3c8c8fea863038a50" } }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "x86_64" }
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/${version}/rust-analyzer-x86_64-apple-darwin.gz"
+format = "gz"
+file_name = "rust-analyzer"
+checksum = { kind = "sha256", values = { "2026-11-16" = "6901d956b4f2b091343eaf3570944098488f3ffec018987145285ed8253c07d2" } }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "aarch64" }
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/${version}/rust-analyzer-aarch64-apple-darwin.gz"
+format = "gz"
+file_name = "rust-analyzer"
+checksum = { kind = "sha256", values = { "2026-11-16" = "608b7c7d6bec1fcd6c964578b1f8234888afe6d6c0e7915284f1e2fd36ef1343" } }
+
+[[lsp]]
+id = "rust-analyzer"
+languages = ["rust"]
+command = ["rust-analyzer"]
+install_hint = "Or with rustup: rustup component add rust-analyzer"

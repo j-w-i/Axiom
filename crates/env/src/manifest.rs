@@ -106,14 +106,29 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                 }
                 for a in artifacts {
                     check_template(&a.url, &format!("{at} artifact url"), &mut errors);
-                    if a.format == axiom_protocol::provider::ArchiveFormat::File {
+                    use axiom_protocol::provider::ArchiveFormat as F;
+                    if let Some(n) = &a.file_name {
+                        if !matches!(a.format, F::File | F::Gz)
+                            || n.is_empty()
+                            || n.contains(['/', '\\'])
+                            || n.contains("${")
+                            || n.starts_with('.')
+                        {
+                            errors.push(format!(
+                                "{at}: `file_name` is a plain name, for \"file\" and \"gz\" artifacts"
+                            ));
+                        }
+                    }
+                    if matches!(a.format, F::File | F::Gz) {
                         if a.strip_components != 0 {
                             errors.push(format!(
                                 "{at}: a \"file\" artifact has no components to strip"
                             ));
                         }
                         let name = a.url.rsplit('/').next().unwrap_or_default();
-                        if name.is_empty() || name.contains("${") || name.starts_with('.') {
+                        if a.file_name.is_none()
+                            && (name.is_empty() || name.contains("${") || name.starts_with('.'))
+                        {
                             errors.push(format!(
                                 "{at}: a \"file\" artifact URL must end in a fixed file name"
                             ));

@@ -18,7 +18,7 @@ use std::path::{Component, Path, PathBuf};
 /// Extracts `archive` into the existing, empty directory `root`, dropping the first
 /// `strip_components` path components of every entry. `cancelled` is polled between entries.
 /// For [`ArchiveFormat::File`] the download itself is copied to `root/<file_name>` and made
-/// executable. Returns the number of entries written.
+/// executable; for [`ArchiveFormat::Gz`] it is decompressed there. Returns the number of entries written.
 pub fn extract(
     archive: &Path,
     format: ArchiveFormat,
@@ -41,6 +41,24 @@ pub fn extract(
                 )));
             }
             write_file(&root.join(rel), file, Some(0o755))?;
+            Ok(1)
+        }
+        ArchiveFormat::Gz => {
+            let Some(rel) = entry_path(file_name, 0)? else {
+                return Err(EnvError::UnsafeArchive(
+                    "the download has no file name".into(),
+                ));
+            };
+            if rel.components().count() != 1 {
+                return Err(EnvError::UnsafeArchive(format!(
+                    "unusable file name `{file_name}`"
+                )));
+            }
+            write_file(
+                &root.join(rel),
+                flate2::read::GzDecoder::new(file),
+                Some(0o755),
+            )?;
             Ok(1)
         }
         ArchiveFormat::TarGz => extract_tar(
@@ -316,6 +334,37 @@ mod tests {
         assert!(entry_path("/etc/passwd", 0).is_err());
         assert!(entry_path("a\\..\\..\\x", 0).is_err());
         assert!(entry_path("C:/x", 0).is_err());
+    }
+
+    #[test]
+    fn a_gz_file_is_decompressed_under_its_name_and_executable() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let gz = dir.path().join("rust-analyzer-x86_64-unknown-linux-gnu.gz");
+        let mut e = flate2::write::GzEncoder::new(
+            File::create(&gz).unwrap(),
+            flate2::Compression::default(),
+        );
+        e.write_all(b"#!/bin/sh\necho ok\n").unwrap();
+        e.finish().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let n = extract(&gz, ArchiveFormat::Gz, 0, "rust-analyzer", &root, &|| false).unwrap();
+        assert_eq!(n, 1);
+        let out = root.join("rust-analyzer");
+        assert_eq!(std::fs::read(&out).unwrap(), b"#!/bin/sh\necho ok\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&out).unwrap().permissions().mode() & 0o111,
+                0o111
+            );
+        }
+        // A name with a path in it is refused.
+        let root2 = dir.path().join("root2");
+        std::fs::create_dir(&root2).unwrap();
+        assert!(extract(&gz, ArchiveFormat::Gz, 0, "a/b", &root2, &|| false).is_err());
     }
 
     #[test]

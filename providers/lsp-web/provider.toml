@@ -1,0 +1,49 @@
+schema = "axiom.provider/1"
+id = "lsp-web"
+name = "HTML, CSS and JSON language servers"
+description = "HTML, CSS, SCSS, Less and JSON language servers from VS Code (vscode-langservers-extracted, MIT)."
+version = "0.1.0"
+homepage = "https://github.com/hrsh7th/vscode-langservers-extracted"
+
+# The server is an npm package, installed pinned into its own root with the npm of an
+# installed Node (ADR-0021 §4); it runs with that Node (`requires`).
+[[tools]]
+id = "vscode-html-language-server"
+program = "vscode-html-language-server"
+version_regex = '(\d+\.\d+\.\d+)'
+version_args = []
+required = false
+
+[[tools]]
+id = "npm"
+program = "npm"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "delegate"
+using = "npm"
+scope = "managed"
+install = ["npm", "install", "--prefix", "${root}", "--no-fund", "--no-audit", "--no-save", "vscode-langservers-extracted@${version}"]
+uninstall = []
+list_versions = ["npm", "view", "vscode-langservers-extracted", "versions", "--json"]
+versions = { kind = "static", versions = ["4.10.0"] }
+bin_dirs = ["node_modules/.bin"]
+
+[[lsp]]
+id = "vscode-html"
+languages = ["html"]
+command = ["vscode-html-language-server", "--stdio"]
+requires = ["node"]
+
+[[lsp]]
+id = "vscode-css"
+languages = ["css", "scss", "less"]
+command = ["vscode-css-language-server", "--stdio"]
+requires = ["node"]
+
+[[lsp]]
+id = "vscode-json"
+languages = ["json", "jsonc"]
+command = ["vscode-json-language-server", "--stdio"]
+requires = ["node"]

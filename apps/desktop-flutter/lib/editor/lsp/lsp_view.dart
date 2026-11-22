@@ -98,7 +98,7 @@ class LspEditorFeatures extends StatefulWidget {
 class LspEditorFeaturesState extends State<LspEditorFeatures> {
   late final AppState app = AppScope.of(context);
   LspStore get lsp => app.lsp;
-  String? get _server => lsp.serverFor(lspLanguageId(widget.doc.path))?.serverId;
+  String? get _server => lsp.serverFor(lspLanguageId(widget.doc))?.serverId;
 
   // completion
   List<CompletionChoice> _items = const [];

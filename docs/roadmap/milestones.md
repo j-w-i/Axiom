@@ -298,7 +298,7 @@ snippets, auto-imports).
 | Epic | Scope |
 |------|-------|
 | 5.5.0 Design + task files | ADR: the language registry, server install recipes (reusing M2's checksummed installs), SDK hand-off to servers, completion UX; licence review of each server (external programs, not linked) |
-| 5.5.1 Language registry | Every highlight.js grammar `re_highlight` ships (197) mapped by extension, file name, shebang and first line, like VS Code's language contributions; a language picker in the status bar; plain text for the rest |
+| 5.5.1 Language registry | Every highlight.js grammar `re_highlight` ships (195) mapped by extension, file name, shebang and first line, like VS Code's language contributions; a language picker in the status bar; plain text for the rest |
 | 5.5.2 Semantic highlighting | LSP semantic tokens over the grammar's colours where a server provides them; large-file guard |
 | 5.5.3 Server registry + installs | `[[lsp]]` entries with install recipes and versions for each tier-1 language; "Install the Python language server" offered when such a file opens, with the M2 plan/approve flow; servers updated and removed like toolchains |
 | 5.5.4 SDK awareness | Servers launched with the project's detected SDK (Python venv/interpreter, JDK, Go, .NET, Dart/Flutter SDK, Swift toolchain, `compile_commands.json` for clangd); new providers where none exists (Java, .NET, Go, Dart, Swift, Kotlin, Ruby, PHP, Lua, Zig) |

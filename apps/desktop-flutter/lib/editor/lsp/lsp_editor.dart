@@ -12,33 +12,9 @@ import '../../daemon/client.dart';
 import '../../state/documents.dart';
 import '../../state/lsp.dart';
 
-/// The LSP language id of a workspace path, or null when no server language applies.
-String? lspLanguageId(String path) {
-  final name = path.split('/').last.toLowerCase();
-  final dot = name.lastIndexOf('.');
-  if (dot < 0) return null;
-  return switch (name.substring(dot + 1)) {
-    'rs' => 'rust',
-    'ts' || 'mts' || 'cts' => 'typescript',
-    'tsx' => 'typescriptreact',
-    'js' || 'mjs' || 'cjs' => 'javascript',
-    'jsx' => 'javascriptreact',
-    'json' => 'json',
-    'py' => 'python',
-    'toml' => 'toml',
-    'md' => 'markdown',
-    'sh' || 'bash' => 'shellscript',
-    'go' => 'go',
-    'c' || 'h' => 'c',
-    'cc' || 'cpp' || 'hpp' => 'cpp',
-    'java' => 'java',
-    'dart' => 'dart',
-    'css' => 'css',
-    'html' => 'html',
-    'yaml' || 'yml' => 'yaml',
-    _ => null,
-  };
-}
+/// The LSP language id of a document: its language's id (the registry's, ADR-0021 §1), which
+/// the status bar's picker may have changed.
+String lspLanguageId(Doc d) => d.language.id;
 
 /// One `contentChanges` entry for going from [before] to [after]: the changed lines as one range
 /// when an unchanged line follows them (the common case: typing), else the whole text.
@@ -83,7 +59,7 @@ class LspSync {
   final _open = <String, _Synced>{};
   int _seenDiagnostics = -1;
 
-  String? _serverFor(String path) => lsp.serverFor(lspLanguageId(path))?.serverId;
+  String? _serverFor(Doc d) => lsp.serverFor(lspLanguageId(d))?.serverId;
 
   void _onDocs() {
     final now = {for (final d in docs.docs) d.path: d};
@@ -91,6 +67,9 @@ class LspSync {
       if (!now.containsKey(path)) _close(path);
     }
     for (final d in now.values) {
+      // A document whose language was changed is closed and opened again under the new one.
+      final s = _open[d.path];
+      if (s != null && s.languageId != lspLanguageId(d)) _close(d.path);
       if (!_open.containsKey(d.path)) {
         _openDoc(d);
       }
@@ -115,9 +94,9 @@ class LspSync {
   }
 
   void _openDoc(Doc d) {
-    final server = _serverFor(d.path);
+    final server = _serverFor(d);
     if (server == null) return;
-    final s = _Synced(d, server, lspLanguageId(d.path)!);
+    final s = _Synced(d, server, lspLanguageId(d));
     _open[d.path] = s;
     unawaited(
       _notify(server, 'textDocument/didOpen', {

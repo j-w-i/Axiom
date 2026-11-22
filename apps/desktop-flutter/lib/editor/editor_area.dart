@@ -591,22 +591,25 @@ class _DocViewState extends State<_DocView> {
                 builder: (context, overrides) => MergeSemantics(
                   child: Semantics(
                     label: '${widget.doc.path}, editor${widget.group == 2 ? ' (right group)' : ''}',
-                    child: CodeView(
-                      controller: _controller,
-                      language: widget.doc.language,
-                      focusNode: widget.focusNode,
-                      scrollController: _scroll,
-                      findController: _find,
-                      fontSize: s.editorFontSize.toDouble(),
-                      fontFamily: s.editorFontFamily,
-                      wordWrap: s.editorWordWrap,
-                      // The bar is drawn above the editor (outside its merged node, so its fields
-                      // keep their own names); re_editor gets an empty one.
-                      findBuilder: (context, controller, readOnly) => const _NoFindBar(),
-                      onSave: () => app.documents.save(widget.doc.path),
-                      overrides: overrides,
-                      gutterKey: _gutter,
-                      gitMarks: gitMarks,
+                    child: ValueListenableBuilder(
+                      valueListenable: widget.doc.languageNotifier,
+                      builder: (context, language, _) => CodeView(
+                        controller: _controller,
+                        language: language,
+                        focusNode: widget.focusNode,
+                        scrollController: _scroll,
+                        findController: _find,
+                        fontSize: s.editorFontSize.toDouble(),
+                        fontFamily: s.editorFontFamily,
+                        wordWrap: s.editorWordWrap,
+                        // The bar is drawn above the editor (outside its merged node, so its fields
+                        // keep their own names); re_editor gets an empty one.
+                        findBuilder: (context, controller, readOnly) => const _NoFindBar(),
+                        onSave: () => app.documents.save(widget.doc.path),
+                        overrides: overrides,
+                        gutterKey: _gutter,
+                        gitMarks: gitMarks,
+                      ),
                     ),
                   ),
                 ),

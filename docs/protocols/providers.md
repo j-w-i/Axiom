@@ -236,8 +236,8 @@ M5.5 (ADR-0021 §3, §4, §6; additive):
   is `missing` with its provider id, so the shell can offer that provider's install.
 - `requires = ["toolId", ...]`: tools (an SDK, a runtime) that must resolve in the environment;
   unresolved, the server is `missing` and its detail names the provider that supplies them.
-- When two servers claim a language, the first in registry order (built-in, user, workspace;
-  then by id) serves it; the others are `standby`.
+- When two servers claim a language, the one from the more specific source serves it
+  (workspace, then user, then built-in; then by id); the others are `standby`.
 - Nothing is installed without the person's approval unless they turned on the setting
   `lsp.autoInstall` (default `false`).
 
