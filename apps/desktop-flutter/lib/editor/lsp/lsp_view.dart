@@ -307,6 +307,11 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       _closeSignature();
     }
     if (!typed || !c.selection.isCollapsed) {
+      if (!completing && _pending != null) {
+        // The caret moved before the list came: it will not be shown.
+        _quick?.cancel();
+        _pending?.cancel();
+      }
       if (completing &&
           (c.selection.extentIndex != _anchor!.line || c.selection.extentOffset < _anchor!.start)) {
         _close();
@@ -327,6 +332,11 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
         _filter();
       }
       return;
+    }
+    if (!_word.hasMatch(ch) && !_triggers.contains(ch)) {
+      // Out of the word: a request on its way is for the word left behind.
+      _quick?.cancel();
+      _pending?.cancel();
     }
     if (_triggers.contains(ch)) {
       unawaited(complete());
@@ -353,6 +363,10 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     try {
       final r = await lsp.request(server, 'textDocument/completion', _docPos(), cancel: token);
       if (!mounted || token.isCancelled) return;
+      // The caret left the word meanwhile (Enter, a click, a non-word character): the reply is
+      // for a place no longer being typed at, and its edits would land wrong (audit finding 6).
+      final now = widget.controller.selection;
+      if (!now.isCollapsed || now.extentIndex != line || now.extentOffset < start) return;
       _items = parseCompletion(r);
       _anchor = (line: line, start: start);
       _filter();
@@ -725,6 +739,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       for (final d in widget.doc.diagnostics)
         if (d.range.start.line <= end.$1 && d.range.end.line >= start.$1) _diagnosticJson(d),
     ];
+    final text = _textNow();
     try {
       final r = await lsp.request(server, 'textDocument/codeAction', {
         'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
@@ -755,7 +770,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
               id: 'action:$i',
               title: a['title']! as String,
               category: a['isPreferred'] == true ? 'Preferred' : (a['kind'] as String? ?? 'Action'),
-              run: () => unawaited(_runAction(server, a)),
+              run: () => unawaited(_runAction(server, a, text)),
             ),
         ],
       );
@@ -764,7 +779,11 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     }
   }
 
-  Future<void> _runAction(String server, Map<Object?, Object?> a) async {
+  Future<void> _runAction(
+    String server,
+    Map<Object?, Object?> a,
+    Map<String, CodeLines> text,
+  ) async {
     var action = a;
     // A lazily resolved action.
     if (action['edit'] == null && action['command'] is! String && action['data'] != null) {
@@ -776,7 +795,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       }
     }
     final edit = action['edit'];
-    if (edit != null) await _applyWorkspaceEdit(edit);
+    if (edit != null && !await _applyWorkspaceEdit(edit, text, '${a['title']}')) return;
     final cmd = action['command'];
     final command = cmd is Map ? cmd : (cmd is String ? action : null);
     if (command != null && command['command'] is String) {
@@ -793,16 +812,40 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     }
   }
 
-  Future<void> _applyWorkspaceEdit(Object? edit) async {
+  /// The open documents' text now: a server's edits were computed for the text of the moment
+  /// the request was sent, and are applied only if none of it changed since (audit finding 5).
+  Map<String, CodeLines> _textNow() => {
+    for (final d in app.documents.docs) d.path: d.controller.codeLines,
+  };
+
+  bool _changedSince(Map<String, CodeLines> text, Iterable<String> paths) => paths.any((p) {
+    final then = text[p];
+    final d = app.documents.doc(p);
+    return then != null && d != null && !identical(d.controller.codeLines, then);
+  });
+
+  /// Applies a server's workspace edit, all of it or (a document it edits changed since [text]
+  /// was taken) none of it, saying why. False when it was not applied.
+  Future<bool> _applyWorkspaceEdit(Object? edit, Map<String, CodeLines> text, String what) async {
+    final edits = <String, List<({LspRange range, String text})>>{};
     for (final e in workspaceEdits(edit).entries) {
       final path = lsp.pathOf(e.key);
-      if (path == null) continue;
-      if (app.documents.doc(path) == null) {
-        await app.documents.open(path, background: true, focus: false);
+      if (path != null) edits[path] = e.value;
+    }
+    if (_changedSince(text, edits.keys)) {
+      if (mounted) {
+        ToastHost.of(context).show('$what: the text changed meanwhile, so nothing was applied.');
       }
-      final d = app.documents.doc(path);
+      return false;
+    }
+    for (final e in edits.entries) {
+      if (app.documents.doc(e.key) == null) {
+        await app.documents.open(e.key, background: true, focus: false);
+      }
+      final d = app.documents.doc(e.key);
       if (d != null) applyEdits(d.controller, e.value);
     }
+    return true;
   }
 
   /// Shift+F12: every reference to the symbol at the caret, in a picker; one opens there.
@@ -908,6 +951,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   Future<void> organizeImports() async {
     final server = _server;
     if (server == null) return;
+    final text = _textNow();
     try {
       final r = await lsp.request(server, 'textDocument/codeAction', {
         'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
@@ -933,7 +977,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
         final done = await lsp.request(server, 'codeAction/resolve', a);
         if (done is Map<Object?, Object?>) a = done;
       }
-      if (a['edit'] != null) await _applyWorkspaceEdit(a['edit']);
+      if (a['edit'] != null) await _applyWorkspaceEdit(a['edit'], text, 'Organize imports');
     } on DaemonException catch (e) {
       if (mounted) {
         ToastHost.of(context).show('Organize imports: ${e.message}', kind: ToastKind.error);
@@ -1092,18 +1136,10 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       builder: (context) => _RenameBox(initial: current),
     );
     if (name == null || name.isEmpty || name == current || !mounted) return;
+    final now = _textNow();
     try {
       final r = await lsp.request(server, 'textDocument/rename', {..._docPos(), 'newName': name});
-      final edits = workspaceEdits(r);
-      for (final e in edits.entries) {
-        final path = lsp.pathOf(e.key);
-        if (path == null) continue;
-        if (app.documents.doc(path) == null) {
-          await app.documents.open(path, background: true, focus: false);
-        }
-        final d = app.documents.doc(path);
-        if (d != null) applyEdits(d.controller, e.value);
-      }
+      await _applyWorkspaceEdit(r, now, 'Rename');
     } on DaemonException catch (e) {
       if (mounted) ToastHost.of(context).show('Rename: ${e.message}', kind: ToastKind.error);
     }
@@ -1113,11 +1149,17 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   Future<void> format() async {
     final server = _server;
     if (server == null) return;
+    final before = widget.doc.controller.codeLines;
     try {
       final r = await lsp.request(server, 'textDocument/formatting', {
         'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
         'options': {'tabSize': 4, 'insertSpaces': true},
       });
+      if (!identical(widget.doc.controller.codeLines, before)) {
+        // Computed for the text before the typing since: its ranges would land wrong.
+        if (mounted) ToastHost.of(context).show('Format: the text changed meanwhile; try again.');
+        return;
+      }
       if (r is List && mounted) {
         applyEdits(widget.doc.controller, [
           for (final e in r.whereType<Map<Object?, Object?>>())

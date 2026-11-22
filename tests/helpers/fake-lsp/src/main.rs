@@ -18,6 +18,8 @@
 //!   hierarchy (callers are the `fn`s whose bodies call the name) and organize imports (sorts the leading `use` lines).
 //!
 //! `FAKE_LSP_LOG` (optional): every received method is appended there, one per line.
+//! `--child-pid-file <path>`: starts a long `sleep` of its own and writes its pid there (tests
+//! that a stopped server's children go with it).
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -82,6 +84,15 @@ fn publish(uri: &str, text: &str, version: Option<i64>) {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--child-pid-file") {
+        if let (Some(path), Ok(child)) = (
+            args.get(i + 1),
+            std::process::Command::new("sleep").arg("300").spawn(),
+        ) {
+            let _ = std::fs::write(path, child.id().to_string());
+        }
+    }
     let stdin = std::io::stdin();
     let mut r = stdin.lock();
     let mut docs: HashMap<String, (String, i64)> = HashMap::new();

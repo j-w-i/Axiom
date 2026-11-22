@@ -108,9 +108,9 @@ pub fn build_router(app: Arc<App>) -> Router {
         let a = a.clone();
         async move {
             a.stop_all_watchers();
-            a.lsp.stop_all().await;
             a.terminals.close_all();
-            a.executor.shutdown().await;
+            // Together: the shell gives the daemon a few seconds before it kills it.
+            tokio::join!(a.lsp.stop_all(), a.executor.shutdown());
         }
     });
     r

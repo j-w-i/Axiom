@@ -157,12 +157,19 @@ class LspStore extends ChangeNotifier {
   }
 
   /// One request through the daemon; [cancel] cancels it (`$/cancel`).
+  /// Per server, the end of the queue of notifications sent to it (audit finding 1). The
+  /// daemon handles each call in its own task, so two `didChange`s sent at once could reach the
+  /// server in either order and leave its copy of the document wrong. Each notification is sent
+  /// once the one before it has been taken, and a request waits for those before it.
+  final _sent = <String, Future<void>>{};
+
   Future<Object?> request(
     String serverId,
     String method,
     Object? params, {
     CancelToken? cancel,
   }) async {
+    if (_sent[serverId] case final before?) await before;
     final r = await client.call(
       Methods.lspRequest,
       RequestParams(workspaceId: workspace.id, serverId: serverId, method: method, params: params),
@@ -172,10 +179,24 @@ class LspStore extends ChangeNotifier {
     return r.result;
   }
 
-  Future<void> notify(String serverId, String method, Object? params) => client.call(
-    Methods.lspNotify,
-    NotifyParams(workspaceId: workspace.id, serverId: serverId, method: method, params: params),
-  );
+  Future<void> notify(String serverId, String method, Object? params) {
+    final before = _sent[serverId] ?? Future<void>.value();
+    final sent = before.then(
+      (_) => client.call(
+        Methods.lspNotify,
+        NotifyParams(workspaceId: workspace.id, serverId: serverId, method: method, params: params),
+      ),
+    );
+    // The queue goes on whether this one failed or not; the caller hears of a failure.
+    final tail = sent.then((_) {}, onError: (Object _) {});
+    _sent[serverId] = tail;
+    unawaited(
+      tail.then((_) {
+        if (identical(_sent[serverId], tail)) _sent.remove(serverId);
+      }),
+    );
+    return sent;
+  }
 
   /// After an install (a server, or a runtime or SDK one needs): every `missing` server tries
   /// again, then the list is read anew (M5.5-UI-001).

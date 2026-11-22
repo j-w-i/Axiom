@@ -272,7 +272,7 @@ before the task that needs them** (no empty scaffolding).
   shared id space with a pending map (many clients, one server), answers to server→client
   requests, a mirror of open documents, diagnostics per URI, a bounded restart policy.
 - **Depends on:** `protocol`; `tokio`, `tokio-util` (cancellation), `serde_json`, `url`,
-  `tracing`, `thiserror`.
+  `tracing`, `thiserror`; `nix` on Unix (signalling a server's process group, as `exec` does).
 - **Status:** built (M4-LSP-001). `axiomd` serves `lsp/*`, resolves each server's command in the
   workspace's environment (the daemon's plus the project's, as builds), and relays events to the
   workspace's clients. Tests: `crates/axiomd/tests/{lsp_server,lsp}.rs` against

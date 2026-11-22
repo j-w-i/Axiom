@@ -154,12 +154,16 @@ class LspSync {
     final caps = info?.capabilities;
     if (caps is! Map || caps['documentFormattingProvider'] == null) return;
     if (caps['documentFormattingProvider'] == false) return;
+    final before = d.controller.codeLines;
     final r = await lsp
         .request(s.server, 'textDocument/formatting', {
           'textDocument': {'uri': lsp.uriOf(d.path)},
           'options': {'tabSize': 4, 'insertSpaces': true},
         })
         .timeout(const Duration(seconds: 2));
+    // Typing while the formatter worked: its ranges are for the text before, so the document is
+    // saved as it is, unformatted (audit finding 5).
+    if (!identical(d.controller.codeLines, before)) return;
     if (r is List) {
       applyEdits(d.controller, [
         for (final e in r.whereType<Map<Object?, Object?>>())

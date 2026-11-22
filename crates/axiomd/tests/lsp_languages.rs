@@ -155,6 +155,97 @@ async fn a_missing_server_names_the_provider_to_install() {
     assert_eq!(fake.install_provider.as_deref(), Some("lsp-fake"));
 }
 
+/// A stopped server's children go with it (its process group is killed), and a closed
+/// workspace's server stays stopped (audit finding 4).
+#[tokio::test]
+async fn closing_the_workspace_stops_the_server_and_its_children() {
+    let data = tempfile::tempdir().unwrap();
+    let pid_file = data.path().join("child.pid");
+    let provider = server_provider("lsp-fake", "fake", "fake-lsp", "").replace(
+        "command = [\"fake-lsp\"]",
+        &format!(
+            "command = [\"fake-lsp\", \"--child-pid-file\", \"{}\"]",
+            pid_file.display()
+        ),
+    );
+    write_provider(data.path(), "lsp-fake", &provider);
+    let bin = data.path().join("toolchains/lsp-fake/1.0.0/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::copy(fake_lsp(), bin.join("fake-lsp")).unwrap();
+    let d = Daemon::ready_in(data.path()).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    d.client
+        .request::<Request>(RequestParams {
+            workspace_id: f.id.clone(),
+            server_id: "fake".into(),
+            method: "textDocument/hover".into(),
+            params: json!({"textDocument": {"uri": "file:///x.fake"}, "position": {"line": 0, "character": 0}}),
+        })
+        .await
+        .unwrap();
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    let alive = |pid: &str| {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", pid.trim()])
+            .output()
+            .unwrap();
+        let stat = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        !stat.is_empty() && !stat.starts_with('Z')
+    };
+    assert!(alive(&pid), "the server's child runs");
+    d.client
+        .request::<axiom_protocol::workspace::Close>(WorkspaceRef {
+            workspace_id: f.id.clone(),
+        })
+        .await
+        .unwrap();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    while alive(&pid) && std::time::Instant::now() < end {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(!alive(&pid), "the server's child was left running");
+}
+
+/// A toolchain manager's stub for a component that is not installed (rustup's proxy) exits at
+/// once and says so: the server is missing, stays missing (its exit is not a crash that restarts
+/// it into "failed"), and names the provider to install (audit finding 3).
+#[tokio::test]
+async fn a_toolchain_stub_stays_missing() {
+    let data = tempfile::tempdir().unwrap();
+    write_provider(
+        data.path(),
+        "lsp-fake",
+        &server_provider("lsp-fake", "fake", "fake-stub", ""),
+    );
+    let bin = data.path().join("toolchains/lsp-fake/1.0.0/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let stub = bin.join("fake-stub");
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\necho \"error: Unknown binary 'fake-stub' in official toolchain\" >&2\nexit 1\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let d = Daemon::ready_in(data.path()).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    let _ = d
+        .client
+        .request::<Request>(RequestParams {
+            workspace_id: f.id.clone(),
+            server_id: "fake".into(),
+            method: "textDocument/hover".into(),
+            params: json!({}),
+        })
+        .await;
+    // Long enough for a restart (and two more) had the exit been taken for a crash.
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let s = servers(&d, &f.id).await;
+    let fake = s.servers.iter().find(|x| x.server_id == "fake").unwrap();
+    assert_eq!(fake.state, ServerState::Missing, "{:?}", fake.detail);
+    assert_eq!(fake.install_provider.as_deref(), Some("lsp-fake"));
+}
+
 #[tokio::test]
 async fn a_required_tool_that_does_not_resolve_names_its_provider() {
     let data = tempfile::tempdir().unwrap();
