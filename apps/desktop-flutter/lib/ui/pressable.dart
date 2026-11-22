@@ -74,6 +74,7 @@ class Pressable extends StatefulWidget {
     this.autofocus = false,
     this.cursor = SystemMouseCursors.click,
     this.excludeChildSemantics = true,
+    this.skipTraversal = false,
   });
 
   /// The accessible name.
@@ -94,28 +95,53 @@ class Pressable extends StatefulWidget {
   final MouseCursor cursor;
   final bool excludeChildSemantics;
 
+  /// Out of the Tab order (a row of a list with one Tab stop: the list's arrows reach it).
+  /// Applies to the node this control creates; a passed [focusNode] keeps its own setting.
+  final bool skipTraversal;
+
   @override
   State<Pressable> createState() => _PressableState();
 }
 
 class _PressableState extends State<Pressable> {
   FocusNode? _own;
-  FocusNode get _focus => widget.focusNode ?? (_own ??= FocusNode(debugLabel: widget.label));
+  FocusNode get _focus =>
+      widget.focusNode ??
+      (_own ??= FocusNode(debugLabel: widget.label, skipTraversal: widget.skipTraversal));
   bool _hovered = false;
   bool _pressed = false;
   bool _focused = false;
 
+  /// The hint line, kept so [dispose] can clear what this control put there (a control that
+  /// goes away under the pointer gets no exit event; AUD-064).
+  ValueNotifier<String?>? _hintLine;
+  String? _shown;
+
   bool get _enabled => widget.onPressed != null;
 
   void _hint(bool on) {
-    final h = HintScope.maybeOf(context);
+    final h = _hintLine;
     if (h == null) return;
     final text = widget.hint ?? widget.label;
     if (on) {
       h.value = text;
-    } else if (h.value == text) {
-      h.value = null;
+      _shown = text;
+    } else {
+      if (h.value == text || h.value == _shown) h.value = null;
+      _shown = null;
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _hintLine = HintScope.maybeOf(context);
+  }
+
+  @override
+  void didUpdateWidget(Pressable old) {
+    super.didUpdateWidget(old);
+    if (widget.focusNode == null && _own != null) _own!.skipTraversal = widget.skipTraversal;
   }
 
   @override
@@ -131,6 +157,8 @@ class _PressableState extends State<Pressable> {
   @override
   void dispose() {
     FocusVisibility.instance.keyboard.removeListener(_onModality);
+    final h = _hintLine;
+    if (h != null && _shown != null && h.value == _shown) h.value = null;
     _own?.dispose();
     super.dispose();
   }
@@ -156,6 +184,10 @@ class _PressableState extends State<Pressable> {
       checked: widget.role == PressRole.checkbox ? (widget.checked ?? false) : null,
       toggled: widget.role == PressRole.toggle ? (widget.checked ?? false) : null,
       enabled: _enabled,
+      // The outer node excludes FocusableActionDetector's own, so it carries the focus flags
+      // (VoiceOver follows them; AUD-071).
+      focusable: _enabled,
+      focused: _enabled ? _focused : null,
       expanded: widget.expanded,
       role: switch (widget.role) {
         PressRole.tab => SemanticsRole.tab,

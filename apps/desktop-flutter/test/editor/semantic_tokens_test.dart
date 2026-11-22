@@ -36,4 +36,15 @@ void main() {
     }
     expect(semanticStyle('enumMember', const [], y)!.color, y.variable);
   });
+
+  test('a theme switch recolours the tokens by role (AUD-055)', () {
+    final dark = AxiomColors.dark.syntax, light = AxiomColors.light.syntax;
+    final r = decodeSemanticTokens([0, 0, 2, 0, 0, 0, 3, 4, 1, 1], ['keyword', 'function'], [
+      'deprecated',
+    ], dark);
+    final again = rethemeSemantic(r, dark, light);
+    expect(again[0]![0].style.color, light.keyword);
+    expect(again[0]![1].style.color, light.function);
+    expect(again[0]![1].style.decoration, TextDecoration.lineThrough);
+  });
 }

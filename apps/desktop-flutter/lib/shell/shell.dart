@@ -18,6 +18,7 @@ import '../console/console.dart';
 import '../editor/editor_area.dart';
 import '../editor/languages.dart';
 import '../files/explorer.dart';
+import '../files/file_actions.dart';
 import '../state/documents.dart';
 import '../state/settings.dart';
 import '../state/tasks.dart';
@@ -128,12 +129,30 @@ class _ShellState extends State<Shell> {
       unawaited(
         showAxDialog<String>(
           context: context,
-          label: 'Changed on disk',
-          builder: (context) => AxQuestion(
-            title: '$conflict changed on disk',
-            detail: 'Another program changed the file since you opened it. Overwrite it with your version, or reload the version on disk (your changes are lost).',
-            actions: const [('overwrite', 'Overwrite'), ('reload', 'Reload'), ('cancel', 'Cancel')],
-          ),
+          label: d.conflictIsDeleted ? 'Deleted on disk' : 'Changed on disk',
+          // A file deleted on disk has no version to reload: save it again, or close it (AUD-019).
+          builder: (context) => d.conflictIsDeleted
+              ? AxQuestion(
+                  title: '$conflict was deleted on disk',
+                  detail: 'Another program deleted the file since you opened it. Save your version to create it again, or close it (your changes are lost).',
+                  actions: const [
+                    ('overwrite', 'Save'),
+                    ('close', 'Close Without Saving'),
+                    ('cancel', 'Cancel'),
+                  ],
+                  defaultAction: 'cancel',
+                )
+              : AxQuestion(
+                  title: '$conflict changed on disk',
+                  detail: 'Another program changed the file since you opened it. Overwrite it with your version, or reload the version on disk (your changes are lost).',
+                  actions: const [
+                    ('overwrite', 'Overwrite'),
+                    ('reload', 'Reload'),
+                    ('cancel', 'Cancel'),
+                  ],
+                  // Enter must not overwrite another program's changes (AUD-018).
+                  defaultAction: 'cancel',
+                ),
         ).then((a) {
           _conflictShown = false;
           unawaited(d.resolveConflict(a ?? 'cancel'));
@@ -226,8 +245,9 @@ class _ShellState extends State<Shell> {
 
   Doc? get _focusedDoc {
     final d = app.documents;
-    final f = FocusManager.instance.primaryFocus?.debugLabel ?? '';
-    if (f.startsWith('editor 2:') && d.split != null) return d.doc(d.split!.active);
+    if (_editor.currentState?.focusedGroup() == 2 && d.split != null) {
+      return d.doc(d.split!.active);
+    }
     return d.active;
   }
 
@@ -447,6 +467,52 @@ class _ShellState extends State<Shell> {
         enabled: () => app.documents.active != null,
         run: _goToLine,
       ),
+      // The Edit menu: the focused editor's edits, also on their keys (AUD-111).
+      for (final (id, title, keys, act) in <(String, String, String, void Function(Doc))>[
+        ('undo', 'Undo', 'Mod+Z', (d) => d.controller.undo()),
+        ('redo', 'Redo', 'Mod+Shift+Z', (d) => d.controller.redo()),
+        ('cut', 'Cut', 'Mod+X', (d) => d.controller.cut()),
+        ('copy', 'Copy', 'Mod+C', (d) => d.controller.copy()),
+        ('paste', 'Paste', 'Mod+V', (d) => d.controller.paste()),
+        ('select-all', 'Select All', 'Mod+A', (d) => d.controller.selectAll()),
+      ])
+        Command(
+          id: 'edit-$id',
+          title: title,
+          shortcut: keys,
+          category: 'Edit',
+          enabled: () =>
+              _focusedDoc != null && (!_focusedDoc!.readOnly || id == 'copy' || id == 'select-all'),
+          run: () {
+            final d = _focusedDoc;
+            if (d == null) return;
+            act(d);
+            _editor.currentState?.focusGroup(_editor.currentState?.focusedGroup() ?? 1);
+          },
+        ),
+      // Files and folders (AUD-022, protocol 0.6).
+      Command(
+        id: 'new-file',
+        title: 'New File…',
+        category: 'File',
+        enabled: () => ws.isOpen,
+        run: () => unawaited(newFile(context, app)),
+      ),
+      Command(
+        id: 'new-folder',
+        title: 'New Folder…',
+        category: 'File',
+        enabled: () => ws.isOpen,
+        run: () => unawaited(newFolder(context, app)),
+      ),
+      Command(
+        id: 'save-as',
+        title: 'Save As…',
+        shortcut: 'Mod+Shift+S',
+        category: 'File',
+        enabled: () => _focusedDoc != null && !_focusedDoc!.readOnly,
+        run: () => unawaited(saveAs(context, app, _focusedDoc!)),
+      ),
       Command(
         id: 'save',
         title: 'Save',
@@ -620,6 +686,7 @@ class _ShellState extends State<Shell> {
     _mod(LogicalKeyboardKey.keyO): const _CommandIntent('open-folder'),
     _mod(LogicalKeyboardKey.keyP): const _CommandIntent('go-to-file'),
     _mod(LogicalKeyboardKey.keyS): const _CommandIntent('save'),
+    _mod(LogicalKeyboardKey.keyS, shift: true): const _CommandIntent('save-as'),
     SingleActivator(LogicalKeyboardKey.keyS, control: !_isMac, meta: _isMac, alt: true):
         const _CommandIntent('save-all'),
     _mod(LogicalKeyboardKey.keyW): const _CommandIntent('close-editor'),
@@ -693,101 +760,115 @@ class _ShellState extends State<Shell> {
                     Expanded(
                       child: ListenableBuilder(
                         listenable: Listenable.merge([app.prefs, app.workspace]),
-                        builder: (context, _) => Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _Rail(
-                              // Chat owns the main area, so it stays marked with the side bar hidden.
-                              selected: app.sideVisible || app.destination == Destination.chat
-                                  ? app.destination
-                                  : null,
-                              onSelect: (d) {
-                                setState(() {
-                                  if (app.destination == d && app.sideVisible) {
-                                    app.sideVisible = false;
-                                  } else {
-                                    app.destination = d;
-                                    app.sideVisible = true;
+                        builder: (context, _) {
+                          // The stored panel sizes are what the person chose; what is shown
+                          // fits the window, the editor keeping its minimum (AUD-014).
+                          final win = MediaQuery.sizeOf(context);
+                          final dockOn =
+                              app.dockVisible &&
+                              app.workspace.isOpen &&
+                              app.destination != Destination.chat;
+                          final fit = fitPanels(
+                            width: win.width - Metrics.railWidth - 1,
+                            height:
+                                win.height - Metrics.titleRowHeight - Metrics.statusBarHeight - 2,
+                            side: app.sideVisible ? app.sideWidth : 0,
+                            dock: dockOn ? app.dockWidth : 0,
+                            console: app.consoleVisible ? app.consoleHeight : 0,
+                          );
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _Rail(
+                                // Chat owns the main area, so it stays marked with the side bar hidden.
+                                selected: app.sideVisible || app.destination == Destination.chat
+                                    ? app.destination
+                                    : null,
+                                onSelect: (d) {
+                                  setState(() {
+                                    if (app.destination == d && app.sideVisible) {
+                                      app.sideVisible = false;
+                                    } else {
+                                      app.destination = d;
+                                      app.sideVisible = true;
+                                    }
+                                  });
+                                  if (d == Destination.chat && app.destination == d) {
+                                    app.focusComposer?.call();
                                   }
-                                });
-                                if (d == Destination.chat && app.destination == d) {
-                                  app.focusComposer?.call();
-                                }
-                              },
-                            ),
-                            const Groove(vertical: true),
-                            // Kept mounted while hidden: showing it again costs no rebuild of
-                            // the explorer (measured: 20 ms otherwise, with 3000 rows listed).
-                            Offstage(
-                              offstage: !app.sideVisible,
-                              child: SizedBox(
-                                width: app.sideVisible ? app.sideWidth : 0,
-                                child: TickerMode(
-                                  enabled: app.sideVisible,
-                                  child: ExcludeFocus(
-                                    excluding: !app.sideVisible,
-                                    child: _SideBar(destination: app.destination),
+                                },
+                              ),
+                              const Groove(vertical: true),
+                              // Kept mounted while hidden: showing it again costs no rebuild of
+                              // the explorer (measured: 20 ms otherwise, with 3000 rows listed).
+                              Offstage(
+                                offstage: !app.sideVisible,
+                                child: SizedBox(
+                                  width: app.sideVisible ? fit.side : 0,
+                                  child: TickerMode(
+                                    enabled: app.sideVisible,
+                                    child: ExcludeFocus(
+                                      excluding: !app.sideVisible,
+                                      child: _SideBar(destination: app.destination),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            if (app.sideVisible) ...[
-                              AxSplitter(
-                                label: 'Resize the side bar',
-                                value: app.sideWidth,
-                                min: 180,
-                                max: 520,
-                                defaultValue: AppState.sideDefault,
-                                focusNode: _sideSplitter,
-                                onChanged: (v) => app.sideWidth = v,
-                              ),
-                            ],
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Expanded(
-                                    child: _Main(
-                                      editor: _editor,
-                                      chat: app.destination == Destination.chat,
-                                      environments: app.destination == Destination.environments,
+                              if (app.sideVisible) ...[
+                                AxSplitter(
+                                  label: 'Resize the side bar',
+                                  value: fit.side,
+                                  min: fit.sideMin,
+                                  max: fit.sideMax,
+                                  defaultValue: AppState.sideDefault,
+                                  focusNode: _sideSplitter,
+                                  onChanged: (v) => app.sideWidth = v,
+                                ),
+                              ],
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      child: _Main(
+                                        editor: _editor,
+                                        chat: app.destination == Destination.chat,
+                                        environments: app.destination == Destination.environments,
+                                      ),
                                     ),
-                                  ),
-                                  if (app.consoleVisible) ...[
-                                    AxSplitter(
-                                      label: 'Resize the console',
-                                      vertical: false,
-                                      invert: true,
-                                      value: app.consoleHeight,
-                                      min: 90,
-                                      max: 640,
-                                      defaultValue: AppState.consoleDefault,
-                                      onChanged: (v) => app.consoleHeight = v,
-                                    ),
-                                    SizedBox(
-                                      height: app.consoleHeight,
-                                      child: const ConsoleRegion(),
-                                    ),
+                                    if (app.consoleVisible) ...[
+                                      AxSplitter(
+                                        label: 'Resize the console',
+                                        vertical: false,
+                                        invert: true,
+                                        value: fit.console,
+                                        min: fit.consoleMin,
+                                        max: fit.consoleMax,
+                                        defaultValue: AppState.consoleDefault,
+                                        onChanged: (v) => app.consoleHeight = v,
+                                      ),
+                                      SizedBox(height: fit.console, child: const ConsoleRegion()),
+                                    ],
                                   ],
-                                ],
+                                ),
                               ),
-                            ),
-                            if (app.dockVisible &&
-                                app.workspace.isOpen &&
-                                app.destination != Destination.chat) ...[
-                              AxSplitter(
-                                label: 'Resize the AI dock',
-                                value: app.dockWidth,
-                                min: 300,
-                                max: 720,
-                                invert: true,
-                                defaultValue: AppState.dockDefault,
-                                onChanged: (v) => app.dockWidth = v,
-                              ),
-                              SizedBox(width: app.dockWidth, child: const ChatView(dock: true)),
+                              if (app.dockVisible &&
+                                  app.workspace.isOpen &&
+                                  app.destination != Destination.chat) ...[
+                                AxSplitter(
+                                  label: 'Resize the AI dock',
+                                  value: fit.dock,
+                                  min: fit.dockMin,
+                                  max: fit.dockMax,
+                                  invert: true,
+                                  defaultValue: AppState.dockDefault,
+                                  onChanged: (v) => app.dockWidth = v,
+                                ),
+                                SizedBox(width: fit.dock, child: const ChatView(dock: true)),
+                              ],
                             ],
-                          ],
-                        ),
+                          );
+                        },
                       ),
                     ),
                     const Groove(),
@@ -856,6 +937,68 @@ class _CommandIntent extends Intent {
 
 // ---- title row ------------------------------------------------------------------------------
 
+/// The panel sizes shown in a [width] × [height] work area (beside the rail, between the title
+/// row and the status bar), from the stored ones: the editor keeps [editorMinWidth] ×
+/// [editorMinHeight] while the panels can shrink to their minimums (the dock first, then the side
+/// bar; then both proportionally), and every splitter's range stays inside what fits (AUD-014).
+typedef PanelFit = ({
+  double side,
+  double sideMin,
+  double sideMax,
+  double dock,
+  double dockMin,
+  double dockMax,
+  double console,
+  double consoleMin,
+  double consoleMax,
+});
+
+const editorMinWidth = 320.0;
+const editorMinHeight = 160.0;
+
+PanelFit fitPanels({
+  required double width,
+  required double height,
+  required double side,
+  required double dock,
+  required double console,
+}) {
+  const splitter = 5.0;
+  double nonNeg(double v) => v.isFinite && v > 0 ? v : 0;
+  final room = nonNeg(
+    width - editorMinWidth - (side > 0 ? splitter : 0) - (dock > 0 ? splitter : 0),
+  );
+  var s = side, d = dock;
+  if (s + d > room) {
+    // The dock gives way first, down to its minimum; then the side bar, down to its; then both.
+    d = d > 0 ? (room - s).clamp(300.0, d) : 0;
+    if (s + d > room) s = s > 0 ? (room - d).clamp(180.0, s) : 0;
+    if (s + d > room && s + d > 0) {
+      final k = room / (s + d);
+      s *= k;
+      d *= k;
+    }
+  }
+  final sideMax = nonNeg(room - d).clamp(0.0, 520.0);
+  final sideMin = sideMax < 180 ? sideMax : 180.0;
+  final dockMax = nonNeg(room - s).clamp(0.0, 720.0);
+  final dockMin = dockMax < 300 ? dockMax : 300.0;
+  final consoleRoom = nonNeg(height - editorMinHeight - splitter);
+  final consoleMax = consoleRoom.clamp(0.0, 640.0);
+  final consoleMin = consoleMax < 90 ? consoleMax : 90.0;
+  return (
+    side: s.clamp(0.0, side > 0 ? sideMax : 0.0),
+    sideMin: sideMin,
+    sideMax: sideMax,
+    dock: d.clamp(0.0, dock > 0 ? dockMax : 0.0),
+    dockMin: dockMin,
+    dockMax: dockMax,
+    console: console > 0 ? console.clamp(consoleMin, consoleMax) : 0,
+    consoleMin: consoleMin,
+    consoleMax: consoleMax,
+  );
+}
+
 class _TitleRow extends StatelessWidget {
   const _TitleRow({required this.commands, required this.onSearch});
   final List<Command> Function() commands;
@@ -891,7 +1034,7 @@ class _TitleRow extends StatelessWidget {
       ),
     );
     return SizedBox(
-      height: Metrics.titleRowHeight,
+      height: context.scaled(Metrics.titleRowHeight, fontSize: 13, lineHeight: 18),
       child: ColoredBox(
         color: c.bar,
         child: Padding(
@@ -916,6 +1059,7 @@ class _TitleRow extends StatelessWidget {
                   ),
                   const SizedBox(width: Metrics.s4),
                   menu('File', 'File'),
+                  menu('Edit', 'Edit'),
                   menu('View', 'View'),
                   menu('Preferences', 'Preferences'),
                   menu('Help', 'Help'),
@@ -1102,7 +1246,7 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
     super.didUpdateWidget(old);
     if (widget.selected == null || old.selected == widget.selected) return;
     final m = context.axiom.motion;
-    if (!_placed || !m.animates) {
+    if (!_placed || !m.glides) {
       _y.value = _target();
     } else {
       _y.animateWith(SpringSimulation(m.settle, _y.value, _target(), _y.velocity));
@@ -1156,6 +1300,8 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
                                   children: [
                                     Center(
                                       child: AxIconButton(
+                                        // Beside the rail, not under it (AUD-051).
+                                        tooltipSide: OverlaySide.right,
                                         icon: icon,
                                         label: chat
                                             ? (n == 0 ? label : '$label, $n waiting for you')
@@ -1180,6 +1326,7 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
                             )
                           : Center(
                               child: AxIconButton(
+                                tooltipSide: OverlaySide.right,
                                 icon: icon,
                                 label: label,
                                 shortcut: shortcut,
@@ -1232,6 +1379,16 @@ class _SideBar extends StatefulWidget {
 /// Each destination's page stays mounted once shown: switching back costs no rebuild.
 class _SideBarState extends State<_SideBar> {
   final _shown = <Destination>{};
+  final _fileMenu = GlobalKey<AxMenuState>();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      AppScope.of(context).openFileMenu = () => _fileMenu.currentState?.open();
+    });
+  }
 
   Widget _page(AppState app, Destination d) => switch (d) {
     Destination.chat => const ChatSide(),
@@ -1273,22 +1430,59 @@ class _SideBarState extends State<_SideBar> {
                     _ => 'Files',
                   };
                   final meta = app.workspace.isOpen ? app.workspace.name : null;
-                  return Semantics(
-                    header: true,
-                    child: Row(
-                      children: [
-                        Text(
+                  final files = d == Destination.files && app.workspace.isOpen;
+                  return Row(
+                    children: [
+                      Semantics(
+                        header: true,
+                        child: Text(
                           title,
                           style: t.type.small.copyWith(color: c.ink, fontWeight: FontWeight.w600),
                         ),
-                        if (meta != null) ...[
-                          const SizedBox(width: Metrics.s4),
-                          Expanded(
-                            child: Text(meta, style: t.type.small, overflow: TextOverflow.ellipsis),
+                      ),
+                      const SizedBox(width: Metrics.s4),
+                      Expanded(
+                        child: meta == null
+                            ? const SizedBox.shrink()
+                            : Text(meta, style: t.type.small, overflow: TextOverflow.ellipsis),
+                      ),
+                      // The folder's file operations (AUD-022): new file, new folder, and the
+                      // selected row's menu (also on a right-click, Shift+F10, F2, Delete).
+                      if (files) ...[
+                        AxIconButton(
+                          icon: AxiomIcons.plus,
+                          label: 'New File…',
+                          size: 24,
+                          onPressed: () => unawaited(newFile(context, app)),
+                        ),
+                        AxIconButton(
+                          icon: AxiomIcons.folder,
+                          label: 'New Folder…',
+                          size: 24,
+                          onPressed: () => unawaited(newFolder(context, app)),
+                        ),
+                        AxMenu(
+                          key: _fileMenu,
+                          label: 'File actions',
+                          hint: 'The selected file\'s actions — Shift+F10',
+                          entries: () => fileMenu(context, app, app.workspace.selection),
+                          trigger: (context, st, open) => FocusRing(
+                            visible: st.focused,
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: Center(
+                                child: AxiomIcon(
+                                  AxiomIcons.more,
+                                  size: 14,
+                                  color: open || st.hovered ? c.ink : c.ink3,
+                                ),
+                              ),
+                            ),
                           ),
-                        ],
+                        ),
                       ],
-                    ),
+                    ],
                   );
                 },
               ),
@@ -1383,9 +1577,18 @@ class _MainState extends State<_Main> {
 }
 
 /// The folder's work: the editor, or what to do when nothing is open.
-class _Work extends StatelessWidget {
+class _Work extends StatefulWidget {
   const _Work({required this.editor});
   final GlobalKey<EditorAreaState> editor;
+
+  @override
+  State<_Work> createState() => _WorkState();
+}
+
+class _WorkState extends State<_Work> {
+  /// One instance for the state's life: a rebuild above (the palette opening, a splitter step,
+  /// a folder listing) then stops here instead of rebuilding the whole editor (AUD-072).
+  late final Widget _editorArea = EditorArea(key: widget.editor);
 
   @override
   Widget build(BuildContext context) {
@@ -1397,6 +1600,40 @@ class _Work extends StatelessWidget {
       builder: (context, _) {
         final ws = app.workspace;
         final daemon = app.client.state.value;
+        // The backend stopped while documents were open: they stay on screen (read-only, with
+        // their unsaved text) under a line that says so and restarts it (AUD-001).
+        if (daemon is DaemonFailed && app.documents.docs.isNotEmpty) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ColoredBox(
+                color: c.raised,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: Metrics.s5, vertical: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Semantics(
+                          liveRegion: true,
+                          child: Text(
+                            'The backend stopped. Your documents are kept, read-only, until it restarts.',
+                            style: t.type.small.copyWith(color: c.danger),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      AxButton(
+                        label: 'Restart the Backend',
+                        onPressed: () => unawaited(app.restartBackend()),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(child: _editorArea),
+            ],
+          );
+        }
         if (daemon is DaemonFailed) {
           return _Centered(
             children: [
@@ -1419,11 +1656,32 @@ class _Work extends StatelessWidget {
             children: [
               AnswerLine(ws.error),
               const SizedBox(height: Metrics.s5),
-              AxButton(label: 'Dismiss', kind: ButtonKind.quiet, onPressed: ws.dismissError),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (ws.rootGone && ws.isOpen) ...[
+                    AxButton(
+                      label: 'Close Folder',
+                      onPressed: () {
+                        ws.dismissError();
+                        app.documents.requestCloseFolder();
+                      },
+                    ),
+                    const SizedBox(width: Metrics.s3),
+                    AxButton(
+                      label: 'Open Folder…',
+                      kind: ButtonKind.quiet,
+                      onPressed: () => unawaited(app.pickFolder?.call()),
+                    ),
+                    const SizedBox(width: Metrics.s3),
+                  ],
+                  AxButton(label: 'Dismiss', kind: ButtonKind.quiet, onPressed: ws.dismissError),
+                ],
+              ),
             ],
           );
         }
-        if (ws.isOpen && app.documents.docs.isNotEmpty) return EditorArea(key: editor);
+        if (ws.isOpen && app.documents.docs.isNotEmpty) return _editorArea;
         if (ws.isOpen) {
           // Tauri's empty editor: the ways in, each with its keys, quiet and centred.
           Widget way(String label, String keys) => SizedBox(
@@ -1481,7 +1739,10 @@ class _Work extends StatelessWidget {
                     const SizedBox(height: Metrics.s6),
                     AnswerLine(
                       ws.opening ? 'Opening the folder…' : 'Open a folder to start',
-                      detail: 'Axiom opens folders through its backend, axiomd.',
+                      // What opening a folder gives the person, not how it works (AUD-110).
+                      detail:
+                          'Pick a project folder: Axiom finds its toolchains, language servers '
+                          'and Git changes.',
                     ),
                     const SizedBox(height: Metrics.s7),
                     AxButton(
@@ -1512,7 +1773,7 @@ class _EmptyTabStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     return SizedBox(
-      height: Metrics.tabHeight,
+      height: context.scaled(Metrics.tabHeight, fontSize: 12, lineHeight: 16),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: c.bar,
@@ -1558,7 +1819,7 @@ class _StatusBar extends StatelessWidget {
       child: Center(widthFactor: 1, child: child),
     );
     return SizedBox(
-      height: Metrics.statusBarHeight,
+      height: context.scaled(Metrics.statusBarHeight, fontSize: 11, lineHeight: 14),
       child: ColoredBox(
         color: c.bar,
         child: Padding(
@@ -1619,7 +1880,17 @@ class _StatusBar extends StatelessWidget {
                             children: [
                               AxiomIcon(AxiomIcons.branch, size: 12, color: c.ink3),
                               const SizedBox(width: 4),
-                              Text(branch, style: t.type.small),
+                              // Long branch names ellipsise (AUD-078).
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 200),
+                                child: Text(
+                                  branch,
+                                  style: t.type.small,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                               if (sync.isNotEmpty) ...[
                                 const SizedBox(width: 4),
                                 Text(sync, style: t.type.numeric),
@@ -1677,10 +1948,15 @@ class _StatusBar extends StatelessWidget {
                             children: [
                               seam,
                               seg(
-                                Text(
-                                  app.workspace.root,
-                                  style: t.type.small,
-                                  overflow: TextOverflow.ellipsis,
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 320),
+                                  child: Text(
+                                    app.workspace.root,
+                                    style: t.type.small,
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ),
                             ],

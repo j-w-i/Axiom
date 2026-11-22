@@ -31,6 +31,16 @@ record.
   numbers (`#6C6962`, `#8A867E`) and comments (`#8A867E`, `#6B675F`) are lifted for the same reason.
 - **The tab's lit edge** does not glide between tabs; each active tab carries its own.
 - **Keycaps** read Ctrl / Shift / Alt on Linux and Windows, and ⌘ ⇧ ⌥ on macOS.
+- **Text on tints (audit AUD-084, 2026-11-23).** `tokens_test.dart` also checks text on the diff
+  tints, `accentSoft`, the selected-row tint and `dangerSoft`. Light `okText` is `#33682B` and light
+  `accentText` `#785616`, lifted to reach 4.5:1 on a selected row.
+- **Tokens added by the audit remediation:** `diffAdd`, `diffDel`, `approvalBorder`,
+  `Metrics.radiusPill`, `radiusHalo`, `sideGutter` (12 px, every side panel), `sideListInset`,
+  `rowInset`, and `AxiomType.sectionHeading` (one heading style for equivalent side-panel sections).
+- **Rows grow with the system's text scale** (`context.scaled`, AUD-020); fixed heights are the
+  heights at scale 1.
+- **Reduced motion follows the system:** Standard becomes Reduced when the platform asks for
+  fewer animations (`MediaQuery.disableAnimations`, AUD-054).
 
 ## Rules the tests enforce
 - No literal colour outside `tokens.dart`.

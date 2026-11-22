@@ -66,3 +66,36 @@ Map<int, List<SemanticRange>> decodeSemanticTokens(
   }
   return out;
 }
+
+/// [tokens] coloured from [to] instead of [from]: a theme switch recolours the server's tokens
+/// at once rather than at the next edit (AUD-055). Each colour of [from]'s palette maps to the
+/// same role's colour in [to]; the decoration is kept.
+Map<int, List<SemanticRange>> rethemeSemantic(
+  Map<int, List<SemanticRange>> tokens,
+  SyntaxColors from,
+  SyntaxColors to,
+) {
+  if (identical(from, to) || tokens.isEmpty) return tokens;
+  final map = <Color, Color>{
+    from.type: to.type,
+    from.function: to.function,
+    from.macro: to.macro,
+    from.keyword: to.keyword,
+    from.comment: to.comment,
+    from.string: to.string,
+    from.number: to.number,
+    from.punct: to.punct,
+    from.variable: to.variable,
+  };
+  return {
+    for (final e in tokens.entries)
+      e.key: [
+        for (final r in e.value)
+          (
+            start: r.start,
+            end: r.end,
+            style: r.style.copyWith(color: map[r.style.color] ?? r.style.color),
+          ),
+      ],
+  };
+}

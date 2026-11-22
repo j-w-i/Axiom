@@ -70,6 +70,43 @@ void main() {
         if (contrast(y.lineNumber, c.ground) < 3) failures.add('line numbers');
         expect(failures, isEmpty);
       });
+      test('text on the derived tints (diff rows, approval cards, selected rows) ≥ 4.5:1', () {
+        final failures = <String>[];
+        // Tints are translucent: checked over each surface they are drawn on.
+        final tinted = {
+          'diffAdd/ground': Color.alphaBlend(c.diffAdd, c.ground),
+          'diffDel/ground': Color.alphaBlend(c.diffDel, c.ground),
+          'diffAdd/recessed': Color.alphaBlend(c.diffAdd, c.recessed),
+          'diffDel/recessed': Color.alphaBlend(c.diffDel, c.recessed),
+          'accentSoft/ground': Color.alphaBlend(c.accentSoft, c.ground),
+          'accentSoft/panel': Color.alphaBlend(c.accentSoft, c.panel),
+          'selected/panel': Color.alphaBlend(c.selected, c.panel),
+          'dangerSoft/ground': Color.alphaBlend(c.dangerSoft, c.ground),
+        };
+        final texts = {
+          'ink': c.ink,
+          'ink2': c.ink2,
+          'code': c.syntax.text,
+          'okText': c.okText,
+          'dangerText': c.dangerText,
+          'accentText': c.accentText,
+        };
+        for (final s in tinted.entries) {
+          for (final x in texts.entries) {
+            final r = contrast(x.value, s.value);
+            if (r < 4.5) failures.add('${x.key} on ${s.key}: ${r.toStringAsFixed(2)}');
+          }
+          // Line numbers in the diff are faint by design: 3:1.
+          if (contrast(c.ink3, s.value) < 3) failures.add('ink3 on ${s.key}');
+        }
+        expect(failures, isEmpty);
+      });
+      test('the approval border is a visible edge (≥ 1.5:1 on the panel and ground)', () {
+        for (final s in [c.panel, c.ground]) {
+          final edge = Color.alphaBlend(c.approvalBorder, s);
+          expect(contrast(edge, s), greaterThanOrEqualTo(1.5));
+        }
+      });
       test('text on the accent and on the ink circle ≥ 4.5:1; the focus ring ≥ 3:1', () {
         expect(contrast(c.onAccent, c.accent), greaterThanOrEqualTo(4.5));
         expect(contrast(c.onInk, c.ink), greaterThanOrEqualTo(4.5));

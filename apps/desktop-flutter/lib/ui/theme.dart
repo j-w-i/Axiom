@@ -14,6 +14,10 @@ final class AxiomThemeData {
   final AxiomType type;
   final AxiomMotion motion;
 
+  /// This theme with another motion mode.
+  AxiomThemeData withMotion(MotionMode mode) =>
+      mode == motionMode ? this : AxiomThemeData(colors: colors, motionMode: mode);
+
   @override
   bool operator ==(Object other) =>
       other is AxiomThemeData && other.colors == colors && other.motionMode == motionMode;
@@ -22,7 +26,15 @@ final class AxiomThemeData {
   int get hashCode => Object.hash(colors, motionMode);
 }
 
-/// Puts [data] in scope, with the body text style as the default.
+/// The motion mode in effect: the person's setting, raised to at least Reduced when the system
+/// asks for reduced motion (`MediaQuery.disableAnimations`: GNOME's and KDE's "reduce
+/// animations", macOS's "Reduce motion"; motion-system.md §2: the OS preference forces at least
+/// `reduced`).
+MotionMode effectiveMotion(MotionMode setting, {required bool systemReduces}) =>
+    systemReduces && setting == MotionMode.standard ? MotionMode.reduced : setting;
+
+/// Puts [data] in scope, with the body text style as the default. The motion follows the
+/// system's reduced-motion preference on top of [data]'s mode ([effectiveMotion]).
 class AxiomTheme extends StatelessWidget {
   const AxiomTheme({super.key, required this.data, required this.child});
   final AxiomThemeData data;
@@ -34,14 +46,20 @@ class AxiomTheme extends StatelessWidget {
     return scope!.data;
   }
 
+  /// The theme in scope, or null outside every [AxiomTheme].
+  static AxiomThemeData? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_AxiomThemeScope>()?.data;
+
   @override
   Widget build(BuildContext context) {
+    final reduces = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final effective = data.withMotion(effectiveMotion(data.motionMode, systemReduces: reduces));
     return _AxiomThemeScope(
-      data: data,
+      data: effective,
       child: DefaultTextStyle(
-        style: data.type.body,
+        style: effective.type.body,
         child: IconTheme(
-          data: IconThemeData(color: data.colors.ink2, size: 16),
+          data: IconThemeData(color: effective.colors.ink2, size: 16),
           child: child,
         ),
       ),
@@ -60,4 +78,55 @@ class _AxiomThemeScope extends InheritedWidget {
 extension AxiomContext on BuildContext {
   AxiomThemeData get axiom => AxiomTheme.of(this);
   AxiomColors get colors => AxiomTheme.of(this).colors;
+
+  /// [base] (a row's or control's height at text scale 1) grown by what the system's text scale
+  /// adds to one line of [fontSize] px text with a [lineHeight] px line, so scaled text is never
+  /// clipped (AUD-020). Never smaller than [base].
+  double scaled(double base, {double fontSize = 13, double lineHeight = 18}) => scaledExtent(
+    MediaQuery.maybeTextScalerOf(this) ?? TextScaler.noScaling,
+    base,
+    fontSize: fontSize,
+    lineHeight: lineHeight,
+  );
+}
+
+/// [base] grown by what [scaler] adds to one line of text ([AxiomContext.scaled]).
+double scaledExtent(
+  TextScaler scaler,
+  double base, {
+  double fontSize = 13,
+  double lineHeight = 18,
+}) {
+  final grow = lineHeight * (scaler.scale(fontSize) / fontSize - 1);
+  return grow > 0 ? (base + grow).ceilToDouble() : base;
+}
+
+/// Whether the window is in front and focused: looping indicators run only then
+/// (motion-system.md §5.5, performance.md P9). Fed by the app's lifecycle; a window that never
+/// reported a state counts as active.
+final class WindowActivity {
+  WindowActivity._() {
+    _listener = AppLifecycleListener(onStateChange: _onState);
+    _onState(WidgetsBinding.instance.lifecycleState);
+  }
+  static WindowActivity? _instance;
+  static WindowActivity get instance => _instance ??= WindowActivity._();
+
+  late final AppLifecycleListener _listener;
+
+  /// True while the window is resumed (shown and focused).
+  final active = ValueNotifier<bool>(true);
+
+  void _onState(AppLifecycleState? s) => active.value = s == null || s == AppLifecycleState.resumed;
+
+  /// For tests: report a lifecycle state.
+  @visibleForTesting
+  void debugSet(AppLifecycleState s) => _onState(s);
+
+  /// Stops listening (tests).
+  @visibleForTesting
+  void dispose() {
+    _listener.dispose();
+    _instance = null;
+  }
 }

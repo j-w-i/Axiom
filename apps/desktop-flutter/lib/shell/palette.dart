@@ -42,6 +42,9 @@ class Palette extends StatefulWidget {
   State<Palette> createState() => _PaletteState();
 }
 
+/// Commands run recently (this session), newest first: offered first with an empty query.
+final _recent = <String>[];
+
 class _PaletteState extends State<Palette> {
   late final _query = TextEditingController(text: widget.seed);
   final _focus = FocusNode(debugLabel: 'palette query');
@@ -77,12 +80,35 @@ class _PaletteState extends State<Palette> {
     super.dispose();
   }
 
-  List<({Command item, FuzzyMatch match})> get _results => rankFuzzy(
-    (_loaded ?? widget.commands).where((c) => c.isEnabled),
-    _query.text,
-    (c) => c.title,
-    limit: 60,
-  );
+  // Ranked once per query and list, not on every rebuild (an arrow key rebuilds; Go to File
+  // ranks up to 20 000 paths) (AUD-049).
+  List<({Command item, FuzzyMatch match})>? _ranked;
+  String? _rankedQuery;
+  Object? _rankedSource;
+
+  List<({Command item, FuzzyMatch match})> get _results {
+    final source = _loaded ?? widget.commands;
+    final query = _query.text;
+    if (_ranked != null && identical(_rankedSource, source) && _rankedQuery == query) {
+      return _ranked!;
+    }
+    var items = source.where((c) => c.isEnabled);
+    if (query.isEmpty && _loaded == null) {
+      // With no query: recently run first, then by category and title, not declaration order
+      // (AUD-111).
+      final list = items.toList()
+        ..sort((a, b) {
+          final ra = _recent.indexOf(a.id), rb = _recent.indexOf(b.id);
+          if (ra != rb) return (ra < 0 ? 1 << 20 : ra).compareTo(rb < 0 ? 1 << 20 : rb);
+          final ca = (a.category ?? '').compareTo(b.category ?? '');
+          return ca != 0 ? ca : a.title.compareTo(b.title);
+        });
+      items = list;
+    }
+    _rankedSource = source;
+    _rankedQuery = query;
+    return _ranked = rankFuzzy(items, query, (c) => c.title, limit: 60);
+  }
 
   void _close() {
     widget.onClose();
@@ -91,6 +117,10 @@ class _PaletteState extends State<Palette> {
   }
 
   void _run(Command c) {
+    _recent
+      ..remove(c.id)
+      ..insert(0, c.id);
+    if (_recent.length > 8) _recent.removeLast();
     _close();
     c.run();
   }
@@ -98,7 +128,7 @@ class _PaletteState extends State<Palette> {
   void _move(int d, int n) {
     if (n == 0) return;
     setState(() => _active = (_active + d + n) % n);
-    const extent = 30.0;
+    final extent = context.scaled(30);
     final top = _active * extent;
     if (!_scroll.hasClients) return;
     if (top < _scroll.offset) {
@@ -147,56 +177,69 @@ class _PaletteState extends State<Palette> {
                     onInvoke: (_) => results.isEmpty ? null : _run(results[_active].item),
                   ),
                 },
-                child: Semantics(
-                  scopesRoute: true,
-                  namesRoute: true,
-                  label: widget.label,
-                  explicitChildNodes: true,
-                  child: SizedBox(
-                    width: 600,
-                    child: Sheet(
-                      padding: const EdgeInsets.all(Metrics.s3),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          AxTextInput(
-                            label: widget.inputLabel,
-                            controller: _query,
-                            focusNode: _focus,
-                            placeholder: widget.placeholder,
-                            leading: AxiomIcon(AxiomIcons.search, size: 14, color: c.ink3),
+                // Focus and the screen reader stay in the palette while it is open: Tab cycles
+                // inside it and the window behind is not announced (AUD-048).
+                child: FocusScope(
+                  child: BlockSemantics(
+                    child: Semantics(
+                      scopesRoute: true,
+                      namesRoute: true,
+                      label: widget.label,
+                      explicitChildNodes: true,
+                      child: SizedBox(
+                        width: 600,
+                        child: Sheet(
+                          padding: const EdgeInsets.all(Metrics.s3),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // The active row is announced as it changes (AUD-082).
+                              if (results.isNotEmpty)
+                                Semantics(
+                                  liveRegion: true,
+                                  label: results[_active.clamp(0, results.length - 1)].item.title,
+                                  child: const SizedBox.shrink(),
+                                ),
+                              AxTextInput(
+                                label: widget.inputLabel,
+                                controller: _query,
+                                focusNode: _focus,
+                                placeholder: widget.placeholder,
+                                leading: AxiomIcon(AxiomIcons.search, size: 14, color: c.ink3),
+                              ),
+                              const SizedBox(height: Metrics.s3),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(maxHeight: 360),
+                                child: results.isEmpty
+                                    ? Padding(
+                                        padding: const EdgeInsets.all(Metrics.s4),
+                                        child: _loading
+                                            ? const Align(
+                                                alignment: Alignment.centerLeft,
+                                                child: Spinner(label: 'Listing files'),
+                                              )
+                                            : Text(widget.empty, style: t.type.small),
+                                      )
+                                    : ListView.builder(
+                                        controller: _scroll,
+                                        shrinkWrap: true,
+                                        itemExtent: context.scaled(30),
+                                        itemCount: results.length,
+                                        itemBuilder: (context, i) {
+                                          final (:item, :match) = results[i];
+                                          return _PaletteRow(
+                                            command: item,
+                                            match: match,
+                                            active: i == _active,
+                                            onPressed: () => _run(item),
+                                          );
+                                        },
+                                      ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: Metrics.s3),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 360),
-                            child: results.isEmpty
-                                ? Padding(
-                                    padding: const EdgeInsets.all(Metrics.s4),
-                                    child: _loading
-                                        ? const Align(
-                                            alignment: Alignment.centerLeft,
-                                            child: Spinner(label: 'Listing files'),
-                                          )
-                                        : Text(widget.empty, style: t.type.small),
-                                  )
-                                : ListView.builder(
-                                    controller: _scroll,
-                                    shrinkWrap: true,
-                                    itemExtent: 30,
-                                    itemCount: results.length,
-                                    itemBuilder: (context, i) {
-                                      final (:item, :match) = results[i];
-                                      return _PaletteRow(
-                                        command: item,
-                                        match: match,
-                                        active: i == _active,
-                                        onPressed: () => _run(item),
-                                      );
-                                    },
-                                  ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),

@@ -1,9 +1,11 @@
 // Source Control (FL-GIT-001; the Tauri shell's SourceControl.tsx and DiffHost.tsx): the side
 // bar's branch and changes grouped as Conflicts, Staged, Changes and Untracked (Enter opens a
-// row's diff, Shift+Enter the file; ↑/↓ move); and the diff view in the editor area, HEAD on the
-// left and the working tree on the right, Esc closes it. Read-only: no staging or commits yet.
+// row's diff, Shift+Enter the file; ↑/↓ move; one Tab stop, built lazily); and the diff view in
+// the editor area, HEAD on the left and the working tree on the right (aligned off the UI isolate
+// for large files, long lines wrapped), Esc closes it. Read-only: no staging or commits yet.
 
 import 'dart:async';
+import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -15,6 +17,7 @@ import '../state/git.dart';
 import '../ui/controls.dart';
 import '../ui/icon_data.dart';
 import '../ui/icons.dart';
+import '../ui/roving.dart';
 import '../ui/surfaces.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
@@ -26,16 +29,22 @@ class ScmSide extends StatefulWidget {
   State<ScmSide> createState() => _ScmSideState();
 }
 
-class _ScmSideState extends State<ScmSide> {
-  final _nodes = <String, FocusNode>{};
+/// One item of the changes list: the branch line, a group's heading, or a changed file.
+typedef _Item = ({String kind, String group, GitFile? file, int k});
 
-  FocusNode _node(String key) => _nodes.putIfAbsent(key, () => FocusNode(debugLabel: key));
+class _ScmSideState extends State<ScmSide> {
+  final _nodes = RowFocusNodes(debugPrefix: 'change');
+  final _scroll = ScrollController();
+  List<_Item> _items = const [];
+  List<int> _rowAt = const [];
+  int _current = 0;
+  bool _focused = false;
+  double _head = 26, _row = 26, _branch = 28;
 
   @override
   void dispose() {
-    for (final n in _nodes.values) {
-      n.dispose();
-    }
+    _nodes.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -45,6 +54,58 @@ class _ScmSideState extends State<ScmSide> {
     'changes': 'Changes',
     'untracked': 'Untracked',
   };
+
+  static String _id(String group, GitFile f) => '$group:${f.path}';
+
+  double _extent(int i) => switch (_items[i].kind) {
+    'branch' => _branch,
+    'heading' => _head,
+    _ => _row,
+  };
+
+  void _focus(int n) {
+    if (_rowAt.isEmpty) return;
+    n = n.clamp(0, _rowAt.length - 1);
+    setState(() => _current = n);
+    final index = _rowAt[n];
+    if (_scroll.hasClients) {
+      var top = 0.0;
+      for (var i = 0; i < index; i++) {
+        top += _extent(i);
+      }
+      final view = _scroll.position.viewportDimension;
+      final max = _scroll.position.maxScrollExtent;
+      if (top < _scroll.offset) {
+        _scroll.jumpTo(top.clamp(0, max));
+      } else if (top + _row > _scroll.offset + view) {
+        _scroll.jumpTo((top + _row - view).clamp(0, max));
+      }
+    }
+    final it = _items[index];
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _nodes[_id(it.group, it.file!)].requestFocus();
+    });
+  }
+
+  KeyEventResult _key(AppState app, KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
+    if (e.logicalKey == LogicalKeyboardKey.enter && HardwareKeyboard.instance.isShiftPressed) {
+      if (_current < _rowAt.length) {
+        unawaited(app.documents.open(_items[_rowAt[_current]].file!.path));
+      }
+      return KeyEventResult.handled;
+    }
+    final to = switch (e.logicalKey) {
+      LogicalKeyboardKey.arrowDown => _current + 1,
+      LogicalKeyboardKey.arrowUp => _current - 1,
+      LogicalKeyboardKey.home => 0,
+      LogicalKeyboardKey.end => _rowAt.length - 1,
+      _ => null,
+    };
+    if (to == null) return KeyEventResult.ignored;
+    _focus(to);
+    return KeyEventResult.handled;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +117,7 @@ class _ScmSideState extends State<ScmSide> {
       builder: (context, _) {
         final s = app.git.status;
         Widget note(String text) => Padding(
-          padding: const EdgeInsets.all(Metrics.s5),
+          padding: const EdgeInsets.all(Metrics.sideGutter),
           child: Text(text, style: t.type.small),
         );
         if (!app.workspace.isOpen) return note('Open a folder to see its changes.');
@@ -69,90 +130,107 @@ class _ScmSideState extends State<ScmSide> {
           ('changes', g.changes),
           ('untracked', g.untracked),
         ].where((x) => x.$2.isNotEmpty).toList();
-        final flat = [
-          for (final (k, files) in sections)
-            for (final f in files) '$k:${f.path}',
-        ];
-        KeyEventResult key(String id, GitFile f, KeyEvent e) {
-          if (e is! KeyDownEvent) return KeyEventResult.ignored;
-          final i = flat.indexOf(id);
-          final to = switch (e.logicalKey) {
-            LogicalKeyboardKey.arrowDown => i + 1,
-            LogicalKeyboardKey.arrowUp => i - 1,
-            LogicalKeyboardKey.home => 0,
-            LogicalKeyboardKey.end => flat.length - 1,
-            _ => null,
-          };
-          if (e.logicalKey == LogicalKeyboardKey.enter &&
-              HardwareKeyboard.instance.isShiftPressed) {
-            unawaited(app.documents.open(f.path));
-            return KeyEventResult.handled;
+        final items = <_Item>[(kind: 'branch', group: '', file: null, k: -1)];
+        final rowAt = <int>[];
+        for (final (k, files) in sections) {
+          items.add((kind: 'heading', group: k, file: null, k: files.length));
+          for (final f in files) {
+            items.add((kind: 'row', group: k, file: f, k: rowAt.length));
+            rowAt.add(items.length - 1);
           }
-          if (to == null || to < 0 || to >= flat.length) return KeyEventResult.ignored;
-          _node(flat[to]).requestFocus();
-          return KeyEventResult.handled;
         }
-
-        return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: Metrics.s2),
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Metrics.s3, 0, Metrics.s3, Metrics.s3),
-              child: Row(
-                children: [
-                  AxiomIcon(AxiomIcons.branch, size: 14, color: c.ink2),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      s.branch ?? 'Detached at ${s.head ?? '?'}',
-                      style: t.type.label,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if ((s.ahead ?? 0) > 0) Text(' ↑${s.ahead}', style: t.type.numeric),
-                  if ((s.behind ?? 0) > 0) Text(' ↓${s.behind}', style: t.type.numeric),
-                ],
-              ),
-            ),
-            if (flat.isEmpty) note('No changes'),
-            for (final (k, files) in sections)
-              Semantics(
-                container: true,
-                explicitChildNodes: true,
-                label: _labels[k],
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(Metrics.s3, Metrics.s3, Metrics.s3, 4),
-                      child: Row(
-                        children: [
-                          Text(_labels[k]!, style: t.type.tiny),
-                          const SizedBox(width: 6),
-                          AxBadge(files.length, attention: false),
-                        ],
-                      ),
-                    ),
-                    for (final f in files) _row(context, k, f, key),
-                  ],
+        _items = items;
+        _rowAt = rowAt;
+        if (_current >= rowAt.length) _current = rowAt.isEmpty ? 0 : rowAt.length - 1;
+        _head = context.scaled(26, fontSize: 12, lineHeight: 16);
+        _row = context.scaled(26);
+        _branch = context.scaled(28, fontSize: 12, lineHeight: 15.6);
+        final branch = Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Metrics.rowInset),
+          child: Row(
+            children: [
+              AxiomIcon(AxiomIcons.branch, size: 14, color: c.ink2),
+              const SizedBox(width: Metrics.s3),
+              Expanded(
+                child: Text(
+                  s.branch ?? 'Detached at ${s.head ?? '?'}',
+                  style: t.type.label,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
               ),
-          ],
+              if ((s.ahead ?? 0) > 0) Text(' ↑${s.ahead}', style: t.type.numeric),
+              if ((s.behind ?? 0) > 0) Text(' ↓${s.behind}', style: t.type.numeric),
+            ],
+          ),
+        );
+        if (rowAt.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Metrics.sideListInset),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(height: _branch, child: branch),
+                note('No changes'),
+              ],
+            ),
+          );
+        }
+        // One lazily built list (AUD-050), one Tab stop (AUD-021).
+        return RovingFocus(
+          onEnter: () => _focus(_current),
+          onFocusChange: (v) => setState(() => _focused = v),
+          child: Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            onKeyEvent: (_, e) => _key(app, e),
+            child: ListView.builder(
+              controller: _scroll,
+              padding: const EdgeInsets.symmetric(horizontal: Metrics.sideListInset),
+              itemCount: items.length,
+              itemExtentBuilder: (i, _) => i < _items.length ? _extent(i) : null,
+              itemBuilder: (context, i) {
+                final it = _items[i];
+                switch (it.kind) {
+                  case 'branch':
+                    return branch;
+                  case 'heading':
+                    return Semantics(
+                      container: true,
+                      header: true,
+                      label: '${_labels[it.group]}, ${it.k}',
+                      excludeSemantics: true,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          Metrics.rowInset,
+                          Metrics.s3,
+                          Metrics.rowInset,
+                          Metrics.s1,
+                        ),
+                        child: Row(
+                          children: [
+                            Text(_labels[it.group]!, style: t.type.sectionHeading),
+                            const SizedBox(width: Metrics.s3),
+                            AxBadge(it.k, attention: false),
+                          ],
+                        ),
+                      ),
+                    );
+                  default:
+                    return _changeRow(context, it.group, it.file!, it.k);
+                }
+              },
+            ),
+          ),
         );
       },
     );
   }
 
-  Widget _row(
-    BuildContext context,
-    String group,
-    GitFile f,
-    KeyEventResult Function(String, GitFile, KeyEvent) key,
-  ) {
+  Widget _changeRow(BuildContext context, String group, GitFile f, int k) {
     final app = AppScope.of(context);
     final t = context.axiom;
     final c = t.colors;
-    final id = '$group:${f.path}';
     final m = group == 'staged'
         ? markOf(GitFile(path: f.path, index_: f.index_, worktree: GitFileState.unmodified))
         : markOf(
@@ -166,40 +244,86 @@ class _ScmSideState extends State<ScmSide> {
     final dir = f.path.length > name.length
         ? f.path.substring(0, f.path.length - name.length - 1)
         : '';
-    return Focus(
-      canRequestFocus: false,
+    return AxListRow(
+      label: '${f.path}, ${m?.word ?? 'changed'}${group == 'staged' ? ', staged' : ''}',
+      hint: 'Show the changes — Enter; open the file — Shift+Enter',
+      focusNode: _nodes[_id(group, f)],
       skipTraversal: true,
-      onKeyEvent: (_, e) => key(id, f, e),
-      child: AxListRow(
-        label: '${f.path}, ${m?.word ?? 'changed'}${group == 'staged' ? ', staged' : ''}',
-        hint: 'Show the changes — Enter; open the file — Shift+Enter',
-        focusNode: _node(id),
-        selected: app.git.diff == f.path,
-        height: 26,
-        onPressed: () {
-          if (HardwareKeyboard.instance.isShiftPressed) {
-            unawaited(app.documents.open(f.path));
-          } else {
-            app.git.openDiff(f.path);
-          }
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(
-            children: [
-              Text(name, style: t.type.body.copyWith(color: gitInk(c, m?.kind))),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(dir, style: t.type.tiny, overflow: TextOverflow.ellipsis),
+      selected: app.git.diff == f.path,
+      listFocused: _focused,
+      height: 26,
+      onPressed: () {
+        setState(() => _current = k);
+        if (HardwareKeyboard.instance.isShiftPressed) {
+          unawaited(app.documents.open(f.path));
+        } else {
+          app.git.openDiff(f.path);
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Metrics.rowInset),
+        child: Row(
+          children: [
+            Flexible(
+              flex: 0,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 200),
+                child: Text(
+                  name,
+                  style: t.type.body.copyWith(color: gitInk(c, m?.kind)),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
               ),
-              Text(m?.letter ?? '', style: t.type.codeSmall.copyWith(color: gitInk(c, m?.kind))),
-            ],
-          ),
+            ),
+            const SizedBox(width: Metrics.s3),
+            Expanded(
+              child: Text(dir, style: t.type.tiny, overflow: TextOverflow.ellipsis, maxLines: 1),
+            ),
+            Text(m?.letter ?? '', style: t.type.codeSmall.copyWith(color: gitInk(c, m?.kind))),
+          ],
         ),
       ),
     );
   }
 }
+
+/// A diff's rows side by side: a removed line beside the added line that replaced it.
+typedef DiffPair = (DiffLine?, DiffLine?);
+
+/// Aligns HEAD's lines [a] with the working tree's [b] (the LCS of [diffLines], then pairs).
+List<DiffPair> sideBySide(List<String> a, List<String> b) {
+  final lines = diffLines(a, b);
+  final rows = <DiffPair>[];
+  var i = 0;
+  while (i < lines.length) {
+    final l = lines[i];
+    if (l.op == DiffOp.same) {
+      rows.add((l, l));
+      i++;
+      continue;
+    }
+    final del = <DiffLine>[], add = <DiffLine>[];
+    while (i < lines.length && lines[i].op != DiffOp.same) {
+      (lines[i].op == DiffOp.removed ? del : add).add(lines[i]);
+      i++;
+    }
+    for (var k = 0; k < (del.length > add.length ? del.length : add.length); k++) {
+      rows.add((k < del.length ? del[k] : null, k < add.length ? add[k] : null));
+    }
+  }
+  return rows;
+}
+
+/// Above this many lines in all the alignment runs on another isolate (it is quadratic: up to
+/// 4 M cells; AUD-079), as the gutter's diff does.
+const diffIsolateLines = 2000;
+
+/// [sideBySide], off the UI isolate for large inputs.
+Future<List<DiffPair>> alignDiff(List<String> a, List<String> b) =>
+    a.length + b.length > diffIsolateLines
+    ? Isolate.run(() => sideBySide(a, b))
+    : Future.value(sideBySide(a, b));
 
 /// HEAD ↔ the working tree, side by side, for [path]. Esc closes it.
 class DiffView extends StatefulWidget {
@@ -213,8 +337,10 @@ class DiffView extends StatefulWidget {
 class DiffViewState extends State<DiffView> {
   late final AppState app = AppScope.of(context);
   final focusNode = FocusNode(debugLabel: 'diff');
-  List<DiffLine>? lines;
+  List<DiffPair>? rows;
+  int added = 0, removed = 0;
   String error = '';
+  int _loads = 0;
 
   @override
   void initState() {
@@ -247,6 +373,7 @@ class DiffViewState extends State<DiffView> {
 
   Future<void> _load() async {
     _version = app.git.version;
+    final load = ++_loads;
     final path = widget.path;
     final head = await app.git.headText(path);
     // The working tree: the open document's text when it is open (unsaved edits too).
@@ -266,11 +393,21 @@ class DiffViewState extends State<DiffView> {
       }
     }
     if (!mounted || path != widget.path) return;
+    final aligned = await alignDiff(
+      head == null || head.isEmpty ? const [] : head.split('\n'),
+      now.isEmpty ? const [] : now.split('\n'),
+    );
+    // A newer load (the file changed again, or another file) wins.
+    if (!mounted || path != widget.path || load != _loads) return;
+    var plus = 0, minus = 0;
+    for (final (l, r) in aligned) {
+      if (l != null && l.op == DiffOp.removed) minus++;
+      if (r != null && r.op == DiffOp.added) plus++;
+    }
     setState(() {
-      lines = diffLines(
-        head == null || head.isEmpty ? const [] : head.split('\n'),
-        now.isEmpty ? const [] : now.split('\n'),
-      );
+      rows = aligned;
+      added = plus;
+      removed = minus;
     });
   }
 
@@ -278,9 +415,7 @@ class DiffViewState extends State<DiffView> {
   Widget build(BuildContext context) {
     final t = context.axiom;
     final c = t.colors;
-    final l = lines;
-    final added = l?.where((x) => x.op == DiffOp.added).length ?? 0;
-    final removed = l?.where((x) => x.op == DiffOp.removed).length ?? 0;
+    final l = rows;
     return Focus(
       focusNode: focusNode,
       onKeyEvent: (_, e) {
@@ -300,19 +435,27 @@ class DiffViewState extends State<DiffView> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(
-                height: 32,
+                height: context.scaled(Metrics.tabHeight, fontSize: 12, lineHeight: 15.6),
                 child: ColoredBox(
                   color: c.bar,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: Metrics.s4),
                     child: Row(
                       children: [
-                        Text(widget.path, style: t.type.label),
+                        // A long path is ellipsised; the buttons keep their room (AUD-079).
+                        Flexible(
+                          child: Text(
+                            widget.path,
+                            style: t.type.label,
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
                         const SizedBox(width: Metrics.s3),
                         Text('HEAD ↔ working tree', style: t.type.tiny),
                         const SizedBox(width: Metrics.s3),
                         Text('+$added', style: t.type.numeric.copyWith(color: c.okText)),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: Metrics.s3),
                         Text('−$removed', style: t.type.numeric.copyWith(color: c.dangerText)),
                         const Spacer(),
                         AxButton(
@@ -339,7 +482,7 @@ class DiffViewState extends State<DiffView> {
               Expanded(
                 child: l == null
                     ? const Center(child: Spinner(label: 'Reading the changes'))
-                    : _SideBySide(lines: l),
+                    : SideBySide(rows: l),
               ),
             ],
           ),
@@ -349,66 +492,40 @@ class DiffViewState extends State<DiffView> {
   }
 }
 
-class _SideBySide extends StatelessWidget {
-  const _SideBySide({required this.lines});
-  final List<DiffLine> lines;
+/// The aligned rows, HEAD on the left. Long lines wrap, so all of each line shows (AUD-058)
+/// and a row grows with the system's text scale (AUD-020); rows are built lazily.
+class SideBySide extends StatelessWidget {
+  const SideBySide({super.key, required this.rows});
+  final List<DiffPair> rows;
 
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
     final c = t.colors;
     final code = t.type.code.copyWith(fontSize: 12.5, color: c.syntax.text, height: 1.5);
-    final num = t.type.numeric.copyWith(fontSize: 11, color: c.ink3);
-    // Pairs: a removed line beside the added line that replaced it.
-    final rows = <(DiffLine?, DiffLine?)>[];
-    var i = 0;
-    while (i < lines.length) {
-      final l = lines[i];
-      if (l.op == DiffOp.same) {
-        rows.add((l, l));
-        i++;
-        continue;
-      }
-      final del = <DiffLine>[], add = <DiffLine>[];
-      while (i < lines.length && lines[i].op != DiffOp.same) {
-        (lines[i].op == DiffOp.removed ? del : add).add(lines[i]);
-        i++;
-      }
-      for (var k = 0; k < (del.length > add.length ? del.length : add.length); k++) {
-        rows.add((k < del.length ? del[k] : null, k < add.length ? add[k] : null));
-      }
-    }
+    final num = t.type.numeric.copyWith(fontSize: 11, color: c.ink3, height: 12.5 * 1.5 / 11);
     Widget side(DiffLine? d, bool left) {
       final n = d == null ? null : (left ? d.left : d.right);
       final changed = d != null && d.op != DiffOp.same;
       return Expanded(
         child: ColoredBox(
-          color: !changed
-              ? (d == null ? c.recessed : c.ground)
-              : (left ? c.danger : c.ok).withValues(alpha: 0.12),
+          color: !changed ? (d == null ? c.recessed : c.ground) : (left ? c.diffDel : c.diffAdd),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
                 width: 44,
                 child: Text('${n ?? ''}', style: num, textAlign: TextAlign.right),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: Metrics.s3),
               SizedBox(
-                width: 12,
+                width: Metrics.s5,
                 child: Text(
                   changed ? (left ? '−' : '+') : '',
                   style: code.copyWith(color: left ? c.dangerText : c.okText),
                 ),
               ),
-              Expanded(
-                child: Text(
-                  d?.text ?? '',
-                  style: code,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.clip,
-                ),
-              ),
+              Expanded(child: Text(d?.text ?? '', style: code)),
             ],
           ),
         ),
@@ -416,7 +533,6 @@ class _SideBySide extends StatelessWidget {
     }
 
     return ListView.builder(
-      itemExtent: 19,
       itemCount: rows.length,
       itemBuilder: (context, k) {
         final (l, r) = rows[k];
@@ -429,12 +545,15 @@ class _SideBySide extends StatelessWidget {
         return Semantics(
           label: what,
           excludeSemantics: true,
-          child: Row(
-            children: [
-              side(l, true),
-              SizedBox(width: 1, child: ColoredBox(color: c.hairline)),
-              side(r, false),
-            ],
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                side(l, true),
+                SizedBox(width: 1, child: ColoredBox(color: c.hairline)),
+                side(r, false),
+              ],
+            ),
           ),
         );
       },

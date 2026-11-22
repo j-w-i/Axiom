@@ -5,6 +5,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../app/app_state.dart';
@@ -14,6 +15,7 @@ import '../ui/controls.dart';
 import '../ui/icon_data.dart';
 import '../ui/icons.dart';
 import '../ui/overlays.dart';
+import '../ui/surfaces.dart';
 import '../ui/tabs.dart';
 import '../ui/text_input.dart';
 import '../ui/theme.dart';
@@ -260,9 +262,14 @@ Future<void> installAgent(BuildContext context, ProviderOption p) async {
   }
 }
 
-/// The external agents: ready, or why not (with Install for the built-in ones).
+/// The external agents: ready, or why not (with Install for the built-in ones). Each agent is a
+/// card (its name and state, what to do, the action together); two to a row when there is room,
+/// stacked in the narrow dock (AUD-110).
 class AgentsList extends StatelessWidget {
   const AgentsList({super.key});
+
+  /// Two cards to a row from this width.
+  static const twoColumns = 520.0;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -271,8 +278,7 @@ class AgentsList extends StatelessWidget {
   );
 
   Widget _list(BuildContext context) {
-    final app = AppScope.of(context);
-    final a = app.agent;
+    final a = AppScope.of(context).agent;
     final t = context.axiom;
     final agents = [
       for (final p in a.providers)
@@ -282,55 +288,189 @@ class AgentsList extends StatelessWidget {
     return Semantics(
       label: 'Agents',
       container: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      explicitChildNodes: true,
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final two = box.maxWidth >= twoColumns;
+          final w = two ? (box.maxWidth - Metrics.s4) / 2 : box.maxWidth;
+          return Wrap(
+            spacing: Metrics.s4,
+            runSpacing: Metrics.s4,
+            children: [
+              for (final p in agents)
+                SizedBox(
+                  width: w,
+                  child: AgentCard(provider: p),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// One external agent: name and state, the reason it is not ready (install commands as
+/// copyable chips), and its action.
+class AgentCard extends StatelessWidget {
+  const AgentCard({super.key, required this.provider});
+  final ProviderOption provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = AppScope.of(context).agent;
+    final t = context.axiom;
+    final c = t.colors;
+    final p = provider;
+    final installing = a.installing.contains(p.providerId);
+    final Widget? action;
+    if (p.usable && a.activeId == null) {
+      action = AxButton(
+        label: 'Use ${p.name}',
+        kind: ButtonKind.quiet,
+        onPressed: () => a.setModel((providerId: p.providerId, model: p.models.first.id)),
+      );
+    } else if (!p.usable && p.builtin && installing) {
+      action = Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          for (final p in agents)
-            Padding(
-              padding: const EdgeInsets.only(bottom: Metrics.s3),
-              child: Row(
+          const Spinner(label: 'Installing with npm'),
+          const SizedBox(width: Metrics.s4),
+          Flexible(
+            child: AxButton(
+              label: 'Cancel installing ${p.name}',
+              kind: ButtonKind.quiet,
+              onPressed: () => a.cancelInstall(p.providerId),
+            ),
+          ),
+        ],
+      );
+    } else if (!p.usable && p.builtin) {
+      action = AxButton(
+        label: 'Install ${p.name}',
+        icon: AxiomIcons.download,
+        hint: "Installs it with npm into Axiom's data directory",
+        onPressed: () => unawaited(installAgent(context, p)),
+      );
+    } else {
+      action = null;
+    }
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: '${p.name}: ${p.usable ? 'ready' : (p.error ?? 'not available')}',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(Metrics.radiusRaised),
+          border: Border.all(color: c.hairline),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(Metrics.s5),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
                 children: [
-                  SizedBox(width: 130, child: Text(p.name, style: t.type.label)),
+                  StatusDot(p.usable ? DotState.ok : DotState.off),
+                  const SizedBox(width: Metrics.s3),
                   Expanded(
-                    child: Text(
-                      p.usable
-                          ? 'Ready: with a folder or without one'
-                          : (p.error ?? 'Not available'),
-                      style: t.type.small,
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 2,
-                    ),
+                    child: Text(p.name, style: t.type.label, overflow: TextOverflow.ellipsis),
                   ),
-                  if (p.usable && a.activeId == null)
-                    AxButton(
-                      label: 'Use ${p.name}',
-                      kind: ButtonKind.quiet,
-                      onPressed: () =>
-                          a.setModel((providerId: p.providerId, model: p.models.first.id)),
-                    )
-                  else if (!p.usable && p.builtin && a.installing.contains(p.providerId)) ...[
-                    const Spinner(label: 'Installing with npm'),
-                    const SizedBox(width: 8),
-                    AxButton(
-                      label: 'Cancel installing ${p.name}',
-                      kind: ButtonKind.quiet,
-                      onPressed: () => a.cancelInstall(p.providerId),
-                    ),
-                  ] else if (!p.usable && p.builtin)
-                    AxButton(
-                      label: a.installing.contains(p.providerId)
-                          ? 'Installing ${p.name}…'
-                          : 'Install ${p.name}',
-                      icon: AxiomIcons.download,
-                      hint: 'Installs it with npm into Axiom\'s data directory',
-                      onPressed: a.installing.contains(p.providerId)
-                          ? null
-                          : () => unawaited(installAgent(context, p)),
-                    ),
                 ],
               ),
+              const SizedBox(height: Metrics.s2),
+              if (p.usable)
+                Text('Ready: with a folder or without one', style: t.type.small)
+              else
+                InstallHint(p.error ?? 'Not available'),
+              if (action != null) ...[const SizedBox(height: Metrics.s4), action],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A sentence that may name a command to run ("Not installed. Install it: npm install -g …,
+/// then sign in …"): the prose as text, each command as a mono chip with a Copy button.
+class InstallHint extends StatelessWidget {
+  const InstallHint(this.text, {super.key});
+  final String text;
+
+  static final _command = RegExp(
+    r'\b((?:npm|pnpm|yarn|brew|pipx?|cargo|winget) (?:install|i|add)\b[^,;]*?)(?=,|;|\.?$|\.\s)',
+  );
+
+  /// The prose and command parts of [text], in order (`(isCommand, part)`).
+  static List<(bool, String)> split(String text) {
+    final out = <(bool, String)>[];
+    var at = 0;
+    for (final m in _command.allMatches(text)) {
+      final before = text.substring(at, m.start).trim();
+      if (before.isNotEmpty) out.add((false, before));
+      out.add((true, m.group(1)!.trim()));
+      at = m.end;
+    }
+    var rest = text.substring(at).trim();
+    if (rest.startsWith(',') || rest.startsWith(';') || rest.startsWith('.')) {
+      rest = rest.substring(1).trim();
+    }
+    if (rest.isNotEmpty) {
+      out.add((false, out.isEmpty ? rest : '${rest[0].toUpperCase()}${rest.substring(1)}'));
+    }
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.axiom;
+    final parts = split(text);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final (i, (command, part)) in parts.indexed)
+          Padding(
+            padding: EdgeInsets.only(top: i == 0 ? 0 : Metrics.s2),
+            child: command ? CommandChip(part) : Text(part, style: t.type.small),
+          ),
+      ],
+    );
+  }
+}
+
+/// A command in a recessed mono chip, with Copy (the command goes to the clipboard).
+class CommandChip extends StatelessWidget {
+  const CommandChip(this.command, {super.key});
+  final String command;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.axiom;
+    return Well(
+      child: Padding(
+        padding: const EdgeInsets.only(left: Metrics.s4),
+        child: Row(
+          children: [
+            Expanded(
+              child: SelectableRegion(
+                selectionControls: emptyTextSelectionControls,
+                child: Text(command, style: t.type.codeSmall.copyWith(color: t.colors.ink)),
+              ),
             ),
-        ],
+            AxIconButton(
+              icon: AxiomIcons.copy,
+              label: 'Copy the command',
+              size: Metrics.controlHeightSmall + Metrics.s2,
+              onPressed: () {
+                unawaited(Clipboard.setData(ClipboardData(text: command)));
+                ToastHost.maybeOf(context)?.show('Copied: $command', kind: ToastKind.ok);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -343,15 +483,15 @@ class ModelSetup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
-    Widget card(String title, String? hint, Widget body) => Padding(
-      padding: const EdgeInsets.only(bottom: Metrics.s6),
+    Widget section(String title, String? hint, Widget body) => Padding(
+      padding: const EdgeInsets.only(bottom: Metrics.s7),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Semantics(header: true, child: Text(title, style: t.type.label)),
           if (hint != null)
             Padding(
-              padding: const EdgeInsets.only(top: 2),
+              padding: const EdgeInsets.only(top: Metrics.s1),
               child: Text(hint, style: t.type.small),
             ),
           const SizedBox(height: Metrics.s4),
@@ -359,33 +499,38 @@ class ModelSetup extends StatelessWidget {
         ],
       ),
     );
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 640),
-      child: Semantics(
-        container: true,
-        explicitChildNodes: true,
-        label: 'Model setup',
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Axiom talks to the model or agent you choose. Pick one way; you can add more in '
-              'Settings → Models.',
-              style: t.type.small,
-            ),
-            const SizedBox(height: Metrics.s6),
-            card(
-              'An agent you already use',
-              'Claude Code, Codex or Gemini CLI, with your own sign-in.',
-              const AgentsList(),
-            ),
-            card('With an API key or a server', null, const AddProvider(compact: true)),
-            card(
-              'A model on this computer',
-              'Ollama, llama.cpp or LM Studio, running on their usual ports.',
-              const LocalServers(),
-            ),
-          ],
+    // Left-aligned at most 720 px wide (a full-width page left the actions far from their
+    // labels); the dock's narrow width stacks everything.
+    return Align(
+      alignment: Alignment.topLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: Semantics(
+          container: true,
+          explicitChildNodes: true,
+          label: 'Model setup',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Axiom talks to the model or agent you choose. Pick one way; you can add more in '
+                'Settings → Models.',
+                style: t.type.small,
+              ),
+              const SizedBox(height: Metrics.s6),
+              section(
+                'An agent you already use',
+                'Claude Code, Codex or Gemini CLI, with your own sign-in.',
+                const AgentsList(),
+              ),
+              section('With an API key or a server', null, const AddProvider(compact: true)),
+              section(
+                'A model on this computer',
+                'Ollama, llama.cpp or LM Studio, running on their usual ports.',
+                const LocalServers(),
+              ),
+            ],
+          ),
         ),
       ),
     );

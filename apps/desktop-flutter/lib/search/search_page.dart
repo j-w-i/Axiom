@@ -1,7 +1,7 @@
 // The Search page (FL-GIT-001; the Tauri shell's Search.tsx, M4-UX-001): a query with Match case,
 // Whole word and Regular expression; files to include and exclude; matches grouped by file with
 // the hit marked. ↓ from the query enters the results; ↑/↓ move; Enter opens the file at the
-// match. Mod+Shift+F focuses the query.
+// match. Mod+Shift+F focuses the query. The results are one Tab stop and are built lazily.
 
 import 'dart:async';
 
@@ -11,7 +11,9 @@ import 'package:flutter/widgets.dart';
 import '../app/app_state.dart';
 import '../daemon/protocol.g.dart';
 import '../ui/controls.dart';
+import '../state/search.dart';
 import '../ui/pressable.dart';
+import '../ui/roving.dart';
 import '../ui/text_input.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
@@ -29,9 +31,7 @@ class SearchSideState extends State<SearchSide> {
   final queryFocus = FocusNode(debugLabel: 'search query');
   final _include = TextEditingController();
   final _exclude = TextEditingController();
-  final _nodes = <String, FocusNode>{};
-
-  FocusNode node(String key) => _nodes.putIfAbsent(key, () => FocusNode(debugLabel: key));
+  final _results = GlobalKey<SearchResultsState>();
 
   @override
   void initState() {
@@ -55,40 +55,25 @@ class SearchSideState extends State<SearchSide> {
     queryFocus.dispose();
     _include.dispose();
     _exclude.dispose();
-    for (final n in _nodes.values) {
-      n.dispose();
-    }
     super.dispose();
   }
-
-  List<(String, SearchMatch)> _flat() => [
-    for (final g in app.search.groups)
-      for (final m in g.matches) ('${m.path}:${m.line}:${m.column}', m),
-  ];
 
   void _open(SearchMatch m) =>
       unawaited(app.documents.open(m.path, line: m.line, column: m.column));
 
-  KeyEventResult _resultKey(String id, SearchMatch m, KeyEvent e) {
-    if (e is! KeyDownEvent) return KeyEventResult.ignored;
-    final flat = _flat();
-    final i = flat.indexWhere((x) => x.$1 == id);
-    if (e.logicalKey == LogicalKeyboardKey.enter) {
-      _open(m);
-      return KeyEventResult.handled;
+  /// The line under the fields: what the search found, or why it found nothing.
+  static String summary(SearchStore s) {
+    if (s.error.isNotEmpty) return s.error;
+    if (s.query.isEmpty) return '';
+    if (s.running && s.groups.isEmpty) return 'Searching…';
+    if (s.total == 0) return 'No results';
+    final files = '${s.groups.length} file${s.groups.length == 1 ? '' : 's'}';
+    if (s.truncated) {
+      // The daemon stops at its limit: say what is shown and how to get the rest (AUD-067).
+      return 'Showing the first ${s.total} results, in $files. Refine the search or add files '
+          'to include to see the rest.';
     }
-    final to = switch (e.logicalKey) {
-      LogicalKeyboardKey.arrowDown => i + 1,
-      LogicalKeyboardKey.arrowUp => i - 1,
-      _ => null,
-    };
-    if (to == null) return KeyEventResult.ignored;
-    if (to < 0) {
-      queryFocus.requestFocus();
-    } else if (to < flat.length) {
-      node(flat[to].$1).requestFocus();
-    }
-    return KeyEventResult.handled;
+    return '${s.total} result${s.total == 1 ? '' : 's'} in $files';
   }
 
   @override
@@ -106,7 +91,7 @@ class SearchSideState extends State<SearchSide> {
         visible: st.focused,
         child: Container(
           width: 26,
-          height: 22,
+          height: Metrics.controlHeightSmall,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: on ? c.accentSoft : (st.hovered ? c.hover : null),
@@ -117,27 +102,17 @@ class SearchSideState extends State<SearchSide> {
         ),
       ),
     );
+    const gutter = EdgeInsets.fromLTRB(Metrics.sideGutter, 0, Metrics.sideGutter, Metrics.s2);
     return ListenableBuilder(
       listenable: Listenable.merge([s, app.workspace]),
       builder: (context, _) {
         if (!app.workspace.isOpen) {
           return Padding(
-            padding: const EdgeInsets.all(Metrics.s5),
+            padding: const EdgeInsets.all(Metrics.sideGutter),
             child: Text('Open a folder to search it.', style: t.type.small),
           );
         }
-        final flat = _flat();
-        final summary = s.error.isNotEmpty
-            ? s.error
-            : s.query.isEmpty
-            ? ''
-            : s.running && s.groups.isEmpty
-            ? 'Searching…'
-            : s.total == 0
-            ? 'No results'
-            : '${s.total}${s.truncated ? '+' : ''} result${s.total == 1 ? '' : 's'} in '
-                  '${s.groups.length} file${s.groups.length == 1 ? '' : 's'}'
-                  '${s.truncated ? ' (the first shown)' : ''}';
+        final text = summary(s);
         // Tab follows the page's order: the query, its three options, the globs, the results.
         return FocusTraversalGroup(
           policy: WidgetOrderTraversalPolicy(),
@@ -145,7 +120,7 @@ class SearchSideState extends State<SearchSide> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(Metrics.s3, 0, Metrics.s3, Metrics.s2),
+                padding: gutter,
                 child: Focus(
                   canRequestFocus: false,
                   skipTraversal: true,
@@ -155,8 +130,8 @@ class SearchSideState extends State<SearchSide> {
                       app.search.now();
                       return KeyEventResult.handled;
                     }
-                    if (e.logicalKey == LogicalKeyboardKey.arrowDown && flat.isNotEmpty) {
-                      node(flat.first.$1).requestFocus();
+                    if (e.logicalKey == LogicalKeyboardKey.arrowDown && s.groups.isNotEmpty) {
+                      _results.currentState?.focusRow(0);
                       return KeyEventResult.handled;
                     }
                     return KeyEventResult.ignored;
@@ -175,14 +150,14 @@ class SearchSideState extends State<SearchSide> {
                           s.caseSensitive,
                           () => s.update(caseSensitive: !s.caseSensitive),
                         ),
-                        const SizedBox(width: 2),
+                        const SizedBox(width: Metrics.s1),
                         toggle(
                           'Whole word',
                           'ab',
                           s.wholeWord,
                           () => s.update(wholeWord: !s.wholeWord),
                         ),
-                        const SizedBox(width: 2),
+                        const SizedBox(width: Metrics.s1),
                         toggle(
                           'Regular expression',
                           '.*',
@@ -195,7 +170,7 @@ class SearchSideState extends State<SearchSide> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(Metrics.s3, 0, Metrics.s3, Metrics.s2),
+                padding: gutter,
                 child: AxTextInput(
                   label: 'Files to include',
                   controller: _include,
@@ -204,7 +179,7 @@ class SearchSideState extends State<SearchSide> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(Metrics.s3, 0, Metrics.s3, Metrics.s2),
+                padding: gutter,
                 child: AxTextInput(
                   label: 'Files to exclude',
                   controller: _exclude,
@@ -212,50 +187,27 @@ class SearchSideState extends State<SearchSide> {
                   placeholder: 'Files to exclude',
                 ),
               ),
-              if (summary.isNotEmpty)
+              if (text.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: Metrics.s4, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Metrics.sideGutter,
+                    vertical: Metrics.s2,
+                  ),
+                  // Announced when the search settles, not on every keystroke's "Searching…".
                   child: Semantics(
-                    liveRegion: true,
+                    liveRegion: !s.running,
                     child: Text(
-                      summary,
+                      text,
                       style: t.type.tiny.copyWith(color: s.error.isNotEmpty ? c.dangerText : null),
                     ),
                   ),
                 ),
               Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: Metrics.s2),
-                  children: [
-                    for (final g in s.groups)
-                      Semantics(
-                        container: true,
-                        explicitChildNodes: true,
-                        label:
-                            '${g.path}, ${g.matches.length} match${g.matches.length == 1 ? '' : 'es'}',
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(Metrics.s3, 6, Metrics.s3, 2),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      g.path,
-                                      style: t.type.label,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  AxBadge(g.matches.length, attention: false),
-                                ],
-                              ),
-                            ),
-                            for (final m in g.matches) _result(context, m),
-                          ],
-                        ),
-                      ),
-                  ],
+                child: SearchResults(
+                  key: _results,
+                  groups: s.groups,
+                  onOpen: _open,
+                  onLeaveTop: queryFocus.requestFocus,
                 ),
               ),
             ],
@@ -264,55 +216,243 @@ class SearchSideState extends State<SearchSide> {
       },
     );
   }
+}
 
-  Widget _result(BuildContext context, SearchMatch m) {
+/// The results, grouped by file: one lazily built list of file headings and match rows (only
+/// the rows on screen are built; AUD-050). One Tab stop; ↑/↓ move between matches (↑ from the
+/// first goes back to the query); Enter opens the file at the match.
+class SearchResults extends StatefulWidget {
+  const SearchResults({super.key, required this.groups, required this.onOpen, this.onLeaveTop});
+  final List<MatchGroup> groups;
+  final ValueChanged<SearchMatch> onOpen;
+  final VoidCallback? onLeaveTop;
+
+  @override
+  State<SearchResults> createState() => SearchResultsState();
+}
+
+/// One item of the flattened results: a file's heading or a match.
+typedef _Item = ({MatchGroup? group, SearchMatch? match, int k});
+
+class SearchResultsState extends State<SearchResults> {
+  final _scroll = ScrollController();
+  final _nodes = RowFocusNodes(debugPrefix: 'result');
+  List<_Item> _items = const [];
+
+  /// Index in [_items] of each match, in order.
+  List<int> _matchAt = const [];
+  List<MatchGroup>? _builtFor;
+  int _current = 0;
+  bool _focused = false;
+  double _head = 26, _row = 22;
+
+  static String _id(SearchMatch m) => '${m.path}:${m.line}:${m.column}';
+
+  void _flatten() {
+    if (identical(_builtFor, widget.groups)) return;
+    _builtFor = widget.groups;
+    final items = <_Item>[];
+    final at = <int>[];
+    for (final g in widget.groups) {
+      items.add((group: g, match: null, k: -1));
+      for (final m in g.matches) {
+        items.add((group: null, match: m, k: at.length));
+        at.add(items.length - 1);
+      }
+    }
+    _items = items;
+    _matchAt = at;
+    if (_current >= at.length) _current = 0;
+  }
+
+  double _extent(int i) => _items[i].group != null ? _head : _row;
+
+  /// The number of match rows built (tests: only the visible ones are).
+  @visibleForTesting
+  int get builtRows => _nodes.length;
+
+  /// Focuses the [n]th match (scrolling it into view first).
+  void focusRow(int n) {
+    if (_matchAt.isEmpty) return;
+    n = n.clamp(0, _matchAt.length - 1);
+    setState(() => _current = n);
+    final index = _matchAt[n];
+    if (_scroll.hasClients) {
+      var top = Metrics.s1;
+      for (var i = 0; i < index; i++) {
+        top += _extent(i);
+      }
+      final view = _scroll.position.viewportDimension;
+      // The match's file heading shows with the first match.
+      final from = n == 0 || _matchAt[n - 1] != index - 1 ? top - _head : top;
+      if (from < _scroll.offset) {
+        _scroll.jumpTo(from.clamp(0, _scroll.position.maxScrollExtent));
+      } else if (top + _row > _scroll.offset + view) {
+        _scroll.jumpTo((top + _row - view).clamp(0, _scroll.position.maxScrollExtent));
+      }
+    }
+    final id = _id(_items[index].match!);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _nodes[id].requestFocus();
+    });
+  }
+
+  KeyEventResult _key(FocusNode _, KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
+    switch (e.logicalKey) {
+      case LogicalKeyboardKey.enter:
+        if (_current < _matchAt.length) widget.onOpen(_items[_matchAt[_current]].match!);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowDown:
+        focusRow(_current + 1);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowUp:
+        if (_current == 0 && widget.onLeaveTop != null) {
+          widget.onLeaveTop!();
+        } else {
+          focusRow(_current - 1);
+        }
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.home:
+        focusRow(0);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.end:
+        focusRow(_matchAt.length - 1);
+        return KeyEventResult.handled;
+      default:
+        return KeyEventResult.ignored;
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    _nodes.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.axiom;
+    _flatten();
+    _head = context.scaled(26, fontSize: 12, lineHeight: 15.6);
+    _row = context.scaled(22, fontSize: 12, lineHeight: 16.8);
+    return RovingFocus(
+      enabled: _matchAt.isNotEmpty,
+      onEnter: () => focusRow(_current),
+      onFocusChange: (v) => setState(() => _focused = v),
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onKeyEvent: _key,
+        child: ListView.builder(
+          controller: _scroll,
+          padding: const EdgeInsets.symmetric(
+            horizontal: Metrics.sideListInset,
+            vertical: Metrics.s1,
+          ),
+          itemCount: _items.length,
+          itemExtentBuilder: (i, _) => i < _items.length ? _extent(i) : null,
+          itemBuilder: (context, i) {
+            final it = _items[i];
+            final g = it.group;
+            if (g != null) {
+              final n = g.matches.length;
+              return Semantics(
+                container: true,
+                header: true,
+                label: '${g.path}, $n match${n == 1 ? '' : 'es'}',
+                excludeSemantics: true,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    Metrics.rowInset,
+                    Metrics.s3,
+                    Metrics.rowInset,
+                    Metrics.s1,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          g.path,
+                          style: t.type.label,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ),
+                      AxBadge(n, attention: false),
+                    ],
+                  ),
+                ),
+              );
+            }
+            final m = it.match!;
+            final k = it.k;
+            return _result(
+              context,
+              m,
+              selected: _focused && k == _current,
+              onTap: () {
+                setState(() => _current = k);
+                widget.onOpen(m);
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _result(
+    BuildContext context,
+    SearchMatch m, {
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
     final t = context.axiom;
     final c = t.colors;
-    final id = '${m.path}:${m.line}:${m.column}';
     final a = (m.previewColumn - 1).clamp(0, m.preview.length);
     final b = (a + m.endColumn - m.column).clamp(a, m.preview.length);
     final style = t.type.codeSmall.copyWith(color: c.ink2);
-    return Focus(
-      canRequestFocus: false,
+    return AxListRow(
+      label: '${m.path}, line ${m.line}: ${m.preview.trim()}',
+      hint: 'Open at the match — Enter',
+      focusNode: _nodes[_id(m)],
       skipTraversal: true,
-      onKeyEvent: (_, e) => _resultKey(id, m, e),
-      child: AxListRow(
-        label: '${m.path}, line ${m.line}: ${m.preview.trim()}',
-        hint: 'Open at the match — Enter',
-        focusNode: node(id),
-        height: 22,
-        onPressed: () => _open(m),
-        child: Padding(
-          padding: const EdgeInsets.only(left: 18, right: 8),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 34,
-                child: Text('${m.line}', style: t.type.numeric.copyWith(fontSize: 11)),
-              ),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(text: m.preview.substring(0, a)),
-                      TextSpan(
-                        text: m.preview.substring(a, b),
-                        style: style.copyWith(
-                          color: c.ink,
-                          backgroundColor: c.accentSoft,
-                          fontWeight: FontWeight.w600,
-                        ),
+      selected: selected,
+      listFocused: _focused,
+      height: 22,
+      onPressed: onTap,
+      child: Padding(
+        padding: const EdgeInsets.only(left: Metrics.s5 + Metrics.s3, right: Metrics.rowInset),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 34,
+              child: Text('${m.line}', style: t.type.numeric.copyWith(fontSize: 11)),
+            ),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: m.preview.substring(0, a)),
+                    TextSpan(
+                      text: m.preview.substring(a, b),
+                      style: style.copyWith(
+                        color: c.ink,
+                        backgroundColor: c.accentSoft,
+                        fontWeight: FontWeight.w600,
                       ),
-                      TextSpan(text: m.preview.substring(b)),
-                    ],
-                  ),
-                  style: style,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                    ),
+                    TextSpan(text: m.preview.substring(b)),
+                  ],
                 ),
+                style: style,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

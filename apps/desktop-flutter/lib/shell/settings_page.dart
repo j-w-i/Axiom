@@ -53,9 +53,11 @@ class _SettingsPageState extends State<SettingsPage> {
     final t = context.axiom;
     final c = t.colors;
     final s = widget.app.settings;
+    // At most 820×600, and never larger than the window (the smallest is 900×560) (AUD-047).
+    final win = MediaQuery.sizeOf(context);
     return SizedBox(
-      width: 820,
-      height: 600,
+      width: (win.width - 48).clamp(320.0, 820.0),
+      height: (win.height - 48).clamp(300.0, 600.0),
       child: ListenableBuilder(
         listenable: s,
         builder: (context, _) => Row(
@@ -281,7 +283,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 s.motion,
                 (v) => unawaited(s.setValue('appearance.motion', v.name)),
               ),
-              note: 'Reduced keeps short fades; Off removes every animation.',
+              note:
+                  'Reduced keeps short fades; Off removes every animation. Standard follows the '
+                  "system's reduce-motion setting.",
             ),
           ],
         );

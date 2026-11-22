@@ -258,8 +258,12 @@ class GitMarkStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     return ExcludeSemantics(
+      // The full height of the gutter: the paragraphs' offsets are measured from the editor's
+      // top. A height-less CustomPaint sat at the Row's vertical centre and drew every mark half
+      // an editor-height too low (AUD-003).
       child: SizedBox(
         width: 3,
+        height: double.infinity,
         // Repainted, not rebuilt: the editor updates [notifier] during its layout.
         child: CustomPaint(
           painter: _MarksPainter(

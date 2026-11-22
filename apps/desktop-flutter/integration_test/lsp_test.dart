@@ -476,6 +476,10 @@ command = ["fake-lsp"]
       });
       final app = await boot(tester, data.path);
       await app.workspace.openFolder(ws.path);
+      // Built-in servers that run the folder's code wait for trust (AUD-008).
+      await until(tester, () => app.workspace.rootLoaded, what: 'the folder');
+      await app.environments.trustWorkspace(true);
+      await app.lsp.load();
       await until(tester, () => app.lsp.servers.isNotEmpty, what: 'the servers');
       await app.documents.open(real.open);
       await until(tester, () => app.documents.activePath == real.open, what: real.open);

@@ -24,6 +24,12 @@ abstract final class AxiomIcons {
   static const play = IconData16([IconPath('M5 3.5v9l7-4.5z', fill: true)]);
   static const stop = IconData16([IconRect(4, 4, 8, 8, rx: 1, fill: true)]);
   static const trash = IconData16([IconPath('M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5')]);
+
+  /// Soft wrap: lines, one returning under itself.
+  static const wrap = IconData16([
+    IconPath('M2.5 4h11M2.5 8h9a2 2 0 010 4H8.5M2.5 12h3'),
+    IconPath('M10 10.5L8.5 12l1.5 1.5'),
+  ]);
   static const copy = IconData16([
     IconRect(5, 5, 8, 8, rx: 1.2),
     IconPath('M3 10.5V3.8A.8.8 0 013.8 3h6.7'),

@@ -61,6 +61,21 @@ class TerminalPaneState extends State<TerminalPane> {
   FocusNode focusFor(String id) =>
       _focus.putIfAbsent(id, () => FocusNode(debugLabel: 'terminal $id'));
 
+  /// Drops the nodes of closed terminals (AUD-083).
+  void _prune(Iterable<String> live) {
+    final keep = live.toSet();
+    if (_focus.keys.every(keep.contains)) return;
+    // After the frame: the closed terminal's screen lets go of its node in this build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.removeWhere((id, n) {
+        if (keep.contains(id) || n.hasFocus || (n.context?.mounted ?? false)) return false;
+        n.dispose();
+        return true;
+      });
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -133,11 +148,12 @@ class TerminalPaneState extends State<TerminalPane> {
           );
         }
         final shown = s.activeTab;
+        _prune([for (final x in s.terminals) x.info.terminalId]);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              height: 28,
+              height: context.scaled(28, fontSize: 12, lineHeight: 16),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: Metrics.s3),
                 child: Row(
@@ -271,9 +287,12 @@ class _ScreenState extends State<_Screen> {
     return Semantics(
       container: true,
       label: 'Terminal ${widget.label}',
-      child: Padding(
-        padding: const EdgeInsets.only(left: Metrics.s3, bottom: 4),
+      // The well runs edge to edge under the tab row: the terminal's own background, with no
+      // seam of the panel's tone around it (AUD-084).
+      child: ColoredBox(
+        color: t.colors.recessed,
         child: TerminalView(
+          padding: const EdgeInsets.fromLTRB(Metrics.s3, Metrics.s2, Metrics.s2, Metrics.s2),
           widget.tab.screen,
           controller: _controller,
           focusNode: widget.focusNode,

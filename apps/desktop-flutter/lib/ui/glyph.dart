@@ -41,7 +41,10 @@ class FileGlyph extends StatelessWidget {
         width: 15,
         height: 15,
         alignment: Alignment.center,
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(3)),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(Metrics.radiusControl),
+        ),
         child: Text(
           label,
           style: TextStyle(

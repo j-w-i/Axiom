@@ -20,6 +20,7 @@ import '../ui/icon_data.dart';
 import '../ui/icons.dart';
 import '../ui/overlays.dart';
 import '../ui/pressable.dart';
+import '../ui/roving.dart';
 import '../ui/surfaces.dart';
 import '../ui/tabs.dart';
 import '../ui/text_input.dart';
@@ -48,6 +49,52 @@ class ChatSide extends StatefulWidget {
 class _ChatSideState extends State<ChatSide> {
   late final AppState app = AppScope.of(context);
   final _search = TextEditingController();
+  final _nodes = RowFocusNodes(debugPrefix: 'conversation');
+  final _scroll = ScrollController();
+  List<SessionInfo> _list = const [];
+  int _current = 0;
+  bool _focused = false;
+  double _extent = 30;
+
+  /// Focuses the [i]th conversation (scrolled into view first).
+  void _focusRow(int i) {
+    if (_list.isEmpty) return;
+    i = i.clamp(0, _list.length - 1);
+    setState(() => _current = i);
+    if (_scroll.hasClients) {
+      final top = i * _extent;
+      final view = _scroll.position.viewportDimension;
+      if (top < _scroll.offset) {
+        _scroll.jumpTo(top);
+      } else if (top + _extent > _scroll.offset + view) {
+        _scroll.jumpTo(top + _extent - view);
+      }
+    }
+    final id = _list[i].sessionId;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _nodes[id].requestFocus();
+    });
+  }
+
+  /// Tab reached the list: the open conversation, else the last focused, else the first.
+  void _enter() {
+    final open = _list.indexWhere((x) => x.sessionId == app.agent.activeId);
+    _focusRow(open >= 0 && !_focused ? open : _current);
+  }
+
+  KeyEventResult _listKey(KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final to = switch (e.logicalKey) {
+      LogicalKeyboardKey.arrowDown => _current + 1,
+      LogicalKeyboardKey.arrowUp => _current - 1,
+      LogicalKeyboardKey.home => 0,
+      LogicalKeyboardKey.end => _list.length - 1,
+      _ => null,
+    };
+    if (to == null) return KeyEventResult.ignored;
+    _focusRow(to);
+    return KeyEventResult.handled;
+  }
 
   @override
   void initState() {
@@ -59,6 +106,8 @@ class _ChatSideState extends State<ChatSide> {
   @override
   void dispose() {
     _search.dispose();
+    _nodes.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -111,7 +160,12 @@ class _ChatSideState extends State<ChatSide> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(Metrics.s4, Metrics.s2, Metrics.s4, Metrics.s3),
+            padding: const EdgeInsets.fromLTRB(
+              Metrics.sideGutter,
+              Metrics.s2,
+              Metrics.sideGutter,
+              Metrics.s3,
+            ),
             child: AxButton(
               label: 'New chat',
               icon: AxiomIcons.plus,
@@ -121,7 +175,7 @@ class _ChatSideState extends State<ChatSide> {
           ),
           if (app.workspace.isOpen)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: Metrics.s3),
+              padding: const EdgeInsets.symmetric(horizontal: Metrics.sideGutter - Metrics.s4),
               child: AxTabs(
                 label: 'Conversations of',
                 height: 28,
@@ -134,7 +188,12 @@ class _ChatSideState extends State<ChatSide> {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.all(Metrics.s3),
+            padding: const EdgeInsets.fromLTRB(
+              Metrics.sideGutter,
+              Metrics.s3,
+              Metrics.sideGutter,
+              Metrics.s3,
+            ),
             child: AxTextInput(
               label: 'Search conversations',
               controller: _search,
@@ -145,81 +204,108 @@ class _ChatSideState extends State<ChatSide> {
           Expanded(
             child: Builder(
               builder: (context) {
-                final list = a.filtered();
+                final list = _list = a.filtered();
+                if (_current >= list.length) _current = list.isEmpty ? 0 : list.length - 1;
+                _extent = context.scaled(30);
                 if (list.isEmpty) {
                   return Padding(
-                    padding: const EdgeInsets.all(Metrics.s5),
+                    padding: const EdgeInsets.all(Metrics.sideGutter),
                     child: Text(
                       a.search.isEmpty ? 'No conversations yet.' : 'No conversation matches.',
                       style: t.type.small,
                     ),
                   );
                 }
-                return ListView.builder(
-                  itemExtent: 30,
-                  padding: const EdgeInsets.symmetric(horizontal: Metrics.s2),
-                  itemCount: list.length,
-                  itemBuilder: (context, i) {
-                    final s = list[i];
-                    final on = s.sessionId == a.activeId;
-                    final approvalsWaiting = a.approvals
-                        .where((x) => x.sessionId == s.sessionId)
-                        .length;
-                    return Focus(
-                      canRequestFocus: false,
-                      skipTraversal: true,
-                      onKeyEvent: (_, e) => _rowKey(s, e),
-                      child: AxListRow(
-                        hint: 'Open — F2 renames, Delete deletes',
-                        label: [
-                          s.title,
-                          if (s.running) 'writing',
-                          if (approvalsWaiting > 0) '$approvalsWaiting waiting for you',
-                          _ago(s.updatedMs),
-                        ].join(', '),
-                        selected: on,
-                        height: 30,
-                        onPressed: () => unawaited(a.open(s.sessionId)),
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 8),
-                          child: Row(
-                            children: [
-                              if (s.running || approvalsWaiting > 0) ...[
-                                StatusDot(
-                                  approvalsWaiting > 0 ? DotState.warn : DotState.running,
-                                  ring: on ? c.raised : c.bar,
-                                ),
-                                const SizedBox(width: 6),
-                              ],
-                              Expanded(
-                                child: Text(
-                                  s.title,
-                                  style: t.type.body,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              Text(_ago(s.updatedMs), style: t.type.numeric.copyWith(fontSize: 11)),
-                              AxMenu(
-                                label: 'More for ${s.title}',
-                                entries: () => [
-                                  MenuEntry.item('Rename…', () => unawaited(_rename(s))),
-                                  MenuEntry.item('Delete…', () => unawaited(_delete(s))),
-                                ],
-                                trigger: (context, st, open) => Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                                  child: AxiomIcon(
-                                    AxiomIcons.more,
-                                    size: 14,
-                                    color: st.hovered || open ? c.ink : c.ink3,
+                // One Tab stop; ↑/↓, Home and End move; F2 renames, Delete deletes.
+                return RovingFocus(
+                  onEnter: _enter,
+                  onFocusChange: (v) => setState(() => _focused = v),
+                  child: Focus(
+                    canRequestFocus: false,
+                    skipTraversal: true,
+                    onKeyEvent: (_, e) => _listKey(e),
+                    child: ListView.builder(
+                      controller: _scroll,
+                      itemExtent: _extent,
+                      padding: const EdgeInsets.symmetric(horizontal: Metrics.sideListInset),
+                      itemCount: list.length,
+                      itemBuilder: (context, i) {
+                        final s = list[i];
+                        final on = s.sessionId == a.activeId;
+                        final approvalsWaiting = a.approvals
+                            .where((x) => x.sessionId == s.sessionId)
+                            .length;
+                        return Focus(
+                          canRequestFocus: false,
+                          skipTraversal: true,
+                          onKeyEvent: (_, e) => _rowKey(s, e),
+                          child: AxListRow(
+                            hint: 'Open — F2 renames, Delete deletes',
+                            label: [
+                              s.title,
+                              if (s.running) 'writing',
+                              if (approvalsWaiting > 0) '$approvalsWaiting waiting for you',
+                              _ago(s.updatedMs),
+                            ].join(', '),
+                            selected: on,
+                            listFocused: _focused,
+                            focusNode: _nodes[s.sessionId],
+                            skipTraversal: true,
+                            height: 30,
+                            onPressed: () {
+                              setState(() => _current = i);
+                              unawaited(a.open(s.sessionId));
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: Metrics.rowInset),
+                              child: Row(
+                                children: [
+                                  if (s.running || approvalsWaiting > 0) ...[
+                                    StatusDot(
+                                      approvalsWaiting > 0 ? DotState.warn : DotState.running,
+                                    ),
+                                    const SizedBox(width: Metrics.s3),
+                                  ],
+                                  Expanded(
+                                    child: Text(
+                                      s.title,
+                                      style: t.type.body,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                ),
+                                  Text(
+                                    _ago(s.updatedMs),
+                                    style: t.type.numeric.copyWith(fontSize: 11),
+                                  ),
+                                  // The row's keys reach the same actions (F2, Delete), so the
+                                  // menu is not another Tab stop in the list.
+                                  AxMenu(
+                                    label: 'More for ${s.title}',
+                                    skipTraversal: true,
+                                    entries: () => [
+                                      MenuEntry.item('Rename…', () => unawaited(_rename(s))),
+                                      MenuEntry.item('Delete…', () => unawaited(_delete(s))),
+                                    ],
+                                    trigger: (context, st, open) => FocusRing(
+                                      visible: st.focused,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: Metrics.s3),
+                                        child: AxiomIcon(
+                                          AxiomIcons.more,
+                                          size: 14,
+                                          color: st.hovered || open ? c.ink : c.ink3,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
-                    );
-                  },
+                        );
+                      },
+                    ),
+                  ),
                 );
               },
             ),
@@ -250,6 +336,9 @@ class ChatViewState extends State<ChatView> {
   final _selection = FocusNode(skipTraversal: true, canRequestFocus: false);
   int? _editing;
   bool _stick = true;
+
+  /// Keeps the composer's field (focus, IME composition) when the rows above it change.
+  final _inputKey = GlobalKey(debugLabel: 'composer');
 
   /// Images attached to the next message.
   final attached = <ImageData>[];
@@ -439,6 +528,35 @@ class ChatViewState extends State<ChatView> {
     return out;
   }
 
+  /// The conversation's items and the text being streamed.
+  Widget _transcript(double g) {
+    final a = app.agent;
+    final running = a.active.running;
+    return SelectableRegion(
+      selectionControls: emptyTextSelectionControls,
+      focusNode: _selection,
+      child: ListView(
+        controller: _scroll,
+        padding: EdgeInsets.fromLTRB(g, Metrics.s4, g, Metrics.s6),
+        children: [
+          ..._itemViews(a.items(), running),
+          // The text being streamed, where its item will be: the same element then shows the
+          // finished answer.
+          if (a.active.streaming.isNotEmpty)
+            _ItemView(item: AssistantItem('streaming', 0, a.active.streaming, null)),
+          if (running && a.active.streaming.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(bottom: Metrics.s5),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Spinner(label: 'Writing'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// ↑ in an empty composer edits the last message.
   void _editLast() {
     final u = lastUser(app.agent.items());
@@ -468,11 +586,26 @@ class ChatViewState extends State<ChatView> {
     final t = context.axiom;
     final c = t.colors;
     final a = app.agent;
-    final g = widget.dock ? 14.0 : 28.0;
-    return ListenableBuilder(
+    final g = widget.dock ? Metrics.sideGutter : Metrics.s7;
+    // The chrome (header, banners, approvals, composer) rebuilds only when what it shows
+    // changes; a streamed delta rebuilds the transcript alone (AUD-072).
+    return _Select(
       listenable: a,
-      builder: (context, _) {
-        final items = a.items();
+      select: () => [
+        a.activeId,
+        a.sessions,
+        a.providers,
+        a.status,
+        a.error,
+        a.sendError,
+        a.approvals,
+        a.restoreConflict,
+        a.model,
+        a.context,
+        a.active,
+        a.active.running,
+      ],
+      builder: (context) {
         final running = a.active.running;
         final title = a.activeId == null
             ? null
@@ -521,31 +654,7 @@ class ChatViewState extends State<ChatView> {
               Expanded(
                 child: a.status == 'ready' && !hasModel && a.activeId == null
                     ? SingleChildScrollView(padding: EdgeInsets.all(g), child: const ModelSetup())
-                    : SelectableRegion(
-                        selectionControls: emptyTextSelectionControls,
-                        focusNode: _selection,
-                        child: ListView(
-                          controller: _scroll,
-                          padding: EdgeInsets.fromLTRB(g, 8, g, 16),
-                          children: [
-                            ..._itemViews(items, running),
-                            // The text being streamed, where its item will be: the same
-                            // element then shows the finished answer.
-                            if (a.active.streaming.isNotEmpty)
-                              _ItemView(
-                                item: AssistantItem('streaming', 0, a.active.streaming, null),
-                              ),
-                            if (running && a.active.streaming.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.only(bottom: 14),
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Spinner(label: 'Writing'),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
+                    : ListenableBuilder(listenable: a, builder: (context, _) => _transcript(g)),
               ),
               for (final r in mine)
                 Padding(
@@ -570,6 +679,56 @@ class ChatViewState extends State<ChatView> {
       },
     );
   }
+}
+
+/// Rebuilds [builder] when [listenable] notifies and one of [select]'s values changed (by `==`;
+/// the agent store replaces its lists rather than changing them, so identity tells).
+class _Select extends StatefulWidget {
+  const _Select({required this.listenable, required this.select, required this.builder});
+  final Listenable listenable;
+  final List<Object?> Function() select;
+  final WidgetBuilder builder;
+
+  @override
+  State<_Select> createState() => _SelectState();
+}
+
+class _SelectState extends State<_Select> {
+  late List<Object?> _last = widget.select();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.listenable.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(_Select old) {
+    super.didUpdateWidget(old);
+    if (old.listenable != widget.listenable) {
+      old.listenable.removeListener(_changed);
+      widget.listenable.addListener(_changed);
+    }
+    _last = widget.select();
+  }
+
+  void _changed() {
+    final next = widget.select();
+    var same = next.length == _last.length;
+    for (var i = 0; same && i < next.length; i++) {
+      same = next[i] == _last[i];
+    }
+    if (!same) setState(() => _last = next);
+  }
+
+  @override
+  void dispose() {
+    widget.listenable.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
 }
 
 /// Context attached to the next message (an element's source lines), removable.
@@ -753,7 +912,8 @@ class _Composer extends StatelessWidget {
       ),
     );
     final context_ = app.agent.context;
-    if (state.attached.isEmpty && note.isEmpty && context_.isEmpty) return input;
+    // Always the same shape (the input is the Column's last child, keyed), so attachments or a
+    // note appearing never re-create the field under the person's typing (AUD-076).
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -806,7 +966,7 @@ class _Composer extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 6),
             child: Semantics(liveRegion: true, child: Text(note, style: t.type.small)),
           ),
-        input,
+        KeyedSubtree(key: state._inputKey, child: input),
       ],
     );
   }
@@ -817,12 +977,19 @@ class Thumbnail extends StatelessWidget {
   const Thumbnail({super.key, required this.data, this.size = 120});
   final ImageData data;
   final double size;
+
+  /// Decoded images, the most recently shown last; at most [cacheSize] are kept (AUD-083).
   static final _decoded = <String, Uint8List>{};
+  static const cacheSize = 48;
 
   @override
   Widget build(BuildContext context) {
     final key = '${data.data.length}:${data.data.hashCode}';
-    final bytes = _decoded.putIfAbsent(key, () => base64Decode(data.data));
+    final bytes = _decoded.remove(key) ?? base64Decode(data.data);
+    _decoded[key] = bytes;
+    while (_decoded.length > cacheSize) {
+      _decoded.remove(_decoded.keys.first);
+    }
     return ClipRRect(
       borderRadius: BorderRadius.circular(Metrics.radiusControl),
       child: Image.memory(
@@ -979,6 +1146,31 @@ class _ItemView extends StatefulWidget {
 class _ItemViewState extends State<_ItemView> {
   bool _open = false;
 
+  /// A user message's images are fetched once, not from build (AUD-075's pattern).
+  void _loadImages() {
+    final it = widget.item;
+    if (it is! UserItem || it.images.isEmpty) return;
+    final agent = AppScope.of(context).agent;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final im in it.images) {
+        unawaited(agent.loadImage(im));
+      }
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadImages();
+  }
+
+  @override
+  void didUpdateWidget(_ItemView old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.item, widget.item)) _loadImages();
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
@@ -988,9 +1180,6 @@ class _ItemViewState extends State<_ItemView> {
     Widget pad(Widget w) => Padding(padding: const EdgeInsets.only(bottom: 14), child: w);
     switch (it) {
       case UserItem(:final text, :final images):
-        for (final im in images) {
-          unawaited(app.agent.loadImage(im));
-        }
         return pad(
           Align(
             alignment: Alignment.centerRight,
@@ -1278,7 +1467,7 @@ class _ApprovalCardState extends State<ApprovalCard> {
           decoration: BoxDecoration(
             color: c.accentSoft,
             borderRadius: BorderRadius.circular(Metrics.radiusRaised),
-            border: Border.all(color: c.accent.withValues(alpha: 0.5)),
+            border: Border.all(color: c.approvalBorder),
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -1465,9 +1654,9 @@ class DiffBlock extends StatelessWidget {
               else
                 ColoredBox(
                   color: switch (r.kind) {
-                    'add' => c.ok.withValues(alpha: 0.12),
-                    'del' => c.danger.withValues(alpha: 0.12),
-                    _ => c.ok.withValues(alpha: 0),
+                    'add' => c.diffAdd,
+                    'del' => c.diffDel,
+                    _ => c.diffAdd.withValues(alpha: 0),
                   },
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1651,7 +1840,15 @@ class _OneFieldState extends State<_OneField> {
 /// Approvals not on screen: other conversations', external callers' (MCP clients), and the open
 /// conversation's while Chat is hidden. A stack at the window's bottom right.
 class ApprovalsStack extends StatelessWidget {
-  const ApprovalsStack({super.key, required this.chatShowing, required this.onShow});
+  const ApprovalsStack({
+    super.key,
+    required this.chatShowing,
+    required this.onShow,
+    this.bottomInset = 36,
+  });
+
+  /// How far above the window's bottom the shell places the stack.
+  final double bottomInset;
 
   /// A Chat view (the page or the dock) shows the open conversation's approvals.
   final bool chatShowing;
@@ -1669,40 +1866,57 @@ class ApprovalsStack extends StatelessWidget {
         ];
         if (others.isEmpty) return const SizedBox.shrink();
         final t = context.axiom;
-        return Semantics(
-          container: true,
-          explicitChildNodes: true,
-          label: 'Approvals waiting',
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final r in others.take(3))
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Sheet(
-                    radius: Metrics.radiusRaised,
-                    padding: const EdgeInsets.all(4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ApprovalCard(key: ValueKey(r.requestId), request: r, origin: _origin(a, r)),
-                        if (r.sessionId != null)
-                          AxButton(
-                            label: 'Show the conversation',
-                            kind: ButtonKind.quiet,
-                            onPressed: () => onShow(r.sessionId!),
+        // Never taller than the room between the title row and the stack's bottom edge
+        // (the shell places it [bottomInset] above the window's bottom): more cards scroll
+        // (AUD-057). Toasts stack above it rather than over its buttons.
+        final room =
+            MediaQuery.sizeOf(context).height - bottomInset - Metrics.titleRowHeight - Metrics.s6;
+        return ToastAvoid(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: room < 160 ? 160 : room),
+            child: Semantics(
+              container: true,
+              explicitChildNodes: true,
+              label: 'Approvals waiting',
+              child: SingleChildScrollView(
+                reverse: true,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final r in others.take(3))
+                      Padding(
+                        padding: const EdgeInsets.only(top: Metrics.s4),
+                        child: Sheet(
+                          radius: Metrics.radiusRaised,
+                          padding: const EdgeInsets.all(4),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ApprovalCard(
+                                key: ValueKey(r.requestId),
+                                request: r,
+                                origin: _origin(a, r),
+                              ),
+                              if (r.sessionId != null)
+                                AxButton(
+                                  label: 'Show the conversation',
+                                  kind: ButtonKind.quiet,
+                                  onPressed: () => onShow(r.sessionId!),
+                                ),
+                            ],
                           ),
-                      ],
-                    ),
-                  ),
+                        ),
+                      ),
+                    if (others.length > 3)
+                      Padding(
+                        padding: const EdgeInsets.only(top: Metrics.s3),
+                        child: Text('${others.length - 3} more waiting', style: t.type.small),
+                      ),
+                  ],
                 ),
-              if (others.length > 3)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text('${others.length - 3} more waiting', style: t.type.small),
-                ),
-            ],
+              ),
+            ),
           ),
         );
       },

@@ -33,7 +33,7 @@ class InspectorSide extends StatelessWidget {
         final t = context.axiom;
         if (!app.workspace.isOpen) {
           return Padding(
-            padding: const EdgeInsets.all(Metrics.s5),
+            padding: const EdgeInsets.all(Metrics.sideGutter),
             child: Text('Open a folder to preview and inspect its app.', style: t.type.small),
           );
         }
@@ -43,7 +43,12 @@ class InspectorSide extends StatelessWidget {
           explicitChildNodes: true,
           label: 'Inspector',
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(Metrics.s5, Metrics.s2, Metrics.s5, Metrics.s5),
+            padding: const EdgeInsets.fromLTRB(
+              Metrics.sideGutter,
+              Metrics.s2,
+              Metrics.sideGutter,
+              Metrics.sideGutter,
+            ),
             children: [
               _PreviewSection(store: s),
               if (s.running) ...[
@@ -63,8 +68,9 @@ class InspectorSide extends StatelessWidget {
                 if (s.inspectMode && s.hovered != null)
                   Padding(
                     padding: const EdgeInsets.only(top: Metrics.s2),
+                    // Not a live region: it changes on every pointer move in the page; the
+                    // selection (a click) is what gets announced (AUD-082).
                     child: Semantics(
-                      liveRegion: true,
                       child: Text(
                         'Under the pointer: ${nodeLabel(s.hovered!)}',
                         style: t.type.small,
@@ -98,7 +104,7 @@ class _Heading extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: Metrics.s2),
-    child: Semantics(header: true, child: Text(text, style: context.axiom.type.label)),
+    child: Semantics(header: true, child: Text(text, style: context.axiom.type.sectionHeading)),
   );
 }
 
