@@ -1640,7 +1640,7 @@ class _StatusBar extends StatelessWidget {
                 ),
               ),
               ListenableBuilder(
-                listenable: Listenable.merge([app.workspace, app.documents]),
+                listenable: Listenable.merge([app.workspace, app.documents, app.documents.cursor]),
                 builder: (context, _) {
                   final doc = app.documents.active;
                   if (doc == null) {

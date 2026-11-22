@@ -464,7 +464,14 @@ class _DocViewState extends State<_DocView> {
   Timer? _marksTimer;
   int _marksSeq = 0;
 
-  void _scheduleMarks() {
+  /// The lines the gutter marks were scheduled for: a caret or selection move changes nothing.
+  Object? _marksLines;
+
+  void _gitChanged() => _scheduleMarks(force: true);
+
+  void _scheduleMarks({bool force = false}) {
+    if (!force && identical(_controller.codeLines, _marksLines)) return;
+    _marksLines = _controller.codeLines;
     _marksTimer?.cancel();
     _marksTimer = Timer(const Duration(milliseconds: 150), () => unawaited(_computeMarks()));
   }
@@ -481,8 +488,8 @@ class _DocViewState extends State<_DocView> {
     super.initState();
     _controller.addListener(_onChange);
     _controller.addListener(_scheduleMarks);
-    app.git.addListener(_scheduleMarks);
-    _scheduleMarks();
+    app.git.addListener(_gitChanged);
+    _scheduleMarks(force: true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _reveal();
@@ -496,7 +503,7 @@ class _DocViewState extends State<_DocView> {
   void dispose() {
     _marksTimer?.cancel();
     _controller.removeListener(_scheduleMarks);
-    app.git.removeListener(_scheduleMarks);
+    app.git.removeListener(_gitChanged);
     gitMarks.dispose();
     _controller.removeListener(_onChange);
     app.documents.removeListener(_reveal);
@@ -537,7 +544,7 @@ class _DocViewState extends State<_DocView> {
     app.documents.setCursor(
       s.extentIndex + 1,
       s.extentOffset + 1,
-      s.isCollapsed ? 0 : c.selectedText.length,
+      s.isCollapsed ? 0 : _selectedLength(c),
     );
   }
 
@@ -758,4 +765,18 @@ class _NextIntent extends Intent {
 
 class _PrevIntent extends Intent {
   const _PrevIntent();
+}
+
+/// The selection's length in characters (newlines counted), from the lines' lengths: no string
+/// is built, so a long selection costs one pass over its lines, not a copy of its text.
+int _selectedLength(CodeLineEditingController c) {
+  final s = c.selection;
+  final lines = c.codeLines;
+  final (a, ao, b, bo) = (s.startIndex, s.startOffset, s.endIndex, s.endOffset);
+  if (a == b) return (bo - ao).abs();
+  var n = lines[a].length - ao + 1;
+  for (var i = a + 1; i < b; i++) {
+    n += lines[i].length + 1;
+  }
+  return n + bo;
 }

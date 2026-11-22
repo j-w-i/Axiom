@@ -143,7 +143,14 @@ class Doc {
   String get text => controller.text;
 
   /// Recomputes [dirty]; true when it changed.
+  /// The lines the dirty mark was last computed for: a caret or selection move keeps them, so it
+  /// costs nothing (the comparison joins the whole document).
+  Object? _dirtyLines;
+
   bool refreshDirty() {
+    final lines = controller.codeLines;
+    if (identical(lines, _dirtyLines)) return false;
+    _dirtyLines = lines;
     final now = controller.text != _savedText;
     if (now == dirty) return false;
     dirty = now;
@@ -154,6 +161,7 @@ class Doc {
     savedVersion = version;
     _savedText = text;
     changedOnDisk = false;
+    _dirtyLines = null;
     refreshDirty();
   }
 
@@ -163,6 +171,7 @@ class Doc {
     _savedText = text;
     dirty = false;
     changedOnDisk = false;
+    _dirtyLines = controller.codeLines;
   }
 }
 
@@ -194,7 +203,12 @@ class DocumentsStore extends ChangeNotifier {
   String banner = '';
   Prompt? prompt;
   final _conflicts = <({String path, String text})>[];
-  String cursorText = '';
+
+  /// The status bar's caret text ("Ln 3, Col 7"), apart from the store: a caret or selection
+  /// move redraws the status bar, not every listener of the documents.
+  final cursor = ValueNotifier<String>('');
+  String get cursorText => cursor.value;
+  set cursorText(String v) => cursor.value = _cursorPending = v;
 
   /// Where to put the caret when a document shows (Go to File, Problems, search results).
   ({String path, int line, int column})? pendingReveal;
@@ -315,10 +329,25 @@ class DocumentsStore extends ChangeNotifier {
     final text = selected > 0
         ? 'Ln $line, Col $column ($selected selected)'
         : 'Ln $line, Col $column';
-    if (text == cursorText) return;
-    cursorText = text;
-    _notifySafely();
+    if (text == _cursorPending) return;
+    _cursorPending = text;
+    // Like _notifySafely: the caret moves while the editor builds or lays out; the status bar
+    // hears of it after the frame.
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
+      cursor.value = text;
+      return;
+    }
+    if (_cursorQueued) return;
+    _cursorQueued = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _cursorQueued = false;
+      cursor.value = _cursorPending;
+    });
   }
+
+  String _cursorPending = '';
+  bool _cursorQueued = false;
 
   bool _notifyQueued = false;
 

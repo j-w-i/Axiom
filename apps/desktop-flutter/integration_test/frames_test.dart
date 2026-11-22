@@ -156,6 +156,28 @@ Future<void> _interactions(
     }
   });
   final view = find.byType(CodeEditor).first;
+  // Selecting text: a mouse drag down and back over the lines, and Shift+Down held.
+  await measure('drag selection in the shell', () async {
+    final box = tester.getRect(view);
+    final from = Offset(box.left + 120, box.top + 60);
+    final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+    for (var i = 1; i <= 60; i++) {
+      await g.moveTo(from + Offset(i * 6.0, i * 7.0));
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    for (var i = 60; i >= 0; i--) {
+      await g.moveTo(from + Offset(i * 6.0, i * 7.0));
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    await g.up();
+  });
+  doc.controller.selection = const CodeLineSelection.collapsed(index: 10, offset: 0);
+  await measure('shift+down selection in the shell', () async {
+    for (var i = 0; i < 40; i++) {
+      await key(tester, LogicalKeyboardKey.arrowDown, shift: true);
+      await Future<void>.delayed(const Duration(milliseconds: 33));
+    }
+  });
   await measure('editor fling in the shell', () async {
     for (var i = 0; i < 3; i++) {
       await tester.fling(view, const Offset(0, -1500), 5000);
