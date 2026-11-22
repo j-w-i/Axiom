@@ -954,7 +954,8 @@ typedef PanelFit = ({
 });
 
 const editorMinWidth = 320.0;
-const editorMinHeight = 160.0;
+// Tabs, breadcrumbs and up to two banner lines, and still some code (AUD-014).
+const editorMinHeight = 240.0;
 
 PanelFit fitPanels({
   required double width,

@@ -7,6 +7,7 @@
 import 'dart:io';
 
 import 'package:axiom_desktop/editor/code_view.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -92,15 +93,23 @@ void main() {
           errors.clear();
         }
         // The gutter strip spans the editor (AUD-003).
-        final strip = find.byType(GitMarkStrip);
-        final editor = find.byType(CodeEditor);
+        // The ones laid out on screen (views kept mounted off stage are not).
+        Finder shown(Finder f) => find.byElementPredicate(
+          (el) =>
+              f.evaluate().contains(el) &&
+              el.renderObject is RenderBox &&
+              (el.renderObject! as RenderBox).hasSize &&
+              (el.renderObject! as RenderBox).attached,
+        );
+        final strip = shown(find.byType(GitMarkStrip));
+        final editor = shown(find.byType(CodeEditor));
         if (strip.evaluate().isNotEmpty && editor.evaluate().isNotEmpty) {
           final s = tester.getRect(strip.first), e = tester.getRect(editor.first);
           want((s.top - e.top).abs() < 2, '$where: gutter strip top ${s.top} vs editor ${e.top}');
           want(s.height > e.height * 0.9, '$where: gutter strip height ${s.height} of ${e.height}');
         }
         // The active tab is inside the window (AUD-017).
-        final active = find.bySemanticsLabel(RegExp(r'^lib\.rs'));
+        final active = find.bySemanticsLabel(RegExp(r'^lib\.rs')).hitTestable();
         if (active.evaluate().isNotEmpty) {
           final r = tester.getRect(active.first);
           want(r.right <= tester.view.physicalSize.width + 1 && r.left >= 0, '$where: tab at $r');

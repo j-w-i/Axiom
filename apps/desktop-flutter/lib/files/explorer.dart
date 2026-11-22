@@ -216,6 +216,8 @@ class _ExplorerState extends State<Explorer> {
                       final (:node, :depth) = _rows[i];
                       // A right-click selects the row and opens its menu (AUD-022).
                       return GestureDetector(
+                        // The row's own semantics (and its menu key) describe it.
+                        excludeFromSemantics: true,
                         onSecondaryTapUp: (_) {
                           setState(() => _current = node.path);
                           widget.workspace.selection = node.path;

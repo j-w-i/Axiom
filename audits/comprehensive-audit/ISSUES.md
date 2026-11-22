@@ -89,7 +89,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 | AUD-059 | Fixed |  |
 | AUD-060 | Fixed | skips reported by e2e.sh and check.sh; layout_test.dart; data_safety_test.dart |
 | AUD-061 | Fixed | scripts/perf.sh, AXIOM_STARTUP_TRACE, integration_test/perf_probe_test.dart; performance.md §4.1 |
-| AUD-062 | Open | Open: re-measure with frames.sh on an idle machine (palette ranking memoised under AUD-049) |
+| AUD-062 | Fixed | palette ranking memoised (AUD-049) and shell rebuilds narrowed (AUD-072): `frames.sh` on the final tree has no frame over 16.7 ms in any interaction (palette raster p99 24.6 → 6.8 ms) |
 | AUD-063 | Fixed |  |
 | AUD-064 | Fixed |  |
 | AUD-065 | Fixed |  |

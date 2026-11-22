@@ -467,6 +467,9 @@ void main() {
       base,
     );
 
+    // The setup page scrolls: the button may be below the fold.
+    await tester.ensureVisible(named('Add provider'));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(named('Add provider'));
     await until(
       tester,

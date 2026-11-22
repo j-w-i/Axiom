@@ -272,6 +272,8 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
     return Focus(
       key: _rowKeys.putIfAbsent(id, GlobalKey.new),
       focusNode: node,
+      // Only a place to reveal: the row's own controls carry its semantics.
+      includeSemantics: false,
       onFocusChange: (_) => setState(() {}),
       child: DecoratedBox(
         decoration: BoxDecoration(color: node.hasFocus ? c.selected : null),

@@ -283,7 +283,11 @@ void clearHintLater(ValueNotifier<String?> hint, String text) {
   // A microtask runs once the current frame's work (the unmount) has returned, before anything
   // that owns the hint can be torn down.
   scheduleMicrotask(() {
-    // No listener: nothing shows it (and its owner may have been disposed with the tree).
-    if (hint.hasListeners && hint.value == text) hint.value = null;
+    if (hint.value != text) return;
+    try {
+      hint.value = null;
+    } on FlutterError {
+      // Its owner was disposed with the tree (the window or a test ending): nothing shows it.
+    }
   });
 }

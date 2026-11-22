@@ -153,3 +153,25 @@ loaded as before):
 Suites added: `integration_test/data_safety_test.dart`, `integration_test/layout_test.dart`,
 `integration_test/perf_probe_test.dart` (via `scripts/perf.sh`), and the helpers' unit and daemon
 tests listed in their reports (`ISSUES.md` notes name them).
+
+### 2026-11-23 — final verification (tree at the last AUD-REM-001 commit)
+- `scripts/check.sh`: pass (606 Rust tests, 148 Flutter tests, clippy, fmt, deny, schemas,
+  inspector 12/12). The new "NOT RUN here" list names the real rust-analyzer test (not installed).
+- `apps/desktop-flutter/scripts/e2e.sh`: all 17 suites pass, including the new
+  `data_safety_test.dart` and `layout_test.dart`; skipped (reported as skipped): env_rust 1,
+  languages 11, lsp 2 (need network installs or real servers).
+- `frames.sh`: no frame over 16.7 ms in any interaction (load average 4–5).
+- `scripts/perf.sh --runs 4`: cold first frame 437 ms, warm 315 ms, folder listed 273/275 ms;
+  idle CPU 0 % (shell and daemon); PSS 139/23 MiB (`evidence/perf/after-remediation-perf-sh.json`).
+- Profile probe: 100k-line file opens in 466 ms, typing at line 1 max build 5.7 ms, PSS after
+  editing 284 MiB (`evidence/perf/after-remediation-probe.json`).
+- Exploratory GUI pass repeated (`evidence/after/`): 2 framework errors left, from 12. One was
+  an exception on every editor split (re_editor notified every editor of a document when a new
+  one attached; patched, `PATCHES.md`); the other is the title row at 640×480, below the enforced
+  900×560 minimum window.
+- Screenshots checked by eye: gutter marks on their lines in both groups, deep explorer rows,
+  tab overflow list, Edit menu, file buttons, Trust Folder line, chat setup cards in the dock,
+  rows at text scale 1.5.
+
+Not verified here: macOS and Windows (no hosts), real language servers and LLM sessions,
+packaging (`check.sh package`), a screen reader.

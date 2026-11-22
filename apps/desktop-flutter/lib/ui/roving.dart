@@ -64,7 +64,10 @@ class _RovingFocusState extends State<RovingFocus> {
   }
 
   @override
-  Widget build(BuildContext context) => Focus(focusNode: _entry, child: widget.child);
+  // The list's own node takes Tab and hands focus on; it is not a control of its own for a
+  // screen reader (the rows are), so it adds no semantics node.
+  Widget build(BuildContext context) =>
+      Focus(focusNode: _entry, includeSemantics: false, child: widget.child);
 }
 
 /// Focus nodes keyed by row id for a lazily built list, out of the Tab order. Nodes of rows that

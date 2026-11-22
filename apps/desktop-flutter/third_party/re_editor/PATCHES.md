@@ -109,3 +109,10 @@ file stalled the UI for over 4 s per burst and kept about 700 MiB (audit
   line, laying out every paragraph in between (100 000 for Ctrl+Home at the end of a 100 000-line
   file: a 3.9 s frame and about 650 MB). With word wrap the estimate can place the view a little
   off for wrapped lines, as the forward jump always could.
+
+## A new editor's controller no longer pings every editor of the document (2026-11-23)
+`lib/src/_code_line.dart` (`_CodeLineEditingControllerDelegate.delegate=`): attaching a
+controller notifies only the editor's own listeners. Upstream called the shared controller's
+`notifyListeners()`, which reached every editor showing the document, including one being torn
+down in the same frame when the editor splits; its input controller then asked an inactive
+element for its render object (an exception on every split, found by the audit's GUI pass).

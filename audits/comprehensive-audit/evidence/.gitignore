@@ -11,3 +11,9 @@ screenshots/43-settings-textscale-1.5.png
 screenshots/44-after-rapid-toggles.png
 screenshots/45-after-rapid-palette.png
 screenshots/46-focus-after-tabs.png
+# The same for the after-remediation pass.
+after/screenshots/34-terminal.png
+after/screenshots/3[6-9]-*.png
+after/screenshots/4[0-6]-*.png
+after/screenshots/47-*.png
+after/screenshots/48-*.png

@@ -645,50 +645,92 @@ class _TrustLine extends StatelessWidget {
         if (_dismissed.contains('${app.workspace.root}\u0000${server.serverId}')) {
           return const SizedBox.shrink();
         }
-        final t = context.axiom;
-        final c = t.colors;
         return Semantics(
           liveRegion: true,
           container: true,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: c.panel,
-              border: Border(bottom: BorderSide(color: c.hairline)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
-              child: Row(
-                children: [
-                  AxiomIcon(AxiomIcons.warning, size: 14, color: c.accentText),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(detail, style: t.type.small.copyWith(color: c.ink)),
-                  ),
-                  AxButton(
-                    label: 'Trust Folder',
-                    hint: 'Trust ${app.workspace.name}: its language servers may run its code',
-                    onPressed: () async {
-                      await app.environments.trustWorkspace(true);
-                      await app.lsp.load();
-                    },
-                  ),
-                  const SizedBox(width: Metrics.s2),
-                  AxButton(
-                    label: 'Not now',
-                    kind: ButtonKind.quiet,
-                    onPressed: () {
-                      _dismissed.add('${app.workspace.root}\u0000${server.serverId}');
-                      (context as Element).markNeedsBuild();
-                    },
-                  ),
-                ],
+          child: _bannerLine(
+            context,
+            icon: AxiomIcons.warning,
+            text: detail,
+            actions: [
+              AxButton(
+                label: 'Trust Folder',
+                hint: 'Trust ${app.workspace.name}: its language servers may run its code',
+                onPressed: () async {
+                  await app.environments.trustWorkspace(true);
+                  await app.lsp.load();
+                },
               ),
-            ),
+              AxButton(
+                label: 'Not now',
+                kind: ButtonKind.quiet,
+                onPressed: () {
+                  _dismissed.add('${app.workspace.root}\u0000${server.serverId}');
+                  (context as Element).markNeedsBuild();
+                },
+              ),
+            ],
           ),
         );
       },
     );
   }
+}
+
+/// A banner line above the editor: an icon, the text, the actions. In a narrow group the actions
+/// go under the text and the text keeps to three lines, so the editor below keeps its room (a
+/// Row there squeezed the text to a character per line and the editor to nothing).
+Widget _bannerLine(
+  BuildContext context, {
+  required IconData16 icon,
+  required String text,
+  required List<Widget> actions,
+}) {
+  final t = context.axiom;
+  final c = t.colors;
+  return DecoratedBox(
+    decoration: BoxDecoration(
+      color: c.panel,
+      border: Border(bottom: BorderSide(color: c.hairline)),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final label = Text(
+            text,
+            style: t.type.small.copyWith(color: c.ink),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          );
+          final lead = [AxiomIcon(icon, size: 14, color: c.accentText), const SizedBox(width: 8)];
+          if (box.maxWidth >= 480 || actions.isEmpty) {
+            return Row(
+              children: [
+                ...lead,
+                Expanded(child: label),
+                ...actions,
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  ...lead,
+                  Expanded(child: label),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Wrap(spacing: 4, runSpacing: 4, children: actions),
+            ],
+          );
+        },
+      ),
+    ),
+  );
 }
 
 /// "Python has a language server: basedpyright. Install… Not now" (ADR-0021 §5), then its install's
@@ -706,8 +748,6 @@ class _ServerOfferLine extends StatelessWidget {
       builder: (context, _) {
         final offer = si.offerFor(doc);
         if (offer == null) return const SizedBox.shrink();
-        final t = context.axiom;
-        final c = t.colors;
         final env = app.environments;
         final pid = offer.providerId;
         final pre = si.prerequisiteOf(pid);
@@ -755,25 +795,7 @@ class _ServerOfferLine extends StatelessWidget {
         return Semantics(
           liveRegion: true,
           container: true,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: c.panel,
-              border: Border(bottom: BorderSide(color: c.hairline)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
-              child: Row(
-                children: [
-                  AxiomIcon(AxiomIcons.download, size: 14, color: c.accentText),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(text, style: t.type.small.copyWith(color: c.ink)),
-                  ),
-                  ...actions,
-                ],
-              ),
-            ),
-          ),
+          child: _bannerLine(context, icon: AxiomIcons.download, text: text, actions: actions),
         );
       },
     );
