@@ -277,6 +277,11 @@ pub fn spawn_forwarder(app: &Arc<App>) {
                 Ok(e) => e,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!("{n} language-server events were dropped (slow clients)");
+                    // What was dropped may have been a state or diagnostics, which are not sent
+                    // again by themselves: send every server's current ones (audit finding 13).
+                    if let Some(app) = weak.upgrade() {
+                        resync(&app).await;
+                    }
                     continue;
                 }
                 Err(_) => return,
@@ -311,4 +316,33 @@ pub fn spawn_forwarder(app: &Arc<App>) {
             }
         }
     });
+}
+
+/// Sends every server's state, and the diagnostics of each document it has them for or has open
+/// (empty when none, so ones cleared meanwhile go), to its workspace's clients.
+async fn resync(app: &Arc<App>) {
+    for s in app.lsp.all() {
+        let ws = s.workspace_id().clone();
+        let state = ServerStateParams {
+            workspace_id: ws.clone(),
+            server: s.info(),
+        };
+        let diagnostics = s.diagnostics();
+        let mut uris: std::collections::BTreeSet<String> = diagnostics.keys().cloned().collect();
+        uris.extend(s.open_uris());
+        for c in app.clients_of(&ws) {
+            let _ = c.notify::<ServerStateChanged>(state.clone()).await;
+            for uri in &uris {
+                let list = diagnostics.get(uri).cloned().unwrap_or_else(|| json!([]));
+                let _ = c
+                    .notify::<LspNotification>(axiom_protocol::lsp::LspNotificationParams {
+                        workspace_id: ws.clone(),
+                        server_id: s.def.id.clone(),
+                        method: "textDocument/publishDiagnostics".into(),
+                        params: json!({"uri": uri, "diagnostics": list}),
+                    })
+                    .await;
+            }
+        }
+    }
 }

@@ -338,6 +338,16 @@ impl LanguageServer {
         lock(&self.diagnostics).clone()
     }
 
+    /// The workspace this server belongs to.
+    pub fn workspace_id(&self) -> &axiom_protocol::WorkspaceId {
+        &self.workspace_id
+    }
+
+    /// The URIs of the documents clients have open on it.
+    pub fn open_uris(&self) -> Vec<String> {
+        lock(&self.docs).all().map(|d| d.uri.clone()).collect()
+    }
+
     /// The mirrored text of an open document.
     pub fn document(&self, uri: &str) -> Option<crate::docs::Document> {
         lock(&self.docs).get(uri).cloned()

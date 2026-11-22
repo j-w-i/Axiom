@@ -58,6 +58,7 @@ class LspSync {
   final LspStore lsp;
   final _open = <String, _Synced>{};
   int _seenDiagnostics = -1;
+  final _seenPath = <String, int>{};
 
   String? _serverFor(Doc d) => lsp.serverFor(lspLanguageId(d))?.serverId;
 
@@ -86,10 +87,12 @@ class LspSync {
     if (lsp.diagnosticsVersion == _seenDiagnostics) return;
     _seenDiagnostics = lsp.diagnosticsVersion;
     for (final d in docs.docs) {
+      // Only documents whose own diagnostics changed are redrawn.
+      final v = lsp.diagnosticsVersionOf(d.path);
+      if (_seenPath[d.path] == v) continue;
+      _seenPath[d.path] = v;
       final list = lsp.diagnosticsOn(d.path);
-      if (!identical(list, d.diagnostics) && !(list.isEmpty && d.diagnostics.isEmpty)) {
-        d.setDiagnostics(list);
-      }
+      if (!(list.isEmpty && d.diagnostics.isEmpty)) d.setDiagnostics(list);
     }
   }
 

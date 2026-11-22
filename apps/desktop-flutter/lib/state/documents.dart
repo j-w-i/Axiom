@@ -103,11 +103,9 @@ class Doc {
         highlightColor,
       );
     }
-    if (diagnostics.isEmpty) return span;
-    return applyUnderlines(
-      span,
-      underlinesOn(index, codeLine.text.length, diagnostics, underlineColor),
-    );
+    final onLine = _diagnosticsByLine[index];
+    if (onLine == null) return span;
+    return applyUnderlines(span, underlinesOn(index, codeLine.text.length, onLine, underlineColor));
   }
 
   /// The server's semantic tokens by line, over the grammar's colours (ADR-0021 §2).
@@ -134,9 +132,26 @@ class Doc {
   /// New diagnostics: redraw the lines.
   void setDiagnostics(List<LspDiagnostic> list) {
     diagnostics = list;
+    // Indexed by line once, so building a line looks at its own diagnostics only, not every
+    // diagnostic in the file (audit finding 12). A range over many lines is indexed on its
+    // first and last 200 lines.
+    final byLine = <int, List<LspDiagnostic>>{};
+    for (final d in list) {
+      final first = d.range.start.line, last = d.range.end.line;
+      for (var i = first; i <= last; i++) {
+        if (i - first >= 200 && last - i >= 200) {
+          i = last - 200;
+          continue;
+        }
+        (byLine[i] ??= []).add(d);
+      }
+    }
+    _diagnosticsByLine = byLine;
     controller.forceRepaint();
     _secondary?.forceRepaint();
   }
+
+  Map<int, List<LspDiagnostic>> _diagnosticsByLine = const {};
 
   String savedVersion;
   String _savedText;

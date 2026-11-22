@@ -132,6 +132,11 @@ impl Manager {
             .cloned()
     }
 
+    /// Every server of every workspace.
+    pub fn all(&self) -> Vec<Arc<LanguageServer>> {
+        self.lock().values().cloned().collect()
+    }
+
     /// The workspace's servers.
     pub fn of_workspace(&self, ws: &WorkspaceId) -> Vec<Arc<LanguageServer>> {
         let mut v: Vec<_> = self
