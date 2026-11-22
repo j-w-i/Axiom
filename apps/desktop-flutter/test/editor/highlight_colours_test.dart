@@ -13,8 +13,7 @@ import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:re_highlight/re_highlight.dart';
 
-/// The highlighted text as lines of coloured pieces, scopes resolved as re_editor does (the whole
-/// name, then without its first part).
+/// The highlighted text as lines of coloured pieces.
 class _Lines implements HighlightRenderer {
   _Lines(this.theme, this.text);
   final Map<String, TextStyle> theme;
@@ -22,16 +21,24 @@ class _Lines implements HighlightRenderer {
   final lines = <List<TextSpan>>[[]];
   final _scopes = <String>[];
 
+  // As re_editor (patched) names and resolves a scope: nested scopes joined with `-` (the
+  // innermost last), tried whole and then without the outer parts, each from its most specific
+  // dotted part (`title.function.invoke`, `title.function`, `title`).
   Color _colour() {
-    for (var i = _scopes.length - 1; i >= 0; i--) {
-      var name = _scopes[i];
+    if (_scopes.isEmpty) return text;
+    var joined = _scopes.where((s) => s.isNotEmpty).join('-');
+    while (joined.isNotEmpty) {
+      var name = joined;
       while (true) {
         final c = theme[name]?.color;
         if (c != null) return c;
-        final dot = name.indexOf('.');
-        if (dot < 0) break;
-        name = name.substring(dot + 1);
+        final dot = name.lastIndexOf('.');
+        if (dot <= 0) break;
+        name = name.substring(0, dot);
       }
+      final dash = joined.indexOf('-');
+      if (dash < 0) break;
+      joined = joined.substring(dash + 1);
     }
     return text;
   }

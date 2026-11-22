@@ -143,11 +143,21 @@ class _CodeHighlighter extends ValueNotifier<List<_HighlightResult>> {
       return null;
     }
     while(true) {
-      final TextStyle? style = _theme?.theme[className];
-      if (style != null) {
-        return style;
+      // Axiom patch: the most specific scope first (`title.function.invoke`, then
+      // `title.function`, then `title`), so a theme tells functions from classes.
+      String name = className!;
+      while (true) {
+        final TextStyle? style = _theme?.theme[name];
+        if (style != null) {
+          return style;
+        }
+        final int dot = name.lastIndexOf('.');
+        if (dot <= 0) {
+          break;
+        }
+        name = name.substring(0, dot);
       }
-      final int pieceIndex = className!.indexOf('-');
+      final int pieceIndex = className.indexOf('-');
       if (pieceIndex < 0) {
         break;
       }
@@ -383,7 +393,8 @@ class _HighlightLineRenderer implements HighlightRenderer {
     } else {
       newClassName = '$className-${node.scope!}';
     }
-    newClassName = newClassName?.split('.')[0];
+    // Axiom patch: the whole scope is kept (upstream kept `title` of `title.function`), and
+    // [_findStyle] resolves it from the most specific part.
     classNames.add(newClassName);
   }
 

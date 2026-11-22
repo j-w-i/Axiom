@@ -76,3 +76,15 @@ is highlighted afterwards.
   highlighter have. Starting past them built nothing, and `_updateDisplayRenderParagraphs`
   retried until the stack overflowed: a long document shrinking while scrolled far down. The
   M5.5-EDIT-001 bound had introduced this.
+
+## Whole highlight scopes (2026-11-22)
+`lib/src/_code_highlight.dart`: upstream kept only the first part of a scope
+(`title.function` became `title`), so a theme could not tell a function's name from a class's.
+- The renderer keeps the whole scope.
+- `_findStyle` tries the most specific part first (`title.function.invoke`, then
+  `title.function`, then `title`).
+- It still tries nested names (`function-title`) whole and then without their outer parts.
+
+`test/editor/highlight_colours_test.dart` resolves scopes the same way and checks every fixture
+gets several colours. `test/editor/highlight_pipeline_test.dart` checks that results reach each
+editor through the shared workers.

@@ -67,9 +67,16 @@ Map<String, TextStyle> syntaxTheme(SyntaxColors y) {
     'built_in': c(y.type),
     'class': c(y.type),
     'selector-class': c(y.type),
-    // Functions: declared (`title`, `title.function`) and called (`title.function.invoke`).
-    'title': c(y.function),
+    // Declared names: functions (`title.function`, called `title.function.invoke`) yellow,
+    // classes (`title.class`) and other titles (C#'s namespaces and classes, Kotlin's) as types.
+    // re_editor resolves the most specific part of a scope first (patched).
+    'title': c(y.type),
     'title.function': c(y.function),
+    // A title inside a function's scope is the function's name (C#'s, Kotlin's, Swift's
+    // grammars); re_editor joins nested scopes with `-` and tries the whole first.
+    'function-title': c(y.function),
+    'function-title.function': c(y.function),
+    'class-title': c(y.type),
     'title.function.invoke': c(y.function),
     'selector-id': c(y.function),
     // Variables, parameters, properties, keys and attributes.
