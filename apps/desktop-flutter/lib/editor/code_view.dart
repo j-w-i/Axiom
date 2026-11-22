@@ -45,13 +45,13 @@ CodeHighlightTheme? highlightTheme(Language language, SyntaxColors y) {
 
 /// highlight.js scopes → the syntax palette (the same roles the Monaco theme used).
 Map<String, TextStyle> syntaxTheme(SyntaxColors y) {
-  TextStyle c(Color col, {bool italic = false}) =>
-      TextStyle(color: col, fontStyle: italic ? FontStyle.italic : null);
+  // No italics in code (the owner, 2026-11-22), comments included.
+  TextStyle c(Color col) => TextStyle(color: col);
   return {
     'root': TextStyle(color: y.text),
     // Comments and documentation.
-    'comment': c(y.comment, italic: true),
-    'quote': c(y.comment, italic: true),
+    'comment': c(y.comment),
+    'quote': c(y.comment),
     'doctag': c(y.keyword),
     // Keywords and markup names.
     'keyword': c(y.keyword),

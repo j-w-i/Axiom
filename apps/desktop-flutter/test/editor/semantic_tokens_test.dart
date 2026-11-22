@@ -26,8 +26,14 @@ void main() {
     expect(r, isEmpty);
   });
 
-  test('defaultLibrary symbols are italic', () {
-    final s = semanticStyle('function', ['defaultLibrary'], y)!;
-    expect(s.fontStyle, FontStyle.italic);
+  test('nothing is italic; enum cases are members', () {
+    for (final (type, mods) in [
+      ('function', ['defaultLibrary']),
+      ('parameter', const <String>[]),
+      ('struct', ['defaultLibrary']),
+    ]) {
+      expect(semanticStyle(type, mods, y)!.fontStyle, isNull, reason: type);
+    }
+    expect(semanticStyle('enumMember', const [], y)!.color, y.variable);
   });
 }

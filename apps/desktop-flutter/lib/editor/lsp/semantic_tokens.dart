@@ -25,17 +25,17 @@ TextStyle? semanticStyle(String type, List<String> modifiers, SyntaxColors y) {
     'keyword' || 'modifier' || 'selfKeyword' => y.keyword,
     'comment' => y.comment,
     'string' || 'regexp' => y.string,
-    'number' || 'enumMember' || 'boolean' => y.number,
+    'number' || 'boolean' => y.number,
     'operator' || 'punctuation' => y.punct,
-    'parameter' || 'variable' || 'property' => y.variable,
+    // Enum cases (`.failure`) are members, as VS Code colours them.
+    'parameter' || 'variable' || 'property' || 'enumMember' => y.variable,
     _ => null,
   };
   if (colour == null) return null;
+  // Never italic: the owner (2026-11-22). A standard-library symbol or a parameter is told by its
+  // colour, as the grammar's are.
   return TextStyle(
     color: colour,
-    fontStyle: type == 'parameter' || modifiers.contains('defaultLibrary')
-        ? FontStyle.italic
-        : null,
     decoration: modifiers.contains('deprecated') ? TextDecoration.lineThrough : null,
   );
 }

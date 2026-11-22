@@ -75,15 +75,27 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
           child: Column(mainAxisSize: MainAxisSize.min, children: children),
         );
         if (!app.workspace.isOpen) {
-          return centered([
-            const AnswerLine('Open a folder to see the toolchains it needs'),
-            const SizedBox(height: Metrics.s5),
-            AxButton(
-              label: 'Open Folder…',
-              icon: AxiomIcons.folderOpen,
-              onPressed: () => unawaited(app.pickFolder?.call()),
+          unawaited(s.loadProviders());
+          return ColoredBox(
+            color: c.ground,
+            child: ListView(
+              padding: const EdgeInsets.all(Metrics.s7),
+              children: [
+                const AnswerLine('Open a folder to see the toolchains it needs'),
+                const SizedBox(height: Metrics.s5),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: AxButton(
+                    label: 'Open Folder…',
+                    icon: AxiomIcons.folderOpen,
+                    onPressed: () => unawaited(app.pickFolder?.call()),
+                  ),
+                ),
+                const SizedBox(height: Metrics.s7),
+                const _AllToolchains(),
+              ],
             ),
-          ]);
+          );
         }
         if (s.status == 'error') {
           return centered([
@@ -174,6 +186,8 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                   ),
                 ),
               ],
+              const SizedBox(height: Metrics.s7),
+              const _AllToolchains(),
               if (s.invalid.isNotEmpty) ...[
                 const SizedBox(height: Metrics.s7),
                 Text('Providers with errors', style: t.type.label),
@@ -208,6 +222,143 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
             Expanded(flex: 2, child: h('Detected')),
             Expanded(flex: 4, child: h('Source')),
             const Expanded(flex: 5, child: SizedBox()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Every toolchain and language server Axiom knows, whether or not this folder needs it: each
+/// can be installed by hand (the owner, 2026-11-22). Installing shows the plan first, as
+/// everywhere; a provider with nothing to download for this computer says so there.
+class _AllToolchains extends StatelessWidget {
+  const _AllToolchains();
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final s = app.environments;
+    final t = context.axiom;
+    final c = t.colors;
+    final usable = [
+      for (final p in s.providers)
+        if (p.trusted && (p.errors?.isEmpty ?? true)) p,
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    if (usable.isEmpty) return const SizedBox.shrink();
+    Widget group(String title, List<ProviderInfo> list) => Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: title,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(title, style: t.type.label),
+          const SizedBox(height: Metrics.s3),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: c.panel,
+              borderRadius: BorderRadius.circular(Metrics.radiusRaised),
+              border: Border.all(color: c.groove),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < list.length; i++) ...[
+                  if (i > 0) SizedBox(height: 1, child: ColoredBox(color: c.groove)),
+                  _InstallRow(provider: list[i]),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    final servers = [
+      for (final p in usable)
+        if (p.id.startsWith('lsp-')) p,
+    ];
+    final toolchains = [
+      for (final p in usable)
+        if (!p.id.startsWith('lsp-')) p,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        group('All toolchains', toolchains),
+        const SizedBox(height: Metrics.s7),
+        group('Language servers', servers),
+      ],
+    );
+  }
+}
+
+class _InstallRow extends StatelessWidget {
+  const _InstallRow({required this.provider});
+  final ProviderInfo provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context).environments;
+    final t = context.axiom;
+    final c = t.colors;
+    final id = provider.id;
+    final install = s.installs[id];
+    final failure = s.failures[id];
+    final Widget action;
+    if (install != null) {
+      action = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 90,
+            child: Meter(
+              value: progressValue(install.progress),
+              label: 'Installing ${provider.name}',
+            ),
+          ),
+          AxButton(
+            label: 'Cancel',
+            kind: ButtonKind.quiet,
+            hint: 'Stop installing ${provider.name}',
+            onPressed: () => s.cancelInstall(id),
+          ),
+        ],
+      );
+    } else if (s.planning == id) {
+      action = const Spinner(label: 'Planning');
+    } else {
+      action = AxButton(
+        label: 'Install…',
+        icon: AxiomIcons.download,
+        hint: 'Review what installing ${provider.name} would do',
+        onPressed: () => unawaited(s.planInstall(id)),
+      );
+    }
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: '${provider.name}: ${provider.description}',
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Metrics.s5, vertical: Metrics.s3),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(provider.name, style: t.type.body.copyWith(color: c.ink)),
+                  Text(
+                    failure ?? provider.description,
+                    style: t.type.small.copyWith(color: failure != null ? c.dangerText : c.ink3),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: Metrics.s4),
+            action,
           ],
         ),
       ),
