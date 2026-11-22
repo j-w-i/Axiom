@@ -88,7 +88,10 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--child-pid-file") {
         if let (Some(path), Ok(child)) = (
             args.get(i + 1),
-            std::process::Command::new("sleep").arg("300").spawn(),
+            // In a session of its own (`setsid`, as kotlin-lsp starts its JVM): out of the group.
+            std::process::Command::new("setsid")
+                .args(["sleep", "300"])
+                .spawn(),
         ) {
             let _ = std::fs::write(path, child.id().to_string());
         }

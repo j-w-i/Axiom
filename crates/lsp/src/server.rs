@@ -173,22 +173,99 @@ struct Conn {
 }
 
 impl Conn {
+    /// The server's descendants now, each with its start time (Linux; elsewhere its process
+    /// group covers them).
+    fn descendants(&self) -> Vec<(u32, String)> {
+        #[cfg(target_os = "linux")]
+        if let Some(pgid) = self.pgid {
+            return descendants(pgid)
+                .into_iter()
+                .filter_map(|pid| start_time(pid).map(|s| (pid, s)))
+                .collect();
+        }
+        Vec::new()
+    }
+
     /// Signals the server's whole process group: SIGKILL when [hard], else SIGTERM. A group
     /// already gone is fine.
     fn signal_group(&self, hard: bool) {
         #[cfg(unix)]
         if let Some(pgid) = self.pgid {
-            use nix::sys::signal::{killpg, Signal};
+            use nix::sys::signal::{kill, killpg, Signal};
             let sig = if hard {
                 Signal::SIGKILL
             } else {
                 Signal::SIGTERM
             };
+            // Descendants that left the group for a session of their own (kotlin-lsp's launcher
+            // starts its JVM with setsid) are found by their parents while the server runs.
+            #[cfg(target_os = "linux")]
+            for pid in descendants(pgid) {
+                let _ = kill(nix::unistd::Pid::from_raw(pid as i32), sig);
+            }
             let _ = killpg(nix::unistd::Pid::from_raw(pgid as i32), sig);
         }
         #[cfg(not(unix))]
         let _ = hard;
     }
+}
+
+/// SIGKILLs a stopped server's descendants that outlived it: each only while its start time is
+/// the one recorded, so a process that reused the number is never touched.
+fn signal_pids(pids: &[(u32, String)]) {
+    #[cfg(target_os = "linux")]
+    for (pid, started) in pids {
+        if start_time(*pid).as_ref() == Some(started) {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(*pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = pids;
+}
+
+/// A process's start time (`/proc/<pid>/stat` field 22), which a reused number does not share.
+#[cfg(target_os = "linux")]
+fn start_time(pid: u32) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after `(comm) `: state is field 3, so the start time (22) is the 20th.
+    let (_, rest) = stat.rsplit_once(") ")?;
+    rest.split_whitespace().nth(19).map(String::from)
+}
+
+/// Every process descended from [root], from `/proc`'s parent links.
+#[cfg(target_os = "linux")]
+fn descendants(root: u32) -> Vec<u32> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    if let Ok(rd) = std::fs::read_dir("/proc") {
+        for e in rd.flatten() {
+            let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                continue;
+            };
+            // `pid (comm) state ppid …`; the name may hold spaces and parentheses.
+            let ppid = stat
+                .rsplit_once(") ")
+                .and_then(|(_, rest)| rest.split_whitespace().nth(1))
+                .and_then(|p| p.parse::<u32>().ok());
+            if let Some(ppid) = ppid {
+                children.entry(ppid).or_default().push(pid);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut todo = vec![root];
+    while let Some(p) = todo.pop() {
+        for &c in children.get(&p).map(Vec::as_slice).unwrap_or_default() {
+            out.push(c);
+            todo.push(c);
+        }
+    }
+    out
 }
 
 impl Drop for Conn {
@@ -703,6 +780,9 @@ impl LanguageServer {
         self.stopping.store(true, Ordering::SeqCst);
         let conn = lock(&self.inner).conn.clone();
         if let Some(c) = conn {
+            // Its descendants, taken while it runs: once it has exited, those in a session of
+            // their own are no longer linked to it.
+            let family = c.descendants();
             let (_, rx) = c.request("shutdown", Value::Null);
             let _ = tokio::time::timeout(STOP_GRACE, rx).await;
             c.notify("exit", Value::Null);
@@ -717,6 +797,7 @@ impl LanguageServer {
                 tokio::time::timeout(STOP_GRACE, async { c.child.lock().await.wait().await }).await;
             // What the server started and left behind goes with it.
             c.signal_group(true);
+            signal_pids(&family);
         }
         let mut i = lock(&self.inner);
         i.conn = None;
