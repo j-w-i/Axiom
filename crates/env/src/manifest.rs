@@ -153,6 +153,18 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                             }
                             check_template(url, &format!("{at} checksum url"), &mut errors);
                         }
+                        Checksum::Sha512 { values } => {
+                            if values.is_empty() {
+                                errors.push(format!("{at}: artifact {} has no checksum", a.url));
+                            }
+                            for (v, d) in values {
+                                if !is_hex(d, 128) {
+                                    errors.push(format!(
+                                        "{at}: checksum for {v} is not 128 lowercase hex digits"
+                                    ));
+                                }
+                            }
+                        }
                     }
                 }
                 check_bin_dirs(bin_dirs, &at, &mut errors);
@@ -235,7 +247,11 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 fn is_sha256_hex(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    is_hex(s, 64)
+}
+
+fn is_hex(s: &str, len: usize) -> bool {
+    s.len() == len && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// Compiles a `version_regex`; it must have exactly one capture group.

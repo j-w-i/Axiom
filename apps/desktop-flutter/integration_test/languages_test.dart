@@ -33,14 +33,7 @@ final _cases = <(String, String, int, String, String, String?)>[
   ('c', 'main.c', 4, '\n    fop', 'fopen', null),
   ('cpp', 'main.cpp', 7, '\n    std::so', 'sort', null),
   ('java', 'src/main/java/fixture/Main.java', 6, '\n        List.o', 'of', null),
-  (
-    'csharp',
-    'Program.cs',
-    3,
-    '\nnumbers.Order',
-    'OrderBy',
-    'Axiom detects .NET but does not install it (ADR-0021 §6)',
-  ),
+  ('csharp', 'Program.cs', 3, '\nnumbers.Order', 'OrderBy', null),
   ('kotlin', 'src/main/kotlin/Main.kt', 2, '\n    names.sor', 'sorted', null),
   (
     'swift',
@@ -163,14 +156,22 @@ void main() {
         offset: at < 0 ? (s.extentOffset - 1).clamp(0, accepted.length) : at + 1,
       );
       await tester.pump(const Duration(milliseconds: 100));
-      await key(tester, LogicalKeyboardKey.f12);
-      await until(
-        tester,
-        () => app.documents.activePath != file,
-        timeout: const Duration(seconds: 30),
-        what: "the SDK's source",
-        detail: () => '${app.documents.activePath} ${app.documents.banner}',
-      );
+      // F12, again every five seconds while the server may still be loading the project (the
+      // first answer can be empty until it has; csharp-ls). At most a minute.
+      final f12At = DateTime.now();
+      final end = f12At.add(const Duration(seconds: 60));
+      while (app.documents.activePath == file) {
+        if (DateTime.now().isAfter(end)) {
+          fail("timed out waiting for the SDK's source (${app.documents.banner})");
+        }
+        await key(tester, LogicalKeyboardKey.f12);
+        final next = DateTime.now().add(const Duration(seconds: 5));
+        while (app.documents.activePath == file && DateTime.now().isBefore(next)) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+      }
+      // ignore: avoid_print
+      print('$folder: definition after ${DateTime.now().difference(f12At).inMilliseconds} ms');
       // ignore: avoid_print
       print('$folder: definition in ${app.documents.activePath}');
       quitted = true;

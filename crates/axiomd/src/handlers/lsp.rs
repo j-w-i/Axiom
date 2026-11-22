@@ -134,9 +134,14 @@ fn launch_in(app: &App, base: &LaunchBase, root: PathBuf, def: &Definition) -> L
     overlay(&def.provider_id, &mut env);
     let mut blocked = None;
     for tool in &def.requires {
+        // Another provider's supply first: the server's own may list the tool only to run its
+        // install (lsp-csharp's `dotnet tool install`), and installs nothing of it itself.
+        let supplies =
+            |m: &axiom_protocol::provider::ProviderManifest| m.tools.iter().any(|t| &t.id == tool);
         let supplier = r
             .active()
-            .find(|(_, m)| m.tools.iter().any(|t| &t.id == tool))
+            .find(|(_, m)| m.id != def.provider_id && supplies(m))
+            .or_else(|| r.active().find(|(_, m)| supplies(m)))
             .map(|(_, m)| {
                 (
                     m.id.clone(),

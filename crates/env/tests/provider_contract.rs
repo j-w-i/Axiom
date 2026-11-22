@@ -78,6 +78,7 @@ fn every_archive_artifact_has_a_checksum() {
                     let ok = match &a.checksum {
                         Checksum::Sha256 { values } => !values.is_empty(),
                         Checksum::Sha256Url { url } => !url.is_empty(),
+                        Checksum::Sha512 { values } => !values.is_empty(),
                     };
                     assert!(ok, "providers/{dir}: {} has no checksum source", a.url);
                 }

@@ -1105,9 +1105,18 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final loc = firstLocation(r);
       if (loc == null || !mounted) return;
       final line = loc.pos.line + 1, column = loc.pos.character + 1;
-      if (loc.uri.startsWith('jdt://')) {
-        // A class in the JDK or a jar: jdtls gives its source (attached or decompiled).
-        final text = await lsp.request(server, 'java/classFileContents', {'uri': loc.uri});
+      if (loc.uri.startsWith('jdt://') || loc.uri.startsWith('csharp:')) {
+        // A class in the JDK or a jar (jdtls), or in a .NET assembly (csharp-ls): the server
+        // gives its source, attached or decompiled.
+        final Object? text;
+        if (loc.uri.startsWith('jdt://')) {
+          text = await lsp.request(server, 'java/classFileContents', {'uri': loc.uri});
+        } else {
+          final r = await lsp.request(server, 'csharp/metadata', {
+            'textDocument': {'uri': loc.uri},
+          });
+          text = r is Map ? r['source'] : null;
+        }
         if (!mounted) return;
         if (text is! String || text.isEmpty) {
           ToastHost.of(context).show('Go to definition: no source for ${titleOf(loc.uri)}.');

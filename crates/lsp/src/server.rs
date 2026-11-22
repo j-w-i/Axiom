@@ -64,6 +64,10 @@ pub struct Launch {
 pub fn client_capabilities() -> Value {
     json!({
         "general": { "positionEncodings": ["utf-16"] },
+        // csharp-ls answers a definition in a .NET assembly with a `csharp:/metadata/…` URI,
+        // whose source the shell asks for with `csharp/metadata`, only when told the client
+        // can (M5.5-QA-001); other servers ignore it.
+        "experimental": { "csharp": { "metadataUris": true } },
         "workspace": {
             "configuration": true,
             "workspaceFolders": true,

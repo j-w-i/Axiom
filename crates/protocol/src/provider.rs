@@ -250,7 +250,7 @@ pub enum ArchiveFormat {
     Gz,
 }
 
-/// Integrity is mandatory: an artifact without a verifiable SHA-256 is not
+/// Integrity is mandatory: an artifact without a verifiable SHA-256 (or SHA-512) is not
 /// installable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -259,6 +259,9 @@ pub enum Checksum {
     Sha256 { values: BTreeMap<String, String> },
     /// URL template of a checksum file (`sha256sum` format or bare digest).
     Sha256Url { url: String },
+    /// Per-version SHA-512 digests in the manifest: version -> lowercase hex (128 digits). For
+    /// publishers that give no SHA-256 (Microsoft's .NET). M5.5, additive.
+    Sha512 { values: BTreeMap<String, String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

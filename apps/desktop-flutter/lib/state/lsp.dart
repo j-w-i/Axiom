@@ -127,7 +127,7 @@ class LspStore extends ChangeNotifier {
   }
 
   String get rootUri => fileUri(workspace.root);
-  String uriOf(String path) => RegExp(r'^[a-z][a-z0-9+.-]*://').hasMatch(path)
+  String uriOf(String path) => RegExp(r'^[a-z][a-z0-9+.-]+:/').hasMatch(path)
       ? path
       : '$rootUri/${path.split('/').map(Uri.encodeComponent).join('/')}';
   String? pathOf(String uri) => relativeTo(uri, rootUri);

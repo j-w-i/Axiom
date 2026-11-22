@@ -62,7 +62,7 @@
       "type": "object"
     },
     "Checksum": {
-      "description": "Integrity is mandatory: an artifact without a verifiable SHA-256 is not\ninstallable.",
+      "description": "Integrity is mandatory: an artifact without a verifiable SHA-256 (or SHA-512) is not\ninstallable.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -100,6 +100,27 @@
           "required": [
             "kind",
             "url"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Per-version SHA-512 digests in the manifest: version -> lowercase hex (128 digits). For\npublishers that give no SHA-256 (Microsoft's .NET). M5.5, additive.",
+          "properties": {
+            "kind": {
+              "const": "sha512",
+              "type": "string"
+            },
+            "values": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "values"
           ],
           "type": "object"
         }

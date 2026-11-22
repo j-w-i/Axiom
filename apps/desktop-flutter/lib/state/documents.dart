@@ -38,11 +38,15 @@ String titleOf(String path) => isExternal(path)
 /// (an SDK's or a dependency's source) the daemon reads, read-only, because the server pointed to
 /// it (protocol 0.4, ADR-0018 §2); another scheme's text comes from the server itself (jdtls's
 /// `jdt://` class files). It is never saved.
-bool isExternal(String path) => RegExp(r'^[a-z][a-z0-9+.-]*://').hasMatch(path);
+bool isExternal(String path) => RegExp(r'^[a-z][a-z0-9+.-]+:/').hasMatch(path);
 
-/// The name a document's language is detected from: a class file's source is Java.
-String _languageName(String path) =>
-    path.startsWith('jdt://') ? '${titleOf(path).replaceAll(RegExp(r'\.class$'), '')}.java' : path;
+/// The name a document's language is detected from: a class file's source is Java, an
+/// assembly's (csharp-ls's `csharp:/metadata/…`) C#.
+String _languageName(String path) => path.startsWith('jdt://')
+    ? '${titleOf(path).replaceAll(RegExp(r'\.class$'), '')}.java'
+    : path.startsWith('csharp:')
+    ? '${titleOf(path).replaceAll(RegExp(r'\.cs$'), '')}.cs'
+    : path;
 
 /// The file's line break: the first one in it (CRLF, CR or LF), LF when it has none. The
 /// editor joins lines with it, so a CRLF file is the same bytes until edited and is saved with

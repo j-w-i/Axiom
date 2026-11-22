@@ -937,8 +937,13 @@ impl Installer {
         cancel: &CancellationToken,
         report: &(dyn Fn(usize, String, Option<u64>, Option<u64>) + Sync),
     ) -> Result<PathBuf, EnvError> {
+        // The digest the download must have, and whether it is a SHA-512 (Microsoft's .NET
+        // publishes no SHA-256). The cache is keyed by it either way.
+        let sha512 = matches!(sha256, Sha256Source::Sha512Digest { .. });
         let expected = match sha256 {
-            Sha256Source::Digest { value } => value.to_ascii_lowercase(),
+            Sha256Source::Digest { value } | Sha256Source::Sha512Digest { value } => {
+                value.to_ascii_lowercase()
+            }
             Sha256Source::Url { url: sums } => {
                 let text = tokio::select! {
                     t = self.http.get_text(sums) => t?,
@@ -952,7 +957,8 @@ impl Installer {
                 })?
             }
         };
-        if !(expected.len() == 64 && expected.bytes().all(|b| b.is_ascii_hexdigit())) {
+        let digits = if sha512 { 128 } else { 64 };
+        if !(expected.len() == digits && expected.bytes().all(|b| b.is_ascii_hexdigit())) {
             return Err(EnvError::InvalidParams(
                 "The expected checksum is malformed.".into(),
             ));
@@ -963,7 +969,7 @@ impl Installer {
         let cached = cache.join(&expected);
         if cached.is_file() {
             let path = cached.clone();
-            let actual = tokio::task::spawn_blocking(move || sha256_file(&path))
+            let actual = tokio::task::spawn_blocking(move || hash_file(&path, sha512))
                 .await
                 .map_err(|_| EnvError::Unsupported("hashing task failed".into()))??;
             if actual == expected {
@@ -981,13 +987,20 @@ impl Installer {
             }
         };
         let result = self.http.download(url, &part, cancel, &mut on_chunk).await;
-        let (actual, _bytes) = match result {
+        let (mut actual, _bytes) = match result {
             Ok(r) => r,
             Err(e) => {
                 let _ = std::fs::remove_file(&part);
                 return Err(e);
             }
         };
+        if sha512 {
+            // The download hashed SHA-256 as it streamed; a SHA-512 is read back once.
+            let path = part.clone();
+            actual = tokio::task::spawn_blocking(move || hash_file(&path, true))
+                .await
+                .map_err(|_| EnvError::Unsupported("hashing task failed".into()))??;
+        }
         if actual != expected {
             let _ = std::fs::remove_file(&part);
             return Err(EnvError::ChecksumMismatch {
@@ -1109,6 +1122,14 @@ fn build_archive(
         },
         Checksum::Sha256Url { url } => Sha256Source::Url {
             url: expand_version(url, version)?,
+        },
+        Checksum::Sha512 { values } => Sha256Source::Sha512Digest {
+            value: values.get(version).cloned().ok_or_else(|| {
+                EnvError::NotFound(format!(
+                    "The provider lists no checksum for {} {version}.",
+                    m.name
+                ))
+            })?,
         },
     };
     let env = expand_map(env, version, root);
@@ -1395,8 +1416,14 @@ pub fn relink(root: &Path, to: &Path) -> Result<u32, EnvError> {
     Ok(changed)
 }
 
-fn sha256_file(path: &Path) -> Result<String, EnvError> {
+/// A file's SHA-512 when [sha512], else its SHA-256, as lowercase hex.
+fn hash_file(path: &Path, sha512: bool) -> Result<String, EnvError> {
     let mut f = std::fs::File::open(path).map_err(EnvError::io("Cannot read the cache"))?;
+    if sha512 {
+        let mut h = sha2::Sha512::new();
+        std::io::copy(&mut f, &mut h).map_err(EnvError::io("Cannot read the cache"))?;
+        return Ok(hex::encode(h.finalize()));
+    }
     let mut h = Sha256::new();
     std::io::copy(&mut f, &mut h).map_err(EnvError::io("Cannot read the cache"))?;
     Ok(hex::encode(h.finalize()))

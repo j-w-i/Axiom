@@ -413,9 +413,10 @@ class PlanDialog extends StatelessWidget {
           'Download ${fileName(url)}${bytes == null ? '' : ' · ${formatBytes(bytes)}'}',
           [
             url,
-            'SHA-256 ${switch (sha256) {
-              Sha256SourceDigest(:final value) => value,
-              Sha256SourceUrl(:final url) => 'from $url',
+            '${switch (sha256) {
+              Sha256SourceDigest(:final value) => 'SHA-256 $value',
+              Sha256SourceUrl(:final url) => 'SHA-256 from $url',
+              Sha256SourceSha512Digest(:final value) => 'SHA-512 $value',
             }}, checked before anything is used',
           ],
         ),
