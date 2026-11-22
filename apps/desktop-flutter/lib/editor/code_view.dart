@@ -220,6 +220,8 @@ class CodeView extends StatelessWidget {
       findController: findController,
       findBuilder: findBuilder,
       readOnly: readOnly,
+      cursorBlink: t.motion.caretBlinks,
+      cursorBlinkTimeout: t.motion.caretBlinkTimeout,
       wordWrap: wordWrap,
       onChanged: onChanged,
       padding: const EdgeInsets.only(left: 6, right: 12, top: 6, bottom: 64),

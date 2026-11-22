@@ -110,6 +110,9 @@ window is idle (the loop gate's `data-idle`); the meter renders only when its ba
   active muted; current line `--editor-line` (very low contrast); selection brass
   20%; cursor brass; indent guides `--editor-guide`; minimap kept (existing default);
   syntax from `--syn-*`. Font: the user's setting, or Plex Mono 13/20.
+- **The caret (Flutter shell, FL-PERF-001):** it blinks for 10 s after the last edit, caret
+  move or focus change, then stays solid (GTK's `gtk-cursor-blink-timeout`). Any edit, caret
+  move or focus change restarts the blink. With motion Reduced or Off it is solid.
 - **Empty editor** (workspace open, no document): §6.
 
 **As built (M1.6-EDITOR-001).** Tabs carry the explorer's glyph chip (shared `glyph.css`). The

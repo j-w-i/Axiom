@@ -107,6 +107,12 @@ everything under this policy = **4.4%**.
    plus text). `off`: same.
 7. The budget for every loop running together is in `performance.md` §3, measured on
    the production engine by M1.6-QA-004.
+8. **The editor's caret** (Flutter shell, FL-PERF-001) blinks for 10 s after the last
+   edit, caret move or focus change, then stays solid (GTK's `gtk-cursor-blink-timeout`).
+   Any edit, caret move or focus change restarts the blink. With `reduced` and `off` it is
+   solid. In the Flutter shell every frame repaints the whole window, so a caret that never
+   stopped blinking cost about 27 % of a core on a software renderer
+   (`docs/roadmap/verification/FL.md` §Idle CPU with a document open).
 
 ## 6. Reduced-motion behaviour
 

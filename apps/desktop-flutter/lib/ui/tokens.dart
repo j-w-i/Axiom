@@ -458,6 +458,15 @@ final class AxiomMotion {
       SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 1);
 
   bool get animates => mode != MotionMode.off;
+
+  /// The editor's caret blinks only at Standard: Reduced and Off make loops static (ADR-0013).
+  bool get caretBlinks => mode == MotionMode.standard;
+
+  /// How long the caret blinks after the last edit, caret move or focus change before it stays
+  /// solid (GTK's gtk-cursor-blink-timeout). Each frame re-rasterises the whole window, so after
+  /// this an editor left alone draws none (FL-PERF-001).
+  Duration get caretBlinkTimeout => const Duration(seconds: 10);
+
   Curve get curve => const Cubic(0.2, 0.8, 0.2, 1);
 }
 

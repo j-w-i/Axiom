@@ -25,6 +25,11 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
 
+# re_editor 0.10.0 with the caret's blink made configurable (third_party/re_editor/PATCHES.md).
+dependency_overrides:
+  re_editor:
+    path: third_party/re_editor
+
 flutter:
   uses-material-design: false
   # IBM's unmodified TTFs (assets/fonts/SOURCE.md; OFL-1.1, ADR-0013).
