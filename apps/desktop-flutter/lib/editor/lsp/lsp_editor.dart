@@ -320,7 +320,9 @@ List<CompletionChoice> parseCompletion(Object? result) {
   return [
     for (final i in items.whereType<Map<Object?, Object?>>())
       () {
-        final label = i['label'] as String? ?? '';
+        // clangd marks an item that adds an #include with a leading `•` and pads the others
+        // with a space: the name is what is shown, matched and inserted.
+        final label = (i['label'] as String? ?? '').replaceFirst(RegExp(r'^[\s•]+'), '');
         final te = i['textEdit'];
         final snippet = (i['insertTextFormat'] as num?)?.toInt() == 2;
         final text =

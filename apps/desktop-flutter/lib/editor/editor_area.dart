@@ -379,7 +379,9 @@ class _Breadcrumbs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
-    final parts = path.split('/');
+    final parts = isExternal(path)
+        ? Uri.parse(path).pathSegments.where((s) => s.isNotEmpty).toList()
+        : path.split('/');
     return SizedBox(
       height: 24,
       child: Padding(
@@ -568,6 +570,7 @@ class _DocViewState extends State<_DocView> {
   }
 
   Future<void> _computeMarks() async {
+    if (widget.doc.readOnly) return; // outside the workspace: not in its repository
     final seq = ++_marksSeq;
     final head = await app.git.headText(widget.doc.path);
     if (!mounted || seq != _marksSeq) return;
@@ -698,6 +701,7 @@ class _DocViewState extends State<_DocView> {
                       valueListenable: widget.doc.languageNotifier,
                       builder: (context, language, _) => CodeView(
                         controller: _controller,
+                        readOnly: widget.doc.readOnly,
                         language: language,
                         focusNode: widget.focusNode,
                         scrollController: _scroll,

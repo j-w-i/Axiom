@@ -1100,13 +1100,8 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final r = await lsp.request(server, 'textDocument/definition', _docPos());
       final loc = firstLocation(r);
       if (loc == null || !mounted) return;
-      final path = lsp.pathOf(loc.uri);
-      if (path == null) {
-        ToastHost.of(context).show(
-          'The definition is outside the workspace: ${Uri.decodeComponent(loc.uri.replaceFirst('file://', ''))}',
-        );
-        return;
-      }
+      // Outside the workspace (an SDK's or a dependency's source): opened read-only by its URI.
+      final path = lsp.pathOf(loc.uri) ?? loc.uri;
       await app.documents.open(path, line: loc.pos.line + 1, column: loc.pos.character + 1);
     } on DaemonException catch (e) {
       if (mounted) {

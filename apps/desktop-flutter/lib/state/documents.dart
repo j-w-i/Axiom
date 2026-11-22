@@ -30,7 +30,13 @@ const splitPathsKey = 'editor.splitPaths';
 const splitActiveKey = 'editor.splitActive';
 const _tabSaveDebounce = Duration(milliseconds: 500);
 
-String titleOf(String path) => path.split('/').last;
+String titleOf(String path) =>
+    isExternal(path) ? Uri.decodeComponent(path.split('/').last) : path.split('/').last;
+
+/// A document outside the workspace: its path is the `file://` URI a language server gave (an
+/// SDK's or a dependency's source). The daemon reads it, read-only, because the server pointed to
+/// it (protocol 0.4, ADR-0018 §2); it is never saved.
+bool isExternal(String path) => path.startsWith('file://');
 
 /// The file's line break: the first one in it (CRLF, CR or LF), LF when it has none. The
 /// editor joins lines with it, so a CRLF file is the same bytes until edited and is saved with
@@ -247,6 +253,9 @@ class Doc {
   }
 
   String get title => titleOf(path);
+
+  /// Outside the workspace: read-only (see [isExternal]).
+  bool get readOnly => isExternal(path);
   String get text => controller.text;
 
   /// Recomputes [dirty]; true when it changed.
@@ -602,7 +611,7 @@ class DocumentsStore extends ChangeNotifier {
 
   Future<void> save(String path) async {
     final d = doc(path);
-    if (d == null) return;
+    if (d == null || d.readOnly) return;
     try {
       await beforeSave?.call(d);
     } on Object {
@@ -782,8 +791,12 @@ class DocumentsStore extends ChangeNotifier {
         SetStateParams(
           workspaceId: workspace.id,
           values_: {
-            openPathsKey: [for (final d in docs) d.path],
-            activePathKey: activePath.isEmpty ? null : activePath,
+            // Files outside the workspace are readable only while their server pointed to them.
+            openPathsKey: [
+              for (final d in docs)
+                if (!d.readOnly) d.path,
+            ],
+            activePathKey: activePath.isEmpty || isExternal(activePath) ? null : activePath,
             splitPathsKey: split?.paths,
             splitActiveKey: split?.active,
           },

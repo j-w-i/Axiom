@@ -127,7 +127,9 @@ class LspStore extends ChangeNotifier {
   }
 
   String get rootUri => fileUri(workspace.root);
-  String uriOf(String path) => '$rootUri/${path.split('/').map(Uri.encodeComponent).join('/')}';
+  String uriOf(String path) => path.startsWith('file://')
+      ? path
+      : '$rootUri/${path.split('/').map(Uri.encodeComponent).join('/')}';
   String? pathOf(String uri) => relativeTo(uri, rootUri);
 
   void _clear() {
