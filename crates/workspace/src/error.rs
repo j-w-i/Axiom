@@ -24,6 +24,12 @@ pub enum WsError {
     Conflict { current: Option<FileVersion> },
     #[error("`{0}` is not valid UTF-8")]
     UnsupportedEncoding(String),
+    #[error("`{0}` already exists")]
+    AlreadyExists(String),
+    #[error("`{0}` is not a regular file")]
+    NotAFile(String),
+    #[error("{0}")]
+    Unsupported(String),
     #[error("file is too large ({bytes} bytes)")]
     TooLarge { bytes: u64 },
     #[error("I/O error: {0}")]
@@ -92,6 +98,15 @@ impl From<WsError> for RpcError {
                 ErrorKind::UnsupportedEncoding,
                 sentence(format!("`{p}` is not valid UTF-8")),
             ),
+            WsError::AlreadyExists(p) => RpcError::new(
+                ErrorKind::AlreadyExists,
+                sentence(format!("`{p}` already exists")),
+            ),
+            WsError::NotAFile(p) => RpcError::new(
+                ErrorKind::InvalidParams,
+                sentence(format!("`{p}` is not a regular file")),
+            ),
+            WsError::Unsupported(m) => RpcError::new(ErrorKind::Unsupported, sentence(m)),
             WsError::TooLarge { bytes } => RpcError::new(
                 ErrorKind::TooLarge,
                 sentence(format!(

@@ -20,6 +20,16 @@ pub const BACKLOG_BYTES: usize = 1024 * 1024;
 pub const COALESCE: Duration = Duration::from_millis(16);
 /// Hang-up, then a kill after this long.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(2);
+/// Largest output event: a burst longer than this is sent in several (AUD-036).
+pub const EVENT_MAX_BYTES: usize = 256 * 1024;
+/// Output of one terminal sent but not yet delivered (held by the event relay and the
+/// connections' queues). Past this the terminal stops reading its PTY, so the program waits
+/// (backpressure), instead of the daemon buffering without limit (AUD-036).
+pub const OUTPUT_BUDGET_BYTES: usize = 4 * 1024 * 1024;
+/// How long output waits for the budget. A relay that delivers nothing for this long (a stuck
+/// client) does not freeze the terminal: further output is not sent as events, the backlog keeps
+/// it, and the `seq` gap tells a client to redraw from `terminal/list`.
+pub const BUDGET_WAIT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, thiserror::Error)]
 pub enum TermError {
@@ -46,6 +56,61 @@ impl From<TermError> for axiom_protocol::RpcError {
     }
 }
 
+/// The bytes of a terminal's output budget one event holds; released when the last copy of the
+/// event is dropped (every subscriber has received and let go of it).
+#[derive(Debug)]
+pub struct OutputPermit {
+    bytes: usize,
+    budget: Arc<Budget>,
+}
+
+impl Drop for OutputPermit {
+    fn drop(&mut self) {
+        let mut held = lock(&self.budget.held);
+        *held = held.saturating_sub(self.bytes);
+        self.budget.cv.notify_all();
+    }
+}
+
+impl PartialEq for OutputPermit {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
+}
+
+/// One terminal's output budget (bytes sent as events and not yet released).
+#[derive(Debug, Default)]
+struct Budget {
+    held: Mutex<usize>,
+    cv: std::sync::Condvar,
+}
+
+impl Budget {
+    /// Takes `n` bytes, waiting up to [`BUDGET_WAIT`] while the budget is spent; `None` if it
+    /// stayed spent (the event is then not sent). An event larger than the budget is let through
+    /// when nothing else is held.
+    fn take(self: &Arc<Self>, n: usize) -> Option<OutputPermit> {
+        let end = Instant::now() + BUDGET_WAIT;
+        let mut held = lock(&self.held);
+        while *held > 0 && *held + n > OUTPUT_BUDGET_BYTES {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            held = self
+                .cv
+                .wait_timeout(held, left)
+                .map(|(g, _)| g)
+                .unwrap_or_else(|p| p.into_inner().0);
+        }
+        *held += n;
+        Some(OutputPermit {
+            bytes: n,
+            budget: self.clone(),
+        })
+    }
+}
+
 /// What a terminal reports.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TermEvent {
@@ -54,11 +119,16 @@ pub enum TermEvent {
         terminal_id: TerminalId,
         seq: u64,
         data: String,
+        /// This event's share of the terminal's output budget: keep the event (or this) until
+        /// its data is delivered, then drop it.
+        permit: Arc<OutputPermit>,
     },
     Exited {
         workspace_id: WorkspaceId,
         terminal_id: TerminalId,
         code: Option<i32>,
+        /// The shell's process id (its process group and session), now ended.
+        pid: Option<u32>,
     },
 }
 
@@ -118,6 +188,19 @@ impl Utf8Stream {
     }
 }
 
+/// Removes and returns at most `max` bytes from the front of `s`, cut at a character boundary.
+fn take_prefix(s: &mut String, max: usize) -> String {
+    if s.len() <= max {
+        return std::mem::take(s);
+    }
+    let mut cut = max;
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let rest = s.split_off(cut);
+    std::mem::replace(s, rest)
+}
+
 /// The kept output, trimmed from the front at a character boundary.
 #[derive(Default)]
 struct Backlog {
@@ -149,6 +232,7 @@ pub struct Terminal {
     backlog: Mutex<Backlog>,
     running: AtomicBool,
     exit_code: Mutex<Option<i32>>,
+    budget: Arc<Budget>,
 }
 
 impl Terminal {
@@ -195,7 +279,17 @@ impl Terminal {
             .map_err(|e| TermError::Io(std::io::Error::other(e.to_string())))
     }
 
-    /// Hangs up the process group; kills it if it is still there after the grace period.
+    /// Output bytes sent as events and not yet released (AUD-036).
+    pub fn held_output_bytes(&self) -> usize {
+        *lock(&self.budget.held)
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    /// Hangs up the process group; kills the terminal's session if it is still there after the
+    /// grace period.
     pub fn close(self: &Arc<Self>) {
         if !self.running.load(Ordering::SeqCst) {
             return;
@@ -214,12 +308,73 @@ impl Terminal {
                     }
                     std::thread::sleep(Duration::from_millis(20));
                 }
-                let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL);
+                me.kill_session();
             });
             return;
         }
+        #[cfg(windows)]
+        if let Some(pid) = self.pid {
+            // ConPTY: killing the shell leaves what it started; end the whole tree (AUD-101).
+            let killed = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success());
+            if killed {
+                return;
+            }
+        }
         let _ = lock(&self.killer).kill();
     }
+
+    /// SIGKILL to the shell's process group and, on Linux, to every other group of its session
+    /// (jobs an interactive shell put in groups of their own).
+    #[cfg(unix)]
+    fn kill_session(&self) {
+        use nix::sys::signal::{killpg, Signal};
+        use nix::unistd::Pid;
+        let Some(pid) = self.pid else { return };
+        let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL);
+        for g in session_groups(pid) {
+            let _ = killpg(Pid::from_raw(g as i32), Signal::SIGKILL);
+        }
+    }
+}
+
+/// The process groups of the session `sid` (Linux: from `/proc`; elsewhere none known).
+#[cfg(target_os = "linux")]
+fn session_groups(sid: u32) -> Vec<u32> {
+    let mut out = Vec::new();
+    if let Ok(dir) = std::fs::read_dir("/proc") {
+        for e in dir.flatten() {
+            let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                continue;
+            };
+            // After the command's closing parenthesis: state ppid pgrp session …
+            let Some(rest) = stat.rsplit_once(')').map(|(_, r)| r) else {
+                continue;
+            };
+            let f: Vec<&str> = rest.split_whitespace().collect();
+            if f.get(3).and_then(|s| s.parse::<u32>().ok()) == Some(sid) {
+                if let Some(g) = f.get(2).and_then(|s| s.parse::<u32>().ok()) {
+                    if !out.contains(&g) {
+                        out.push(g);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn session_groups(_sid: u32) -> Vec<u32> {
+    Vec::new()
 }
 
 /// Every terminal of the daemon.
@@ -305,6 +460,24 @@ impl Terminals {
         }
     }
 
+    /// Closes every terminal and waits (blocking, at most the grace period and a little more)
+    /// until they have ended, killing what ignores the hang-up: for the daemon's shutdown, which
+    /// must not exit before the escalation has run (AUD-027).
+    pub fn close_all_and_wait(&self) {
+        let all: Vec<_> = lock(&self.map).drain().map(|(_, t)| t).collect();
+        for t in &all {
+            t.close();
+        }
+        let end = Instant::now() + CLOSE_GRACE + Duration::from_millis(500);
+        while Instant::now() < end && all.iter().any(|t| t.is_running()) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        #[cfg(unix)]
+        for t in all.iter().filter(|t| t.is_running()) {
+            t.kill_session();
+        }
+    }
+
     /// Closes one terminal and forgets it.
     pub fn close(&self, id: &TerminalId) -> Result<(), TermError> {
         let t = lock(&self.map)
@@ -371,6 +544,7 @@ impl Terminals {
             backlog: Mutex::new(Backlog::default()),
             running: AtomicBool::new(true),
             exit_code: Mutex::new(None),
+            budget: Arc::default(),
         });
         lock(&self.map).insert(id, t.clone());
 
@@ -407,7 +581,7 @@ impl Terminals {
                     } else {
                         COALESCE.saturating_sub(last.elapsed())
                     };
-                    if open {
+                    if open && pending.len() < EVENT_MAX_BYTES {
                         match rx.recv_timeout(wait) {
                             Ok(bytes) => pending.push_str(&decoder.push(&bytes)),
                             Err(RecvTimeoutError::Timeout) => {}
@@ -417,20 +591,25 @@ impl Terminals {
                             }
                         }
                     }
-                    if !pending.is_empty() && (last.elapsed() >= COALESCE || !open) {
-                        let data = std::mem::take(&mut pending);
+                    let full = pending.len() >= EVENT_MAX_BYTES;
+                    if !pending.is_empty() && (full || last.elapsed() >= COALESCE || !open) {
+                        let data = take_prefix(&mut pending, EVENT_MAX_BYTES);
                         let seq = {
                             let mut b = lock(&term.backlog);
                             b.push(&data);
                             b.seq += 1;
                             b.seq
                         };
-                        let _ = events.send(TermEvent::Output {
-                            workspace_id: term.workspace_id.clone(),
-                            terminal_id: term.id.clone(),
-                            seq,
-                            data,
-                        });
+                        // Waiting here stops reading the PTY: the program waits too.
+                        if let Some(permit) = term.budget.take(data.len()) {
+                            let _ = events.send(TermEvent::Output {
+                                workspace_id: term.workspace_id.clone(),
+                                terminal_id: term.id.clone(),
+                                seq,
+                                data,
+                                permit: Arc::new(permit),
+                            });
+                        }
                         last = Instant::now();
                     }
                 }
@@ -447,6 +626,7 @@ impl Terminals {
                     workspace_id: term.workspace_id.clone(),
                     terminal_id: term.id.clone(),
                     code,
+                    pid: term.pid,
                 });
             })?;
         Ok(t)
@@ -465,6 +645,34 @@ mod tests {
         assert_eq!(d.push(&pi[1..4]), "π");
         assert_eq!(d.push(&pi[4..]), "😀");
         assert_eq!(d.push(b"a\xffb"), "a\u{FFFD}b");
+    }
+
+    #[test]
+    fn prefixes_are_cut_at_character_boundaries() {
+        let mut s = "aé".repeat(3);
+        assert_eq!(take_prefix(&mut s, 2), "a");
+        assert_eq!(s, "éaéaé");
+        assert_eq!(take_prefix(&mut s, 100), "éaéaé");
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn the_budget_waits_then_gives_up_and_is_released_on_drop() {
+        let b: Arc<Budget> = Arc::default();
+        let big = b.take(OUTPUT_BUDGET_BYTES).unwrap();
+        // One event larger than the budget passes when nothing else is held.
+        drop(big);
+        let a = b.take(OUTPUT_BUDGET_BYTES - 10).unwrap();
+        let t = Instant::now();
+        assert!(b.take(100).is_none());
+        assert!(t.elapsed() >= BUDGET_WAIT);
+        // Released by another thread while waiting: the wait ends early.
+        let b2 = b.clone();
+        let h = std::thread::spawn(move || b2.take(100).is_some());
+        std::thread::sleep(Duration::from_millis(50));
+        drop(a);
+        assert!(h.join().unwrap());
+        assert_eq!(*lock(&b.held), 0);
     }
 
     #[test]

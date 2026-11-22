@@ -28,6 +28,10 @@ pub async fn create(app: Arc<App>, p: CreateParams) -> Result<TerminalInfo, RpcE
     let t = tokio::task::spawn_blocking(move || terms.terminals.create(spec))
         .await
         .map_err(|_| crate::app::internal())??;
+    // Ended by the watchdog if the daemon dies without closing it (AUD-027).
+    if let Some(pid) = t.pid {
+        axiom_exec::guard::watch_group(pid);
+    }
     Ok(t.info())
 }
 
@@ -87,25 +91,30 @@ pub fn spawn_forwarder(app: &Arc<App>) {
                     terminal_id,
                     seq,
                     data,
+                    permit,
                 } => {
                     let n = OutputParams {
                         terminal_id,
                         seq,
                         data,
                     };
-                    for c in app.clients_of(&workspace_id) {
-                        let _ = c.notify::<Output>(n.clone()).await;
-                    }
+                    // The permit is held until the output is queued for every connection: a
+                    // terminal producing faster than its readers take waits (AUD-036); a
+                    // connection that does not read does not hold up the others (AUD-030).
+                    app.notify_clients::<Output>(&workspace_id, n).await;
+                    drop(permit);
                 }
                 TermEvent::Exited {
                     workspace_id,
                     terminal_id,
                     code,
+                    pid,
                 } => {
-                    let n = ExitedParams { terminal_id, code };
-                    for c in app.clients_of(&workspace_id) {
-                        let _ = c.notify::<Exited>(n.clone()).await;
+                    if let Some(pid) = pid {
+                        axiom_exec::guard::unwatch_group(pid);
                     }
+                    let n = ExitedParams { terminal_id, code };
+                    app.notify_clients::<Exited>(&workspace_id, n).await;
                 }
             }
         }

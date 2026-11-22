@@ -13,7 +13,7 @@ enum Level {
     Debug,
 }
 
-/// The Axiom daemon. Speaks protocol 0.2 on stdin/stdout; logs to stderr.
+/// The Axiom daemon. Speaks the Axiom protocol on stdin/stdout; logs to stderr.
 #[derive(Parser)]
 #[command(name = "axiomd", version)]
 struct Cli {
@@ -25,10 +25,26 @@ struct Cli {
     /// Do not listen on the local socket for other clients (ADR-0015 §6).
     #[arg(long)]
     no_listen: bool,
+    /// Internal: run as the daemon's exit watchdog (`axiom_exec::guard`), not as a daemon.
+    #[arg(long, hide = true)]
+    watchdog: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
+    if cli.watchdog {
+        axiom_exec::guard::run_watchdog();
+        return;
+    }
+    // Ends the daemon's tasks and terminals if it is killed or crashes (AUD-027).
+    match std::env::current_exe() {
+        Ok(exe) => {
+            if let Err(e) = axiom_exec::guard::install(&[exe.into(), "--watchdog".into()]) {
+                eprintln!("axiomd: no exit watchdog: {e}");
+            }
+        }
+        Err(e) => eprintln!("axiomd: no exit watchdog: {e}"),
+    }
     // stdout is the protocol channel: logs go to stderr only.
     let level = match cli.log_level {
         Level::Error => tracing::Level::ERROR,

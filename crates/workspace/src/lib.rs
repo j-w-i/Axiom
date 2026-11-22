@@ -1,11 +1,13 @@
 //! Workspace registry and safe file access (`workspace/open|close`, `fs/list`,
 //! `fs/readFile`, `fs/writeFile`), and text search and file removal for the agent's tools
-//! (M3). No persistence or RPC here.
+//! (M3); creating, renaming and trashing entries (protocol 0.6). No persistence or RPC here.
 
 mod error;
+mod fileops;
 mod ignore_rules;
 mod registry;
 mod search;
+mod trash;
 mod watch;
 mod workspace;
 
@@ -17,4 +19,4 @@ pub use search::{
     FIND_MAX_LIMIT,
 };
 pub use watch::WatchHandle;
-pub use workspace::Workspace;
+pub use workspace::{read_regular_file, Workspace};

@@ -33,6 +33,36 @@ method!(
     /// is off by default on each connection.
     Watch, "fs/watch", WatchParams => Empty
 );
+method!(
+    /// Protocol 0.6 (audit AUD-022). Creates a new file with `text` (default empty), atomically
+    /// (temp file, fsync, rename that never replaces). The directory must exist. Errors:
+    /// `already_exists` (anything has that name: a file, a directory, a symlink), `not_found`
+    /// (directory missing), `permission_denied` (resolves outside the workspace), `too_large`,
+    /// `invalid_params` (bad path, the root).
+    CreateFile, "fs/createFile", CreateFileParams => WriteFileResult
+);
+method!(
+    /// Protocol 0.6. Creates a directory; with `parents`, the missing ones above it too. Errors:
+    /// `already_exists`, `not_found` (parent missing, without `parents`), `permission_denied`,
+    /// `invalid_params`.
+    CreateDirectory, "fs/createDirectory", CreateDirectoryParams => Empty
+);
+method!(
+    /// Protocol 0.6. Renames or moves a file, directory or symlink inside the workspace. A
+    /// symlink is moved itself, never followed. Never replaces: `already_exists` if `to` exists
+    /// (a case-only rename of the same entry is allowed). `to`'s directory must exist
+    /// (`not_found`); a directory cannot move into itself (`invalid_params`); either path
+    /// resolving outside the workspace is `permission_denied`.
+    Rename, "fs/rename", RenameParams => Empty
+);
+method!(
+    /// Protocol 0.6. Moves a file, directory or symlink (the link itself) to the person's trash:
+    /// the freedesktop.org trash on Linux, `~/.Trash` on macOS. `unsupported` where there is no
+    /// trash the entry can be moved to (other platforms, another drive without a trash
+    /// folder): nothing is ever deleted permanently. Errors besides: `not_found`,
+    /// `permission_denied`, `invalid_params` (the root).
+    Trash, "fs/trash", TrashParams => Empty
+);
 notification!(
     /// Daemon to client. Coalesced (at most one per 100 ms per workspace)
     /// set of paths that changed on disk, from any cause including this
@@ -147,4 +177,43 @@ pub enum ChangeKind {
     Created,
     Modified,
     Removed,
+}
+
+/// `fs/createFile` (0.6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateFileParams {
+    pub workspace_id: WorkspaceId,
+    pub path: WorkspacePath,
+    /// The new file's content; empty when absent.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+}
+
+/// `fs/createDirectory` (0.6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDirectoryParams {
+    pub workspace_id: WorkspaceId,
+    pub path: WorkspacePath,
+    /// Also create missing parent directories (`mkdir -p`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parents: bool,
+}
+
+/// `fs/rename` (0.6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameParams {
+    pub workspace_id: WorkspaceId,
+    pub from: WorkspacePath,
+    pub to: WorkspacePath,
+}
+
+/// `fs/trash` (0.6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashParams {
+    pub workspace_id: WorkspaceId,
+    pub path: WorkspacePath,
 }

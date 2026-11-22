@@ -1,7 +1,8 @@
-# IPC protocol 0.5 (shell/CLI/agents ↔ daemon)
+# IPC protocol 0.6 (shell/CLI/agents ↔ daemon)
 
 **State: 0.1 frozen for M1; each later minor's additions frozen by its milestone's first task
-(0.2 M2-ARCH-001, 0.3 M3-ARCH-001, 0.4 M4-ARCH-001, 0.5 M5-ARCH-001).**
+(0.2 M2-ARCH-001, 0.3 M3-ARCH-001, 0.4 M4-ARCH-001, 0.5 M5-ARCH-001); 0.6 by the owner-approved
+change request `docs/decisions/proposed/CR-AUD-022-workspace-file-operations.md`.**
 Source of truth for types: `crates/protocol`.
 Machine-readable form: `schemas/ipc/protocol.schema.json` (generated). This
 document specifies the behaviour the types cannot express.
@@ -14,7 +15,10 @@ document specifies the behaviour the types cannot express.
 - M1 transport: the daemon's stdin (client→daemon) and stdout (daemon→client).
   stderr is unstructured log text and is not part of the protocol.
 - Maximum line length: 64 MiB. A longer line is a fatal protocol error: the
-  receiver closes the connection.
+  receiver closes the connection. A sender never writes one (AUD-100): the daemon answers a
+  request whose response would be longer with a `too_large` error for its id (details
+  `{ "bytes", "limit" }`) and drops (and logs) a notification that would be; `axiom_rpc::Client`
+  refuses such a request with `too_large` without sending it.
 - Either side may send requests and notifications. In 0.1 the daemon sends no
   requests, only notifications.
 
@@ -39,6 +43,10 @@ Why NDJSON rather than LSP's `Content-Length` framing: see ADR-0003.
 - Every request gets exactly one response, including cancelled ones.
 - Unknown method → `method_not_found`. Params that fail to deserialize →
   `invalid_params` with details `{ "reason": "<serde message>" }`.
+- A message that is not valid JSON-RPC is answered `invalid_request`, with its `id` when it has
+  a `method` member and an `id` that is a number or a string (JSON-RPC 2.0 §5, AUD-096), else
+  with `id: null` (a message without `method` may be a malformed response, which is never
+  answered with its id).
 - Unknown *fields* in params are ignored (forward compatibility). Unknown
   enum values are an `invalid_params` error.
 - Requests are handled concurrently. Responses may arrive in any order.
@@ -78,7 +86,7 @@ Why NDJSON rather than LSP's `Content-Length` framing: see ADR-0003.
 | `not_initialized` | request before `initialize` |
 | `cancelled`, `timeout`, `unsupported` | protocol level |
 | `not_found` | file, directory, task or parent directory does not exist |
-| `already_exists` | reserved (create operations, M2+) |
+| `already_exists` | a create, or a rename onto, a name that is taken (0.6 `fs/*`) |
 | `permission_denied` | OS permission, or path escapes the workspace |
 | `conflict` | `expectedVersion` mismatch, or creating an existing file |
 | `io` | any other OS I/O failure (details: `{ "osError": string }`) |
@@ -335,6 +343,47 @@ Additive only, under the same rules: the daemon reports `0.5`. Types:
   `skipped` in M5. A skipped check neither passes nor fails the verdict.
 - New error kinds: `preview_failed` (-32029), `adapter_unavailable` (-32030).
 
+## Protocol 0.6 (audit AUD-022)
+
+Additive only: four methods, no new notification, no new error kind; the daemon reports `0.6`,
+and a 0.5 client gets `0.5` and unchanged behaviour (it just does not see the methods in
+`initialize.methods`). Types: `crates/protocol/src/fs.rs`. Why: the change request
+`docs/decisions/proposed/CR-AUD-022-workspace-file-operations.md`.
+
+| Method | Params → Result | Errors (besides the generic ones) |
+|--------|-----------------|-----------------------------------|
+| `fs/createFile` | `CreateFileParams {workspaceId, path, text?}` → `WriteFileResult {version}` | `already_exists`, `not_found` (directory missing), `permission_denied`, `too_large`, `invalid_params` |
+| `fs/createDirectory` | `CreateDirectoryParams {workspaceId, path, parents?}` → `{}` | `already_exists`, `not_found` (parent missing, without `parents`), `permission_denied`, `invalid_params` |
+| `fs/rename` | `RenameParams {workspaceId, from, to}` → `{}` | `already_exists`, `not_found` (`from`, or `to`'s directory), `permission_denied`, `invalid_params` (into itself, the root) |
+| `fs/trash` | `TrashParams {workspaceId, path}` → `{}` | `not_found`, `unsupported` (no trash it can go to), `permission_denied`, `invalid_params` (the root) |
+
+- **Containment.** Every path is a `WorkspacePath` resolved as for every other `fs/*` method
+  (lexical rules, then symlinks resolved, then inside the root, else `permission_denied`). The
+  entry a path names is never followed itself: renaming or trashing a symlink moves the link,
+  never what it points to (inside the workspace or not). The root itself cannot be created,
+  renamed or trashed.
+- **Never replaces.** `fs/createFile` and `fs/createDirectory` fail with `already_exists` when
+  anything has the name (a file, a directory, a symlink, a dangling one too). `fs/rename` fails
+  with `already_exists` when `to` exists, an empty directory included; the rename is atomic
+  where the platform allows (Linux `renameat2(RENAME_NOREPLACE)`, macOS `renamex_np(RENAME_EXCL)`;
+  elsewhere checked right before). A case-only rename of the same entry
+  (`a.txt` → `A.txt` on a case-insensitive volume) is allowed. Renaming a path to itself is `{}`.
+- **`fs/createFile`** writes like `fs/writeFile` (temp file in the same directory, fsync, then a
+  rename that never replaces): the file appears complete or not at all. `text` defaults to
+  empty. Never creates parent directories; `fs/createDirectory` with `parents: true` does.
+- **`fs/trash`** moves the entry (a directory with everything in it) to the person's trash; it
+  never deletes permanently. Linux and other freedesktop.org desktops: the Trash specification
+  1.0. On the same file system as `$XDG_DATA_HOME` (default `~/.local/share`), into
+  `$XDG_DATA_HOME/Trash/files/` with `info/<name>.trashinfo` (`Path` absolute, percent-encoded;
+  `DeletionDate` written in UTC, as the daemon has no time-zone database); on another file
+  system, `$topdir/.Trash/$uid` when `$topdir/.Trash` is a real directory with the sticky bit,
+  else `$topdir/.Trash-$uid` (`Path` relative to `$topdir`). A name taken in the trash gets a
+  number (`a.2.txt`). macOS: renamed into `~/.Trash` when on the same volume. Anything else
+  (another volume on macOS, a file system where no trash folder can be made, Windows):
+  `unsupported`, and the entry stays where it was.
+- **Notifications.** No new ones: a client watching the workspace (`fs/watch`) gets the usual
+  `fs/didChange` (`created`; `removed` + `created` for a rename; `removed` for a trash).
+
 ## Behavioural details
 
 ### `fs/writeFile` decision table
@@ -365,6 +414,16 @@ by remove is `removed`). Changes under ignored directories (and under `.git`) ar
 dropped; a change to an individually ignored file in a non-ignored
 directory is reported, because `fs/list` lists such files. If the OS reports an overflow, the daemon sends one change with
 `path: ""`, `kind: "modified"`, meaning "re-list everything you show".
+`fs/watch` is per connection: every connection that enabled it gets every batch, enabling it
+twice on one connection is one subscription, and a connection's subscription ends with it
+(AUD-028).
+
+### `workspace/close`
+A workspace opened by several connections (the same folder gives the same `workspaceId`) is
+held by each of them. `workspace/close` releases the calling connection's hold (and its
+`fs/watch`); the workspace's tasks, language servers, terminals, watches and previews stop, and
+its id becomes unknown, only when the last connection holding it closes it or disconnects
+(AUD-029).
 
 ### Tasks
 - `argv[0]` is resolved against the task's `PATH` (after `env` is applied).
@@ -376,7 +435,18 @@ directory is reported, because `fs/list` lists such files. If the OS reports an 
   grandchildren.
 - `task/cancel`: Unix `SIGTERM` to the group, `SIGKILL` after 3 s. Windows:
   `TerminateJobObject` immediately (there is no portable graceful signal for
-  non-console children).
+  non-console children). On Windows the process is created suspended and resumed only once it
+  is in its job object, so nothing it starts escapes the job (AUD-101).
+- A task ends when its own process has exited and its output pipes are drained, but the drain
+  is bounded (AUD-007): if a descendant still holds stdout or stderr 2 s after the process
+  exited (`server &`, a daemonising tool), the task's process group is killed, and if the pipes
+  are still open 500 ms later (a descendant that left the group) reading stops; `task/exited`
+  then reports the process's own exit status. Output such a descendant writes later is lost.
+  A cancel during that drain kills the group at once. `task/cancel` and `workspace/close`
+  therefore never wait on a pipe.
+- A `$/cancel` that races a successful `task/start` or `build/run` (the response is then
+  `cancelled`) cancels the task it started, so no task runs on that the client never learnt
+  about (AUD-098).
 - Finished tasks are kept for `task/list` (50 per workspace); their output is
   not retained by the daemon in 0.1.
 
@@ -404,8 +474,8 @@ it to this table and the daemon's registry.
 - MINOR bump: new methods, notifications, optional fields, settings keys.
 - MAJOR bump: anything that could break an existing client. Needs an ADR.
 - The daemon must keep serving every method listed for the MAJOR it speaks.
-- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 to 0.5 added
-  methods and optional fields only, so a 0.1 client talking to a 0.5 daemon gets `"0.1"` and
+- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 to 0.6 added
+  methods and optional fields only, so a 0.1 client talking to a 0.6 daemon gets `"0.1"` and
   unchanged behaviour.
 
 ## Example session
@@ -423,7 +493,8 @@ it to this table and the daemon's registry.
 
 ## Contract tests
 
-- Shape: `crates/protocol/tests/contract.rs` (0.1) and `tests/m2_contract.rs` (0.2 additions).
+- Shape: `crates/protocol/tests/contract.rs` (0.1), `tests/m2_contract.rs` (0.2 additions), and
+  so on per minor; `tests/fs_ops_contract.rs` for 0.6.
 - Behaviour: `crates/axiomd/tests/` spawns the real binary and exercises every
   row of every table in this document (task M1-DAEMON-002). A behaviour stated
   here without a test there is a defect in the test suite.

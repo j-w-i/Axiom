@@ -33,23 +33,51 @@ pub async fn open(app: Arc<App>, p: OpenParams, ctx: RequestCtx) -> Result<OpenR
     Ok(opened)
 }
 
-pub async fn close(app: Arc<App>, p: WorkspaceRef) -> Result<Empty, RpcError> {
+/// `workspace/close`: this connection lets go of the workspace. Workspace handles are shared by
+/// the connections that opened the same folder (processes.md §Multi-client): only when the last
+/// one closes it (or disconnects, [`release_connection`]) are its tasks, servers, terminals and
+/// watches stopped (AUD-029).
+pub async fn close(app: Arc<App>, p: WorkspaceRef, ctx: RequestCtx) -> Result<Empty, RpcError> {
     app.workspaces.get(&p.workspace_id)?;
-    app.executor.cancel_all(&p.workspace_id).await;
-    app.stop_watcher(&p.workspace_id);
-    app.lsp.close_workspace(&p.workspace_id).await;
-    app.terminals.close_workspace(&p.workspace_id);
-    crate::handlers::git::stop_watch(&app, &p.workspace_id);
+    app.stop_watcher_of(&p.workspace_id, &ctx.notifier);
+    if app.release_client(&p.workspace_id, &ctx.notifier) {
+        teardown(&app, &p.workspace_id).await?;
+    }
+    Ok(Empty {})
+}
+
+/// A connection ended: it lets go of every workspace it had open; those no other connection
+/// holds are torn down.
+pub async fn release_connection(app: Arc<App>, n: axiom_rpc::Notifier) {
+    for ws in app.workspaces_of(&n) {
+        app.stop_watcher_of(&ws, &n);
+        if app.release_client(&ws, &n) {
+            if let Err(e) = teardown(&app, &ws).await {
+                tracing::debug!("closing {ws:?} after its last connection: {e:?}");
+            }
+        }
+    }
+}
+
+/// Stops everything of the workspace and forgets it.
+pub async fn teardown(app: &Arc<App>, id: &axiom_protocol::WorkspaceId) -> Result<(), RpcError> {
+    app.executor.cancel_all(id).await;
+    app.stop_watcher(id);
+    app.lsp.close_workspace(id).await;
+    app.terminals.close_workspace(id);
+    crate::handlers::git::stop_watch(app, id);
+    crate::handlers::preview::close_workspace(app, id).await;
     app.external_reads
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .remove(&p.workspace_id);
+        .remove(id);
     app.clients
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .remove(&p.workspace_id);
-    app.workspaces.close(&p.workspace_id).await?;
-    Ok(Empty {})
+        .remove(id);
+    app.executor.forget_workspace(id);
+    app.workspaces.close(id).await?;
+    Ok(())
 }
 
 pub async fn recent(app: Arc<App>, _: Empty) -> Result<RecentResult, RpcError> {

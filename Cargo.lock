@@ -289,17 +289,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-desktop-bridge"
-version = "0.1.0"
-dependencies = [
- "axiom-protocol",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "axiom-env"
 version = "0.1.0"
 dependencies = [
@@ -424,6 +413,7 @@ dependencies = [
  "ignore",
  "notify",
  "regex",
+ "rustix",
  "serde_json",
  "sha2",
  "tempfile",
@@ -451,6 +441,8 @@ dependencies = [
  "flate2",
  "futures-util",
  "hex",
+ "nix 0.30.1",
+ "rustix",
  "serde_json",
  "sha2",
  "tar",

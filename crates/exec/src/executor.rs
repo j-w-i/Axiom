@@ -16,6 +16,12 @@ use tokio::sync::{mpsc, watch, Notify};
 const CHUNK: usize = 8 * 1024;
 const EVENT_CAPACITY: usize = 256;
 const KILL_GRACE: Duration = Duration::from_secs(3);
+/// How long the pipes may stay open after the task's own process has exited (AUD-007).
+const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(2);
+/// How long the pipes may stay open after the task's process group was killed.
+const DRAIN_AFTER_KILL: Duration = Duration::from_millis(500);
+/// Longest `cancel_all` waits for its tasks (they end within the kill grace plus the drains).
+const CANCEL_ALL_BOUND: Duration = Duration::from_secs(10);
 const HISTORY_PER_WORKSPACE: usize = 50;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,6 +127,10 @@ impl Executor {
         }
         let mut cmd = self.inner.backend.prepare(&spec);
         let started = Instant::now();
+        // On Windows the process starts suspended, so nothing it starts escapes its job object
+        // (AUD-101); `attach` assigns the job, then it is resumed.
+        #[cfg(windows)]
+        cmd.creation_flags(crate::tree_windows::CREATE_SUSPENDED);
         let mut child = cmd.spawn().map_err(|e| ExecError::SpawnFailed {
             program: program_name(&spec.command),
             os_error: e.to_string(),
@@ -128,13 +138,26 @@ impl Executor {
         let tree: SharedTree = match tree::attach(&child) {
             Some(t) => Arc::new(Mutex::new(t)),
             None => {
+                // Never ran (Windows: still suspended); reap it before reporting.
                 let _ = child.start_kill();
+                let _ = child.wait().await;
                 return Err(ExecError::SpawnFailed {
                     program: program_name(&spec.command),
                     os_error: "could not attach process tree control".into(),
                 });
             }
         };
+        #[cfg(windows)]
+        if let Err(e) = crate::tree_windows::resume(&child) {
+            lock(&tree).kill();
+            let _ = child.wait().await;
+            return Err(ExecError::SpawnFailed {
+                program: program_name(&spec.command),
+                os_error: format!("could not resume the process: {e}"),
+            });
+        }
+        let group = child.id().unwrap_or(0);
+        crate::guard::watch_group(group);
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
@@ -172,6 +195,7 @@ impl Executor {
 
         tokio::spawn(supervise(Supervised {
             id: id.clone(),
+            group,
             child,
             stdout,
             stderr,
@@ -226,10 +250,25 @@ impl Executor {
                 waits.push(e.done.clone());
             }
         }
-        for mut w in waits {
-            // Err means the supervisor is gone, which also means finished.
-            let _ = w.wait_for(|done| *done).await;
+        let all = async {
+            for mut w in waits {
+                // Err means the supervisor is gone, which also means finished.
+                let _ = w.wait_for(|done| *done).await;
+            }
+        };
+        // Bounded: a supervisor ends within the kill grace and the drains, but a process the
+        // OS cannot reap (uninterruptible sleep) must not hang `workspace/close` or shutdown.
+        if tokio::time::timeout(CANCEL_ALL_BOUND, all).await.is_err() {
+            tracing::warn!("tasks of {workspace:?} did not end within {CANCEL_ALL_BOUND:?}");
         }
+    }
+
+    /// Forgets the finished tasks of a closed workspace (its history is never asked for again:
+    /// workspace ids are not reused; AUD-099).
+    pub fn forget_workspace(&self, workspace: &WorkspaceId) {
+        lock(&self.inner.state)
+            .tasks
+            .retain(|_, e| &e.workspace != workspace || e.finished_at.is_none());
     }
 
     /// `cancel_all` for every workspace.
@@ -249,6 +288,8 @@ impl Executor {
 
 struct Supervised {
     id: TaskId,
+    /// The task's process group (Unix) or process id, for the daemon-exit watchdog.
+    group: u32,
     child: tokio::process::Child,
     stdout: Option<tokio::process::ChildStdout>,
     stderr: Option<tokio::process::ChildStderr>,
@@ -357,30 +398,57 @@ async fn supervise(mut s: Supervised) {
         }
     };
 
-    // The process is reaped. Let the pipes drain; if descendants keep them
-    // open after a cancel, finish them off when the grace period ends.
+    // The process is reaped. Let the pipes drain, but never wait for them without a bound
+    // (AUD-007): a descendant that inherited stdout/stderr (`server &`, a daemonising tool)
+    // keeps them open after the task's own process has exited. After the drain window (or, for
+    // a cancelled task, the rest of its grace period) the task's process group is killed; if
+    // the pipes are still open even then (a descendant left the group), reading stops.
+    // A cancel during the drain kills the group at once.
+    let aborts: Vec<tokio::task::AbortHandle> = readers.iter().map(|r| r.abort_handle()).collect();
     let drain = async {
         for r in readers.iter_mut() {
             let _ = r.await;
         }
     };
     tokio::pin!(drain);
-    match grace_deadline {
-        Some(d) => {
-            tokio::select! {
-                _ = &mut drain => {}
-                _ = tokio::time::sleep_until(d) => {
+    let now = tokio::time::Instant::now();
+    let (mut deadline, mut killed) = match (grace_deadline, cancel_seen) {
+        // Cancelled, the grace period still running: the descendants get the rest of it.
+        (Some(d), _) => (d, false),
+        // Cancelled and already killed.
+        (None, true) => (now + DRAIN_AFTER_KILL, true),
+        (None, false) => (now + DRAIN_AFTER_EXIT, false),
+    };
+    let mut aborted = false;
+    loop {
+        tokio::select! {
+            _ = &mut drain => break,
+            _ = s.cancel.notified(), if !cancel_seen => {
+                cancel_seen = true;
+                lock(&s.tree).kill();
+                killed = true;
+                deadline = tokio::time::Instant::now() + DRAIN_AFTER_KILL;
+            }
+            _ = tokio::time::sleep_until(deadline), if !aborted => {
+                if killed {
+                    // Still open after the kill: whatever holds them is not ours to wait for.
+                    for a in &aborts {
+                        a.abort();
+                    }
+                    aborted = true;
+                } else {
                     lock(&s.tree).kill();
-                    drain.await;
+                    killed = true;
+                    deadline = tokio::time::Instant::now() + DRAIN_AFTER_KILL;
                 }
             }
         }
-        None => drain.await,
     }
     // A cancelled task must not leave descendants behind.
     if s.cancelled.load(Ordering::SeqCst) {
         lock(&s.tree).kill();
     }
+    crate::guard::unwatch_group(s.group);
 
     let (exit_code, signal) = match &status {
         Ok(st) => (st.code(), signal_of(st)),

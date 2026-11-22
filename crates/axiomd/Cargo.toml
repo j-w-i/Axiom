@@ -36,7 +36,13 @@ tracing-subscriber.workspace = true
 serde_json.workspace = true
 futures-util.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# The local socket's listener lock (`flock`, safe). Already in the tree through `tempfile`.
+rustix = { version = "1.1", features = ["fs"] }
+
 [dev-dependencies]
+# Paused time for the git change relay's tests.
+tokio = { version = "1", features = ["full", "test-util"] }
 tokio-util.workspace = true
 axiom-agent = { path = "../agent", features = ["test-support"] }
 tempfile.workspace = true
@@ -45,6 +51,9 @@ tar.workspace = true
 flate2.workspace = true
 sha2.workspace = true
 hex.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+nix.workspace = true
 
 [lints]
 workspace = true

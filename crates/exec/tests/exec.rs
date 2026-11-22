@@ -629,3 +629,106 @@ async fn dropping_the_receiver_does_not_hang_the_task() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
+
+/// AUD-007: a background descendant that inherited stdout keeps the pipe open after the task's
+/// own process has exited. The task still ends (within the drain window) with the shell's exit
+/// status, and the descendant, still holding the task's output, is ended with it.
+#[cfg(unix)]
+#[tokio::test]
+async fn exit_with_a_background_pipe_holder_still_reports_exited() {
+    let ex = Executor::new();
+    let t = Instant::now();
+    let (_, mut rx) = ex
+        .start(ws(), sh("sleep 30 & echo $!; exit 0"))
+        .await
+        .unwrap();
+    let pid: i32 = match tokio::time::timeout(Duration::from_secs(10), rx.recv())
+        .await
+        .unwrap()
+        .unwrap()
+    {
+        TaskEvent::Output(o) => o.data.trim().parse().unwrap(),
+        e => panic!("{e:?}"),
+    };
+    let c = collect(rx).await;
+    assert!(t.elapsed() < Duration::from_secs(4), "{:?}", t.elapsed());
+    assert_eq!(c.exited().status.outcome, Outcome::Succeeded);
+    assert_eq!(c.exited().status.exit_code, Some(0));
+    assert!(wait_until_dead(pid).await, "the pipe holder {pid} survived");
+    // `list` agrees.
+    assert!(ex.list(&ws())[0].exit.is_some());
+}
+
+/// AUD-007: a descendant that left the task's process group (setsid) and holds the pipe cannot
+/// be killed through the group; the task ends anyway once the drain window is over, and a
+/// cancel during the drain is not ignored.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_pipe_holder_outside_the_group_does_not_hang_the_task_or_cancel() {
+    let ex = Executor::new();
+    let (id, mut rx) = ex
+        .start(
+            ws(),
+            sh("setsid sh -c 'echo $$; exec sleep 30' & sleep 0.2; echo started; exit 0"),
+        )
+        .await
+        .unwrap();
+    let mut text = String::new();
+    while !text.contains("started") {
+        match tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+        {
+            TaskEvent::Output(o) => text.push_str(&o.data),
+            e => panic!("{e:?}"),
+        }
+    }
+    let holder: i32 = text.lines().next().unwrap().trim().parse().unwrap();
+    // The shell has exited (or is about to); cancel while the pipe is still held.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let t = Instant::now();
+    ex.cancel(&id).await.unwrap();
+    let c = collect(rx).await;
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    assert!(matches!(
+        c.exited().status.outcome,
+        Outcome::Cancelled | Outcome::Succeeded
+    ));
+    // Not ours any more (another session): end it here.
+    let _ = nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(holder),
+        nix::sys::signal::Signal::SIGKILL,
+    );
+}
+
+/// AUD-007: `cancel_all` (what `workspace/close` and shutdown wait on) returns within a bound
+/// when a task's process has exited and a descendant holds its output.
+#[cfg(unix)]
+#[tokio::test]
+async fn cancel_all_returns_with_a_pipe_holder() {
+    let ex = Executor::new();
+    let (_, rx) = ex.start(ws(), sh("sleep 30 & exit 0")).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let t = Instant::now();
+    tokio::time::timeout(Duration::from_secs(5), ex.cancel_all(&ws()))
+        .await
+        .expect("cancel_all must not hang");
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    drop(rx);
+}
+
+/// AUD-099: a closed workspace's finished tasks are forgotten; running ones are kept.
+#[cfg(unix)]
+#[tokio::test]
+async fn forgetting_a_workspace_drops_its_history() {
+    let ex = Executor::new();
+    let (_, rx) = ex.start(ws(), sh("exit 0")).await.unwrap();
+    collect(rx).await;
+    let w2 = WorkspaceId("w2".into());
+    let (_, rx2) = ex.start(w2.clone(), sh("exit 0")).await.unwrap();
+    collect(rx2).await;
+    ex.forget_workspace(&ws());
+    assert!(ex.list(&ws()).is_empty());
+    assert_eq!(ex.list(&w2).len(), 1);
+}

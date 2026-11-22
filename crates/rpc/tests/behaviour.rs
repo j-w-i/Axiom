@@ -748,3 +748,118 @@ fn registering_duplicate_method_panics() {
     r.method::<Echo, _, _>(|p, _| async move { Ok(p) });
     r.method::<Echo, _, _>(|p, _| async move { Ok(p) });
 }
+
+// AUD-096, AUD-098, AUD-100 ----------------------------------------------------------------
+
+/// AUD-096: an invalid request whose id can be read is answered with that id (JSON-RPC 2.0 §5),
+/// so the client's request does not hang until its timeout. One without `method` keeps `null`.
+#[tokio::test]
+async fn invalid_request_with_a_readable_id_is_answered_with_it() {
+    let (mut c_w, s_r) = duplex(1 << 16);
+    let (s_w, c_r) = duplex(1 << 16);
+    tokio::spawn(serve(s_r, s_w, Arc::new(base_router()), info()));
+    let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1","client":{"name":"a","version":"b"}}}"#;
+    let bad = [
+        r#"{"jsonrpc":"2.0","id":7,"method":42}"#,
+        r#"{"jsonrpc":"1.0","id":"x","method":"test/echo","params":{"text":"hi"}}"#,
+    ];
+    c_w.write_all(format!("{init}\n{}\n{}\n", bad[0], bad[1]).as_bytes())
+        .await
+        .unwrap();
+    let mut lines = BufReader::new(c_r).lines();
+    let _ = lines.next_line().await.unwrap().unwrap();
+    for want in [serde_json::json!(7), serde_json::json!("x")] {
+        let l = tokio::time::timeout(Duration::from_secs(2), lines.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&l).unwrap();
+        assert_eq!(v["id"], want, "{l}");
+        assert_eq!(v["error"]["data"]["kind"], "invalid_request", "{l}");
+    }
+}
+
+/// AUD-098: a `$/cancel` that lands after the handler succeeded answers `cancelled`, and the
+/// handler's `on_discarded` undo runs (a started task is cancelled, not orphaned); it does not
+/// run when the answer is the success.
+#[tokio::test]
+async fn a_success_discarded_by_a_cancel_runs_its_undo() {
+    let mut r = base_router();
+    let undone = Arc::new(AtomicUsize::new(0));
+    let u2 = undone.clone();
+    r.method::<Cleanup, _, _>(move |_, ctx| {
+        let u = u2.clone();
+        async move {
+            ctx.on_discarded(async move {
+                u.fetch_add(1, Ordering::SeqCst);
+            });
+            // The side effect is done; the cancel arrives while the handler finishes.
+            ctx.cancel.cancelled().await;
+            Ok(Msg {
+                text: "started".into(),
+            })
+        }
+    });
+    let u3 = undone.clone();
+    r.method::<Stubborn, _, _>(move |_, ctx| {
+        let u = u3.clone();
+        async move {
+            ctx.on_discarded(async move {
+                u.fetch_add(100, Ordering::SeqCst);
+            });
+            Ok(Msg { text: "ok".into() })
+        }
+    });
+    let h = connect_init(r).await;
+    let (id, fut) = h.client.request_with_id::<Cleanup>(Empty {});
+    let task = tokio::spawn(fut);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    h.client
+        .notify::<axiom_protocol::lifecycle::Cancel>(CancelParams { id })
+        .await;
+    assert_eq!(
+        kind(&task.await.unwrap().unwrap_err()),
+        ErrorKind::Cancelled
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(undone.load(Ordering::SeqCst), 1);
+    // A request answered normally never runs it.
+    h.client.request::<Stubborn>(Empty {}).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(undone.load(Ordering::SeqCst), 1);
+}
+
+method!(Big, "test/big", N => Msg);
+
+/// AUD-100: a response over the 64 MiB line limit is replaced by a `too_large` error for its
+/// id (the peer would have to close the connection on it), and the connection stays up. A
+/// request over the limit is refused by the client before it is sent.
+#[tokio::test]
+async fn an_oversized_response_becomes_too_large_and_the_connection_survives() {
+    let mut r = base_router();
+    r.method::<Big, _, _>(|p, _| async move {
+        Ok(Msg {
+            text: "x".repeat(p.n as usize * 1024 * 1024),
+        })
+    });
+    let h = connect_init(r).await;
+    let e = h.client.request::<Big>(N { n: 65 }).await.unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::TooLarge);
+    let ok = h.client.request::<Big>(N { n: 1 }).await.unwrap();
+    assert_eq!(ok.text.len(), 1024 * 1024);
+    let e = h
+        .client
+        .request::<Echo>(Msg {
+            text: "x".repeat(65 * 1024 * 1024),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::TooLarge);
+    let ok = h
+        .client
+        .request::<Echo>(Msg { text: "up".into() })
+        .await
+        .unwrap();
+    assert_eq!(ok.text, "up");
+}

@@ -13,7 +13,6 @@ members = [
     "crates/term",
     "crates/inspect",
     "crates/axiomd",
-    "crates/desktop-bridge",
     "apps/cli",
     "tests/helpers/emit",
     "tests/helpers/fake-mcp",

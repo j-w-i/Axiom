@@ -23,7 +23,7 @@ pub struct Workspace {
     pub(crate) inner: Arc<Inner>,
 }
 
-fn version_of(bytes: &[u8]) -> FileVersion {
+pub(crate) fn version_of(bytes: &[u8]) -> FileVersion {
     let digest = Sha256::digest(bytes);
     let mut s = String::with_capacity(64);
     for b in digest {
@@ -32,7 +32,7 @@ fn version_of(bytes: &[u8]) -> FileVersion {
     FileVersion(s)
 }
 
-fn join_err(e: tokio::task::JoinError) -> WsError {
+pub(crate) fn join_err(e: tokio::task::JoinError) -> WsError {
     WsError::Io(std::io::Error::other(e))
 }
 
@@ -194,19 +194,7 @@ impl Workspace {
         let file = file.clone();
         tokio::task::spawn_blocking(move || {
             let abs = ws.resolve(&file)?;
-            let md = std::fs::metadata(&abs).map_err(|e| WsError::from_io(e, &file.0))?;
-            if md.is_dir() {
-                return Err(WsError::IsADirectory(display_path(&file.0)));
-            }
-            if md.len() > MAX_TEXT_FILE_BYTES {
-                return Err(WsError::TooLarge { bytes: md.len() });
-            }
-            let bytes = std::fs::read(&abs).map_err(|e| WsError::from_io(e, &file.0))?;
-            if bytes.len() as u64 > MAX_TEXT_FILE_BYTES {
-                return Err(WsError::TooLarge {
-                    bytes: bytes.len() as u64,
-                });
-            }
+            let bytes = read_regular(&abs, &file.0, MAX_TEXT_FILE_BYTES)?;
             let version = version_of(&bytes);
             let text = String::from_utf8(bytes)
                 .map_err(|_| WsError::UnsupportedEncoding(display_path(&file.0)))?;
@@ -216,7 +204,7 @@ impl Workspace {
         .map_err(join_err)?
     }
 
-    fn lock_for(&self, abs: &Path) -> Arc<tokio::sync::Mutex<()>> {
+    pub(crate) fn lock_for(&self, abs: &Path) -> Arc<tokio::sync::Mutex<()>> {
         let mut map = self
             .inner
             .file_locks
@@ -249,8 +237,8 @@ impl Workspace {
             if md.is_dir() {
                 return Err(WsError::IsADirectory(display_path(&rel)));
             }
-            let bytes = std::fs::read(&abs).map_err(|e| WsError::from_io(e, &rel))?;
-            let current = version_of(&bytes);
+            // A FIFO or a device is refused rather than read (it could block).
+            let current = version_of(&read_regular(&abs, &rel, u64::MAX)?);
             if current != expected {
                 return Err(WsError::Conflict {
                     current: Some(current),
@@ -301,6 +289,52 @@ impl Workspace {
         ws.inner.ignores.invalidate_for_write(&file.0);
         Ok(version)
     }
+}
+
+/// Reads a regular file of at most `limit` bytes (`TooLarge` beyond). Anything else (a FIFO, a
+/// device, a socket) is refused without blocking: on Unix the file is opened non-blocking and
+/// checked after opening, so a FIFO swapped in after a check cannot hang a thread either; the
+/// read itself stops after `limit + 1` bytes whatever the size claimed (AUD-097).
+pub(crate) fn read_regular(abs: &Path, rel: &str, limit: u64) -> Result<Vec<u8>, WsError> {
+    use std::io::Read;
+    let md = std::fs::metadata(abs).map_err(|e| WsError::from_io(e, rel))?;
+    if md.is_dir() {
+        return Err(WsError::IsADirectory(display_path(rel)));
+    }
+    if !md.is_file() {
+        return Err(WsError::NotAFile(display_path(rel)));
+    }
+    if md.len() > limit {
+        return Err(WsError::TooLarge { bytes: md.len() });
+    }
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
+    }
+    let f = opts.open(abs).map_err(|e| WsError::from_io(e, rel))?;
+    let md = f.metadata().map_err(|e| WsError::from_io(e, rel))?;
+    if !md.is_file() {
+        return Err(WsError::NotAFile(display_path(rel)));
+    }
+    let mut bytes = Vec::with_capacity(md.len().min(limit) as usize);
+    f.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|e| WsError::from_io(e, rel))?;
+    if bytes.len() as u64 > limit {
+        return Err(WsError::TooLarge {
+            bytes: bytes.len() as u64,
+        });
+    }
+    Ok(bytes)
+}
+
+/// [`read_regular`] for a host path outside any workspace (a language server's location, read
+/// only through `fs/readFile`'s allow list); `shown` names it in errors.
+pub fn read_regular_file(abs: &Path, shown: &str, limit: u64) -> Result<Vec<u8>, WsError> {
+    read_regular(abs, shown, limit)
 }
 
 /// Renames the temp file over the target. On Windows a replace can fail with
@@ -360,9 +394,7 @@ fn write_blocking(
 
     if !overwrite {
         let current = match &existing_meta {
-            Some(_) => Some(version_of(
-                &std::fs::read(abs).map_err(|e| WsError::from_io(e, rel))?,
-            )),
+            Some(_) => Some(version_of(&read_regular(abs, rel, u64::MAX)?)),
             None => None,
         };
         let allowed = match (&current, expected) {

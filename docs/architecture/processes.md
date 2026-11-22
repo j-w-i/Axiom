@@ -5,7 +5,7 @@
 | Process | Language | Started by | Lifetime | Talks to | If it dies |
 |---------|----------|-----------|----------|----------|------------|
 | `axiom` (shell) | Dart (Flutter, `apps/desktop-flutter`) | user | app session | `axiomd` (stdio, via `lib/daemon/client.dart`) | daemon sees stdin EOF, cancels tasks, exits; unsaved text is lost with the process (there is no separate renderer process to survive it) |
-| `axiom` (Tauri shell, retired) | Rust host (Tauri) + React webview | user | app session | `axiomd` (stdio, via `crates/desktop-bridge`), its webview processes | until FL-QA-001 (tag `tauri-shell-final`); its webview-crash recovery (T-08) has no Flutter counterpart because there is no webview |
+| `axiom` (Tauri shell, retired) | Rust host (Tauri) + React webview | user | app session | `axiomd` (stdio, via `crates/desktop-bridge`, removed with AUD-102), its webview processes | until FL-QA-001 (tag `tauri-shell-final`); its webview-crash recovery (T-08) has no Flutter counterpart because there is no webview |
 | `axiom` (Qt shell, retired) | C++/QML | user | app session | `axiomd` (stdio), Qt WebEngine renderer (QWebChannel) | until task T-15 (tag `qt-shell-final`) |
 | `axiomd` (daemon) | Rust | shell (M1); may be pre-existing from M3 | while ≥1 client is connected | children below | shell shows a blocking banner with *Restart backend*; editor buffers are untouched; on restart the shell re-opens the workspace and re-reads state |
 | task processes | any | daemon `exec` | until exit/cancel | daemon (pipes) | `task/exited` |
@@ -17,8 +17,8 @@
 
 1. Shell resolves the daemon binary: `--daemon <path>` argument, then
    `$AXIOMD`, then a sibling of the shell executable, then `PATH`
-   (`locateDaemon` in `apps/desktop-flutter/lib/daemon/client.dart`, the same
-   order as `crates/desktop-bridge::locate_daemon`). The packages put `axiomd`
+   (`locateDaemon` in `apps/desktop-flutter/lib/daemon/client.dart`, which is the
+   one specification of this order). The packages put `axiomd`
    beside the shell (`scripts/bundle.sh`: `/usr/lib/axiom/` on Linux,
    `Axiom.app/Contents/MacOS/` on macOS).
 2. Shell spawns it with piped stdin/stdout. **stdout carries protocol
@@ -36,6 +36,20 @@ The daemon holds no state that is not either persisted in SQLite before the
 response to the mutating request (settings, workspace state) or trivially
 re-creatable (open workspace handles, watcher). Running tasks are lost on
 daemon exit by design: they are killed.
+
+**As built (audit AUD-027, AUD-007):**
+- **Shutdown** cancels every task (bounded: a task whose own process has exited is reported
+  after a 2 s drain of its pipes even if a background descendant still holds them; that
+  descendant is killed with the task's process group), stops the language servers, the external
+  agents (ACP) and MCP servers, the change watches, and closes the terminals *waiting* for their
+  hang-up → SIGKILL escalation (2 s) before the process exits.
+- **A killed or crashed daemon** (SIGKILL, OOM): `axiomd` starts a small watchdog, `axiomd
+  --watchdog`, in its own process group with a pipe from the daemon as its stdin, and registers
+  the process group of every task and terminal it starts. When the pipe reaches end of file
+  (the daemon is gone, however it ended) the watchdog sends SIGHUP and SIGTERM to every group
+  still registered, SIGKILL a second later, and exits. Unix; Windows tasks are in
+  kill-on-close job objects. Language servers, ACP agents and MCP servers are not registered
+  yet (they are started by other crates).
 
 ## Threads and async
 
@@ -61,7 +75,9 @@ the runtime dir with mode 0600; Windows named pipe with an owner-only ACL) so
 the CLI, MCP clients and additional windows can attach. The protocol is
 identical; only the transport differs (ADR-0003). Events are broadcast to all
 connections that subscribed. Workspace handles are reference-counted across
-connections. This is deliberately not built in M1, but M1 code must not
+connections (as built, AUD-029: each connection that opened a workspace holds it; its
+`workspace/close` releases only that connection, and the workspace's tasks, servers, terminals
+and watches stop when the last holder closes it or disconnects). This is deliberately not built in M1, but M1 code must not
 assume a single connection in service crates — only `axiomd`'s `main` may.
 
 **As built (M3-DAEMON-001, Unix):**
@@ -74,6 +90,15 @@ assume a single connection in service crates — only `axiomd`'s `main` may.
 - **What a socket connection shares and does not.** Socket connections share the workspace
   registry, executor, sessions and gate. They do not run the daemon's shutdown hooks when they
   end (`ServeOptions.run_hooks = false`). The daemon ends with its stdio client.
+- **Who listens, exactly.** The daemon holding an exclusive lock on `run/axiomd.lock` (for
+  its lifetime; the OS releases it when the process ends) is the only one that may listen; the
+  token is written after the bind, to a temporary file renamed into place (AUD-095). A failing
+  `accept` (descriptor exhaustion) backs off from 50 ms to 1 s instead of spinning (AUD-094).
+- **Per connection.** `fs/watch` is per connection: each one that enables it gets every batch
+  (AUD-028). Daemon-wide relays (terminal output, `git/didChange`, previews, inspection) send to
+  each connection without waiting on a slow one: a connection whose queue stays full for 500 ms
+  misses notifications until it reads again (AUD-030); terminal output it missed shows as a
+  `seq` gap, and `terminal/list` redraws it.
 - **Closed clients.** Each connection's notifications go only to it. Session events go to
   attached connections; approvals go to connections that declared `capabilities.approvals`.
   `axiom_rpc::Client` now fails a request sent after its connection closed instead of waiting.

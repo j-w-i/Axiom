@@ -7,11 +7,32 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+/// Most directories whose matchers are kept; past this the cache starts over (AUD-099: it held
+/// one entry per directory ever classified, including every one under ignored trees).
+pub(crate) const MAX_CACHED_DIRS: usize = 4096;
+
+/// What an ignore file looked like when its matcher was built: `None` if absent, else its
+/// modification time and length. A matcher whose files no longer look like this is rebuilt, so a
+/// `.gitignore` changed outside the daemon (a `git checkout`) is seen without a watch.
+type Stamp = Vec<Option<(std::time::SystemTime, u64)>>;
+
+fn stamp(files: &[PathBuf]) -> Stamp {
+    files
+        .iter()
+        .map(|f| {
+            std::fs::metadata(f)
+                .ok()
+                .filter(|m| m.is_file())
+                .map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len()))
+        })
+        .collect()
+}
+
 #[derive(Default)]
 pub(crate) struct IgnoreCache {
     /// Keyed by workspace-relative directory ("" = root).
-    dirs: Mutex<HashMap<String, Arc<Gitignore>>>,
-    exclude: Mutex<Option<Arc<Gitignore>>>,
+    dirs: Mutex<HashMap<String, (Stamp, Arc<Gitignore>)>>,
+    exclude: Mutex<Option<(Stamp, Arc<Gitignore>)>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -31,30 +52,44 @@ fn build(root: &Path, files: &[PathBuf]) -> Arc<Gitignore> {
 
 impl IgnoreCache {
     fn dir_matcher(&self, ws_root: &Path, rel: &str) -> Arc<Gitignore> {
-        if let Some(m) = lock(&self.dirs).get(rel) {
-            return m.clone();
-        }
         let dir = if rel.is_empty() {
             ws_root.to_path_buf()
         } else {
             ws_root.join(rel)
         };
         // `.ignore` outranks `.gitignore`, as in ripgrep.
-        let m = build(&dir, &[dir.join(".gitignore"), dir.join(".ignore")]);
-        lock(&self.dirs).insert(rel.to_string(), m.clone());
+        let files = [dir.join(".gitignore"), dir.join(".ignore")];
+        let now = stamp(&files);
+        if let Some((st, m)) = lock(&self.dirs).get(rel) {
+            if *st == now {
+                return m.clone();
+            }
+        }
+        let m = build(&dir, &files);
+        let mut dirs = lock(&self.dirs);
+        if dirs.len() >= MAX_CACHED_DIRS {
+            dirs.clear();
+        }
+        dirs.insert(rel.to_string(), (now, m.clone()));
         m
     }
 
     fn exclude_matcher(&self, ws_root: &Path) -> Arc<Gitignore> {
-        if let Some(m) = lock(&self.exclude).as_ref() {
-            return m.clone();
+        let files = [ws_root.join(".git").join("info").join("exclude")];
+        let now = stamp(&files);
+        if let Some((st, m)) = lock(&self.exclude).as_ref() {
+            if *st == now {
+                return m.clone();
+            }
         }
-        let m = build(
-            ws_root,
-            &[ws_root.join(".git").join("info").join("exclude")],
-        );
-        *lock(&self.exclude) = Some(m.clone());
+        let m = build(ws_root, &files);
+        *lock(&self.exclude) = Some((now, m.clone()));
         m
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_dirs(&self) -> usize {
+        lock(&self.dirs).len()
     }
 
     /// Forgets what was learned about ignore files after a write touched one.
@@ -134,4 +169,33 @@ fn decide(chain: &[Arc<Gitignore>], exclude: &Gitignore, path: &Path, is_dir: bo
         }
     }
     exclude.matched(path, is_dir).is_ignore()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AUD-099: classifying many distinct directories keeps the cache bounded.
+    #[test]
+    fn the_cache_stays_bounded() {
+        let d = tempfile::tempdir().unwrap();
+        let c = IgnoreCache::default();
+        for i in 0..(MAX_CACHED_DIRS + 500) {
+            c.classify(d.path(), &format!("d{i}"), &[("x".into(), false)]);
+        }
+        assert!(c.cached_dirs() <= MAX_CACHED_DIRS);
+    }
+
+    /// AUD-099: a `.gitignore` edited outside the daemon is seen without a watch.
+    #[test]
+    fn an_ignore_file_changed_behind_the_cache_is_reread() {
+        let d = tempfile::tempdir().unwrap();
+        let c = IgnoreCache::default();
+        let probe = [("a.log".to_string(), false)];
+        assert_eq!(c.classify(d.path(), "", &probe), vec![false]);
+        std::fs::write(d.path().join(".gitignore"), "*.log\n").unwrap();
+        assert_eq!(c.classify(d.path(), "", &probe), vec![true]);
+        std::fs::write(d.path().join(".gitignore"), "*.tmp\n*.bak\n").unwrap();
+        assert_eq!(c.classify(d.path(), "", &probe), vec![false]);
+    }
 }

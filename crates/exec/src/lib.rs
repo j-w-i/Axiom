@@ -4,6 +4,7 @@
 mod backend;
 mod error;
 mod executor;
+pub mod guard;
 mod tree;
 #[cfg(windows)]
 mod tree_windows;

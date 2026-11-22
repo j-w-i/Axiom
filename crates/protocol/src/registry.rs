@@ -39,7 +39,8 @@ where
     }
 }
 
-/// Every request method in protocol 0.4 (0.1 and the M2, M3 and M4 additions). Add new methods here.
+/// Every request method in protocol 0.6 (0.1 and the M2–M5 and 0.6 additions). Add new methods
+/// here.
 pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
     use crate::{agent, build, env, fs, lifecycle, settings, task, workspace};
     vec![
@@ -110,10 +111,15 @@ pub fn methods(g: &mut SchemaGenerator) -> Vec<MethodSpec> {
         m::<crate::ui::NodeDetails>(g),
         m::<crate::ui::Highlight>(g),
         m::<crate::ui::Verify>(g),
+        // 0.6 (audit AUD-022, CR-AUD-022-workspace-file-operations).
+        m::<fs::CreateFile>(g),
+        m::<fs::CreateDirectory>(g),
+        m::<fs::Rename>(g),
+        m::<fs::Trash>(g),
     ]
 }
 
-/// Every notification in protocol 0.4. Add new notifications here.
+/// Every notification in protocol 0.6. Add new notifications here.
 pub fn notifications(g: &mut SchemaGenerator) -> Vec<NotificationSpec> {
     use crate::{agent, build, env, fs, lifecycle, settings, task};
     vec![

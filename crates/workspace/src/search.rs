@@ -362,29 +362,13 @@ fn find_blocking(
                 return WalkState::Continue;
             };
             searched.fetch_add(1, Ordering::Relaxed);
-            let mut ms = Vec::new();
-            for (i, line) in text.lines().enumerate() {
-                for m in re.find_iter(line) {
-                    if m.start() == m.end() {
-                        continue;
-                    }
-                    // The preview starts at most PREVIEW_BEFORE characters before the match.
-                    let before: Vec<(usize, char)> = line[..m.start()].char_indices().collect();
-                    let from = before.len().saturating_sub(PREVIEW_BEFORE);
-                    let start_byte = before.get(from).map_or(m.start(), |(b, _)| *b);
-                    let preview: String = line[start_byte..].chars().take(MAX_LINE_CHARS).collect();
-                    ms.push(FindMatch {
-                        path: WorkspacePath(rel.clone()),
-                        line: i as u32 + 1,
-                        column: utf16_len(&line[..m.start()]) + 1,
-                        end_column: utf16_len(&line[..m.end()]) + 1,
-                        preview,
-                        preview_column: utf16_len(&line[start_byte..m.start()]) + 1,
-                    });
-                }
-            }
+            let Some((ms, more)) = file_matches(&text, &rel, &re, limit, cancel) else {
+                return WalkState::Quit;
+            };
             if !ms.is_empty() {
                 let mut f = found.lock().unwrap_or_else(|p| p.into_inner());
+                // The file alone had more than the limit: the answer is truncated.
+                f.2 |= more;
                 f.0.push((rel, ms));
                 f.1 += f.0.last().map_or(0, |x| x.1.len());
                 // Bounded memory, same answer whatever the scheduling: past twice the limit, keep
@@ -422,4 +406,96 @@ fn find_blocking(
         }
     }
     Ok(out)
+}
+
+/// How many lines or matches pass between two looks at the cancel flag.
+const CANCEL_EVERY: usize = 1024;
+
+/// A position in a line: bytes, characters and UTF-16 units from its start.
+#[derive(Clone, Copy, Default)]
+struct Cursor {
+    byte: usize,
+    utf16: u32,
+}
+
+impl Cursor {
+    /// Moves forward to `to` (a character boundary at or after the cursor).
+    fn advance(&mut self, line: &str, to: usize) {
+        self.utf16 += utf16_len(&line[self.byte..to]);
+        self.byte = to;
+    }
+}
+
+/// The matches of one file, at most `limit` of them, in one forward pass over each line (the
+/// columns and previews never rescan a line from its start). `Some((matches, more))`, where
+/// `more` says the file had matches beyond the limit; `None` once `cancel` is set.
+fn file_matches(
+    text: &str,
+    rel: &str,
+    re: &regex::Regex,
+    limit: usize,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Option<(Vec<FindMatch>, bool)> {
+    use std::sync::atomic::Ordering;
+    let mut ms = Vec::new();
+    let mut ticks = 0usize;
+    for (i, line) in text.lines().enumerate() {
+        ticks += 1;
+        if ticks.is_multiple_of(CANCEL_EVERY) && cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        let mut at = Cursor::default();
+        for m in re.find_iter(line) {
+            if m.start() == m.end() {
+                continue;
+            }
+            ticks += 1;
+            if ticks.is_multiple_of(CANCEL_EVERY) && cancel.load(Ordering::Relaxed) {
+                return None;
+            }
+            if ms.len() == limit {
+                return Some((ms, true));
+            }
+            at.advance(line, m.start());
+            let column = at.utf16 + 1;
+            // The preview starts at most PREVIEW_BEFORE characters before the match: walk back
+            // from the match, never from the start of the line.
+            let start_byte = line[..m.start()]
+                .char_indices()
+                .rev()
+                .take(PREVIEW_BEFORE)
+                .last()
+                .map_or(m.start(), |(b, _)| b);
+            let preview: String = line[start_byte..].chars().take(MAX_LINE_CHARS).collect();
+            let preview_column = utf16_len(&line[start_byte..m.start()]) + 1;
+            at.advance(line, m.end());
+            ms.push(FindMatch {
+                path: WorkspacePath(rel.to_string()),
+                line: i as u32 + 1,
+                column,
+                end_column: at.utf16 + 1,
+                preview,
+                preview_column,
+            });
+        }
+    }
+    Some((ms, false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    /// AUD-006: the cancel flag is honoured inside one big file, not only between files.
+    #[test]
+    fn a_file_scan_stops_when_cancelled() {
+        let re = regex::Regex::new("b").unwrap();
+        let text = "ab\n".repeat(10 * CANCEL_EVERY);
+        let go = AtomicBool::new(false);
+        let (ms, more) = file_matches(&text, "f", &re, 5, &go).unwrap();
+        assert_eq!((ms.len(), more), (5, true));
+        let stop = AtomicBool::new(true);
+        assert!(file_matches(&text, "f", &re, usize::MAX, &stop).is_none());
+    }
 }

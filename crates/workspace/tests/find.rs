@@ -210,6 +210,53 @@ async fn truncated_cancelled_and_previews() {
     assert!(r.matches.is_empty());
 }
 
+/// AUD-006: a minified bundle (one 2 MiB line) searched for one character used to rescan the line
+/// from its start for every match (quadratic: minutes to hours). One forward pass, capped at the
+/// limit, answers at once, with the same columns as before.
+#[tokio::test]
+async fn a_two_mebibyte_single_line_file_is_searched_at_once() {
+    let line = "a".repeat(2 * 1024 * 1024 - 1) + "\n";
+    let (_d, w) = ws(&[("bundle.min.js", &line)]).await;
+    let t = std::time::Instant::now();
+    let r = w
+        .find(
+            FindQuery {
+                limit: 2000,
+                ..q("a")
+            },
+            no(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        t.elapsed() < std::time::Duration::from_secs(1),
+        "{:?}",
+        t.elapsed()
+    );
+    assert_eq!(r.matches.len(), 2000);
+    assert!(r.truncated);
+    let last = &r.matches[1999];
+    assert_eq!((last.line, last.column, last.end_column), (1, 2000, 2001));
+    assert_eq!(last.preview_column, 61);
+    assert!(last.preview.chars().count() <= 300);
+}
+
+/// Columns stay exact across many matches on one line with characters of several widths.
+#[tokio::test]
+async fn columns_across_many_matches_on_a_line_with_wide_characters() {
+    let line = "é😀x".repeat(100);
+    let (_d, w) = ws(&[("w.txt", &line)]).await;
+    let r = w.find(q("x"), no()).await.unwrap();
+    assert_eq!(r.matches.len(), 100);
+    for (k, m) in r.matches.iter().enumerate() {
+        // Each "é😀x" is 1 + 2 + 1 = 4 UTF-16 units.
+        let col = 4 * k as u32 + 4;
+        assert_eq!((m.column, m.end_column), (col, col + 1));
+        let p: Vec<u16> = m.preview.encode_utf16().collect();
+        assert_eq!(p[(m.preview_column - 1) as usize], 'x' as u16);
+    }
+}
+
 /// The budget (M4-UX-001): the first page of a regex search over 10 000 files under 300 ms.
 #[tokio::test]
 async fn ten_thousand_files_first_page_is_fast() {
