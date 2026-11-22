@@ -389,22 +389,48 @@ class _Breadcrumbs extends StatelessWidget {
         child: Semantics(
           label: 'Path: ${parts.join(' › ')}',
           excludeSemantics: true,
-          child: Row(
-            children: [
-              for (var i = 0; i < parts.length; i++) ...[
-                if (i > 0)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: AxiomIcon(AxiomIcons.chevron, size: 12, color: t.colors.ink3),
-                  ),
-                Text(
-                  parts[i],
-                  style: t.type.small.copyWith(
-                    color: i == parts.length - 1 ? t.colors.ink : t.colors.ink2,
-                  ),
+          // A path longer than the bar (an SDK's file, a deep folder) keeps its end in view, the
+          // file's name, and its start is cut, as VS Code does: never an overflow.
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final row = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < parts.length; i++) ...[
+                    if (i > 0)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: AxiomIcon(AxiomIcons.chevron, size: 12, color: t.colors.ink3),
+                      ),
+                    Text(
+                      parts[i],
+                      maxLines: 1,
+                      softWrap: false,
+                      style: t.type.small.copyWith(
+                        color: i == parts.length - 1 ? t.colors.ink : t.colors.ink2,
+                      ),
+                    ),
+                  ],
+                ],
+              );
+              var width = (parts.length - 1) * 20.0;
+              for (final part in parts) {
+                width += (TextPainter(
+                  text: TextSpan(text: part, style: t.type.small),
+                  textDirection: TextDirection.ltr,
+                  maxLines: 1,
+                  textScaler: MediaQuery.textScalerOf(context),
+                )..layout()).width;
+              }
+              if (width <= box.maxWidth) return Align(alignment: Alignment.centerLeft, child: row);
+              return ClipRect(
+                child: OverflowBox(
+                  maxWidth: double.infinity,
+                  alignment: Alignment.centerRight,
+                  child: row,
                 ),
-              ],
-            ],
+              );
+            },
           ),
         ),
       ),

@@ -24,11 +24,13 @@ import 'support.dart';
 /// (fixture folder, file, line to type at (0-based; the end of the line), what to type, the
 /// symbol completion must offer, a reason to skip here or null).
 final _cases = <(String, String, int, String, String, String?)>[
-  ('python', 'main.py', 4, '\n    os.path.jo', 'join', null),
+  // At module level: after the fixture's `return`, Pyright would not analyse the line.
+  ('python', 'main.py', 0, '\nos.path.jo', 'join', null),
   ('typescript', 'src/main.ts', 2, '\nsorted.toS', 'toSorted', null),
   ('rust', 'src/main.rs', 5, '\n    let n: HashMap<i32, i32> = HashMap::ne', 'new', null),
   ('go', 'main.go', 8, '\n\tstrings.ToU', 'ToUpper', null),
-  ('c', 'main.c', 4, '\n    strl', 'strlen', null),
+  // Not strlen: clangd treats it as a compiler builtin, which has no source to go to.
+  ('c', 'main.c', 4, '\n    fop', 'fopen', null),
   ('cpp', 'main.cpp', 7, '\n    std::so', 'sort', null),
   ('java', 'src/main/java/fixture/Main.java', 6, '\n        List.o', 'of', null),
   (
@@ -78,6 +80,11 @@ void main() {
         writeFile(ws, f.path.substring(src.path.length + 1), f.readAsStringSync());
       }
       final app = await boot(tester, data.path);
+      // A failed case still stops its daemon and the servers it started.
+      var quitted = false;
+      addTearDown(() async {
+        if (!quitted) await app.shutdown();
+      });
       await app.settings.setValue('lsp.autoInstall', true);
       await app.workspace.openFolder(ws.path);
       await until(tester, () => app.workspace.isOpen, what: 'the folder');
@@ -99,15 +106,21 @@ void main() {
         await tester.pump(const Duration(milliseconds: 15));
       }
       final features = tester.state<LspEditorFeaturesState>(find.byType(LspEditorFeatures).first);
+      // The symbol's item: its name, or its name and parameters as some servers label it
+      // (rust-analyzer's `new()`).
+      bool isWant(String? label) => label == want || (label?.startsWith('$want(') ?? false);
+      bool offered() => features.shownLabels.any(isWant);
       final started = DateTime.now();
       // Servers index on first use: the first answer may be slow; the 300 ms budget is measured
       // on a second request, once the list has been shown.
       await until(
         tester,
-        () => features.shownLabels.contains(want),
+        offered,
         timeout: const Duration(minutes: 2),
         what: '$want offered',
-        detail: () => '${features.shownLabels.take(20)}',
+        detail: () =>
+            '${features.shownLabels.take(20)} '
+            '${app.lsp.serverFor(doc.language.id)?.toJson()} ${app.lsp.progress}',
       );
       // ignore: avoid_print
       print(
@@ -118,7 +131,7 @@ void main() {
       await features.complete();
       await until(
         tester,
-        () => features.shownLabels.contains(want),
+        offered,
         timeout: const Duration(seconds: 5),
         what: '$want offered again',
       );
@@ -126,10 +139,11 @@ void main() {
       // ignore: avoid_print
       print('$folder: completion in ${again.elapsedMilliseconds} ms');
       expect(again.elapsedMilliseconds, lessThanOrEqualTo(300));
-      // Its documentation (the item's or resolved).
-      while (features.shownLabels.first != want) {
+      // Its documentation (the item's or resolved): Down until it is selected, at most the list.
+      for (var n = 0; !isWant(features.activeLabel) && n < features.shownLabels.length; n++) {
         await key(tester, LogicalKeyboardKey.arrowDown);
       }
+      expect(features.activeLabel, predicate<String?>(isWant), reason: 'the $want item selected');
       await until(
         tester,
         () => find.bySemanticsLabel('Documentation').evaluate().isNotEmpty,
@@ -150,10 +164,11 @@ void main() {
         () => app.documents.activePath != file,
         timeout: const Duration(seconds: 30),
         what: "the SDK's source",
-        detail: () => app.documents.activePath,
+        detail: () => '${app.documents.activePath} ${app.documents.banner}',
       );
       // ignore: avoid_print
       print('$folder: definition in ${app.documents.activePath}');
+      quitted = true;
       await quit(tester, app);
     });
   }

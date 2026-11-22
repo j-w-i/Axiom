@@ -30,13 +30,19 @@ const splitPathsKey = 'editor.splitPaths';
 const splitActiveKey = 'editor.splitActive';
 const _tabSaveDebounce = Duration(milliseconds: 500);
 
-String titleOf(String path) =>
-    isExternal(path) ? Uri.decodeComponent(path.split('/').last) : path.split('/').last;
+String titleOf(String path) => isExternal(path)
+    ? (Uri.tryParse(path)?.pathSegments.where((s) => s.isNotEmpty).lastOrNull ?? path)
+    : path.split('/').last;
 
-/// A document outside the workspace: its path is the `file://` URI a language server gave (an
-/// SDK's or a dependency's source). The daemon reads it, read-only, because the server pointed to
-/// it (protocol 0.4, ADR-0018 §2); it is never saved.
-bool isExternal(String path) => path.startsWith('file://');
+/// A document outside the workspace: its path is the URI a language server gave. A `file://` one
+/// (an SDK's or a dependency's source) the daemon reads, read-only, because the server pointed to
+/// it (protocol 0.4, ADR-0018 §2); another scheme's text comes from the server itself (jdtls's
+/// `jdt://` class files). It is never saved.
+bool isExternal(String path) => RegExp(r'^[a-z][a-z0-9+.-]*://').hasMatch(path);
+
+/// The name a document's language is detected from: a class file's source is Java.
+String _languageName(String path) =>
+    path.startsWith('jdt://') ? '${titleOf(path).replaceAll(RegExp(r'\.class$'), '')}.java' : path;
 
 /// The file's line break: the first one in it (CRLF, CR or LF), LF when it has none. The
 /// editor joins lines with it, so a CRLF file is the same bytes until edited and is saved with
@@ -69,7 +75,7 @@ class Doc {
   Doc({required this.path, required String text, required this.savedVersion})
     : _savedText = text,
       languageNotifier = ValueNotifier(
-        Languages.instance.detect(path, firstLine: _firstLine(text)),
+        Languages.instance.detect(_languageName(path), firstLine: _firstLine(text)),
       ) {
     controller = CodeLineEditingController(
       codeLines: CodeLines.fromText(text),
@@ -364,6 +370,18 @@ class DocumentsStore extends ChangeNotifier {
   // ---- opening -------------------------------------------------------------------------
 
   /// Opens [path] (or shows it if open), optionally at [line]:[column] (1-based).
+  /// Opens a read-only document whose [text] a language server gave (a class file's source), or
+  /// shows it when it is open.
+  Future<void> openText(String path, String text, {int? line, int? column}) async {
+    if (line != null) pendingReveal = (path: path, line: line, column: column ?? 1);
+    focusRequest = path;
+    if (doc(path) == null) {
+      docs.add(Doc(path: path, text: text, savedVersion: ''));
+    }
+    _setActive(path);
+    notifyListeners();
+  }
+
   Future<void> open(
     String path, {
     int? line,

@@ -165,6 +165,10 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   @visibleForTesting
   List<String> get shownLabels => [for (final s in _shown) s.item.label];
 
+  /// The selected item's label (tests).
+  String? get activeLabel =>
+      _shown.isEmpty ? null : _shown[_active.clamp(0, _shown.length - 1)].item.label;
+
   @override
   void initState() {
     super.initState();
@@ -1100,9 +1104,21 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final r = await lsp.request(server, 'textDocument/definition', _docPos());
       final loc = firstLocation(r);
       if (loc == null || !mounted) return;
+      final line = loc.pos.line + 1, column = loc.pos.character + 1;
+      if (loc.uri.startsWith('jdt://')) {
+        // A class in the JDK or a jar: jdtls gives its source (attached or decompiled).
+        final text = await lsp.request(server, 'java/classFileContents', {'uri': loc.uri});
+        if (!mounted) return;
+        if (text is! String || text.isEmpty) {
+          ToastHost.of(context).show('Go to definition: no source for ${titleOf(loc.uri)}.');
+          return;
+        }
+        await app.documents.openText(loc.uri, text, line: line, column: column);
+        return;
+      }
       // Outside the workspace (an SDK's or a dependency's source): opened read-only by its URI.
       final path = lsp.pathOf(loc.uri) ?? loc.uri;
-      await app.documents.open(path, line: loc.pos.line + 1, column: loc.pos.character + 1);
+      await app.documents.open(path, line: line, column: column);
     } on DaemonException catch (e) {
       if (mounted) {
         ToastHost.of(context).show('Go to definition: ${e.message}', kind: ToastKind.error);
