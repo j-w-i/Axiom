@@ -900,10 +900,17 @@ class _TitleRow extends StatelessWidget {
                         const SizedBox(width: Metrics.s2),
                         SizedBox(height: 18, width: 1, child: ColoredBox(color: c.groove)),
                         const SizedBox(width: Metrics.s5),
-                        Text(
-                          ws.name,
-                          style: t.type.body.copyWith(fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis,
+                        // Both give way when the row is crowded: the path first, then the
+                        // name, which ellipsises rather than overflowing.
+                        Flexible(
+                          flex: 2,
+                          child: Text(
+                            ws.name,
+                            style: t.type.body.copyWith(fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
                         ),
                         const SizedBox(width: 7),
                         Flexible(
@@ -913,6 +920,8 @@ class _TitleRow extends StatelessWidget {
                               ws.root,
                               style: t.type.codeSmall.copyWith(fontSize: 11, color: c.ink3),
                               overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              softWrap: false,
                             ),
                           ),
                         ),
