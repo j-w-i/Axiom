@@ -54,7 +54,13 @@ command = ["fake-lsp"]
     final app = await boot(
       tester,
       data.path,
-      env: {'FAKE_LSP_LOG': log, 'FAKE_LSP_DEFINITION': fileUri('${ws.path}/src/other.rs')},
+      env: {
+        'FAKE_LSP_LOG': log,
+        'FAKE_LSP_DEFINITION': fileUri(
+          // Canonical, as the daemon's root is (macOS temp folders: /var is /private/var).
+          '${ws.resolveSymbolicLinksSync()}/src/other.rs',
+        ),
+      },
     );
     await app.workspace.openFolder(ws.path);
     await until(

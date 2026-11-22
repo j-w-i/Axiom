@@ -96,9 +96,13 @@ void main() {
             '[[tools]]\nid = "$program"\nprogram = "$program"\n'
             "version_regex = '$tool (\\d+\\.\\d+\\.\\d+)'\n"
             '[[install]]\nkind = "archive"\nversions = { kind = "static", versions = ["$version"] }\n'
-            'bin_dirs = ["."]\n[[install.artifacts]]\nplatform = { os = "linux" }\n'
-            'url = "$base/$program"\nformat = "file"\n'
-            'checksum = { kind = "sha256", values = { "$version" = "$digest" } }\n',
+            'bin_dirs = ["."]\n'
+            // The same single file on each OS the suite runs on.
+            '${[
+              for (final os in ['linux', 'macos']) '[[install.artifacts]]\nplatform = { os = "$os" }\n'
+                    'url = "$base/$program"\nformat = "file"\n'
+                    'checksum = { kind = "sha256", values = { "$version" = "$digest" } }\n',
+            ].join()}',
       );
     }
     writeFile(

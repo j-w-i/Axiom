@@ -71,6 +71,17 @@ void main() {
     page.queryFocus.requestFocus();
     await tester.pump();
     await key(tester, LogicalKeyboardKey.tab);
+    if (Platform.isMacOS) {
+      // A macOS text field leaves Tab to the system, which answers the real key with the
+      // `insertTab:` selector (Flutter's DefaultTextEditingShortcuts); a synthesized key event
+      // gets no answer, so the test sends the selector the system would.
+      tester
+          .state<EditableTextState>(
+            find.byWidgetPredicate((w) => w is EditableText && w.focusNode == page.queryFocus),
+          )
+          .performSelector('insertTab:');
+      await tester.pump();
+    }
     final afterTab = FocusManager.instance.primaryFocus;
     await key(tester, LogicalKeyboardKey.space);
     expect(app.search.caseSensitive, isTrue, reason: 'focus after Tab: $afterTab');
