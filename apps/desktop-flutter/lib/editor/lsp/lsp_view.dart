@@ -165,6 +165,14 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   @visibleForTesting
   List<String> get shownLabels => [for (final s in _shown) s.item.label];
 
+  /// The list holds the document's words, not a server's items (tests).
+  bool get wordsOnly => _wordsOnly;
+  bool _wordsOnly = false;
+
+  /// The selected item's label (tests).
+  String? get activeLabel =>
+      _shown.isEmpty ? null : _shown[_active.clamp(0, _shown.length - 1)].item.label;
+
   @override
   void initState() {
     super.initState();
@@ -369,6 +377,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final now = widget.controller.selection;
       if (!now.isCollapsed || now.extentIndex != line || now.extentOffset < start) return;
       _items = parseCompletion(r);
+      _wordsOnly = false;
       _anchor = (line: line, start: start);
       _filter();
     } on DaemonException {
@@ -378,6 +387,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
 
   /// Where no server serves the language: the document's words (ADR-0021 §7).
   void _completeWords() {
+    _wordsOnly = true;
     final c = widget.controller;
     final s = c.selection;
     final start = _wordStart();
@@ -1100,14 +1110,30 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final r = await lsp.request(server, 'textDocument/definition', _docPos());
       final loc = firstLocation(r);
       if (loc == null || !mounted) return;
-      final path = lsp.pathOf(loc.uri);
-      if (path == null) {
-        ToastHost.of(context).show(
-          'The definition is outside the workspace: ${Uri.decodeComponent(loc.uri.replaceFirst('file://', ''))}',
-        );
+      final line = loc.pos.line + 1, column = loc.pos.character + 1;
+      if (loc.uri.startsWith('jdt://') || loc.uri.startsWith('csharp:')) {
+        // A class in the JDK or a jar (jdtls), or in a .NET assembly (csharp-ls): the server
+        // gives its source, attached or decompiled.
+        final Object? text;
+        if (loc.uri.startsWith('jdt://')) {
+          text = await lsp.request(server, 'java/classFileContents', {'uri': loc.uri});
+        } else {
+          final r = await lsp.request(server, 'csharp/metadata', {
+            'textDocument': {'uri': loc.uri},
+          });
+          text = r is Map ? r['source'] : null;
+        }
+        if (!mounted) return;
+        if (text is! String || text.isEmpty) {
+          ToastHost.of(context).show('Go to definition: no source for ${titleOf(loc.uri)}.');
+          return;
+        }
+        await app.documents.openText(loc.uri, text, line: line, column: column);
         return;
       }
-      await app.documents.open(path, line: loc.pos.line + 1, column: loc.pos.character + 1);
+      // Outside the workspace (an SDK's or a dependency's source): opened read-only by its URI.
+      final path = lsp.pathOf(loc.uri) ?? loc.uri;
+      await app.documents.open(path, line: line, column: column);
     } on DaemonException catch (e) {
       if (mounted) {
         ToastHost.of(context).show('Go to definition: ${e.message}', kind: ToastKind.error);
@@ -1246,19 +1272,24 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
 
   /// The line rectangle at [line]:[column] in this view, from the editor's own layout (the
   /// arithmetic from the font size drifts from it further down a file), else from that.
-  Rect _lineRect(int line, int column) {
-    final stack = _stackKey.currentContext?.findRenderObject();
-    if (stack != null && line < widget.controller.codeLines.length) {
-      final r = codeEditorPositionRect(
-        stack,
-        CodeLinePosition(index: line, offset: column),
-        ancestor: stack,
-      );
-      if (r != null) return r;
-    }
+  /// A placement at [line]:[column]: the editor's own layout when the delegate lays the popup out
+  /// (after the editor, the same frame), else [fallback], from the font size, worked out here in
+  /// build: during layout nothing may read another box's size (the gutter's).
+  Rect Function() _lineRect(int line, int column) {
     final g = widget.geometry;
-    final at = g.at(line, column, widget.controller.codeLines[line].text);
-    return Rect.fromLTWH(at.dx, at.dy, 0, g.lineHeight);
+    final lines = widget.controller.codeLines;
+    final at = line < lines.length ? g.at(line, column, lines[line].text) : Offset.zero;
+    final fallback = Rect.fromLTWH(at.dx, at.dy, 0, g.lineHeight);
+    return () {
+      final stack = _stackKey.currentContext?.findRenderObject();
+      if (stack == null || line >= widget.controller.codeLines.length) return fallback;
+      return codeEditorPositionRect(
+            stack,
+            CodeLinePosition(index: line, offset: column),
+            ancestor: stack,
+          ) ??
+          fallback;
+    };
   }
 
   @override
@@ -1274,7 +1305,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final selected = _shown[_active.clamp(0, _shown.length - 1)].item;
       popup = Positioned.fill(
         child: CustomSingleChildLayout(
-          delegate: _AtText(() => _lineRect(line, column), inset: completionTextInset),
+          delegate: _AtText(_lineRect(line, column), inset: completionTextInset),
           child: _CompletionPopup(
             shown: _shown,
             active: _active,
@@ -1297,11 +1328,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final base = t.type.code.copyWith(fontSize: 12.5, color: c.ink2);
       sigCard = Positioned.fill(
         child: CustomSingleChildLayout(
-          delegate: _AtText(
-            () => _lineRect(sel.extentIndex, sel.extentOffset),
-            inset: 24,
-            above: true,
-          ),
+          delegate: _AtText(_lineRect(sel.extentIndex, sel.extentOffset), inset: 24, above: true),
           child: Semantics(
             liveRegion: true,
             label: 'Signature: ${sig.label}',

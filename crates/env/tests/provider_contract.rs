@@ -58,8 +58,10 @@ fn every_template_uses_allowed_variables() {
     for (dir, text) in manifests() {
         for line in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
             for v in manifest::template_vars(line).unwrap() {
+                // `${linux}`: a method's own name for the host, only where it declares them.
+                let linux = v == "linux" && text.contains("[[install.linux_names]]");
                 assert!(
-                    TEMPLATE_VARS.contains(&v),
+                    TEMPLATE_VARS.contains(&v) || linux,
                     "providers/{dir}: `${{{v}}}` in {line}"
                 );
             }
@@ -78,6 +80,7 @@ fn every_archive_artifact_has_a_checksum() {
                     let ok = match &a.checksum {
                         Checksum::Sha256 { values } => !values.is_empty(),
                         Checksum::Sha256Url { url } => !url.is_empty(),
+                        Checksum::Sha512 { values } => !values.is_empty(),
                     };
                     assert!(ok, "providers/{dir}: {} has no checksum source", a.url);
                 }

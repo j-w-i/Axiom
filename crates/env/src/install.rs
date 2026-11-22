@@ -562,7 +562,11 @@ impl Installer {
                 plan: plan.clone(),
                 manifest: m.clone(),
                 final_root: root,
-                verify_bin_dirs: built.bin_dirs,
+                verify_bin_dirs: built
+                    .bin_dirs
+                    .iter()
+                    .map(|d| detect::bin_dir(d, version))
+                    .collect(),
                 verify_env: built.env,
                 system_path: None,
                 expires: Instant::now() + self.plan_lifetime,
@@ -937,8 +941,13 @@ impl Installer {
         cancel: &CancellationToken,
         report: &(dyn Fn(usize, String, Option<u64>, Option<u64>) + Sync),
     ) -> Result<PathBuf, EnvError> {
+        // The digest the download must have, and whether it is a SHA-512 (Microsoft's .NET
+        // publishes no SHA-256). The cache is keyed by it either way.
+        let sha512 = matches!(sha256, Sha256Source::Sha512Digest { .. });
         let expected = match sha256 {
-            Sha256Source::Digest { value } => value.to_ascii_lowercase(),
+            Sha256Source::Digest { value } | Sha256Source::Sha512Digest { value } => {
+                value.to_ascii_lowercase()
+            }
             Sha256Source::Url { url: sums } => {
                 let text = tokio::select! {
                     t = self.http.get_text(sums) => t?,
@@ -952,7 +961,8 @@ impl Installer {
                 })?
             }
         };
-        if !(expected.len() == 64 && expected.bytes().all(|b| b.is_ascii_hexdigit())) {
+        let digits = if sha512 { 128 } else { 64 };
+        if !(expected.len() == digits && expected.bytes().all(|b| b.is_ascii_hexdigit())) {
             return Err(EnvError::InvalidParams(
                 "The expected checksum is malformed.".into(),
             ));
@@ -963,7 +973,7 @@ impl Installer {
         let cached = cache.join(&expected);
         if cached.is_file() {
             let path = cached.clone();
-            let actual = tokio::task::spawn_blocking(move || sha256_file(&path))
+            let actual = tokio::task::spawn_blocking(move || hash_file(&path, sha512))
                 .await
                 .map_err(|_| EnvError::Unsupported("hashing task failed".into()))??;
             if actual == expected {
@@ -981,13 +991,20 @@ impl Installer {
             }
         };
         let result = self.http.download(url, &part, cancel, &mut on_chunk).await;
-        let (actual, _bytes) = match result {
+        let (mut actual, _bytes) = match result {
             Ok(r) => r,
             Err(e) => {
                 let _ = std::fs::remove_file(&part);
                 return Err(e);
             }
         };
+        if sha512 {
+            // The download hashed SHA-256 as it streamed; a SHA-512 is read back once.
+            let path = part.clone();
+            actual = tokio::task::spawn_blocking(move || hash_file(&path, true))
+                .await
+                .map_err(|_| EnvError::Unsupported("hashing task failed".into()))??;
+        }
         if actual != expected {
             let _ = std::fs::remove_file(&part);
             return Err(EnvError::ChecksumMismatch {
@@ -1086,6 +1103,7 @@ fn build_archive(
         bin_dirs,
         env,
         setup,
+        linux_names,
         ..
     } = method
     else {
@@ -1110,6 +1128,14 @@ fn build_archive(
         Checksum::Sha256Url { url } => Sha256Source::Url {
             url: expand_version(url, version)?,
         },
+        Checksum::Sha512 { values } => Sha256Source::Sha512Digest {
+            value: values.get(version).cloned().ok_or_else(|| {
+                EnvError::NotFound(format!(
+                    "The provider lists no checksum for {} {version}.",
+                    m.name
+                ))
+            })?,
+        },
     };
     let env = expand_map(env, version, root);
     let mut steps = vec![
@@ -1125,10 +1151,24 @@ fn build_archive(
         },
     ];
     if !setup.is_empty() {
+        let linux = if setup.iter().any(|a| a.contains("${linux}")) {
+            let release = std::fs::read_to_string("/etc/os-release")
+                .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+                .unwrap_or_default();
+            linux_name(linux_names, &release).ok_or_else(|| {
+                EnvError::UnsupportedPlatform(format!(
+                    "{} does not support this Linux distribution ({}).",
+                    m.name,
+                    os_release_field(&release, "PRETTY_NAME").unwrap_or_else(|| "unknown".into())
+                ))
+            })?
+        } else {
+            String::new()
+        };
         steps.push(Step::Run {
             argv: setup
                 .iter()
-                .map(|a| manifest::expand(a, version, root))
+                .map(|a| manifest::expand(a, version, root).replace("${linux}", &linux))
                 .collect(),
             env: env.clone(),
         });
@@ -1137,6 +1177,32 @@ fn build_archive(
         steps,
         bin_dirs: bin_dirs.clone(),
         env,
+    })
+}
+
+/// A field of an os-release file, unquoted.
+fn os_release_field(release: &str, key: &str) -> Option<String> {
+    release.lines().find_map(|l| {
+        let (k, v) = l.split_once('=')?;
+        (k.trim() == key).then(|| v.trim().trim_matches(['"', '\'']).to_string())
+    })
+}
+
+/// The first of [names] that matches the host described by the os-release text [release].
+pub fn linux_name(names: &[axiom_protocol::provider::LinuxName], release: &str) -> Option<String> {
+    let id = os_release_field(release, "ID").unwrap_or_default();
+    let like = os_release_field(release, "ID_LIKE").unwrap_or_default();
+    let version = os_release_field(release, "VERSION_ID").unwrap_or_default();
+    names.iter().find_map(|n| {
+        let by_id = n.ids.contains(&id)
+            && n.min_version.as_ref().is_none_or(|min| {
+                !version.is_empty() && compare_versions(&version, min) != std::cmp::Ordering::Less
+            });
+        let by_like = n.min_version.is_none()
+            && like
+                .split_whitespace()
+                .any(|l| n.ids.iter().any(|i| i.as_str() == l));
+        (by_id || by_like).then(|| n.name.clone())
     })
 }
 
@@ -1197,7 +1263,7 @@ fn delegate_uninstall(
     let exe = detect::managed_layouts(m).into_iter().find_map(|(d, _)| {
         detect::executable_names(program)
             .into_iter()
-            .map(|n| root.join(&d).join(n))
+            .map(|n| root.join(detect::bin_dir(&d, version)).join(n))
             .find(|p| p.is_file())
     })?;
     let mut argv = vec![exe.to_string_lossy().into_owned()];
@@ -1230,7 +1296,8 @@ fn command_label(argv: &[String]) -> String {
 /// Runs argv (never through a shell) with extra variables, stdin closed. Each output line
 /// (stdout or stderr) is passed to `on_line` as it arrives. Returns stdout; a non-zero exit
 /// is an error carrying the end of the combined output.
-/// Kills a process group when dropped, unless disarmed (set to None).
+/// Kills a process group when dropped, unless disarmed (set to None). Unix only.
+#[cfg_attr(not(unix), allow(dead_code))]
 struct GroupGuard(Option<u32>);
 
 impl Drop for GroupGuard {
@@ -1394,8 +1461,14 @@ pub fn relink(root: &Path, to: &Path) -> Result<u32, EnvError> {
     Ok(changed)
 }
 
-fn sha256_file(path: &Path) -> Result<String, EnvError> {
+/// A file's SHA-512 when [sha512], else its SHA-256, as lowercase hex.
+fn hash_file(path: &Path, sha512: bool) -> Result<String, EnvError> {
     let mut f = std::fs::File::open(path).map_err(EnvError::io("Cannot read the cache"))?;
+    if sha512 {
+        let mut h = sha2::Sha512::new();
+        std::io::copy(&mut f, &mut h).map_err(EnvError::io("Cannot read the cache"))?;
+        return Ok(hex::encode(h.finalize()));
+    }
     let mut h = Sha256::new();
     std::io::copy(&mut f, &mut h).map_err(EnvError::io("Cannot read the cache"))?;
     Ok(hex::encode(h.finalize()))
@@ -1403,6 +1476,48 @@ fn sha256_file(path: &Path) -> Result<String, EnvError> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_linux_host_gets_the_providers_name_for_it() {
+        use axiom_protocol::provider::LinuxName;
+        let n = |ids: &[&str], min: Option<&str>, name: &str| LinuxName {
+            ids: ids.iter().map(|s| s.to_string()).collect(),
+            min_version: min.map(String::from),
+            name: name.into(),
+        };
+        let names = [
+            n(&["fedora"], Some("41"), "fedora41"),
+            n(&["fedora"], Some("39"), "fedora39"),
+            n(&["ubuntu"], Some("24.04"), "ubuntu24.04"),
+            n(&["ubuntu"], None, "ubuntu22.04"),
+        ];
+        let host = |id: &str, version: &str, like: &str| {
+            format!("NAME=x\nID={id}\nVERSION_ID=\"{version}\"\nID_LIKE=\"{like}\"\n")
+        };
+        assert_eq!(
+            linux_name(&names, &host("fedora", "44", "")).as_deref(),
+            Some("fedora41")
+        );
+        assert_eq!(
+            linux_name(&names, &host("fedora", "40", "")).as_deref(),
+            Some("fedora39")
+        );
+        assert_eq!(linux_name(&names, &host("fedora", "38", "")), None);
+        assert_eq!(
+            linux_name(&names, &host("ubuntu", "26.04", "debian")).as_deref(),
+            Some("ubuntu24.04")
+        );
+        assert_eq!(
+            linux_name(&names, &host("ubuntu", "22.04", "debian")).as_deref(),
+            Some("ubuntu22.04")
+        );
+        assert_eq!(
+            linux_name(&names, &host("linuxmint", "22", "ubuntu debian")).as_deref(),
+            Some("ubuntu22.04")
+        );
+        assert_eq!(linux_name(&names, &host("arch", "", "")), None);
+    }
+
     use super::*;
 
     #[cfg(unix)]

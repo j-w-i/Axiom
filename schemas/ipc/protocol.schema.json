@@ -4204,6 +4204,23 @@
             "url"
           ],
           "type": "object"
+        },
+        {
+          "description": "A SHA-512 digest from the manifest (lowercase hex), for publishers that give no SHA-256.\nM5.5, additive.",
+          "properties": {
+            "kind": {
+              "const": "sha512Digest",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -4452,7 +4469,7 @@
     "Step": {
       "oneOf": [
         {
-          "description": "Download into the cache; verified against `sha256` before anything uses it.",
+          "description": "Download into the cache; verified against `sha256` (a SHA-256 digest, a checksum file,\nor a SHA-512 digest) before anything uses it.",
           "properties": {
             "bytes": {
               "format": "uint64",

@@ -19,7 +19,8 @@ fail=0
 check() { if [[ "$2" == 0 ]]; then echo "PASS  $1 — $3"; else echo "FAIL  $1 — $3"; fail=1; fi; }
 
 if [[ "${1:-}" == "--app" ]]; then
-  app="${2:?--app needs a .app path}"
+  # Absolute: the self-test prints the daemon's absolute path, compared with this below.
+  app="$(cd "${2:?--app needs a .app path}" && pwd)"
   plist="$app/Contents/Info.plist"
   exe="$(plutil -extract CFBundleExecutable raw "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")"
   bid="$(plutil -extract CFBundleIdentifier raw "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")"

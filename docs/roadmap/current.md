@@ -18,8 +18,14 @@ Branch `task/m5.5`, from main (`9aa8ae8`). ADR-0021; protocol 0.5 with additive 
   hierarchy, format on save.
 - **FL-PERF-002:** selection lag fixed (the cursor no longer rebuilds the editor area).
 
+Real servers per language (2026-11-22): ten of eleven pass (completion in 1–63 ms, F12 into
+the SDK's source), C# and Swift on Linux with SDKs Axiom installs (.NET 11 by SHA-512; Swift
+6.4.3 through swiftly). Kotlin's kotlin-lsp (Alpha) gives no completion; the owner accepts it
+broken for now (`verification/M5.5.md`). Highlighting: function and variable colours, calls
+and members coloured, at least five colours in every code fixture.
+
 Owed:
-- the real-server scenario per language (`AXIOM_TEST_LSP_INSTALL=1 apps/desktop-flutter/scripts/e2e.sh languages_test.dart`; it downloads servers);
+- Kotlin (accepted broken for now);
 - macOS CI; Windows.
 
 **Next: CI green on `task/m5.5`, merge to main; then M6.**

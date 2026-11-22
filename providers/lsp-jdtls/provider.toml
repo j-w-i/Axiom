@@ -34,3 +34,8 @@ id = "jdtls"
 languages = ["java"]
 command = ["jdtls"]
 requires = ["java"]
+
+# Locations in the JDK and in jars come back as `jdt://` URIs, whose source the client asks for
+# with `java/classFileContents` (the shell does; M5.5-QA-001). Without this, jdtls returns none.
+[lsp.initialization_options.extendedClientCapabilities]
+classFileContentsSupport = true

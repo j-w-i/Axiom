@@ -86,11 +86,28 @@ fn publish(uri: &str, text: &str, version: Option<i64>) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--child-pid-file") {
-        if let (Some(path), Ok(child)) = (
-            args.get(i + 1),
-            std::process::Command::new("sleep").arg("300").spawn(),
-        ) {
-            let _ = std::fs::write(path, child.id().to_string());
+        if let Some(path) = args.get(i + 1) {
+            // In a session of its own and no longer its child (`setsid --fork`: the forking parent
+            // exits at once, as kotlin-lsp's launcher does), holding fake-lsp's output pipe: out of
+            // the group and the tree. It writes its own pid.
+            // macOS has no setsid command: there the child stays in the group, which is
+            // killed whole.
+            let script = [
+                "sh",
+                "-c",
+                "echo $$ > \"$0\"; exec sleep 300",
+                path.as_str(),
+            ];
+            let _ = if cfg!(target_os = "linux") {
+                std::process::Command::new("setsid")
+                    .arg("--fork")
+                    .args(script)
+                    .spawn()
+            } else {
+                std::process::Command::new(script[0])
+                    .args(&script[1..])
+                    .spawn()
+            };
         }
     }
     let stdin = std::io::stdin();

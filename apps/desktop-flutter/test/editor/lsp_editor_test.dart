@@ -212,4 +212,12 @@ void main() {
     c.undo();
     expect(c.text, 'fn main() {\n    let m = Ha\n}');
   });
+
+  test("clangd's include marker and padding are not part of the name", () {
+    final items = parseCompletion([
+      {'label': ' strlen', 'kind': 3},
+      {'label': '•strcasecmp_l', 'kind': 3},
+    ]);
+    expect(items.map((i) => i.label), ['strlen', 'strcasecmp_l']);
+  });
 }

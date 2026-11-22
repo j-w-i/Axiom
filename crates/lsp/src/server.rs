@@ -64,6 +64,10 @@ pub struct Launch {
 pub fn client_capabilities() -> Value {
     json!({
         "general": { "positionEncodings": ["utf-16"] },
+        // csharp-ls answers a definition in a .NET assembly with a `csharp:/metadata/…` URI,
+        // whose source the shell asks for with `csharp/metadata`, only when told the client
+        // can (M5.5-QA-001); other servers ignore it.
+        "experimental": { "csharp": { "metadataUris": true } },
         "workspace": {
             "configuration": true,
             "workspaceFolders": true,
@@ -166,13 +170,65 @@ struct Conn {
     stderr: Arc<Mutex<VecDeque<String>>>,
     child: tokio::sync::Mutex<Child>,
     /// The server's process group (it is spawned as the group's leader), so its children (node
-    /// workers, a JVM's, gradle daemons) are stopped with it.
+    /// workers, a JVM's, gradle daemons) are stopped with it. Unix only.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pgid: Option<u32>,
+    /// The server's output pipe (`pipe:[inode]`, Linux): a process that left the server's group
+    /// and tree (kotlin-lsp's launcher starts its JVM with setsid and exits) still holds it.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pipe: Option<String>,
     /// Becomes true when the process has exited (or its stdout closed).
     exited: watch::Receiver<bool>,
 }
 
 impl Conn {
+    /// The server's descendants now, and the processes holding its output pipe, each with its
+    /// start time (Linux; elsewhere its process group covers them).
+    fn descendants(&self) -> Vec<(u32, String)> {
+        #[cfg(target_os = "linux")]
+        if let Some(pgid) = self.pgid {
+            let mut pids = descendants(pgid);
+            pids.extend(self.pipe_holders());
+            pids.sort_unstable();
+            pids.dedup();
+            return pids
+                .into_iter()
+                .filter_map(|pid| start_time(pid).map(|s| (pid, s)))
+                .collect();
+        }
+        Vec::new()
+    }
+
+    /// Other processes that hold the server's output pipe open (Linux).
+    #[cfg(target_os = "linux")]
+    fn pipe_holders(&self) -> Vec<u32> {
+        let Some(pipe) = &self.pipe else {
+            return Vec::new();
+        };
+        let me = std::process::id();
+        let mut out = Vec::new();
+        let Ok(procs) = std::fs::read_dir("/proc") else {
+            return out;
+        };
+        for p in procs.flatten() {
+            let Ok(pid) = p.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            if pid == me {
+                continue;
+            }
+            let Ok(fds) = std::fs::read_dir(p.path().join("fd")) else {
+                continue;
+            };
+            if fds.flatten().any(|fd| {
+                std::fs::read_link(fd.path()).is_ok_and(|l| l.as_os_str() == pipe.as_str())
+            }) {
+                out.push(pid);
+            }
+        }
+        out
+    }
+
     /// Signals the server's whole process group: SIGKILL when [hard], else SIGTERM. A group
     /// already gone is fine.
     fn signal_group(&self, hard: bool) {
@@ -184,11 +240,75 @@ impl Conn {
             } else {
                 Signal::SIGTERM
             };
+            // Descendants that left the group for a session of their own (kotlin-lsp's launcher
+            // starts its JVM with setsid) are found by their parents while the server runs.
+            #[cfg(target_os = "linux")]
+            for pid in descendants(pgid).into_iter().chain(self.pipe_holders()) {
+                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), sig);
+            }
             let _ = killpg(nix::unistd::Pid::from_raw(pgid as i32), sig);
         }
         #[cfg(not(unix))]
         let _ = hard;
     }
+}
+
+/// SIGKILLs a stopped server's descendants that outlived it: each only while its start time is
+/// the one recorded, so a process that reused the number is never touched.
+fn signal_pids(pids: &[(u32, String)]) {
+    #[cfg(target_os = "linux")]
+    for (pid, started) in pids {
+        if start_time(*pid).as_ref() == Some(started) {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(*pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = pids;
+}
+
+/// A process's start time (`/proc/<pid>/stat` field 22), which a reused number does not share.
+#[cfg(target_os = "linux")]
+fn start_time(pid: u32) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after `(comm) `: state is field 3, so the start time (22) is the 20th.
+    let (_, rest) = stat.rsplit_once(") ")?;
+    rest.split_whitespace().nth(19).map(String::from)
+}
+
+/// Every process descended from [root], from `/proc`'s parent links.
+#[cfg(target_os = "linux")]
+fn descendants(root: u32) -> Vec<u32> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    if let Ok(rd) = std::fs::read_dir("/proc") {
+        for e in rd.flatten() {
+            let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                continue;
+            };
+            // `pid (comm) state ppid …`; the name may hold spaces and parentheses.
+            let ppid = stat
+                .rsplit_once(") ")
+                .and_then(|(_, rest)| rest.split_whitespace().nth(1))
+                .and_then(|p| p.parse::<u32>().ok());
+            if let Some(ppid) = ppid {
+                children.entry(ppid).or_default().push(pid);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut todo = vec![root];
+    while let Some(p) = todo.pop() {
+        for &c in children.get(&p).map(Vec::as_slice).unwrap_or_default() {
+            out.push(c);
+            todo.push(c);
+        }
+    }
+    out
 }
 
 impl Drop for Conn {
@@ -537,8 +657,11 @@ impl LanguageServer {
                 // A toolchain manager's stub for a component that is not installed (rustup's
                 // proxy: "Unknown binary 'rust-analyzer' in official toolchain") means the server
                 // is missing, not broken: the shell offers its install (ADR-0021 §5).
+                // Homebrew's rustup says "`rust-analyzer` is unavailable for the active
+                // toolchain" (and then loops on its own fallback).
                 let missing = tail.contains("Unknown binary")
-                    || tail.contains("is not installed for the toolchain");
+                    || tail.contains("is not installed for the toolchain")
+                    || tail.contains("is unavailable for the active toolchain");
                 // The generation moves on first, so the process's exit is not taken for a crash.
                 self.end_start(
                     gen,
@@ -703,6 +826,9 @@ impl LanguageServer {
         self.stopping.store(true, Ordering::SeqCst);
         let conn = lock(&self.inner).conn.clone();
         if let Some(c) = conn {
+            // Its descendants, taken while it runs: once it has exited, those in a session of
+            // their own are no longer linked to it.
+            let family = c.descendants();
             let (_, rx) = c.request("shutdown", Value::Null);
             let _ = tokio::time::timeout(STOP_GRACE, rx).await;
             c.notify("exit", Value::Null);
@@ -717,6 +843,7 @@ impl LanguageServer {
                 tokio::time::timeout(STOP_GRACE, async { c.child.lock().await.wait().await }).await;
             // What the server started and left behind goes with it.
             c.signal_group(true);
+            signal_pids(&family);
         }
         let mut i = lock(&self.inner);
         i.conn = None;
@@ -864,6 +991,15 @@ fn spawn_conn(
         .stdout
         .take()
         .ok_or_else(|| std::io::Error::other("no stdout"))?;
+    #[cfg(target_os = "linux")]
+    let pipe = {
+        use std::os::fd::AsRawFd;
+        std::fs::read_link(format!("/proc/self/fd/{}", stdout.as_raw_fd()))
+            .ok()
+            .map(|l| l.to_string_lossy().into_owned())
+    };
+    #[cfg(not(target_os = "linux"))]
+    let pipe = None;
     let stderr = child
         .stderr
         .take()
@@ -876,6 +1012,7 @@ fn spawn_conn(
         next_id: AtomicI64::new(1),
         stderr: Arc::new(Mutex::new(VecDeque::new())),
         pgid,
+        pipe,
         child: tokio::sync::Mutex::new(child),
         exited: exit_rx,
     });

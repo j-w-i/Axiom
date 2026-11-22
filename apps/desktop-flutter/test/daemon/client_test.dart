@@ -166,6 +166,9 @@ void main() {
       await client.start();
       final id = await open();
       final pid = client.pid!;
+      // Paused first, so the request is certainly still pending when the daemon dies (under load
+      // it could otherwise answer before the kill landed).
+      Process.killPid(pid, ProcessSignal.sigstop);
       final pending = client.call(
         Methods.taskStart,
         StartParams(

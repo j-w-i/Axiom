@@ -220,7 +220,9 @@ final class AxiomColors {
       string: Color(0xFFA9C47F),
       number: Color(0xFFC4A7DE),
       punct: Color(0xFF9D998F),
-      macro: Color(0xFF9FB8D8),
+      macro: Color(0xFFD9A0C4),
+      function: Color(0xFFDDC783),
+      variable: Color(0xFF9EC6E4),
       lineNumber: Color(0xFF6C6962),
       lineNumberActive: Color(0xFFA3A097),
       currentLine: Color(0x07FFFFFF),
@@ -291,7 +293,9 @@ final class AxiomColors {
       string: Color(0xFF557A25),
       number: Color(0xFF7A4EA8),
       punct: Color(0xFF6D6961),
-      macro: Color(0xFF3B6A9E),
+      macro: Color(0xFF9C3F72),
+      function: Color(0xFF7D6114),
+      variable: Color(0xFF2D6896),
       lineNumber: Color(0xFF8A867E),
       lineNumberActive: Color(0xFF5A5852),
       currentLine: Color(0x093C2D14),
@@ -337,11 +341,17 @@ final class SyntaxColors {
     required this.number,
     required this.punct,
     required this.macro,
+    required this.function,
+    required this.variable,
     required this.lineNumber,
     required this.lineNumberActive,
     required this.currentLine,
   });
   final Color text, comment, keyword, type, string, number, punct, macro;
+
+  /// Functions and methods (declared and called), and variables, parameters and properties:
+  /// the roles VS Code colours apart from the text (2026-11-22).
+  final Color function, variable;
   final Color lineNumber, lineNumberActive, currentLine;
 }
 
