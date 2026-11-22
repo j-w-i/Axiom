@@ -1285,12 +1285,18 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   }
 
   List<CodeLineRenderParagraph> _buildDisplayRenderParagraphs(int startIndex, double maxWidth) {
-    double offset = startIndex * _preferredLineHeight;
     final List<CodeLineRenderParagraph> paragraphs = [];
     // Axiom (M5.5-EDIT-001): a repaint forced between an edit that removed lines and this
     // render's next update (the shell's diagnostics arriving then) still holds the old lines; the
     // highlighter reads the controller's. Only lines both have are built.
     final int count = min(_codes.length, _highlighter._controller.codeLines.length);
+    // Axiom (FL-EDIT-003): from at most the last of those lines. Starting past them built
+    // nothing, and _updateDisplayRenderParagraphs retried with no end (a stack overflow when a
+    // long document shrank while scrolled far down).
+    if (startIndex >= count) {
+      startIndex = max(0, count - 1);
+    }
+    double offset = startIndex * _preferredLineHeight;
     for (int i = startIndex; i < count; i++) {
       final IParagraph paragraph = _buildParagraph(i, maxWidth);
       _displayParagraphs.add(CodeLineRenderParagraph(
@@ -1757,4 +1763,33 @@ class _CodeFieldFloatingCursorPainter extends _CodeFieldExtraPainter {
     canvas.drawRRect(RRect.fromRectXY(Rect.fromLTWH(offset.dx - _width / 2, offset.dy, _width, _height), _width / 2, _width / 2), _paint);
   }
 
+}
+
+/// Axiom patch (FL-EDIT-003): where [position] is drawn, for popups placed at a text position.
+/// [root] is a render object whose subtree holds the editor. The result is the rectangle of the
+/// position's line from the position's left edge (zero width, the line's height) in [ancestor]'s
+/// coordinates (global when null), or null when that line is not laid out (scrolled away).
+/// Arithmetic from the font size drifts from the editor's own layout further down a file.
+Rect? codeEditorPositionRect(RenderObject root, CodeLinePosition position, {RenderObject? ancestor}) {
+  final _CodeFieldRender? render = _findCodeFieldRender(root);
+  if (render == null || !render.attached || !render.hasSize) {
+    return null;
+  }
+  final Offset? local = render.calculateTextPositionViewportOffset(position);
+  if (local == null) {
+    return null;
+  }
+  final Offset topLeft = render.localToGlobal(local, ancestor: ancestor);
+  return Rect.fromLTWH(topLeft.dx, topLeft.dy, 0, render._preferredLineHeight);
+}
+
+_CodeFieldRender? _findCodeFieldRender(RenderObject node) {
+  if (node is _CodeFieldRender) {
+    return node;
+  }
+  _CodeFieldRender? found;
+  node.visitChildren((RenderObject child) {
+    found ??= _findCodeFieldRender(child);
+  });
+  return found;
 }

@@ -674,6 +674,7 @@ class _DocViewState extends State<_DocView> {
                 controller: _controller,
                 geometry: CodeGeometry(
                   fontSize: s.editorFontSize.toDouble(),
+                  fontFamily: s.editorFontFamily,
                   gutterKey: _gutter,
                   scroll: _scroll,
                 ),

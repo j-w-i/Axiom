@@ -153,6 +153,33 @@ command = ["fake-lsp"]
     main.controller.text = original;
     await tester.pump(const Duration(milliseconds: 100));
 
+    // 2b'. The list opens under the line being typed, never over it, with the names on the word
+    //      being completed (FL-EDIT-003), 400 lines down, where arithmetic from the font size
+    //      had drifted a line off the editor's own layout.
+    main.controller.text = '${'// filler\n' * 400}$original';
+    main.controller.selection = const CodeLineSelection.collapsed(index: 402, offset: 24);
+    await tester.pump(const Duration(milliseconds: 100));
+    await type('pri');
+    await until(
+      tester,
+      () => features.shownLabels.isNotEmpty,
+      what: 'the list 400 lines down',
+      detail: () => '${features.shownLabels}',
+    );
+    await tester.pump();
+    final editor = tester.renderObject(find.byType(CodeEditor).first);
+    final typed = codeEditorPositionRect(editor, const CodeLinePosition(index: 402, offset: 24))!;
+    final list = tester.getRect(find.bySemanticsLabel('Suggestions'));
+    expect(list.top, greaterThanOrEqualTo(typed.bottom), reason: 'list $list, line $typed');
+    expect(
+      (list.left + completionTextInset - typed.left).abs(),
+      lessThan(1.5),
+      reason: 'the names start on the typed word: list $list, word at ${typed.left}',
+    );
+    await key(tester, LogicalKeyboardKey.escape);
+    main.controller.text = original;
+    await tester.pump(const Duration(milliseconds: 100));
+
     // 2c. M5.5-EDIT-002: semantic tokens colour `fn` and the names after it; Mod+T finds a
     //     workspace symbol; Shift+Alt+H lists who calls `value`; Shift+Alt+O sorts the imports.
     await until(

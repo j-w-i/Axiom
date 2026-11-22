@@ -66,3 +66,13 @@ for up to 54 ms in `CopyMutableObjectGraph`; each keystroke paid the copy too.
 
 `integration_test/frames_test.dart` measures tab switching and checks that the tab left showing
 is highlighted afterwards.
+
+## Where a text position is drawn; no endless rebuild (FL-EDIT-003)
+- `lib/src/_code_field.dart`: `codeEditorPositionRect(root, position, ancestor:)` returns the
+  rectangle of the position's line from the render's own layout, in an ancestor's coordinates.
+  The shell places the completion list and the signature card with it. Arithmetic from the font
+  size had drifted about a line off by line 200, so the list covered the line being typed.
+- `_buildDisplayRenderParagraphs` starts at most at the last line that both the render and the
+  highlighter have. Starting past them built nothing, and `_updateDisplayRenderParagraphs`
+  retried until the stack overflowed: a long document shrinking while scrolled far down. The
+  M5.5-EDIT-001 bound had introduced this.

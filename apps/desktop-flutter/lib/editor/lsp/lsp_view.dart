@@ -33,10 +33,15 @@ final class CodeGeometry {
     required this.fontSize,
     required this.gutterKey,
     required this.scroll,
+    this.fontFamily,
     this.padLeft = 6,
     this.padTop = 6,
   });
   final double fontSize;
+
+  /// The editor's font (null or empty: the default mono), for text drawn in line with the code.
+  final String? fontFamily;
+  String get family => (fontFamily == null || fontFamily!.isEmpty) ? AxiomType.mono : fontFamily!;
   final GlobalKey gutterKey;
   final CodeScrollController scroll;
   final double padLeft, padTop;
@@ -48,7 +53,7 @@ final class CodeGeometry {
     final tp = TextPainter(
       text: TextSpan(
         text: 'M' * 64,
-        style: TextStyle(fontFamily: AxiomType.mono, fontSize: fontSize),
+        style: TextStyle(fontFamily: family, fontSize: fontSize),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -557,7 +562,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     if (_shown.isEmpty) return;
     setState(() => _active = (_active + d + _shown.length) % _shown.length);
     _scheduleResolve();
-    const extent = 24.0;
+    final extent = _rowExtent;
     if (_listScroll.hasClients) {
       final top = _active * extent;
       if (top < _listScroll.offset) {
@@ -1191,6 +1196,28 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     ),
   };
 
+  final _stackKey = GlobalKey();
+
+  /// A completion row's height: the editor's line, at least the shell's row.
+  double get _rowExtent => (widget.geometry.fontSize * 1.75).roundToDouble().clamp(22, 40);
+
+  /// The line rectangle at [line]:[column] in this view, from the editor's own layout (the
+  /// arithmetic from the font size drifts from it further down a file), else from that.
+  Rect _lineRect(int line, int column) {
+    final stack = _stackKey.currentContext?.findRenderObject();
+    if (stack != null && line < widget.controller.codeLines.length) {
+      final r = codeEditorPositionRect(
+        stack,
+        CodeLinePosition(index: line, offset: column),
+        ancestor: stack,
+      );
+      if (r != null) return r;
+    }
+    final g = widget.geometry;
+    final at = g.at(line, column, widget.controller.codeLines[line].text);
+    return Rect.fromLTWH(at.dx, at.dy, 0, g.lineHeight);
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
@@ -1199,120 +1226,22 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     Widget? popup;
     if (completing && _shown.isNotEmpty) {
       final s = widget.controller.selection;
-      final at = g.at(
-        s.extentIndex,
-        _anchor!.start,
-        widget.controller.codeLines[s.extentIndex].text,
-      );
-      popup = Positioned(
-        left: at.dx.clamp(0, double.infinity),
-        top: at.dy + g.lineHeight + 2,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Semantics(
-              label: 'Suggestions',
-              container: true,
-              liveRegion: true,
-              child: SizedBox(
-                width: 380,
-                height: (_shown.length.clamp(1, 10)) * 24.0 + 8,
-                child: Sheet(
-                  radius: Metrics.radiusRaised,
-                  padding: const EdgeInsets.all(4),
-                  child: ListView.builder(
-                    controller: _listScroll,
-                    itemExtent: 24,
-                    itemCount: _shown.length,
-                    itemBuilder: (context, i) {
-                      final (:item, :match) = _shown[i];
-                      final on = i == _active;
-                      return GestureDetector(
-                        onTap: () => _accept(i),
-                        child: Semantics(
-                          selected: on,
-                          label: [item.label, if (item.detail != null) item.detail!].join(', '),
-                          excludeSemantics: true,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: on ? c.raised : null,
-                              borderRadius: BorderRadius.circular(Metrics.radiusControl),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 18,
-                                    child: Text(
-                                      _kind(item.kind),
-                                      style: t.type.codeSmall.copyWith(color: c.accentText),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: Row(
-                                      children: [
-                                        Flexible(
-                                          child: _Highlighted(
-                                            text: item.label,
-                                            match: match,
-                                            style: t.type.code.copyWith(fontSize: 12.5),
-                                          ),
-                                        ),
-                                        if (item.labelDetail != null)
-                                          Flexible(
-                                            child: Text(
-                                              item.labelDetail!,
-                                              style: t.type.codeSmall.copyWith(color: c.ink3),
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 1,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                  if (item.detail != null)
-                                    Flexible(
-                                      child: Text(
-                                        item.detail!,
-                                        style: t.type.tiny,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.right,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ),
-            // The selected item's documentation beside the list (resolved when it came without).
-            if (_docOf(_shown[_active.clamp(0, _shown.length - 1)].item) case final doc?)
-              Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Semantics(
-                  label: 'Documentation',
-                  container: true,
-                  child: SizedBox(
-                    width: 360,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 248),
-                      child: Sheet(
-                        radius: Metrics.radiusRaised,
-                        padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
-                        child: SingleChildScrollView(child: MarkdownView(doc)),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+      final line = s.extentIndex;
+      final column = _anchor!.start;
+      final selected = _shown[_active.clamp(0, _shown.length - 1)].item;
+      popup = Positioned.fill(
+        child: CustomSingleChildLayout(
+          delegate: _AtText(() => _lineRect(line, column), inset: completionTextInset),
+          child: _CompletionPopup(
+            shown: _shown,
+            active: _active,
+            scroll: _listScroll,
+            rowExtent: _rowExtent,
+            text: TextStyle(fontFamily: g.family, fontSize: g.fontSize, height: 1.2),
+            charWidth: g.charWidth,
+            selected: selected,
+            onTap: _accept,
+          ),
         ),
       );
     }
@@ -1321,46 +1250,48 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     Widget? sigCard;
     if (sig != null) {
       final sel = widget.controller.selection;
-      final at = g.at(
-        sel.extentIndex,
-        sel.extentOffset,
-        widget.controller.codeLines[sel.extentIndex].text,
-      );
       final active = sig.active < sig.params.length ? sig.params[sig.active] : null;
       final base = t.type.code.copyWith(fontSize: 12.5, color: c.ink2);
-      sigCard = Positioned(
-        left: (at.dx - 24).clamp(0, double.infinity),
-        top: (at.dy - 30).clamp(0, double.infinity),
-        child: Semantics(
-          liveRegion: true,
-          label: 'Signature: ${sig.label}',
-          excludeSemantics: true,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: Sheet(
-              radius: Metrics.radiusRaised,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              child: Text.rich(
-                active == null
-                    ? TextSpan(text: sig.label, style: base)
-                    : TextSpan(
-                        style: base,
-                        children: [
-                          TextSpan(
-                            text: sig.label.substring(0, active.$1.clamp(0, sig.label.length)),
-                          ),
-                          TextSpan(
-                            text: sig.label.substring(
-                              active.$1.clamp(0, sig.label.length),
-                              active.$2.clamp(0, sig.label.length),
+      sigCard = Positioned.fill(
+        child: CustomSingleChildLayout(
+          delegate: _AtText(
+            () => _lineRect(sel.extentIndex, sel.extentOffset),
+            inset: 24,
+            above: true,
+          ),
+          child: Semantics(
+            liveRegion: true,
+            label: 'Signature: ${sig.label}',
+            excludeSemantics: true,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: Sheet(
+                radius: Metrics.radiusRaised,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                child: Text.rich(
+                  active == null
+                      ? TextSpan(text: sig.label, style: base)
+                      : TextSpan(
+                          style: base,
+                          children: [
+                            TextSpan(
+                              text: sig.label.substring(0, active.$1.clamp(0, sig.label.length)),
                             ),
-                            style: base.copyWith(color: c.ink, fontWeight: FontWeight.w700),
-                          ),
-                          TextSpan(text: sig.label.substring(active.$2.clamp(0, sig.label.length))),
-                        ],
-                      ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+                            TextSpan(
+                              text: sig.label.substring(
+                                active.$1.clamp(0, sig.label.length),
+                                active.$2.clamp(0, sig.label.length),
+                              ),
+                              style: base.copyWith(color: c.ink, fontWeight: FontWeight.w700),
+                            ),
+                            TextSpan(
+                              text: sig.label.substring(active.$2.clamp(0, sig.label.length)),
+                            ),
+                          ],
+                        ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ),
@@ -1443,6 +1374,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
           onHover: _onHover,
           onExit: (_) => _hide(),
           child: Stack(
+            key: _stackKey,
             children: [
               Positioned.fill(child: widget.builder(context, _overrides())),
               ?sigCard,
@@ -1482,59 +1414,263 @@ class _LspIntent extends Intent {
 /// What the documentation pane shows for [item]: its detail as code, then its documentation.
 bool get _isMac => defaultTargetPlatform == TargetPlatform.macOS;
 
-String? _docOf(CompletionChoice item) {
-  final parts = [
-    if (item.detail case final d? when d.trim().isNotEmpty) '```\n${d.trim()}\n```',
-    if (item.documentation case final d? when d.trim().isNotEmpty) d.trim(),
-  ];
-  return parts.isEmpty ? null : parts.join('\n\n');
+/// From a completion popup's left edge to where its rows' names start: the names line up with
+/// the word being completed, and the kind badges hang to their left (as in Xcode).
+const completionTextInset = _popupPad + _rowPad + _badgeSize + _badgeGap;
+const _popupPad = 4.0, _rowPad = 6.0, _badgeSize = 18.0, _badgeGap = 6.0;
+
+/// Places its child at a text position: below the line (above when [above], or when there is
+/// no room below), with the child's text [inset] from its left edge on the position. Laid out
+/// after the editor in the same pass, so it follows the editor's layout of this frame.
+final class _AtText extends SingleChildLayoutDelegate {
+  _AtText(this.line, {required this.inset, this.above = false});
+  final Rect Function() line;
+  final double inset;
+  final bool above;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) => constraints.loosen();
+
+  @override
+  Offset getPositionForChild(Size size, Size child) {
+    final r = line();
+    const gap = 2.0;
+    final below = r.bottom + gap;
+    final over = r.top - gap - child.height;
+    final fitsBelow = below + child.height <= size.height;
+    final y = (above ? (over >= 0 || !fitsBelow) && over >= 0 : !fitsBelow && over >= 0)
+        ? over
+        : below;
+    final x = (r.left - inset).clamp(0.0, (size.width - child.width).clamp(0.0, double.infinity));
+    return Offset(x, y.clamp(0.0, double.infinity));
+  }
+
+  @override
+  bool shouldRelayout(_AtText old) => true;
 }
 
-String _kind(int? k) => switch (k) {
-  2 || 3 => 'ƒ',
-  4 => 'c',
-  5 || 10 => 'p',
-  6 => 'v',
-  7 || 22 => 'T',
-  8 => 'I',
-  9 => 'm',
-  13 => 'e',
-  14 => 'k',
-  15 => 's',
-  21 => 'π',
-  _ => '·',
-};
+/// The completion list as Xcode has it: rows with a kind badge and the name with its parameters,
+/// in the editor's font, under the word being typed; the selected item's declaration and
+/// documentation in a panel below the list.
+class _CompletionPopup extends StatelessWidget {
+  const _CompletionPopup({
+    required this.shown,
+    required this.active,
+    required this.scroll,
+    required this.rowExtent,
+    required this.text,
+    required this.charWidth,
+    required this.selected,
+    required this.onTap,
+  });
+  final List<({CompletionChoice item, FuzzyMatch match})> shown;
+  final int active;
+  final ScrollController scroll;
+  final double rowExtent;
+  final TextStyle text;
+  final double charWidth;
+  final CompletionChoice selected;
+  final void Function(int) onTap;
 
-class _Highlighted extends StatelessWidget {
-  const _Highlighted({required this.text, required this.match, required this.style});
-  final String text;
-  final FuzzyMatch match;
-  final TextStyle style;
+  static const _visibleRows = 8;
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    final spans = <TextSpan>[];
-    var at = 0;
-    for (final (s, e) in match.ranges) {
-      if (s > at) spans.add(TextSpan(text: text.substring(at, s)));
-      spans.add(
-        TextSpan(
-          text: text.substring(s, e),
-          style: TextStyle(color: c.accentText, fontWeight: FontWeight.w600),
-        ),
-      );
-      at = e;
+    final t = context.axiom;
+    final c = t.colors;
+    var longest = 0;
+    for (final (:item, match: _) in shown.take(200)) {
+      final n = item.label.length + (item.labelDetail?.length ?? 0);
+      if (n > longest) longest = n;
     }
-    if (at < text.length) spans.add(TextSpan(text: text.substring(at)));
-    return Text.rich(
-      TextSpan(children: spans),
-      style: style,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
+    final width = (completionTextInset + longest * charWidth + _rowPad + _popupPad + 8).clamp(
+      320.0,
+      680.0,
+    );
+    final declaration = selected.detail?.trim();
+    final doc = selected.documentation?.trim();
+    final hasDeclaration = declaration != null && declaration.isNotEmpty;
+    final hasDoc = doc != null && doc.isNotEmpty;
+    return SizedBox(
+      width: width,
+      child: Sheet(
+        radius: Metrics.radiusSheet,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Semantics(
+              label: 'Suggestions',
+              container: true,
+              liveRegion: true,
+              child: SizedBox(
+                height: shown.length.clamp(1, _visibleRows) * rowExtent + _popupPad * 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(_popupPad),
+                  child: ListView.builder(
+                    controller: scroll,
+                    itemExtent: rowExtent,
+                    itemCount: shown.length,
+                    itemBuilder: (context, i) {
+                      final (:item, :match) = shown[i];
+                      final on = i == active;
+                      return GestureDetector(
+                        onTap: () => onTap(i),
+                        child: Semantics(
+                          selected: on,
+                          label: [item.label, if (item.detail != null) item.detail!].join(', '),
+                          excludeSemantics: true,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: on ? c.accentSoft : null,
+                              borderRadius: BorderRadius.circular(Metrics.radiusRaised),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: _rowPad),
+                              child: Row(
+                                children: [
+                                  _KindBadge(kind: item.kind, size: _badgeSize),
+                                  const SizedBox(width: _badgeGap),
+                                  Expanded(
+                                    child: Text.rich(
+                                      TextSpan(
+                                        style: text.copyWith(color: c.ink),
+                                        children: [
+                                          _highlightedSpan(item.label, match, c),
+                                          if (item.labelDetail case final d?)
+                                            TextSpan(
+                                              text: d,
+                                              style: TextStyle(color: c.ink3),
+                                            ),
+                                        ],
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+            if (hasDeclaration || hasDoc) ...[
+              SizedBox(height: 1, child: ColoredBox(color: c.hairline)),
+              Semantics(
+                label: 'Documentation',
+                container: true,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 180),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (hasDeclaration)
+                          Text(
+                            declaration,
+                            style: text.copyWith(fontSize: text.fontSize! * 0.92, color: c.ink2),
+                            maxLines: 4,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        if (hasDeclaration && hasDoc) const SizedBox(height: 6),
+                        if (hasDoc) MarkdownView(doc),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
+
+TextSpan _highlightedSpan(String text, FuzzyMatch match, AxiomColors c) {
+  final spans = <TextSpan>[];
+  var at = 0;
+  for (final (s, e) in match.ranges) {
+    if (s > at) spans.add(TextSpan(text: text.substring(at, s)));
+    spans.add(
+      TextSpan(
+        text: text.substring(s, e),
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+    );
+    at = e;
+  }
+  if (at < text.length) spans.add(TextSpan(text: text.substring(at)));
+  return TextSpan(children: spans);
+}
+
+/// A completion item's kind as Xcode marks it: a letter on a tinted square, coloured by what
+/// the symbol is (types, callables, values, keywords and snippets).
+class _KindBadge extends StatelessWidget {
+  const _KindBadge({required this.kind, required this.size});
+  final int? kind;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.axiom;
+    final c = t.colors;
+    final y = c.syntax;
+    final k = kind;
+    final colour = switch (k) {
+      7 || 8 || 9 || 13 || 22 || 25 => y.type,
+      2 || 3 || 4 || 23 || 24 => c.accentText,
+      5 || 6 || 10 || 11 || 12 || 20 || 21 => y.number,
+      14 || 15 => y.keyword,
+      _ => c.ink3,
+    };
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: colour.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(Metrics.radiusControl),
+      ),
+      child: Text(
+        _kindLetter(k),
+        style: t.type.tiny.copyWith(color: colour, fontWeight: FontWeight.w700, height: 1),
+      ),
+    );
+  }
+}
+
+/// Xcode's letters for the LSP CompletionItemKind.
+String _kindLetter(int? k) => switch (k) {
+  2 || 4 => 'M',
+  3 => 'F',
+  5 || 10 => 'P',
+  6 || 12 || 21 => 'V',
+  7 => 'C',
+  8 => 'Pr',
+  9 => 'Mo',
+  11 => 'U',
+  13 || 20 => 'E',
+  14 => 'K',
+  15 => '{}',
+  16 => 'Co',
+  17 => 'Fi',
+  18 => 'R',
+  19 => 'Fo',
+  22 => 'S',
+  23 => 'Ev',
+  24 => 'Op',
+  25 => 'T',
+  _ => 'Ab',
+};
 
 /// Hover text: paragraphs as body text, fenced code as code.
 class _HoverText extends StatelessWidget {
