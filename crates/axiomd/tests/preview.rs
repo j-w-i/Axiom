@@ -21,7 +21,7 @@ use axiom_protocol::ui::{
     NodeTarget, SnapshotParams, TakeSnapshot, Verify, VerifyParams,
 };
 use axiom_protocol::workspace::WorkspaceRef;
-use common::Daemon;
+use common::{note_skipped, Daemon};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -52,6 +52,7 @@ fn skip(why: &str) -> bool {
         panic!("{why}");
     }
     eprintln!("SKIPPED: {why}");
+    note_skipped("preview", why);
     true
 }
 

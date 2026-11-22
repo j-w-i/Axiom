@@ -28,4 +28,22 @@ void main() {
     expect(d.text, 'fn main() {\r\n    println!();\r\n    x();\r\n}\r\n');
     expect(d.secondary.text, d.text);
   });
+
+  test('a file with mixed line breaks is not dirty until edited, and keeps them (AUD-023)', () {
+    const text = 'one\r\ntwo\nthree\r\n';
+    final d = Doc(path: 'mixed.txt', text: text, savedVersion: 'v1');
+    d.controller.selection = const CodeLineSelection.collapsed(index: 1, offset: 1);
+    d.refreshDirty();
+    expect(d.dirty, isFalse);
+    // Saved unchanged: the same bytes.
+    expect(d.diskText(d.text), text);
+    // A same-line edit keeps every line's own break.
+    d.controller.selection = const CodeLineSelection.collapsed(index: 1, offset: 3);
+    d.controller.replaceSelection('!');
+    d.refreshDirty();
+    expect(d.dirty, isTrue);
+    expect(d.diskText(d.text), 'one\r\ntwo!\nthree\r\n');
+    expect(mixedBreaks('a\nb\n'), isNull);
+    expect(mixedBreaks('a\r\nb\rc\n'), ['\r\n', '\r', '\n']);
+  });
 }

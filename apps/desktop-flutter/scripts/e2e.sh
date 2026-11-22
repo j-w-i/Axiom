@@ -19,7 +19,7 @@ cd "$here"
 suites=("$@")
 if [[ ${#suites[@]} -eq 0 ]]; then
   # Every suite but the frame benchmarks (bash 3.2 on macOS: no mapfile).
-  while IFS= read -r f; do suites+=("$f"); done < <(cd integration_test && ls -- *_test.dart | grep -v frames_test)
+  while IFS= read -r f; do suites+=("$f"); done < <(cd integration_test && ls -- *_test.dart | grep -v -e frames_test -e perf_probe_test)
 fi
 
 cleanup() { [[ -n "${kwin_pid:-}" ]] && kill "$kwin_pid" 2>/dev/null || true; }
@@ -45,8 +45,20 @@ if [[ "$(uname -s)" == Linux ]]; then
   fi
 fi
 fail=0
+summary=()
 for s in "${suites[@]}"; do
   echo "[e2e] ===== $s"
-  flutter test "integration_test/$s" -d "$( [[ "$(uname -s)" == Darwin ]] && echo macos || echo linux )" ${AXIOM_E2E_FLAGS:-} || fail=1
+  log="$(mktemp)"
+  flutter test "integration_test/$s" -d "$( [[ "$(uname -s)" == Darwin ]] && echo macos || echo linux )" ${AXIOM_E2E_FLAGS:-} 2>&1 | tee "$log"
+  [[ ${PIPESTATUS[0]} -eq 0 ]] || fail=1
+  # Skipped cases are reported, not counted as passes (audit AUD-060).
+  last="$(grep -Eo '[+][0-9]+( ~[0-9]+)?( -[0-9]+)?: (All tests (passed|skipped)|Some tests failed)' "$log" | tail -1)"
+  skipped="$(sed -nE 's/.* ~([0-9]+).*/\1/p' <<<"$last")"
+  [[ -n "$skipped" ]] && summary+=("$s: $skipped skipped")
+  rm -f "$log"
 done
+if [[ ${#summary[@]} -gt 0 ]]; then
+  echo "[e2e] skipped (not run here):"
+  printf '[e2e]   %s\n' "${summary[@]}"
+fi
 exit $fail

@@ -395,3 +395,19 @@ impl RawSession {
         self.stdin = None;
     }
 }
+
+/// Records a test that returned early because something it needs is missing here, so
+/// `scripts/check.sh` can list it after `cargo test` (a passing test hides its stderr; audit
+/// AUD-060). The list is `target/tmp/skipped-tests.txt`.
+#[allow(dead_code)]
+pub fn note_skipped(what: &str, why: &str) {
+    use std::io::Write;
+    let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("skipped-tests.txt");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(f, "{what}: {why}");
+    }
+}

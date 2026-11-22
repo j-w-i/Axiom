@@ -80,11 +80,27 @@ class OutputBuffer {
     return cr >= 0 ? line.substring(cr + 1) : line;
   }
 
+  /// The longest line kept: output without line breaks is cut here (with a marker) rather than
+  /// growing one string without bound (AUD-026).
+  static const maxLineLength = 64 * 1024;
+
   void _apply(StreamKind stream, String data) {
-    final text = _partial[stream]! + stripAnsi(data);
-    final parts = text.split('\n');
-    _partial[stream] = parts.removeLast();
+    final clean = stripAnsi(data);
+    final prev = _partial[stream]!;
+    // Only the new chunk is split; the pending partial line is joined to its first part.
+    final parts = clean.split('\n');
+    parts[0] = prev + parts[0];
+    var tail = parts.removeLast();
+    if (tail.length > maxLineLength) {
+      // Emit the long run as a cut line and keep reading.
+      parts.add('${tail.substring(0, maxLineLength)} … (line cut at ${maxLineLength ~/ 1024} KiB)');
+      tail = '';
+    }
+    _partial[stream] = tail;
     for (var line in parts) {
+      if (line.length > maxLineLength) {
+        line = '${line.substring(0, maxLineLength)} … (line cut at ${maxLineLength ~/ 1024} KiB)';
+      }
       if (line.endsWith('\r')) line = line.substring(0, line.length - 1);
       _pending.add((_lastCr(line), stream, RowKind.line));
     }

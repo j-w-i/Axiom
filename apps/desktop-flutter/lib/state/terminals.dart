@@ -151,11 +151,38 @@ class TerminalsStore extends ChangeNotifier {
     }
   }
 
-  void write(String id, String data) => unawaited(
-    client
-        .call(Methods.terminalWrite, WriteParams(terminalId: id, data: data))
-        .then((_) {}, onError: (_) {}),
-  );
+  /// Input waiting while a write is in flight, by terminal.
+  final _queued = <String, StringBuffer>{};
+  final _writing = <String>{};
+
+  /// Keystrokes go one write at a time per terminal, in order; what is typed meanwhile is sent
+  /// as one write. The daemon runs each request in a task of its own, so two writes in flight
+  /// could reach the PTY in either order (AUD-087).
+  void write(String id, String data) {
+    (_queued[id] ??= StringBuffer()).write(data);
+    if (_writing.contains(id)) return;
+    unawaited(_drain(id));
+  }
+
+  Future<void> _drain(String id) async {
+    _writing.add(id);
+    try {
+      while (true) {
+        final buf = _queued[id];
+        if (buf == null || buf.isEmpty) break;
+        final data = buf.toString();
+        buf.clear();
+        try {
+          await client.call(Methods.terminalWrite, WriteParams(terminalId: id, data: data));
+        } on DaemonException {
+          _queued.remove(id);
+          break;
+        }
+      }
+    } finally {
+      _writing.remove(id);
+    }
+  }
 
   void resize(String id, int cols, int rows) {
     if (cols < 1 || rows < 1) return;

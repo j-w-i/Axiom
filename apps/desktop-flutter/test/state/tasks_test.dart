@@ -38,4 +38,22 @@ void main() {
     expect(formatDuration(1530), '1.5 s');
     expect(formatDuration(125000), '2 min 5 s');
   });
+
+  test('output with no line breaks is cut into bounded lines, in linear time (AUD-026)', () {
+    final b = OutputBuffer();
+    final chunk = 'a' * 4096;
+    final sw = Stopwatch()..start();
+    for (var i = 0; i < 2000; i++) {
+      b.append(i, StreamKind.stdout, chunk); // 8 MiB, no newline
+    }
+    b.finish();
+    sw.stop();
+    final out = lines(b);
+    expect(out, isNotEmpty);
+    for (final l in out) {
+      expect(l.length, lessThan(OutputBuffer.maxLineLength + 64));
+    }
+    expect(out.first, contains('line cut at 64 KiB'));
+    expect(sw.elapsedMilliseconds, lessThan(5000));
+  });
 }

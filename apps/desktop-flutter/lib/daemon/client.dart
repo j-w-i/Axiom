@@ -143,6 +143,7 @@ class _Connection {
   final pending = <int, _Pending>{};
   final stderrTail = <String>[];
   final exited = Completer<int>();
+  final stderrDone = Completer<void>();
   final lines = Queue<List<int>>();
   bool pumping = false;
   bool stopping = false;
@@ -204,12 +205,20 @@ class DaemonClient {
     final conn = _Connection(process, generation);
     _conn = conn;
     _read(conn);
-    process.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
-      conn.stderrTail.add(line);
-      if (conn.stderrTail.length > _stderrTailLines) conn.stderrTail.removeAt(0);
-      lastLogLine.value = line;
-      onLog?.call(line);
-    });
+    process.stderr
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(
+          (line) {
+            conn.stderrTail.add(line);
+            if (conn.stderrTail.length > _stderrTailLines) conn.stderrTail.removeAt(0);
+            lastLogLine.value = line;
+            onLog?.call(line);
+          },
+          onDone: () {
+            if (!conn.stderrDone.isCompleted) conn.stderrDone.complete();
+          },
+        );
     unawaited(process.exitCode.then((code) => _exited(conn, code)));
 
     final params = InitializeParams(
@@ -278,7 +287,16 @@ class DaemonClient {
       timeout ?? config.requestTimeout,
       cancel,
     );
-    return method.decodeResult(json);
+    // An answer that does not decode (a daemon of another version) is a DaemonException like any
+    // other failure, so callers that catch those do not stay "opening" or "running" (AUD-091).
+    try {
+      return method.decodeResult(json);
+    } on Object catch (e) {
+      throw DaemonException(
+        ErrorKind.internal,
+        "The backend's answer to ${method.name} was not understood ($e)",
+      );
+    }
   }
 
   /// Calls a method by name with raw JSON params (for `lsp/request` pass-through and tests).
@@ -426,6 +444,9 @@ class DaemonClient {
     final m = msg.cast<String, Object?>();
     final id = m['id'];
     if (m.containsKey('method') && id == null) {
+      // A daemon being replaced still talks while it stops; the new one reuses its ids (w1, t1),
+      // so its notifications would pass the stores' checks (AUD-086).
+      if (!identical(conn, _conn) || conn.stopping) return false;
       final method = m['method']! as String;
       for (final l in List.of(_listeners[method] ?? const <void Function(Object?)>[])) {
         try {
@@ -473,11 +494,17 @@ class DaemonClient {
     _set(conn.generation, DaemonFailed(message));
   }
 
-  void _exited(_Connection conn, int code) {
+  Future<void> _exited(_Connection conn, int code) async {
     conn.exited.complete(code);
-    _failPending(conn);
-    if (conn.stopping) return;
+    if (conn.stopping) {
+      _failPending(conn);
+      return;
+    }
     conn.stopping = true;
+    // The panic is often the last thing on stderr: wait (briefly) for it before saying why the
+    // daemon stopped (AUD-090).
+    await conn.stderrDone.future.timeout(const Duration(milliseconds: 500), onTimeout: () {});
+    _failPending(conn);
     final tail = conn.stderrTail.isEmpty ? '' : '\n${conn.stderrTail.join('\n')}';
     _set(conn.generation, DaemonFailed('The backend exited unexpectedly (code $code).$tail'));
   }

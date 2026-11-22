@@ -81,6 +81,75 @@ class WorkspaceStore extends ChangeNotifier {
 
   bool get isOpen => id.isNotEmpty;
 
+  /// The folder that was open when the daemon went away (crashed, killed, restarted): reopened
+  /// by [AppState.restartBackend]; cleared once a folder opens (AUD-001).
+  String lostRoot = '';
+
+  /// True while the closed callbacks run because the daemon went away, not because the person
+  /// closed or switched the folder: the documents keep their unsaved text then (AUD-001).
+  bool closingForLoss = false;
+
+  /// The explorer's selected row (a file or folder path; '' is the root): where New File and
+  /// New Folder put what they make (AUD-022).
+  String selection = '';
+
+  /// The folder [selection] stands for: itself when it is a folder, else its parent.
+  String get selectedFolder {
+    final n = _nodes[selection];
+    if (n == null) return '';
+    return n.isDir ? n.path : parentPath(n.path);
+  }
+
+  // ---- file operations (protocol 0.6, AUD-022) ---------------------------------------------
+
+  /// Creates an empty (or [text]) file at [path]; null when done, else why not.
+  Future<String?> createFile(String path, {String text = ''}) => _op(
+    () => client.call(
+      Methods.fsCreateFile,
+      CreateFileParams(workspaceId: id, path: path, text: text),
+    ),
+    path,
+  );
+
+  Future<String?> createFolder(String path) => _op(
+    () =>
+        client.call(Methods.fsCreateDirectory, CreateDirectoryParams(workspaceId: id, path: path)),
+    path,
+  );
+
+  Future<String?> rename(String from, String to) => _op(
+    () => client.call(Methods.fsRename, RenameParams(workspaceId: id, from: from, to: to)),
+    to,
+    also: from,
+  );
+
+  /// Moves [path] to the system's trash (never deletes it outright).
+  Future<String?> trash(String path) =>
+      _op(() => client.call(Methods.fsTrash, TrashParams(workspaceId: id, path: path)), path);
+
+  Future<String?> _op(Future<Object?> Function() call, String path, {String? also}) async {
+    if (!isOpen) return 'No folder is open.';
+    try {
+      await call();
+      // The watcher reports it too; listing now shows it at once.
+      applyChanges([path, ?also]);
+      return null;
+    } on DaemonException catch (e) {
+      final name = path.split('/').last;
+      return switch (e.kind) {
+        ErrorKind.alreadyExists => 'Something named $name is already there.',
+        ErrorKind.notFound => '$name is no longer there.',
+        ErrorKind.permissionDenied => '$name is outside the folder.',
+        ErrorKind.unsupported => 'This system has no trash to move $name to.',
+        ErrorKind.invalidParams => '“$name” is not a usable name or place.',
+        _ => e.message,
+      };
+    }
+  }
+
+  /// The open folder's root was not found when it was listed (moved or deleted, AUD-066).
+  bool rootGone = false;
+
   void Function() onOpened(VoidCallback fn) {
     _opened.add(fn);
     return () => _opened.remove(fn);
@@ -97,10 +166,12 @@ class WorkspaceStore extends ChangeNotifier {
     if (client.state.value is DaemonReady) {
       unawaited(refreshRecent());
     } else {
-      // A new daemon process knows no workspaces.
+      // A new daemon process knows no workspaces. The open folder is remembered so the shell
+      // can reopen it, and the documents are told it was a loss, not a close (AUD-001).
       _pendingClose = 0;
       _deferredOpen = null;
-      if (isOpen || opening) _clearOpenState();
+      if (isOpen) lostRoot = root;
+      if (isOpen || opening) _clearOpenState(lost: true);
     }
   }
 
@@ -146,8 +217,10 @@ class WorkspaceStore extends ChangeNotifier {
     if (isOpen) {
       final oldId = id;
       await flushState();
-      _resetTree('');
-      id = '';
+      if (gen != _generation) return;
+      // The old folder's documents, language servers, diagnostics and searches go before the new
+      // folder opens: their paths are relative to the old root (AUD-002).
+      _clearOpenState(bumpGeneration: false, keepOpening: true);
       try {
         await client.call(Methods.workspaceClose, WorkspaceRef(workspaceId: oldId));
       } on DaemonException {
@@ -170,6 +243,8 @@ class WorkspaceStore extends ChangeNotifier {
     if (gen != _generation) return;
     _resetTree(r.workspaceId);
     _restoring = true;
+    lostRoot = '';
+    rootGone = false;
     id = r.workspaceId;
     root = r.root;
     name = r.name;
@@ -224,17 +299,22 @@ class WorkspaceStore extends ChangeNotifier {
     }
   }
 
-  void _clearOpenState() {
+  void _clearOpenState({bool lost = false, bool bumpGeneration = true, bool keepOpening = false}) {
     _saveTimer?.cancel();
-    ++_generation;
+    if (bumpGeneration) ++_generation;
     _resetTree('');
     id = '';
     root = '';
     name = '';
-    opening = false;
+    opening = keepOpening;
     notifyListeners();
-    for (final fn in List.of(_closed)) {
-      fn();
+    closingForLoss = lost;
+    try {
+      for (final fn in List.of(_closed)) {
+        fn();
+      }
+    } finally {
+      closingForLoss = false;
     }
   }
 
@@ -335,6 +415,7 @@ class WorkspaceStore extends ChangeNotifier {
       )).entries;
     } on DaemonException catch (e) {
       err = e.message;
+      if (path.isEmpty && e.kind == ErrorKind.notFound) rootGone = true;
     }
     if (gen != _generation) return;
     final current = _nodes[path];
@@ -342,7 +423,14 @@ class WorkspaceStore extends ChangeNotifier {
     current.loading = false;
     if (err != null) {
       if (path.isEmpty) {
-        error = 'Could not list the folder: $err';
+        // Words for the person, not the daemon's (AUD-066); the stale tree goes.
+        error = rootGone
+            ? 'The folder $name was moved or deleted.'
+            : 'Could not list the folder $name: ${err.replaceAll('`', '')}';
+        if (rootGone) {
+          _removeSubtree(current, false);
+          current.children = [];
+        }
       } else {
         _removeSubtree(current, false);
         current.children = [];

@@ -16,14 +16,20 @@ class LocalPrefs extends ChangeNotifier {
 
   static Future<LocalPrefs> load(String dir) async {
     final p = LocalPrefs('$dir${Platform.pathSeparator}shell-local.json');
-    try {
-      final f = File(p.path);
-      if (await f.exists()) {
-        final v = jsonDecode(await f.readAsString());
-        if (v is Map) p._values = v.cast<String, Object?>();
+    // A damaged file falls back to the copy kept by the previous save (AUD-089).
+    for (final path in [p.path, '${p.path}.bak']) {
+      try {
+        final f = File(path);
+        if (await f.exists()) {
+          final v = jsonDecode(await f.readAsString());
+          if (v is Map) {
+            p._values = v.cast<String, Object?>();
+            break;
+          }
+        }
+      } on Object {
+        debugPrint('$path could not be read; trying the backup');
       }
-    } on Object {
-      // A damaged file is replaced on the next save.
     }
     return p;
   }
@@ -45,15 +51,34 @@ class LocalPrefs extends ChangeNotifier {
     _save = Timer(const Duration(milliseconds: 300), flush);
   }
 
-  /// Writes now (on quit, and after the debounce).
-  Future<void> flush() async {
+  Future<void>? _writing;
+  int _writes = 0;
+
+  /// Writes now (on quit, and after the debounce). Writes run one after another, each to a temp
+  /// file of its own, so two flushes cannot interleave into a damaged file (AUD-089).
+  Future<void> flush() {
     _save?.cancel();
     _save = null;
+    final text = const JsonEncoder.withIndent('  ').convert(_values);
+    final before = _writing ?? Future<void>.value();
+    final next = before.then((_) => _write(text));
+    _writing = next;
+    return next;
+  }
+
+  Future<void> _write(String text) async {
     try {
       final f = File(path);
       await f.parent.create(recursive: true);
-      final tmp = File('$path.tmp');
-      await tmp.writeAsString(const JsonEncoder.withIndent('  ').convert(_values), flush: true);
+      final tmp = File('$path.$pid.${_writes++}.tmp');
+      await tmp.writeAsString(text, flush: true);
+      if (await f.exists()) {
+        try {
+          await f.copy('$path.bak');
+        } on Object {
+          // The backup is best effort.
+        }
+      }
       await tmp.rename(path);
     } on Object catch (e) {
       debugPrint('shell-local.json not saved: $e');

@@ -22,6 +22,7 @@ import '../editor/lsp/semantic_tokens.dart';
 import '../editor/lsp/underline.dart';
 import '../ui/tokens.dart';
 import 'lsp.dart';
+import 'recovery.dart';
 import 'workspace.dart';
 
 const openPathsKey = 'editor.openPaths';
@@ -101,13 +102,40 @@ TextLineBreak lineBreakOf(String text) {
 int? textLength(CodeLines lines, int breakLength) {
   final n = lines.length;
   var length = n > 0 ? (n - 1) * breakLength : 0;
-  for (var i = 0; i < n; i++) {
-    final line = lines[i];
+  // One pass over the segments: `lines[i]` walks them from the start each time (AUD-005).
+  for (final line in lines.lines) {
     if (line.chunks.isNotEmpty) return null;
     length += line.text.length;
   }
   return length;
 }
+
+/// Each line's own break when a file mixes them (CRLF and LF, or a stray CR); null when every
+/// break is the same. The editor joins lines with one break, so a mixed file would look edited as
+/// soon as it was read, and saving would rewrite its breaks (AUD-023).
+List<String>? mixedBreaks(String text) {
+  final breaks = <String>[];
+  for (var i = 0; i < text.length; i++) {
+    final ch = text.codeUnitAt(i);
+    if (ch == 0x0D) {
+      if (i + 1 < text.length && text.codeUnitAt(i + 1) == 0x0A) {
+        breaks.add('\r\n');
+        i++;
+      } else {
+        breaks.add('\r');
+      }
+    } else if (ch == 0x0A) {
+      breaks.add('\n');
+    }
+  }
+  if (breaks.isEmpty) return null;
+  final first = breaks.first;
+  return breaks.every((b) => b == first) ? null : breaks;
+}
+
+/// [text] with every line break replaced by [lineBreak] (what the editor shows and joins with).
+String _normalised(String text, String lineBreak) =>
+    text.replaceAll(RegExp('\r\n|\r|\n'), lineBreak);
 
 String _firstLine(String text) {
   final i = text.indexOf('\n');
@@ -117,6 +145,7 @@ String _firstLine(String text) {
 class Doc {
   Doc({required this.path, required String text, required this.savedVersion})
     : _savedText = text,
+      _breaks = mixedBreaks(text),
       languageNotifier = ValueNotifier(
         Languages.instance.detect(_languageName(path), firstLine: _firstLine(text)),
       ) {
@@ -127,6 +156,33 @@ class Doc {
     );
     _shiftLines = controller.codeLines;
     controller.addListener(_followLines);
+    if (_breaks != null) _savedText = _normalised(text, controller.options.lineBreak.value);
+  }
+
+  /// The file's own line breaks, one per line, when it mixes them (see [mixedBreaks]).
+  List<String>? _breaks;
+
+  /// [text] (as the editor joins it) as it is written to disk: a file with mixed line breaks keeps
+  /// each line's own break while the number of lines is unchanged; lines added or removed take the
+  /// first break of the file (AUD-023).
+  String diskText(String text) {
+    final breaks = _breaks;
+    if (breaks == null) return text;
+    final lb = controller.options.lineBreak.value;
+    final lines = text.split(lb);
+    if (lines.length != breaks.length + 1) return text;
+    final out = StringBuffer();
+    for (var i = 0; i < lines.length; i++) {
+      out.write(lines[i]);
+      if (i < breaks.length) out.write(breaks[i]);
+    }
+    return out.toString();
+  }
+
+  /// [disk] (a file's bytes as text) as the editor would join it.
+  String editorText(String disk) {
+    _breaks = mixedBreaks(disk);
+    return _breaks == null ? disk : _normalised(disk, controller.options.lineBreak.value);
   }
 
   /// The lines the server's decorations were last placed for.
@@ -141,9 +197,10 @@ class Doc {
     if (identical(now, before)) return;
     _shiftLines = now;
     if (before == null || before.length == now.length) return;
-    final n = before.length < now.length ? before.length : now.length;
+    // The first changed line, in one pass over both (indexing walks the segments each time).
     var at = 0;
-    while (at < n && before[at].text == now[at].text) {
+    final a = before.lines.iterator, b = now.lines.iterator;
+    while (a.moveNext() && b.moveNext() && a.current.text == b.current.text) {
       at++;
     }
     final delta = now.length - before.length;
@@ -165,7 +222,8 @@ class Doc {
     if (highlights.isNotEmpty) highlights = const [];
   }
 
-  final String path;
+  /// Workspace-relative; changes when the file is renamed or moved in Axiom (AUD-022).
+  String path;
 
   /// The document's language: detected from its name and first line; the status bar's picker
   /// changes it for the session.
@@ -179,8 +237,14 @@ class Doc {
   /// Underline colours by LSP severity (set by the editor from the theme).
   Color Function(int severity) underlineColor = (_) => AxiomColors.dark.danger;
 
-  /// The code colours (set by the editor from the theme).
-  SyntaxColors syntax = AxiomColors.dark.syntax;
+  /// The code colours (set by the editor from the theme); the server's tokens follow a change.
+  SyntaxColors get syntax => _syntax;
+  SyntaxColors _syntax = AxiomColors.dark.syntax;
+  set syntax(SyntaxColors y) {
+    if (identical(y, _syntax)) return;
+    semantic = rethemeSemantic(semantic, _syntax, y);
+    _syntax = y;
+  }
 
   TextSpan _span({
     required BuildContext context,
@@ -309,8 +373,22 @@ class Doc {
 
   String get title => titleOf(path);
 
-  /// Outside the workspace: read-only (see [isExternal]).
-  bool get readOnly => isExternal(path);
+  /// Outside the workspace: read-only (see [isExternal]); also while the daemon is gone and the
+  /// document waits to attach to the folder again (AUD-001).
+  bool get readOnly => isExternal(path) || detached;
+
+  /// The daemon went away: the document keeps its text (and unsaved changes) until the folder is
+  /// open again (AUD-001).
+  bool detached = false;
+
+  /// The file was deleted on disk while the document was open (AUD-019).
+  bool deletedOnDisk = false;
+
+  /// The text as last saved or read (the dirty mark compares with it).
+  String get savedText => _savedText;
+
+  /// The lines the recovery copy was last scheduled for (AUD-001).
+  Object? recoveryLines;
   String get text => controller.text;
 
   /// Recomputes [dirty]; true when it changed.
@@ -331,21 +409,32 @@ class Doc {
     return true;
   }
 
-  void markSaved(String version, String text) {
+  void markSaved(String version, String text, {String? disk}) {
     savedVersion = version;
+    if (disk != null) _breaks = mixedBreaks(disk);
     _savedText = text;
     changedOnDisk = false;
+    deletedOnDisk = false;
     _dirtyLines = null;
     refreshDirty();
   }
 
   void replaceText(String text, String version) {
-    controller.text = text;
+    final shown = editorText(text);
+    controller.text = shown;
     savedVersion = version;
-    _savedText = text;
+    _savedText = shown;
     dirty = false;
     changedOnDisk = false;
+    deletedOnDisk = false;
     _dirtyLines = controller.codeLines;
+  }
+
+  /// Puts recovered unsaved [text] into the document (the saved text stays as it is on disk).
+  void restoreUnsaved(String text) {
+    controller.text = text;
+    _dirtyLines = null;
+    refreshDirty();
   }
 }
 
@@ -359,14 +448,24 @@ final class Prompt {
 }
 
 class DocumentsStore extends ChangeNotifier {
-  DocumentsStore(this.client, this.workspace) {
+  DocumentsStore(this.client, this.workspace, {RecoveryStore? recovery})
+    : recovery = recovery ?? RecoveryStore(null) {
     _offChange = client.on(Notifications.fsDidChange, _onDidChange);
     _offOpened = workspace.onOpened(() => unawaited(_restoreTabs()));
-    _offClosed = workspace.onClosed(_clearAll);
+    _offClosed = workspace.onClosed(_onClosed);
   }
 
   final DaemonClient client;
   final WorkspaceStore workspace;
+
+  /// Unsaved text kept on disk (AUD-001).
+  final RecoveryStore recovery;
+
+  /// The folder the documents belonged to when the daemon went away.
+  String _detachedRoot = '';
+
+  /// The root the open documents belong to (the recovery copies are filed under it).
+  String _root = '';
   late final void Function() _offChange, _offOpened, _offClosed;
 
   final docs = <Doc>[];
@@ -441,7 +540,11 @@ class DocumentsStore extends ChangeNotifier {
     if (line != null) pendingReveal = (path: path, line: line, column: column ?? 1);
     focusRequest = focus && !background ? path : null;
     if (doc(path) != null) {
-      if (!background) _setActive(path);
+      if (!background) {
+        _setActive(path);
+        // A failed open's message is about that file, not the one shown now (AUD-063).
+        if (banner.startsWith('Cannot open')) banner = '';
+      }
       notifyListeners();
       return;
     }
@@ -459,9 +562,7 @@ class DocumentsStore extends ChangeNotifier {
       );
       if (gen != _generation || doc(path) != null) return;
       final d = Doc(path: path, text: r.text, savedVersion: r.version);
-      d.controller.addListener(() {
-        if (d.refreshDirty()) _notifySafely();
-      });
+      _watch(d);
       docs.add(d);
       banner = '';
       if (activate || activePath.isEmpty) _setActive(path);
@@ -477,6 +578,28 @@ class DocumentsStore extends ChangeNotifier {
       notifyListeners();
     } finally {
       _opening.remove(path);
+    }
+  }
+
+  /// Follows [d]'s edits: the dirty mark, and the recovery copy of unsaved text.
+  void _watch(Doc d) {
+    d.recoveryLines = d.controller.codeLines;
+    d.controller.addListener(() {
+      if (d.refreshDirty()) _notifySafely();
+      final lines = d.controller.codeLines;
+      if (identical(lines, d.recoveryLines)) return; // a caret move
+      d.recoveryLines = lines;
+      _keepOrForget(d);
+    });
+  }
+
+  void _keepOrForget(Doc d) {
+    if (d.readOnly && !d.detached) return;
+    final root = _root.isNotEmpty ? _root : workspace.root;
+    if (d.dirty) {
+      recovery.keep(root, d.path, () => d.text, d.savedVersion);
+    } else {
+      recovery.forget(root, d.path);
     }
   }
 
@@ -497,6 +620,7 @@ class DocumentsStore extends ChangeNotifier {
 
   void activate(String path) {
     if (doc(path) == null) return;
+    if (banner.startsWith('Cannot open')) banner = '';
     _setActive(path);
     notifyListeners();
   }
@@ -632,6 +756,7 @@ class DocumentsStore extends ChangeNotifier {
     final wasActive = activePath == path;
     if (split?.paths.contains(path) ?? false) closeInSplit(path);
     final d = docs.removeAt(i);
+    recovery.forget(_root, d.path);
     final second = d.dropSecondary();
     _conflicts.removeWhere((c) => c.path == path);
     if (wasActive) {
@@ -648,10 +773,160 @@ class DocumentsStore extends ChangeNotifier {
     });
   }
 
+  void _onClosed() {
+    if (workspace.closingForLoss) {
+      _detachAll();
+    } else {
+      _clearAll();
+    }
+  }
+
+  /// The daemon went away: the documents stay, read-only, with their unsaved text (also written
+  /// to the recovery folder now, in case the shell goes too), until the folder opens again
+  /// (AUD-001, requirement N3).
+  void _detachAll() {
+    ++_generation;
+    _tabSave?.cancel();
+    _detachedRoot = _root.isNotEmpty ? _root : workspace.lostRoot;
+    for (final d in docs) {
+      if (!isExternal(d.path)) d.detached = true;
+    }
+    _conflicts.clear();
+    prompt = null;
+    _proceed = null;
+    final unsaved = dirtyPaths.length;
+    banner = unsaved == 0
+        ? ''
+        : 'The backend stopped. Your unsaved changes to ${unsaved == 1 ? titleOf(dirtyPaths.first) : '$unsaved files'} are kept and come back when it restarts.';
+    for (final d in docs) {
+      if (d.dirty) recovery.keep(_detachedRoot, d.path, () => d.text, d.savedVersion);
+    }
+    unawaited(recovery.flush());
+    notifyListeners();
+  }
+
+  /// The folder (the same one) is open again: the kept documents attach to it. A clean document
+  /// takes the text on disk; a dirty one keeps its text, and is marked changed (or deleted) on
+  /// disk when the file moved on meanwhile.
+  Future<void> _reattach() async {
+    final kept = [
+      for (final d in docs)
+        if (d.detached) d,
+    ];
+    if (kept.isEmpty) return;
+    if (workspace.root != _detachedRoot) {
+      // Another folder opened: the unsaved text stays in the recovery folder for its own folder.
+      await recovery.flush();
+      final unsaved = kept.where((d) => d.dirty).length;
+      _drop(kept);
+      if (unsaved > 0) {
+        final name = _detachedRoot.split(RegExp(r'[/\\]')).where((x) => x.isNotEmpty).lastOrNull;
+        banner =
+            'Unsaved changes to $unsaved file${unsaved == 1 ? '' : 's'} in ${name ?? _detachedRoot} are kept; open that folder again to get them back.';
+      }
+      notifyListeners();
+      return;
+    }
+    final gen = _generation;
+    for (final d in kept) {
+      ReadFileResult? r;
+      var gone = false;
+      try {
+        r = await client.call(
+          Methods.fsReadFile,
+          ReadFileParams(workspaceId: workspace.id, path: d.path),
+        );
+      } on DaemonException catch (e) {
+        gone = e.kind == ErrorKind.notFound;
+      }
+      if (gen != _generation) return;
+      d.detached = false;
+      if (r == null) {
+        if (gone && !d.dirty) {
+          _drop([d]);
+        } else if (gone) {
+          d.deletedOnDisk = true;
+        }
+        continue;
+      }
+      if (!d.dirty) {
+        if (d.editorText(r.text) != d.text) {
+          d.replaceText(r.text, r.version);
+        } else {
+          d.savedVersion = r.version;
+        }
+      } else if (d.editorText(r.text) == d.savedText) {
+        d.savedVersion = r.version;
+      } else {
+        d.changedOnDisk = true;
+      }
+    }
+    _detachedRoot = '';
+    if (banner.startsWith('The backend stopped')) banner = '';
+    notifyListeners();
+  }
+
+  /// Unsaved text kept for this folder from an earlier session (the shell or the daemon ended
+  /// with unsaved changes): opened again as unsaved changes.
+  Future<void> _recover() async {
+    final entries = recovery.entries(workspace.root);
+    if (entries.isEmpty) return;
+    final gen = _generation;
+    var n = 0;
+    for (final e in entries) {
+      if (gen != _generation) return;
+      var d = doc(e.path);
+      if (d == null) {
+        await _openInternal(e.path, silent: true, activate: false);
+        d = doc(e.path);
+      }
+      if (d == null || gen != _generation) {
+        // The file is gone: the text is still offered, as a new unsaved document is not possible
+        // without the file; it stays in the recovery folder.
+        continue;
+      }
+      if (d.dirty || d.text == e.text) {
+        if (!d.dirty) recovery.forget(workspace.root, e.path);
+        continue;
+      }
+      if (e.savedVersion.isNotEmpty && d.savedVersion != e.savedVersion) d.changedOnDisk = true;
+      d.restoreUnsaved(e.text);
+      n++;
+    }
+    if (n > 0) {
+      banner =
+          'Recovered unsaved changes to ${n == 1 ? '1 file' : '$n files'} from the last session.';
+      notifyListeners();
+    }
+  }
+
+  /// Removes [list] from the open documents (their controllers are disposed after the frame).
+  void _drop(List<Doc> list) {
+    for (final d in list) {
+      docs.remove(d);
+      if (split?.paths.contains(d.path) ?? false) closeInSplit(d.path);
+      if (activePath == d.path) activePath = docs.isEmpty ? '' : docs.first.path;
+    }
+    final seconds = [for (final d in list) d.dropSecondary()];
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      for (final c in seconds) {
+        c?.dispose();
+      }
+      for (final d in list) {
+        d.controller.dispose();
+      }
+    });
+  }
+
   void _clearAll() {
     ++_generation;
     _tabSave?.cancel();
     final old = [...docs];
+    for (final d in old) {
+      recovery.forget(_root, d.path);
+    }
+    _root = '';
+    _detachedRoot = '';
     docs.clear();
     split = null;
     activePath = '';
@@ -693,28 +968,53 @@ class DocumentsStore extends ChangeNotifier {
     }
   }
 
+  /// Saves of one document run one after another: two in flight sent the same
+  /// `expectedVersion`, and the second came back as a false conflict (AUD-024).
+  final _saving = <String, Future<bool>>{};
+
   /// True when the save succeeded.
-  Future<bool> _write(Doc d, String text, {required bool overwrite}) async {
+  Future<bool> _write(Doc d, String text, {required bool overwrite}) {
+    final before = _saving[d.path];
+    final next = (before == null ? Future<bool>.value(true) : before.then((_) => true)).then(
+      (_) => _writeNow(d, text, overwrite: overwrite),
+    );
+    _saving[d.path] = next;
+    next.whenComplete(() {
+      if (identical(_saving[d.path], next)) _saving.remove(d.path);
+    });
+    return next;
+  }
+
+  Future<bool> _writeNow(Doc d, String text, {required bool overwrite}) async {
     final gen = _generation;
+    if (d.detached) return false;
+    final disk = d.diskText(text);
     try {
       final r = await client.call(
         Methods.fsWriteFile,
         WriteFileParams(
           workspaceId: workspace.id,
           path: d.path,
-          text: text,
+          text: disk,
           overwrite: overwrite ? true : null,
           expectedVersion: overwrite || d.savedVersion.isEmpty ? null : d.savedVersion,
         ),
       );
       if (gen != _generation) return false;
-      d.markSaved(r.version, text);
+      d.markSaved(r.version, text, disk: disk);
+      if (!d.dirty) recovery.forget(_root, d.path);
       onSaved?.call(d.path);
       notifyListeners();
       return true;
     } on DaemonException catch (e) {
       if (gen != _generation) return false;
       if (e.kind == ErrorKind.conflict) {
+        // A file deleted on disk is not "changed": its own question (AUD-019).
+        if (!await _existsOnDisk(d.path)) d.deletedOnDisk = true;
+        if (gen != _generation) return false;
+        _conflicts.add((path: d.path, text: text));
+      } else if (e.kind == ErrorKind.notFound) {
+        d.deletedOnDisk = true;
         _conflicts.add((path: d.path, text: text));
       } else {
         banner = 'Could not save ${d.title}: ${e.message}';
@@ -724,7 +1024,22 @@ class DocumentsStore extends ChangeNotifier {
     }
   }
 
-  /// The answer to "changed on disk": overwrite it with ours, reload theirs, or leave it.
+  /// Whether the first conflict is a file deleted on disk (the dialog asks differently).
+  bool get conflictIsDeleted =>
+      _conflicts.isNotEmpty && (doc(_conflicts.first.path)?.deletedOnDisk ?? false);
+
+  Future<bool> _existsOnDisk(String path) async {
+    try {
+      await client.call(Methods.fsReadFile, ReadFileParams(workspaceId: workspace.id, path: path));
+      return true;
+    } on DaemonException catch (e) {
+      return e.kind != ErrorKind.notFound;
+    }
+  }
+
+  /// The answer to "changed on disk": overwrite it with ours, reload theirs, or leave it. For a
+  /// file deleted on disk: `overwrite` writes it again (recreates it), `close` closes the tab
+  /// without saving (AUD-019).
   Future<void> resolveConflict(String action) async {
     if (_conflicts.isEmpty) return;
     final c = _conflicts.removeAt(0);
@@ -733,8 +1048,11 @@ class DocumentsStore extends ChangeNotifier {
     if (d == null) return;
     if (action == 'overwrite') {
       await _write(d, c.text, overwrite: true);
-    } else if (action == 'reload') {
+    } else if (action == 'reload' && !d.deletedOnDisk) {
       await _reloadFromDisk(c.path);
+    } else if (action == 'close') {
+      d.dirty = false;
+      _closeNow(c.path);
     }
   }
 
@@ -772,23 +1090,30 @@ class DocumentsStore extends ChangeNotifier {
     if (!workspace.isOpen) return;
     final gen = _generation;
     ReadFileResult? r;
+    var gone = false;
     try {
       r = await client.call(
         Methods.fsReadFile,
         ReadFileParams(workspaceId: workspace.id, path: path),
       );
-    } on DaemonException {
+    } on DaemonException catch (e) {
       r = null;
+      gone = e.kind == ErrorKind.notFound;
     }
     final d = doc(path);
     if (gen != _generation || d == null) return;
     if (r == null) {
-      if (d.dirty && !d.changedOnDisk) {
+      // Deleted on disk: the tab says so (AUD-019); a dirty one keeps its text to save again.
+      if (gone && !d.deletedOnDisk) {
+        d.deletedOnDisk = true;
+        notifyListeners();
+      } else if (!gone && d.dirty && !d.changedOnDisk) {
         d.changedOnDisk = true;
         notifyListeners();
       }
       return;
     }
+    if (d.deletedOnDisk) d.deletedOnDisk = false;
     if (r.version == d.savedVersion) return;
     if (!d.dirty) {
       d.replaceText(r.text, r.version);
@@ -831,9 +1156,53 @@ class DocumentsStore extends ChangeNotifier {
     } else if (action == 'discard') {
       for (final p in paths) {
         doc(p)?.dirty = false;
+        recovery.forget(_root, p);
       }
       proceed();
     }
+  }
+
+  /// [from] was renamed to [to] (a file, or a folder holding open documents): the documents
+  /// follow, with their unsaved text (AUD-022).
+  void renamed(String from, String to) {
+    String? moved(String p) => p == from
+        ? to
+        : p.startsWith('$from/')
+        ? '$to${p.substring(from.length)}'
+        : null;
+    var any = false;
+    for (final d in docs) {
+      final n = moved(d.path);
+      if (n == null) continue;
+      recovery.forget(_root, d.path);
+      d.path = n;
+      if (d.dirty) recovery.keep(_root, n, () => d.text, d.savedVersion);
+      any = true;
+    }
+    if (!any) return;
+    activePath = moved(activePath) ?? activePath;
+    final s = split;
+    if (s != null) {
+      split = (
+        paths: [for (final p in s.paths) moved(p) ?? p],
+        active: moved(s.active) ?? s.active,
+      );
+    }
+    _scheduleTabSave();
+    notifyListeners();
+  }
+
+  /// "Save As": writes [d]'s text to a new file [to] and shows that file instead; the old file
+  /// is left as it was on disk. Null when done, else why not.
+  Future<String?> saveAs(Doc d, String to) async {
+    final err = await workspace.createFile(to, text: d.diskText(d.text));
+    if (err != null) return err;
+    final from = d.path;
+    d.dirty = false;
+    recovery.forget(_root, from);
+    _closeNow(from);
+    await open(to);
+    return null;
   }
 
   void requestOpenFolder(String path) =>
@@ -875,6 +1244,9 @@ class DocumentsStore extends ChangeNotifier {
   }
 
   Future<void> _restoreTabs() async {
+    if (!workspace.isOpen) return;
+    _root = workspace.root;
+    await _reattach();
     if (!workspace.isOpen) return;
     final gen = _generation;
     _restoring = true;
@@ -920,6 +1292,7 @@ class DocumentsStore extends ChangeNotifier {
     } finally {
       if (gen == _generation) _restoring = false;
     }
+    if (gen == _generation) await _recover();
   }
 
   @override
@@ -928,6 +1301,7 @@ class DocumentsStore extends ChangeNotifier {
     _offOpened();
     _offClosed();
     _tabSave?.cancel();
+    recovery.dispose();
     super.dispose();
   }
 }

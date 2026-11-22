@@ -103,6 +103,7 @@ class SearchStore extends ChangeNotifier {
       return;
     }
     final seq = ++_seq;
+    final ws = workspace.id;
     final cancel = _cancel = CancelToken();
     running = true;
     error = '';
@@ -121,7 +122,8 @@ class SearchStore extends ChangeNotifier {
         ),
         cancel: cancel,
       );
-      if (seq != _seq) return;
+      // A result for a folder that is no longer open is dropped (AUD-093).
+      if (seq != _seq || workspace.id != ws) return;
       final m = r.matches ?? const <SearchMatch>[];
       running = false;
       groups = groupMatches(m);

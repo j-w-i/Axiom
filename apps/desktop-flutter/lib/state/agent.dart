@@ -298,7 +298,48 @@ class AgentStore extends ChangeNotifier {
       }),
     ];
     workspace.addListener(_onWorkspace);
+    client.state.addListener(_onDaemonState);
   }
+
+  bool _daemonLost = false;
+
+  /// The daemon went away mid-reply: no turn is running any more, and nothing waits for an
+  /// answer; when it is back, the open conversation is read again (AUD-025).
+  void _onDaemonState() {
+    final ready = client.state.value is DaemonReady;
+    if (!ready) {
+      if (_daemonLost) return;
+      _daemonLost = true;
+      for (final c in _cache.values) {
+        c.running = false;
+        c.streaming = '';
+      }
+      _pendingDelta.clear();
+      approvals = const [];
+      sessions = [
+        for (final x in sessions)
+          if (x.running) _withRunning(x, false) else x,
+      ];
+      if (activeId != null && active.running) active.running = false;
+      notifyListeners();
+      return;
+    }
+    if (!_daemonLost) return;
+    _daemonLost = false;
+    final id = activeId;
+    if (id != null) unawaited(open(id));
+  }
+
+  SessionInfo _withRunning(SessionInfo s, bool running) => SessionInfo(
+    sessionId: s.sessionId,
+    title: s.title,
+    providerId: s.providerId,
+    model: s.model,
+    createdMs: s.createdMs,
+    updatedMs: s.updatedMs,
+    pendingApprovals: s.pendingApprovals,
+    running: running,
+  );
 
   final DaemonClient client;
   final WorkspaceStore workspace;
@@ -367,6 +408,9 @@ class AgentStore extends ChangeNotifier {
 
   void _onWorkspace() {
     final id = workspace.isOpen ? workspace.id : null;
+    // A folder switch passes through "no folder" while the next one opens: that is not a reason
+    // to leave the folder's scope (AUD-092).
+    if (id == null && workspace.opening) return;
     if (id == _lastWs) return;
     _lastWs = id;
     context = const [];
@@ -460,7 +504,9 @@ class AgentStore extends ChangeNotifier {
 
   Future<void> open(String id) async {
     activeId = id;
-    active = _cache[id] ?? Conversation();
+    // Cached before the call, so events the daemon sends ahead of its answer are kept and merged
+    // (AUD-088).
+    active = _cache.putIfAbsent(id, Conversation.new);
     sendError = '';
     notifyListeners();
     try {
@@ -896,6 +942,7 @@ class AgentStore extends ChangeNotifier {
       off();
     }
     workspace.removeListener(_onWorkspace);
+    client.state.removeListener(_onDaemonState);
     super.dispose();
   }
 }
