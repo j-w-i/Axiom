@@ -2,6 +2,28 @@
 
 _Last updated: 2026-11-22._
 
+## M5.5 — Every language: complete (2026-11-22)
+
+Branch `task/m5.5`, from main (`9aa8ae8`). ADR-0021; protocol 0.5 with additive fields
+(`standby`, `requires`, `installProvider`). Record: `verification/M5.5.md`.
+
+- **Highlighting:** 195 grammars, recognised by extension, name, shebang and first line; a
+  language picker in the status bar.
+- **Servers:** 16 tier-1 server providers (`providers/lsp-*`), pinned and checksummed, applied by
+  language; the managed install first; an offer above the editor (Install…, Not now) and the
+  "Install language servers automatically" switch. Go, Java and Dart SDKs installable; .NET
+  detected.
+- **Editing:** completion like VS Code (as you type, documented, snippets, auto-imports, commit
+  characters, word completion); semantic tokens, workspace symbols, organize imports, call
+  hierarchy, format on save.
+- **FL-PERF-002:** selection lag fixed (the cursor no longer rebuilds the editor area).
+
+Owed:
+- the real-server scenario per language (`AXIOM_TEST_LSP_INSTALL=1 apps/desktop-flutter/scripts/e2e.sh languages_test.dart`; it downloads servers);
+- macOS CI; Windows.
+
+**Next: CI green on `task/m5.5`, merge to main; then M6.**
+
 ## M5 — Visual intelligence (web): complete (2026-11-22)
 
 Branch `task/m5`, which builds on `task/flutter` (M4 + FL). ADR-0019 is amended by ADR-0020 §8:

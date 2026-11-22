@@ -286,8 +286,7 @@ presented as uncertain, not exact.
 
 ## M5.5 — Every language
 
-**Status (2026-11-22):** proposed by the owner ("syntax highlighting, autocomplete and knowledge of
-every language's SDK, like VS Code"); ADR and task files to follow its approval. Windows deferred.
+**Status (2026-11-22):** complete on Linux — all 9 tasks in `docs/tasks/M5.5/` implemented; decisions in `docs/decisions/ADR-0021-every-language-m5-5.md`; P2 −10.0 / +18.0 ms and P7 +2.4 MiB against M5. Deferred: inlay hints, server folding ranges, the outline (ADR-0021 §8); .NET detected, not installed (§6). Owed: the opt-in real-server scenario per language, run by the owner or CI; macOS CI; Windows deferred. Record: `docs/roadmap/verification/M5.5.md`.
 
 **Outcome.** Any file Axiom opens is highlighted; the languages people use most have a language
 server that Axiom installs on request and points at the project's own SDK, so completion, hover
