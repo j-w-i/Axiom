@@ -458,6 +458,26 @@ async fn the_agent_inspects_patches_and_verifies_a_ui_change() {
     )
     .await;
     adapter.expect("the page's adapter connected");
+    // The page has rendered (the adapter connects before React mounts): the agent's first
+    // snapshot must see the app, not an empty root.
+    let mut rendered = false;
+    for _ in 0..50 {
+        let s = d
+            .client
+            .request::<TakeSnapshot>(SnapshotParams {
+                preview_id: info.preview_id.clone(),
+                max_nodes: None,
+                include_invisible: false,
+            })
+            .await
+            .unwrap();
+        if s.nodes.iter().any(|n| n.type_name == "button") {
+            rendered = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert!(rendered, "the app rendered");
 
     let session = d
         .client
