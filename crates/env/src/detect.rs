@@ -329,7 +329,7 @@ async fn run_version(
     let mut cmd = tokio::process::Command::new(bin);
     cmd.args(args)
         .envs(env)
-        .current_dir(std::env::temp_dir())
+        .current_dir(crate::work_dir())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -366,6 +366,28 @@ mod tests {
         assert!(glob_match("?.c", "a.c") && !glob_match("?.c", "ab.c"));
         assert!(glob_match("*", "") && !glob_match("a*", "b"));
         assert!(glob_match("*a*b", "xxaxxb") && !glob_match("*a*b", "xxaxxbx"));
+    }
+
+    /// Probes run in the private work directory, never the shared temp directory, where any
+    /// local user could plant a `rust-toolchain.toml` (AUD-044).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probes_do_not_run_in_the_shared_temp_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let tool = d.path().join("probe");
+        std::fs::write(&tool, "#!/bin/sh\necho \"cwd=$(pwd -P)\"\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let re = regex::Regex::new(r"cwd=(.*)").unwrap();
+        let cwd = run_version(&tool, &[], &BTreeMap::new(), &re)
+            .await
+            .unwrap();
+        let tmp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        assert_ne!(std::path::Path::new(&cwd), tmp);
+        assert_eq!(
+            std::path::Path::new(&cwd),
+            std::fs::canonicalize(crate::work_dir()).unwrap()
+        );
     }
 
     #[test]

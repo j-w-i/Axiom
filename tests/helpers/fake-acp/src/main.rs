@@ -6,6 +6,10 @@
 //! - `sneak`: writes `sneaky.txt` without asking permission first.
 //! - `outside`: reads `/etc/hostname` (outside the workspace).
 //! - `wait`: asks permission and waits (for cancel tests).
+//! - `peek`: asks a `read` permission for `notes.md`, then writes it (AUD-040: a read approval
+//!   must not cover a write).
+//! - `envrun`: runs `sh -c 'echo term-out'` with `LD_PRELOAD` set (AUD-039).
+//! - `crash`: exits at once, mid-turn (AUD-032: the next turn starts the agent again).
 //!
 //! `FAKE_ACP_LOG` (optional): `session/new` params are appended there as JSON lines.
 
@@ -181,8 +185,31 @@ fn scenario(peer: &mut Peer, sid: &str, cwd: &str, word: &str) -> &'static str {
                 }
             }
         }
-        "run" => {
-            let r = peer.call("terminal/create", json!({"sessionId":sid,"command":"sh","args":["-c","echo term-out"],"outputByteLimit":4096}));
+        "crash" => std::process::exit(3),
+        "peek" => {
+            let path = format!("{cwd}/notes.md");
+            let call = json!({"toolCallId":"t2","title":"Read notes.md","kind":"read",
+                "locations":[{"path":path}]});
+            let _ = peer.call(
+                "session/request_permission",
+                json!({"sessionId":sid,"toolCall":call,
+                "options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},
+                           {"optionId":"reject","name":"Reject","kind":"reject_once"}]}),
+            );
+            match peer.call(
+                "fs/write_text_file",
+                json!({"sessionId":sid,"path":path,"content":"peeked\n"}),
+            ) {
+                Ok(_) => say(sid, "wrote notes.md"),
+                Err(e) => say(sid, &format!("write refused: {e}")),
+            }
+        }
+        "run" | "envrun" => {
+            let mut create = json!({"sessionId":sid,"command":"sh","args":["-c","echo term-out"],"outputByteLimit":4096});
+            if word == "envrun" {
+                create["env"] = json!([{"name":"LD_PRELOAD","value":"/tmp/evil.so"}]);
+            }
+            let r = peer.call("terminal/create", create);
             let Ok(r) = r else {
                 say(
                     sid,

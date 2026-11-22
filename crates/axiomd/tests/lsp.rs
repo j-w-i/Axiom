@@ -127,13 +127,15 @@ async fn servers_requests_sync_diagnostics_and_external_reads() {
         ("fakelang", ServerState::Idle)
     );
     // Since M5.5 (ADR-0021 §3) every server applies by language: rust-analyzer is listed in
-    // this non-Rust folder, and stays unstarted until a Rust document opens.
+    // this non-Rust folder, and stays unstarted; in this untrusted folder it is `stopped` until
+    // the folder is trusted, because it would run the project's build scripts (AUD-008).
     if let Some(ra) = s.servers.iter().find(|s| s.server_id == "rust-analyzer") {
-        assert!(
-            matches!(ra.state, ServerState::Idle | ServerState::Missing),
-            "{:?}",
-            ra.state
-        );
+        assert_eq!(ra.state, ServerState::Stopped, "{ra:?}");
+        assert!(ra
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with(axiom_lsp::TRUST_TO_ENABLE));
     }
 
     // didOpen starts it; its diagnostics reach this client.
@@ -279,6 +281,10 @@ fn rust_analyzer_available() -> bool {
             "AXIOM_REQUIRE_LSP=1 but rust-analyzer does not run"
         );
         eprintln!("NOT RUN: rust-analyzer is not installed (rustup component add rust-analyzer)");
+        common::note_skipped(
+            "real rust-analyzer",
+            "rust-analyzer is not installed (rustup component add rust-analyzer)",
+        );
     }
     ok
 }

@@ -30,7 +30,18 @@ const TAIL_LINES: usize = 200;
 const TAIL_BYTES: usize = 16 * 1024;
 const DEFAULT_TIMEOUT: u64 = 120;
 const MAX_TIMEOUT: u64 = 600;
+/// `build.run`: builds take longer than most commands (AUD-035: it had no limit at all).
+const BUILD_DEFAULT_TIMEOUT: u64 = 600;
+const BUILD_MAX_TIMEOUT: u64 = 3600;
 const MAX_DIAGNOSTICS: usize = 50;
+/// What a running command's output is reduced to while it runs: enough for the tail the
+/// result shows (AUD-035: the whole output was kept).
+const KEEP_BYTES: usize = 4 * TAIL_BYTES;
+/// The most an ACP terminal keeps of its output, whatever the agent asks (AUD-039).
+const MAX_ACP_OUTPUT: u64 = 16 * 1024 * 1024;
+/// Settings key: names of variables that look like secrets but an agent-started process may
+/// still get (AUD-010).
+const PASS_ENV_KEY: &str = "agent.passEnv";
 
 type Run = for<'a> fn(
     &'a Arc<App>,
@@ -165,7 +176,7 @@ pub fn registry(app: Weak<App>) -> Registry {
         "Run a program in the workspace root, in the project's environment, and wait for it (default 120 s, at most 600). argv only, no shell. Returns the exit code and the last 200 lines of output.",
         schema_of::<inputs::TaskRunInput>(),
         Effect::Execute,
-        |_, _, i| {
+        |a, _, i| {
             async move {
                 let t: inputs::TaskRunInput = parse(i)?;
                 if t.argv.is_empty() || t.argv[0].is_empty() {
@@ -173,6 +184,7 @@ pub fn registry(app: Weak<App>) -> Registry {
                 }
                 Ok(Targets {
                     argv: Some(t.argv),
+                    preview: axiom_agent::secrets::describe(&withheld(a).await?),
                     ..Default::default()
                 })
             }
@@ -210,16 +222,14 @@ pub fn registry(app: Weak<App>) -> Registry {
         schema_of::<inputs::PlanInstallInput>(),
         Effect::Read,
         |_, _, i| async move { parse::<inputs::PlanInstallInput>(i).map(|_| Targets::default()) }.boxed(),
-        |a, _, i, _| env_plan(a, i).boxed(),
+        |a, c, i, _| env_plan(a, c, i).boxed(),
     );
     add(
         "env.install",
         "Execute an install plan from env.planInstall (its planId, within 10 minutes).",
         schema_of::<inputs::InstallInput>(),
         Effect::Install,
-        |_, _, i| {
-            async move { parse::<inputs::InstallInput>(i).map(|_| Targets::default()) }.boxed()
-        },
+        |a, c, i| prepare_install(a, c, i).boxed(),
         |a, c, i, _| env_install(a, c, i).boxed(),
     );
     add(
@@ -345,7 +355,7 @@ async fn run_to_end(
         .start(ctx.workspace_id.clone(), spec)
         .await
         .map_err(|e| rpc(e.into()))?;
-    let mut out = String::new();
+    let mut out = Tail::default();
     let mut timed_out = false;
     let deadline = tokio::time::Instant::now() + timeout;
     let status = loop {
@@ -372,13 +382,13 @@ async fn run_to_end(
         match ev {
             TaskEvent::Output(o) => {
                 if o.stream == Stream::Stderr || o.stream == Stream::Stdout {
-                    out.push_str(&o.data);
+                    out.push(&o.data);
                 }
             }
             TaskEvent::Exited(x) => break x.status,
         }
     };
-    let (t, cut) = tail(&out);
+    let (t, cut) = out.tail();
     let v = json!({
         "outcome": outcome_name(status.outcome),
         "exitCode": status.exit_code,
@@ -386,7 +396,35 @@ async fn run_to_end(
         "timedOut": timed_out,
         "output": t,
     });
-    Ok((v, out, cut))
+    Ok((v, out.text, cut))
+}
+
+/// The end of a command's output, bounded while it runs: the newest [`KEEP_BYTES`] at most
+/// twice over, so a command that prints gigabytes costs the daemon kilobytes (AUD-035).
+#[derive(Default)]
+struct Tail {
+    text: String,
+    dropped: bool,
+}
+
+impl Tail {
+    fn push(&mut self, data: &str) {
+        self.text.push_str(data);
+        if self.text.len() > 2 * KEEP_BYTES {
+            let mut from = self.text.len() - KEEP_BYTES;
+            while !self.text.is_char_boundary(from) {
+                from += 1;
+            }
+            self.text.drain(..from);
+            self.dropped = true;
+        }
+    }
+
+    /// The last lines (as [`tail`]), and whether anything was cut.
+    fn tail(&self) -> (String, bool) {
+        let (t, cut) = tail(&self.text);
+        (t, cut || self.dropped)
+    }
 }
 
 // ---------------------------------------------------------------- tools
@@ -666,6 +704,43 @@ async fn apply_patch(
     })
 }
 
+/// The daemon's variables a process an agent starts does not get: those that look like
+/// secrets and the model providers' `apiKeyEnv` variables, unless settings `agent.passEnv`
+/// names them (`security.md` §Processes; AUD-010).
+pub(crate) async fn withheld(app: &App) -> Result<Vec<String>, ToolError> {
+    let configs = crate::handlers::agent::provider_configs(app)
+        .await
+        .map_err(rpc)?;
+    let keys: Vec<String> = app
+        .agent
+        .providers
+        .all(&configs)
+        .into_iter()
+        .filter_map(|c| c.api_key_env)
+        .collect();
+    let allowed: Vec<String> = app
+        .store_call(|s| s.setting_get(PASS_ENV_KEY))
+        .await
+        .map_err(rpc)?
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    let names = axiom_agent::secrets::daemon_names();
+    Ok(axiom_agent::secrets::withheld(
+        names.iter().map(String::as_str),
+        &keys,
+        &allowed,
+    ))
+}
+
+/// Adds the removal of each withheld variable to a spawn environment.
+fn withhold(env: &mut std::collections::BTreeMap<String, String>, names: &[String]) {
+    for n in names {
+        env.insert(SpawnSpec::remove_key(n), String::new());
+    }
+}
+
+/// The environment of a process an agent starts: the project's over the daemon's, without the
+/// withheld variables.
 async fn spawn_env(
     app: &App,
     ctx: &ToolCtx,
@@ -675,10 +750,9 @@ async fn spawn_env(
     let environment = project_environment(app, &ctx.workspace_id, &r)
         .await
         .map_err(rpc)?;
-    Ok(axiom_env::project::process_env(
-        &environment,
-        std::env::var_os("PATH"),
-    ))
+    let mut env = axiom_env::project::process_env(&environment, std::env::var_os("PATH"));
+    withhold(&mut env, &withheld(app).await?);
+    Ok(env)
 }
 
 async fn task_run(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOutput, ToolError> {
@@ -724,20 +798,32 @@ async fn task_run(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOut
 
 async fn prepare_build(app: &Arc<App>, ctx: &ToolCtx, input: &Value) -> Result<Targets, ToolError> {
     let b: inputs::BuildRunInput = parse(input)?;
-    let (provider, argv) = build_spec(app, ctx, &b).await?;
-    let _ = provider;
+    let built = build_spec(app, ctx, &b).await?;
     Ok(Targets {
-        argv: Some(argv),
+        argv: Some(built.argv),
+        preview: axiom_agent::secrets::describe(&withheld(app).await?),
+        conditions: built.conditions,
         ..Default::default()
     })
 }
 
-/// The provider offering `task` and the argv it will run.
+/// What `build.run` will run: the provider, the argv, and the conditions shown with it (the
+/// provider, the environment's `PATH` prepend, which decides which program runs).
+struct BuildSpec {
+    provider: String,
+    argv: Vec<String>,
+    conditions: Vec<String>,
+    spec: SpawnSpec,
+    diagnostics: axiom_protocol::provider::DiagnosticsFormat,
+    root: std::path::PathBuf,
+}
+
+/// The provider offering `task` and what it will run, in the project's environment.
 async fn build_spec(
     app: &Arc<App>,
     ctx: &ToolCtx,
     b: &inputs::BuildRunInput,
-) -> Result<(String, Vec<String>), ToolError> {
+) -> Result<BuildSpec, ToolError> {
     let tasks = crate::handlers::build::tasks(
         app.clone(),
         WorkspaceRef {
@@ -767,58 +853,90 @@ async fn build_spec(
     let wsinfo = workspace(app, &ctx.workspace_id).await.map_err(rpc)?;
     let root = wsinfo.0.clone();
     let r = env_registry(app, Some(wsinfo)).await.map_err(rpc)?;
-    let prepared =
-        axiom_build::prepare(&r, &t.provider_id, &t.id, &root, &Default::default(), None)
-            .map_err(|e| rpc(e.into()))?;
-    let argv = match prepared.spec.command {
-        Command::Argv(a) => a,
-        Command::Shell(s) => vec![s],
+    let environment = project_environment(app, &ctx.workspace_id, &r)
+        .await
+        .map_err(rpc)?;
+    let prepared = axiom_build::prepare(
+        &r,
+        &t.provider_id,
+        &t.id,
+        &root,
+        &environment,
+        std::env::var_os("PATH"),
+    )
+    .map_err(|e| rpc(e.into()))?;
+    let argv = match &prepared.spec.command {
+        Command::Argv(a) => a.clone(),
+        Command::Shell(s) => vec![s.clone()],
     };
-    Ok((t.provider_id.clone(), argv))
+    let mut conditions = vec![format!("provider {}", t.provider_id)];
+    if !environment.path_prepend.is_empty() {
+        conditions.push(format!(
+            "PATH starts with {}",
+            environment.path_prepend.join(", ")
+        ));
+    }
+    Ok(BuildSpec {
+        provider: t.provider_id.clone(),
+        argv,
+        conditions,
+        spec: prepared.spec,
+        diagnostics: prepared.diagnostics,
+        root,
+    })
 }
 
 async fn build_run(
     app: &Arc<App>,
     ctx: &ToolCtx,
     input: Value,
-    _targets: &Targets,
+    targets: &Targets,
 ) -> Result<ToolOutput, ToolError> {
     let b: inputs::BuildRunInput = parse(&input)?;
-    let (provider, _) = build_spec(app, ctx, &b).await?;
-    let wsinfo = workspace(app, &ctx.workspace_id).await.map_err(rpc)?;
-    let root = wsinfo.0.clone();
-    let r = env_registry(app, Some(wsinfo)).await.map_err(rpc)?;
-    let environment = project_environment(app, &ctx.workspace_id, &r)
-        .await
-        .map_err(rpc)?;
-    let prepared = axiom_build::prepare(
-        &r,
-        &provider,
-        &b.task,
-        &root,
-        &environment,
-        std::env::var_os("PATH"),
-    )
-    .map_err(|e| rpc(e.into()))?;
+    let timeout = b
+        .timeout_secs
+        .unwrap_or(BUILD_DEFAULT_TIMEOUT)
+        .clamp(1, BUILD_MAX_TIMEOUT);
+    // What runs is what was approved: the task is resolved again (its provider, its manifest,
+    // the environment may have changed while the approval waited) and must be the same
+    // (AUD-103).
+    let mut built = build_spec(app, ctx, &b).await?;
+    if targets.argv.as_ref() != Some(&built.argv) || targets.conditions != built.conditions {
+        return Err(ToolError::new(
+            ErrorKind::Conflict,
+            "The task changed after it was approved.",
+        )
+        .hint("Call build.run again: the person approves the command as it is now."));
+    }
+    withhold(&mut built.spec.env, &withheld(app).await?);
+    let provider = built.provider;
+    let root = built.root;
     let started = Instant::now();
     let (task_id, rx) = app
         .executor
-        .start(ctx.workspace_id.clone(), prepared.spec)
+        .start(ctx.workspace_id.clone(), built.spec)
         .await
         .map_err(|e| rpc(e.into()))?;
-    let mut events = axiom_build::drive(task_id.clone(), rx, &prepared.diagnostics, vec![root]);
-    let mut out = String::new();
+    let mut events = axiom_build::drive(task_id.clone(), rx, &built.diagnostics, vec![root]);
+    let mut out = Tail::default();
     let mut diags = Vec::new();
+    let mut timed_out = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
     let status = loop {
         let ev = tokio::select! {
             ev = events.recv() => ev,
+            _ = tokio::time::sleep_until(deadline), if !timed_out => {
+                timed_out = true;
+                let _ = app.executor.cancel(&task_id).await;
+                continue;
+            }
             _ = ctx.cancel.cancelled() => {
                 let _ = app.executor.cancel(&task_id).await;
                 events.recv().await
             }
         };
         match ev {
-            Some(axiom_build::BuildEvent::Output(o)) => out.push_str(&o.data),
+            Some(axiom_build::BuildEvent::Output(o)) => out.push(&o.data),
             Some(axiom_build::BuildEvent::Diagnostics(d)) => {
                 app.record_diagnostics(&ctx.workspace_id, &d);
                 diags.extend(d.diagnostics);
@@ -832,29 +950,34 @@ async fn build_run(
             }
         }
     };
-    let (t, cut) = tail(&out);
+    let (t, cut) = out.tail();
     let errors = diags
         .iter()
         .filter(|d| d.severity == axiom_protocol::diagnostics::Severity::Error)
         .count();
     let shown: Vec<_> = diags.iter().take(MAX_DIAGNOSTICS).collect();
     let mut text = format!(
-        "{}: {} (exit code {}), {} diagnostics ({errors} errors)\n",
+        "{}: {} (exit code {}){}, {} diagnostics ({errors} errors)\n",
         b.task,
         outcome_name(status.outcome),
         status.exit_code.map_or("none".into(), |c| c.to_string()),
+        if timed_out {
+            format!(", stopped after {timeout} s")
+        } else {
+            String::new()
+        },
         diags.len()
     );
     for d in &shown {
         text.push_str(&render_diagnostic(d));
     }
     if shown.is_empty() {
-        let (t2, _) = tail(&out);
-        text.push_str(&t2);
+        text.push_str(&t);
     }
     let v = json!({
         "task": b.task, "provider": provider,
         "outcome": outcome_name(status.outcome), "exitCode": status.exit_code,
+        "timedOut": timed_out,
         "durationMs": started.elapsed().as_millis() as u64,
         "diagnostics": shown, "diagnosticCount": diags.len(), "output": t,
     });
@@ -927,22 +1050,36 @@ async fn env_detect(app: &Arc<App>, ctx: &ToolCtx) -> Result<ToolOutput, ToolErr
     Ok(ToolOutput::json(v, "detected"))
 }
 
-async fn env_plan(app: &Arc<App>, input: Value) -> Result<ToolOutput, ToolError> {
+async fn env_plan(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOutput, ToolError> {
     let p: inputs::PlanInstallInput = parse(&input)?;
     let version = match p.version {
         Some(v) => v,
-        None => crate::handlers::env::versions(
-            app.clone(),
-            axiom_protocol::env::VersionsParams {
-                provider_id: p.provider.clone(),
-            },
-        )
-        .await
-        .map_err(rpc)?
-        .available
-        .first()
-        .cloned()
-        .ok_or_else(|| ToolError::new(ErrorKind::NotFound, "No installable version is listed."))?,
+        None => {
+            // A read: the versions a manifest lists, never a program that would list them.
+            let m = crate::handlers::env::provider(app, &p.provider)
+                .await
+                .map_err(rpc)?
+                .ok_or_else(|| {
+                    ToolError::new(
+                        ErrorKind::NotFound,
+                        format!("There is no provider \"{}\".", p.provider),
+                    )
+                })?;
+            app.env
+                .installer
+                .listed_versions(&m)
+                .await
+                .map_err(|e| rpc(e.into()))?
+                .ok_or_else(|| {
+                    ToolError::invalid("This provider does not list its versions.")
+                        .hint("Name the version to install (`version`).")
+                })?
+                .first()
+                .cloned()
+                .ok_or_else(|| {
+                    ToolError::new(ErrorKind::NotFound, "No installable version is listed.")
+                })?
+        }
     };
     let plan = crate::handlers::env::plan_install(
         app.clone(),
@@ -954,8 +1091,72 @@ async fn env_plan(app: &Arc<App>, input: Value) -> Result<ToolOutput, ToolError>
     )
     .await
     .map_err(rpc)?;
+    // Only this principal's env.install may run it (AUD-041).
+    app.env.installer.set_owner(&plan.plan_id, &ctx.principal);
     let v = serde_json::to_value(&plan).unwrap_or_default();
     Ok(ToolOutput::json(v, format!("plan {}", plan.plan_id)))
+}
+
+/// The approval card of an install shows the plan: provider, version, scope, every download
+/// (with how it is verified) and every command (AUD-041). Only a plan this principal made
+/// with `env.planInstall` can be installed: not one a client issued, not another agent's.
+async fn prepare_install(
+    app: &Arc<App>,
+    ctx: &ToolCtx,
+    input: &Value,
+) -> Result<Targets, ToolError> {
+    use axiom_protocol::env::{Sha256Source, Step};
+    use axiom_protocol::provider::InstallScope;
+    let i: inputs::InstallInput = parse(input)?;
+    let not_yours = || {
+        ToolError::new(
+            ErrorKind::NotFound,
+            format!("There is no plan {} of yours.", i.plan_id),
+        )
+        .hint("Plan the install with env.planInstall (a plan lasts 10 minutes), then pass its planId.")
+    };
+    let (plan, owner) = app.env.installer.issued(&i.plan_id).ok_or_else(not_yours)?;
+    if owner.as_deref() != Some(ctx.principal.as_str()) {
+        return Err(not_yours());
+    }
+    if plan.scope == InstallScope::System {
+        return Err(ToolError::new(
+            ErrorKind::PermissionDenied,
+            "An agent cannot install system packages.",
+        ));
+    }
+    let mut preview = format!(
+        "Install {} {} into Axiom's managed storage:\n",
+        plan.provider_id, plan.version
+    );
+    for (n, step) in plan.steps.iter().enumerate() {
+        let line = match step {
+            Step::Download { url, sha256, .. } => format!(
+                "download {url} ({})",
+                match sha256 {
+                    Sha256Source::Digest { .. } => "SHA-256 from the manifest".to_string(),
+                    Sha256Source::Sha512Digest { .. } => "SHA-512 from the manifest".to_string(),
+                    Sha256Source::Url { url } => format!("checksum from {url}"),
+                }
+            ),
+            Step::Extract { .. } => "extract it".to_string(),
+            Step::Run { argv, .. } => format!("run {}", axiom_agent::tools::display_argv(argv)),
+            Step::SystemPackages { argv, .. } => {
+                format!("run (elevated) {}", axiom_agent::tools::display_argv(argv))
+            }
+            Step::Verify { tool_id } => format!("verify {tool_id}"),
+        };
+        preview.push_str(&format!("{}. {line}\n", n + 1));
+    }
+    Ok(Targets {
+        preview: Some(preview),
+        conditions: vec![format!(
+            "{} {} (managed install)",
+            plan.provider_id, plan.version
+        )],
+        opaque: true,
+        ..Default::default()
+    })
 }
 
 async fn env_install(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOutput, ToolError> {
@@ -1053,12 +1254,14 @@ async fn preview_start(
     input: Value,
 ) -> Result<ToolOutput, ToolError> {
     let p: inputs::PreviewStartInput = parse(&input)?;
-    let info = crate::handlers::preview::start(
+    let hidden = withheld(app).await?;
+    let info = crate::handlers::preview::start_with(
         app.clone(),
         axiom_protocol::preview::StartParams {
             workspace_id: ctx.workspace_id.clone(),
             argv: p.argv,
         },
+        &hidden,
     )
     .await
     .map_err(rpc)?;
@@ -1521,18 +1724,85 @@ fn acp_argv(input: &Value) -> Result<Vec<String>, ToolError> {
         .ok_or_else(|| ToolError::invalid("`command` is required."))?;
     let mut argv = vec![cmd.to_string()];
     for a in input["args"].as_array().into_iter().flatten() {
-        argv.push(a.as_str().unwrap_or_default().to_string());
+        // A non-string argument was run as "" (AUD-039): refuse it instead.
+        argv.push(
+            a.as_str()
+                .ok_or_else(|| ToolError::invalid("Every argument must be a string."))?
+                .to_string(),
+        );
     }
     Ok(argv)
 }
 
+/// The environment variables an ACP `terminal/create` sets, validated.
+fn acp_env(input: &Value) -> Result<Vec<(String, String)>, ToolError> {
+    let mut out = Vec::new();
+    for e in input["env"].as_array().into_iter().flatten() {
+        let (Some(n), Some(v)) = (e["name"].as_str(), e["value"].as_str()) else {
+            return Err(ToolError::invalid(
+                "Every env entry needs a string name and value.",
+            ));
+        };
+        if n.is_empty() || n.contains(['=', '\0']) || v.contains('\0') {
+            return Err(ToolError::invalid(format!(
+                "`{n}` is not a valid variable."
+            )));
+        }
+        out.push((n.to_string(), v.to_string()));
+    }
+    Ok(out)
+}
+
+/// The working directory an ACP terminal asks for, as a workspace path (`None`: the root).
+fn acp_cwd(app: &App, ctx: &ToolCtx, input: &Value) -> Result<Option<WorkspacePath>, ToolError> {
+    match input["cwd"].as_str() {
+        None => Ok(None),
+        Some(c) => {
+            let w = ws(app, ctx)?;
+            if std::path::Path::new(c) == w.root() {
+                return Ok(None);
+            }
+            acp_rel(app, ctx, &json!(c)).map(Some)
+        }
+    }
+}
+
+/// Everything that decides what the terminal runs is on the card: the argv, the variables the
+/// agent sets and a working directory other than the root. Either of the latter makes it ask
+/// even where a rule allows the argv (AUD-039).
 async fn acp_prepare_terminal(
-    _app: &Arc<App>,
-    _ctx: &ToolCtx,
+    app: &Arc<App>,
+    ctx: &ToolCtx,
     input: &Value,
 ) -> Result<Targets, ToolError> {
+    let argv = acp_argv(input)?;
+    let env = acp_env(input)?;
+    let cwd = acp_cwd(app, ctx, input)?;
+    let mut conditions: Vec<String> = env
+        .iter()
+        .map(|(n, v)| {
+            let shown: String = v.chars().take(300).collect();
+            let more = if v.chars().count() > 300 { "…" } else { "" };
+            format!("env {n}={shown}{more}")
+        })
+        .collect();
+    if let Some(c) = &cwd {
+        conditions.push(format!("cwd {}", c.0));
+    }
+    let mut preview: Vec<String> = Vec::new();
+    if !env.is_empty() {
+        preview.push("The agent sets these variables:".into());
+        preview.extend(env.iter().map(|(n, v)| format!("  {n}={v}")));
+    }
+    if let Some(c) = &cwd {
+        preview.push(format!("in the folder {}", c.0));
+    }
+    preview.extend(axiom_agent::secrets::describe(&withheld(app).await?));
     Ok(Targets {
-        argv: Some(acp_argv(input)?),
+        argv: Some(argv),
+        escalate: !conditions.is_empty(),
+        conditions,
+        preview: (!preview.is_empty()).then(|| preview.join("\n")),
         ..Default::default()
     })
 }
@@ -1544,17 +1814,18 @@ async fn acp_terminal(
 ) -> Result<ToolOutput, ToolError> {
     let argv = acp_argv(&input)?;
     let w = ws(app, ctx)?;
-    let cwd = match input["cwd"].as_str() {
-        Some(c) => w.resolve(&acp_rel(app, ctx, &json!(c))?).map_err(ws_err)?,
+    let cwd = match acp_cwd(app, ctx, &input)? {
+        Some(c) => w.resolve(&c).map_err(ws_err)?,
         None => w.root().to_path_buf(),
     };
     let mut env = spawn_env(app, ctx).await?;
-    for e in input["env"].as_array().into_iter().flatten() {
-        if let (Some(n), Some(v)) = (e["name"].as_str(), e["value"].as_str()) {
-            env.insert(n.into(), v.into());
-        }
+    for (n, v) in acp_env(&input)? {
+        env.insert(n, v);
     }
-    let limit = input["outputByteLimit"].as_u64().unwrap_or(1024 * 1024) as usize;
+    let limit = input["outputByteLimit"]
+        .as_u64()
+        .unwrap_or(1024 * 1024)
+        .min(MAX_ACP_OUTPUT) as usize;
     let (task_id, rx) = app
         .executor
         .start(
@@ -1568,9 +1839,51 @@ async fn acp_terminal(
         )
         .await
         .map_err(|e| rpc(e.into()))?;
-    let id = crate::acp::Terminal::start(app, task_id, rx, limit);
+    let id = crate::acp::Terminal::start(app, ctx, task_id, rx, limit);
     Ok(ToolOutput::json(
         json!({"terminalId": id}),
         format!("started {}", argv.join(" ")),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A command that prints far more than the result shows costs the daemon a bounded buffer,
+    /// and the tail is still its last lines (AUD-035).
+    #[test]
+    fn the_tail_of_a_huge_output_is_bounded() {
+        let mut t = Tail::default();
+        let line = "x".repeat(99) + "\n";
+        for i in 0..200_000 {
+            t.push(&line);
+            if i % 1000 == 0 {
+                assert!(t.text.len() <= 2 * KEEP_BYTES + line.len());
+            }
+        }
+        t.push("the end\n");
+        let (tail, cut) = t.tail();
+        assert!(cut);
+        assert!(tail.ends_with("the end"));
+        assert!(tail.len() <= TAIL_BYTES);
+        let mut small = Tail::default();
+        small.push("a\nb\n");
+        assert_eq!(small.tail(), ("a\nb".to_string(), false));
+    }
+
+    #[test]
+    fn acp_terminal_inputs_are_validated() {
+        assert!(acp_argv(&json!({"command": "ls", "args": ["-l", 3]})).is_err());
+        assert_eq!(
+            acp_argv(&json!({"command": "ls", "args": ["-l"]})).unwrap(),
+            ["ls", "-l"]
+        );
+        assert!(acp_env(&json!({"env": [{"name": "A=B", "value": "x"}]})).is_err());
+        assert!(acp_env(&json!({"env": [{"name": "A"}]})).is_err());
+        assert_eq!(
+            acp_env(&json!({"env": [{"name": "A", "value": "1"}]})).unwrap(),
+            [("A".to_string(), "1".to_string())]
+        );
+    }
 }

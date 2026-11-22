@@ -465,3 +465,78 @@ async fn install_agent_puts_a_builtin_agent_in_the_data_directory() {
         .unwrap_err();
     assert_eq!(common::kind(&e), axiom_protocol::ErrorKind::NotFound);
 }
+
+/// What the gate's approval covers is what was approved (AUD-039, AUD-040):
+/// - a permission of kind `read`, allowed by the default policy without asking, does not let
+///   the agent write that file unseen;
+/// - a policy rule allowing the bare command does not allow it with variables the agent sets
+///   (`LD_PRELOAD`), and the card lists them.
+#[tokio::test]
+async fn acp_approvals_cover_only_what_was_shown() {
+    use axiom_protocol::agent::{Decision, Policy, PolicyRule, SetPolicy};
+    let tmp = tempfile::tempdir().unwrap();
+    let (d, f, sid) = setup(&tmp.path().join("acp.log")).await;
+    let (evs, asked) = turn(&d, &f.id, &sid, "peek", Some(ApprovalDecision::Deny)).await;
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert_eq!(asked[0].tool, "acp.writeFile");
+    assert!(said(&evs).starts_with("write refused"), "{}", said(&evs));
+    assert!(!f.root.join("notes.md").exists());
+
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Ask,
+            rules: vec![
+                PolicyRule {
+                    effect: Some(axiom_protocol::agent::Effect::Read),
+                    tool: None,
+                    path: None,
+                    argv_prefix: None,
+                    decision: Decision::Allow,
+                },
+                PolicyRule {
+                    effect: None,
+                    tool: None,
+                    path: None,
+                    argv_prefix: Some(vec!["sh".into()]),
+                    decision: Decision::Allow,
+                },
+            ],
+        })
+        .await
+        .unwrap();
+    let (evs, asked) = turn(&d, &f.id, &sid, "run", None).await;
+    assert!(
+        asked.is_empty(),
+        "the rule allows the bare command: {asked:?}"
+    );
+    assert_eq!(said(&evs), "ran: term-out exit 0");
+    let (evs, asked) = turn(&d, &f.id, &sid, "envrun", Some(ApprovalDecision::Deny)).await;
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(
+        asked[0]
+            .targets
+            .iter()
+            .any(|t| t == "env LD_PRELOAD=/tmp/evil.so"),
+        "{:?}",
+        asked[0].targets
+    );
+    assert!(asked[0]
+        .preview
+        .as_deref()
+        .unwrap_or_default()
+        .contains("LD_PRELOAD=/tmp/evil.so"));
+    assert!(said(&evs).starts_with("terminal refused"), "{}", said(&evs));
+}
+
+/// An agent that exits mid-turn is not kept: the next turn starts it again instead of failing
+/// against the dead process until the session is deleted (AUD-032).
+#[tokio::test]
+async fn acp_an_agent_that_exited_is_started_again() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (d, f, sid) = setup(&tmp.path().join("acp.log")).await;
+    let (evs, _) = turn(&d, &f.id, &sid, "crash", None).await;
+    assert_eq!(end(&evs), TurnEndReason::Error);
+    let (evs, _) = turn(&d, &f.id, &sid, "read", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    assert!(said(&evs).starts_with("README: "), "{}", said(&evs));
+}

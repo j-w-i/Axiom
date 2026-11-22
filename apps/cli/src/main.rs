@@ -98,6 +98,29 @@ enum AgentCmd {
     },
 }
 
+/// Text from a model, a file or an agent made safe for a terminal: every control character
+/// but newline and tab (C0, DEL, C1, which start escape sequences that could erase or rewrite
+/// what is shown, such as an approval prompt) is shown as an escape (`\x1b`) instead of being
+/// sent (AUD-045).
+fn tty_safe(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\n' | '\t' => out.push(c),
+            c if c.is_control() => {
+                let n = c as u32;
+                if n <= 0xff {
+                    out.push_str(&format!("\\x{n:02x}"));
+                } else {
+                    out.push_str(&format!("\\u{{{n:x}}}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn fail(e: impl std::fmt::Display) -> ExitCode {
     eprintln!("axiom: {e}");
     ExitCode::from(1)
@@ -382,6 +405,11 @@ async fn stream_turn(
                 }
                 match e.event {
                     EventBody::TextDelta { text } => {
+                        let text = if std::io::stdout().is_terminal() {
+                            tty_safe(&text)
+                        } else {
+                            text
+                        };
                         let _ = out.write_all(text.as_bytes());
                         let _ = out.flush();
                     }
@@ -389,12 +417,16 @@ async fn stream_turn(
                         let _ = out.write_all(b"\n");
                     }
                     EventBody::ToolCall { tool, targets, .. } => {
-                        eprintln!("  ▸ {tool} {}", targets.join(", "));
+                        eprintln!("  ▸ {} {}", tty_safe(&tool), tty_safe(&targets.join(", ")));
                     }
                     EventBody::ToolResult {
                         is_error, summary, ..
                     } => {
-                        eprintln!("    {} {summary}", if is_error { "✗" } else { "✓" });
+                        eprintln!(
+                            "    {} {}",
+                            if is_error { "✗" } else { "✓" },
+                            tty_safe(&summary)
+                        );
                     }
                     EventBody::Checkpoint { checkpoint } => {
                         eprintln!(
@@ -402,7 +434,7 @@ async fn stream_turn(
                             checkpoint.number, checkpoint.label
                         );
                     }
-                    EventBody::Error { message, .. } => eprintln!("axiom: {message}"),
+                    EventBody::Error { message, .. } => eprintln!("axiom: {}", tty_safe(&message)),
                     EventBody::TurnEnd { reason } => {
                         return Ok(match reason {
                             TurnEndReason::Error => ExitCode::from(1),
@@ -432,25 +464,36 @@ async fn stream_turn(
     }
 }
 
-/// Asks on the terminal. Anything but y/s is a denial.
-async fn ask(r: &ApprovalRequest) -> ApprovalDecision {
+/// The approval prompt, every untrusted part made terminal-safe and the targets one per line
+/// (an argument cannot pass for another target).
+fn prompt_text(r: &ApprovalRequest) -> String {
     let effect = serde_json::to_value(r.effect)
         .ok()
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_default();
+    let mut t = String::new();
     if let Some(p) = &r.preview {
-        eprintln!("{p}");
+        t.push_str(&tty_safe(p));
+        t.push('\n');
     }
-    eprint!(
-        "Allow {} ({effect}) on {}? [y] once{} / [N]o: ",
-        r.tool,
-        r.targets.join(", "),
+    t.push_str(&format!("Allow {} ({effect}) on:\n", tty_safe(&r.tool)));
+    for target in &r.targets {
+        t.push_str(&format!("  {}\n", tty_safe(target)));
+    }
+    t.push_str(&format!(
+        "[y] once{} / [N]o: ",
         if r.can_remember {
             " / [s] for this session"
         } else {
             ""
         }
-    );
+    ));
+    t
+}
+
+/// Asks on the terminal. Anything but y/s is a denial.
+async fn ask(r: &ApprovalRequest) -> ApprovalDecision {
+    eprint!("{}", prompt_text(r));
     let _ = std::io::stderr().flush();
     let line = tokio::task::spawn_blocking(|| {
         let mut s = String::new();
@@ -463,5 +506,39 @@ async fn ask(r: &ApprovalRequest) -> ApprovalDecision {
         "y" | "yes" => ApprovalDecision::Once,
         "s" if r.can_remember => ApprovalDecision::Session,
         _ => ApprovalDecision::Deny,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_sequences_are_shown_not_sent() {
+        assert_eq!(tty_safe("ok\n\tline"), "ok\n\tline");
+        assert_eq!(tty_safe("\x1b[2K\x1b[1Ahi\r"), "\\x1b[2K\\x1b[1Ahi\\x0d");
+        assert_eq!(tty_safe("\u{9b}31m\u{7f}"), "\\x9b31m\\x7f");
+        assert_eq!(tty_safe("é ✓"), "é ✓");
+    }
+
+    #[test]
+    fn the_approval_prompt_cannot_be_rewritten_by_its_content() {
+        let r = ApprovalRequest {
+            request_id: "r1".into(),
+            session_id: None,
+            principal: "session:s".into(),
+            tool: "task.run".into(),
+            effect: axiom_protocol::agent::Effect::Execute,
+            targets: vec!["cargo test\x1b[2K\r rm -rf /".into()],
+            argv: None,
+            preview: Some("\x1b]0;title\x07diff".into()),
+            rule: None,
+            checkpoint_planned: true,
+            can_remember: false,
+        };
+        let p = prompt_text(&r);
+        assert!(!p.chars().any(|c| c.is_control() && c != '\n'), "{p:?}");
+        assert!(p.contains("\\x1b[2K\\x0d rm -rf /"), "{p}");
+        assert!(p.contains("\\x1b]0;title\\x07diff"), "{p}");
     }
 }

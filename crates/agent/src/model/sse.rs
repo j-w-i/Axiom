@@ -11,12 +11,18 @@ pub struct SseEvent {
     pub data: String,
 }
 
+/// The longest line, and the most data in one event, a stream may send: past it the stream is
+/// broken (or hostile) and ends (AUD-109).
+pub const MAX_EVENT_BYTES: usize = 16 * 1024 * 1024;
+
 /// Incremental parser: feed bytes, take complete events.
 #[derive(Debug, Default)]
 pub struct SseParser {
     buf: Vec<u8>,
     event: Option<String>,
     data: Vec<String>,
+    data_bytes: usize,
+    overflow: bool,
 }
 
 impl SseParser {
@@ -24,22 +30,44 @@ impl SseParser {
         Self::default()
     }
 
-    /// Appends bytes and returns every event completed by them.
+    /// Appends bytes and returns every event completed by them. Only the new bytes are
+    /// scanned, and the consumed lines are removed once per call.
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<SseEvent> {
-        self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
-        while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
-            let mut line: Vec<u8> = self.buf.drain(..=pos).collect();
-            line.pop();
+        if self.overflow {
+            return out;
+        }
+        let mut scan = self.buf.len();
+        self.buf.extend_from_slice(bytes);
+        let mut start = 0;
+        while let Some(rel) = self.buf[scan..].iter().position(|&b| b == b'\n') {
+            let pos = scan + rel;
+            let mut line = &self.buf[start..pos];
             if line.last() == Some(&b'\r') {
-                line.pop();
+                line = &line[..line.len() - 1];
             }
-            let line = String::from_utf8_lossy(&line).into_owned();
+            let line = String::from_utf8_lossy(line).into_owned();
+            start = pos + 1;
+            scan = start;
             if let Some(ev) = self.line(&line) {
                 out.push(ev);
             }
+            if self.overflow {
+                self.buf.clear();
+                return out;
+            }
+        }
+        self.buf.drain(..start);
+        if self.buf.len() > MAX_EVENT_BYTES {
+            self.overflow = true;
+            self.buf.clear();
         }
         out
+    }
+
+    /// A line or an event was larger than [`MAX_EVENT_BYTES`]: nothing more is parsed.
+    pub fn overflowed(&self) -> bool {
+        self.overflow
     }
 
     /// The stream ended: an event without its blank line is still dispatched.
@@ -68,7 +96,16 @@ impl SseParser {
         };
         match field {
             "event" => self.event = Some(value.to_string()),
-            "data" => self.data.push(value.to_string()),
+            "data" => {
+                self.data_bytes += value.len() + 1;
+                if self.data_bytes > MAX_EVENT_BYTES {
+                    self.overflow = true;
+                    self.data.clear();
+                    self.event = None;
+                    return None;
+                }
+                self.data.push(value.to_string())
+            }
             _ => {}
         }
         None
@@ -77,8 +114,10 @@ impl SseParser {
     fn dispatch(&mut self) -> Option<SseEvent> {
         if self.data.is_empty() {
             self.event = None;
+            self.data_bytes = 0;
             return None;
         }
+        self.data_bytes = 0;
         let data = std::mem::take(&mut self.data).join("\n");
         Some(SseEvent {
             event: self.event.take(),
@@ -109,7 +148,11 @@ where
                     return None;
                 }
                 match bytes.next().await {
-                    Some(Ok(chunk)) => queue.extend(parser.feed(chunk.as_ref())),
+                    Some(Ok(chunk)) => {
+                        queue.extend(parser.feed(chunk.as_ref()));
+                        // A line or event past the bound: the stream ends here, early.
+                        done = parser.overflowed();
+                    }
                     Some(Err(e)) => {
                         done = true;
                         return Some((Err(e), (bytes, parser, queue, done)));
@@ -171,6 +214,26 @@ mod tests {
     fn sse_ignores_an_event_line_without_data() {
         let mut p = SseParser::new();
         assert_eq!(p.feed(b"event: x\n\ndata: y\n\n"), vec![ev(None, "y")]);
+    }
+
+    #[test]
+    fn sse_an_endless_line_is_bounded() {
+        let mut p = SseParser::new();
+        let chunk = vec![b'x'; 1024 * 1024];
+        for _ in 0..=MAX_EVENT_BYTES / chunk.len() {
+            assert!(p.feed(&chunk).is_empty());
+        }
+        assert!(p.overflowed());
+        assert!(p.buf.capacity() <= 2 * MAX_EVENT_BYTES + chunk.len());
+        assert!(p.feed(b"\ndata: a\n\n").is_empty());
+    }
+
+    #[test]
+    fn sse_many_lines_in_one_chunk() {
+        let mut p = SseParser::new();
+        let input = "data: x\n\n".repeat(10_000);
+        assert_eq!(p.feed(input.as_bytes()).len(), 10_000);
+        assert!(p.buf.is_empty());
     }
 
     #[tokio::test]

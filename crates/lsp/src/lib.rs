@@ -7,8 +7,10 @@
 
 pub mod docs;
 pub mod framing;
+pub mod restricted;
 pub mod server;
 
+pub use restricted::{restrict, Restriction, TRUST_TO_ENABLE};
 pub use server::{client_capabilities, file_uri, which, Definition, LanguageServer, Launch};
 
 use axiom_protocol::lsp::{ServerInfo, ServerState};

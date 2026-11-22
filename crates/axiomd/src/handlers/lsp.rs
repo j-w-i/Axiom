@@ -21,14 +21,18 @@ use std::sync::Arc;
 /// `initializationOptions`, keyed by server id.
 pub const SETTINGS_KEY: &str = "lsp.servers";
 
+/// A server definition and whether it is a built-in provider's: only those are restricted in an
+/// untrusted folder (a server the person added is their choice; AUD-008).
+type Defined = (Definition, bool);
+
 /// The server definitions of the providers that apply to the workspace.
-async fn definitions(app: &App, ws: &WorkspaceId) -> Result<(PathBuf, Vec<Definition>), RpcError> {
+async fn definitions(app: &App, ws: &WorkspaceId) -> Result<(PathBuf, Vec<Defined>), RpcError> {
     let w = workspace(app, ws).await?;
     let root = w.0.clone();
     let r = registry(app, Some(w)).await?;
     let root2 = root.clone();
     let defs = tokio::task::spawn_blocking(move || {
-        let mut out: Vec<Definition> = Vec::new();
+        let mut out: Vec<Defined> = Vec::new();
         // M5.5 (ADR-0021 §3): every active provider's servers, whether or not it detects the
         // workspace; the shell starts one when a document of its language opens.
         let _ = &root2;
@@ -43,23 +47,27 @@ async fn definitions(app: &App, ws: &WorkspaceId) -> Result<(PathBuf, Vec<Defini
             };
             (rank, m.id.clone())
         });
-        for (_, m) in active {
+        for (e, m) in active {
             if m.lsp.is_empty() {
                 continue;
             }
+            let builtin = e.info.source == axiom_protocol::env::ProviderSource::Builtin;
             for s in &m.lsp {
-                if out.iter().any(|d| d.id == s.id) {
+                if out.iter().any(|(d, _)| d.id == s.id) {
                     continue;
                 }
-                out.push(Definition {
-                    id: s.id.clone(),
-                    provider_id: m.id.clone(),
-                    languages: s.languages.clone(),
-                    command: s.command.clone(),
-                    initialization_options: s.initialization_options.clone(),
-                    install_hint: s.install_hint.clone(),
-                    requires: s.requires.clone(),
-                });
+                out.push((
+                    Definition {
+                        id: s.id.clone(),
+                        provider_id: m.id.clone(),
+                        languages: s.languages.clone(),
+                        command: s.command.clone(),
+                        initialization_options: s.initialization_options.clone(),
+                        install_hint: s.install_hint.clone(),
+                        requires: s.requires.clone(),
+                    },
+                    builtin,
+                ));
             }
         }
         out
@@ -78,7 +86,12 @@ async fn launch(
     def: &Definition,
 ) -> Result<Launch, RpcError> {
     let base = LaunchBase::read(app, ws).await?;
-    Ok(launch_in(app, &base, root, def))
+    let builtin = definitions(app, ws)
+        .await?
+        .1
+        .into_iter()
+        .any(|(d, b)| b && d.id == def.id);
+    Ok(launch_in(app, &base, root, def, builtin))
 }
 
 /// What every server of a workspace launches from, read once per listing (M5.5: with every
@@ -87,19 +100,39 @@ struct LaunchBase {
     env: BTreeMap<String, String>,
     registry: axiom_env::registry::Registry,
     settings: Option<Value>,
+    /// The person trusted the folder (`env/trust`): built-in servers run as configured.
+    trusted: bool,
 }
 
 impl LaunchBase {
     async fn read(app: &App, ws: &WorkspaceId) -> Result<Self, RpcError> {
+        let w = workspace(app, ws).await?;
+        let trusted = w.1;
         Ok(Self {
             env: process_environment(app, ws).await?,
-            registry: registry(app, Some(workspace(app, ws).await?)).await?,
+            registry: registry(app, Some(w)).await?,
             settings: app.store_call(|s| s.setting_get(SETTINGS_KEY)).await?,
+            trusted,
         })
     }
 }
 
-fn launch_in(app: &App, base: &LaunchBase, root: PathBuf, def: &Definition) -> Launch {
+fn launch_in(
+    app: &App,
+    base: &LaunchBase,
+    root: PathBuf,
+    def: &Definition,
+    builtin: bool,
+) -> Launch {
+    let l = launch_trusted(app, base, root, def);
+    if builtin && !base.trusted {
+        axiom_lsp::restrict(def, l)
+    } else {
+        l
+    }
+}
+
+fn launch_trusted(app: &App, base: &LaunchBase, root: PathBuf, def: &Definition) -> Launch {
     let server_id = def.id.as_str();
     let mut env = base.env.clone();
     // M5.5 (ADR-0021 §4, §6): not in the workspace's environment → the newest managed install of
@@ -181,7 +214,37 @@ fn launch_in(app: &App, base: &LaunchBase, root: PathBuf, def: &Definition) -> L
         initialization_options: mine.get("initializationOptions").cloned(),
         blocked,
         install_provider: Some(def.provider_id.clone()),
+        restriction: Default::default(),
     }
+}
+
+/// Brings an existing server in line with the folder's trust now: one restricted or refused
+/// before the person trusted the folder runs as configured (restarting if it runs), and the
+/// reverse. Nothing to do (and nothing read) when its launch already matches the trust.
+async fn follow_trust(
+    app: &App,
+    ws: &WorkspaceId,
+    trusted: bool,
+    s: &Arc<LanguageServer>,
+    builtin: bool,
+) -> Result<(), RpcError> {
+    let expect = builtin && !trusted;
+    let has = s.restriction() != axiom_lsp::Restriction::None;
+    if expect == has {
+        return Ok(());
+    }
+    let base = LaunchBase::read(app, ws).await?;
+    let root = app.workspaces.get(ws)?.root().to_path_buf();
+    let l = launch_in(app, &base, root, &s.def, builtin);
+    if l.restriction == s.restriction() {
+        return Ok(());
+    }
+    s.set_launch(l);
+    if s.state() == axiom_protocol::lsp::ServerState::Ready {
+        let s = s.clone();
+        tokio::spawn(async move { s.restart().await });
+    }
+    Ok(())
 }
 
 /// The workspace's server with this id, created (idle) on first use.
@@ -191,19 +254,29 @@ async fn server(
     server_id: &str,
 ) -> Result<Arc<LanguageServer>, RpcError> {
     if let Some(s) = app.lsp.get(ws, server_id) {
+        // Started for an untrusted folder: it may have been trusted since (one store read; a
+        // server running as configured pays nothing). Revoking trust applies from the next
+        // `lsp/servers` or `lsp/restart`.
+        if s.restriction() != axiom_lsp::Restriction::None {
+            let trusted = workspace(app, ws).await?.1;
+            if trusted {
+                follow_trust(app, ws, trusted, &s, true).await?;
+            }
+        }
         return Ok(s);
     }
     let (root, defs) = definitions(app, ws).await?;
-    let def = defs
+    let (def, builtin) = defs
         .into_iter()
-        .find(|d| d.id == server_id)
+        .find(|(d, _)| d.id == server_id)
         .ok_or_else(|| {
             RpcError::new(
                 ErrorKind::NotFound,
                 format!("No language server \"{server_id}\" applies to this workspace."),
             )
         })?;
-    let l = launch(app, ws, root, &def).await?;
+    let base = LaunchBase::read(app, ws).await?;
+    let l = launch_in(app, &base, root, &def, builtin);
     Ok(app.lsp.server(ws, def, l))
 }
 
@@ -214,12 +287,16 @@ pub async fn servers(app: Arc<App>, p: WorkspaceRef) -> Result<ServersResult, Rp
     // language is already claimed is on standby (ADR-0021 §3).
     let mut claimed: std::collections::BTreeSet<String> = Default::default();
     let mut base: Option<LaunchBase> = None;
-    for def in defs {
+    let trusted = workspace(&app, &p.workspace_id).await?.1;
+    for (def, builtin) in defs {
         let standby =
             !def.languages.is_empty() && def.languages.iter().all(|l| claimed.contains(l));
         claimed.extend(def.languages.iter().cloned());
         let s = match app.lsp.get(&p.workspace_id, &def.id) {
-            Some(s) => s,
+            Some(s) => {
+                follow_trust(&app, &p.workspace_id, trusted, &s, builtin).await?;
+                s
+            }
             None => {
                 if base.is_none() {
                     base = Some(LaunchBase::read(&app, &p.workspace_id).await?);
@@ -227,7 +304,7 @@ pub async fn servers(app: Arc<App>, p: WorkspaceRef) -> Result<ServersResult, Rp
                 let Some(b) = base.as_ref() else {
                     return Err(internal());
                 };
-                let l = launch_in(&app, b, root.clone(), &def);
+                let l = launch_in(&app, b, root.clone(), &def, builtin);
                 app.lsp.server(&p.workspace_id, def, l)
             }
         };
@@ -271,6 +348,11 @@ pub async fn restart(app: Arc<App>, p: ServerRef) -> Result<Empty, RpcError> {
 
 /// Relays server events to the workspace's clients, for the life of the daemon.
 pub fn spawn_forwarder(app: &Arc<App>) {
+    // Every server's process group is ended by the orphan watchdog if the daemon dies (AUD-027).
+    axiom_lsp::server::set_group_hooks(
+        axiom_exec::guard::watch_group,
+        axiom_exec::guard::unwatch_group,
+    );
     let Ok(rt) = tokio::runtime::Handle::try_current() else {
         return;
     };

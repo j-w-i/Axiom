@@ -83,6 +83,9 @@ pub struct BuildRunInput {
     /// The provider offering it (default: the first that does).
     #[serde(default)]
     pub provider: Option<String>,
+    /// Seconds to wait before stopping it (default 600, at most 3600). Additive (AUD-035).
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]

@@ -113,58 +113,124 @@ fn failed(message: &str, output: &str) -> RpcError {
         .with_details(serde_json::json!({ "output": output }))
 }
 
+/// Undoes a start that did not get as far as its relay (an error, or the request cancelled and
+/// its handler dropped at an await): forgets the placeholder, the token, and stops the task.
+struct StartGuard {
+    app: Arc<App>,
+    id: PreviewId,
+    task: Option<axiom_protocol::TaskId>,
+    armed: bool,
+}
+
+impl Drop for StartGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let info = self.app.previews.remove(&self.id);
+        if let Some(s) = self.app.previews.inspect() {
+            s.unregister(&self.id);
+        }
+        let app = self.app.clone();
+        let task = self.task.take();
+        // Drop cannot await: the cancel and the notification are spawned (a runtime is running
+        // whenever a handler is dropped).
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move {
+                if let Some(t) = task {
+                    let _ = app.executor.cancel(&t).await;
+                }
+                if let Some(mut i) = info {
+                    i.state = PreviewState::Stopped;
+                    notify_state(&app, i).await;
+                }
+            });
+        }
+    }
+}
+
+/// `preview/start`. Cancellation-safe (AUD-034): the preview's own task, not this request,
+/// moves it from `starting` to `ready` (or `failed`), and stops a server that prints no address
+/// within [`URL_WAIT`]; the request only waits for that outcome. One preview per workspace: a
+/// start while one is starting or ready returns it.
 pub async fn start(app: Arc<App>, p: StartParams) -> Result<PreviewInfo, RpcError> {
+    start_with(app, p, &[]).await
+}
+
+/// [`start`], without the daemon variables in `withhold` (a preview an agent starts does not
+/// get the daemon's secrets: `security.md` §Processes, AUD-010).
+pub async fn start_with(
+    app: Arc<App>,
+    p: StartParams,
+    withhold: &[String],
+) -> Result<PreviewInfo, RpcError> {
     let ws = app.workspaces.get(&p.workspace_id)?;
     let root = ws.root().to_path_buf();
-    // One preview per workspace: a second start returns the running one.
-    if let Some(running) = app
-        .previews
-        .of_workspace(&p.workspace_id)
-        .into_iter()
-        .find(|i| matches!(i.state, PreviewState::Ready | PreviewState::Starting))
-    {
+    let id = PreviewId(format!("p{}", NEXT.fetch_add(1, Ordering::SeqCst)));
+    let placeholder = PreviewInfo {
+        preview_id: id.clone(),
+        workspace_id: p.workspace_id.clone(),
+        state: PreviewState::Starting,
+        url: None,
+        task_id: None,
+        adapter: None,
+        message: None,
+        output: None,
+    };
+    if let Some(running) = app.previews.claim(placeholder) {
         return Ok(running);
     }
+    let mut guard = StartGuard {
+        app: app.clone(),
+        id: id.clone(),
+        task: None,
+        armed: true,
+    };
     let inspect = app.previews.service(&app).await.map_err(|e| {
         RpcError::new(
             ErrorKind::Io,
             format!("The inspection service could not start: {e}"),
         )
     })?;
-    let id = PreviewId(format!("p{}", NEXT.fetch_add(1, Ordering::SeqCst)));
     let token = inspect
         .register(id.clone(), root.clone())
         .map_err(|e| RpcError::new(ErrorKind::Io, format!("No randomness for a token: {e}")))?;
 
     // The generated config, the plugin and the adapter, under the data directory.
     let dir = app.env.data_dir.join("previews").join(&id.0);
-    let write = |dir: &Path| -> std::io::Result<PathBuf> {
-        std::fs::create_dir_all(dir)?;
-        std::fs::write(dir.join("plugin.mjs"), PLUGIN)?;
-        std::fs::write(dir.join("adapter.js"), ADAPTER)?;
-        let user = USER_CONFIGS
-            .iter()
-            .map(|n| root.join(n))
-            .find(|p| p.is_file());
-        let cfg = dir.join("vite.config.mjs");
-        std::fs::write(
-            &cfg,
-            generated_config(
-                &dir.join("plugin.mjs"),
-                user.as_deref(),
-                &inspect.endpoint(),
-                &token,
-            ),
-        )?;
-        Ok(cfg)
+    let endpoint = inspect.endpoint();
+    let cfg = {
+        let (dir, root, endpoint, token) = (dir.clone(), root.clone(), endpoint, token.clone());
+        tokio::task::spawn_blocking(move || -> std::io::Result<PathBuf> {
+            std::fs::create_dir_all(&dir)?;
+            // The config holds the inspection token: the directory is the person's alone.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+            }
+            std::fs::write(dir.join("plugin.mjs"), PLUGIN)?;
+            std::fs::write(dir.join("adapter.js"), ADAPTER)?;
+            let user = USER_CONFIGS
+                .iter()
+                .map(|n| root.join(n))
+                .find(|p| p.is_file());
+            let cfg = dir.join("vite.config.mjs");
+            std::fs::write(
+                &cfg,
+                generated_config(&dir.join("plugin.mjs"), user.as_deref(), &endpoint, &token),
+            )?;
+            Ok(cfg)
+        })
+        .await
+        .map_err(|_| crate::app::internal())?
+        .map_err(|e| {
+            RpcError::new(
+                ErrorKind::Io,
+                format!("Could not write the preview's config: {e}"),
+            )
+        })?
     };
-    let cfg = write(&dir).map_err(|e| {
-        inspect.unregister(&id);
-        RpcError::new(
-            ErrorKind::Io,
-            format!("Could not write the preview's config: {e}"),
-        )
-    })?;
     let cfg_s = cfg.to_string_lossy().into_owned();
     let argv = match p.argv {
         Some(a) if !a.is_empty() => a,
@@ -188,130 +254,141 @@ pub async fn start(app: Arc<App>, p: StartParams) -> Result<PreviewInfo, RpcErro
     env.insert("AXIOM_INSPECT_TOKEN".into(), token.clone());
     env.insert("AXIOM_INSPECT_CONFIG".into(), cfg_s);
     env.insert("BROWSER".into(), "none".into());
+    for n in withhold {
+        env.insert(SpawnSpec::remove_key(n), String::new());
+    }
     let spec = SpawnSpec {
         command: Command::Argv(argv),
         cwd: root,
         env,
         label: Some("Preview".into()),
     };
-    let (task_id, mut rx) = match app.executor.start(p.workspace_id.clone(), spec).await {
-        Ok(x) => x,
-        Err(e) => {
-            inspect.unregister(&id);
-            return Err(e.into());
-        }
-    };
-    let info = PreviewInfo {
-        preview_id: id.clone(),
-        workspace_id: p.workspace_id.clone(),
-        state: PreviewState::Starting,
-        url: None,
-        task_id: Some(task_id),
-        adapter: None,
-        message: None,
-        output: None,
-    };
-    app.previews.insert(info.clone());
-    notify_state(&app, info).await;
+    let (task_id, rx) = app.executor.start(p.workspace_id.clone(), spec).await?;
+    guard.task = Some(task_id.clone());
+    let info = app
+        .previews
+        .update(&id, |i| i.task_id = Some(task_id))
+        .ok_or_else(crate::app::internal)?;
 
-    // The server's output: relayed to the workspace's clients, searched for the URL, kept for a
-    // failure report; its end is the preview's end.
-    let (url_tx, url_rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
-    // Detached: it lives as long as the server does.
-    {
-        let app = app.clone();
-        let id = id.clone();
-        let ws_id = p.workspace_id.clone();
-        tokio::spawn(async move {
-            let mut url_tx = Some(url_tx);
-            let mut tail = String::new();
-            while let Some(ev) = rx.recv().await {
-                match ev {
-                    TaskEvent::Output(o) => {
-                        tail.push_str(&o.data);
-                        if tail.len() > 8192 {
-                            let cut = tail.len() - 8192;
-                            let cut = (cut..tail.len())
-                                .find(|i| tail.is_char_boundary(*i))
-                                .unwrap_or(0);
-                            tail.drain(..cut);
-                        }
-                        for line in o.data.lines() {
-                            app.previews.record_output(&id, line);
-                        }
-                        if url_tx.is_some() {
-                            if let Some(u) = o.data.lines().find_map(find_url) {
-                                let _ = url_tx.take().map(|t| t.send(Ok(u)));
+    // From here the preview's own task owns it: relays the server's output to the workspace's
+    // clients, finds the URL, keeps a tail for a failure report, ends the preview with the
+    // server, and answers this request through `done`.
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(relay(
+        app.clone(),
+        id.clone(),
+        p.workspace_id.clone(),
+        rx,
+        done_tx,
+    ));
+    guard.armed = false;
+    notify_state(&app, info).await;
+    done_rx.await.map_err(|_| crate::app::internal())?
+}
+
+/// The preview's task (detached; it lives as long as the dev server does).
+async fn relay(
+    app: Arc<App>,
+    id: PreviewId,
+    ws_id: axiom_protocol::WorkspaceId,
+    mut rx: tokio::sync::mpsc::Receiver<TaskEvent>,
+    done: tokio::sync::oneshot::Sender<Result<PreviewInfo, RpcError>>,
+) {
+    let mut done = Some(done);
+    let mut tail = String::new();
+    let url_deadline = tokio::time::sleep(URL_WAIT);
+    tokio::pin!(url_deadline);
+    loop {
+        let ev = tokio::select! {
+            ev = rx.recv() => ev,
+            () = &mut url_deadline, if done.is_some() => {
+                // No address in time: stop the server, report.
+                let _ = stop(app.clone(), PreviewRef { preview_id: id.clone() }).await;
+                if let Some(d) = done.take() {
+                    let _ = d.send(Err(failed("The dev server printed no address within 60 s.", "")));
+                }
+                continue;
+            }
+        };
+        let Some(ev) = ev else { break };
+        match ev {
+            TaskEvent::Output(o) => {
+                tail.push_str(&o.data);
+                if tail.len() > 8192 {
+                    let cut = tail.len() - 8192;
+                    let cut = (cut..tail.len())
+                        .find(|i| tail.is_char_boundary(*i))
+                        .unwrap_or(0);
+                    tail.drain(..cut);
+                }
+                for line in o.data.lines() {
+                    app.previews.record_output(&id, line);
+                }
+                if done.is_some() {
+                    if let Some(u) = o.data.lines().find_map(find_url) {
+                        let ready = app.previews.update(&id, |i| {
+                            if i.state == PreviewState::Starting {
+                                i.state = PreviewState::Ready;
+                                i.url = Some(u);
+                            }
+                        });
+                        if let Some(info) = ready {
+                            notify_state(&app, info.clone()).await;
+                            if let Some(d) = done.take() {
+                                let _ = d.send(Ok(info));
                             }
                         }
-                        for c in app.clients_of(&ws_id) {
-                            let _ = c.notify::<Output>(o.clone()).await;
-                        }
-                    }
-                    TaskEvent::Exited(x) => {
-                        for c in app.clients_of(&ws_id) {
-                            let _ = c.notify::<Exited>(x.clone()).await;
-                        }
-                        if let Some(t) = url_tx.take() {
-                            let _ = t.send(Err(tail.clone()));
-                        }
-                        let stopping = app
-                            .previews
-                            .get(&id)
-                            .is_some_and(|i| i.state == PreviewState::Stopped);
-                        if let Some(i) = app.previews.update(&id, |i| {
-                            i.adapter = None;
-                            if !stopping {
-                                i.state = PreviewState::Failed;
-                                i.message = Some(match x.status.exit_code {
-                                    Some(c) => format!("The dev server exited (code {c})."),
-                                    None => "The dev server stopped.".into(),
-                                });
-                                i.output = Some(last_lines(&tail, 20));
-                            }
-                        }) {
-                            if !stopping {
-                                notify_state(&app, i).await;
-                            }
-                        }
-                        if let Some(s) = app.previews.inspect() {
-                            s.unregister(&id);
-                        }
-                        break;
                     }
                 }
+                app.notify_clients::<Output>(&ws_id, o).await;
             }
-        });
+            TaskEvent::Exited(x) => {
+                app.notify_clients::<Exited>(&ws_id, x.clone()).await;
+                let stopping = app
+                    .previews
+                    .get(&id)
+                    .is_none_or(|i| i.state == PreviewState::Stopped);
+                if let Some(d) = done.take() {
+                    let _ = d.send(Err(failed(
+                        "The dev server exited before it printed its address.",
+                        &last_lines(&tail, 20),
+                    )));
+                }
+                if let Some(i) = app.previews.update(&id, |i| {
+                    i.adapter = None;
+                    if !stopping {
+                        i.state = PreviewState::Failed;
+                        i.message = Some(match x.status.exit_code {
+                            Some(c) => format!("The dev server exited (code {c})."),
+                            None => "The dev server stopped.".into(),
+                        });
+                        i.output = Some(last_lines(&tail, 20));
+                    }
+                }) {
+                    if !stopping {
+                        notify_state(&app, i).await;
+                    }
+                }
+                if let Some(s) = app.previews.inspect() {
+                    s.unregister(&id);
+                }
+                break;
+            }
+        }
     }
+}
 
-    let outcome = tokio::time::timeout(URL_WAIT, url_rx).await;
-    match outcome {
-        Ok(Ok(Ok(url))) => {
-            let info = app
-                .previews
-                .update(&id, |i| {
-                    i.state = PreviewState::Ready;
-                    i.url = Some(url);
-                })
-                .ok_or_else(crate::app::internal)?;
-            notify_state(&app, info.clone()).await;
-            Ok(info)
+/// The workspace closed: its previews end and are forgotten (AUD-099). Their tasks were
+/// cancelled with the workspace's.
+pub async fn close_workspace(app: &Arc<App>, ws: &axiom_protocol::WorkspaceId) {
+    for info in app.previews.all_of_workspace(ws) {
+        if let Some(s) = app.previews.inspect() {
+            s.unregister(&info.preview_id);
         }
-        Ok(Ok(Err(output))) => Err(failed(
-            "The dev server exited before it printed its address.",
-            &last_lines(&output, 20),
-        )),
-        Ok(Err(_)) => Err(crate::app::internal()),
-        Err(_) => {
-            let _ = stop(
-                app.clone(),
-                PreviewRef {
-                    preview_id: id.clone(),
-                },
-            )
-            .await;
-            Err(failed("The dev server printed no address within 60 s.", ""))
+        if let Some(t) = &info.task_id {
+            let _ = app.executor.cancel(t).await;
         }
+        app.previews.remove(&info.preview_id);
     }
 }
 
@@ -338,6 +415,7 @@ pub async fn stop(app: Arc<App>, p: PreviewRef) -> Result<Empty, RpcError> {
     if let Some(s) = app.previews.inspect() {
         s.unregister(&p.preview_id);
     }
+    app.previews.forget_details(&p.preview_id);
     if let Some(t) = &info.task_id {
         let _ = app.executor.cancel(t).await;
     }

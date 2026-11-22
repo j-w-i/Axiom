@@ -40,45 +40,48 @@ versions = { kind = "github_releases", repo = "rust-lang/rust" }
 bin_dirs = ["cargo/bin"]
 env = { RUSTUP_HOME = "${root}/rustup", CARGO_HOME = "${root}/cargo", RUSTUP_TOOLCHAIN = "${version}" }
 
-# Bootstraps the delegate: rustup-init, verified against its published SHA-256,
-# installs rustup (no toolchain, no PATH or profile changes) into the same root.
+# Bootstraps the delegate: rustup-init of one pinned rustup release (its archive, never the
+# moving `dist/` copy), verified against that release's published SHA-256 (same origin: the
+# first digest verified is kept and a later different one refused, AUD-107), installs rustup
+# (no toolchain, no PATH or profile changes) into the same root. The release is named in the
+# URLs (`${version}` there would be the toolchain's version).
 [[install]]
 kind = "archive"
 provides = ["rustup"]
-versions = { kind = "static", versions = ["latest"] }
+versions = { kind = "static", versions = ["1.28.2"] }
 bin_dirs = ["cargo/bin"]
 setup = ["${root}/rustup-init", "-y", "--no-modify-path", "--default-toolchain", "none", "--profile", "minimal"]
 env = { RUSTUP_HOME = "${root}/rustup", CARGO_HOME = "${root}/cargo" }
 
 [[install.artifacts]]
 platform = { os = "linux", arch = "x86_64" }
-url = "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"
+url = "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init"
 format = "file"
-checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256" }
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init.sha256" }
 
 [[install.artifacts]]
 platform = { os = "linux", arch = "aarch64" }
-url = "https://static.rust-lang.org/rustup/dist/aarch64-unknown-linux-gnu/rustup-init"
+url = "https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-unknown-linux-gnu/rustup-init"
 format = "file"
-checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/aarch64-unknown-linux-gnu/rustup-init.sha256" }
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-unknown-linux-gnu/rustup-init.sha256" }
 
 [[install.artifacts]]
 platform = { os = "macos", arch = "aarch64" }
-url = "https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin/rustup-init"
+url = "https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-apple-darwin/rustup-init"
 format = "file"
-checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin/rustup-init.sha256" }
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-apple-darwin/rustup-init.sha256" }
 
 [[install.artifacts]]
 platform = { os = "macos", arch = "x86_64" }
-url = "https://static.rust-lang.org/rustup/dist/x86_64-apple-darwin/rustup-init"
+url = "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-apple-darwin/rustup-init"
 format = "file"
-checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/x86_64-apple-darwin/rustup-init.sha256" }
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-apple-darwin/rustup-init.sha256" }
 
 [[install.artifacts]]
 platform = { os = "windows", arch = "x86_64" }
-url = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+url = "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-pc-windows-msvc/rustup-init.exe"
 format = "file"
-checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe.sha256" }
+checksum = { kind = "sha256_url", url = "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-pc-windows-msvc/rustup-init.exe.sha256" }
 
 [[install]]
 kind = "system_package"

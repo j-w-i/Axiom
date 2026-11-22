@@ -8,10 +8,12 @@ pub mod agent_loop;
 pub mod checkpoint;
 pub mod credentials;
 pub mod gate;
+pub mod lines;
 pub mod live;
 pub mod mcp_client;
 pub mod model;
 pub mod providers;
+pub mod secrets;
 pub mod session;
 pub mod tools;
 

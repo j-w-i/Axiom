@@ -29,11 +29,14 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot};
 
 pub const PROTOCOL_VERSION: u64 = 1;
 const SETUP_TIMEOUT: Duration = Duration::from_secs(60);
+/// Messages from the agent not yet handled by a turn: past this, notifications are dropped (an
+/// agent that floods the daemon cannot grow its memory without bound; AUD-109).
+const INCOMING_QUEUE: usize = 4096;
 
 /// The built-in external agents (ADR-0016 §2): id, name, command, install hint.
 pub const BUILTIN: &[(&str, &str, &[&str], &str)] = &[
@@ -159,19 +162,28 @@ pub struct Connection {
     stdin: tokio::sync::Mutex<tokio::process::ChildStdin>,
     waiters: Waiters,
     next: AtomicI64,
-    incoming: tokio::sync::Mutex<mpsc::UnboundedReceiver<Incoming>>,
+    incoming: tokio::sync::Mutex<mpsc::Receiver<Incoming>>,
     child: tokio::sync::Mutex<tokio::process::Child>,
+    /// The reader saw the end of the agent's output: the process is gone or unusable.
+    ended: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Connection {
+    /// Starts `argv` with the daemon's environment minus `withhold` (Axiom's model-key
+    /// variables, AUD-010), plus `env`.
     pub fn spawn(
         argv: &[String],
         env: &BTreeMap<String, String>,
+        withhold: &[String],
         cwd: &Path,
     ) -> Result<Connection, String> {
         let program = argv.first().ok_or("no command")?;
         let path = find_program(program).ok_or_else(|| format!("`{program}` is not installed"))?;
-        let mut child = tokio::process::Command::new(path)
+        let mut cmd = tokio::process::Command::new(path);
+        for name in withhold {
+            cmd.env_remove(name);
+        }
+        let mut child = cmd
             .args(&argv[1..])
             .envs(env)
             .current_dir(cwd)
@@ -185,28 +197,39 @@ impl Connection {
             return Err("no stdio".into());
         };
         let waiters: Waiters = Arc::default();
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(INCOMING_QUEUE);
         let w = waiters.clone();
+        let ended: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let end = ended.clone();
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            while let Ok(Some(l)) = lines.next_line().await {
+            let queue = |m: Incoming| {
+                if let Err(mpsc::error::TrySendError::Full(_)) = tx.try_send(m) {
+                    tracing::warn!("an external agent sent more than {INCOMING_QUEUE} unhandled messages; one was dropped");
+                }
+            };
+            let mut lines = crate::lines::Lines::new(stdout, crate::lines::MAX_LINE);
+            loop {
+                let l = match lines.next_line().await {
+                    Ok(Some(l)) => l,
+                    Ok(None) => break,
+                    Err(e) => {
+                        tracing::warn!("an external agent's output is unusable: {e}");
+                        break;
+                    }
+                };
                 let Ok(v) = serde_json::from_str::<Value>(&l) else {
                     continue;
                 };
                 match (v.get("method").and_then(Value::as_str), v.get("id")) {
-                    (Some(m), Some(id)) => {
-                        let _ = tx.send(Incoming::Request {
-                            id: id.clone(),
-                            method: m.into(),
-                            params: v.get("params").cloned().unwrap_or(Value::Null),
-                        });
-                    }
-                    (Some(m), None) => {
-                        let _ = tx.send(Incoming::Notification {
-                            method: m.into(),
-                            params: v.get("params").cloned().unwrap_or(Value::Null),
-                        });
-                    }
+                    (Some(m), Some(id)) => queue(Incoming::Request {
+                        id: id.clone(),
+                        method: m.into(),
+                        params: v.get("params").cloned().unwrap_or(Value::Null),
+                    }),
+                    (Some(m), None) => queue(Incoming::Notification {
+                        method: m.into(),
+                        params: v.get("params").cloned().unwrap_or(Value::Null),
+                    }),
                     (None, Some(id)) => {
                         let Some(id) = id.as_i64() else { continue };
                         let r = match v.get("error") {
@@ -223,6 +246,7 @@ impl Connection {
                     _ => {}
                 }
             }
+            end.store(true, Ordering::SeqCst);
             for (_, s) in lock(&w).drain() {
                 let _ = s.send(Err(AcpError {
                     code: -32603,
@@ -236,7 +260,14 @@ impl Connection {
             next: AtomicI64::new(1),
             incoming: tokio::sync::Mutex::new(rx),
             child: tokio::sync::Mutex::new(child),
+            ended,
         })
+    }
+
+    /// The agent's process has ended (or its output became unusable): a cached session with
+    /// it must be replaced, not reused (AUD-032).
+    pub fn is_ended(&self) -> bool {
+        self.ended.load(Ordering::SeqCst)
     }
 
     async fn write(&self, v: Value) -> Result<(), AcpError> {
@@ -292,6 +323,7 @@ impl Connection {
     }
 
     pub async fn kill(&self) {
+        self.ended.store(true, Ordering::SeqCst);
         let _ = self.child.lock().await.kill().await;
     }
 }
@@ -311,6 +343,13 @@ pub struct AcpSession {
     pub conn: Connection,
     pub agent_session: String,
     pub caps: AgentCaps,
+}
+
+impl AcpSession {
+    /// Stops the agent's process (the session is deleted, or the daemon is stopping).
+    pub async fn kill(&self) {
+        self.conn.kill().await;
+    }
 }
 
 /// The MCP server entry offering Axiom's own tools to the agent.
@@ -340,14 +379,14 @@ pub async fn connect(
     root: &Path,
     saved: Option<&str>,
     mcp: Option<&AxiomMcp>,
+    withhold: &[String],
 ) -> Result<(AcpSession, bool), String> {
-    let conn =
-        Connection::spawn(&config.command, &config.env, root).map_err(|e| {
-            match install_hint(&config.id) {
-                Some(h) => format!("{} cannot start: {e}. Install it: {h}.", config.name),
-                None => format!("{} cannot start: {e}.", config.name),
-            }
-        })?;
+    let conn = Connection::spawn(&config.command, &config.env, withhold, root).map_err(|e| {
+        match install_hint(&config.id) {
+            Some(h) => format!("{} cannot start: {e}. Install it: {h}.", config.name),
+            None => format!("{} cannot start: {e}.", config.name),
+        }
+    })?;
     let init = tokio::time::timeout(
         SETUP_TIMEOUT,
         conn.request(
@@ -548,8 +587,59 @@ fn tool_content(items: &Value, root: &Path) -> String {
 struct Grants {
     /// Allow rules from approved permission requests, for this turn.
     rules: Vec<PolicyRule>,
-    /// An approved `execute` permission covers the next terminal.
-    next_terminal: bool,
+    /// The command an approved `execute` permission showed (its `rawInput.command`): it covers
+    /// the next terminal only if that terminal runs exactly this command (AUD-040).
+    next_terminal: Option<Command>,
+}
+
+/// The command a permission request describes.
+#[derive(Debug, Clone, PartialEq)]
+enum Command {
+    /// A command line (run through a shell, or split on spaces).
+    Line(String),
+    Argv(Vec<String>),
+}
+
+impl Command {
+    fn of(raw: &Value) -> Option<Command> {
+        match &raw["command"] {
+            Value::String(s) if !s.trim().is_empty() => Some(Command::Line(s.trim().to_string())),
+            Value::Array(a) if !a.is_empty() => a
+                .iter()
+                .map(|x| x.as_str().map(String::from))
+                .collect::<Option<Vec<_>>>()
+                .map(Command::Argv),
+            _ => None,
+        }
+    }
+
+    /// Whether a terminal's argv runs this command: the same argv, the line split on spaces,
+    /// or the line given to a shell's `-c`.
+    fn runs(&self, argv: &[String]) -> bool {
+        match self {
+            Command::Argv(a) => a == argv,
+            Command::Line(l) => {
+                let words: Vec<&str> = l.split_whitespace().collect();
+                let shell = argv.len() == 3
+                    && matches!(argv[1].as_str(), "-c" | "-lc")
+                    && argv[2].trim() == l;
+                shell || (argv.len() == words.len() && argv.iter().zip(&words).all(|(a, w)| a == w))
+            }
+        }
+    }
+}
+
+/// The argv a `terminal/create` asks for (as `acp.terminal` reads it).
+fn terminal_argv(input: &Value) -> Vec<String> {
+    let mut v: Vec<String> = input["command"]
+        .as_str()
+        .map(String::from)
+        .into_iter()
+        .collect();
+    for a in input["args"].as_array().into_iter().flatten() {
+        v.push(a.as_str().unwrap_or_default().to_string());
+    }
+    v
 }
 
 struct Open {
@@ -851,8 +941,12 @@ async fn tool(
         .await
         .map_err(|e| (INVALID, e.message))?;
     let mut extra = grants.rules.clone();
-    if name == "acp.terminal" && grants.next_terminal {
-        grants.next_terminal = false;
+    let covered = name == "acp.terminal"
+        && grants
+            .next_terminal
+            .take()
+            .is_some_and(|c| c.runs(&terminal_argv(&prepared.input)));
+    if covered {
         extra.push(PolicyRule {
             effect: Some(Effect::Execute),
             tool: Some("acp.terminal".into()),
@@ -961,18 +1055,24 @@ async fn permission(t: &AcpTurn<'_>, grants: &mut Grants, p: &Value) -> Value {
         .await
     {
         Ok((via, _)) => {
-            // The approval covers the writes to these paths and (for execute) the next command.
-            for p in &paths {
-                grants.rules.push(PolicyRule {
-                    effect: None,
-                    tool: Some("acp.writeFile".into()),
-                    path: Some(p.0.clone()),
-                    argv_prefix: None,
-                    decision: Decision::Allow,
-                });
-            }
-            if effect == Effect::Execute {
-                grants.next_terminal = true;
+            // What the person approved (not what the policy let through unseen) covers the
+            // writes to these paths, for an edit, and the next terminal running the command
+            // shown, for an execute (AUD-040).
+            if matches!(via, Via::Approved(_)) {
+                if matches!(effect, Effect::WriteWorkspace | Effect::Delete) {
+                    for p in &paths {
+                        grants.rules.push(PolicyRule {
+                            effect: None,
+                            tool: Some("acp.writeFile".into()),
+                            path: Some(p.0.clone()),
+                            argv_prefix: None,
+                            decision: Decision::Allow,
+                        });
+                    }
+                }
+                if effect == Effect::Execute {
+                    grants.next_terminal = call.get("rawInput").and_then(Command::of);
+                }
             }
             let always = matches!(
                 via,
@@ -1029,6 +1129,24 @@ mod tests {
         assert_eq!(effect_of(Some("execute")), Effect::Execute);
         assert_eq!(effect_of(Some("fetch")), Effect::Network);
         assert_eq!(effect_of(None), Effect::Execute);
+    }
+
+    #[test]
+    fn an_approved_command_covers_only_the_same_terminal() {
+        let line = Command::of(&json!({"command": "ls -la"})).unwrap();
+        let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(line.runs(&argv(&["ls", "-la"])));
+        assert!(line.runs(&argv(&["bash", "-c", "ls -la"])));
+        assert!(!line.runs(&argv(&["rm", "-rf", "x"])));
+        assert!(!line.runs(&argv(&["ls", "-la", "/"])));
+        let a = Command::of(&json!({"command": ["bash", "-lc", "ls"]})).unwrap();
+        assert!(a.runs(&argv(&["bash", "-lc", "ls"])));
+        assert!(!a.runs(&argv(&["bash", "-lc", "ls; rm x"])));
+        assert_eq!(Command::of(&json!({"title": "x"})), None);
+        assert_eq!(
+            terminal_argv(&json!({"command": "ls", "args": ["-l"]})),
+            ["ls", "-l"]
+        );
     }
 
     #[test]

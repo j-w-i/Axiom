@@ -93,9 +93,9 @@ A tool is a typed operation with a declared effect (`Effect` in `agent.rs`):
 | `fs.list`, `fs.read` (line range, paged, numbered lines) | workspace | read |
 | `fs.applyPatch` (search/replace blocks against the current version; create; delete) | workspace | writeWorkspace |
 | `task.run` (argv only; waits up to a timeout; exit status, output tail, diagnostics) | exec, build | execute |
-| `build.run` (a provider task; waits; status + diagnostics), `build.diagnostics` | build | execute / read |
-| `env.detect`, `env.planInstall` | env | read |
-| `env.install` (an issued plan id only) | env | install |
+| `build.run` (a provider task; waits up to `timeoutSecs`, default 600, at most 3600 (additive, AUD-035); status + diagnostics; `conflict` if the task changed after approval, AUD-103), `build.diagnostics` | build | execute / read |
+| `env.detect`, `env.planInstall` (without `version`: the newest the manifest lists; never runs a provider's `list_versions` program, AUD-109) | env | read |
+| `env.install` (a plan id this principal got from `env.planInstall`; never a client's plan or a system plan; the card shows the plan, AUD-041) | env | install |
 | `editor.open` (reveal a location: the `agent/reveal` notification) | clients | read |
 | `mcp.<server>.<tool>` (user-configured MCP servers) | MCP client | execute (+ network) |
 | `preview.start` (the dev server with the inspector; gated as the command it runs; returns the URL and whether a page is connected) | preview | execute |
@@ -136,7 +136,13 @@ validate input against the tool's schema                     → invalid_params 
 ```
 
 Principals: `session:<id>` (the loop), `mcp:<client name>` (the MCP front end through
-`agent/toolCall`), `cli`.
+`agent/toolCall`), `cli`. The daemon makes an external principal its connection's own:
+cards and the audit log show `mcp:<client name>#c<n>` / `cli#c<n>` (AUD-009).
+
+Processes an agent starts (`task.run`, `build.run`, `acp.terminal`) do not get the daemon's
+secret-looking variables or the providers' `apiKeyEnv` variables, unless settings
+`agent.passEnv` names them; the card says how many are withheld (`security.md` §Processes;
+AUD-010). Output is kept as a bounded tail while a command runs.
 
 ## Permission policy
 
@@ -159,8 +165,17 @@ decision = "deny"
   the longer `argvPrefix`); among equals, deny > ask > allow. No match → `default`.
 - The built-in user policy: `default = "ask"`, `read → allow`.
 - Workspace rules are merged so they can only turn allow into ask/deny or ask into deny.
-- "Allow for session" adds an in-memory rule for that tool and target set; never for
-  `credentials` or `deploy`.
+- "Allow for session" records exactly that call: tool, effect, paths, argv (exact, not a
+  prefix) and its conditions (an ACP terminal's agent-set variables and working directory,
+  `build.run`'s provider and `PATH` prepend), in that workspace, for that principal. It is not
+  offered for `credentials`, `deploy`, protected paths, opaque calls (MCP tools, installs) or
+  calls without targets other than reads; it ends when the session is deleted, rewound or
+  restored, or the external principal's connection closes (AUD-009).
+- Protected paths: a write or delete under `.axiom/` or `.git/` always asks, whatever the
+  policy or a grant says (AUD-104).
+- A call whose conditions change what an approved command does (an agent-set variable, a
+  working directory other than the root) asks even where a rule allows its argv (AUD-039).
+- `path` globs are matched in linear time per candidate (AUD-106).
 - Content a model reads (files, tool results, web pages) cannot change policy.
 - Audit log: `<data dir>/audit/<workspace hash>.jsonl`, append-only.
 
@@ -274,8 +289,16 @@ ADR-0015 §7.
     executor task.
   - **Permission requests.** `session/request_permission` is decided by the gate as the policy
     tool `<provider id>.<agent tool name>`, with the effect from the ACP `kind`. An approval
-    adds one-turn grants: `acp.writeFile` on the requested paths and, for `execute`, the next
-    terminal. So the person is asked once, not twice.
+    the person gave adds one-turn grants: for an edit or delete, `acp.writeFile` on the
+    requested paths; for `execute`, the next terminal if it runs the command the request showed
+    (`rawInput.command`). A request the policy allowed unseen (a `read`) adds none (AUD-040).
+    So the person is asked once, not twice, and never for less than what runs.
+  - **Terminals.** `acp.terminal` shows the variables the agent sets and its working directory
+    on the card (they ask even under an argv rule); `outputByteLimit` is capped at 16 MiB;
+    non-string `args` are refused. A deleted session's terminals, and a closed workspace's, are
+    dropped (AUD-039, AUD-099).
+  - **Lifetime.** An agent whose process ended is started again on the next turn; agents and
+    MCP servers start without holding the daemon-wide maps (AUD-032).
   - **Updates.** Message and thought chunks become `textDelta` + `assistantText` (thoughts with
     `kind: thought`). The final `plan` becomes `assistantText` with `kind: plan`. `tool_call`
     and `tool_call_update` become `toolCall`/`toolResult` (diffs rendered as unified diffs).

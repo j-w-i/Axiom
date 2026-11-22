@@ -89,6 +89,36 @@ fn every_archive_artifact_has_a_checksum() {
     }
 }
 
+/// 4b. Nothing is fetched from a moving "latest" location: an artifact and its checksum file
+/// name one release, so they cannot change between the two fetches or between machines
+/// (AUD-107). A checksum file names the release too.
+#[test]
+fn no_artifact_or_checksum_tracks_latest() {
+    for (dir, text) in manifests() {
+        let m = manifest::parse(&text).unwrap();
+        for i in &m.install {
+            if let InstallMethod::Archive { artifacts, .. } = i {
+                for a in artifacts {
+                    let mut urls = vec![a.url.as_str()];
+                    if let Checksum::Sha256Url { url } = &a.checksum {
+                        urls.push(url);
+                    }
+                    for u in urls {
+                        assert!(
+                            !u.contains("/latest/") && !u.contains("/latest-"),
+                            "providers/{dir}: {u} tracks the latest release"
+                        );
+                        assert!(
+                            !u.starts_with("https://static.rust-lang.org/rustup/dist/"),
+                            "providers/{dir}: {u} is rustup's moving copy"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// 5. Detection runs on this host without error (found or not found), on this repository,
 /// which is a Cargo workspace and so applies to the Rust provider at least.
 #[tokio::test]

@@ -170,7 +170,10 @@ impl Inspect {
         let snap: Snapshot = s
             .request("inspect/snapshot", &params, SNAPSHOT_TIMEOUT)
             .await?;
-        let snap = s.normalizer().snapshot(snap);
+        let norm = s.normalizer().clone();
+        let snap = tokio::task::spawn_blocking(move || norm.snapshot(snap))
+            .await
+            .map_err(|_| InspectError::Adapter("normalising the snapshot failed".into()))?;
         s.set_snapshot(snap.clone());
         Ok(snap)
     }
@@ -184,7 +187,11 @@ impl Inspect {
         let r: HitTestResult = s
             .request("inspect/hitTest", &params, REQUEST_TIMEOUT)
             .await?;
-        Ok(s.normalizer().chain(r))
+        // The text search reads files: on the blocking pool (AUD-042).
+        let norm = s.normalizer().clone();
+        tokio::task::spawn_blocking(move || norm.chain(r))
+            .await
+            .map_err(|_| InspectError::Adapter("resolving the sources failed".into()))
     }
 
     pub async fn node_details(
@@ -221,7 +228,10 @@ impl Inspect {
                 }
             }
         }
-        Ok(norm.node(n, owner))
+        let norm = norm.clone();
+        tokio::task::spawn_blocking(move || norm.node(n, owner))
+            .await
+            .map_err(|_| InspectError::Adapter("resolving the sources failed".into()))
     }
 
     pub async fn highlight(
@@ -249,18 +259,33 @@ impl Inspect {
     }
 
     fn take_token(&self, token: &str) -> Option<Registration> {
-        // One-time: a page that reloads gets a new token from the dev server only through a new
-        // config, so the token stays valid for reconnects of the same preview (a reload) but
-        // belongs to one preview only.
+        // The token belongs to one preview and stays valid while it runs, so a reload (a new
+        // page, the same served config) reconnects; but only one page at a time is the
+        // preview's session (`adopt`).
         lock(&self.tokens).get(token).map(|r| Registration {
             preview: r.preview.clone(),
             root: r.root.clone(),
         })
     }
 
-    fn adopt(&self, preview: PreviewId, s: Arc<Session>) {
-        if let Some(old) = lock(&self.sessions).insert(preview, s) {
-            old.close();
+    /// Makes `s` the preview's session once no open one is left, waiting up to `wait` for the
+    /// current page to go (a reload closes the old page as the new one connects). `false`: the
+    /// current page is still connected, and `s` is refused rather than replacing it (AUD-043:
+    /// a page that learned the token could take over a live session).
+    async fn adopt(&self, preview: PreviewId, s: Arc<Session>, wait: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            {
+                let mut sessions = lock(&self.sessions);
+                if !sessions.get(&preview).is_some_and(|old| old.is_open()) {
+                    sessions.insert(preview, s);
+                    return true;
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
 

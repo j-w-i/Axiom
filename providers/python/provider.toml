@@ -4,7 +4,8 @@
 # every uv location inside the root, so the user's own Python, uv cache and uv config are
 # never read for writing or changed. UV_PYTHON_INSTALL_REGISTRY=0 keeps Windows' PEP 514
 # registry untouched; UV_NO_CONFIG=1 ignores the user's uv.toml.
-# The bootstrap downloads uv's latest release (`${version}` here is the Python version).
+# The bootstrap downloads uv 0.9.0, named in its URLs (`${version}` there would be the Python
+# version); raise it with the URLs.
 schema = "axiom.provider/1"
 id = "python"
 name = "Python"
@@ -37,47 +38,51 @@ versions = { kind = "static", versions = ["3.13", "3.12", "3.11", "3.10"] }
 bin_dirs = ["bin"]
 env = { UV_PYTHON_INSTALL_DIR = "${root}/python", UV_PYTHON_BIN_DIR = "${root}/bin", UV_CACHE_DIR = "${root}/cache", UV_PYTHON_INSTALL_REGISTRY = "0", UV_NO_CONFIG = "1" }
 
-# Bootstraps the delegate: uv's release archive, verified against its .sha256 file.
+# Bootstraps the delegate: uv's release archive, pinned to one release (never `latest`, which
+# could change between the checksum and the download), verified against that release's .sha256
+# file. The checksum file comes from the same origin as the archive, so it detects corruption,
+# not a compromised release; the first digest verified is kept (`cache/pins.json`) and a later
+# different one is refused (AUD-107, providers.md §Checksums).
 [[install]]
 kind = "archive"
 provides = ["uv"]
-versions = { kind = "static", versions = ["latest"] }
+versions = { kind = "static", versions = ["0.9.0"] }
 bin_dirs = ["."]
 env = { UV_PYTHON_INSTALL_DIR = "${root}/python", UV_CACHE_DIR = "${root}/cache", UV_NO_CONFIG = "1" }
 
 [[install.artifacts]]
 platform = { os = "linux", arch = "x86_64" }
-url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz"
+url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-x86_64-unknown-linux-gnu.tar.gz"
 format = "tar.gz"
 strip_components = 1
-checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz.sha256" }
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-x86_64-unknown-linux-gnu.tar.gz.sha256" }
 
 [[install.artifacts]]
 platform = { os = "linux", arch = "aarch64" }
-url = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-gnu.tar.gz"
+url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-aarch64-unknown-linux-gnu.tar.gz"
 format = "tar.gz"
 strip_components = 1
-checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-gnu.tar.gz.sha256" }
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-aarch64-unknown-linux-gnu.tar.gz.sha256" }
 
 [[install.artifacts]]
 platform = { os = "macos", arch = "aarch64" }
-url = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz"
+url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-aarch64-apple-darwin.tar.gz"
 format = "tar.gz"
 strip_components = 1
-checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz.sha256" }
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-aarch64-apple-darwin.tar.gz.sha256" }
 
 [[install.artifacts]]
 platform = { os = "macos", arch = "x86_64" }
-url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz"
+url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-x86_64-apple-darwin.tar.gz"
 format = "tar.gz"
 strip_components = 1
-checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz.sha256" }
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-x86_64-apple-darwin.tar.gz.sha256" }
 
 [[install.artifacts]]
 platform = { os = "windows", arch = "x86_64" }
-url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
+url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-x86_64-pc-windows-msvc.zip"
 format = "zip"
-checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip.sha256" }
+checksum = { kind = "sha256_url", url = "https://github.com/astral-sh/uv/releases/download/0.9.0/uv-x86_64-pc-windows-msvc.zip.sha256" }
 
 [[tasks]]
 id = "sync"

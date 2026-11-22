@@ -192,7 +192,13 @@ async fn mcp_lists_and_calls_tools_under_the_same_policy() {
             let (m, p) = approvals.recv().await.unwrap();
             if m == "agent/approvalRequested" {
                 let r: ApprovalRequest = serde_json::from_value(p).unwrap();
-                assert_eq!(r.principal, "mcp:claude-code");
+                // The declared name, made this connection's own (AUD-009): another client that
+                // calls itself claude-code shares no grants with this one.
+                assert!(
+                    r.principal.starts_with("mcp:claude-code#c"),
+                    "{}",
+                    r.principal
+                );
                 app.request::<Approve>(ApproveParams {
                     request_id: r.request_id,
                     decision: ApprovalDecision::Once,
@@ -245,7 +251,7 @@ async fn mcp_lists_and_calls_tools_under_the_same_policy() {
         .unwrap()
         .path();
     let text = std::fs::read_to_string(audit).unwrap();
-    assert!(text.contains("\"principal\":\"mcp:claude-code\""));
+    assert!(text.contains("\"principal\":\"mcp:claude-code#c"));
     assert!(text.contains("approved (once)") && text.contains("denied"));
     // The write was checkpointed under the external principal.
     let refs = std::process::Command::new("git")

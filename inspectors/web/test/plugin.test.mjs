@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import axiom, { loadBabel, stamp } from "../plugin.mjs";
+import axiom, { adapterRequestAllowed, loadBabel, stamp } from "../plugin.mjs";
 
 const root = "/proj";
 const file = path.join(root, "src/App.jsx");
@@ -90,4 +90,28 @@ test("with Babel the transform stamps; it warns once and passes through without 
   assert.equal(await q.transform.call(ctx, "<p/>", "/x/A.jsx"), null);
   assert.equal(await q.transform.call(ctx, "<p/>", "/x/B.jsx"), null);
   assert.equal(warnings.length, 1);
+});
+
+test("the adapter module (it holds the token) is served to the dev server's own page only", () => {
+  assert.equal(adapterRequestAllowed({ "sec-fetch-site": "same-origin", host: "127.0.0.1:5173" }), true);
+  assert.equal(adapterRequestAllowed({ "sec-fetch-site": "none" }), true);
+  assert.equal(adapterRequestAllowed({ "sec-fetch-site": "cross-site", origin: "https://evil.example" }), false);
+  assert.equal(adapterRequestAllowed({ "sec-fetch-site": "same-site" }), false);
+  assert.equal(adapterRequestAllowed({ host: "127.0.0.1:5173", origin: "https://evil.example" }), false);
+  assert.equal(adapterRequestAllowed({ host: "127.0.0.1:5173", origin: "http://127.0.0.1:5173" }), true);
+  assert.equal(adapterRequestAllowed({ host: "127.0.0.1:5173" }), true);
+
+  // The middleware answers 403 for a cross-site request and passes everything else on.
+  const plugin = axiom({ endpoint: "ws://127.0.0.1:1/", token: "t" });
+  let handler;
+  plugin.configureServer({ middlewares: { use: (h) => (handler = h) } });
+  const run = (url, headers) => {
+    const res = { statusCode: 200, end() {} };
+    let passed = false;
+    handler({ url, headers }, res, () => (passed = true));
+    return passed ? "next" : res.statusCode;
+  };
+  assert.equal(run("/@id/__x00__virtual:axiom-adapter", { "sec-fetch-site": "cross-site" }), 403);
+  assert.equal(run("/@id/__x00__virtual:axiom-adapter", { "sec-fetch-site": "same-origin" }), "next");
+  assert.equal(run("/src/App.jsx", { "sec-fetch-site": "cross-site" }), "next");
 });

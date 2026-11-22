@@ -41,7 +41,8 @@ async fn rust_plan_bootstraps_rustup_first() {
         )
     };
     assert!(
-        url.starts_with("https://static.rust-lang.org/rustup/dist/"),
+        // One pinned rustup release, never the moving `dist/` copy (AUD-107).
+        url.starts_with("https://static.rust-lang.org/rustup/archive/1.28.2/"),
         "{url}"
     );
     assert!(url.ends_with("/rustup-init") || url.ends_with("/rustup-init.exe"));

@@ -30,14 +30,27 @@ const SKIP_DIRS: &[&str] = &["node_modules", ".git", "dist", "build", "target", 
 const MAX_SEARCH_FILES: usize = 2000;
 const MAX_SEARCH_BYTES: u64 = 1024 * 1024;
 
+/// How many texts' search results are remembered (cleared when the page reloads).
+const SEARCH_CACHE: usize = 256;
+
 pub struct Normalizer {
     root: PathBuf,
+    /// Text → its heuristic candidates, so the same element costs one search (AUD-042).
+    cache: std::sync::Mutex<HashMap<String, Vec<SourceCandidate>>>,
 }
 
 impl Normalizer {
     pub fn new(root: PathBuf) -> Self {
         let root = std::fs::canonicalize(&root).unwrap_or(root);
-        Self { root }
+        Self {
+            root,
+            cache: Default::default(),
+        }
+    }
+
+    /// Forgets remembered search results (the page reloaded: files may have changed).
+    pub fn clear_cache(&self) {
+        self.cache.lock().unwrap_or_else(|p| p.into_inner()).clear();
     }
 
     /// A whole snapshot: bounded, sources resolved, owners from the tree (no text search: a
@@ -108,6 +121,17 @@ impl Normalizer {
             }
         }
         HitTestResult { chain }
+    }
+
+    /// One node without the text search (a hover): its own sources, else the given owner.
+    pub fn node_without_search(&self, n: UiNode, owner_location: Option<Location>) -> UiNode {
+        let mut n = self.own(n);
+        if !has_own(&n) {
+            if let Some(l) = owner_location {
+                n.sources.push(owner(l));
+            }
+        }
+        n
     }
 
     /// One node (details): its own sources, the given owner, else a text search.
@@ -190,6 +214,25 @@ impl Normalizer {
         let Some(text) = text.map(str::trim).filter(|t| t.chars().count() >= 3) else {
             return Vec::new();
         };
+        let cached = self
+            .cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(text)
+            .cloned();
+        if let Some(c) = cached {
+            return c;
+        }
+        let found = self.search_files(text);
+        let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+        if cache.len() >= SEARCH_CACHE {
+            cache.clear();
+        }
+        cache.insert(text.to_string(), found.clone());
+        found
+    }
+
+    fn search_files(&self, text: &str) -> Vec<SourceCandidate> {
         let mut out = Vec::new();
         let mut seen = 0usize;
         let mut stack = vec![self.root.clone()];

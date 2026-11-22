@@ -22,6 +22,25 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const VIRTUAL = "virtual:axiom-adapter";
 const RESOLVED = "\0" + VIRTUAL;
+const SERVED = "/@id/__x00__" + VIRTUAL;
+
+/**
+ * Whether a request for the adapter module (which carries the preview's token) may be served:
+ * the dev server's own page loads it (`Sec-Fetch-Site: same-origin`, or `none` when typed in);
+ * another site's page reading it through a permissive CORS setting may not (AUD-043). Without
+ * fetch metadata (an old browser, a tool), an `Origin` naming another host is refused.
+ */
+export function adapterRequestAllowed(headers) {
+  const site = headers["sec-fetch-site"];
+  if (site !== undefined) return site === "same-origin" || site === "none";
+  const origin = headers.origin;
+  if (origin === undefined) return true;
+  try {
+    return new URL(origin).host === headers.host;
+  } catch {
+    return false;
+  }
+}
 
 /** `@babel/core`, from the project first, then from beside this file; null if neither has it. */
 export async function loadBabel(root) {
@@ -92,6 +111,17 @@ export default function axiom({ endpoint, token, adapterSource } = {}) {
     configResolved(c) {
       root = c.root;
     },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = (req.url ?? "").split("?")[0];
+        if ((url === SERVED || url.endsWith(VIRTUAL)) && !adapterRequestAllowed(req.headers)) {
+          res.statusCode = 403;
+          res.end();
+          return;
+        }
+        next();
+      });
+    },
     async buildStart() {
       babel = await loadBabel(root);
     },
@@ -118,7 +148,7 @@ start({ endpoint: ${JSON.stringify(endpoint ?? "")}, token: ${JSON.stringify(tok
     },
     transformIndexHtml() {
       return [
-        { tag: "script", attrs: { type: "module", src: "/@id/__x00__" + VIRTUAL }, injectTo: "head-prepend" },
+        { tag: "script", attrs: { type: "module", src: SERVED }, injectTo: "head-prepend" },
       ];
     },
   };

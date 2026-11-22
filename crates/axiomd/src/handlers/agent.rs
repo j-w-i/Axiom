@@ -14,9 +14,9 @@ use axiom_protocol::lifecycle::Empty;
 use axiom_protocol::workspace::WorkspaceRef;
 use axiom_protocol::{ErrorKind, RpcError};
 use axiom_protocol::{WorkspaceId, WorkspacePath};
-use axiom_rpc::RequestCtx;
+use axiom_rpc::{Notifier, RequestCtx};
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub(crate) const PROVIDERS_KEY: &str = "agent.providers";
 
@@ -172,6 +172,36 @@ pub async fn approve(app: Arc<App>, p: ApproveParams) -> Result<Empty, RpcError>
     Ok(Empty {})
 }
 
+/// The connections that made tool calls from outside a session, numbered.
+static CONNECTIONS: Mutex<Vec<(Notifier, u64)>> = Mutex::new(Vec::new());
+
+/// The principal a call from outside a session runs under: the name it declared, made this
+/// connection's own (`mcp:<client>#c<n>`). Two clients that both call themselves
+/// `claude-code` share no grants, and a connection's grants end with it (AUD-009, AUD-109).
+fn connection_principal(app: &App, declared: &str, notifier: &Notifier) -> String {
+    let mut c = CONNECTIONS.lock().unwrap_or_else(|p| p.into_inner());
+    let closed: Vec<String> = c
+        .iter()
+        .filter(|(n, _)| n.is_closed())
+        .map(|(_, id)| format!("#c{id}"))
+        .collect();
+    if !closed.is_empty() {
+        c.retain(|(n, _)| !n.is_closed());
+        app.agent
+            .gate
+            .retain_grants(|p| !closed.iter().any(|tag| p.ends_with(tag.as_str())));
+    }
+    let id = match c.iter().find(|(n, _)| n.same_connection(notifier)) {
+        Some((_, id)) => *id,
+        None => {
+            let id = c.iter().map(|(_, id)| id + 1).max().unwrap_or(1);
+            c.push((notifier.clone(), id));
+            id
+        }
+    };
+    format!("{declared}#c{id}")
+}
+
 /// One tool call from outside a session (the MCP front end, the CLI). The principal must say
 /// where it comes from (`mcp:<client>` or `cli`), so it can never use a session's grants.
 pub async fn tool_call(
@@ -190,18 +220,10 @@ pub async fn tool_call(
         ));
     }
     let ws = app.workspaces.get(&p.workspace_id)?;
-    let tctx = ToolCtx {
-        workspace_id: p.workspace_id.clone(),
-        principal: p.principal,
-        cancel: ctx.cancel.clone(),
-    };
-    let policies = policies(&app, &p.workspace_id).await?;
-    let audit = audit_path(&app, ws.root());
-    let shadow = crate::handlers::sessions::shadow(&app, ws.root());
-    // Calls from outside a session keep their checkpoints under one key per principal.
+    // Checkpoints stay under the declared name (one key per client, as before).
     let key: String = format!(
         "ext-{}",
-        tctx.principal
+        p.principal
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() || c == '-' {
                 c
@@ -210,6 +232,14 @@ pub async fn tool_call(
             })
             .collect::<String>()
     );
+    let tctx = ToolCtx {
+        workspace_id: p.workspace_id.clone(),
+        principal: connection_principal(&app, &p.principal, &ctx.notifier),
+        cancel: ctx.cancel.clone(),
+    };
+    let policies = policies(&app, &p.workspace_id).await?;
+    let audit = audit_path(&app, ws.root());
+    let shadow = crate::handlers::sessions::shadow(&app, ws.root());
     let hook = ExternalCheckpoint {
         shadow: &shadow,
         key: &key,

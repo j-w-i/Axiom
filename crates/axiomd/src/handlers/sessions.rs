@@ -113,19 +113,25 @@ fn open_live(app: &App, id: &SessionId, root: &Option<PathBuf>) -> Result<Arc<Li
 }
 
 /// Forwards the session's events to this connection from `after_seq` on (once per connection).
+/// The connection counts as attached only once the request has succeeded and its forwarder
+/// runs, and no longer once the forwarder ends: a failed or cancelled request leaves nothing
+/// behind that would stop a later one from attaching (AUD-033).
 fn attach(app: &Arc<App>, live: &Arc<Live>, notifier: Notifier, after_seq: u64, ctx: &RequestCtx) {
-    {
-        let mut a = app.agent.attached.lock().unwrap_or_else(|p| p.into_inner());
-        a.retain(|(_, n)| !n.is_closed());
-        if a.iter()
-            .any(|(s, n)| *s == live.id && n.same_connection(&notifier))
-        {
-            return;
-        }
-        a.push((live.id.clone(), notifier.clone()));
-    }
+    // Subscribed now, so nothing emitted before the response is missed.
     let mut rx = live.subscribe();
+    let app = app.clone();
+    let id = live.id.clone();
     ctx.after_response(async move {
+        {
+            let mut a = app.agent.attached.lock().unwrap_or_else(|p| p.into_inner());
+            a.retain(|(_, n)| !n.is_closed());
+            if a.iter()
+                .any(|(s, n)| *s == id && n.same_connection(&notifier))
+            {
+                return;
+            }
+            a.push((id.clone(), notifier.clone()));
+        }
         loop {
             match rx.recv().await {
                 Ok(ev) => {
@@ -143,7 +149,50 @@ fn attach(app: &Arc<App>, live: &Arc<Live>, notifier: Notifier, after_seq: u64, 
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
+        app.agent
+            .attached
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|(s, n)| !(*s == id && n.same_connection(&notifier)));
     });
+}
+
+/// Ends a turn that was begun but never handed to its task (an error or a cancelled request
+/// after `Live::begin`), so the session is not left "running" (AUD-011).
+struct TurnGuard(Option<Arc<Live>>);
+
+impl TurnGuard {
+    fn new(live: &Arc<Live>) -> Self {
+        Self(Some(live.clone()))
+    }
+    /// The turn's task owns ending it now.
+    fn disarm(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for TurnGuard {
+    fn drop(&mut self) {
+        if let Some(l) = self.0.take() {
+            l.end();
+        }
+    }
+}
+
+/// The principal a session's tool calls and grants are under.
+fn principal_of(id: &SessionId) -> String {
+    format!("session:{}", id.0)
+}
+
+/// The variables model providers read their keys from (`apiKeyEnv`): an external agent or MCP
+/// server Axiom starts does not get them (AUD-010).
+fn key_vars(app: &App, configs: &[axiom_protocol::agent::ProviderConfig]) -> Vec<String> {
+    app.agent
+        .providers
+        .all(configs)
+        .into_iter()
+        .filter_map(|c| c.api_key_env)
+        .collect()
 }
 
 pub async fn create(
@@ -239,9 +288,12 @@ pub async fn delete(app: Arc<App>, p: SessionRef) -> Result<Empty, RpcError> {
         .map_err(journal_error)?;
     // Stops its MCP servers and external agent (their processes are killed when dropped).
     app.agent.mcp.lock().await.remove(&p.session_id);
-    if let Some(a) = app.agent.acp.lock().await.remove(&p.session_id) {
+    let acp = app.agent.acp.lock().await.remove(&p.session_id);
+    if let Some(a) = acp {
         a.conn.kill().await;
     }
+    app.agent.gate.clear_grants(&principal_of(&p.session_id));
+    crate::acp::drop_session(&app, &principal_of(&p.session_id)).await;
     let id = p.session_id.0.clone();
     app.store_call(move |s| s.session_delete(&id)).await?;
     Ok(Empty {})
@@ -363,7 +415,8 @@ pub async fn send(app: Arc<App>, p: SendParams, ctx: RequestCtx) -> Result<Empty
             )
         })?;
     if config.kind == ProviderKind::Acp {
-        return send_acp(app, p, row, root, live, config).await;
+        let key_vars = key_vars(&app, &configs);
+        return send_acp(app, p, row, root, live, config, key_vars).await;
     }
     let provider = app
         .agent
@@ -384,33 +437,8 @@ pub async fn send(app: Arc<App>, p: SendParams, ctx: RequestCtx) -> Result<Empty
     for im in &p.images {
         images.push(live.journal.put_image(im).map_err(journal_error)?);
     }
-    let Some(cancel) = live.begin() else {
-        return Err(RpcError::new(
-            ErrorKind::Conflict,
-            "A turn is already running in this session.",
-        ));
-    };
-    let input = UserInput {
-        text: p.text.clone(),
-        attachments: p.attachments.clone(),
-        attached_text: attached,
-        images,
-        from_turn: p.from_turn,
-    };
-    let turn = match agent_loop::begin(&live, &input) {
-        Ok(t) => t,
-        Err(e) => {
-            live.end();
-            return Err(journal_error(e));
-        }
-    };
-    if turn == 1 && row.title == DEFAULT_TITLE {
-        row.title = title_from(&p.text);
-    }
-    row.updated_ms = now_ms();
-    let r2 = row.clone();
-    app.store_call(move |s| s.session_put(&r2)).await?;
-
+    // Everything that can fail on the workspace's content (a malformed `[agent.policy]`) is
+    // read before the turn begins (AUD-011).
     let tools = match &p.workspace_id {
         Some(ws) => {
             let root = root.clone().ok_or_else(internal)?;
@@ -426,12 +454,39 @@ pub async fn send(app: Arc<App>, p: SendParams, ctx: RequestCtx) -> Result<Empty
         }
         None => agent_loop::system_prompt(None),
     };
+    let Some(cancel) = live.begin() else {
+        return Err(RpcError::new(
+            ErrorKind::Conflict,
+            "A turn is already running in this session.",
+        ));
+    };
+    let guard = TurnGuard::new(&live);
+    let input = UserInput {
+        text: p.text.clone(),
+        attachments: p.attachments.clone(),
+        attached_text: attached,
+        images,
+        from_turn: p.from_turn,
+    };
+    let turn = agent_loop::begin(&live, &input).map_err(journal_error)?;
+    if p.from_turn.is_some() {
+        // Rewound: what the person allowed for the session no longer holds.
+        app.agent.gate.clear_grants(&principal_of(&live.id));
+    }
+    if turn == 1 && row.title == DEFAULT_TITLE {
+        row.title = title_from(&p.text);
+    }
+    row.updated_ms = now_ms();
+    let r2 = row.clone();
+    app.store_call(move |s| s.session_put(&r2)).await?;
+    let key_vars = key_vars(&app, &configs);
+    guard.disarm();
     let a = app.clone();
     let model = row.model.clone();
     tokio::spawn(async move {
         // Built-in tools plus the session's MCP servers' (started on first use).
         let registry = match &tools {
-            Some((_, root, _)) => session_registry(&a, &live, root).await,
+            Some((_, root, _)) => session_registry(&a, &live, root, &key_vars).await,
             None => a.agent.tools.clone(),
         };
         let env = tools.map(|(ws, root, policies)| ToolEnv {
@@ -440,7 +495,7 @@ pub async fn send(app: Arc<App>, p: SendParams, ctx: RequestCtx) -> Result<Empty
             policies,
             ctx: ToolCtx {
                 workspace_id: ws,
-                principal: format!("session:{}", live.id.0),
+                principal: principal_of(&live.id),
                 cancel: cancel.clone(),
             },
             shadow: shadow(&a, &root),
@@ -490,6 +545,7 @@ async fn send_acp(
     root: Option<PathBuf>,
     live: Arc<Live>,
     config: axiom_protocol::agent::ProviderConfig,
+    key_vars: Vec<String>,
 ) -> Result<Empty, RpcError> {
     // A conversation without a folder (Chat's general scope, ADR-0020 §6) runs the agent in a
     // scratch folder of its own under the data directory, opened here as a workspace, so its
@@ -509,12 +565,16 @@ async fn send_acp(
             "An external agent keeps its own history: editing an earlier message is not possible. Send a new message instead.",
         ));
     }
+    // Read before the turn begins: a malformed workspace policy is an error, not a stuck
+    // session (AUD-011).
+    let policies = policies(&app, &ws).await?;
     let Some(cancel) = live.begin() else {
         return Err(RpcError::new(
             ErrorKind::Conflict,
             "A turn is already running in this session.",
         ));
     };
+    let guard = TurnGuard::new(&live);
     let input = UserInput {
         text: p.text.clone(),
         attachments: p.attachments.clone(),
@@ -522,55 +582,17 @@ async fn send_acp(
         images,
         from_turn: None,
     };
-    let turn = match agent_loop::begin(&live, &input) {
-        Ok(t) => t,
-        Err(e) => {
-            live.end();
-            return Err(journal_error(e));
-        }
-    };
+    let turn = agent_loop::begin(&live, &input).map_err(journal_error)?;
     if turn == 1 && row.title == DEFAULT_TITLE {
         row.title = title_from(&p.text);
     }
     row.updated_ms = now_ms();
     let r2 = row.clone();
     app.store_call(move |s| s.session_put(&r2)).await?;
-    let policies = policies(&app, &ws).await?;
+    guard.disarm();
     let a = app.clone();
     tokio::spawn(async move {
-        let saved_path = live.journal.path().with_extension("acp");
-        let session = {
-            let mut m = a.agent.acp.lock().await;
-            match m.get(&live.id) {
-                Some(s) => Ok(s.clone()),
-                None => {
-                    let saved = std::fs::read_to_string(&saved_path).ok();
-                    match axiom_agent::acp::connect(
-                        &config,
-                        &root,
-                        saved.as_deref().map(str::trim),
-                        axiom_mcp(&a, &root).as_ref(),
-                    )
-                    .await
-                    {
-                        Ok((s, resumed)) => {
-                            if saved.is_some() && !resumed {
-                                let _ = live.emit(EventBody::Error {
-                                    kind: "notice".into(),
-                                    model_kind: None,
-                                    message: format!("{} cannot resume its earlier conversation, so it starts fresh; the history above is kept.", config.name),
-                                });
-                            }
-                            let _ = std::fs::write(&saved_path, &s.agent_session);
-                            let s = Arc::new(s);
-                            m.insert(live.id.clone(), s.clone());
-                            Ok(s)
-                        }
-                        Err(e) => Err(e),
-                    }
-                }
-            }
-        };
+        let session = acp_session(&a, &live, &config, &root, &key_vars).await;
         match session {
             Ok(session) => {
                 let images: Vec<ImageData> = p.images.clone();
@@ -592,7 +614,7 @@ async fn send_acp(
                     policies,
                     ctx: ToolCtx {
                         workspace_id: ws,
-                        principal: format!("session:{}", live.id.0),
+                        principal: principal_of(&live.id),
                         cancel: cancel.clone(),
                     },
                     shadow: shadow(&a, &root),
@@ -619,6 +641,59 @@ async fn send_acp(
     Ok(Empty {})
 }
 
+/// The session's external agent: the running one, else a new one (also when the cached one has
+/// exited or was killed: AUD-032). The daemon-wide map is locked only to look and to insert,
+/// never while the agent starts, so one slow agent does not hold up other sessions.
+async fn acp_session(
+    a: &Arc<App>,
+    live: &Arc<Live>,
+    config: &axiom_protocol::agent::ProviderConfig,
+    root: &std::path::Path,
+    key_vars: &[String],
+) -> Result<Arc<axiom_agent::acp::AcpSession>, String> {
+    {
+        let mut m = a.agent.acp.lock().await;
+        match m.get(&live.id) {
+            Some(s) if !s.conn.is_ended() => return Ok(s.clone()),
+            Some(_) => {
+                m.remove(&live.id);
+            }
+            None => {}
+        }
+    }
+    let saved_path = live.journal.path().with_extension("acp");
+    let saved = tokio::fs::read_to_string(&saved_path).await.ok();
+    let (s, resumed) = axiom_agent::acp::connect(
+        config,
+        root,
+        saved.as_deref().map(str::trim),
+        axiom_mcp(a, root).as_ref(),
+        key_vars,
+    )
+    .await?;
+    if saved.is_some() && !resumed {
+        let _ = live.emit(EventBody::Error {
+            kind: "notice".into(),
+            model_kind: None,
+            message: format!("{} cannot resume its earlier conversation, so it starts fresh; the history above is kept.", config.name),
+        });
+    }
+    let _ = tokio::fs::write(&saved_path, &s.agent_session).await;
+    let s = Arc::new(s);
+    let mut m = a.agent.acp.lock().await;
+    // Deleted while it started: it goes with the session.
+    if a.agent.sessions.get(&live.id).is_none() {
+        drop(m);
+        s.conn.kill().await;
+        return Err(format!(
+            "{} stopped: the conversation was deleted.",
+            config.name
+        ));
+    }
+    m.insert(live.id.clone(), s.clone());
+    Ok(s)
+}
+
 /// The scratch folder of a conversation without a folder: `<data dir>/scratch/<session>`,
 /// created on first use and opened as a workspace (the same id while the daemon runs).
 async fn scratch_workspace(app: &App, id: &SessionId) -> Result<(WorkspaceId, PathBuf), RpcError> {
@@ -641,6 +716,7 @@ async fn session_registry(
     app: &App,
     live: &Live,
     root: &std::path::Path,
+    key_vars: &[String],
 ) -> axiom_agent::tools::Registry {
     let mut reg = app.agent.tools.clone();
     let configs: Vec<axiom_agent::mcp_client::ServerConfig> = app
@@ -653,14 +729,21 @@ async fn session_registry(
     if configs.is_empty() {
         return reg;
     }
-    let mut running = app.agent.mcp.lock().await;
-    let entry = running.entry(live.id.clone()).or_default();
-    for cfg in &configs {
-        if entry.iter().any(|(c, _)| c.name == cfg.name) {
-            continue;
-        }
-        match axiom_agent::mcp_client::McpClient::start(cfg, root).await {
-            Ok(started) => entry.push(started),
+    // Which servers to start (none running, or the running one exited: AUD-032), under a short
+    // lock; they start without it, so a slow server holds up no other session.
+    let missing: Vec<&axiom_agent::mcp_client::ServerConfig> = {
+        let mut running = app.agent.mcp.lock().await;
+        let entry = running.entry(live.id.clone()).or_default();
+        entry.retain(|(c, _)| !c.is_ended());
+        configs
+            .iter()
+            .filter(|cfg| !entry.iter().any(|(c, _)| c.name == cfg.name))
+            .collect()
+    };
+    let mut started = Vec::new();
+    for cfg in missing {
+        match axiom_agent::mcp_client::McpClient::start(cfg, root, key_vars).await {
+            Ok(s) => started.push(s),
             Err(e) => {
                 let _ = live.emit(EventBody::Error {
                     kind: "io".into(),
@@ -668,6 +751,18 @@ async fn session_registry(
                     message: format!("{e}; its tools are not available."),
                 });
             }
+        }
+    }
+    let mut running = app.agent.mcp.lock().await;
+    if app.agent.sessions.get(&live.id).is_none() {
+        // Deleted meanwhile: the servers just started are dropped (and killed) here.
+        running.remove(&live.id);
+        return reg;
+    }
+    let entry = running.entry(live.id.clone()).or_default();
+    for s in started {
+        if !entry.iter().any(|(c, _)| c.name == s.0.name) {
+            entry.push(s);
         }
     }
     for (client, tools) in entry.iter() {
@@ -748,5 +843,8 @@ pub async fn restore(app: Arc<App>, p: RestoreParams) -> Result<RestoreResult, R
         .await
         .map_err(checkpoint_rpc)?;
     let _ = live.emit(EventBody::Restored { result: r.clone() });
+    // The files are back to an earlier state: what was allowed for the session no longer
+    // holds (AUD-009).
+    app.agent.gate.clear_grants(&principal_of(&p.session_id));
     Ok(r)
 }

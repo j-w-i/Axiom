@@ -13,6 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 /// Largest text document (version list, checksum file) read into memory.
 const MAX_TEXT: usize = 16 * 1024 * 1024;
+/// The largest download (no toolchain archive comes near it; AUD-108).
+pub const MAX_DOWNLOAD: u64 = 8 << 30;
 
 #[derive(Clone)]
 pub struct Http {
@@ -137,6 +139,17 @@ impl Http {
         .and_then(|r| r.error_for_status())
         .map_err(|e| EnvError::Network(net(&e)))?;
         let total = resp.content_length();
+        // A server's announced size, with a margin, bounds what is accepted from it; and no
+        // download is larger than MAX_DOWNLOAD (AUD-108).
+        let cap = total.map_or(MAX_DOWNLOAD, |t| {
+            t.saturating_add(1 << 20).min(MAX_DOWNLOAD)
+        });
+        if total.is_some_and(|t| t > MAX_DOWNLOAD) {
+            return Err(EnvError::Network(format!(
+                "the download is larger than {} GiB",
+                MAX_DOWNLOAD >> 30
+            )));
+        }
         let mut file = tokio::fs::File::create(dest)
             .await
             .map_err(EnvError::io("Cannot write to the download cache"))?;
@@ -150,6 +163,11 @@ impl Http {
             };
             let Some(chunk) = next else { break };
             let chunk = chunk.map_err(|e| EnvError::Network(net(&e)))?;
+            if done + chunk.len() as u64 > cap {
+                return Err(EnvError::Network(
+                    "the server sent more than the download's size".into(),
+                ));
+            }
             hasher.update(&chunk);
             file.write_all(&chunk)
                 .await

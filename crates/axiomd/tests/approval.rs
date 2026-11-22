@@ -82,7 +82,12 @@ async fn approval_once_executes_and_deny_does_not() {
     assert_eq!(req.tool, "fs.applyPatch");
     assert_eq!(req.effect, Effect::WriteWorkspace);
     assert_eq!(req.targets, ["notes.txt"]);
-    assert_eq!(req.principal, "mcp:test-client");
+    // The declared principal, made this connection's own (AUD-009).
+    assert!(
+        req.principal.starts_with("mcp:test-client#c"),
+        "{}",
+        req.principal
+    );
     assert!(req.preview.as_deref().unwrap().contains("+hello"));
     assert!(req.can_remember && req.checkpoint_planned);
     let resolved = d.next_notification("agent/approvalResolved", WAIT).await;
@@ -141,7 +146,10 @@ async fn approval_once_executes_and_deny_does_not() {
         decisions,
         ["allowed by policy", "approved (once)", "denied"]
     );
-    assert_eq!(lines[1]["principal"], "mcp:test-client");
+    assert!(lines[1]["principal"]
+        .as_str()
+        .unwrap()
+        .starts_with("mcp:test-client#c"));
     assert_eq!(lines[2]["outcome"], "error");
 }
 
@@ -246,4 +254,165 @@ async fn approval_policy_and_workspace_rules() {
     bad.principal = "session:s1".into();
     let e = d.client.request::<ToolCall>(bad).await.unwrap_err();
     assert_eq!(kind(&e), ErrorKind::InvalidParams);
+}
+
+/// "Allow for session" covers exactly the approved argv: a longer one starting with it asks
+/// again (AUD-009: grants matched as a prefix).
+#[tokio::test]
+async fn a_session_grant_covers_only_the_exact_argv() {
+    let d = approving_daemon().await;
+    let f = d.open_fixture().await;
+    let (r, _) = call_answering(
+        &d,
+        call(&f.id, "task.run", json!({"argv": ["echo", "a"]})),
+        ApprovalDecision::Session,
+    )
+    .await;
+    assert!(!r.unwrap().is_error);
+    let (r, req) = call_answering(
+        &d,
+        call(
+            &f.id,
+            "task.run",
+            json!({"argv": ["echo", "a", "-rf", "/"]}),
+        ),
+        ApprovalDecision::Deny,
+    )
+    .await;
+    assert_eq!(kind(&r.unwrap_err()), ErrorKind::ApprovalDenied);
+    assert_eq!(req.argv.unwrap(), ["echo", "a", "-rf", "/"]);
+}
+
+/// Writes to the workspace's Axiom configuration (its policy, its providers) and to `.git`
+/// always ask, even under a policy that allows every write, and cannot be allowed for the
+/// session (AUD-104).
+#[tokio::test]
+async fn writes_to_axiom_configuration_always_ask() {
+    let d = approving_daemon().await;
+    let f = d.open_fixture().await;
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Ask,
+            rules: vec![PolicyRule {
+                effect: Some(Effect::WriteWorkspace),
+                tool: None,
+                path: None,
+                argv_prefix: None,
+                decision: Decision::Allow,
+            }],
+        })
+        .await
+        .unwrap();
+    let r = d
+        .client
+        .request::<ToolCall>(call(
+            &f.id,
+            "fs.applyPatch",
+            json!({"path": "ordinary.txt", "create": "x"}),
+        ))
+        .await
+        .unwrap();
+    assert!(!r.is_error, "{}", r.text);
+    let (r, req) = call_answering(
+        &d,
+        call(
+            &f.id,
+            "fs.applyPatch",
+            json!({"path": ".axiom/project.toml", "create": "[agent.policy]\ndefault = \"allow\"\n"}),
+        ),
+        ApprovalDecision::Deny,
+    )
+    .await;
+    assert_eq!(kind(&r.unwrap_err()), ErrorKind::ApprovalDenied);
+    assert!(!req.can_remember);
+    assert!(req.rule.unwrap_or_default().contains("protected"));
+    assert!(!f.root.join(".axiom/project.toml").exists());
+}
+
+/// A process an agent starts does not get the daemon's secrets (`security.md` §Processes;
+/// AUD-010): variables that look like secrets and the providers' `apiKeyEnv` variables are
+/// withheld (the card says so), unless settings `agent.passEnv` names them. The person's own
+/// tasks keep them.
+#[cfg(unix)]
+#[tokio::test]
+async fn agent_started_processes_do_not_get_the_daemons_secrets() {
+    use axiom_protocol::settings::{Set, SetParams};
+    use axiom_protocol::task::{Command, Start, StartParams};
+    let data = tempfile::tempdir().unwrap();
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("FOO_TOKEN", "s3cret-token")
+            .env("MY_LLM_VAR", "s3cret-llm")
+            .env("PLAIN_VALUE", "visible");
+    })
+    .await;
+    let mut info = client_info();
+    info.protocol_version = "0.3".into();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    // A provider names MY_LLM_VAR as its key.
+    d.client
+        .request::<Set>(SetParams {
+            values: [(
+                "agent.providers".to_string(),
+                json!([{"id": "mine", "kind": "openaiChat", "name": "Mine",
+                        "baseUrl": "https://example.invalid/v1", "apiKeyEnv": "MY_LLM_VAR",
+                        "models": ["m"]}]),
+            )]
+            .into(),
+        })
+        .await
+        .unwrap();
+    let f = d.open_fixture().await;
+    let (r, req) = call_answering(
+        &d,
+        call(&f.id, "task.run", json!({"argv": ["env"]})),
+        ApprovalDecision::Once,
+    )
+    .await;
+    let r = r.unwrap();
+    assert!(!r.is_error, "{}", r.text);
+    assert!(!r.text.contains("s3cret"), "{}", r.text);
+    assert!(r.text.contains("PLAIN_VALUE=visible") && r.text.contains("PATH="));
+    let preview = req.preview.unwrap_or_default();
+    assert!(
+        preview.contains("withheld")
+            && preview.contains("FOO_TOKEN")
+            && preview.contains("MY_LLM_VAR"),
+        "{preview}"
+    );
+
+    // Allowed by name.
+    d.client
+        .request::<Set>(SetParams {
+            values: [("agent.passEnv".to_string(), json!(["FOO_TOKEN"]))].into(),
+        })
+        .await
+        .unwrap();
+    let (r, _) = call_answering(
+        &d,
+        call(&f.id, "task.run", json!({"argv": ["env"]})),
+        ApprovalDecision::Once,
+    )
+    .await;
+    let text = r.unwrap().text;
+    assert!(
+        text.contains("FOO_TOKEN=s3cret-token") && !text.contains("s3cret-llm"),
+        "{text}"
+    );
+
+    // The person's own task: unchanged.
+    let started = d
+        .client
+        .request::<Start>(StartParams {
+            workspace_id: f.id.clone(),
+            command: Command::Argv(vec!["env".into()]),
+            cwd: None,
+            env: Default::default(),
+            label: None,
+        })
+        .await
+        .unwrap();
+    let (out, _) = d.task_events(&started.task_id.0).await;
+    let all: String = out.iter().map(|o| o.data.as_str()).collect();
+    assert!(all.contains("FOO_TOKEN=s3cret-token"), "{all}");
 }
