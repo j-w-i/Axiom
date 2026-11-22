@@ -1,7 +1,8 @@
 //! Toolchain provider manifest (`provider.toml`). Normative prose:
 //! `docs/protocols/providers.md`.
 //!
-//! Frozen for M2 (M2-ARCH-001; `axiom.provider/1`); M4-ARCH-001 added the optional `lsp` table. A manifest is pure data: the
+//! Frozen for M2 (M2-ARCH-001; `axiom.provider/1`); M4-ARCH-001 added the optional `lsp` table;
+//! M5.5-ARCH-001 its optional `requires`. A manifest is pure data: the
 //! daemon interprets it; a manifest can never run code other than the
 //! commands it declares, and each such command passes the permission gate.
 
@@ -50,7 +51,8 @@ pub struct ProviderManifest {
     pub lsp: Vec<LspServerSpec>,
 }
 
-/// A language server the daemon may start for a workspace this provider applies to.
+/// A language server the daemon may start for any workspace, when a document of one of its
+/// languages opens (M5.5, ADR-0021 §3; M4 required the provider to apply to the workspace).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LspServerSpec {
@@ -67,6 +69,11 @@ pub struct LspServerSpec {
     /// One sentence shown when the command is not found.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install_hint: Option<String>,
+    /// Tool ids that must resolve in the environment for the server to run (an SDK, a runtime);
+    /// unresolved, the server is `missing` and names the provider that supplies them (M5.5,
+    /// ADR-0021 §6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -4091,7 +4091,8 @@ enum ServerState {
   unknown('unknown'),
   idle('idle'),
   failed('failed'),
-  missing('missing');
+  missing('missing'),
+  standby('standby');
 
   const ServerState(this.wire);
   final String wire;

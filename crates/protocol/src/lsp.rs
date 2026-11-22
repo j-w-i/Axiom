@@ -86,6 +86,8 @@ pub enum ServerState {
     /// The command was not found in the workspace's environment.
     Missing,
     Stopped,
+    /// Another server claims the same languages and is used instead (M5.5, ADR-0021 §3).
+    Standby,
     #[serde(other)]
     Unknown,
 }

@@ -349,7 +349,7 @@
     },
     "LspServerSpec": {
       "additionalProperties": false,
-      "description": "A language server the daemon may start for a workspace this provider applies to.",
+      "description": "A language server the daemon may start for any workspace, when a document of one of its\nlanguages opens (M5.5, ADR-0021 §3; M4 required the provider to apply to the workspace).",
       "properties": {
         "command": {
           "description": "argv, resolved in the workspace's environment (the provider's tools first); never a\nshell.",
@@ -374,6 +374,13 @@
         },
         "languages": {
           "description": "Language ids (Monaco's, which are LSP's) the server handles, e.g. `[\"rust\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "description": "Tool ids that must resolve in the environment for the server to run (an SDK, a runtime);\nunresolved, the server is `missing` and names the provider that supplies them (M5.5,\nADR-0021 §6).",
           "items": {
             "type": "string"
           },

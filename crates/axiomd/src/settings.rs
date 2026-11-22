@@ -97,6 +97,23 @@ pub const KNOWN: &[Known] = &[
         default: || json!({}),
         valid: is_object,
     },
+    // M5.5 (ADR-0021 §5): install a missing language server without asking.
+    Known {
+        key: "lsp.autoInstall",
+        default: || json!(false),
+        valid: is_bool,
+    },
+    // M5.5 (ADR-0021 §8): inlay hints where the server offers them; formatting on save.
+    Known {
+        key: "editor.inlayHints",
+        default: || json!(true),
+        valid: is_bool,
+    },
+    Known {
+        key: "editor.formatOnSave",
+        default: || json!(false),
+        valid: is_bool,
+    },
 ];
 
 fn is_object(v: &Value) -> bool {

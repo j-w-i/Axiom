@@ -222,11 +222,24 @@ languages = ["rust"]          # LSP language ids (the shell maps file extensions
 command = ["rust-analyzer"]   # argv, resolved in the workspace's environment
 install_hint = "Install it with: rustup component add rust-analyzer"
 # initialization_options = { ... }   # merged under settings lsp.<id>.initializationOptions
+# requires = ["java"]                 # M5.5: tools that must resolve for the server to run
 ```
 
-The daemon starts a server on first use for a workspace the provider applies to (M4-LSP-001).
-A command that is not found leaves the server `missing` with the hint; nothing is installed
-silently.
+The daemon starts a server on first use, when a document of one of its languages opens.
+
+M5.5 (ADR-0021 §3, §4, §6; additive):
+- A server applies to **every** workspace, whether or not its provider detects the project
+  (M4 required the provider to apply). A provider whose only content is a server (`[[tools]]`,
+  install methods and `[[lsp]]`) has no `[project]` table.
+- Its command resolves in the workspace's environment; when not found there, in the newest
+  managed install of its provider (that install's `bin_dirs` and method `env`); else the server
+  is `missing` with its provider id, so the shell can offer that provider's install.
+- `requires = ["toolId", ...]`: tools (an SDK, a runtime) that must resolve in the environment;
+  unresolved, the server is `missing` and its detail names the provider that supplies them.
+- When two servers claim a language, the first in registry order (built-in, user, workspace;
+  then by id) serves it; the others are `standby`.
+- Nothing is installed without the person's approval unless they turned on the setting
+  `lsp.autoInstall` (default `false`).
 
 ## Template variables
 

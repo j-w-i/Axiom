@@ -3895,6 +3895,11 @@
           "const": "missing",
           "description": "The command was not found in the workspace's environment.",
           "type": "string"
+        },
+        {
+          "const": "standby",
+          "description": "Another server claims the same languages and is used instead (M5.5, ADR-0021 §3).",
+          "type": "string"
         }
       ]
     },
