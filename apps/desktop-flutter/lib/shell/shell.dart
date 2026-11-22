@@ -869,139 +869,168 @@ class _TitleRow extends StatelessWidget {
         color: c.bar,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(Metrics.s5, 0, Metrics.s4, 0),
-          child: Row(
-            children: [
-              // The brand: the brass mark and the word (Tauri's title row).
-              ExcludeSemantics(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AxiomIcon(AxiomIcons.logo, size: 17, color: c.accent),
-                    const SizedBox(width: 7),
-                    Text('Axiom', style: t.type.body.copyWith(fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: Metrics.s4),
-              menu('File', 'File'),
-              menu('View', 'View'),
-              menu('Preferences', 'Preferences'),
-              menu('Help', 'Help'),
-              // The open folder: its name and, quieter, its path.
-              ListenableBuilder(
-                listenable: app.workspace,
-                builder: (context, _) {
-                  final ws = app.workspace;
-                  if (!ws.isOpen) return const SizedBox.shrink();
-                  return Flexible(
+          // Tauri's narrow-window rules: under 1040 px the command field becomes an icon button
+          // and the folder's path goes; everything else gives way before the row overflows.
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final narrow = box.maxWidth < 1040;
+              return Row(
+                children: [
+                  // The brand: the brass mark and the word (Tauri's title row).
+                  ExcludeSemantics(
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const SizedBox(width: Metrics.s2),
-                        SizedBox(height: 18, width: 1, child: ColoredBox(color: c.groove)),
-                        const SizedBox(width: Metrics.s5),
-                        // Both give way when the row is crowded: the path first, then the
-                        // name, which ellipsises rather than overflowing.
-                        Flexible(
-                          flex: 2,
-                          child: Text(
-                            ws.name,
-                            style: t.type.body.copyWith(fontWeight: FontWeight.w600),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                            softWrap: false,
-                          ),
-                        ),
+                        AxiomIcon(AxiomIcons.logo, size: 17, color: c.accent),
                         const SizedBox(width: 7),
-                        Flexible(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 240),
-                            child: Text(
-                              ws.root,
-                              style: t.type.codeSmall.copyWith(fontSize: 11, color: c.ink3),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                              softWrap: false,
-                            ),
-                          ),
-                        ),
+                        Text('Axiom', style: t.type.body.copyWith(fontWeight: FontWeight.w600)),
                       ],
                     ),
-                  );
-                },
-              ),
-              const Spacer(),
-              Pressable(
-                label: 'Search files, run commands',
-                hint: 'Search files, run commands — Mod+K',
-                onPressed: onSearch,
-                builder: (context, s) => FocusRing(
-                  visible: s.focused,
-                  child: SizedBox(
-                    width: 380,
-                    height: 26,
-                    child: Well(
-                      radius: Metrics.radiusRaised,
-                      border: s.hovered ? c.lineInput : null,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 0, 4, 0),
-                        child: Row(
-                          children: [
-                            AxiomIcon(
-                              AxiomIcons.search,
-                              size: 14,
-                              color: s.hovered ? c.ink2 : c.ink3,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Search files, run commands',
-                                style: t.type.small.copyWith(color: s.hovered ? c.ink2 : c.ink3),
-                                overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(width: Metrics.s4),
+                  menu('File', 'File'),
+                  menu('View', 'View'),
+                  menu('Preferences', 'Preferences'),
+                  menu('Help', 'Help'),
+                  // The open folder: its name and, quieter, its path.
+                  ListenableBuilder(
+                    listenable: app.workspace,
+                    builder: (context, _) {
+                      final ws = app.workspace;
+                      if (!ws.isOpen) return const SizedBox.shrink();
+                      return Flexible(
+                        child: LayoutBuilder(
+                          builder: (context, seg) => seg.maxWidth < 64
+                              ? const SizedBox.shrink()
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const SizedBox(width: Metrics.s2),
+                                    SizedBox(
+                                      height: 18,
+                                      width: 1,
+                                      child: ColoredBox(color: c.groove),
+                                    ),
+                                    const SizedBox(width: Metrics.s5),
+                                    // Both give way when the row is crowded: the path first, then the
+                                    // name, which ellipsises rather than overflowing.
+                                    Flexible(
+                                      flex: 2,
+                                      child: Text(
+                                        ws.name,
+                                        style: t.type.body.copyWith(fontWeight: FontWeight.w600),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                        softWrap: false,
+                                      ),
+                                    ),
+                                    if (!narrow) const SizedBox(width: 7),
+                                    if (!narrow)
+                                      Flexible(
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(maxWidth: 240),
+                                          child: Text(
+                                            ws.root,
+                                            style: t.type.codeSmall.copyWith(
+                                              fontSize: 11,
+                                              color: c.ink3,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                            softWrap: false,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                        ),
+                      );
+                    },
+                  ),
+                  const Spacer(),
+                  if (narrow)
+                    AxIconButton(
+                      icon: AxiomIcons.search,
+                      label: 'Search files, run commands',
+                      shortcut: 'Mod+K',
+                      onPressed: onSearch,
+                    )
+                  else
+                    Pressable(
+                      label: 'Search files, run commands',
+                      hint: 'Search files, run commands — Mod+K',
+                      onPressed: onSearch,
+                      builder: (context, s) => FocusRing(
+                        visible: s.focused,
+                        child: SizedBox(
+                          width: (box.maxWidth * 0.32).clamp(180.0, 380.0),
+                          height: 26,
+                          child: Well(
+                            radius: Metrics.radiusRaised,
+                            border: s.hovered ? c.lineInput : null,
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(8, 0, 4, 0),
+                              child: Row(
+                                children: [
+                                  AxiomIcon(
+                                    AxiomIcons.search,
+                                    size: 14,
+                                    color: s.hovered ? c.ink2 : c.ink3,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Search files, run commands',
+                                      style: t.type.small.copyWith(
+                                        color: s.hovered ? c.ink2 : c.ink3,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const Keycaps('Mod+K'),
+                                ],
                               ),
                             ),
-                            const Keycaps('Mod+K'),
-                          ],
+                          ),
                         ),
                       ),
                     ),
+                  const SizedBox(width: Metrics.s4),
+                  const Transport(),
+                  const Spacer(),
+                  ListenableBuilder(
+                    listenable: app.prefs,
+                    builder: (context, _) => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AxIconButton(
+                          icon: AxiomIcons.sidebar,
+                          label: 'Toggle side bar',
+                          shortcut: 'Mod+B',
+                          selected: app.sideVisible,
+                          onPressed: () => app.sideVisible = !app.sideVisible,
+                        ),
+                        const SizedBox(width: 2),
+                        AxIconButton(
+                          icon: AxiomIcons.panel,
+                          label: 'Toggle console',
+                          shortcut: 'Mod+J',
+                          selected: app.consoleVisible,
+                          onPressed: () => app.consoleVisible = !app.consoleVisible,
+                        ),
+                        const SizedBox(width: 2),
+                      ],
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: Metrics.s4),
-              const Transport(),
-              const Spacer(),
-              ListenableBuilder(
-                listenable: app.prefs,
-                builder: (context, _) => Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AxIconButton(
-                      icon: AxiomIcons.sidebar,
-                      label: 'Toggle side bar',
-                      shortcut: 'Mod+B',
-                      selected: app.sideVisible,
-                      onPressed: () => app.sideVisible = !app.sideVisible,
-                    ),
-                    const SizedBox(width: 2),
-                    AxIconButton(
-                      icon: AxiomIcons.panel,
-                      label: 'Toggle console',
-                      shortcut: 'Mod+J',
-                      selected: app.consoleVisible,
-                      onPressed: () => app.consoleVisible = !app.consoleVisible,
-                    ),
-                    const SizedBox(width: 2),
-                  ],
-                ),
-              ),
-              AxIconButton(
-                icon: AxiomIcons.gear,
-                label: 'Settings',
-                shortcut: 'Mod+,',
-                onPressed: () => app.openSettings?.call(),
-              ),
-            ],
+                  AxIconButton(
+                    icon: AxiomIcons.gear,
+                    label: 'Settings',
+                    shortcut: 'Mod+,',
+                    onPressed: () => app.openSettings?.call(),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
