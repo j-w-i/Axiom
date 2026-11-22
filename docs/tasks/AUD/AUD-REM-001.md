@@ -1,8 +1,8 @@
 ---
 id: AUD-REM-001
 title: Remediation of the comprehensive audit of 751ffc2 (all 112 issues, in batches)
-status: in-progress
-status_note: 2026-11-23; branch task/audit-remediation; owner authorised every issue
+status: implemented
+status_note: 2026-11-23; all 112 issues addressed (ISSUES.md §Remediation status); gate, 17 e2e suites, frames and perf pass on Linux; awaits review by another session
 depends_on: []
 order: 710
 scope: everything the issues name (audits/comprehensive-audit/ISSUES.md); no new frameworks
