@@ -5,7 +5,6 @@
 import 'package:axiom_desktop/editor/code_view.dart';
 import 'package:axiom_desktop/editor/languages.dart';
 import 'package:axiom_desktop/ui/tokens.dart';
-import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:re_editor/re_editor.dart';
