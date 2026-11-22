@@ -39,7 +39,11 @@ async fn defaults_for_all_known_keys() {
     assert_eq!(v["agent.mcpServers"], json!([]));
     // M4-LSP-001.
     assert_eq!(v["lsp.servers"], json!({}));
-    assert_eq!(v.len(), 10);
+    // M5.5-ARCH-001: servers are installed only when asked, unless this is on.
+    assert_eq!(v["lsp.autoInstall"], json!(false));
+    assert_eq!(v["editor.inlayHints"], json!(true));
+    assert_eq!(v["editor.formatOnSave"], json!(false));
+    assert_eq!(v.len(), 13);
 }
 
 #[tokio::test]
