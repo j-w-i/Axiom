@@ -284,6 +284,44 @@ presented as uncertain, not exact.
 
 ---
 
+## M5.5 — Every language
+
+**Status (2026-11-22):** proposed by the owner ("syntax highlighting, autocomplete and knowledge of
+every language's SDK, like VS Code"); ADR and task files to follow its approval. Windows deferred.
+
+**Outcome.** Any file Axiom opens is highlighted; the languages people use most have a language
+server that Axiom installs on request and points at the project's own SDK, so completion, hover
+docs, signature help and navigation reach the standard library and the project's dependencies
+the way VS Code's do; completion behaves like VS Code's (as you type, ranked, documented,
+snippets, auto-imports).
+
+| Epic | Scope |
+|------|-------|
+| 5.5.0 Design + task files | ADR: the language registry, server install recipes (reusing M2's checksummed installs), SDK hand-off to servers, completion UX; licence review of each server (external programs, not linked) |
+| 5.5.1 Language registry | Every highlight.js grammar `re_highlight` ships (197) mapped by extension, file name, shebang and first line, like VS Code's language contributions; a language picker in the status bar; plain text for the rest |
+| 5.5.2 Semantic highlighting | LSP semantic tokens over the grammar's colours where a server provides them; large-file guard |
+| 5.5.3 Server registry + installs | `[[lsp]]` entries with install recipes and versions for each tier-1 language; "Install the Python language server" offered when such a file opens, with the M2 plan/approve flow; servers updated and removed like toolchains |
+| 5.5.4 SDK awareness | Servers launched with the project's detected SDK (Python venv/interpreter, JDK, Go, .NET, Dart/Flutter SDK, Swift toolchain, `compile_commands.json` for clangd); new providers where none exists (Java, .NET, Go, Dart, Swift, Kotlin, Ruby, PHP, Lua, Zig) |
+| 5.5.5 Completion like VS Code | As you type and on trigger characters; fuzzy filter and ranking; kind icons; documentation beside the list (`completionItem/resolve`); snippet tab stops; auto-import edits; commit characters; word completion where there is no server |
+| 5.5.6 More language features | Inlay hints, outline (document symbols), workspace symbols (Mod+T), folding ranges, format on save, organize imports, call hierarchy |
+| 5.5.7 Fixtures + tests | A fixture project per tier-1 language; end-to-end: open → offered install → completion of an SDK symbol with its docs → hover → definition into the SDK's source |
+
+**Tier 1 (servers installed and verified):** Python (basedpyright), TypeScript/JavaScript
+(typescript-language-server), Rust (rust-analyzer), Go (gopls), C/C++ (clangd), Java (Eclipse
+JDT LS), C# (csharp-ls), Kotlin, Swift (sourcekit-lsp, macOS), Dart/Flutter (`dart
+language-server`), HTML/CSS/JSON (vscode-langservers-extracted), YAML, TOML (taplo), Markdown
+(marksman), Bash, Dockerfile. **Tier 2 (registry entries, best effort):** Ruby, PHP, Lua, Zig,
+Haskell, Elixir, Svelte, Vue, Terraform, SQL.
+
+**Exit criteria.** In fixture projects for each tier-1 language on Linux and macOS, starting with
+no server installed: opening a source file offers the server; after the approved install,
+completion lists a standard-library symbol with its documentation within 300 ms of typing its
+prefix, hover shows its docs, and go-to-definition opens the SDK's source; every file in the
+grammar fixture set is highlighted with its language named in the status bar; typing and
+scrolling stay within the frame budget on a 10,000-line file.
+
+---
+
 ## M6 — Framework and platform expansion
 
 | Epic | Scope |
