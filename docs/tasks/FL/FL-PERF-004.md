@@ -2,7 +2,7 @@
 id: FL-PERF-004
 title: A frame reaches the screen without GTK repainting the window (Wayland): the runner commits the window's surface itself
 status: implemented
-status_note: 2026-11-22; Linux (Fedora 44, KDE Wayland; private virtual KWin, NVIDIA): the frame suite's run took the app's GTK thread 31.4 → 0.4 CPU s, the app 66.8 → 29.7 s, KWin 15.0 → ~2 s; drag selection span p99 11.4 → 6.1 ms; every interaction at 16.7 ms, no frame over budget in that run
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-PERF-003]
 order: 612
 scope: apps/desktop-flutter/linux/runner/, docs/roadmap/verification/FL.md

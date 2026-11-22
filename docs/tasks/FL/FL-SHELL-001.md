@@ -2,7 +2,7 @@
 id: FL-SHELL-001
 title: The shell: title row, rail (Files, Chat, Search, Source Control, Environments), side bar, editor area, console, status bar and hint line, palette, settings, layout persistence
 status: implemented
-status_note: 2026-11-22; Linux verified (shell_test, frames), CI pending
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-CORE-001, FL-DS-001]
 order: 523
 scope: apps/desktop-flutter/lib/shell/, apps/desktop-flutter/lib/state/, apps/desktop-flutter/integration_test/shell_test.dart

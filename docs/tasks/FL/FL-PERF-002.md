@@ -2,7 +2,7 @@
 id: FL-PERF-002
 title: Selecting text does no whole-document work: dirty mark, gutter and LSP sync on text changes only; the caret text has its own notifier
 status: implemented
-status_note: 2026-11-22; Linux (Fedora 44): frames_test.dart drag selection and Shift+Down on a 10,000-line file, no frame over 16.7 ms; check.sh flutter passes
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-PERF-001]
 order: 610
 scope: apps/desktop-flutter/lib/editor/editor_area.dart, apps/desktop-flutter/lib/state/documents.dart, apps/desktop-flutter/lib/shell/shell.dart, apps/desktop-flutter/integration_test/frames_test.dart

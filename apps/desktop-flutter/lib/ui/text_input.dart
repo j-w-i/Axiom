@@ -139,7 +139,7 @@ class _AxTextInputState extends State<AxTextInput>
   @override
   void dispose() {
     final h = _hintLine;
-    if (h != null && _focused && h.value == widget.label) h.value = null;
+    if (h != null && _focused) clearHintLater(h, widget.label);
     _focus.removeListener(_onFocus);
     _controller.removeListener(_onText);
     _ownController?.dispose();

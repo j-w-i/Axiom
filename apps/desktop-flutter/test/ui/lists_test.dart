@@ -399,9 +399,18 @@ void main() {
     await tester.pump();
     final hint = HintScope.maybeOf(tester.element(find.byType(AxButton)))!;
     expect(hint.value, 'Restart');
+    // A listener rebuilds on the hint (as the status bar does): clearing it while the tree is
+    // locked (during the unmount) would throw.
+    var heard = 0;
+    void listen() => heard++;
+    hint.addListener(listen);
+    addTearDown(() => hint.removeListener(listen));
     show.value = false;
     await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
     expect(hint.value, isNull);
+    expect(heard, greaterThan(0));
   });
 
   testWidgets('a focused control carries the focusable and focused flags', (tester) async {

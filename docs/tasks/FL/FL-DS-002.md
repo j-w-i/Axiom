@@ -2,7 +2,7 @@
 id: FL-DS-002
 title: Design system: the Tauri shell's design, as the owner directed
 status: implemented
-status_note: 2026-11-22; Linux verified (screenshots, flutter gate); end-to-end and macOS per the handoff
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-DS-001]
 order: 523
 scope: apps/desktop-flutter/lib/ (styling only), apps/desktop-flutter/test/ui/, docs/design/flutter/

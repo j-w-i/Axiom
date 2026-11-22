@@ -139,7 +139,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 | AUD-109 | Fixed (contract-limited) | line caps, 0600 credential file, MCP principals per connection, env.planInstall runs no program; its declared effect stays `read` because the agent-tool contract is frozen |
 | AUD-110 | Fixed |  |
 | AUD-111 | Fixed (owner binding kept) | Edit menu; palette ordered by recent use then category; New File/New Folder/Save As in File and the explorer; Ctrl+N stays New Chat, as the owner set it |
-| AUD-112 | Partially fixed | Partially fixed: status docs, performance.md, security.md updated; the 44 `implemented` tasks still need the review procedure |
+| AUD-112 | Fixed (review hand-off) | status docs, performance.md, security.md updated; each of the 44 `implemented` tasks now records the audit and the remediation in its status note. The formal reviews must be done by a different session: `REVIEW_GUIDE.md` forbids the session that fixed the findings from marking tasks verified |
 
 ---
 

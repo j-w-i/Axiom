@@ -49,8 +49,12 @@ summary=()
 for s in "${suites[@]}"; do
   echo "[e2e] ===== $s"
   log="$(mktemp)"
+  # A failing suite must not end the run (set -e with pipefail would): its status is kept.
+  set +e
   flutter test "integration_test/$s" -d "$( [[ "$(uname -s)" == Darwin ]] && echo macos || echo linux )" ${AXIOM_E2E_FLAGS:-} 2>&1 | tee "$log"
-  [[ ${PIPESTATUS[0]} -eq 0 ]] || fail=1
+  status=${PIPESTATUS[0]}
+  set -e
+  [[ $status -eq 0 ]] || fail=1
   # Skipped cases are reported, not counted as passes (audit AUD-060).
   last="$(grep -Eo '[+][0-9]+( ~[0-9]+)?( -[0-9]+)?: (All tests (passed|skipped)|Some tests failed)' "$log" | tail -1)"
   skipped="$(sed -nE 's/.* ~([0-9]+).*/\1/p' <<<"$last")"

@@ -2,7 +2,7 @@
 id: M5-PREVIEW-001
 title: preview/*: the dev server with the plugin injected, URL detection, preview state
 status: implemented
-status_note: 2026-11-22; Linux (cargo test -p axiomd --test preview with headless Chrome, 3/3 runs)
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [M5-INSPECT-001, M5-WEB-001]
 order: 604
 scope: crates/axiomd/, crates/inspect/, tests/fixtures/inspect-react/

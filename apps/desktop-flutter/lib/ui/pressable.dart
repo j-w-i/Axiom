@@ -2,6 +2,7 @@
 // pressed, Enter/Space activation, semantics (name, role, enabled), and the hint line: the
 // hovered or focused control publishes its "Action — Shortcut" hint (workspace-spec §2.5).
 
+import 'dart:async';
 import 'dart:ui' show SemanticsRole;
 
 import 'package:flutter/gestures.dart';
@@ -158,7 +159,8 @@ class _PressableState extends State<Pressable> {
   void dispose() {
     FocusVisibility.instance.keyboard.removeListener(_onModality);
     final h = _hintLine;
-    if (h != null && _shown != null && h.value == _shown) h.value = null;
+    final shown = _shown;
+    if (h != null && shown != null) clearHintLater(h, shown);
     _own?.dispose();
     super.dispose();
   }
@@ -272,4 +274,16 @@ class _RingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_RingPainter o) => o.color != color || o.radius != radius;
+}
+
+/// Clears the hint line after this frame when it still shows [text] (AUD-064). A control that
+/// goes away while hovered or focused gets no exit event, but it is unmounted while the widget
+/// tree is locked, so the hint (a ValueNotifier the status bar listens to) cannot change then.
+void clearHintLater(ValueNotifier<String?> hint, String text) {
+  // A microtask runs once the current frame's work (the unmount) has returned, before anything
+  // that owns the hint can be torn down.
+  scheduleMicrotask(() {
+    // No listener: nothing shows it (and its owner may have been disposed with the tree).
+    if (hint.hasListeners && hint.value == text) hint.value = null;
+  });
 }

@@ -60,7 +60,8 @@ class _AxSplitterState extends State<AxSplitter> {
   void dispose() {
     // A splitter that goes away under the pointer gets no exit event (AUD-064).
     final h = _hintLine;
-    if (h != null && _shown != null && h.value == _shown) h.value = null;
+    final shown = _shown;
+    if (h != null && shown != null) clearHintLater(h, shown);
     super.dispose();
   }
 
