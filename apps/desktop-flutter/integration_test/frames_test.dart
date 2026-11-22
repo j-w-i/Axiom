@@ -141,12 +141,22 @@ Future<void> _interactions(
     await app.documents.open('big/$n.rs');
   }
   await Future<void>.delayed(const Duration(seconds: 1));
+  var highlighted = 0;
   await measure('tab switching', () async {
     for (var i = 0; i < 12; i++) {
+      highlighted = reEditorHighlightsDelivered;
       await key(tester, LogicalKeyboardKey.tab, ctrl: true);
       await Future<void>.delayed(const Duration(milliseconds: 150));
     }
   });
+  // The tab left showing is highlighted: switching quickly drops the work of the editors
+  // it closed, not the visible one's (FL-PERF-003).
+  await until(
+    tester,
+    () => reEditorHighlightsDelivered > highlighted,
+    timeout: const Duration(seconds: 10),
+    what: 'the last tab highlighted',
+  );
   final doc = app.documents.active!;
   doc.controller.selection = const CodeLineSelection.collapsed(index: 40, offset: 4);
   await measure('typing in the shell', () async {

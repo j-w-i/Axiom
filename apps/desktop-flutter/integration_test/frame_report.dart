@@ -1,5 +1,7 @@
 // Frame timings from the engine (FrameTiming: build and raster per frame), summarised.
 
+import 'dart:ui' show FramePhase;
+
 import 'package:flutter/scheduler.dart';
 
 const budgetMs = 16.7;
@@ -12,6 +14,17 @@ final class Report {
   double _ms(Duration d) => d.inMicroseconds / 1000;
   List<double> get build => [for (final f in frames) _ms(f.buildDuration)];
   List<double> get raster => [for (final f in frames) _ms(f.rasterDuration)];
+  /// The time from one frame's vsync to the next one's: 16.7 ms when it draws at 60 Hz.
+  List<double> get gaps => [
+    for (var i = 1; i < frames.length; i++)
+      (frames[i].timestampInMicroseconds(FramePhase.vsyncStart) -
+              frames[i - 1].timestampInMicroseconds(FramePhase.vsyncStart)) /
+          1000,
+  ];
+
+  /// From vsync to the frame's raster finishing (what the person waits for).
+  List<double> get span => [for (final f in frames) _ms(f.totalSpan)];
+
   int get over => frames
       .where((f) => _ms(f.buildDuration) > budgetMs || _ms(f.rasterDuration) > budgetMs)
       .length;
@@ -30,6 +43,10 @@ final class Report {
     'raster_p50_ms': _p(raster, .5),
     'raster_p99_ms': _p(raster, .99),
     'raster_max_ms': _p(raster, 1),
+    'gap_p50_ms': _p(gaps, .5),
+    'gap_p90_ms': _p(gaps, .9),
+    'span_p50_ms': _p(span, .5),
+    'span_p99_ms': _p(span, .99),
     'over_budget': over,
   };
 
@@ -38,7 +55,7 @@ final class Report {
     final j = toJson();
     String f(String k) => (j[k]! as double).toStringAsFixed(1);
     return '${name.padRight(22)} frames ${'${j['frames']}'.padLeft(4)}  build p50 ${f('build_p50_ms')} p99 ${f('build_p99_ms')} max ${f('build_max_ms')}  '
-        'raster p50 ${f('raster_p50_ms')} p99 ${f('raster_p99_ms')} max ${f('raster_max_ms')}  over ${j['over_budget']}';
+        'raster p50 ${f('raster_p50_ms')} p99 ${f('raster_p99_ms')} max ${f('raster_max_ms')}  gap p50 ${f('gap_p50_ms')} p90 ${f('gap_p90_ms')}  span p50 ${f('span_p50_ms')} p99 ${f('span_p99_ms')}  over ${j['over_budget']}';
   }
 }
 

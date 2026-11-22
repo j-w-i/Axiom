@@ -167,21 +167,29 @@ class _CodeHighlighter extends ValueNotifier<List<_HighlightResult>> {
   }
 
   void _processHighlight() {
-    _engine.run(_controller.codeLines, (result) => value = result);
+    _engine.run(_controller.codeLines, (result) {
+      reEditorHighlightsDelivered++;
+      value = result;
+    });
   }
 
 }
 
+/// Axiom patch (FL-PERF-003): how many highlight results reached a live editor (tests: a
+/// tab shown after quick switching is still highlighted).
+@visibleForTesting
+int reEditorHighlightsDelivered = 0;
+
 class _CodeHighlightEngine {
 
-  late final _IsolateTasker<_HighlightPayload, List<_HighlightResult>> _tasker;
+  late final _IsolateTasker<_HighlightPayload, List<_HighlightResult>?> _tasker;
 
   Highlight? _highlight;
   CodeHighlightTheme? _theme;
 
   _CodeHighlightEngine(final CodeHighlightTheme? theme) {
     this.theme = theme;
-    _tasker = _IsolateTasker<_HighlightPayload, List<_HighlightResult>>('CodeHighlightEngine', _run);
+    _tasker = _IsolateTasker<_HighlightPayload, List<_HighlightResult>?>('CodeHighlightEngine', _run);
   }
 
   set theme(CodeHighlightTheme? value) {
@@ -206,6 +214,28 @@ class _CodeHighlightEngine {
     _tasker.close();
   }
 
+  // Axiom patch (FL-PERF-003): the worker keeps each Highlight it was given, keyed by
+  // the identity of its modes, and is sent the text as one string (shared between
+  // isolates, not copied). Sending the Highlight and the CodeLines with every request
+  // copied the grammar and the whole document on the UI thread for each edit.
+  static final Expando<int> _modeIds = Expando<int>('mode');
+  static int _nextModeId = 0;
+  static final Set<String> _sentKeys = {};
+  static final Map<String, Highlight> _workerHighlights = {};
+
+  String _keyOf(Map<String, CodeHighlightThemeMode> modes) {
+    final StringBuffer sb = StringBuffer();
+    for (final MapEntry<String, CodeHighlightThemeMode> e in modes.entries) {
+      final int id = _modeIds[e.value.mode] ??= _nextModeId++;
+      sb.write('${e.key}=$id;');
+    }
+    for (final HLPlugin plugin in _theme!.plugins) {
+      final int id = _modeIds[plugin] ??= _nextModeId++;
+      sb.write('plugin=$id;');
+    }
+    return sb.toString();
+  }
+
   void run(CodeLines codes, IsolateCallback<List<_HighlightResult>> callback) {
     final Highlight? highlight = _highlight;
     if (highlight == null) {
@@ -217,39 +247,66 @@ class _CodeHighlightEngine {
       callback(const []);
       return;
     }
-    _tasker.run(_HighlightPayload(
-      highlight: highlight,
-      codes: codes,
-      languages: modes.keys.toList(),
-      maxSizes: modes.values.map((e) => e.maxSize).toList(),
-      maxLineLengths: modes.values.map((e) => e.maxLineLength).toList(),
-    ), callback);
-  }
-
-  @pragma('vm:entry-point')
-  static List<_HighlightResult> _run(_HighlightPayload payload) {
-    final CodeLines codeLines = payload.codes;
-    final int maxSize = payload.maxSizes.reduce(min);
-    final int maxLineLength = payload.maxLineLengths.reduce(min);
+    final int maxSize = modes.values.map((e) => e.maxSize).reduce(min);
+    final int maxLineLength = modes.values.map((e) => e.maxLineLength).reduce(min);
     // Evalaute performance
     bool canHighlight = true;
     int total = 0;
-    for (int i = 0; i < codeLines.length; i++) {
-      final int length = codeLines[i].length;
+    for (int i = 0; i < codes.length; i++) {
+      final int length = codes[i].length;
       if (length > maxLineLength || total > maxSize) {
         canHighlight = false;
         break;
       }
       total += length;
     }
-    final String code = payload.codes.asString(TextLineBreak.lf, false);
-    final HighlightResult result;
-    if (!canHighlight) {
-      result = payload.highlight.justTextHighlightResult(code);
-    } else if (payload.languages.length == 1) {
-      result = payload.highlight.highlight(code: code, language: payload.languages.first);
+    final String key = _keyOf(modes);
+    final String code = codes.asString(TextLineBreak.lf, false);
+    final List<String> languages = modes.keys.toList();
+    void send() {
+      final bool known = _sentKeys.contains(key);
+      _sentKeys.add(key);
+      _tasker.run(_HighlightPayload(
+        key: key,
+        highlight: known ? null : highlight,
+        code: code,
+        canHighlight: canHighlight,
+        languages: languages,
+      ), (List<_HighlightResult>? result) {
+        if (result == null) {
+          // The worker did not have this Highlight: send it once more.
+          _sentKeys.remove(key);
+          send();
+          return;
+        }
+        callback(result);
+      });
+    }
+    send();
+  }
+
+  @pragma('vm:entry-point')
+  static List<_HighlightResult>? _run(_HighlightPayload payload) {
+    Highlight? highlight = payload.highlight;
+    if (highlight != null) {
+      if (_workerHighlights.length >= 64) {
+        _workerHighlights.clear();
+      }
+      _workerHighlights[payload.key] = highlight;
     } else {
-      result = payload.highlight.highlightAuto(code, payload.languages);
+      highlight = _workerHighlights[payload.key];
+      if (highlight == null) {
+        return null;
+      }
+    }
+    final String code = payload.code;
+    final HighlightResult result;
+    if (!payload.canHighlight) {
+      result = highlight.justTextHighlightResult(code);
+    } else if (payload.languages.length == 1) {
+      result = highlight.highlight(code: code, language: payload.languages.first);
+    } else {
+      result = highlight.highlightAuto(code, payload.languages);
     }
     final _HighlightLineRenderer renderer = _HighlightLineRenderer();
     result.render(renderer);
@@ -260,18 +317,18 @@ class _CodeHighlightEngine {
 
 class _HighlightPayload {
 
-  final Highlight highlight;
-  final CodeLines codes;
+  final String key;
+  final Highlight? highlight;
+  final String code;
+  final bool canHighlight;
   final List<String> languages;
-  final List<int> maxSizes;
-  final List<int> maxLineLengths;
 
   const _HighlightPayload({
+    required this.key,
     required this.highlight,
-    required this.codes,
+    required this.code,
+    required this.canHighlight,
     required this.languages,
-    required this.maxSizes,
-    required this.maxLineLengths,
   });
 
 }
