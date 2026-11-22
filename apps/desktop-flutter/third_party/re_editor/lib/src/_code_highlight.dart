@@ -262,13 +262,22 @@ class _CodeHighlightEngine {
     // Evalaute performance
     bool canHighlight = true;
     int total = 0;
-    for (int i = 0; i < codes.length; i++) {
-      final int length = codes[i].length;
+    // Axiom patch (AUD-005): one pass over the segments, not `[i]` per line (quadratic).
+    for (final CodeLine line in codes.lines) {
+      final int length = line.length;
       if (length > maxLineLength || total > maxSize) {
         canHighlight = false;
         break;
       }
       total += length;
+    }
+    // Axiom patch (AUD-005): a document too large to highlight is drawn as plain text without
+    // asking a worker. Upstream still sent the whole text and got back one result per line on
+    // every keystroke, decoded on the UI thread.
+    if (!canHighlight) {
+      _latest = null;
+      callback(const []);
+      return;
     }
     final String key = _keyOf(modes);
     final String code = codes.asString(TextLineBreak.lf, false);

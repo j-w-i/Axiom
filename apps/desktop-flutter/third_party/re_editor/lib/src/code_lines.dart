@@ -49,7 +49,35 @@ class CodeLines {
 
   CodeLine get last => segments.last.last;
 
-  int get length => segments.fold(0, (previousValue, element) => previousValue += element.length);
+  int get length {
+    // Axiom patch (AUD-005): a plain loop (this is called in tight loops).
+    int n = 0;
+    for (final CodeLineSegment segment in segments) {
+      n += segment.codeLines.length;
+    }
+    return n;
+  }
+
+  /// Axiom patch (AUD-005): every line, in order, in one pass over the segments. Indexing with
+  /// `[i]` walks the segments from the start for each line, so a loop over `[i]` up to `length`
+  /// was quadratic in a long document (seconds per keystroke at 100 000 lines).
+  Iterable<CodeLine> get lines sync* {
+    for (final CodeLineSegment segment in segments) {
+      yield* segment.codeLines;
+    }
+  }
+
+  /// Axiom patch (AUD-005): every line's text, in one pass.
+  List<String> get texts {
+    final List<String> out = List<String>.filled(length, '', growable: false);
+    int i = 0;
+    for (final CodeLineSegment segment in segments) {
+      for (final CodeLine line in segment.codeLines) {
+        out[i++] = line.text;
+      }
+    }
+    return out;
+  }
 
   bool get isEmpty => segments.isEmpty || length == 0;
 

@@ -123,15 +123,14 @@ class CodeChunkController extends ValueNotifier<List<CodeChunk>> {
     // Axiom patch (FL-PERF-003): without folded lines the worker is sent the lines'
     // text (strings are shared between isolates, CodeLine objects are copied).
     bool folded = false;
-    final List<String> texts = List<String>.filled(codeLines.length, '');
-    for (int i = 0; i < codeLines.length; i++) {
-      final CodeLine line = codeLines[i];
+    // Axiom patch (AUD-005): one pass over the segments, not `[i]` per line (quadratic).
+    for (final CodeLine line in codeLines.lines) {
       if (line.chunks.isNotEmpty) {
         folded = true;
         break;
       }
-      texts[i] = line.text;
     }
+    final List<String>? texts = folded ? null : codeLines.texts;
     final _CodeChunkAnalyzePayload payload = folded
         ? _CodeChunkAnalyzePayload(_analyzer, codeLines, null)
         : _CodeChunkAnalyzePayload(_analyzer, null, texts);
