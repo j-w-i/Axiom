@@ -1,6 +1,9 @@
 # ADR-0012: Desktop shell on Tauri 2 + React; Qt is retired after a gated migration
 
-Status: Accepted (2026-11-12) — proposed by the evaluation in
+Status: Superseded by ADR-0020 (FL-QA-001, 2026-11-22): the shell is Flutter
+(`apps/desktop-flutter`); the Tauri shell was removed and is kept at the tag
+`tauri-shell-final`. The process split stands. Earlier: Accepted (2026-11-12) —
+proposed by the evaluation in
 `docs/migration/qt-to-tauri/decision.md`, approved by the project owner.
 
 Supersedes ADR-0001 (desktop shell), supersedes ADR-0002 (the "no Rust in the

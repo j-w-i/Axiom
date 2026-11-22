@@ -9,13 +9,16 @@ members = [
     "crates/env",
     "crates/build",
     "crates/agent",
+    "crates/lsp",
+    "crates/term",
+    "crates/inspect",
     "crates/axiomd",
     "crates/desktop-bridge",
     "apps/cli",
-    "apps/desktop-tauri/src-tauri",
     "tests/helpers/emit",
     "tests/helpers/fake-mcp",
     "tests/helpers/fake-acp",
+    "tests/helpers/fake-lsp",
 ]
 exclude = ["experiments"]
 
@@ -57,15 +60,11 @@ tracing-subscriber = "0.3"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 nix = { version = "0.30", default-features = false, features = ["signal"] }
 windows-sys = "0.61"
-# Desktop shell (ADR-0012). Exact pins: the prototype was verified against these.
-tauri = "=2.12.5"
-tauri-build = "=2.7.4"
-tauri-plugin-dialog = "=2.8.4"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
 
-# Shipped binaries (axiomd, axiom-tauri). Deliberately no `panic = "abort"`:
+# Shipped binary (axiomd). Deliberately no `panic = "abort"`:
 # the rpc server catches handler panics to answer `internal` (docs/protocols/ipc.md).
 [profile.release]
 lto = "thin"
@@ -74,3 +73,22 @@ strip = "symbols"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Search's engines are built optimised in dev and test builds too (M4-UX-001): unoptimised
+# regex and directory walking are several times slower, so the tests would measure the debug
+# build of these crates rather than Axiom's code (the 10 000-file budget took 370 ms on a macOS
+# runner and 684 ms on Windows unoptimised). Only these crates; Axiom's own code stays debug.
+[profile.dev.package.regex]
+opt-level = 3
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
+opt-level = 3
+[profile.dev.package.aho-corasick]
+opt-level = 3
+[profile.dev.package.memchr]
+opt-level = 3
+[profile.dev.package.ignore]
+opt-level = 3
+[profile.dev.package.globset]
+opt-level = 3

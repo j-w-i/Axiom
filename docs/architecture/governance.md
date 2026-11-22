@@ -8,13 +8,15 @@ on one system. They bind every contributor, human or agent.
 | Contract | File(s) | State |
 |----------|---------|-------|
 | IPC protocol 0.1 | `crates/protocol/src/{envelope,method,lifecycle,workspace,fs,task,settings}.rs`, `docs/protocols/ipc.md` | **Frozen for M1** |
-| Editor bridge 1 | `docs/protocols/editor-bridge.md` | **Frozen for M1** |
+| Editor bridge 1 | `docs/protocols/editor-bridge.md` | **Retired** with the Tauri shell (FL-QA-001, ADR-0020; was frozen for M1) |
 | IPC protocol 0.2 additions | `crates/protocol/src/{env,build}.rs`, `docs/protocols/ipc.md` §Protocol 0.2 | **Frozen for M2** (M2-ARCH-001) |
 | Provider manifest | `crates/protocol/src/provider.rs`, `docs/protocols/providers.md` | **Frozen for M2** (M2-ARCH-001) |
 | Diagnostics | `crates/protocol/src/diagnostics.rs` | **Frozen for M2** (M2-ARCH-001) |
 | IPC protocol 0.3 additions | `crates/protocol/src/agent.rs`, `docs/protocols/ipc.md` §Protocol 0.3 | **Frozen for M3** (M3-ARCH-001) |
 | Agent tools & permissions | `docs/protocols/agents.md` | **Frozen for M3** (M3-ARCH-001) |
-| Inspection | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | Draft until M5 starts |
+| IPC protocol 0.4 additions | `crates/protocol/src/{lsp,terminal,git}.rs`, `workspace.rs` (`workspace/search`), `provider.rs` (`lsp` table), `docs/protocols/ipc.md` §Protocol 0.4 | **Frozen for M4** (M4-ARCH-001) |
+| IPC protocol 0.5 additions | `crates/protocol/src/{preview,ui}.rs`, `docs/protocols/ipc.md` §Protocol 0.5 | **Frozen for M5** (M5-ARCH-001) |
+| Inspection model and adapter protocol | `crates/protocol/src/inspection.rs`, `docs/protocols/inspection.md` | **Frozen for M5** (M5-ARCH-001) |
 
 **Frozen** means: an implementation task may not change its meaning. If the
 contract is wrong or insufficient, stop and file a change request (below).
@@ -42,13 +44,16 @@ regenerate `schemas/`.
 5. Read or write workspace files from the shell or the editor surface.
 6. Bypass `Workspace::resolve` to build a host path.
 7. Delete, weaken, `#[ignore]` or skip a test to get a green run.
-8. Edit generated files (`schemas/**`) by hand.
+8. Edit generated files (`schemas/**`, `apps/desktop-flutter/lib/daemon/protocol.g.dart`) by
+   hand.
 9. Create directories, modules, UI controls or settings that nothing uses yet.
 10. Touch files outside the task's declared scope, except: `Cargo.lock`,
     lockfiles, the task's own status, `docs/roadmap/current.md`, its
     handoff, the files its *Documentation updates* section names, and
     editorial rewording of frozen documents as defined above.
-11. Use a Qt module that is not LGPL (see ADR-0011 for the list).
+11. Add a Dart package to the shell whose licence is not MIT, BSD or Apache-2.0
+    (`scripts/check_dart_licences.py`), or import Material or Cupertino there (ADR-0020 §1,
+    §10). (Until T-15 this rule was: use a Qt module that is not LGPL.)
 
 ## Change requests
 

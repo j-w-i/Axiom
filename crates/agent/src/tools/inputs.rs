@@ -1,4 +1,4 @@
-//! Input types of the M3 tools (`docs/protocols/agents.md` §Tools). Each derives its JSON Schema,
+//! Input types of the built-in tools (M3; `preview.*` and `ui.*` from M5) (`docs/protocols/agents.md` §Tools). Each derives its JSON Schema,
 //! which is what models are offered; inputs are validated by deserialising into these types
 //! (`deny_unknown_fields`), so the schema and the validation cannot drift apart.
 
@@ -114,6 +114,65 @@ pub struct OpenInput {
     pub line: Option<u32>,
     #[serde(default)]
     pub column: Option<u32>,
+}
+
+/// `preview.start` (M5).
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PreviewStartInput {
+    /// The dev server command; default: the project's Vite (`node_modules/.bin/vite`), else
+    /// `npm run dev`.
+    #[serde(default)]
+    pub argv: Option<Vec<String>>,
+}
+
+/// `ui.snapshot` (M5).
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiSnapshotInput {
+    /// Default: the workspace's running preview.
+    #[serde(default)]
+    pub preview_id: Option<String>,
+    /// At most this many nodes (default 300, at most 2000).
+    #[serde(default)]
+    pub max_nodes: Option<u32>,
+}
+
+/// `ui.inspect` (M5): one node, by `stableKey` (preferred, survives reloads) or by `node` id.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiInspectInput {
+    #[serde(default)]
+    pub preview_id: Option<String>,
+    #[serde(default)]
+    pub stable_key: Option<String>,
+    /// A node id from the latest `ui.snapshot`.
+    #[serde(default)]
+    pub node: Option<String>,
+}
+
+/// `ui.selection` (M5).
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiSelectionInput {
+    #[serde(default)]
+    pub preview_id: Option<String>,
+}
+
+/// `ui.verify` (M5): the checks stated before the patch, evaluated against the reloaded page.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiVerifyInput {
+    #[serde(default)]
+    pub preview_id: Option<String>,
+    /// At least one geometry or property assertion that would show the change succeeded.
+    pub assertions: Vec<axiom_protocol::ui::Assertion>,
+    /// The element the change was about.
+    #[serde(default)]
+    pub target: Option<axiom_protocol::ui::NodeTarget>,
+    /// How long to wait for the page to settle (ms; default 5000, at most 30000).
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
 
 /// The JSON Schema of `T` as a plain object schema (no `$schema`/`title`), as model APIs want.

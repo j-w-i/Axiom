@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The single quality gate. Every task must leave this passing.
-# Usage: scripts/check.sh            (everything: Rust + editor + the Tauri shell)
+# Usage: scripts/check.sh            (everything: the Rust workspace and the desktop shell)
 #        scripts/check.sh rust       (only the Rust workspace + repository guards)
-#        scripts/check.sh editor | tauri   (one part)
-#        scripts/check.sh e2e        (Tauri end-to-end test, headless, ~2 min)
+#        scripts/check.sh flutter    (only the desktop shell, apps/desktop-flutter)
+#        scripts/check.sh inspectors (only the web inspector, inspectors/web)
+#        scripts/check.sh e2e        (the shell's end-to-end suites, private compositor)
+#        scripts/check.sh package    (build the packages and verify them as installed copies)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -13,17 +15,13 @@ step() { printf '\n==> %s\n' "$*"; }
 
 if [[ "$what" == all || "$what" == rust ]]; then
   step "cargo fmt --check";            cargo fmt --all --check
-  # The desktop shell is excluded here: `tauri::generate_context!` embeds the
-  # built frontend, so it cannot compile before `pnpm run build`. It is checked
-  # in the `tauri` step below, where the bundle exists.
   step "cargo clippy (deny warnings)"
-  cargo clippy --workspace --all-targets --exclude axiom-desktop-tauri -- -D warnings
+  cargo clippy --workspace --all-targets -- -D warnings
   # The bridge tests spawn the real daemon binary.
   step "cargo build -p axiomd (for the desktop-bridge tests)"
   cargo build -p axiomd
-  step "cargo test";                   cargo test --workspace --exclude axiom-desktop-tauri
+  step "cargo test";                   cargo test --workspace
   step "schema files are current";     cargo run -q -p axiom-protocol --example export_schema -- --check
-  step "theme tokens are current";     node apps/desktop-tauri/scripts/gen-themes.mjs --check
   step "task board is consistent";     python3 scripts/tasks.py check
   step "dependency matrix";            python3 scripts/check_deps.py
   step "CI workflow syntax"
@@ -40,49 +38,57 @@ if [[ "$what" == all || "$what" == rust ]]; then
   fi
 fi
 
-if [[ ( "$what" == all || "$what" == editor ) && -f editor/package.json ]]; then
-  step "editor: install, typecheck, build, test"
-  (cd editor && pnpm install --frozen-lockfile && pnpm run check && pnpm run build && pnpm run test)
+# The web inspector (M5, ADR-0019): the Vite plugin and the in-page adapter.
+if [[ "$what" == all || "$what" == rust || "$what" == inspectors ]]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    step "web inspector: plugin and adapter tests"
+    (cd inspectors/web && pnpm install --frozen-lockfile >/dev/null && pnpm test)
+  else
+    echo "SKIPPED: the web inspector's tests (pnpm is not installed). CI always runs them."
+  fi
 fi
 
-if [[ ( "$what" == all || "$what" == tauri ) && -f apps/desktop-tauri/package.json ]]; then
-  step "tauri shell: typecheck, bundle, UI-state tests (real daemon), design-token guards"
-  # Linux: WebKitGTK/GTK development headers. scripts/sysroot.sh provides them
-  # under .toolchains/ when the -devel packages cannot be installed.
-  # shellcheck disable=SC1091
-  source apps/desktop-tauri/scripts/env.sh
-  # The shell compiles editor/src directly (ADR-0012 §4): the editor package's
-  # dependencies must be present for tsc to resolve monaco-editor's types.
-  (cd editor && pnpm install --frozen-lockfile)
-  (cd apps/desktop-tauri && pnpm install --frozen-lockfile && pnpm run check && pnpm run build && pnpm run test)
-  step "tauri shell: Rust host (needs the bundle it embeds), with and without the e2e feature"
-  cargo clippy -p axiom-desktop-tauri --all-targets -- -D warnings
-  cargo clippy -p axiom-desktop-tauri --all-targets --features e2e -- -D warnings
-  cargo test -p axiom-desktop-tauri   # includes the release guard
+# The Flutter shell (ADR-0020). Flutter is looked for on PATH, then in ~/flutter (dev-setup.md).
+if [[ ( "$what" == all || "$what" == flutter ) && -f apps/desktop-flutter/pubspec.yaml ]]; then
+  export PATH="$PATH:$HOME/flutter/bin"
+  if ! command -v flutter >/dev/null 2>&1; then
+    if [[ "$what" == flutter ]]; then
+      echo "flutter is not installed (docs/contributing/dev-setup.md §Flutter)" >&2; exit 1
+    fi
+    echo "SKIPPED: the Flutter shell (flutter is not installed; see dev-setup.md). CI always runs it."
+  else
+    step "flutter shell: dependencies (lockfile enforced), wire types, format, analyze, tests, licences"
+    # The client tests spawn the real daemon.
+    cargo build -q -p axiomd
+    (cd apps/desktop-flutter && flutter pub get --enforce-lockfile >/dev/null \
+      && dart run tool/gen_types.dart --check \
+      && dart format --output=none --set-exit-if-changed lib test tool \
+      && flutter analyze --fatal-infos \
+      && flutter test)
+    python3 scripts/check_dart_licences.py apps/desktop-flutter >/dev/null
+  fi
 fi
 
-# End-to-end (real app, real webview, real daemon, real input). Needs a private
-# X server, so it is opt-in: `scripts/check.sh e2e`. On Linux it runs twice:
-# through WebKitWebDriver (trusted OS-level key events) and through the
-# embedded driver that Windows and macOS CI use, so both paths stay honest.
-if [[ "$what" == e2e ]]; then
-  step "tauri shell: end-to-end (headless)"
-  cargo build -p axiomd
-  apps/desktop-tauri/scripts/e2e.sh --driver all
-  apps/desktop-tauri/scripts/e2e.sh --no-build --driver all agent.mjs   # the M3 exit scenario
+# End-to-end (the real app against the real daemon, real input) in a private compositor, never on
+# the developer's desktop: opt-in, `scripts/check.sh e2e` (`flutter-e2e` is the same).
+if [[ "$what" == e2e || "$what" == flutter-e2e ]]; then
+  step "desktop shell: end-to-end (private compositor)"
+  apps/desktop-flutter/scripts/e2e.sh
 fi
 
-# Packaging, as an installed copy behaves: unpack the package, launch it with no
-# --daemon (the packaged sibling lookup must find the sidecar), and watch the
-# protocol handshake on the wire. Opt-in: `scripts/check.sh package`.
+# Packaging, as an installed copy behaves: build the packages, unpack each to a prefix, run it
+# with no --daemon (the packaged sibling lookup must find axiomd) and complete the handshake.
+# Opt-in: `scripts/check.sh package`.
 if [[ "$what" == package ]]; then
-  step "tauri shell: packages launch, find their sidecar and connect"
-  cargo build -q --release -p axiom-desktop-tauri -p axiomd
-  apps/desktop-tauri/scripts/bundle.sh --bundles deb,rpm
-  for p in apps/desktop-tauri/../../target/release/bundle/deb/*.deb \
-           apps/desktop-tauri/../../target/release/bundle/rpm/*.rpm; do
-    apps/desktop-tauri/scripts/verify-package.sh "$p" || exit 1
-  done
+  step "desktop shell: packages install, find their daemon and connect"
+  scripts/bundle.sh target/bundle
+  if [[ "$(uname -s)" == Darwin ]]; then
+    scripts/verify-package.sh --app target/bundle/Axiom.app
+  else
+    for p in target/bundle/*.deb $(find target/bundle -name '*.rpm'); do
+      scripts/verify-package.sh "$p" || exit 1
+    done
+  fi
 fi
 
 printf '\nAll checks passed (%s).\n' "$what"

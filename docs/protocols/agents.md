@@ -98,8 +98,20 @@ A tool is a typed operation with a declared effect (`Effect` in `agent.rs`):
 | `env.install` (an issued plan id only) | env | install |
 | `editor.open` (reveal a location: the `agent/reveal` notification) | clients | read |
 | `mcp.<server>.<tool>` (user-configured MCP servers) | MCP client | execute (+ network) |
+| `preview.start` (the dev server with the inspector; gated as the command it runs; returns the URL and whether a page is connected) | preview | execute |
+| `ui.snapshot` (the page's tree: id, type, text, stable key, bounds, best source), `ui.inspect` (one node by stable key or id: properties, accessibility, every source candidate), `ui.selection` (the person's selection in inspect mode, with ancestors) | inspect | read |
+| `ui.verify` (the checks stated before the patch, against the reloaded page; `verified` / `failed` / `inconclusive` and every check) | inspect | read |
 
-Later milestones add `preview.*`, `ui.*` (M5), `lsp.*` (M4), `debug.*` (M6).
+`ui.*` default to the workspace's running preview and refuse another workspace's.
+They are **assertion-first**:
+- the system prompt and `ui.verify`'s description tell the model to decide, before patching, the
+  checks that would show success;
+- the model calls `ui.verify` after `fs.applyPatch` and reports the verdict as it is.
+
+The person's selection reaches a chat turn as an `Attachment`: the selected node's source file
+and lines (the shell's Inspector, M5-UI-001).
+
+Later milestones add `debug.*` (M6).
 
 Tool result rules: results are bounded (`max_result_bytes`, default 32 KiB) with a
 `truncated` flag and a continuation cursor where the tool pages; errors are structured
@@ -239,8 +251,17 @@ ADR-0015 §7.
 - **ACP:** external agents inside Axiom (ADR-0016; as built by M3-ACP-001).
   - **Built-in providers.** `claude-code` (`claude-agent-acp`), `codex` (`codex-acp`) and
     `gemini` (`gemini --experimental-acp`) are listed by `agent/models`: available when the
-    program is on `PATH`, else with an install hint. A user configuration with the same id
-    overrides one.
+    program is on `PATH` or in `<data dir>/agents/node_modules/.bin`, else with an install
+    hint. A user configuration with the same id overrides one.
+  - **Installing (ADR-0020 §6).** `agent/installAgent { providerId }` runs
+    `npm install --prefix <data dir>/agents <package>`, bounded to 10 minutes. The packages
+    are `@agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp` and
+    `@google/gemini-cli`. The answer is the installed program. The person still signs in to the
+    agent themselves.
+  - **Without a folder (ADR-0020 §6).** A conversation without a workspace may use an external
+    agent. Its first turn creates `<data dir>/scratch/<session id>` and opens it as a workspace
+    inside the daemon; the agent runs there, with the gate, checkpoints and terminals as in a
+    folder.
   - **Connection.** ACP protocol version 1. The client capabilities are fs read/write and
     terminal. `session/new` gets the workspace as `cwd` and Axiom's own MCP server
     (`axiom mcp`, when the CLI is installed next to the daemon). `session/load` is used when

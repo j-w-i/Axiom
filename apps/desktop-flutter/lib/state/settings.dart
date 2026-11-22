@@ -1,0 +1,87 @@
+import 'package:flutter/foundation.dart';
+
+import '../daemon/client.dart';
+import '../daemon/protocol.g.dart';
+import '../ui/tokens.dart';
+
+enum ThemeSetting { system, light, dark }
+
+/// The daemon's settings the shell presents (ipc.md §settings), plus `appearance.motion`, a
+/// shell key the daemon stores unchanged.
+class SettingsStore extends ChangeNotifier {
+  SettingsStore(this.client);
+  final DaemonClient client;
+
+  bool loaded = false;
+  ThemeSetting theme = ThemeSetting.system;
+  MotionMode motion = MotionMode.standard;
+  int editorFontSize = 13;
+  String editorFontFamily = '';
+  bool editorWordWrap = false;
+  bool reopenLast = true;
+  String? lastRoot;
+  String error = '';
+
+  static const _keys = [
+    'appearance.theme',
+    'appearance.motion',
+    'editor.fontSize',
+    'editor.fontFamily',
+    'editor.wordWrap',
+    'workspace.reopenLast',
+    'workspace.lastRoot',
+  ];
+
+  Future<void> load() async {
+    try {
+      final r = await client.call(Methods.settingsGet, const GetParams(keys: _keys));
+      _apply(r.values_);
+      loaded = true;
+      error = '';
+    } on DaemonException catch (e) {
+      error = 'Settings could not be read: ${e.message}';
+    }
+    notifyListeners();
+  }
+
+  void _apply(Map<String, Object?> v) {
+    theme = switch (v['appearance.theme']) {
+      'light' => ThemeSetting.light,
+      'dark' => ThemeSetting.dark,
+      _ => ThemeSetting.system,
+    };
+    motion = switch (v['appearance.motion']) {
+      'reduced' => MotionMode.reduced,
+      'off' => MotionMode.off,
+      _ => MotionMode.standard,
+    };
+    final size = v['editor.fontSize'];
+    if (size is num) editorFontSize = size.toInt().clamp(8, 40);
+    if (v['editor.fontFamily'] is String) editorFontFamily = v['editor.fontFamily']! as String;
+    if (v['editor.wordWrap'] is bool) editorWordWrap = v['editor.wordWrap']! as bool;
+    if (v['workspace.reopenLast'] is bool) reopenLast = v['workspace.reopenLast']! as bool;
+    lastRoot = v['workspace.lastRoot'] as String?;
+  }
+
+  /// Sets one key on the daemon; the store follows once it is accepted.
+  Future<void> setValue(String key, Object? value) async {
+    try {
+      await client.call(Methods.settingsSet, SetParams(values_: {key: value}));
+      _apply({..._snapshot(), key: value});
+      error = '';
+    } on DaemonException catch (e) {
+      error = e.message;
+    }
+    notifyListeners();
+  }
+
+  Map<String, Object?> _snapshot() => {
+    'appearance.theme': theme.name,
+    'appearance.motion': motion.name,
+    'editor.fontSize': editorFontSize,
+    'editor.fontFamily': editorFontFamily,
+    'editor.wordWrap': editorWordWrap,
+    'workspace.reopenLast': reopenLast,
+    'workspace.lastRoot': lastRoot,
+  };
+}

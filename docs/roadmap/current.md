@@ -2,13 +2,154 @@
 
 _Last updated: 2026-11-22._
 
+## M5 — Visual intelligence (web): complete (2026-11-22)
+
+Branch `task/m5`, which builds on `task/flutter` (M4 + FL). ADR-0019 is amended by ADR-0020 §8:
+the preview opens in the person's browser; the injected adapter talks to the daemon over a
+loopback WebSocket, gated by a token; there is no CDP.
+
+The exit scenario passes in the Flutter shell (`inspect_loop_test.dart`), with a real page:
+- a click in the page → the source at 11:9;
+- the agent's spacing fix → hot reload → `verified`, with a passing geometry check;
+- a wrong patch → `failed`;
+- the library's element shown as uncertain.
+
+P2 and P7 against M4 pass (`verification/M5.md`).
+
+Owed:
+- Windows;
+- the macOS CI results after the window fix.
+
+**FL-PERF-001 implemented (2026-11-22, branch `task/fl-idle-cpu`):** the editor's idle CPU with
+a document open fell from 28.1 % to 0.0 % (P7 `--ab`, Xvfb's software renderer; workspace only
+0.0 %).
+- **The cause:** the caret's blink, a full-window frame every 500 ms.
+- **The fix:** the caret now stays solid after 10 s without input, and is solid under Reduced
+  and Off. re_editor is vendored with that patch (`apps/desktop-flutter/third_party/re_editor`).
+- **Details:** `verification/FL.md` §Idle CPU.
+
+**Next: CI green on PR 6 (`task/flutter`) and on `task/m5`, then merge both to main; then M6.**
+
+- **M5-ARCH-001:** protocol 0.5 (`preview/*`, `ui/*` with assertions); the adapter protocol
+  frozen for M5; new error kinds.
+- **M5-INSPECT-001:** `crates/inspect` (sessions, normalisation, source resolution); `axiomd`
+  serves `ui/*`.
+- **M5-WEB-001:** `inspectors/web` (the Vite plugin's source stamps and the in-page adapter).
+- **M5-PREVIEW-001:** `preview/start|stop|list` (Vite through a generated config); the
+  `inspect-react` fixture.
+- **M5-VERIFY-001:** `ui/verify` (quiescence, re-identification, geometry and property checks,
+  build and runtime clean, skipped pixel checks, the verdict rule).
+- **M5-AGENT-001:** the agent tools `preview.start`, `ui.snapshot`, `ui.inspect`,
+  `ui.selection` and `ui.verify`, assertion-first.
+- **M5-UI-001:** the Visual Inspector in the Flutter shell (start, inspect mode, selection,
+  hierarchy, properties, source jump, Ask AI, the latest verification).
+- **M5-QA-001:** the exit scenario through the UI, P2 and P7, `verification/M5.md`.
+
+## FL — Flutter shell: complete (2026-11-22)
+
+The owner chose a full Flutter rewrite of the desktop shell (ADR-0020). The daemon and protocol
+are unchanged. **The Flutter shell is now the app.** `scripts/run.sh` launches it, and the Tauri
+shell and `editor/` are retired (tag `tauri-shell-final`). 12 tasks in `docs/tasks/FL/`, branch
+`task/flutter` (from `task/m4`, so it carries M4). Flutter 3.50.1 is in `~/flutter`
+(dev-setup.md §Flutter).
+
+The gate is recorded in `verification/FL.md`:
+- the M1–M4 exit scenarios pass in Flutter;
+- no frame is over 16.7 ms at 125 %;
+- accessibility in both themes passes;
+- the .deb and .rpm verify as installed copies;
+- startup is about 180 ms faster than the Tauri shell, except a first-ever launch that compiles
+  its shaders.
+
+Owed: Windows (deferred by the owner); the CI run's macOS and real-Rust-install results.
+**Next: merge `task/flutter` (M4 + FL) to main once CI is green, then M5.**
+
+- **FL-QA-001 implemented (2026-11-22):**
+  - parity: signature help, code actions, references, symbols, highlights, tab drag;
+  - `a11y_test`, and `agent_test` (the M3 exit scenario);
+  - packaging: `scripts/bundle.sh` and `scripts/verify-package.sh` with `--self-test`;
+  - startup measured against Tauri;
+  - Flutter became the default and Tauri was retired.
+
+- **FL-ARCH-001 implemented (2026-11-22):** `apps/desktop-flutter` (widgets layer only; a test
+  rejects Material and Cupertino), `scripts/check.sh flutter` (format, analyze, tests,
+  licences), `scripts/check_dart_licences.py`, the CI job on Ubuntu and macOS, the docs.
+- **FL-CORE-001 implemented (2026-11-22):** the Dart daemon client (lifecycle, wire order,
+  cancel, timeout, crash and restart, bounded shutdown) and generated wire types for all 170
+  definitions with typed method and notification descriptors; 10 tests against the real axiomd.
+- **FL-DS-001 implemented (2026-11-22):** the design system in Flutter
+  (`docs/design/flutter/README.md`): Temporal Tactility's surfaces and motion with Precision
+  Instrument's brass, Plex and hint line; every control keyboard-operable and named;
+  contrast-checked tokens; golden images of the gallery in both themes.
+- **FL-SHELL-001 and FL-FILES-001 implemented (2026-11-22):**
+  - the shell: title row and menus, the rail with its ink underline, side bar and splitter, the
+    status bar with the hint line, the palette, Settings, layout in `shell-local.json`, the
+    quit path;
+  - the explorer (lazy tree, ignored entries, keyboard, external changes, restored after a
+    restart);
+  - `scripts/e2e.sh` (a private compositor) and `scripts/frames.sh`;
+  - at the owner's 125 % scale and window size, no frame over 16.7 ms in any measured
+    interaction (`verification/FL.md`).
+- **FL-EDIT-001 implemented (2026-11-22):**
+  - the editor on `re_editor`: documents with the Tauri rules (saving with `expectedVersion`,
+    conflicts, external changes, unsaved-work prompts, restore), tabs, the split, find and
+    replace, Go to File, go to line;
+  - no frame over 16.7 ms while scrolling, typing or switching tabs on 5000-line files at the
+    owner's scale. The Tauri editor ran at 44 fps there.
+- **FL-EDIT-002 implemented (2026-11-22):** language servers in the Flutter editor:
+  - sync, diagnostic underlines and the Problems panel (the console region, Mod+J);
+  - completion, hover, F12, F2 across files as one undo, formatting, the status segment;
+  - `lsp_test.dart` against fake-lsp; the real servers required in CI on Ubuntu.
+- **FL-ENV-001 implemented (2026-11-22):** Environments in Flutter:
+  - the toolchains page and side list, and the rail badge ("N need attention");
+  - the plan dialog with every step; install with progress, also in the title-row transport,
+    and Cancel; Remove names the directory;
+  - trusting the folder's own providers;
+  - `env_test.dart` (smoke 24a–24e, a loopback fixture) passes;
+  - `env_rust_test.dart` (the M2 exit scenario) needs the internet, so it runs in CI on
+    Ubuntu only.
+- **FL-GIT-001 implemented (2026-11-22):** Git and Search in Flutter:
+  - the branch in the status bar; M/U/A/D marks on explorer rows, folders and tabs; gutter
+    marks against HEAD that follow unsaved edits;
+  - Source Control (Mod+Shift+G) and a side-by-side diff (Esc closes it), also opened from
+    Chat's diffs;
+  - the Search page (Mod+Shift+F) with case, word and regex options and include/exclude globs;
+  - `git_test.dart` and `search_test.dart` pass; the shell's frame benchmark still has no
+    frame over budget.
+- **FL-CONSOLE-001 implemented (2026-11-22):** the console's Output view and the Terminal:
+  - Output: the run prompt with its history, stdout and stderr apart, the exit status, Stop,
+    Rerun; the title row's transport;
+  - provider tasks in the palette, and their diagnostics in Problems;
+  - terminals on `xterm` (tabs, the size reaching the shell, the window's chords passing
+    through, copy and paste);
+  - `console_test.dart` 3/3; a typed key's echo is on screen in 33 ms or less (p95).
+- **FL-CHAT-001 implemented (2026-11-22):** Chat, first-party, on the rail under Files:
+  - conversations with or without a folder, streamed Markdown, edit, regenerate, images,
+    rename and delete;
+  - the AI dock beside the editor (Mod+L), approvals with the diff and a rail badge,
+    checkpoints and Restore with conflicts;
+  - the first-run setup and Settings → Models;
+  - the external agents (Claude Code, Codex, Gemini CLI) in the same picker; a missing one is
+    installed by the daemon into the data directory, and the install can be cancelled; an agent
+    without a folder works in a scratch folder;
+  - `chat_test.dart` 3/3; streaming a long answer with no frame over 16.7 ms at the owner's
+    scale.
+
 ## M2 — Environments and builds: complete (2026-11-21)
 
 All 14 tasks tested; CI green on Linux and macOS (PR j-w-i/Axiom#3, the exit scenario `e2e/env.mjs` 6/6 on Ubuntu). Merged to main under the owner's standing permission to merge a milestone once complete. Owed: the owner's by-hand run of the exit scenario. Windows deferred (owner): known gaps in `verification/M2.md` §Not done. **Next: M3 (agent runtime)**, then M4 and M5, worked autonomously (owner, 2026-11-21).
 
+## M4 — Editor depth: planned (2026-11-22)
+
+ADR-0018 records the decisions (protocol 0.4 `lsp/*`, `terminal/*`, `git/*`, `workspace/search`; `crates/lsp` supervises servers and owns the protocol, and the editor is a client of the daemon; an in-house LSP client over Monaco's providers; `crates/term` on `portable-pty` with xterm.js in the console; Git through the `git` CLI). 10 tasks in `docs/tasks/M4/`. Branch `task/m4`, PR to main. Next task: the first READY `M4-*` by order.
+
+- **M4-ARCH-001 tested (2026-11-22):** protocol 0.4 (`lsp/*`, `terminal/*`, `git/*`, `workspace/search`; provider `[[lsp]]`), docs, module edges.
+- **M4-LSP-001 tested (2026-11-22):** `crates/lsp`: daemon-supervised language servers shared by every client (own ids, server requests answered, document mirror, diagnostics, restart policy), `lsp/*` served; rust-analyzer and typescript-language-server in the manifests. Real rust-analyzer test: CI.
+- **M4-LSP-002 tested (2026-11-22):** the editor's LSP client (sync, completion, hover, signature, definition, references, highlight, rename, formatting, code actions, symbols), diagnostics in Problems with their source, the status-bar server segment, themed suggest and hover widgets. e2e `lsp.mjs` 9/9 against fake-lsp; real servers: CI (Ubuntu).
+
 ## M3 — Agent runtime: complete (2026-11-22)
 
-ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4; merged to main once CI is green, under the owner's standing permission. **Next: M4 (editor depth)**, then M5.
+ADR-0015 records the decisions (protocol 0.3 `agent/*`, `crates/agent`, `apps/cli`, keychain credentials, shadow-git checkpoints through the `git` CLI, Unix socket + token for more clients, MCP server as a protocol client, in-house MCP codec). 15 tasks in `docs/tasks/M3/` (ADR-0016 added external agents through ACP — M3-ACP-001; ADR-0017 made Chat a first-class full-window surface that works without a folder — M3-ARCH-002, M3-UI-001…003). Branch `task/m3`, PR j-w-i/Axiom#4, **merged to main 2026-11-22** (f45bae4; CI green on Linux, macOS and Windows) under the owner's standing permission. **Next: M4 (editor depth)**, then M5.
 
 - **M3-ARCH-001 tested (2026-11-21):** protocol 0.3 (`crates/protocol/src/agent.rs`: 14 methods, 4 notifications, 3 error kinds, optional `authToken`/`capabilities` on initialize); `agents.md` frozen; `agent`/`cli` edges. `axiomd::NOT_YET_SERVED` lists the agent methods until wired.
 - **M3-MODEL-001 tested (2026-11-21):** `crates/agent` with the message model, `ModelProvider`, an in-house SSE parser, the Anthropic Messages adapter (text, tools, opaque thinking, errors, cancel) and `ScriptedProvider`; tested against a loopback fixture server.
@@ -141,7 +282,7 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-19-M2-QA-001.md`. Earlier: `agents/handoffs/2026-11-19-M2-PROV-003.md`, `agents/handoffs/2026-11-19-M2-PROV-002.md`, `agents/handoffs/2026-11-19-M2-PROV-001.md`, `agents/handoffs/2026-11-19-M2-UI-003.md`, `agents/handoffs/2026-11-19-M2-UI-001.md` (+ `-M2-UI-002.md`), `agents/handoffs/2026-11-18-M2-BUILD-001.md`, `agents/handoffs/2026-11-18-M2-ENV-005.md`, `agents/handoffs/2026-11-18-M2-ENV-004.md`, `agents/handoffs/2026-11-18-M2-ENV-003.md`, `agents/handoffs/2026-11-18-M2-ENV-002.md`, `agents/handoffs/2026-11-18-M2-ENV-001.md`, `agents/handoffs/2026-11-18-M2-ARCH-001.md`, `agents/handoffs/2026-11-18-M1.6.md` (milestone), `agents/handoffs/2026-11-18-M1.6-QA-004.md`, `agents/handoffs/2026-11-18-M1.6-QA-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-004.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-003.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-002.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-001.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
+`agents/handoffs/2026-11-22-FL-PERF-001.md`. Earlier: `agents/handoffs/2026-11-22-M5-QA-001.md`, `agents/handoffs/2026-11-19-M2-QA-001.md`, `agents/handoffs/2026-11-19-M2-PROV-003.md`, `agents/handoffs/2026-11-19-M2-PROV-002.md`, `agents/handoffs/2026-11-19-M2-PROV-001.md`, `agents/handoffs/2026-11-19-M2-UI-003.md`, `agents/handoffs/2026-11-19-M2-UI-001.md` (+ `-M2-UI-002.md`), `agents/handoffs/2026-11-18-M2-BUILD-001.md`, `agents/handoffs/2026-11-18-M2-ENV-005.md`, `agents/handoffs/2026-11-18-M2-ENV-004.md`, `agents/handoffs/2026-11-18-M2-ENV-003.md`, `agents/handoffs/2026-11-18-M2-ENV-002.md`, `agents/handoffs/2026-11-18-M2-ENV-001.md`, `agents/handoffs/2026-11-18-M2-ARCH-001.md`, `agents/handoffs/2026-11-18-M1.6.md` (milestone), `agents/handoffs/2026-11-18-M1.6-QA-004.md`, `agents/handoffs/2026-11-18-M1.6-QA-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-004.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-003.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-002.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-001.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 

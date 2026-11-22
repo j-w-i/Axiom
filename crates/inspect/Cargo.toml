@@ -1,0 +1,26 @@
+[package]
+name = "axiom-inspect"
+description = "Previews' inspection: the adapter WebSocket server, sessions, normalisation, source resolution and verification (ADR-0019 §4)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-protocol = { path = "../protocol" }
+tokio = { workspace = true, features = ["net"] }
+tokio-tungstenite = "0.27"
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+getrandom = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile.workspace = true
+tokio-tungstenite = "0.27"
+
+[lints]
+workspace = true

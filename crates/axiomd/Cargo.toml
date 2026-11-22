@@ -23,6 +23,12 @@ axiom-exec = { path = "../exec" }
 axiom-env = { path = "../env" }
 axiom-build = { path = "../build" }
 axiom-agent = { path = "../agent" }
+axiom-lsp = { path = "../lsp" }
+axiom-term = { path = "../term" }
+axiom-inspect = { path = "../inspect" }
+url = "2"
+sha2.workspace = true
+hex.workspace = true
 tokio = { version = "1", features = ["full"] }
 clap.workspace = true
 tracing.workspace = true

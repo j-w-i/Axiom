@@ -1,0 +1,11 @@
+76a77,78
+> # The baseline's own daemon (M5-QA-001: each milestone measured with its own axiomd).
+> BASE_DAEMON = Path(os.environ["AXIOMD_BASE"]) if os.environ.get("AXIOMD_BASE") else None
+287c289
+<         env.update(AXIOM_TAP_LOG=str(tap_log), AXIOM_TAP_REAL=str(DAEMON))
+---
+>         env.update(AXIOM_TAP_LOG=str(tap_log), AXIOM_TAP_REAL=str(BASE_DAEMON if kind == "base" and BASE_DAEMON else DAEMON))
+316c318
+<             if "daemon_tap.py" in cmd or cmd.startswith(str(DAEMON)):
+---
+>             if "daemon_tap.py" in cmd or cmd.startswith(str(DAEMON)) or (BASE_DAEMON is not None and cmd.startswith(str(BASE_DAEMON))):

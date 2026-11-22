@@ -557,6 +557,7 @@ pub fn system_prompt(workspace: Option<(&str, Option<&str>)>) -> String {
                  - Use the tools to look before you change anything: workspace.info, workspace.search, fs.read.\n\
                  - Change files only with fs.applyPatch; copy search text exactly from fs.read.\n\
                  - Build and test with build.run (see workspace.info for task ids) or task.run.\n\
+                 - For a change to a running UI (preview.start, ui.*): find the element with ui.selection, ui.snapshot or ui.inspect; before patching, decide the checks that would show success (geometry against other elements, or a computed property); after fs.applyPatch, call ui.verify with them and report its verdict as it is.\n\
                  - Every change is checkpointed and the user can restore it; some calls need the user's approval, and a denial means: do not retry the same call.\n\
                  - Paths are workspace-relative with `/`.\n\
                  - Be brief in prose; use Markdown, with code in fenced blocks."

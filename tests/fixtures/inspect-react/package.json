@@ -1,0 +1,9 @@
+{
+  "name": "inspect-react-fixture",
+  "private": true,
+  "type": "module",
+  "description": "M5 fixture: a React + Vite app for the inspector (ADR-0019 §6). lib/ is an uninstrumented 'library' (no JSX).",
+  "scripts": { "dev": "vite" },
+  "dependencies": { "react": "^19.1.0", "react-dom": "^19.1.0" },
+  "devDependencies": { "@vitejs/plugin-react": "^5.0.0", "vite": "^7.0.0" }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@axiom/inspector-web",
+  "private": true,
+  "description": "Axiom's web inspection: the Vite plugin (source stamps, adapter injection) and the in-page adapter (ADR-0019).",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@babel/core": "7.28.5",
+    "jsdom": "26.1.0"
+  }
+}

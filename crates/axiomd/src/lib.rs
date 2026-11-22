@@ -10,4 +10,4 @@ pub mod socket;
 mod tools;
 
 pub use app::App;
-pub use router::build_router;
+pub use router::{build_router, NOT_YET_SERVED};

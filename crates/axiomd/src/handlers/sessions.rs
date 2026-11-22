@@ -153,8 +153,7 @@ pub async fn create(
 ) -> Result<SessionInfo, RpcError> {
     let root = root_of(&app, p.workspace_id.as_ref())?;
     let configs = provider_configs(&app).await?;
-    let config = app
-        .agent
+    app.agent
         .providers
         .config(&configs, &p.provider_id)
         .ok_or_else(|| {
@@ -163,12 +162,6 @@ pub async fn create(
                 format!("No provider `{}` is configured.", p.provider_id),
             )
         })?;
-    if config.kind == ProviderKind::Acp && root.is_none() {
-        return Err(RpcError::new(
-            ErrorKind::InvalidParams,
-            format!("{} works in a folder: open one first.", config.name),
-        ));
-    }
     if p.model.trim().is_empty() {
         return Err(RpcError::new(
             ErrorKind::InvalidParams,
@@ -498,11 +491,12 @@ async fn send_acp(
     live: Arc<Live>,
     config: axiom_protocol::agent::ProviderConfig,
 ) -> Result<Empty, RpcError> {
-    let (Some(ws), Some(root)) = (p.workspace_id.clone(), root) else {
-        return Err(RpcError::new(
-            ErrorKind::InvalidParams,
-            "External agents work in a folder.",
-        ));
+    // A conversation without a folder (Chat's general scope, ADR-0020 §6) runs the agent in a
+    // scratch folder of its own under the data directory, opened here as a workspace, so its
+    // files, terminals, approvals and checkpoints work as in a folder.
+    let (ws, root) = match (p.workspace_id.clone(), root) {
+        (Some(ws), Some(root)) => (ws, root),
+        _ => scratch_workspace(&app, &live.id).await?,
     };
     let attached = attached_text(&app, &ws, &p).await?;
     let mut images = Vec::new();
@@ -623,6 +617,20 @@ async fn send_acp(
         live.end();
     });
     Ok(Empty {})
+}
+
+/// The scratch folder of a conversation without a folder: `<data dir>/scratch/<session>`,
+/// created on first use and opened as a workspace (the same id while the daemon runs).
+async fn scratch_workspace(app: &App, id: &SessionId) -> Result<(WorkspaceId, PathBuf), RpcError> {
+    let dir = app.env.data_dir.join("scratch").join(&id.0);
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| {
+        RpcError::new(
+            ErrorKind::Io,
+            format!("Could not create the conversation's folder: {e}"),
+        )
+    })?;
+    let opened = app.workspaces.open(&dir.to_string_lossy()).await?;
+    Ok((opened.workspace_id, PathBuf::from(opened.root)))
 }
 
 const MCP_KEY: &str = "agent.mcpServers";

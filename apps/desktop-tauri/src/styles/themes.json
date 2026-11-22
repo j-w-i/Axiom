@@ -1,6 +1,0 @@
-{
-  "dark": { "base": { "hue": 70, "chroma": 0.006 }, "tone": "warm", "contrast": 1.0,
-            "accent": { "hue": 80, "chroma": 0.10, "lightness": 0.74 } },
-  "light": { "base": { "hue": 75, "chroma": 0.008 }, "tone": "warm", "contrast": 1.0,
-             "accent": { "hue": 78, "chroma": 0.11, "lightness": 0.60 } }
-}

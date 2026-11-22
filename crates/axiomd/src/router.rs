@@ -1,5 +1,7 @@
 use crate::app::App;
-use crate::handlers::{agent, build, env, fs, sessions, settings, task, workspace};
+use crate::handlers::{
+    agent, build, env, fs, git, lsp, preview, sessions, settings, task, terminal, ui, workspace,
+};
 use axiom_protocol::{
     agent as pagent, build as pbuild, env as penv, fs as pfs, settings as pset, task as ptask,
     workspace as pws,
@@ -10,6 +12,13 @@ use std::sync::Arc;
 /// Registers one handler per protocol method plus the shutdown hook.
 pub fn build_router(app: Arc<App>) -> Router {
     let mut r = Router::new();
+    if !app
+        .lsp_forwarding
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        lsp::spawn_forwarder(&app);
+        terminal::spawn_forwarder(&app);
+    }
 
     macro_rules! wire {
         // handler takes (app, params)
@@ -24,12 +33,33 @@ pub fn build_router(app: Arc<App>) -> Router {
         }};
     }
 
+    wire!(axiom_protocol::preview::Start, preview::start);
+    wire!(axiom_protocol::preview::Stop, preview::stop);
+    wire!(axiom_protocol::preview::List, preview::list);
+    wire!(axiom_protocol::ui::InspectMode, ui::inspect_mode);
+    wire!(axiom_protocol::ui::TakeSnapshot, ui::snapshot);
+    wire!(axiom_protocol::ui::HitTest, ui::hit_test);
+    wire!(axiom_protocol::ui::NodeDetails, ui::node_details);
+    wire!(axiom_protocol::ui::Highlight, ui::highlight);
+    wire!(axiom_protocol::ui::Verify, ui::verify);
     wire!(pws::Open, workspace::open, ctx);
     wire!(pws::Close, workspace::close);
     wire!(pws::Recent, workspace::recent);
     wire!(pws::GetState, workspace::get_state);
     wire!(pws::SetState, workspace::set_state);
     wire!(pfs::List, fs::list);
+    wire!(axiom_protocol::lsp::Servers, lsp::servers);
+    wire!(axiom_protocol::lsp::Request, lsp::request, ctx);
+    wire!(axiom_protocol::lsp::Notify, lsp::notify);
+    wire!(axiom_protocol::lsp::Restart, lsp::restart);
+    wire!(pws::Search, workspace::search, ctx);
+    wire!(axiom_protocol::git::Status, git::status);
+    wire!(axiom_protocol::git::Show, git::show);
+    wire!(axiom_protocol::terminal::Create, terminal::create);
+    wire!(axiom_protocol::terminal::Write, terminal::write);
+    wire!(axiom_protocol::terminal::Resize, terminal::resize);
+    wire!(axiom_protocol::terminal::Close, terminal::close);
+    wire!(axiom_protocol::terminal::List, terminal::list);
     wire!(pfs::ReadFile, fs::read_file);
     wire!(pfs::WriteFile, fs::write_file);
     wire!(pfs::Watch, fs::watch, ctx);
@@ -54,6 +84,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(pagent::GetPolicy, agent::get_policy);
     wire!(pagent::SetPolicy, agent::set_policy);
     wire!(pagent::Approve, agent::approve);
+    wire!(pagent::InstallAgent, agent::install_agent);
     wire!(pagent::ToolCall, agent::tool_call, ctx);
     wire!(pagent::SessionCreate, sessions::create, ctx);
     wire!(pagent::SessionList, sessions::list);
@@ -77,11 +108,20 @@ pub fn build_router(app: Arc<App>) -> Router {
         let a = a.clone();
         async move {
             a.stop_all_watchers();
+            a.lsp.stop_all().await;
+            a.terminals.close_all();
             a.executor.shutdown().await;
         }
     });
     r
 }
+
+/// Protocol methods registered by a milestone's first task whose handlers later tasks add. Each
+/// task that wires one removes it here; the milestone's last backend task leaves this empty
+/// (M5-VERIFY-001 did for 0.5). Clients feature-detect from `initialize.methods`, which lists
+/// only served methods.
+#[doc(hidden)]
+pub const NOT_YET_SERVED: &[&str] = &[];
 
 #[cfg(test)]
 mod tests {
@@ -89,7 +129,7 @@ mod tests {
     use axiom_store::Store;
     use std::collections::BTreeSet;
 
-    /// A protocol method can never be left unwired.
+    /// A protocol method can never be left unwired (beyond the explicit `NOT_YET_SERVED`).
     #[tokio::test]
     async fn router_serves_exactly_the_registry_methods() {
         let app = App::new(Store::open_in_memory().unwrap());
@@ -97,8 +137,15 @@ mod tests {
         let served: BTreeSet<String> = router.method_names().into_iter().collect();
         let expected: BTreeSet<String> = axiom_protocol::registry::method_names()
             .into_iter()
+            .filter(|m| !NOT_YET_SERVED.contains(m))
             .map(String::from)
             .collect();
         assert_eq!(served, expected);
+        for m in NOT_YET_SERVED {
+            assert!(
+                axiom_protocol::registry::method_names().contains(m),
+                "{m} is not a protocol method"
+            );
+        }
     }
 }

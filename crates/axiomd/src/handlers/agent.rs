@@ -272,3 +272,72 @@ impl axiom_agent::gate::BeforeExecute for ExternalCheckpoint<'_> {
         })
     }
 }
+
+/// `agent/installAgent` (ADR-0020 §6): `npm install --prefix <data dir>/agents <package>`,
+/// bounded to ten minutes; the agent's program is then found there.
+pub async fn install_agent(
+    app: Arc<App>,
+    p: axiom_protocol::agent::InstallAgentParams,
+) -> Result<axiom_protocol::agent::InstallAgentResult, RpcError> {
+    use axiom_agent::acp;
+    let package = acp::builtin_package(&p.provider_id).ok_or_else(|| {
+        RpcError::new(
+            ErrorKind::NotFound,
+            format!("`{}` is not an agent Axiom can install.", p.provider_id),
+        )
+    })?;
+    let npm = acp::find_program("npm").ok_or_else(|| {
+        RpcError::new(
+            ErrorKind::PrerequisiteMissing,
+            "Installing an agent needs npm (Node.js). Install Node.js, then try again.",
+        )
+    })?;
+    let prefix = app.env.data_dir.join("agents");
+    tokio::fs::create_dir_all(&prefix).await.map_err(|e| {
+        RpcError::new(
+            ErrorKind::Io,
+            format!("Could not create {}: {e}", prefix.display()),
+        )
+    })?;
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(600),
+        tokio::process::Command::new(&npm)
+            .args(["install", "--no-fund", "--no-audit", "--prefix"])
+            .arg(&prefix)
+            .arg(package)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| RpcError::new(ErrorKind::Timeout, "npm did not finish within 10 minutes."))?
+    .map_err(|e| RpcError::new(ErrorKind::SpawnFailed, format!("Could not run npm: {e}")))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let tail: Vec<&str> = err.lines().rev().take(8).collect();
+        let tail: Vec<&str> = tail.into_iter().rev().collect();
+        return Err(RpcError::new(
+            ErrorKind::Io,
+            format!("npm could not install {package}:\n{}", tail.join("\n")),
+        ));
+    }
+    let configs = provider_configs(&app).await?;
+    let program = app
+        .agent
+        .providers
+        .config(&configs, &p.provider_id)
+        .and_then(|c| c.command.first().cloned())
+        .and_then(|cmd| acp::find_program(&cmd))
+        .ok_or_else(|| {
+            RpcError::new(
+                ErrorKind::Io,
+                format!(
+                    "{package} was installed, but its program was not found in {}.",
+                    prefix.display()
+                ),
+            )
+        })?;
+    Ok(axiom_protocol::agent::InstallAgentResult {
+        program: program.to_string_lossy().into_owned(),
+    })
+}

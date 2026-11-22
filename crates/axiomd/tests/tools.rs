@@ -78,7 +78,7 @@ fn read(p: &Path) -> String {
 }
 
 #[tokio::test]
-async fn tools_registry_lists_every_m3_tool_with_its_effect() {
+async fn tools_registry_lists_every_built_in_tool_with_its_effect() {
     let e = Env::new(&[]).await;
     let infos = e.app.agent.tools.infos();
     let got: Vec<(String, Effect)> = infos.iter().map(|t| (t.name.clone(), t.effect)).collect();
@@ -92,7 +92,12 @@ async fn tools_registry_lists_every_m3_tool_with_its_effect() {
         ("fs.applyPatch", Effect::WriteWorkspace),
         ("fs.list", Effect::Read),
         ("fs.read", Effect::Read),
+        ("preview.start", Effect::Execute),
         ("task.run", Effect::Execute),
+        ("ui.inspect", Effect::Read),
+        ("ui.selection", Effect::Read),
+        ("ui.snapshot", Effect::Read),
+        ("ui.verify", Effect::Read),
         ("workspace.info", Effect::Read),
         ("workspace.search", Effect::Read),
     ];
@@ -417,4 +422,37 @@ async fn tools_editor_open_and_env_detect() {
     assert_eq!(out.summary, "no editor attached");
     let d = e.call("env.detect", json!({})).await.unwrap();
     assert!(d.text.contains("rust"), "{}", d.text);
+}
+
+#[tokio::test]
+async fn tools_ui_without_a_preview_explain_what_to_do() {
+    let e = Env::new(&[("package.json", "{}")]).await;
+    for (tool, input) in [
+        ("ui.snapshot", json!({})),
+        ("ui.selection", json!({})),
+        ("ui.inspect", json!({"stableKey": "src/App.jsx:1:1#0"})),
+    ] {
+        let err = e.call(tool, input).await.unwrap_err();
+        assert_eq!(err.kind, ErrorKind::NotFound, "{tool}: {err:?}");
+        assert!(err.hint.unwrap().contains("preview.start"), "{tool}");
+    }
+    // A check must be stated.
+    let err = e
+        .call("ui.verify", json!({"assertions": []}))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::InvalidParams);
+    assert!(err.hint.unwrap().contains("geometry"));
+    // Unknown fields are refused by the schema.
+    let err = e
+        .call("ui.snapshot", json!({"selector": "button"}))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::InvalidParams);
+    // preview.start is gated as the command it will run.
+    let p = e.prepare("preview.start", json!({})).await.unwrap();
+    assert_eq!(
+        p.targets.argv.as_deref(),
+        Some(&["npm".to_string(), "run".into(), "dev".into()][..])
+    );
 }

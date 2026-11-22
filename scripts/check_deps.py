@@ -23,22 +23,29 @@ ALLOWED = {
     "axiom-build": {"axiom-protocol", "axiom-exec", "axiom-env"},
     # M3 (ADR-0015 §2): the agent runtime calls services only through the tools axiomd registers.
     "axiom-agent": {"axiom-protocol", "axiom-store"},
+    # M4 (ADR-0018 §7): language servers and terminals.
+    "axiom-lsp": {"axiom-protocol"},
+    "axiom-term": {"axiom-protocol"},
+    # M5 (ADR-0019 §4): previews and inspection.
+    "axiom-inspect": {"axiom-protocol"},
     "axiomd": {
         "axiom-protocol", "axiom-rpc", "axiom-store", "axiom-workspace", "axiom-exec",
-        "axiom-env", "axiom-build", "axiom-agent",
+        "axiom-env", "axiom-build", "axiom-agent", "axiom-lsp", "axiom-term", "axiom-inspect",
     },
     # The `axiom` command-line client (ADR-0015 §2, §6): a protocol client.
     "axiom-cli": {"axiom-protocol", "axiom-rpc"},
-    # The GUI's daemon client (ADR-0012): protocol only.
+    # The Tauri shell's daemon client (ADR-0012): protocol only. No shell links it since the
+    # Flutter shell (ADR-0020), whose Dart client keeps its observable behaviour; its tests still
+    # pin the daemon's lifecycle from a client's side.
     "axiom-desktop-bridge": {"axiom-protocol"},
-    # Tauri shell host: bridge only (plus third-party crates).
-    "axiom-desktop-tauri": {"axiom-desktop-bridge"},
     # Test helper binary (tests/helpers/emit): depends on nothing in the workspace.
     "emit": set(),
     # Test helper binary (tests/helpers/fake-mcp): an MCP server for the MCP client tests.
     "fake-mcp": set(),
     # Test helper binary (tests/helpers/fake-acp): an ACP agent for the ACP client tests.
     "fake-acp": set(),
+    # Test helper binary (tests/helpers/fake-lsp): a language server for the LSP tests.
+    "fake-lsp": set(),
 }
 
 

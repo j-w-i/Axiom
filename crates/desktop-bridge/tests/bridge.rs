@@ -97,8 +97,8 @@ async fn connects_and_reports_ready() {
             methods,
         } => {
             assert!(!server_version.is_empty());
-            // The bridge asks for 0.3 since M3-UI-002 (approvals): the daemon speaks it.
-            assert_eq!(protocol_version, "0.3");
+            // The bridge asks for the crate's version (0.5 since M5-ARCH-001): the daemon speaks it.
+            assert_eq!(protocol_version, axiom_protocol::PROTOCOL_VERSION);
             assert!(methods.iter().any(|m| m == "fs/readFile"));
             assert!(methods.iter().any(|m| m == "agent/approve"));
         }
