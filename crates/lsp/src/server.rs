@@ -234,7 +234,7 @@ impl Conn {
     fn signal_group(&self, hard: bool) {
         #[cfg(unix)]
         if let Some(pgid) = self.pgid {
-            use nix::sys::signal::{kill, killpg, Signal};
+            use nix::sys::signal::{killpg, Signal};
             let sig = if hard {
                 Signal::SIGKILL
             } else {
@@ -244,7 +244,7 @@ impl Conn {
             // starts its JVM with setsid) are found by their parents while the server runs.
             #[cfg(target_os = "linux")]
             for pid in descendants(pgid).into_iter().chain(self.pipe_holders()) {
-                let _ = kill(nix::unistd::Pid::from_raw(pid as i32), sig);
+                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), sig);
             }
             let _ = killpg(nix::unistd::Pid::from_raw(pgid as i32), sig);
         }
@@ -657,8 +657,11 @@ impl LanguageServer {
                 // A toolchain manager's stub for a component that is not installed (rustup's
                 // proxy: "Unknown binary 'rust-analyzer' in official toolchain") means the server
                 // is missing, not broken: the shell offers its install (ADR-0021 §5).
+                // Homebrew's rustup says "`rust-analyzer` is unavailable for the active
+                // toolchain" (and then loops on its own fallback).
                 let missing = tail.contains("Unknown binary")
-                    || tail.contains("is not installed for the toolchain");
+                    || tail.contains("is not installed for the toolchain")
+                    || tail.contains("is unavailable for the active toolchain");
                 // The generation moves on first, so the process's exit is not taken for a crash.
                 self.end_start(
                     gen,
