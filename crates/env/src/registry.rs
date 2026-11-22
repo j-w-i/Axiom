@@ -13,6 +13,19 @@ pub const BUILTIN: &[(&str, &str)] = &[
         include_str!("../../../providers/cmake/provider.toml"),
     ),
     (
+        "dart",
+        include_str!("../../../providers/dart/provider.toml"),
+    ),
+    (
+        "dotnet",
+        include_str!("../../../providers/dotnet/provider.toml"),
+    ),
+    ("go", include_str!("../../../providers/go/provider.toml")),
+    (
+        "java",
+        include_str!("../../../providers/java/provider.toml"),
+    ),
+    (
         "lsp-basedpyright",
         include_str!("../../../providers/lsp-basedpyright/provider.toml"),
     ),

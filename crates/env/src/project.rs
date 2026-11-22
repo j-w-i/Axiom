@@ -140,11 +140,14 @@ pub fn managed_overlay(
     let mut vars = BTreeMap::new();
     for (dir, e) in detect::managed_layouts(m) {
         let d = root.join(&dir);
-        if d.is_dir() {
-            let s = d.to_string_lossy().into_owned();
-            if !dirs.contains(&s) {
-                dirs.push(s);
-            }
+        // Only the layouts this install has: a per-platform method's variables (macOS Java's
+        // `Contents/Home`) do not leak into another platform's install.
+        if !d.is_dir() {
+            continue;
+        }
+        let s = d.to_string_lossy().into_owned();
+        if !dirs.contains(&s) {
+            dirs.push(s);
         }
         vars.extend(detect::expand_env(&e, version, root));
     }

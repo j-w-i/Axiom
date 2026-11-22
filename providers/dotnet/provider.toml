@@ -1,0 +1,26 @@
+schema = "axiom.provider/1"
+id = "dotnet"
+name = ".NET"
+description = "The .NET SDK, detected on this computer (install it from https://dotnet.microsoft.com/download; csharp-ls needs .NET 11)."
+version = "0.1.0"
+homepage = "https://dotnet.microsoft.com"
+
+[project]
+any_file = ["*.csproj", "*.fsproj", "*.sln", "*.slnx", "global.json"]
+
+[[tools]]
+id = "dotnet"
+program = "dotnet"
+version_regex = '(\d+\.\d+\.\d+)'
+
+[[tasks]]
+id = "build"
+kind = "build"
+label = "dotnet build"
+command = ["dotnet", "build"]
+
+[[tasks]]
+id = "test"
+kind = "test"
+label = "dotnet test"
+command = ["dotnet", "test"]

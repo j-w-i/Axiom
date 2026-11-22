@@ -84,7 +84,11 @@ way when the switch is on, and are part of the plan when it is off.
 ### 6. SDK awareness
 
 A server runs in the workspace's environment (M2 resolution), so it sees the project's SDK. M5.5
-adds SDK providers where none exists: Go, Java (Eclipse Temurin JDK 21), .NET 8, Dart. A server
+adds SDK providers where none exists: Go, Java (Eclipse Temurin JDK 21), .NET, Dart. Amended at
+implementation (M5.5-PROV-002): .NET 8 reached end of life on 2026-11-10 and csharp-ls 0.29 needs
+.NET 11; Microsoft publishes SHA-512 digests only and Axiom's installer verifies SHA-256, so the
+`dotnet` provider detects an installed SDK and names where to get one, and does not install it
+in M5.5. A server
 that needs an SDK names it in `[[lsp]]`:
 
 ```toml

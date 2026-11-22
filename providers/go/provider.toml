@@ -1,0 +1,68 @@
+schema = "axiom.provider/1"
+id = "go"
+name = "Go"
+description = "The Go toolchain (BSD-3-Clause): go, gofmt. gopls needs it."
+version = "0.1.0"
+homepage = "https://go.dev"
+
+[project]
+any_file = ["go.mod", "go.work"]
+
+[[tools]]
+id = "go"
+program = "go"
+version_args = ["version"]
+version_regex = 'go(\d+\.\d+(?:\.\d+)?)'
+
+[[tools]]
+id = "gofmt"
+program = "gofmt"
+version_args = ["-h"]
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "archive"
+versions = { kind = "static", versions = ["1.27.4"] }
+bin_dirs = ["bin"]
+env = { GOROOT = "${root}", GOTOOLCHAIN = "local" }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://go.dev/dl/go${version}.linux-amd64.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "1.27.4" = "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840" } }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://go.dev/dl/go${version}.linux-arm64.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "1.27.4" = "3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92" } }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "x86_64" }
+url = "https://go.dev/dl/go${version}.darwin-amd64.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "1.27.4" = "2b799377704ef12db39bd254995d5c348c9cc8d86562ca817724390e56c38f43" } }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "aarch64" }
+url = "https://go.dev/dl/go${version}.darwin-arm64.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "1.27.4" = "91a44a2b8a716600ad94a4f143e156116620db8828086a6e3602291be9bd0bb4" } }
+
+[[tasks]]
+id = "build"
+kind = "build"
+label = "go build"
+command = ["go", "build", "./..."]
+
+[[tasks]]
+id = "test"
+kind = "test"
+label = "go test"
+command = ["go", "test", "./..."]
