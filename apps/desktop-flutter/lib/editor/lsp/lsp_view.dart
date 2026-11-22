@@ -206,7 +206,8 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     };
     final sem = caps['semanticTokensProvider'];
     // Files over 1 MiB keep the grammar alone.
-    final small = widget.controller.text.length <= 1 << 20;
+    final small =
+        (textLength(widget.controller.codeLines, 1) ?? widget.controller.text.length) <= 1 << 20;
     if (sem is Map && sem['full'] != null && sem['full'] != false && small) {
       try {
         final r = await lsp.request(

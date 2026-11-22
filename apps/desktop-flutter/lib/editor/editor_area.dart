@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:isolate';
 // The editor area (FL-EDIT-001): tabs, breadcrumbs, the banner, the code view for the active
 // document, the right group, and the find bar. Each open document keeps its own editor state;
 // switching tabs shows the one already laid out (no model swap, unlike Monaco's 17 ms).
@@ -570,7 +571,18 @@ class _DocViewState extends State<_DocView> {
     final seq = ++_marksSeq;
     final head = await app.git.headText(widget.doc.path);
     if (!mounted || seq != _marksSeq) return;
-    gitMarks.value = head == null ? const {} : gutterMarks(head, _controller.text);
+    if (head == null) {
+      gitMarks.value = const {};
+      return;
+    }
+    final now = _controller.text;
+    // A large file's diff runs on another isolate (the strings are shared, not copied), so the
+    // UI thread does not align thousands of lines after an edit (audit finding 8).
+    final marks = _controller.codeLines.length > 2000
+        ? await Isolate.run(() => gutterMarks(head, now))
+        : gutterMarks(head, now);
+    if (!mounted || seq != _marksSeq) return;
+    gitMarks.value = marks;
   }
 
   @override

@@ -41,6 +41,19 @@ TextLineBreak lineBreakOf(String text) {
   return i + 1 < text.length && text[i + 1] == '\n' ? TextLineBreak.crlf : TextLineBreak.cr;
 }
 
+/// The length of [lines] joined with a [breakLength]-character line break, without joining
+/// them; null when a line has folded lines inside (they are counted by joining).
+int? textLength(CodeLines lines, int breakLength) {
+  final n = lines.length;
+  var length = n > 0 ? (n - 1) * breakLength : 0;
+  for (var i = 0; i < n; i++) {
+    final line = lines[i];
+    if (line.chunks.isNotEmpty) return null;
+    length += line.text.length;
+  }
+  return length;
+}
+
 String _firstLine(String text) {
   final i = text.indexOf('\n');
   return i < 0 ? text : text.substring(0, i);
@@ -192,7 +205,10 @@ class Doc {
     final lines = controller.codeLines;
     if (identical(lines, _dirtyLines)) return false;
     _dirtyLines = lines;
-    final now = controller.text != _savedText;
+    // A different length is a difference, found without joining the document (most edits);
+    // only an edit that keeps the length compares the text (audit finding 8).
+    final length = textLength(lines, controller.options.lineBreak.value.length);
+    final now = (length != null && length != _savedText.length) || controller.text != _savedText;
     if (now == dirty) return false;
     dirty = now;
     return true;
