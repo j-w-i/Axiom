@@ -14,7 +14,7 @@ Requirements: `docs/product/requirements.md`.
 
 ## Current status
 
-**M1–M5.5 complete** (M5.5, every language: highlighting, managed language servers, VS Code-like completion, on branch `task/m5.5`). Always check
+**M1–M5.5 complete** (M5.5, every language: highlighting, managed language servers, VS Code-like completion; merged). An audit of `751ffc2` (`audits/comprehensive-audit/`) is being remediated on `task/audit-remediation` (AUD-REM-001). Always check
 `docs/roadmap/current.md` and `scripts/tasks.py` — they are kept current; this
 paragraph may lag. The Tauri shell became the default on 2026-11-17 (T-14) and the Qt shell was retired the same day (T-15; recover it from tag `qt-shell-final`).
 ADR-0020 then moved the shell to Flutter: FL-QA-001 made `apps/desktop-flutter` the app and
@@ -53,7 +53,6 @@ Start with `docs/architecture/overview.md`; details in `modules.md`,
 | `crates/{rpc,store,workspace,exec,axiomd}/` | M1 backend (complete) |
 | `crates/{env,build,agent,lsp,term}/`, `apps/cli/` | M2–M4 services and the `axiom` CLI |
 | `apps/desktop-flutter/` | The desktop shell (ADR-0020): `lib/` (daemon client, design system `lib/ui/`, stores `lib/state/`, one folder per surface), `test/`, end-to-end suites `integration_test/`, `scripts/{e2e,frames}.sh` |
-| `crates/desktop-bridge/` | `axiom-desktop-bridge`: protocol 0.1 client that spawns/supervises `axiomd`; no shell links it since the Tauri shell's removal, its tests still pin the daemon lifecycle from a client's side |
 | `providers/` | Toolchain provider manifests |
 | `schemas/` | **Generated** JSON Schemas — never edit by hand |
 | `experiments/` | Phase 0 proofs of concept and their results; reference only |

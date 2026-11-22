@@ -5,9 +5,9 @@ conversation. Audit of `main` at `751ffc2` (clean tree), 2026-11-22.
 
 ## Implementation authorisation
 
-**Not authorised.** The owner's brief is audit-first: no fixes until explicitly approved. The
-only repository writes made are under `audits/comprehensive-audit/` (nothing committed). When
-authorised, follow `REMEDIATION_PLAN.md` and record progress in §Implementation log below.
+**Authorised on 2026-11-23** by the owner: "Fix every single issue … commit … in batches".
+Work is on branch `task/audit-remediation` (task AUD-REM-001); statuses are in `ISSUES.md`
+§Remediation status.
 
 ## Progress
 
@@ -125,4 +125,31 @@ AUD-010/031/109).
 
 ## Implementation log
 
-_Empty — implementation not authorised._
+### 2026-11-23 — remediation, all batches
+How the work was split (one checkout, disjoint files; the lead integrated and committed):
+- **Lead** (Flutter shell: `lib/shell`, `lib/editor`, `lib/state`, `lib/app`, `lib/daemon`,
+  `integration_test`, vendored `re_editor`): batches 0, 1, the shell parts of 2, 4, 5 and 7.
+- **Daemon core helper** (`crates/{exec,term,rpc,workspace,store,protocol}`, most of
+  `crates/axiomd`): AUD-006, 007, 012, 027, 028–031, 034, 036–038, 094–102 and the daemon side
+  of AUD-022 (protocol 0.6: `fs/createFile`, `fs/createDirectory`, `fs/rename`, `fs/trash`;
+  `docs/decisions/proposed/CR-AUD-022-workspace-file-operations.md`).
+- **Security helper** (`crates/{agent,env,lsp,inspect,build}`, `inspectors/web`, `providers`,
+  `apps/cli`, `tools.rs`, `acp.rs`, session/agent/lsp handlers): AUD-008–011, 027 (servers),
+  031–033, 035, 039–045, 099, 103–109 (`docs/decisions/proposed/CR-AUD-SEC-agent-gate-trust-supply-chain.md`).
+- **UI helper** (`lib/ui`, `lib/files`, `lib/scm`, `lib/search`, `lib/console`, `lib/env`,
+  `lib/chat`, `lib/inspector`): AUD-013, 016, 018 (default action), 020, 021, 046, 050, 051,
+  054, 056–059, 064, 067–076, 079–084, 110 (chat setup).
+
+Measurements after the fixes (profile build, private KWin at 125 %, release daemon, machine
+loaded as before):
+- 100 000-line file: open 1294 → 486 ms; first-second max build 1062 → 28 ms; typing p99 build
+  5 ms (was 3.8–4.5 s max). A CPU profile (VM service, `CodeLines.length`/`[]` 15.3 s of 17.9 s)
+  found the cause: line loops indexing `CodeLines[i]` (quadratic) in re_editor and the shell.
+  One ~3.9 s frame remains on the first edit at line 1; the UI isolate used only 1.0 s of CPU
+  for the 13 keys, so it is not Dart work (suspected GC/paging on this swap-full machine).
+- Search over a 2 MiB single line: under 1 s (daemon test `a_two_mebibyte_single_line_file…`).
+- `sh -c 'sleep 30 & echo x'` completes in about 2 s (exec tests).
+
+Suites added: `integration_test/data_safety_test.dart`, `integration_test/layout_test.dart`,
+`integration_test/perf_probe_test.dart` (via `scripts/perf.sh`), and the helpers' unit and daemon
+tests listed in their reports (`ISSUES.md` notes name them).

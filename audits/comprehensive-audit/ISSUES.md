@@ -1,7 +1,9 @@
 # Issue register
 
-Audit of `main` at `751ffc2` (2026-11-22). Every issue has a stable id. Status of all issues:
-**Not started** (implementation is not authorised).
+Audit of `main` at `751ffc2` (2026-11-22). Every issue has a stable id. Implementation was
+authorised by the owner on 2026-11-23 for every issue (task AUD-REM-001, branch
+`task/audit-remediation`); the current status of each issue is in **Remediation status** below,
+which supersedes the "Status: Not started" lines in the entries.
 
 **Confidence**
 - **Confirmed (runtime)** — reproduced in the running app or daemon during this audit; the
@@ -17,6 +19,127 @@ each reviewer proposed, are in `evidence/static/`:
 are relative to the repository root; `app/` means `apps/desktop-flutter/`.
 
 Priority counts: **P0 1 · P1 12 · P2 49 · P3 50 · total 112.**
+
+
+## Remediation status (2026-11-23)
+
+Verification for every issue: the test or measurement named in its entry, plus the final gate
+(`scripts/check.sh`, `scripts/check.sh e2e`) recorded in `AUDIT_STATE.md` §Implementation log.
+
+| Issue | Status | Note |
+|-------|--------|------|
+| AUD-001 | Fixed | documents detach on daemon loss and re-attach on restart; recovery folder for shell crashes; data_safety_test.dart |
+| AUD-002 | Fixed | folder switch closes the old folder's documents; data_safety_test.dart step 6 |
+| AUD-003 | Fixed | gutter strip full height; layout_test.dart checks it |
+| AUD-004 | Fixed | split bounds never cross; layout_test.dart at 900×560 with dock and split |
+| AUD-005 | Partially fixed | Partially fixed: the quadratic line loops (re_editor and the shell) and the oversized-highlight round trip are gone; open 1.29 s → 0.49 s, typing p99 build 5 ms; one ~3.9 s frame remains on the first edit at line 1 of a 100 000-line file (GC, not UI-isolate CPU: 1.0 s of CPU for 13 keys) and the retained heap after GC is 197 MiB (from 64) |
+| AUD-006 | Fixed |  |
+| AUD-007 | Fixed |  |
+| AUD-008 | Fixed | built-in servers that run project code are refused or restricted until the folder is trusted; Trust Folder line above the editor |
+| AUD-009 | Fixed |  |
+| AUD-010 | Fixed |  |
+| AUD-011 | Fixed |  |
+| AUD-012 | Partially fixed | Partially fixed: no spin, a 10 s poll fallback with one log line; the status-bar "file watching limited" note is not built |
+| AUD-013 | Fixed |  |
+| AUD-014 | Fixed | fitPanels() bounds side bar, dock and console by the window; layout_test.dart |
+| AUD-015 | Fixed |  |
+| AUD-016 | Fixed |  |
+| AUD-017 | Fixed |  |
+| AUD-018 | Fixed |  |
+| AUD-019 | Fixed |  |
+| AUD-020 | Fixed |  |
+| AUD-021 | Fixed |  |
+| AUD-022 | Fixed | protocol 0.6 fs/createFile, createDirectory, rename, trash (CR-AUD-022); explorer menu, F2, Delete, Shift+F10, right-click; File → New File…, New Folder…, Save As… |
+| AUD-023 | Fixed |  |
+| AUD-024 | Fixed |  |
+| AUD-025 | Fixed |  |
+| AUD-026 | Fixed |  |
+| AUD-027 | Fixed |  |
+| AUD-028 | Fixed |  |
+| AUD-029 | Fixed |  |
+| AUD-030 | Fixed |  |
+| AUD-031 | Fixed |  |
+| AUD-032 | Partially fixed | Partially fixed: no daemon-wide lock across start; dead agents evicted and restarted; idle agents are not stopped (an agent that cannot resume its session would lose the conversation) |
+| AUD-033 | Fixed |  |
+| AUD-034 | Fixed |  |
+| AUD-035 | Fixed |  |
+| AUD-036 | Fixed |  |
+| AUD-037 | Fixed |  |
+| AUD-038 | Fixed |  |
+| AUD-039 | Fixed |  |
+| AUD-040 | Fixed |  |
+| AUD-041 | Fixed |  |
+| AUD-042 | Fixed |  |
+| AUD-043 | Fixed with a deviation | Fixed with a deviation: Origin checked, a live page is never replaced; the token stays reusable for a reload |
+| AUD-044 | Fixed |  |
+| AUD-045 | Fixed |  |
+| AUD-046 | Fixed |  |
+| AUD-047 | Fixed |  |
+| AUD-048 | Fixed |  |
+| AUD-049 | Fixed |  |
+| AUD-050 | Fixed |  |
+| AUD-051 | Fixed |  |
+| AUD-052 | Fixed |  |
+| AUD-053 | Fixed |  |
+| AUD-054 | Fixed |  |
+| AUD-055 | Fixed |  |
+| AUD-056 | Fixed |  |
+| AUD-057 | Fixed |  |
+| AUD-058 | Fixed |  |
+| AUD-059 | Fixed |  |
+| AUD-060 | Fixed | skips reported by e2e.sh and check.sh; layout_test.dart; data_safety_test.dart |
+| AUD-061 | Fixed | scripts/perf.sh, AXIOM_STARTUP_TRACE, integration_test/perf_probe_test.dart; performance.md §4.1 |
+| AUD-062 | Open | Open: re-measure with frames.sh on an idle machine (palette ranking memoised under AUD-049) |
+| AUD-063 | Fixed |  |
+| AUD-064 | Fixed |  |
+| AUD-065 | Fixed |  |
+| AUD-066 | Fixed |  |
+| AUD-067 | Fixed |  |
+| AUD-068 | Fixed |  |
+| AUD-069 | Fixed |  |
+| AUD-070 | Fixed |  |
+| AUD-071 | Fixed |  |
+| AUD-072 | Fixed |  |
+| AUD-073 | Fixed |  |
+| AUD-074 | Fixed |  |
+| AUD-075 | Fixed |  |
+| AUD-076 | Fixed |  |
+| AUD-077 | Fixed |  |
+| AUD-078 | Fixed |  |
+| AUD-079 | Fixed |  |
+| AUD-080 | Fixed |  |
+| AUD-081 | Fixed |  |
+| AUD-082 | Fixed |  |
+| AUD-083 | Fixed |  |
+| AUD-084 | Fixed |  |
+| AUD-085 | Fixed |  |
+| AUD-086 | Fixed |  |
+| AUD-087 | Fixed |  |
+| AUD-088 | Fixed |  |
+| AUD-089 | Fixed |  |
+| AUD-090 | Fixed |  |
+| AUD-091 | Fixed |  |
+| AUD-092 | Fixed |  |
+| AUD-093 | Fixed |  |
+| AUD-094 | Fixed |  |
+| AUD-095 | Fixed |  |
+| AUD-096 | Fixed |  |
+| AUD-097 | Fixed |  |
+| AUD-098 | Fixed |  |
+| AUD-099 | Fixed |  |
+| AUD-100 | Fixed |  |
+| AUD-101 | Fixed |  |
+| AUD-102 | Fixed | crates/desktop-bridge removed; its daemon-side coverage moved to crates/axiomd/tests/lifecycle.rs |
+| AUD-103 | Fixed |  |
+| AUD-104 | Fixed |  |
+| AUD-105 | Fixed |  |
+| AUD-106 | Fixed |  |
+| AUD-107 | Fixed with a residual risk | Fixed with a residual risk: pinned uv 0.9.0 and rustup 1.28.2 (not verified online: confirm before release); the first install of a checksum URL trusts its origin, later changes are refused |
+| AUD-108 | Fixed |  |
+| AUD-109 | Partially fixed | Partially fixed: line caps, 0600 credential file, MCP principals per connection; env.planInstall keeps its declared effect `read` (frozen contract) |
+| AUD-110 | Fixed |  |
+| AUD-111 | Partially fixed | Partially fixed: Edit menu, palette ordered by recent use and category; Ctrl+N stays New Chat (the owner's binding), New File is in File and the explorer |
+| AUD-112 | Partially fixed | Partially fixed: status docs, performance.md, security.md updated; the 44 `implemented` tasks still need the review procedure |
 
 ---
 

@@ -1,6 +1,16 @@
 # Current state
 
-_Last updated: 2026-11-22._
+_Last updated: 2026-11-23._
+
+## Audit remediation: in progress (2026-11-23)
+
+A comprehensive audit of `main` at `751ffc2` (2026-11-22) found 112 issues: 1 P0, 12 P1, 49 P2,
+50 P3 (`audits/comprehensive-audit/`). The owner authorised fixing all of them; the work is on
+branch `task/audit-remediation` (task AUD-REM-001), committed in the batches of
+`audits/comprehensive-audit/REMEDIATION_PLAN.md`. Issue statuses are in
+`audits/comprehensive-audit/ISSUES.md`.
+
+**Next: finish the remediation batches, CI green, merge to main; then M6.**
 
 ## M5.5 — Every language: complete (2026-11-22)
 
@@ -28,7 +38,7 @@ Owed:
 - Kotlin (accepted broken for now);
 - macOS CI; Windows.
 
-**Next: CI green on `task/m5.5`, merge to main; then M6.**
+Merged to main (PR 8, `adc63c1`).
 
 ## M5 — Visual intelligence (web): complete (2026-11-22)
 
