@@ -251,6 +251,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     _hoverPending?.cancel();
     _quick?.cancel();
     _hoverTimer?.cancel();
+    _hoverHideTimer?.cancel();
     _resolveTimer?.cancel();
     _resolvePending?.cancel();
     _structureTimer?.cancel();
@@ -600,11 +601,24 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
 
   // ---- hover --------------------------------------------------------------------------------
 
+  /// The pointer is over the hover card: it stays, and scrolls (the owner, 2026-11-22).
+  bool _overHoverCard = false;
+  Timer? _hoverHideTimer;
+
   void _onHover(PointerHoverEvent e) {
+    if (_overHoverCard) return;
     _hoverTimer?.cancel();
     final local = e.localPosition;
-    if (_hover != null && (local - _hover!.at).distance > 24) _hide();
+    // Leaving the word gives the pointer a moment to reach the card before it closes.
+    if (_hover != null && (local - _hover!.at).distance > 24) _hideSoon();
     _hoverTimer = Timer(const Duration(milliseconds: 600), () => unawaited(_hoverAt(local)));
+  }
+
+  void _hideSoon() {
+    _hoverHideTimer?.cancel();
+    _hoverHideTimer = Timer(const Duration(milliseconds: 400), () {
+      if (mounted && !_overHoverCard) _hide();
+    });
   }
 
   Future<void> _hoverAt(Offset local) async {
@@ -624,6 +638,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       if (!mounted || token.isCancelled) return;
       final text = hoverText(r);
       if (text.isEmpty) return;
+      _hoverHideTimer?.cancel();
       setState(() => _hover = (at: local, text: text));
     } on DaemonException {
       // Nothing to show.
@@ -632,6 +647,8 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
 
   void _hide() {
     _hoverTimer?.cancel();
+    _hoverHideTimer?.cancel();
+    _overHoverCard = false;
     if (_hover != null) setState(() => _hover = null);
   }
 
@@ -1453,16 +1470,28 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
                 Positioned(
                   left: (hover.at.dx - 40).clamp(0, double.infinity),
                   top: hover.at.dy + 18,
-                  child: Semantics(
-                    liveRegion: true,
-                    label: hover.text,
-                    excludeSemantics: true,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 560, maxHeight: 320),
-                      child: Sheet(
-                        radius: Metrics.radiusRaised,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        child: SingleChildScrollView(child: _HoverText(hover.text)),
+                  child: MouseRegion(
+                    onEnter: (_) {
+                      _overHoverCard = true;
+                      _hoverTimer?.cancel();
+                      _hoverHideTimer?.cancel();
+                    },
+                    onExit: (_) {
+                      _overHoverCard = false;
+                      _hideSoon();
+                    },
+                    child: Semantics(
+                      liveRegion: true,
+                      label: 'Hover: ${hover.text}',
+                      container: true,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 320),
+                        child: Sheet(
+                          radius: Metrics.radiusRaised,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          // Headings, lists, links and code as the completion docs show them.
+                          child: SingleChildScrollView(child: MarkdownView(hover.text)),
+                        ),
                       ),
                     ),
                   ),
@@ -1743,51 +1772,6 @@ String _kindLetter(int? k) => switch (k) {
 };
 
 /// Hover text: paragraphs as body text, fenced code as code.
-class _HoverText extends StatelessWidget {
-  const _HoverText(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.axiom;
-    final parts = <Widget>[];
-    final fence = RegExp(r'```[^\n]*\n([\s\S]*?)```');
-    var at = 0;
-    for (final m in fence.allMatches(text)) {
-      final before = text.substring(at, m.start).trim();
-      if (before.isNotEmpty) {
-        parts.add(
-          Text(
-            before.replaceAll('**', '').replaceAll('`', ''),
-            style: t.type.small.copyWith(color: t.colors.ink),
-          ),
-        );
-      }
-      parts.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Text(m[1]!.trimRight(), style: t.type.code.copyWith(fontSize: 12.5)),
-        ),
-      );
-      at = m.end;
-    }
-    final rest = text.substring(at).trim();
-    if (rest.isNotEmpty) {
-      parts.add(
-        Text(
-          rest.replaceAll('**', '').replaceAll('`', ''),
-          style: t.type.small.copyWith(color: t.colors.ink),
-        ),
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: parts,
-    );
-  }
-}
-
 class _RenameBox extends StatefulWidget {
   const _RenameBox({required this.initial});
   final String initial;

@@ -9,8 +9,9 @@ import 'dart:io';
 import 'package:axiom_desktop/editor/lsp/lsp_view.dart';
 import 'package:axiom_desktop/shell/palette.dart';
 import 'package:axiom_desktop/state/lsp.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' show FocusManager;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:re_editor/re_editor.dart';
@@ -223,6 +224,43 @@ command = ["fake-lsp"]
       detail: () => main.controller.codeLines[0].text,
     );
     expect(main.controller.codeLines[1].text, 'use b;');
+    main.controller.text = original;
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 2d. Hover (the owner, 2026-11-22): the server's Markdown in a card the pointer can move
+    //     onto, which stays and scrolls there, and closes once the pointer has left.
+    main.controller.text = '// LONGHOVER\n$original';
+    await tester.pump(const Duration(milliseconds: 300));
+    final hoverEditor = tester.renderObject(find.byType(CodeEditor).first);
+    final word = codeEditorPositionRect(hoverEditor, const CodeLinePosition(index: 2, offset: 4))!;
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: word.centerLeft + const Offset(4, 0));
+    await mouse.moveTo(word.centerLeft + const Offset(6, 0));
+    final card = find.bySemanticsLabel(RegExp('^Hover: '));
+    await until(tester, () => card.evaluate().isNotEmpty, what: 'the hover card');
+    expect(find.text('Long hover', findRichText: true), findsOneWidget, reason: 'Markdown heading');
+    // Onto the card, in small steps (as a hand moves), and a moment there: it stays.
+    final target = tester.getRect(card).center;
+    final start = word.centerLeft + const Offset(6, 0);
+    for (var i = 1; i <= 12; i++) {
+      await mouse.moveTo(Offset.lerp(start, target, i / 12)!);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(card, findsOneWidget, reason: 'the card stays under the pointer');
+    final scroll = find.descendant(of: card, matching: find.byType(Scrollable)).first;
+    final before = tester.state<ScrollableState>(scroll).position.pixels;
+    await tester.sendEventToBinding(
+      PointerScrollEvent(position: target, scrollDelta: const Offset(0, 240)),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.state<ScrollableState>(scroll).position.pixels, greaterThan(before));
+    // Away from the card and the word: it closes.
+    await mouse.moveTo(
+      tester.getRect(find.byType(CodeEditor).first).bottomRight - const Offset(8, 8),
+    );
+    await until(tester, () => card.evaluate().isEmpty, what: 'the hover card closed');
+    await mouse.removePointer();
     main.controller.text = original;
     await tester.pump(const Duration(milliseconds: 100));
 

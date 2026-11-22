@@ -5,7 +5,8 @@
 //!   `completionItem/resolve`) and `HashMap` (with an import as an additional edit).
 //! - `textDocument/definition`: line 0 of `$FAKE_LSP_DEFINITION` (a URI) or of the same file.
 //! - `textDocument/hover` on a document containing `SLOW`: answers only once `$/cancelRequest`
-//!   arrives (with RequestCancelled), else hover text with the document's version.
+//!   arrives (with RequestCancelled); on one containing `LONGHOVER`, a long Markdown answer
+//!   (a heading and 60 list items); else hover text with the document's version.
 //! - `fake/config`: asks the client `workspace/configuration` for section `fake.answer` and
 //!   returns what it got.
 //! - `fake/crash`: exits with status 3 at once.
@@ -211,6 +212,11 @@ fn main() {
                             &json!({"jsonrpc":"2.0","id":id,"error":{"code":-32800,"message":"cancelled"}}),
                         );
                     }
+                } else if text.contains("LONGHOVER") {
+                    // A long Markdown answer: the card scrolls.
+                    let body: String = (1..=60).map(|n| format!("- item {n}\n")).collect();
+                    let value = format!("## Long hover\n\nversion {v}\n\n{body}");
+                    reply(json!({"contents":{"kind":"markdown","value":value}}));
                 } else {
                     reply(json!({"contents":{"kind":"markdown","value":format!("version {v}")}}));
                 }

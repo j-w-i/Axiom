@@ -229,9 +229,13 @@ class EnvironmentsStore extends ChangeNotifier {
   /// The providers alone (their names), without detecting anything: cheap enough for opening a
   /// folder (the language server line names the provider it offers).
   Future<void> loadProviders() async {
-    if (!workspace.isOpen || providers.isNotEmpty) return;
+    if (providers.isNotEmpty) return;
     try {
-      final r = await client.call(Methods.envProviders, ProvidersParams(workspaceId: workspace.id));
+      // Without a folder, the built-in and user providers (any toolchain can be installed).
+      final r = await client.call(
+        Methods.envProviders,
+        ProvidersParams(workspaceId: workspace.isOpen ? workspace.id : null),
+      );
       if (providers.isEmpty) {
         providers = r.providers;
         notifyListeners();
