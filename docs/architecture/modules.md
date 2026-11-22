@@ -232,7 +232,8 @@ before the task that needs them** (no empty scaffolding).
   install plans and their execution into managed storage, uninstall, and resolving a
   project's `Environment` from `.axiom/project.toml` / `.axiom/project.lock`.
 - **Depends on:** `protocol`, `store` (installed-toolchain index, workspace trust); `reqwest`
-  (rustls), `sha2`, `tar`, `flate2`, `xz2`, `zip`, `toml`, `regex`, `semver` (ADR-0014 §3).
+  (rustls), `sha2`, `tar`, `flate2`, `xz2`, `zip`, `toml`, `regex`, `semver` (ADR-0014 §3);
+  `nix` on Unix (stopping a delegate's process group).
 - **Rule:** never executes anything not in an issued `InstallPlan`; never writes outside its
   managed root except the workspace's `.axiom/project.lock`.
 

@@ -70,6 +70,44 @@ class Doc {
       options: CodeLineOptions(lineBreak: lineBreakOf(text)),
       spanBuilder: _span,
     );
+    _shiftLines = controller.codeLines;
+    controller.addListener(_followLines);
+  }
+
+  /// The lines the server's decorations were last placed for.
+  CodeLines? _shiftLines;
+
+  /// Lines inserted or removed: the semantic tokens below the edit move with their lines, and the
+  /// diagnostics and highlights below it, which carry their own positions, go until the server
+  /// sends new ones, rather than showing on a neighbour's line (audit finding 16).
+  void _followLines() {
+    final now = controller.codeLines;
+    final before = _shiftLines;
+    if (identical(now, before)) return;
+    _shiftLines = now;
+    if (before == null || before.length == now.length) return;
+    final n = before.length < now.length ? before.length : now.length;
+    var at = 0;
+    while (at < n && before[at].text == now[at].text) {
+      at++;
+    }
+    final delta = now.length - before.length;
+    if (semantic.isNotEmpty) {
+      semantic = {
+        for (final e in semantic.entries)
+          if (e.key < at)
+            e.key: e.value
+          else if (e.key + delta > at || (delta > 0 && e.key + delta >= at))
+            e.key + delta: e.value,
+      };
+    }
+    if (diagnostics.isNotEmpty) {
+      _diagnosticsByLine = {
+        for (final e in _diagnosticsByLine.entries)
+          if (e.key < at) e.key: e.value,
+      };
+    }
+    if (highlights.isNotEmpty) highlights = const [];
   }
 
   final String path;

@@ -1,7 +1,8 @@
 // LSP snippets (M5.5-EDIT-001, ADR-0021 §7): `insertTextFormat: 2` text parsed into the text to
 // insert and its tab stops, as VS Code does: `$1`, `${1:default}` (nested), `${1|a,b|}` (the first
 // choice), `$0` (the final caret), variables (`$TM_FILENAME`, `${VAR:default}`) as their default or
-// nothing, and `\$`, `\}`, `\\` escapes.
+// nothing, transforms (`${1/regex/format/}`, `${VAR/…/…/}`) as nothing (the text they
+// transform is not known when the snippet is inserted), and `\$`, `\}`, `\\` escapes.
 
 /// A tab stop: its number and where it is in the inserted text (offsets; start == end for an empty
 /// stop). One number may appear more than once (mirrors): each occurrence is a range.
@@ -52,7 +53,31 @@ ParsedSnippet parseSnippet(String snippet) {
         final n = int.tryParse(name);
         i = head.end;
         final start = out.length;
-        if (i < snippet.length && snippet[i] == ':') {
+        var transform = false;
+        if (i < snippet.length && snippet[i] == '/') {
+          // A transform: `/regex/format/options` up to the `}`; skipped (audit finding 20).
+          transform = true;
+          // The format may hold `${1:/upcase}` and the like: their braces are nested.
+          var slashes = 0, depth = 0;
+          while (i < snippet.length && !(slashes >= 3 && depth == 0 && snippet[i] == '}')) {
+            final c = snippet[i];
+            if (c == '\\' && i + 1 < snippet.length) {
+              i += 2;
+              continue;
+            }
+            if (c == r'$' && i + 1 < snippet.length && snippet[i + 1] == '{') {
+              depth++;
+              i += 2;
+              continue;
+            }
+            if (c == '}' && depth > 0) {
+              depth--;
+            } else if (c == '/' && depth == 0) {
+              slashes++;
+            }
+            i++;
+          }
+        } else if (i < snippet.length && snippet[i] == ':') {
           i++;
           parse(inside: true);
         } else if (i < snippet.length && snippet[i] == '|') {
@@ -64,7 +89,7 @@ ParsedSnippet parseSnippet(String snippet) {
           i = close < 0 ? snippet.length : close + 1;
         }
         if (i < snippet.length && snippet[i] == '}') i++;
-        if (n != null) stops.add((index: n, start: start, end: out.length));
+        if (n != null && !transform) stops.add((index: n, start: start, end: out.length));
         continue;
       }
       out.write(ch);

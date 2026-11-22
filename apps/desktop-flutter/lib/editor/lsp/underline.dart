@@ -61,16 +61,17 @@ TextSpan applyStyles(
   List<({int start, int end, TextStyle style})> styles,
   int length,
 ) {
-  final byColour = <Color, TextStyle>{};
-  final ranges = [
-    for (final r in styles)
-      if (r.style.color != null && r.start < length)
-        (start: r.start.clamp(0, length), end: r.end.clamp(0, length), color: r.style.color!),
-  ];
+  // Each range keeps its own style: keyed by colour, the italic or strikethrough of one token
+  // went to every token of that colour on the line (audit finding 16).
+  final styleOf = <Underline, TextStyle>{};
+  final ranges = <Underline>[];
   for (final r in styles) {
-    if (r.style.color != null) byColour[r.style.color!] = r.style;
+    if (r.style.color == null || r.start >= length) continue;
+    final u = (start: r.start.clamp(0, length), end: r.end.clamp(0, length), color: r.style.color!);
+    ranges.add(u);
+    styleOf[u] = r.style;
   }
-  return _apply(span, ranges, (style, u) => style.merge(byColour[u.color]));
+  return _apply(span, ranges, (style, u) => style.merge(styleOf[u]));
 }
 
 /// The ranges of [highlights] (LSP ranges) on line [index].

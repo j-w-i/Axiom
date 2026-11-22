@@ -25,6 +25,9 @@ pub const CRASH_WINDOW: Duration = Duration::from_secs(180);
 pub const READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// `shutdown` + `exit`, then a kill.
 pub const STOP_GRACE: Duration = Duration::from_secs(2);
+
+/// Messages waiting for a server to read them, at most: more means it stopped reading.
+const OUT_QUEUE: usize = 8192;
 const STDERR_LINES: usize = 200;
 
 /// A server definition from a provider manifest (`[[lsp]]`), with the provider's id.
@@ -157,7 +160,7 @@ type Reply = Result<Value, LspError>;
 
 /// One running process and its conversation.
 struct Conn {
-    out: mpsc::UnboundedSender<Value>,
+    out: mpsc::Sender<Value>,
     pending: Mutex<HashMap<i64, oneshot::Sender<Reply>>>,
     next_id: AtomicI64,
     stderr: Arc<Mutex<VecDeque<String>>>,
@@ -197,7 +200,17 @@ impl Drop for Conn {
 
 impl Conn {
     fn send(&self, v: Value) -> bool {
-        self.out.send(v).is_ok()
+        match self.out.try_send(v) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                // The server has not read its input for [OUT_QUEUE] messages: it is hung. It is
+                // killed, which counts as a crash and restarts it (audit finding 15).
+                tracing::warn!("a language server stopped reading its input; killing it");
+                self.signal_group(true);
+                false
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => false,
+        }
     }
 
     fn notify(&self, method: &str, params: Value) -> bool {
@@ -855,7 +868,7 @@ fn spawn_conn(
         .stderr
         .take()
         .ok_or_else(|| std::io::Error::other("no stderr"))?;
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Value>();
+    let (out_tx, mut out_rx) = mpsc::channel::<Value>(OUT_QUEUE);
     let (exit_tx, exit_rx) = watch::channel(false);
     let conn = Arc::new(Conn {
         out: out_tx,
