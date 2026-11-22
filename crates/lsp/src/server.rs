@@ -173,22 +173,60 @@ struct Conn {
     /// workers, a JVM's, gradle daemons) are stopped with it. Unix only.
     #[cfg_attr(not(unix), allow(dead_code))]
     pgid: Option<u32>,
+    /// The server's output pipe (`pipe:[inode]`, Linux): a process that left the server's group
+    /// and tree (kotlin-lsp's launcher starts its JVM with setsid and exits) still holds it.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pipe: Option<String>,
     /// Becomes true when the process has exited (or its stdout closed).
     exited: watch::Receiver<bool>,
 }
 
 impl Conn {
-    /// The server's descendants now, each with its start time (Linux; elsewhere its process
-    /// group covers them).
+    /// The server's descendants now, and the processes holding its output pipe, each with its
+    /// start time (Linux; elsewhere its process group covers them).
     fn descendants(&self) -> Vec<(u32, String)> {
         #[cfg(target_os = "linux")]
         if let Some(pgid) = self.pgid {
-            return descendants(pgid)
+            let mut pids = descendants(pgid);
+            pids.extend(self.pipe_holders());
+            pids.sort_unstable();
+            pids.dedup();
+            return pids
                 .into_iter()
                 .filter_map(|pid| start_time(pid).map(|s| (pid, s)))
                 .collect();
         }
         Vec::new()
+    }
+
+    /// Other processes that hold the server's output pipe open (Linux).
+    #[cfg(target_os = "linux")]
+    fn pipe_holders(&self) -> Vec<u32> {
+        let Some(pipe) = &self.pipe else {
+            return Vec::new();
+        };
+        let me = std::process::id();
+        let mut out = Vec::new();
+        let Ok(procs) = std::fs::read_dir("/proc") else {
+            return out;
+        };
+        for p in procs.flatten() {
+            let Ok(pid) = p.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            if pid == me {
+                continue;
+            }
+            let Ok(fds) = std::fs::read_dir(p.path().join("fd")) else {
+                continue;
+            };
+            if fds.flatten().any(|fd| {
+                std::fs::read_link(fd.path()).is_ok_and(|l| l.as_os_str() == pipe.as_str())
+            }) {
+                out.push(pid);
+            }
+        }
+        out
     }
 
     /// Signals the server's whole process group: SIGKILL when [hard], else SIGTERM. A group
@@ -205,7 +243,7 @@ impl Conn {
             // Descendants that left the group for a session of their own (kotlin-lsp's launcher
             // starts its JVM with setsid) are found by their parents while the server runs.
             #[cfg(target_os = "linux")]
-            for pid in descendants(pgid) {
+            for pid in descendants(pgid).into_iter().chain(self.pipe_holders()) {
                 let _ = kill(nix::unistd::Pid::from_raw(pid as i32), sig);
             }
             let _ = killpg(nix::unistd::Pid::from_raw(pgid as i32), sig);
@@ -950,6 +988,15 @@ fn spawn_conn(
         .stdout
         .take()
         .ok_or_else(|| std::io::Error::other("no stdout"))?;
+    #[cfg(target_os = "linux")]
+    let pipe = {
+        use std::os::fd::AsRawFd;
+        std::fs::read_link(format!("/proc/self/fd/{}", stdout.as_raw_fd()))
+            .ok()
+            .map(|l| l.to_string_lossy().into_owned())
+    };
+    #[cfg(not(target_os = "linux"))]
+    let pipe = None;
     let stderr = child
         .stderr
         .take()
@@ -962,6 +1009,7 @@ fn spawn_conn(
         next_id: AtomicI64::new(1),
         stderr: Arc::new(Mutex::new(VecDeque::new())),
         pgid,
+        pipe,
         child: tokio::sync::Mutex::new(child),
         exited: exit_rx,
     });

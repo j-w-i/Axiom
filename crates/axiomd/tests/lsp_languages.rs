@@ -155,8 +155,9 @@ async fn a_missing_server_names_the_provider_to_install() {
     assert_eq!(fake.install_provider.as_deref(), Some("lsp-fake"));
 }
 
-/// A stopped server's children go with it (its process group is killed), and a closed
-/// workspace's server stays stopped (audit finding 4).
+/// A stopped server's children go with it, even one in a session of its own that is no longer
+/// its child (kotlin-lsp's JVM, found by the server's pipe it holds), and a closed workspace's
+/// server stays stopped (audit finding 4).
 #[tokio::test]
 async fn closing_the_workspace_stops_the_server_and_its_children() {
     let data = tempfile::tempdir().unwrap();
@@ -183,7 +184,18 @@ async fn closing_the_workspace_stops_the_server_and_its_children() {
         })
         .await
         .unwrap();
-    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    // The child writes its own pid (it forks away first).
+    let mut pid = String::new();
+    for _ in 0..50 {
+        if let Ok(p) = std::fs::read_to_string(&pid_file) {
+            if !p.trim().is_empty() {
+                pid = p;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(!pid.is_empty(), "the server's child wrote no pid");
     let alive = |pid: &str| {
         let out = std::process::Command::new("ps")
             .args(["-o", "stat=", "-p", pid.trim()])

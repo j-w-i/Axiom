@@ -86,14 +86,19 @@ fn publish(uri: &str, text: &str, version: Option<i64>) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--child-pid-file") {
-        if let (Some(path), Ok(child)) = (
-            args.get(i + 1),
-            // In a session of its own (`setsid`, as kotlin-lsp starts its JVM): out of the group.
-            std::process::Command::new("setsid")
-                .args(["sleep", "300"])
-                .spawn(),
-        ) {
-            let _ = std::fs::write(path, child.id().to_string());
+        if let Some(path) = args.get(i + 1) {
+            // In a session of its own and no longer its child (`setsid --fork`: the forking parent
+            // exits at once, as kotlin-lsp's launcher does), holding fake-lsp's output pipe: out of
+            // the group and the tree. It writes its own pid.
+            let _ = std::process::Command::new("setsid")
+                .args([
+                    "--fork",
+                    "sh",
+                    "-c",
+                    "echo $$ > \"$0\"; exec sleep 300",
+                    path,
+                ])
+                .spawn();
         }
     }
     let stdin = std::io::stdin();
