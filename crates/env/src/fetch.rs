@@ -199,12 +199,20 @@ impl Http {
                     .collect()
             }
         };
-        // Pre-releases (a `-` suffix, e.g. `27.0.0-alpha.0`) are never offered (M2-PROV-001).
-        out.retain(|v| crate::install::valid_version(v) && !v.contains('-'));
+        // Pre-releases (e.g. `27.0.0-alpha.0`) are never offered (M2-PROV-001).
+        out.retain(|v| crate::install::valid_version(v) && !is_prerelease(v));
         out.sort_by(|a, b| compare_versions(b, a));
         out.dedup();
         Ok(out)
     }
+}
+
+/// A pre-release: a `-` followed by a part with a letter (`27.0.0-alpha.0`, `1.2.0-rc1`). A date
+/// version (`2026-02-08`, rust-analyzer's and Marksman's) is not one; treating every `-` as a
+/// pre-release left those providers with no version to install.
+pub(crate) fn is_prerelease(v: &str) -> bool {
+    v.split_once('-')
+        .is_some_and(|(_, rest)| rest.bytes().any(|b| b.is_ascii_alphabetic()))
 }
 
 fn is_loopback_http(u: &reqwest::Url) -> bool {
@@ -302,6 +310,34 @@ pub fn digest_from_checksum_file(text: &str, file_name: &str) -> Option<String> 
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn date_versions_are_releases_and_suffixes_with_letters_are_not() {
+        for v in ["2026-02-08", "2026-11-16", "1.2.3", "20.0.1"] {
+            assert!(!super::is_prerelease(v), "{v}");
+        }
+        for v in [
+            "27.0.0-alpha.0",
+            "1.2.0-rc1",
+            "3.0.0-beta",
+            "0.9.0-nightly.20260101",
+        ] {
+            assert!(super::is_prerelease(v), "{v}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_static_date_version_is_offered() {
+        let http = Http::new(HttpConfig::default()).unwrap();
+        let v = http
+            .versions(&VersionSource::Static {
+                versions: vec!["2026-02-08".into(), "2026-11-16".into()],
+            })
+            .await
+            .unwrap();
+        assert_eq!(v, ["2026-11-16", "2026-02-08"]);
+    }
+
     use super::*;
     use serde_json::json;
 

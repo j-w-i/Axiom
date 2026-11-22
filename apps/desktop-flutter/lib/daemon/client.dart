@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -377,7 +378,12 @@ class DaemonClient {
     conn.pumping = true;
     try {
       while (conn.lines.isNotEmpty) {
-        final wasResponse = _line(conn, conn.lines.removeFirst());
+        final bytes = conn.lines.removeFirst();
+        // A large line (a file's text) is decoded off the UI thread; the pump waits for it, so
+        // the order of lines is kept (audit finding 8).
+        final wasResponse = bytes.length >= _offThreadBytes
+            ? _message(conn, await _decodeOffThread(bytes))
+            : _line(conn, bytes);
         if (wasResponse && conn.lines.isNotEmpty) await Future<void>.delayed(Duration.zero);
       }
     } finally {
@@ -385,12 +391,34 @@ class DaemonClient {
     }
   }
 
+  /// Lines from this size are decoded on another isolate.
+  static const _offThreadBytes = 256 * 1024;
+
+  /// The decoded line, or [_notJson] when it is not JSON.
+  static Future<Object?> _decodeOffThread(List<int> bytes) async {
+    try {
+      return await Isolate.run(() => jsonDecode(utf8.decode(bytes, allowMalformed: false)));
+    } on Object {
+      return _notJson;
+    }
+  }
+
+  static const _notJson = Object();
+
   /// Handles one line; true when it answered a request.
   bool _line(_Connection conn, List<int> bytes) {
-    final Object? msg;
+    Object? msg;
     try {
       msg = jsonDecode(utf8.decode(bytes, allowMalformed: false));
     } on FormatException {
+      msg = _notJson;
+    }
+    return _message(conn, msg);
+  }
+
+  /// Handles one decoded line; true when it answered a request.
+  bool _message(_Connection conn, Object? msg) {
+    if (identical(msg, _notJson)) {
       _protocolFailure(conn, 'The backend sent a line that is not JSON.');
       return false;
     }

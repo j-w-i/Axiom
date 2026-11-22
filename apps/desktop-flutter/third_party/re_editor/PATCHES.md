@@ -66,3 +66,25 @@ for up to 54 ms in `CopyMutableObjectGraph`; each keystroke paid the copy too.
 
 `integration_test/frames_test.dart` measures tab switching and checks that the tab left showing
 is highlighted afterwards.
+
+## Where a text position is drawn; no endless rebuild (FL-EDIT-003)
+- `lib/src/_code_field.dart`: `codeEditorPositionRect(root, position, ancestor:)` returns the
+  rectangle of the position's line from the render's own layout, in an ancestor's coordinates.
+  The shell places the completion list and the signature card with it. Arithmetic from the font
+  size had drifted about a line off by line 200, so the list covered the line being typed.
+- `_buildDisplayRenderParagraphs` starts at most at the last line that both the render and the
+  highlighter have. Starting past them built nothing, and `_updateDisplayRenderParagraphs`
+  retried until the stack overflowed: a long document shrinking while scrolled far down. The
+  M5.5-EDIT-001 bound had introduced this.
+
+## Whole highlight scopes (2026-11-22)
+`lib/src/_code_highlight.dart`: upstream kept only the first part of a scope
+(`title.function` became `title`), so a theme could not tell a function's name from a class's.
+- The renderer keeps the whole scope.
+- `_findStyle` tries the most specific part first (`title.function.invoke`, then
+  `title.function`, then `title`).
+- It still tries nested names (`function-title`) whole and then without their outer parts.
+
+`test/editor/highlight_colours_test.dart` resolves scopes the same way and checks every fixture
+gets several colours. `test/editor/highlight_pipeline_test.dart` checks that results reach each
+editor through the shared workers.

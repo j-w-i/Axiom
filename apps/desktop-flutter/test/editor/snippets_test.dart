@@ -52,4 +52,10 @@ void main() {
     expect(w, contains('total'));
     expect(w, isNot(contains('if')));
   });
+
+  test('transforms insert nothing and leave no text behind (audit finding 20)', () {
+    final s = parseSnippet(r'${1:name} ${1/(.*)/${1:/upcase}/} ${TM_FILENAME/(.*)\..+$/$1/} end');
+    expect(s.text, 'name   end');
+    expect(s.stops.where((x) => x.index == 1).length, 1);
+  });
 }

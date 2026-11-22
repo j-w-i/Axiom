@@ -30,7 +30,84 @@ const splitPathsKey = 'editor.splitPaths';
 const splitActiveKey = 'editor.splitActive';
 const _tabSaveDebounce = Duration(milliseconds: 500);
 
-String titleOf(String path) => path.split('/').last;
+String titleOf(String path) => isExternal(path)
+    ? (Uri.tryParse(path)?.pathSegments.where((s) => s.isNotEmpty).lastOrNull ?? path)
+    : path.split('/').last;
+
+/// A document outside the workspace: its path is the URI a language server gave. A `file://` one
+/// (an SDK's or a dependency's source) the daemon reads, read-only, because the server pointed to
+/// it (protocol 0.4, ADR-0018 §2); another scheme's text comes from the server itself (jdtls's
+/// `jdt://` class files). It is never saved.
+bool isExternal(String path) => RegExp(r'^[a-z][a-z0-9+.-]+:/').hasMatch(path);
+
+/// The name a document's language is detected from: a class file's source is Java, an
+/// assembly's (csharp-ls's `csharp:/metadata/…`) C#.
+String _languageName(String path) => path.startsWith('jdt://')
+    ? '${titleOf(path).replaceAll(RegExp(r'\.class$'), '')}.java'
+    : path.startsWith('csharp:')
+    ? '${titleOf(path).replaceAll(RegExp(r'\.cs$'), '')}.cs'
+    : path;
+
+/// Languages whose calls and members get their colours from the structural pass when the grammar
+/// leaves them plain ([applyStructure]), by highlight.js name: code, not data or prose.
+const structuredLanguages = {
+  'arduino',
+  'bash',
+  'c',
+  'cpp',
+  'crystal',
+  'csharp',
+  'd',
+  'dart',
+  'elixir',
+  'erlang',
+  'fsharp',
+  'go',
+  'groovy',
+  'haskell',
+  'java',
+  'javascript',
+  'julia',
+  'kotlin',
+  'lua',
+  'nim',
+  'objectivec',
+  'ocaml',
+  'perl',
+  'php',
+  'powershell',
+  'python',
+  'r',
+  'ruby',
+  'rust',
+  'scala',
+  'sql',
+  'swift',
+  'typescript',
+  'vbnet',
+};
+
+/// The file's line break: the first one in it (CRLF, CR or LF), LF when it has none. The
+/// editor joins lines with it, so a CRLF file is the same bytes until edited and is saved with
+/// CRLF (requirement E-3; audit finding 2).
+TextLineBreak lineBreakOf(String text) {
+  final i = text.indexOf(RegExp('[\r\n]'));
+  if (i < 0 || text[i] == '\n') return TextLineBreak.lf;
+  return i + 1 < text.length && text[i + 1] == '\n' ? TextLineBreak.crlf : TextLineBreak.cr;
+}
+
+/// The length of [lines] joined with a [breakLength]-character line break, without joining
+/// them; null when a line has folded lines inside (they are counted by joining).
+int? textLength(CodeLines lines, int breakLength) {
+  final n = lines.length;
+  var length = n > 0 ? (n - 1) * breakLength : 0;
+  for (var i = 0; i < n; i++) {
+    final line = lines[i];
+    if (line.chunks.isNotEmpty) return null;
+    length += line.text.length;
+  }
+  return length;
+}
 
 String _firstLine(String text) {
   final i = text.indexOf('\n');
@@ -41,9 +118,51 @@ class Doc {
   Doc({required this.path, required String text, required this.savedVersion})
     : _savedText = text,
       languageNotifier = ValueNotifier(
-        Languages.instance.detect(path, firstLine: _firstLine(text)),
+        Languages.instance.detect(_languageName(path), firstLine: _firstLine(text)),
       ) {
-    controller = CodeLineEditingController(codeLines: CodeLines.fromText(text), spanBuilder: _span);
+    controller = CodeLineEditingController(
+      codeLines: CodeLines.fromText(text),
+      options: CodeLineOptions(lineBreak: lineBreakOf(text)),
+      spanBuilder: _span,
+    );
+    _shiftLines = controller.codeLines;
+    controller.addListener(_followLines);
+  }
+
+  /// The lines the server's decorations were last placed for.
+  CodeLines? _shiftLines;
+
+  /// Lines inserted or removed: the semantic tokens below the edit move with their lines, and the
+  /// diagnostics and highlights below it, which carry their own positions, go until the server
+  /// sends new ones, rather than showing on a neighbour's line (audit finding 16).
+  void _followLines() {
+    final now = controller.codeLines;
+    final before = _shiftLines;
+    if (identical(now, before)) return;
+    _shiftLines = now;
+    if (before == null || before.length == now.length) return;
+    final n = before.length < now.length ? before.length : now.length;
+    var at = 0;
+    while (at < n && before[at].text == now[at].text) {
+      at++;
+    }
+    final delta = now.length - before.length;
+    if (semantic.isNotEmpty) {
+      semantic = {
+        for (final e in semantic.entries)
+          if (e.key < at)
+            e.key: e.value
+          else if (e.key + delta > at || (delta > 0 && e.key + delta >= at))
+            e.key + delta: e.value,
+      };
+    }
+    if (diagnostics.isNotEmpty) {
+      _diagnosticsByLine = {
+        for (final e in _diagnosticsByLine.entries)
+          if (e.key < at) e.key: e.value,
+      };
+    }
+    if (highlights.isNotEmpty) highlights = const [];
   }
 
   final String path;
@@ -60,6 +179,9 @@ class Doc {
   /// Underline colours by LSP severity (set by the editor from the theme).
   Color Function(int severity) underlineColor = (_) => AxiomColors.dark.danger;
 
+  /// The code colours (set by the editor from the theme).
+  SyntaxColors syntax = AxiomColors.dark.syntax;
+
   TextSpan _span({
     required BuildContext context,
     required int index,
@@ -68,6 +190,9 @@ class Doc {
     required TextStyle style,
   }) {
     var span = textSpan;
+    if (structuredLanguages.contains(language.hljs)) {
+      span = applyStructure(span, syntax.text, syntax.function, syntax.variable);
+    }
     final sem = semantic[index];
     if (sem != null && sem.isNotEmpty) span = applyStyles(span, sem, codeLine.text.length);
     if (highlights.isNotEmpty) {
@@ -77,11 +202,9 @@ class Doc {
         highlightColor,
       );
     }
-    if (diagnostics.isEmpty) return span;
-    return applyUnderlines(
-      span,
-      underlinesOn(index, codeLine.text.length, diagnostics, underlineColor),
-    );
+    final onLine = _diagnosticsByLine[index];
+    if (onLine == null) return span;
+    return applyUnderlines(span, underlinesOn(index, codeLine.text.length, onLine, underlineColor));
   }
 
   /// The server's semantic tokens by line, over the grammar's colours (ADR-0021 §2).
@@ -108,9 +231,26 @@ class Doc {
   /// New diagnostics: redraw the lines.
   void setDiagnostics(List<LspDiagnostic> list) {
     diagnostics = list;
+    // Indexed by line once, so building a line looks at its own diagnostics only, not every
+    // diagnostic in the file (audit finding 12). A range over many lines is indexed on its
+    // first and last 200 lines.
+    final byLine = <int, List<LspDiagnostic>>{};
+    for (final d in list) {
+      final first = d.range.start.line, last = d.range.end.line;
+      for (var i = first; i <= last; i++) {
+        if (i - first >= 200 && last - i >= 200) {
+          i = last - 200;
+          continue;
+        }
+        (byLine[i] ??= []).add(d);
+      }
+    }
+    _diagnosticsByLine = byLine;
     controller.forceRepaint();
     _secondary?.forceRepaint();
   }
+
+  Map<int, List<LspDiagnostic>> _diagnosticsByLine = const {};
 
   String savedVersion;
   String _savedText;
@@ -126,7 +266,11 @@ class Doc {
   CodeLineEditingController get secondary {
     final existing = _secondary;
     if (existing != null) return existing;
-    final c = CodeLineEditingController(codeLines: controller.codeLines, spanBuilder: _span);
+    final c = CodeLineEditingController(
+      codeLines: controller.codeLines,
+      options: controller.options,
+      spanBuilder: _span,
+    );
     void fromPrimary() {
       if (_syncing || identical(c.codeLines, controller.codeLines)) return;
       _syncing = true;
@@ -164,6 +308,9 @@ class Doc {
   }
 
   String get title => titleOf(path);
+
+  /// Outside the workspace: read-only (see [isExternal]).
+  bool get readOnly => isExternal(path);
   String get text => controller.text;
 
   /// Recomputes [dirty]; true when it changed.
@@ -175,7 +322,10 @@ class Doc {
     final lines = controller.codeLines;
     if (identical(lines, _dirtyLines)) return false;
     _dirtyLines = lines;
-    final now = controller.text != _savedText;
+    // A different length is a difference, found without joining the document (most edits);
+    // only an edit that keeps the length compares the text (audit finding 8).
+    final length = textLength(lines, controller.options.lineBreak.value.length);
+    final now = (length != null && length != _savedText.length) || controller.text != _savedText;
     if (now == dirty) return false;
     dirty = now;
     return true;
@@ -269,6 +419,18 @@ class DocumentsStore extends ChangeNotifier {
   // ---- opening -------------------------------------------------------------------------
 
   /// Opens [path] (or shows it if open), optionally at [line]:[column] (1-based).
+  /// Opens a read-only document whose [text] a language server gave (a class file's source), or
+  /// shows it when it is open.
+  Future<void> openText(String path, String text, {int? line, int? column}) async {
+    if (line != null) pendingReveal = (path: path, line: line, column: column ?? 1);
+    focusRequest = path;
+    if (doc(path) == null) {
+      docs.add(Doc(path: path, text: text, savedVersion: ''));
+    }
+    _setActive(path);
+    notifyListeners();
+  }
+
   Future<void> open(
     String path, {
     int? line,
@@ -516,7 +678,7 @@ class DocumentsStore extends ChangeNotifier {
 
   Future<void> save(String path) async {
     final d = doc(path);
-    if (d == null) return;
+    if (d == null || d.readOnly) return;
     try {
       await beforeSave?.call(d);
     } on Object {
@@ -696,8 +858,12 @@ class DocumentsStore extends ChangeNotifier {
         SetStateParams(
           workspaceId: workspace.id,
           values_: {
-            openPathsKey: [for (final d in docs) d.path],
-            activePathKey: activePath.isEmpty ? null : activePath,
+            // Files outside the workspace are readable only while their server pointed to them.
+            openPathsKey: [
+              for (final d in docs)
+                if (!d.readOnly) d.path,
+            ],
+            activePathKey: activePath.isEmpty || isExternal(activePath) ? null : activePath,
             splitPathsKey: split?.paths,
             splitActiveKey: split?.active,
           },

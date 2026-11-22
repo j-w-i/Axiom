@@ -88,7 +88,19 @@ adds SDK providers where none exists: Go, Java (Eclipse Temurin JDK 21), .NET, D
 implementation (M5.5-PROV-002): .NET 8 reached end of life on 2026-11-10 and csharp-ls 0.29 needs
 .NET 11; Microsoft publishes SHA-512 digests only and Axiom's installer verifies SHA-256, so the
 `dotnet` provider detects an installed SDK and names where to get one, and does not install it
-in M5.5. A server
+in M5.5. Amended again (2026-11-22, the owner: C# and Swift must work):
+- **.NET:** manifests and plans gain SHA-512 checksums (additive: manifest checksum kind
+  `sha512`, plan `Sha256Source.sha512Digest`), so `dotnet` installs the .NET 11 SDK, verified by
+  Microsoft's digests and exporting `DOTNET_ROOT`.
+- **Swift on Linux:** a `swift` provider installs a pinned toolchain through swiftly (Swift's
+  own installer, which checks each toolchain's PGP signature). swiftly is bootstrapped into the
+  install root with a SHA-256 pinned after checking swift.org's signature. Archive methods gain
+  `linux_names` (`${linux}` in `setup`) for swiftly's `--platform`. SourceKit-LSP `requires`
+  Swift.
+- **On macOS**, Xcode brings Swift.
+- **Kotlin** (kotlin-lsp, Alpha) gives no completion and is left not working for now.
+
+A server
 that needs an SDK names it in `[[lsp]]`:
 
 ```toml

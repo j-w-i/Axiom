@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:isolate';
 // The editor area (FL-EDIT-001): tabs, breadcrumbs, the banner, the code view for the active
 // document, the right group, and the find bar. Each open document keeps its own editor state;
 // switching tabs shows the one already laid out (no model swap, unlike Monaco's 17 ms).
@@ -378,7 +379,9 @@ class _Breadcrumbs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
-    final parts = path.split('/');
+    final parts = isExternal(path)
+        ? Uri.parse(path).pathSegments.where((s) => s.isNotEmpty).toList()
+        : path.split('/');
     return SizedBox(
       height: 24,
       child: Padding(
@@ -386,22 +389,48 @@ class _Breadcrumbs extends StatelessWidget {
         child: Semantics(
           label: 'Path: ${parts.join(' › ')}',
           excludeSemantics: true,
-          child: Row(
-            children: [
-              for (var i = 0; i < parts.length; i++) ...[
-                if (i > 0)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: AxiomIcon(AxiomIcons.chevron, size: 12, color: t.colors.ink3),
-                  ),
-                Text(
-                  parts[i],
-                  style: t.type.small.copyWith(
-                    color: i == parts.length - 1 ? t.colors.ink : t.colors.ink2,
-                  ),
+          // A path longer than the bar (an SDK's file, a deep folder) keeps its end in view, the
+          // file's name, and its start is cut, as VS Code does: never an overflow.
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final row = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < parts.length; i++) ...[
+                    if (i > 0)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: AxiomIcon(AxiomIcons.chevron, size: 12, color: t.colors.ink3),
+                      ),
+                    Text(
+                      parts[i],
+                      maxLines: 1,
+                      softWrap: false,
+                      style: t.type.small.copyWith(
+                        color: i == parts.length - 1 ? t.colors.ink : t.colors.ink2,
+                      ),
+                    ),
+                  ],
+                ],
+              );
+              var width = (parts.length - 1) * 20.0;
+              for (final part in parts) {
+                width += (TextPainter(
+                  text: TextSpan(text: part, style: t.type.small),
+                  textDirection: TextDirection.ltr,
+                  maxLines: 1,
+                  textScaler: MediaQuery.textScalerOf(context),
+                )..layout()).width;
+              }
+              if (width <= box.maxWidth) return Align(alignment: Alignment.centerLeft, child: row);
+              return ClipRect(
+                child: OverflowBox(
+                  maxWidth: double.infinity,
+                  alignment: Alignment.centerRight,
+                  child: row,
                 ),
-              ],
-            ],
+              );
+            },
           ),
         ),
       ),
@@ -567,10 +596,22 @@ class _DocViewState extends State<_DocView> {
   }
 
   Future<void> _computeMarks() async {
+    if (widget.doc.readOnly) return; // outside the workspace: not in its repository
     final seq = ++_marksSeq;
     final head = await app.git.headText(widget.doc.path);
     if (!mounted || seq != _marksSeq) return;
-    gitMarks.value = head == null ? const {} : gutterMarks(head, _controller.text);
+    if (head == null) {
+      gitMarks.value = const {};
+      return;
+    }
+    final now = _controller.text;
+    // A large file's diff runs on another isolate (the strings are shared, not copied), so the
+    // UI thread does not align thousands of lines after an edit (audit finding 8).
+    final marks = _controller.codeLines.length > 2000
+        ? await Isolate.run(() => gutterMarks(head, now))
+        : gutterMarks(head, now);
+    if (!mounted || seq != _marksSeq) return;
+    gitMarks.value = marks;
   }
 
   @override
@@ -645,6 +686,7 @@ class _DocViewState extends State<_DocView> {
     final s = app.settings;
     final c = context.colors;
     widget.doc.highlightColor = c.accentSoft;
+    widget.doc.syntax = c.syntax;
     widget.doc.underlineColor = (severity) => switch (severity) {
       1 => c.danger,
       2 => c.warn,
@@ -674,6 +716,7 @@ class _DocViewState extends State<_DocView> {
                 controller: _controller,
                 geometry: CodeGeometry(
                   fontSize: s.editorFontSize.toDouble(),
+                  fontFamily: s.editorFontFamily,
                   gutterKey: _gutter,
                   scroll: _scroll,
                 ),
@@ -685,6 +728,7 @@ class _DocViewState extends State<_DocView> {
                       valueListenable: widget.doc.languageNotifier,
                       builder: (context, language, _) => CodeView(
                         controller: _controller,
+                        readOnly: widget.doc.readOnly,
                         language: language,
                         focusNode: widget.focusNode,
                         scrollController: _scroll,

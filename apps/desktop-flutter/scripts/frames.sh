@@ -21,4 +21,13 @@ for _ in $(seq 80); do [[ -S "$XDG_RUNTIME_DIR/$sock" ]] && break; sleep 0.1; do
 unset DISPLAY
 export WAYLAND_DISPLAY="$sock" GDK_BACKEND=wayland AXIOM_WINDOW_SIZE="${AXIOM_WINDOW_SIZE:-2040x1120}"
 cd "$here"
-flutter drive --profile -d linux --driver=test_driver/integration_test.dart --target=integration_test/${AXIOM_FRAMES_TARGET:-frames_test.dart}
+log="$(mktemp)"
+trap 'kill $kwin 2>/dev/null || true; rm -f "$log"' EXIT
+flutter drive --profile -d linux --driver=test_driver/integration_test.dart \
+  --target=integration_test/${AXIOM_FRAMES_TARGET:-frames_test.dart} 2>&1 | tee "$log"
+# The frames were measured through the runner's direct commit (FL-PERF-004): a Flutter upgrade
+# that bypasses the hook would measure GTK's redraw path instead (audit finding 11).
+if [[ -z "${AXIOM_GTK_REDRAW:-}" ]] && ! grep -q "presented by committing the window surface" "$log"; then
+  echo "frames.sh: the runner's direct commit was not used (runner/wayland_present.cc)" >&2
+  exit 1
+fi

@@ -4410,6 +4410,8 @@ sealed class Sha256Source implements Wire {
         return Sha256SourceDigest.fromJson(m);
       case 'url':
         return Sha256SourceUrl.fromJson(m);
+      case 'sha512Digest':
+        return Sha256SourceSha512Digest.fromJson(m);
     }
     throw FormatException('Sha256Source: unknown kind ${m['kind']}');
   }
@@ -4446,6 +4448,22 @@ final class Sha256SourceUrl extends Sha256Source {
 
   @override
   Map<String, Object?> toJson() => {'kind': 'url', 'url': url};
+}
+
+/// A SHA-512 digest from the manifest (lowercase hex), for publishers that give no SHA-256.
+/// M5.5, additive.
+final class Sha256SourceSha512Digest extends Sha256Source {
+  const Sha256SourceSha512Digest({required this.value});
+
+  final String value;
+
+  static Sha256SourceSha512Digest fromJson(Object? json) {
+    final m = asMap(json);
+    return Sha256SourceSha512Digest(value: m['value'] as String);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'kind': 'sha512Digest', 'value': value};
 }
 
 final class ShowParams implements Wire {
@@ -4738,7 +4756,8 @@ sealed class Step implements Wire {
   Map<String, Object?> toJson();
 }
 
-/// Download into the cache; verified against `sha256` before anything uses it.
+/// Download into the cache; verified against `sha256` (a SHA-256 digest, a checksum file,
+/// or a SHA-512 digest) before anything uses it.
 final class StepDownload extends Step {
   const StepDownload({this.bytes, required this.sha256, required this.url});
 

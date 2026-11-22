@@ -139,6 +139,9 @@ Additive manifest fields (all optional; older manifests are unchanged):
 | `format = "gz"` | artifact | M5.5: one gzip-compressed executable, decompressed to the root under the URL's last segment without `.gz` |
 | `file_name` | `file`/`gz` artifact | M5.5: the executable's name in the root when the URL's is not it (`marksman-linux-x64` → `marksman`) |
 | `versions` | `delegate` | the installable versions; absent = `list_versions` through the delegate on `PATH` |
+| `checksum = { kind = "sha512", values = {…} }` | artifact | M5.5: per-version SHA-512 digests (128 hex), for publishers with no SHA-256 (Microsoft's .NET); the plan's download step carries `sha512Digest` |
+| `linux_names = [{ ids, min_version?, name }]` | `archive` | M5.5: the method's name for this Linux host, as `${linux}` in `setup`: the first entry whose `ids` holds os-release `ID` with `VERSION_ID` ≥ `min_version`, or (no `min_version`) one of `ID_LIKE`; no match = unsupported platform (swiftly's `--platform`) |
+| `bin_dirs` with `${version}` | `archive`, `delegate` | M5.5: expands to the installed version (`toolchains/${version}/usr/bin`, a toolchain manager's layout) |
 
 - A delegate plan is: the bootstrap archive's steps when an `archive` method `provides` the
   `using` tool for this host (download, place, `setup`), else the delegate from `PATH`, else
@@ -248,8 +251,9 @@ M5.5 (ADR-0021 §3, §4, §6; additive):
 ## Template variables
 
 Only these expand, and only in the fields documented as templates:
-`${version}`, `${root}` (managed install root), `${workspace}`. No shell
-evaluation, no nested expansion. An unknown `${…}` is a validation error.
+`${version}`, `${root}` (managed install root), `${workspace}`; `${linux}` in an archive's
+`setup` when the method declares `linux_names` (M5.5). No shell evaluation, no nested
+expansion. An unknown `${…}` is a validation error.
 
 ## Errors
 

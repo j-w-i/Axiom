@@ -55,9 +55,26 @@ impl Documents {
         self.docs.is_empty()
     }
 
+    /// A `didChange` older than the mirror's version of its document: it arrived after a newer
+    /// one, and applying or forwarding it would put the change on the wrong text.
+    pub fn is_stale(&self, method: &str, params: &Value) -> bool {
+        if method != "textDocument/didChange" {
+            return false;
+        }
+        let uri = params["textDocument"]["uri"].as_str().unwrap_or_default();
+        match (
+            self.docs.get(uri),
+            params["textDocument"]["version"].as_i64(),
+        ) {
+            (Some(doc), Some(v)) => v <= doc.version,
+            _ => false,
+        }
+    }
+
     /// Applies a sync notification. Other methods are ignored. Returns false when the
-    /// notification does not fit the mirror (unknown document, bad range): the caller forwards
-    /// it anyway; the server is the authority.
+    /// notification does not fit the mirror (unknown document, bad range), and then leaves the
+    /// document as it was: a change is applied whole or not at all. The caller forwards it
+    /// anyway; the server is the authority.
     pub fn apply(&mut self, method: &str, params: &Value) -> bool {
         let uri = params["textDocument"]["uri"].as_str().unwrap_or_default();
         match method {
@@ -82,13 +99,14 @@ impl Documents {
                 let Some(changes) = params["contentChanges"].as_array() else {
                     return false;
                 };
+                let mut text = doc.text.clone();
                 for c in changes {
                     let Some(new) = c["text"].as_str() else {
                         return false;
                     };
                     let range = &c["range"];
                     if range.is_null() {
-                        doc.text = new.to_string();
+                        text = new.to_string();
                         continue;
                     }
                     let pos = |p: &Value| {
@@ -99,13 +117,14 @@ impl Documents {
                     };
                     let (sl, sc) = pos(&range["start"]);
                     let (el, ec) = pos(&range["end"]);
-                    let a = offset_of(&doc.text, sl, sc);
-                    let b = offset_of(&doc.text, el, ec);
+                    let a = offset_of(&text, sl, sc);
+                    let b = offset_of(&text, el, ec);
                     if a > b {
                         return false;
                     }
-                    doc.text.replace_range(a..b, new);
+                    text.replace_range(a..b, new);
                 }
+                doc.text = text;
                 if let Some(v) = params["textDocument"]["version"].as_i64() {
                     doc.version = v;
                 }
@@ -118,6 +137,27 @@ impl Documents {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_older_change_is_stale_and_a_bad_change_applies_nothing() {
+        let mut d = super::Documents::default();
+        let open = serde_json::json!({"textDocument":{"uri":"u","languageId":"rust","version":1,"text":"ab\ncd"}});
+        assert!(d.apply("textDocument/didOpen", &open));
+        let change = |v: i64, sl: u64, el: u64| {
+            serde_json::json!({"textDocument":{"uri":"u","version":v},"contentChanges":[
+                {"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"text":"X"},
+                {"range":{"start":{"line":sl,"character":1},"end":{"line":el,"character":0}},"text":"Y"}]})
+        };
+        assert!(!d.is_stale("textDocument/didChange", &change(2, 0, 0)));
+        // The second range runs backwards: nothing of the change is applied.
+        assert!(!d.apply("textDocument/didChange", &change(2, 1, 0)));
+        assert_eq!(d.get("u").unwrap().text, "ab\ncd");
+        assert_eq!(d.get("u").unwrap().version, 1);
+        assert!(d.apply("textDocument/didChange", &change(3, 0, 1)));
+        assert_eq!(d.get("u").unwrap().text, "XYcd");
+        assert!(d.is_stale("textDocument/didChange", &change(3, 0, 1)));
+        assert!(d.is_stale("textDocument/didChange", &change(2, 0, 1)));
+    }
+
     use super::*;
     use serde_json::json;
 

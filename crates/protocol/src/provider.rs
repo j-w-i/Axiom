@@ -146,9 +146,15 @@ pub enum InstallMethod {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         provides: Vec<String>,
         /// argv run once after extraction, inside the new root, with `env`; `${root}` and
-        /// `${version}` expand. Never through a shell. Added in M2-ENV-003.
+        /// `${version}` expand, and `${linux}` (see `linux_names`). Never through a shell. Added
+        /// in M2-ENV-003.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         setup: Vec<String>,
+        /// The provider's names for Linux hosts, as `${linux}` in `setup`: the first entry that
+        /// matches this host's os-release. A host none matches cannot use the method (unsupported
+        /// platform). M5.5, additive (swiftly's `--platform`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        linux_names: Vec<LinuxName>,
     },
     /// Delegate to the ecosystem's own installer (rustup, swiftly, uv...).
     /// Runs with managed HOME-style variables so nothing global is modified
@@ -250,7 +256,19 @@ pub enum ArchiveFormat {
     Gz,
 }
 
-/// Integrity is mandatory: an artifact without a verifiable SHA-256 is not
+/// One name for a family of Linux hosts. Matches when os-release `ID` is in `ids` and
+/// `VERSION_ID` is at least `min_version` (if given), or, for an entry without `min_version`,
+/// when one of `ID_LIKE` is in `ids`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LinuxName {
+    pub ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_version: Option<String>,
+    pub name: String,
+}
+
+/// Integrity is mandatory: an artifact without a verifiable SHA-256 (or SHA-512) is not
 /// installable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -259,6 +277,9 @@ pub enum Checksum {
     Sha256 { values: BTreeMap<String, String> },
     /// URL template of a checksum file (`sha256sum` format or bare digest).
     Sha256Url { url: String },
+    /// Per-version SHA-512 digests in the manifest: version -> lowercase hex (128 digits). For
+    /// publishers that give no SHA-256 (Microsoft's .NET). M5.5, additive.
+    Sha512 { values: BTreeMap<String, String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

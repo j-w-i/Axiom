@@ -14,6 +14,7 @@ final class Report {
   double _ms(Duration d) => d.inMicroseconds / 1000;
   List<double> get build => [for (final f in frames) _ms(f.buildDuration)];
   List<double> get raster => [for (final f in frames) _ms(f.rasterDuration)];
+
   /// The time from one frame's vsync to the next one's: 16.7 ms when it draws at 60 Hz.
   List<double> get gaps => [
     for (var i = 1; i < frames.length; i++)

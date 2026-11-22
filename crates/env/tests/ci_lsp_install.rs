@@ -20,7 +20,11 @@ fn registry() -> Registry {
 async fn install(inst: &Installer, r: &Registry, provider: &str) -> std::path::PathBuf {
     let m = r.get(provider).unwrap().clone();
     let versions = inst.versions(&m).await.unwrap();
-    let version = versions.available.first().unwrap().clone();
+    let version = versions
+        .available
+        .first()
+        .unwrap_or_else(|| panic!("{provider}: no versions ({versions:?})"))
+        .clone();
     let plan = inst.plan(&m, &version, None).await.unwrap();
     inst.install(&plan.plan_id, Some(&m), &CancellationToken::new(), &|p| {
         if p.bytes_done.is_none() {
@@ -55,20 +59,32 @@ fn initializes(exe: &Path, args: &[&str], path_dir: Option<&Path>) {
     write!(stdin, "Content-Length: {}\r\n\r\n{body}", body.len()).unwrap();
     stdin.flush().unwrap();
     let mut out = BufReader::new(child.stdout.take().unwrap());
-    let mut len = 0usize;
-    loop {
-        let mut line = String::new();
-        out.read_line(&mut line).unwrap();
-        if line.trim().is_empty() {
+    // Servers may log or ask things before they answer (basedpyright's window/logMessage): the
+    // messages are read until the reply to id 1, at most 50.
+    let mut reply = serde_json::Value::Null;
+    for _ in 0..50 {
+        let mut len = 0usize;
+        loop {
+            let mut line = String::new();
+            assert!(
+                out.read_line(&mut line).unwrap() > 0,
+                "the server closed its output"
+            );
+            if line.trim().is_empty() {
+                break;
+            }
+            if let Some(v) = line.trim().strip_prefix("Content-Length:") {
+                len = v.trim().parse().unwrap();
+            }
+        }
+        let mut buf = vec![0; len];
+        out.read_exact(&mut buf).unwrap();
+        let msg: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        if msg["id"] == 1 && msg.get("method").is_none() {
+            reply = msg;
             break;
         }
-        if let Some(v) = line.trim().strip_prefix("Content-Length:") {
-            len = v.trim().parse().unwrap();
-        }
     }
-    let mut buf = vec![0; len];
-    out.read_exact(&mut buf).unwrap();
-    let reply: serde_json::Value = serde_json::from_slice(&buf).unwrap();
     assert!(reply["result"]["capabilities"].is_object(), "{reply}");
     let _ = child.kill();
     let _ = child.wait();
@@ -112,10 +128,10 @@ async fn every_server_provider_plans() {
             continue;
         }
         let versions = inst.versions(m).await.unwrap();
-        match inst
-            .plan(m, versions.available.first().unwrap(), None)
-            .await
-        {
+        let Some(version) = versions.available.first() else {
+            panic!("{}: no versions ({versions:?})", m.id);
+        };
+        match inst.plan(m, version, None).await {
             Ok(p) => println!("{}: {} steps", m.id, p.steps.len()),
             Err(axiom_env::error::EnvError::PrerequisiteMissing(why, _)) => {
                 println!("{}: {why}", m.id)
@@ -126,4 +142,21 @@ async fn every_server_provider_plans() {
             Err(e) => panic!("{}: {e}", m.id),
         }
     }
+}
+
+/// Swift on Linux (M5.5): swiftly bootstrapped into the root (its SHA-256 pinned, `init` with this
+/// host's platform), then the toolchain through it; SourceKit-LSP from that toolchain answers.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn swift_installs_through_swiftly_and_sourcekit_lsp_answers() {
+    let r = registry();
+    let data = tempfile::tempdir().unwrap();
+    let inst = Installer::new(
+        data.path().to_path_buf(),
+        Http::new(HttpConfig::default()).unwrap(),
+    );
+    let root = install(&inst, &r, "swift").await;
+    let bin = root.join("toolchains/6.4.3/usr/bin");
+    assert!(bin.join("swift").is_file(), "{}", bin.display());
+    initializes(&bin.join("sourcekit-lsp"), &[], Some(&bin));
 }

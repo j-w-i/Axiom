@@ -132,6 +132,11 @@ impl Manager {
             .cloned()
     }
 
+    /// Every server of every workspace.
+    pub fn all(&self) -> Vec<Arc<LanguageServer>> {
+        self.lock().values().cloned().collect()
+    }
+
     /// The workspace's servers.
     pub fn of_workspace(&self, ws: &WorkspaceId) -> Vec<Arc<LanguageServer>> {
         let mut v: Vec<_> = self
@@ -144,25 +149,48 @@ impl Manager {
         v
     }
 
-    /// Stops and forgets the workspace's servers (the workspace closed).
+    /// Stops and forgets the workspace's servers (the workspace closed). They are marked closed
+    /// first, so a late `didClose` or request cannot start one again; they stop together.
     pub async fn close_workspace(&self, ws: &WorkspaceId) {
         let servers: Vec<_> = {
             let mut m = self.lock();
             let keys: Vec<_> = m.keys().filter(|(w, _)| w == ws).cloned().collect();
             keys.into_iter().filter_map(|k| m.remove(&k)).collect()
         };
-        for s in servers {
-            s.stop().await;
-        }
+        stop_together(servers, None).await;
     }
 
-    /// Stops every server (daemon shutdown).
+    /// Stops every server (daemon shutdown): together, and what has not stopped within
+    /// [SHUTDOWN_BUDGET] is killed with its process group. The shell waits a few seconds for
+    /// the daemon before killing it, which would leave the servers behind.
     pub async fn stop_all(&self) {
         let servers: Vec<_> = self.lock().drain().map(|(_, s)| s).collect();
-        let stops = servers.iter().map(|s| s.stop());
-        for f in stops {
-            f.await;
+        stop_together(servers, Some(SHUTDOWN_BUDGET)).await;
+    }
+}
+
+/// How long the daemon's shutdown waits for its language servers to stop by themselves.
+pub const SHUTDOWN_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
+
+async fn stop_together(servers: Vec<Arc<LanguageServer>>, budget: Option<std::time::Duration>) {
+    for s in &servers {
+        s.close();
+    }
+    let mut set = tokio::task::JoinSet::new();
+    for s in &servers {
+        let s = s.clone();
+        set.spawn(async move { s.stop().await });
+    }
+    let all = async { while set.join_next().await.is_some() {} };
+    match budget {
+        Some(b) => {
+            if tokio::time::timeout(b, all).await.is_err() {
+                for s in &servers {
+                    s.kill_now();
+                }
+            }
         }
+        None => all.await,
     }
 }
 

@@ -410,6 +410,62 @@ async fn checksum_mismatch_cleans_up() {
     assert!(snapshot(&data.path().join("cache")).is_empty());
 }
 
+/// An artifact checked by SHA-512 (Microsoft's .NET publishes no SHA-256) installs, and the
+/// plan carries the digest; a wrong one is refused with nothing left behind (M5.5).
+#[tokio::test]
+async fn a_sha512_checksum_installs_and_a_wrong_one_is_refused() {
+    use sha2::Sha512;
+    let srv = Server::start().await;
+    let archive = good_tar("1.2.3");
+    let url = srv.put("/demo-1.2.3.tar.gz", archive.clone());
+    let digest = hex::encode(Sha512::digest(&archive));
+    let sha512 = |d: &str| format!(r#"{{ kind = "sha512", values = {{ "1.2.3" = "{d}" }} }}"#);
+    let data = tempfile::tempdir().unwrap();
+    let inst = installer(data.path());
+    let m = manifest(&url, "tar.gz", &sha512(&digest));
+    let plan = inst.plan(&m, "1.2.3", None).await.unwrap();
+    assert!(plan.steps.iter().any(|s| matches!(
+        s,
+        Step::Download { sha256: Sha256Source::Sha512Digest { value }, .. } if *value == digest
+    )));
+    let (_, progress) = recorder();
+    inst.install(
+        &plan.plan_id,
+        Some(&m),
+        &CancellationToken::new(),
+        &progress,
+    )
+    .await
+    .unwrap();
+    assert!(data.path().join("toolchains/demo/1.2.3/bin").is_dir());
+
+    let data = tempfile::tempdir().unwrap();
+    let inst = installer(data.path());
+    let wrong = hex::encode(Sha512::digest(b"something else"));
+    let m = manifest(&url, "tar.gz", &sha512(&wrong));
+    let plan = inst.plan(&m, "1.2.3", None).await.unwrap();
+    let e = inst
+        .install(
+            &plan.plan_id,
+            Some(&m),
+            &CancellationToken::new(),
+            &progress,
+        )
+        .await
+        .unwrap_err();
+    match e {
+        EnvError::ChecksumMismatch {
+            expected, actual, ..
+        } => {
+            assert_eq!(expected, wrong);
+            assert_eq!(actual, digest);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(snapshot(&data.path().join("toolchains/demo")).is_empty());
+    assert!(snapshot(&data.path().join("cache")).is_empty());
+}
+
 async fn install_archive(archive: Vec<u8>) -> (tempfile::TempDir, Result<(), EnvError>) {
     let srv = Server::start().await;
     let url = srv.put("/bad.tar.gz", archive.clone());

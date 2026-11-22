@@ -209,7 +209,8 @@ pub struct InstallPlan {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Step {
-    /// Download into the cache; verified against `sha256` before anything uses it.
+    /// Download into the cache; verified against `sha256` (a SHA-256 digest, a checksum file,
+    /// or a SHA-512 digest) before anything uses it.
     Download {
         url: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -250,6 +251,9 @@ pub enum Sha256Source {
     Digest { value: String },
     /// A checksum file fetched first (`sha256sum` format or a bare digest).
     Url { url: String },
+    /// A SHA-512 digest from the manifest (lowercase hex), for publishers that give no SHA-256.
+    /// M5.5, additive.
+    Sha512Digest { value: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

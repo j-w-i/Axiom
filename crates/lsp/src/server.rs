@@ -25,6 +25,9 @@ pub const CRASH_WINDOW: Duration = Duration::from_secs(180);
 pub const READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// `shutdown` + `exit`, then a kill.
 pub const STOP_GRACE: Duration = Duration::from_secs(2);
+
+/// Messages waiting for a server to read them, at most: more means it stopped reading.
+const OUT_QUEUE: usize = 8192;
 const STDERR_LINES: usize = 200;
 
 /// A server definition from a provider manifest (`[[lsp]]`), with the provider's id.
@@ -61,6 +64,10 @@ pub struct Launch {
 pub fn client_capabilities() -> Value {
     json!({
         "general": { "positionEncodings": ["utf-16"] },
+        // csharp-ls answers a definition in a .NET assembly with a `csharp:/metadata/…` URI,
+        // whose source the shell asks for with `csharp/metadata`, only when told the client
+        // can (M5.5-QA-001); other servers ignore it.
+        "experimental": { "csharp": { "metadataUris": true } },
         "workspace": {
             "configuration": true,
             "workspaceFolders": true,
@@ -157,18 +164,173 @@ type Reply = Result<Value, LspError>;
 
 /// One running process and its conversation.
 struct Conn {
-    out: mpsc::UnboundedSender<Value>,
+    out: mpsc::Sender<Value>,
     pending: Mutex<HashMap<i64, oneshot::Sender<Reply>>>,
     next_id: AtomicI64,
     stderr: Arc<Mutex<VecDeque<String>>>,
     child: tokio::sync::Mutex<Child>,
+    /// The server's process group (it is spawned as the group's leader), so its children (node
+    /// workers, a JVM's, gradle daemons) are stopped with it. Unix only.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pgid: Option<u32>,
+    /// The server's output pipe (`pipe:[inode]`, Linux): a process that left the server's group
+    /// and tree (kotlin-lsp's launcher starts its JVM with setsid and exits) still holds it.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pipe: Option<String>,
     /// Becomes true when the process has exited (or its stdout closed).
     exited: watch::Receiver<bool>,
 }
 
 impl Conn {
+    /// The server's descendants now, and the processes holding its output pipe, each with its
+    /// start time (Linux; elsewhere its process group covers them).
+    fn descendants(&self) -> Vec<(u32, String)> {
+        #[cfg(target_os = "linux")]
+        if let Some(pgid) = self.pgid {
+            let mut pids = descendants(pgid);
+            pids.extend(self.pipe_holders());
+            pids.sort_unstable();
+            pids.dedup();
+            return pids
+                .into_iter()
+                .filter_map(|pid| start_time(pid).map(|s| (pid, s)))
+                .collect();
+        }
+        Vec::new()
+    }
+
+    /// Other processes that hold the server's output pipe open (Linux).
+    #[cfg(target_os = "linux")]
+    fn pipe_holders(&self) -> Vec<u32> {
+        let Some(pipe) = &self.pipe else {
+            return Vec::new();
+        };
+        let me = std::process::id();
+        let mut out = Vec::new();
+        let Ok(procs) = std::fs::read_dir("/proc") else {
+            return out;
+        };
+        for p in procs.flatten() {
+            let Ok(pid) = p.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            if pid == me {
+                continue;
+            }
+            let Ok(fds) = std::fs::read_dir(p.path().join("fd")) else {
+                continue;
+            };
+            if fds.flatten().any(|fd| {
+                std::fs::read_link(fd.path()).is_ok_and(|l| l.as_os_str() == pipe.as_str())
+            }) {
+                out.push(pid);
+            }
+        }
+        out
+    }
+
+    /// Signals the server's whole process group: SIGKILL when [hard], else SIGTERM. A group
+    /// already gone is fine.
+    fn signal_group(&self, hard: bool) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.pgid {
+            use nix::sys::signal::{killpg, Signal};
+            let sig = if hard {
+                Signal::SIGKILL
+            } else {
+                Signal::SIGTERM
+            };
+            // Descendants that left the group for a session of their own (kotlin-lsp's launcher
+            // starts its JVM with setsid) are found by their parents while the server runs.
+            #[cfg(target_os = "linux")]
+            for pid in descendants(pgid).into_iter().chain(self.pipe_holders()) {
+                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), sig);
+            }
+            let _ = killpg(nix::unistd::Pid::from_raw(pgid as i32), sig);
+        }
+        #[cfg(not(unix))]
+        let _ = hard;
+    }
+}
+
+/// SIGKILLs a stopped server's descendants that outlived it: each only while its start time is
+/// the one recorded, so a process that reused the number is never touched.
+fn signal_pids(pids: &[(u32, String)]) {
+    #[cfg(target_os = "linux")]
+    for (pid, started) in pids {
+        if start_time(*pid).as_ref() == Some(started) {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(*pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = pids;
+}
+
+/// A process's start time (`/proc/<pid>/stat` field 22), which a reused number does not share.
+#[cfg(target_os = "linux")]
+fn start_time(pid: u32) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after `(comm) `: state is field 3, so the start time (22) is the 20th.
+    let (_, rest) = stat.rsplit_once(") ")?;
+    rest.split_whitespace().nth(19).map(String::from)
+}
+
+/// Every process descended from [root], from `/proc`'s parent links.
+#[cfg(target_os = "linux")]
+fn descendants(root: u32) -> Vec<u32> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    if let Ok(rd) = std::fs::read_dir("/proc") {
+        for e in rd.flatten() {
+            let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                continue;
+            };
+            // `pid (comm) state ppid …`; the name may hold spaces and parentheses.
+            let ppid = stat
+                .rsplit_once(") ")
+                .and_then(|(_, rest)| rest.split_whitespace().nth(1))
+                .and_then(|p| p.parse::<u32>().ok());
+            if let Some(ppid) = ppid {
+                children.entry(ppid).or_default().push(pid);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut todo = vec![root];
+    while let Some(p) = todo.pop() {
+        for &c in children.get(&p).map(Vec::as_slice).unwrap_or_default() {
+            out.push(c);
+            todo.push(c);
+        }
+    }
+    out
+}
+
+impl Drop for Conn {
+    fn drop(&mut self) {
+        // The leader alone would be killed on drop; its children would live on.
+        self.signal_group(true);
+    }
+}
+
+impl Conn {
     fn send(&self, v: Value) -> bool {
-        self.out.send(v).is_ok()
+        match self.out.try_send(v) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                // The server has not read its input for [OUT_QUEUE] messages: it is hung. It is
+                // killed, which counts as a crash and restarts it (audit finding 15).
+                tracing::warn!("a language server stopped reading its input; killing it");
+                self.signal_group(true);
+                false
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => false,
+        }
     }
 
     fn notify(&self, method: &str, params: Value) -> bool {
@@ -222,6 +384,8 @@ pub struct LanguageServer {
     ready: watch::Sender<u64>,
     events: tokio::sync::broadcast::Sender<Event>,
     stopping: AtomicBool,
+    /// Its workspace closed or the daemon is stopping: it is never started again.
+    closed: AtomicBool,
 }
 
 impl LanguageServer {
@@ -249,6 +413,7 @@ impl LanguageServer {
             ready: watch::channel(0).0,
             events,
             stopping: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
         })
     }
 
@@ -306,6 +471,16 @@ impl LanguageServer {
         lock(&self.diagnostics).clone()
     }
 
+    /// The workspace this server belongs to.
+    pub fn workspace_id(&self) -> &axiom_protocol::WorkspaceId {
+        &self.workspace_id
+    }
+
+    /// The URIs of the documents clients have open on it.
+    pub fn open_uris(&self) -> Vec<String> {
+        lock(&self.docs).all().map(|d| d.uri.clone()).collect()
+    }
+
     /// The mirrored text of an open document.
     pub fn document(&self, uri: &str) -> Option<crate::docs::Document> {
         lock(&self.docs).get(uri).cloned()
@@ -328,6 +503,28 @@ impl LanguageServer {
             workspace_id: self.workspace_id.clone(),
             info: self.info(),
         });
+    }
+
+    /// Ends the start of generation [gen] in [state] (missing or failed). The generation moves
+    /// on, so the exit of the process it may have spawned is not counted as a crash (which would
+    /// restart it and lose this state); a newer start is left alone.
+    fn end_start(&self, gen: u64, state: ServerState, detail: Option<String>) {
+        {
+            let mut i = lock(&self.inner);
+            if i.generation != gen {
+                return;
+            }
+            i.generation += 1;
+            i.conn = None;
+            i.capabilities = None;
+            i.state = state;
+            i.detail = detail;
+        }
+        let _ = self.events.send(Event::State {
+            workspace_id: self.workspace_id.clone(),
+            info: self.info(),
+        });
+        self.ready.send_modify(|v| *v += 1);
     }
 
     /// The connection of a ready server, starting it (and waiting, bounded) if needed.
@@ -363,6 +560,9 @@ impl LanguageServer {
     }
 
     fn spawn_start(self: &Arc<Self>) {
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
         let gen = {
             let mut i = lock(&self.inner);
             if i.state == ServerState::Starting {
@@ -384,34 +584,33 @@ impl LanguageServer {
     async fn start(self: Arc<Self>, gen: u64) {
         let launch = lock(&self.launch).clone();
         let Some(program) = self.def.command.first() else {
-            self.set_state(
+            self.end_start(
+                gen,
                 ServerState::Failed,
                 Some("The server definition has no command.".into()),
             );
-            self.ready.send_modify(|v| *v += 1);
             return;
         };
         if let Some((detail, _)) = &launch.blocked {
-            self.set_state(ServerState::Missing, Some(detail.clone()));
-            self.ready.send_modify(|v| *v += 1);
+            self.end_start(gen, ServerState::Missing, Some(detail.clone()));
             return;
         }
         let Some(exe) = which(program, &launch.env) else {
-            self.set_state(
+            self.end_start(
+                gen,
                 ServerState::Missing,
                 Some(format!("{program} was not found.")),
             );
-            self.ready.send_modify(|v| *v += 1);
             return;
         };
         let conn = match spawn_conn(&exe, &self.def.command[1..], &launch, self.clone(), gen) {
             Ok(c) => c,
             Err(e) => {
-                self.set_state(
+                self.end_start(
+                    gen,
                     ServerState::Failed,
                     Some(format!("{program} could not be started: {e}")),
                 );
-                self.ready.send_modify(|v| *v += 1);
                 return;
             }
         };
@@ -450,7 +649,6 @@ impl LanguageServer {
                     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                     tail = conn.stderr_tail(5);
                 }
-                let _ = conn.child.lock().await.start_kill();
                 let detail = if tail.is_empty() {
                     e.to_string()
                 } else {
@@ -459,9 +657,14 @@ impl LanguageServer {
                 // A toolchain manager's stub for a component that is not installed (rustup's
                 // proxy: "Unknown binary 'rust-analyzer' in official toolchain") means the server
                 // is missing, not broken: the shell offers its install (ADR-0021 §5).
+                // Homebrew's rustup says "`rust-analyzer` is unavailable for the active
+                // toolchain" (and then loops on its own fallback).
                 let missing = tail.contains("Unknown binary")
-                    || tail.contains("is not installed for the toolchain");
-                self.set_state(
+                    || tail.contains("is not installed for the toolchain")
+                    || tail.contains("is unavailable for the active toolchain");
+                // The generation moves on first, so the process's exit is not taken for a crash.
+                self.end_start(
+                    gen,
                     if missing {
                         ServerState::Missing
                     } else {
@@ -469,7 +672,7 @@ impl LanguageServer {
                     },
                     Some(detail),
                 );
-                self.ready.send_modify(|v| *v += 1);
+                let _ = conn.child.lock().await.start_kill();
                 return;
             }
         };
@@ -490,8 +693,16 @@ impl LanguageServer {
             }
             i.conn = Some(conn);
             i.capabilities = Some(caps);
+            // Ready in the same step as the connection, under the send lock: a notification
+            // waiting on that lock finds the server ready and sends, rather than seeing it
+            // starting and leaving the change to a replay that has already happened.
+            i.state = ServerState::Ready;
+            i.detail = None;
         }
-        self.set_state(ServerState::Ready, None);
+        let _ = self.events.send(Event::State {
+            workspace_id: self.workspace_id.clone(),
+            info: self.info(),
+        });
         self.ready.send_modify(|v| *v += 1);
     }
 
@@ -565,7 +776,16 @@ impl LanguageServer {
     /// A notification from a client: mirrored, then sent (starting the server if needed).
     pub async fn notify(self: &Arc<Self>, method: &str, params: Value) -> Result<(), LspError> {
         let _g = self.send_lock.lock().await;
-        lock(&self.docs).apply(method, &params);
+        {
+            let mut docs = lock(&self.docs);
+            if docs.is_stale(method, &params) {
+                // Older than what the mirror and the server already have: applying it would
+                // put the change on the wrong text.
+                tracing::warn!(server = %self.def.id, "dropped a didChange that arrived out of order");
+                return Ok(());
+            }
+            docs.apply(method, &params);
+        }
         if method == "textDocument/didClose" {
             if let Some(uri) = params["textDocument"]["uri"].as_str() {
                 lock(&self.diagnostics).remove(uri);
@@ -586,6 +806,9 @@ impl LanguageServer {
                 // Not ready: the mirror has it, and a start (re)opens mirrored documents. Start
                 // now if idle; report a server that cannot run.
                 match self.state() {
+                    // Closing a document never starts a server (it may be closing with its
+                    // workspace).
+                    _ if method == "textDocument/didClose" => Ok(()),
                     ServerState::Idle | ServerState::Stopped => {
                         self.stopping.store(false, Ordering::SeqCst);
                         self.spawn_start();
@@ -603,6 +826,9 @@ impl LanguageServer {
         self.stopping.store(true, Ordering::SeqCst);
         let conn = lock(&self.inner).conn.clone();
         if let Some(c) = conn {
+            // Its descendants, taken while it runs: once it has exited, those in a session of
+            // their own are no longer linked to it.
+            let family = c.descendants();
             let (_, rx) = c.request("shutdown", Value::Null);
             let _ = tokio::time::timeout(STOP_GRACE, rx).await;
             c.notify("exit", Value::Null);
@@ -611,10 +837,13 @@ impl LanguageServer {
                 .await
                 .is_err()
             {
-                let _ = c.child.lock().await.start_kill();
+                c.signal_group(true);
             }
             let _ =
                 tokio::time::timeout(STOP_GRACE, async { c.child.lock().await.wait().await }).await;
+            // What the server started and left behind goes with it.
+            c.signal_group(true);
+            signal_pids(&family);
         }
         let mut i = lock(&self.inner);
         i.conn = None;
@@ -624,6 +853,19 @@ impl LanguageServer {
         lock(&self.diagnostics).clear();
         self.set_state(ServerState::Stopped, None);
         self.ready.send_modify(|v| *v += 1);
+    }
+
+    /// Never starts again (its workspace closed, or the daemon is stopping).
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.stopping.store(true, Ordering::SeqCst);
+    }
+
+    /// Kills the server's process group now, without the shutdown handshake.
+    pub fn kill_now(&self) {
+        if let Some(c) = lock(&self.inner).conn.clone() {
+            c.signal_group(true);
+        }
     }
 
     /// Stops and starts again, also out of `failed` or `missing`.
@@ -740,6 +982,7 @@ fn spawn_conn(
     #[cfg(unix)]
     cmd.process_group(0);
     let mut child = cmd.spawn()?;
+    let pgid = child.id();
     let stdin = child
         .stdin
         .take()
@@ -748,17 +991,28 @@ fn spawn_conn(
         .stdout
         .take()
         .ok_or_else(|| std::io::Error::other("no stdout"))?;
+    #[cfg(target_os = "linux")]
+    let pipe = {
+        use std::os::fd::AsRawFd;
+        std::fs::read_link(format!("/proc/self/fd/{}", stdout.as_raw_fd()))
+            .ok()
+            .map(|l| l.to_string_lossy().into_owned())
+    };
+    #[cfg(not(target_os = "linux"))]
+    let pipe = None;
     let stderr = child
         .stderr
         .take()
         .ok_or_else(|| std::io::Error::other("no stderr"))?;
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Value>();
+    let (out_tx, mut out_rx) = mpsc::channel::<Value>(OUT_QUEUE);
     let (exit_tx, exit_rx) = watch::channel(false);
     let conn = Arc::new(Conn {
         out: out_tx,
         pending: Mutex::new(HashMap::new()),
         next_id: AtomicI64::new(1),
         stderr: Arc::new(Mutex::new(VecDeque::new())),
+        pgid,
+        pipe,
         child: tokio::sync::Mutex::new(child),
         exited: exit_rx,
     });

@@ -105,6 +105,10 @@ pub const BUILTIN: &[(&str, &str)] = &[
         "rust",
         include_str!("../../../providers/rust/provider.toml"),
     ),
+    (
+        "swift",
+        include_str!("../../../providers/swift/provider.toml"),
+    ),
 ];
 
 /// Where built-in manifests come from.

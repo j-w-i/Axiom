@@ -23,13 +23,13 @@ fn fake_lsp() -> PathBuf {
     } else {
         "fake-lsp"
     });
-    if !p.exists() {
-        assert!(std::process::Command::new(env!("CARGO"))
-            .args(["build", "-q", "-p", "fake-lsp"])
-            .status()
-            .unwrap()
-            .success());
-    }
+    // Always built: a no-op when up to date, and a binary left from before a change to the
+    // helper would not have it.
+    assert!(std::process::Command::new(env!("CARGO"))
+        .args(["build", "-q", "-p", "fake-lsp"])
+        .status()
+        .unwrap()
+        .success());
     p
 }
 
