@@ -143,7 +143,8 @@ fn main() {
                 let mut item = p.clone();
                 if item["label"] == "printLine" {
                     item["detail"] = json!("fn printLine(message, level)");
-                    item["documentation"] = json!({"kind":"markdown","value":"Prints a **line** at a level."});
+                    item["documentation"] =
+                        json!({"kind":"markdown","value":"Prints a **line** at a level."});
                 }
                 reply(item)
             }
