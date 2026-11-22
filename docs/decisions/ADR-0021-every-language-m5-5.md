@@ -122,11 +122,20 @@ and Mod+Shift+O), workspace symbols (Mod+T), folding ranges, format on save (set
 off), organize imports (a command), call hierarchy (a picker). Each is used only when the server
 advertises it.
 
+Amended at implementation (M5.5-EDIT-002): built are semantic tokens, workspace symbols
+(Mod+T; Ctrl+T no longer transposes characters off macOS), format on save, organize imports
+(Shift+Alt+O), call hierarchy (Shift+Alt+H, the callers) and document symbols (Ctrl+Shift+O, the
+M4 picker). Deferred: **inlay hints** (re_editor maps the caret through each line's text, so text
+inserted for display would move the caret and hit-testing; they need a re_editor change), **server
+folding ranges** (re_editor runs its folding analyser in an isolate, fixed when the editor is
+built; the bracket-based folding stays), and the **outline side bar section**. The
+`editor.inlayHints` setting is not added.
+
 ### 9. Protocol and contracts
 
 IPC stays 0.5: `lsp/*` relays any method, `env/*` installs. Additive and documented:
 `ServerState::standby`; `[[lsp]].requires`; providers without `[project]`; settings
-`lsp.autoInstall`, `editor.inlayHints`, `editor.formatOnSave`. The schemas are regenerated.
+`lsp.autoInstall`, `editor.formatOnSave`. The schemas are regenerated.
 
 ## Consequences
 

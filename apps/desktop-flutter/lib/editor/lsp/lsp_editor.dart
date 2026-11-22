@@ -146,6 +146,28 @@ class LspSync {
     );
   }
 
+  /// Formats [d] with its server (format on save), when the server formats documents.
+  Future<void> formatForSave(Doc d) async {
+    final s = _open[d.path];
+    if (s == null) return;
+    final info = lsp.servers.where((x) => x.serverId == s.server).firstOrNull;
+    final caps = info?.capabilities;
+    if (caps is! Map || caps['documentFormattingProvider'] == null) return;
+    if (caps['documentFormattingProvider'] == false) return;
+    final r = await lsp
+        .request(s.server, 'textDocument/formatting', {
+          'textDocument': {'uri': lsp.uriOf(d.path)},
+          'options': {'tabSize': 4, 'insertSpaces': true},
+        })
+        .timeout(const Duration(seconds: 2));
+    if (r is List) {
+      applyEdits(d.controller, [
+        for (final e in r.whereType<Map<Object?, Object?>>())
+          (range: lspRange(e['range']), text: e['newText'] as String? ?? ''),
+      ]);
+    }
+  }
+
   /// Tells the server the document was saved.
   void saved(String path) {
     final s = _open[path];

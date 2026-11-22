@@ -212,9 +212,13 @@ class _AxiomShortcuts extends CodeShortcutsActivatorsBuilder {
   const _AxiomShortcuts();
 
   @override
-  List<ShortcutActivator>? build(CodeShortcutType type) => type == CodeShortcutType.lineSelect
-      ? null
-      : const DefaultCodeShortcutsActivatorsBuilder().build(type);
+  List<ShortcutActivator>? build(CodeShortcutType type) => switch (type) {
+    CodeShortcutType.lineSelect => null,
+    // Ctrl+T is "workspace symbols" off macOS (as in VS Code, M5.5-EDIT-002); macOS keeps
+    // Control+T for transposing (its symbols key is Cmd+T).
+    CodeShortcutType.transposeCharacters when defaultTargetPlatform != TargetPlatform.macOS => null,
+    _ => const DefaultCodeShortcutsActivatorsBuilder().build(type),
+  };
 }
 
 /// The gutter's Git marks: a bar per added (green) or modified (brass) line, a wedge where lines

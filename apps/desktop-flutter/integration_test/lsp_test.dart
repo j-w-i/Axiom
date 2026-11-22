@@ -10,6 +10,7 @@ import 'package:axiom_desktop/editor/lsp/lsp_view.dart';
 import 'package:axiom_desktop/shell/palette.dart';
 import 'package:axiom_desktop/state/lsp.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show FocusManager;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:re_editor/re_editor.dart';
@@ -152,6 +153,52 @@ command = ["fake-lsp"]
     main.controller.text = original;
     await tester.pump(const Duration(milliseconds: 100));
 
+    // 2c. M5.5-EDIT-002: semantic tokens colour `fn` and the names after it; Mod+T finds a
+    //     workspace symbol; Shift+Alt+H lists who calls `value`; Shift+Alt+O sorts the imports.
+    await until(
+      tester,
+      () => main.semantic[0]?.any((r) => r.start == 0 && r.end == 2) ?? false,
+      what: 'the semantic tokens',
+      detail: () => '${main.semantic}',
+    );
+    main.controller.selection = const CodeLineSelection.collapsed(index: 0, offset: 5);
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.keyT, mod: true);
+    await until(
+      tester,
+      () => find.textContaining('helper  src/main.rs').evaluate().isNotEmpty,
+      what: 'the workspace symbol',
+      detail: () =>
+          'palette ${find.byType(Palette).evaluate().length}, asked '
+          '${File(log).readAsStringSync().contains('workspace/symbol')}, focus '
+          '${FocusManager.instance.primaryFocus}',
+    );
+    await key(tester, LogicalKeyboardKey.escape);
+    await tester.pump(const Duration(milliseconds: 100));
+    main.controller.selection = const CodeLineSelection.collapsed(index: 2, offset: 18);
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.keyH, shift: true, alt: true);
+    await until(
+      tester,
+      () => find.textContaining('main  src/main.rs').evaluate().isNotEmpty,
+      what: 'the caller of value',
+    );
+    await key(tester, LogicalKeyboardKey.escape);
+    await tester.pump(const Duration(milliseconds: 100));
+    main.controller.selection = const CodeLineSelection.collapsed(index: 0, offset: 0);
+    main.controller.replaceSelection('use b;\nuse a;\n');
+    await tester.pump(const Duration(milliseconds: 100));
+    await key(tester, LogicalKeyboardKey.keyO, shift: true, alt: true);
+    await until(
+      tester,
+      () => main.controller.codeLines[0].text == 'use a;',
+      what: 'the imports organized',
+      detail: () => main.controller.codeLines[0].text,
+    );
+    expect(main.controller.codeLines[1].text, 'use b;');
+    main.controller.text = original;
+    await tester.pump(const Duration(milliseconds: 100));
+
     // 3. F12 opens the definition in another file, at its place.
     main.controller.selection = const CodeLineSelection.collapsed(index: 2, offset: 18);
     await tester.pump();
@@ -270,6 +317,18 @@ command = ["fake-lsp"]
     await tester.pump(const Duration(milliseconds: 200));
     expect(app.documents.docs.map((d) => d.path).toList(), ['src/other.rs', 'src/main.rs']);
 
+    // 13. Format on save (M5.5-EDIT-002): with the setting on, Mod+S formats, then saves.
+    await app.settings.setValue('editor.formatOnSave', true);
+    await app.documents.open('src/other.rs');
+    final otherDoc = app.documents.doc('src/other.rs')!;
+    otherDoc.controller.text = 'pub fn value() -> i32 {   \n    2\n}\n';
+    await tester.pump(const Duration(milliseconds: 100));
+    await app.documents.save('src/other.rs');
+    expect(
+      File('${ws.path}/src/other.rs').readAsStringSync(),
+      startsWith('pub fn value() -> i32 {\n'),
+    );
+
     // 6. The server received the sync and the requests.
     final got = File(log).readAsStringSync();
     for (final m in [
@@ -284,6 +343,10 @@ command = ["fake-lsp"]
       'textDocument/signatureHelp',
       'textDocument/codeAction',
       'textDocument/documentHighlight',
+      'textDocument/semanticTokens/full',
+      'workspace/symbol',
+      'textDocument/prepareCallHierarchy',
+      'callHierarchy/incomingCalls',
     ]) {
       expect(got, contains(m), reason: m);
     }

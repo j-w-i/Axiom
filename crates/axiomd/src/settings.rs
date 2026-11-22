@@ -103,12 +103,7 @@ pub const KNOWN: &[Known] = &[
         default: || json!(false),
         valid: is_bool,
     },
-    // M5.5 (ADR-0021 §8): inlay hints where the server offers them; formatting on save.
-    Known {
-        key: "editor.inlayHints",
-        default: || json!(true),
-        valid: is_bool,
-    },
+    // M5.5 (ADR-0021 §8): formatting on save.
     Known {
         key: "editor.formatOnSave",
         default: || json!(false),

@@ -56,6 +56,9 @@ class AppState {
     lsp = LspStore(client, workspace);
     lspSync = LspSync(docs: documents, lsp: lsp);
     documents.onSaved = lspSync.saved;
+    documents.beforeSave = (d) async {
+      if (settings.editorFormatOnSave) await lspSync.formatForSave(d);
+    };
     problems = ProblemsStore(lsp, client: client, workspace: workspace);
     tasks = TasksStore(client, workspace)..onProviderStart = problems.begin;
     terminals = TerminalsStore(client, workspace);

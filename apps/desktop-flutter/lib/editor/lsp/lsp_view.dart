@@ -6,6 +6,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:re_editor/re_editor.dart';
@@ -23,6 +24,7 @@ import '../../ui/text_input.dart';
 import '../../ui/theme.dart';
 import '../../ui/tokens.dart';
 import '../snippets.dart';
+import 'semantic_tokens.dart';
 import 'lsp_editor.dart';
 
 /// Geometry of the code view, for placing popups at a text position.
@@ -163,6 +165,66 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     super.initState();
     widget.controller.addListener(_onEdit);
     _lastLines = widget.controller.codeLines;
+    lsp.addListener(_onServers);
+    _scheduleStructure();
+  }
+
+  // ---- semantic tokens (ADR-0021 §2) ---------------------------------------------------------
+
+  Timer? _structureTimer;
+  CancelToken? _structurePending;
+  String? _structureServer;
+
+  /// A server became ready (or changed): ask again.
+  void _onServers() {
+    final s = _server;
+    final ready = lsp.servers.where((x) => x.serverId == s).firstOrNull?.state == ServerState.ready;
+    if (ready && _structureServer != s) _scheduleStructure();
+  }
+
+  void _scheduleStructure() {
+    _structureTimer?.cancel();
+    _structureTimer = Timer(const Duration(milliseconds: 250), () => unawaited(_structure()));
+  }
+
+  Future<void> _structure() async {
+    final server = _server;
+    final caps = _caps;
+    if (server == null || caps == null || !mounted) return;
+    final info = lsp.servers.where((x) => x.serverId == server).firstOrNull;
+    if (info?.state != ServerState.ready) return;
+    _structureServer = server;
+    _structurePending?.cancel();
+    final cancel = _structurePending = CancelToken();
+    final doc = {
+      'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
+    };
+    final sem = caps['semanticTokensProvider'];
+    // Files over 1 MiB keep the grammar alone.
+    final small = widget.controller.text.length <= 1 << 20;
+    if (sem is Map && sem['full'] != null && sem['full'] != false && small) {
+      try {
+        final r = await lsp.request(
+          server,
+          'textDocument/semanticTokens/full',
+          doc,
+          cancel: cancel,
+        );
+        final legend = sem['legend'];
+        if (!mounted || cancel.isCancelled || r is! Map || legend is! Map) return;
+        final data = [...?(r['data'] as List?)?.whereType<num>().map((n) => n.toInt())];
+        widget.doc.setSemantic(
+          decodeSemanticTokens(
+            data,
+            [...?(legend['tokenTypes'] as List?)?.whereType<String>()],
+            [...?(legend['tokenModifiers'] as List?)?.whereType<String>()],
+            context.colors.syntax,
+          ),
+        );
+      } on DaemonException {
+        // The grammar's colours stay.
+      }
+    }
   }
 
   @override
@@ -177,6 +239,9 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     _hoverTimer?.cancel();
     _resolveTimer?.cancel();
     _resolvePending?.cancel();
+    _structureTimer?.cancel();
+    _structurePending?.cancel();
+    lsp.removeListener(_onServers);
     _listScroll.dispose();
     super.dispose();
   }
@@ -220,6 +285,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     if (typed && completing && _commit(now)) return;
     _hide();
     _scheduleHighlight(edited: typed);
+    if (typed) _scheduleStructure();
     if (typed && c.selection.isCollapsed) {
       final s = c.selection;
       final line = c.codeLines[s.extentIndex].text;
@@ -782,6 +848,146 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     }
   }
 
+  /// Mod+T: the workspace's symbols matching the word at the caret (or all), in a picker.
+  Future<void> workspaceSymbols() async {
+    final server = _server;
+    if (server == null) return;
+    final c = widget.controller;
+    final s = c.selection;
+    final line = c.codeLines[s.extentIndex].text;
+    var a = s.extentOffset.clamp(0, line.length), b = a;
+    while (a > 0 && _word.hasMatch(line[a - 1])) {
+      a--;
+    }
+    while (b < line.length && _word.hasMatch(line[b])) {
+      b++;
+    }
+    try {
+      final r = await lsp.request(server, 'workspace/symbol', {'query': line.substring(a, b)});
+      if (!mounted) return;
+      final items = <Command>[];
+      for (final (i, x) in (r is List ? r : const <Object?>[]).indexed) {
+        if (x is! Map) continue;
+        final loc = x['location'];
+        if (loc is! Map || loc['uri'] is! String) continue;
+        final path = lsp.pathOf(loc['uri']! as String);
+        if (path == null) continue;
+        final p = lspRange(loc['range']).start;
+        items.add(
+          Command(
+            id: 'wsym:$i',
+            title: '${x['name']}  $path',
+            category: 'Ln ${p.line + 1}',
+            run: () =>
+                unawaited(app.documents.open(path, line: p.line + 1, column: p.character + 1)),
+          ),
+        );
+      }
+      if (items.isEmpty) {
+        ToastHost.of(context).show('No matching symbol in the workspace.');
+        return;
+      }
+      app.openPicker?.call(
+        label: 'Workspace symbols',
+        inputLabel: 'Symbol',
+        placeholder: '${items.length} symbol${items.length == 1 ? '' : 's'}',
+        empty: 'No matching symbol',
+        items: items,
+      );
+    } on DaemonException catch (e) {
+      if (mounted) ToastHost.of(context).show('Symbols: ${e.message}', kind: ToastKind.error);
+    }
+  }
+
+  /// Shift+Alt+O: the server's "organize imports" source action, applied.
+  Future<void> organizeImports() async {
+    final server = _server;
+    if (server == null) return;
+    try {
+      final r = await lsp.request(server, 'textDocument/codeAction', {
+        'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
+        'range': {
+          'start': {'line': 0, 'character': 0},
+          'end': {'line': widget.controller.codeLines.length, 'character': 0},
+        },
+        'context': {
+          'diagnostics': <Object?>[],
+          'only': ['source.organizeImports'],
+        },
+      });
+      if (!mounted) return;
+      final action = (r is List ? r : const <Object?>[])
+          .whereType<Map<Object?, Object?>>()
+          .firstOrNull;
+      if (action == null) {
+        ToastHost.of(context).show('The imports are already organized.');
+        return;
+      }
+      var a = action;
+      if (a['edit'] == null && a['data'] != null) {
+        final done = await lsp.request(server, 'codeAction/resolve', a);
+        if (done is Map<Object?, Object?>) a = done;
+      }
+      if (a['edit'] != null) await _applyWorkspaceEdit(a['edit']);
+    } on DaemonException catch (e) {
+      if (mounted) {
+        ToastHost.of(context).show('Organize imports: ${e.message}', kind: ToastKind.error);
+      }
+    }
+  }
+
+  /// Shift+Alt+H: who calls the symbol at the caret, in a picker.
+  Future<void> callHierarchy() async {
+    final server = _server;
+    if (server == null) return;
+    try {
+      final items = await lsp.request(server, 'textDocument/prepareCallHierarchy', _docPos());
+      final item = (items is List ? items : const <Object?>[]).firstOrNull;
+      if (item == null) {
+        if (mounted) ToastHost.of(context).show('No call hierarchy here.');
+        return;
+      }
+      final r = await lsp.request(server, 'callHierarchy/incomingCalls', {'item': item});
+      if (!mounted) return;
+      final out = <Command>[];
+      for (final (i, x) in (r is List ? r : const <Object?>[]).indexed) {
+        final from = x is Map ? x['from'] : null;
+        if (from is! Map || from['uri'] is! String) continue;
+        final path = lsp.pathOf(from['uri']! as String);
+        if (path == null) continue;
+        final ranges = (x as Map)['fromRanges'];
+        final at = ranges is List && ranges.isNotEmpty
+            ? lspRange(ranges.first).start
+            : lspRange(from['range']).start;
+        out.add(
+          Command(
+            id: 'call:$i',
+            title: '${from['name']}  $path',
+            category: 'Ln ${at.line + 1}',
+            run: () =>
+                unawaited(app.documents.open(path, line: at.line + 1, column: at.character + 1)),
+          ),
+        );
+      }
+      final name = item is Map ? item['name'] : '';
+      if (out.isEmpty) {
+        ToastHost.of(context).show('Nothing calls $name.');
+        return;
+      }
+      app.openPicker?.call(
+        label: 'Calls to $name',
+        inputLabel: 'Caller',
+        placeholder: '${out.length} caller${out.length == 1 ? '' : 's'}',
+        empty: 'No matching caller',
+        items: out,
+      );
+    } on DaemonException catch (e) {
+      if (mounted) {
+        ToastHost.of(context).show('Call hierarchy: ${e.message}', kind: ToastKind.error);
+      }
+    }
+  }
+
   /// Ctrl+Shift+O: the document's symbols, in a picker; one goes there.
   Future<void> symbols() async {
     final server = _server;
@@ -1179,6 +1385,15 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
         const SingleActivator(LogicalKeyboardKey.space, control: true, shift: true):
             const _LspIntent('signature'),
         const SingleActivator(LogicalKeyboardKey.f2): const _LspIntent('rename'),
+        SingleActivator(LogicalKeyboardKey.keyT, control: !_isMac, meta: _isMac): const _LspIntent(
+          'workspace-symbols',
+        ),
+        const SingleActivator(LogicalKeyboardKey.keyO, shift: true, alt: true): const _LspIntent(
+          'organize-imports',
+        ),
+        const SingleActivator(LogicalKeyboardKey.keyH, shift: true, alt: true): const _LspIntent(
+          'call-hierarchy',
+        ),
         const SingleActivator(LogicalKeyboardKey.keyI, control: true, shift: true):
             const _LspIntent('format'),
         const SingleActivator(LogicalKeyboardKey.keyF, shift: true, alt: true): const _LspIntent(
@@ -1213,6 +1428,12 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
                   unawaited(rename());
                 case 'format':
                   unawaited(format());
+                case 'workspace-symbols':
+                  unawaited(workspaceSymbols());
+                case 'organize-imports':
+                  unawaited(organizeImports());
+                case 'call-hierarchy':
+                  unawaited(callHierarchy());
               }
               return null;
             },
@@ -1259,6 +1480,8 @@ class _LspIntent extends Intent {
 
 /// A letter for the completion item kind (LSP CompletionItemKind).
 /// What the documentation pane shows for [item]: its detail as code, then its documentation.
+bool get _isMac => defaultTargetPlatform == TargetPlatform.macOS;
+
 String? _docOf(CompletionChoice item) {
   final parts = [
     if (item.detail case final d? when d.trim().isNotEmpty) '```\n${d.trim()}\n```',

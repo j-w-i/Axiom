@@ -18,6 +18,7 @@ import 'package:re_editor/re_editor.dart';
 import '../daemon/client.dart';
 import '../daemon/protocol.g.dart';
 import '../editor/languages.dart';
+import '../editor/lsp/semantic_tokens.dart';
 import '../editor/lsp/underline.dart';
 import '../ui/tokens.dart';
 import 'lsp.dart';
@@ -67,6 +68,8 @@ class Doc {
     required TextStyle style,
   }) {
     var span = textSpan;
+    final sem = semantic[index];
+    if (sem != null && sem.isNotEmpty) span = applyStyles(span, sem, codeLine.text.length);
     if (highlights.isNotEmpty) {
       span = applyHighlights(
         span,
@@ -79,6 +82,16 @@ class Doc {
       span,
       underlinesOn(index, codeLine.text.length, diagnostics, underlineColor),
     );
+  }
+
+  /// The server's semantic tokens by line, over the grammar's colours (ADR-0021 §2).
+  Map<int, List<SemanticRange>> semantic = const {};
+
+  void setSemantic(Map<int, List<SemanticRange>> tokens) {
+    if (tokens.isEmpty && semantic.isEmpty) return;
+    semantic = tokens;
+    controller.forceRepaint();
+    _secondary?.forceRepaint();
   }
 
   /// The symbol under the caret, everywhere it is in this document (`documentHighlight`).
@@ -498,9 +511,17 @@ class DocumentsStore extends ChangeNotifier {
 
   // ---- saving -------------------------------------------------------------------------------
 
+  /// Runs before a save writes (format on save, ADR-0021 §8); its failure does not stop the save.
+  Future<void> Function(Doc d)? beforeSave;
+
   Future<void> save(String path) async {
     final d = doc(path);
     if (d == null) return;
+    try {
+      await beforeSave?.call(d);
+    } on Object {
+      // The text is saved as it is.
+    }
     await _write(d, d.text, overwrite: false);
   }
 
