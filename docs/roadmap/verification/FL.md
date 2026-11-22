@@ -173,6 +173,79 @@ the whole answer and rebuilt the whole transcript. Three changes fixed it:
 
 After the change, `frames_test.dart` (the shell's interactions) still has no frame over budget.
 
+## Idle CPU with a document open (FL-PERF-001)
+_2026-11-22. Fedora 44 (kernel 7.3.3), KDE Wayland. The measurements ran on a private Xvfb
+(`scripts/headless.sh`, software rendering with llvmpipe, 1440×900), and the frame suites in a
+private virtual KWin on the RTX 3060 Ti._
+
+M5-QA-001's P7 found this: with a document open, the shell idled at about 27 % of a core, against
+0.0 % with only a workspace, in both M4's and M5's builds (`M5.md` §Performance).
+
+**The cause.** `FL-bench/frames_probe.py` launches a profile build and counts the engine's frames
+over the VM service's timeline. It also reads per-thread CPU from /proc.
+- With `main.rs` restored, there were **21 frames in 10 s**: re_editor's caret, which toggles every
+  500 ms. Nothing else animates.
+- The CPU cost was 28.1 %, almost all of it in llvmpipe's 8 threads.
+- The caret already has its own repaint boundary, so on the Dart side a blink repaints only the
+  caret. But the Linux embedder re-rasterises the whole window for every frame, about **130 ms of
+  CPU per frame** on llvmpipe. A smaller dirty region cannot help; only fewer frames can.
+
+**The change.**
+- The caret blinks for 10 s after the last edit, caret move or focus change, then stays solid.
+  This is GTK's `gtk-cursor-blink-timeout`.
+- With motion Reduced or Off, it does not blink.
+- re_editor 0.10.0 had no way to do this. `apps/desktop-flutter/third_party/re_editor` is
+  upstream with a small patch (`PATCHES.md`).
+
+**P7, interleaved against the previous build** (`--ab`, 3 pairs, the same release `axiomd`;
+`FL-bench/JWI-Fedora-20261122-111638.json`):
+- **Harness:** the retired bench harness (`tauri-shell-final`, with `M5-bench/run.py.diff`).
+- **Baseline:** `d8ccb8e`, the end of M5.
+- **Load:** 4.5–6.5.
+
+| Idle CPU (median of 3 windows of 10 s) | This build | Baseline | Paired difference |
+|--|--:|--:|--:|
+| Workspace open | 0.6 / 0.0 / 0.0 % | 0.7 / 0.0 / 0.0 % | 0.0 (−0.1…0.0) |
+| A document open | **2.8 / 0.0 / 0.0 %** | 27.4 / 28.1 / 28.6 % | **−28.1** (−28.6…−24.6) |
+
+- **The criterion is met:** with a document open, the median is 0.0 %, the same as with only the
+  workspace.
+- **The first pair** read 2.8 %; its workspace-only figure in the same pair was 0.6 %, at load 6.3.
+- **Other results:** memory with a document open +0.5 MiB (+0.5…+0.9); typing p50 −3.3 ms and
+  p95 +0.5 ms, within the spread of the loaded host.
+
+**The probe, the same day** (profile builds, 10 s windows, starting 14 s after launch):
+
+| | Frames | CPU |
+|--|--:|--:|
+| This build, a document open (after the 10 s) | 1 | 1.3 % |
+| Baseline, a document open | 21 | 28.7 % |
+| This build, workspace only | 3 | 1.8 % |
+| This build, the first 5 s (still blinking) | 11 | 30.0 % |
+
+**Tests:** `test/editor/caret_blink_test.dart`, 4/4.
+- the blink stops after the timeout and no frame is requested; the caret is hidden when focus
+  leaves;
+- a caret move and an edit each restart the blink for a whole timeout;
+- the caret is solid, with no frame requested, under Reduced and under Off.
+
+All four fail with upstream's behaviour (blinking forever, no setting).
+`scripts/check.sh flutter` passes.
+
+**Frames** (`scripts/frames.sh`, the owner's display, 2040×1120 at 125 %):
+- **`editor_frames_test.dart`:** no frame over 16.7 ms in fling, wheel, typing or cursor ↓ ×60.
+  The highest was a build of 7.6 ms.
+- **`frames_test.dart`:** this build and the baseline, interleaved, 6 pairs.
+  - **The load was 7.5–11.5:** two runaway `xdg-open` processes each held a core, and a Flatpak
+    update was running.
+  - **Both builds missed scattered frames:**
+    - the baseline missed 12 frames in total, and none of its 6 runs was clean;
+    - this build missed 11, and 3 of its 6 runs were clean.
+  - **No interaction missed consistently** on either side. Tab switching: the baseline 4 frames,
+    this build 5, all 5 in its first two runs at the highest load.
+  - **Verdict:** no regression. A clean run of the whole shell suite on an idle machine is still
+    owed.
+
 ## End to end
 `env_test.dart`: 1/1, in a private virtual KWin and in a private Xvfb, against the real daemon
 and two fixture providers served from loopback.

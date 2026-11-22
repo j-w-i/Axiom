@@ -24,6 +24,8 @@ class _CodeEditable extends StatefulWidget {
   final Color? chunkIndicatorColor;
   final double cursorWidth;
   final bool showCursorWhenReadOnly;
+  final bool cursorBlink;
+  final Duration? cursorBlinkTimeout;
   final EdgeInsetsGeometry padding;
   final EdgeInsetsGeometry margin;
   final Widget? leadingDivider;
@@ -65,6 +67,8 @@ class _CodeEditable extends StatefulWidget {
     this.chunkIndicatorColor,
     required this.cursorWidth,
     required this.showCursorWhenReadOnly,
+    required this.cursorBlink,
+    required this.cursorBlinkTimeout,
     required this.padding,
     required this.margin,
     required this.leadingDivider,
@@ -124,7 +128,9 @@ class _CodeEditableState extends State<_CodeEditable> with AutomaticKeepAliveCli
 
     _codeIndicatorValueNotifier = CodeIndicatorValueNotifier(null);
 
-    _cursorController = _CodeCursorBlinkController();
+    _cursorController = _CodeCursorBlinkController()
+      ..blink = widget.cursorBlink
+      ..timeout = widget.cursorBlinkTimeout;
     _floatingCursorAnimationController = AnimationController(vsync: this);
 
     widget.floatingCursorController
@@ -156,6 +162,12 @@ class _CodeEditableState extends State<_CodeEditable> with AutomaticKeepAliveCli
     }
     if (oldWidget.codeTheme != widget.codeTheme) {
       _highlighter.theme = widget.codeTheme;
+    }
+    if (oldWidget.cursorBlink != widget.cursorBlink || oldWidget.cursorBlinkTimeout != widget.cursorBlinkTimeout) {
+      _cursorController
+        ..blink = widget.cursorBlink
+        ..timeout = widget.cursorBlinkTimeout;
+      _updateCursorState();
     }
     super.didUpdateWidget(oldWidget);
   }
@@ -450,13 +462,25 @@ class _CodeCursorBlinkController extends ValueNotifier<bool> {
 
   Timer? _timer;
 
+  // Whether the cursor blinks at all; when false it is shown solid.
+  bool blink = true;
+
+  // How long the cursor blinks after each start before it stays solid; null blinks forever.
+  Duration? timeout;
+
+  int _ticks = 0;
+
   _CodeCursorBlinkController() : super(false);
 
   void startBlink() {
     if (_timer != null) {
       _timer!.cancel();
+      _timer = null;
     }
-    _timer = Timer.periodic(_kCursorBlinkHalfPeriod, _cursorTick);
+    _ticks = 0;
+    if (blink && timeout != Duration.zero) {
+      _timer = Timer.periodic(_kCursorBlinkHalfPeriod, _cursorTick);
+    }
     if (kIsAndroid || kIsIOS) {
       // Wait selection position to update
       Future.delayed(const Duration(milliseconds: 100), () {
@@ -468,15 +492,21 @@ class _CodeCursorBlinkController extends ValueNotifier<bool> {
   }
 
   void stopBlink() {
-    if (_timer == null) {
-      return;
-    }
     _timer?.cancel();
     _timer = null;
     value = false;
   }
 
   void _cursorTick(Timer timer) {
+    _ticks++;
+    final Duration? timeout = this.timeout;
+    if (timeout != null && _kCursorBlinkHalfPeriod * _ticks >= timeout) {
+      // Blinked long enough: stay solid until the next start.
+      timer.cancel();
+      _timer = null;
+      value = true;
+      return;
+    }
     value = !value;
   }
 

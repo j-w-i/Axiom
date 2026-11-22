@@ -18,9 +18,15 @@ P2 and P7 against M4 pass (`verification/M5.md`).
 
 Owed:
 - Windows;
-- the macOS CI results after the window fix;
-- the Flutter editor's idle CPU with a document open (27 % on Xvfb's software renderer, the same
-  in M4's Flutter build).
+- the macOS CI results after the window fix.
+
+**FL-PERF-001 implemented (2026-11-22, branch `task/fl-idle-cpu`):** the editor's idle CPU with
+a document open fell from 28.1 % to 0.0 % (P7 `--ab`, Xvfb's software renderer; workspace only
+0.0 %).
+- **The cause:** the caret's blink, a full-window frame every 500 ms.
+- **The fix:** the caret now stays solid after 10 s without input, and is solid under Reduced
+  and Off. re_editor is vendored with that patch (`apps/desktop-flutter/third_party/re_editor`).
+- **Details:** `verification/FL.md` §Idle CPU.
 
 **Next: CI green on PR 6 (`task/flutter`) and on `task/m5`, then merge both to main; then M6.**
 
@@ -276,7 +282,7 @@ gone (tag `qt-shell-final`).
 
 ## Latest handoff
 
-`agents/handoffs/2026-11-19-M2-QA-001.md`. Earlier: `agents/handoffs/2026-11-19-M2-PROV-003.md`, `agents/handoffs/2026-11-19-M2-PROV-002.md`, `agents/handoffs/2026-11-19-M2-PROV-001.md`, `agents/handoffs/2026-11-19-M2-UI-003.md`, `agents/handoffs/2026-11-19-M2-UI-001.md` (+ `-M2-UI-002.md`), `agents/handoffs/2026-11-18-M2-BUILD-001.md`, `agents/handoffs/2026-11-18-M2-ENV-005.md`, `agents/handoffs/2026-11-18-M2-ENV-004.md`, `agents/handoffs/2026-11-18-M2-ENV-003.md`, `agents/handoffs/2026-11-18-M2-ENV-002.md`, `agents/handoffs/2026-11-18-M2-ENV-001.md`, `agents/handoffs/2026-11-18-M2-ARCH-001.md`, `agents/handoffs/2026-11-18-M1.6.md` (milestone), `agents/handoffs/2026-11-18-M1.6-QA-004.md`, `agents/handoffs/2026-11-18-M1.6-QA-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-004.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-003.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-002.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-001.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
+`agents/handoffs/2026-11-22-FL-PERF-001.md`. Earlier: `agents/handoffs/2026-11-22-M5-QA-001.md`, `agents/handoffs/2026-11-19-M2-QA-001.md`, `agents/handoffs/2026-11-19-M2-PROV-003.md`, `agents/handoffs/2026-11-19-M2-PROV-002.md`, `agents/handoffs/2026-11-19-M2-PROV-001.md`, `agents/handoffs/2026-11-19-M2-UI-003.md`, `agents/handoffs/2026-11-19-M2-UI-001.md` (+ `-M2-UI-002.md`), `agents/handoffs/2026-11-18-M2-BUILD-001.md`, `agents/handoffs/2026-11-18-M2-ENV-005.md`, `agents/handoffs/2026-11-18-M2-ENV-004.md`, `agents/handoffs/2026-11-18-M2-ENV-003.md`, `agents/handoffs/2026-11-18-M2-ENV-002.md`, `agents/handoffs/2026-11-18-M2-ENV-001.md`, `agents/handoffs/2026-11-18-M2-ARCH-001.md`, `agents/handoffs/2026-11-18-M1.6.md` (milestone), `agents/handoffs/2026-11-18-M1.6-QA-004.md`, `agents/handoffs/2026-11-18-M1.6-QA-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-004.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-003.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-003.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-002.md`, `agents/handoffs/2026-11-18-M1.6-SURFACES-001.md`, `agents/handoffs/2026-11-18-M1.6-INTERACTION-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-002.md`, `agents/handoffs/2026-11-18-M1.6-EDITOR-001.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-007.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-006.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-005.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-004.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-003.md`, `agents/handoffs/2026-11-18-M1.6-SHELL-002.md`, `agents/handoffs/2026-11-17-M1.6-INTERACTION-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-004.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-003.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-002.md`, `agents/handoffs/2026-11-17-M1.6-SHELL-001.md`, `agents/handoffs/2026-11-17-M1.6-SYSTEM-001.md`, `agents/handoffs/2026-11-17-M1.6-QA-002.md`, `agents/handoffs/2026-11-17-M1.6-QA-001.md`, `agents/handoffs/2026-11-17-M1.6-DESIGN-001.md` (M1.6 approval), `agents/handoffs/2026-11-12-M1.5.md`.
 
 ## Next task
 

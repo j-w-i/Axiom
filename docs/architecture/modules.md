@@ -197,6 +197,9 @@ before the task that needs them** (no empty scaffolding).
   `lib/ui/` (the design system; colours only in `tokens.dart`), `lib/state/` (stores), and one
   folder per surface (`shell`, `files`, `editor`, `console`, `scm`, `search`, `env`, `chat`).
   Tests in `test/`, end-to-end suites in `integration_test/`, packaging icons in `packaging/`.
+  `third_party/re_editor/` is re_editor 0.10.0 with one patch, a configurable caret blink
+  (FL-PERF-001). It is used through `dependency_overrides`; `PATCHES.md` records the patch and
+  how to drop it.
 - **Depends on:** Flutter's `widgets` layer and Dart packages that are MIT, BSD or Apache-2.0
   (`scripts/check_dart_licences.py`): `re_editor`, `re_highlight` (editor), `xterm`
   (terminal), `markdown` (Chat), `file_selector` (folder and image pickers), `path_parsing`

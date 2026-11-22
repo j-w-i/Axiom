@@ -204,6 +204,8 @@ class CodeEditor extends StatefulWidget {
     this.clipBehavior = Clip.none,
     this.readOnly,
     this.showCursorWhenReadOnly,
+    this.cursorBlink,
+    this.cursorBlinkTimeout,
     this.wordWrap,
     this.autocompleteSymbols,
     this.autofocus,
@@ -295,6 +297,21 @@ class CodeEditor extends StatefulWidget {
   ///
   /// The cursor refers to the blinking caret when the editor is focused.
   final bool? showCursorWhenReadOnly;
+
+  /// Whether the cursor blinks.
+  ///
+  /// When this is set to false, the cursor is drawn solid while the editor is focused.
+  ///
+  /// Defaults to true.
+  final bool? cursorBlink;
+
+  /// How long the cursor blinks after the last edit, selection change or focus change.
+  ///
+  /// Once this time has passed, the cursor stays solid (and no frames are scheduled for it)
+  /// until the next edit, selection change or focus change, which restarts the blink.
+  ///
+  /// Defaults to null: the cursor blinks for as long as the editor is focused.
+  final Duration? cursorBlinkTimeout;
 
   /// Should wrap the word.
   final bool? wordWrap;
@@ -522,6 +539,8 @@ class _CodeEditorState extends State<CodeEditor> {
       chunkIndicatorColor: widget.style?.chunkIndicatorColor,
       cursorWidth: widget.style?.cursorWidth ?? _kDefaultCaretWidth,
       showCursorWhenReadOnly: widget.showCursorWhenReadOnly ?? true,
+      cursorBlink: widget.cursorBlink ?? true,
+      cursorBlinkTimeout: widget.cursorBlinkTimeout,
       leadingDivider: widget.leadingDivider,
       border: widget.border,
       borderRadius: widget.borderRadius,
