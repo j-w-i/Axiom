@@ -1,31 +1,36 @@
-# The Flutter shell's design system (FL-DS-001)
+# The Flutter shell's design system (FL-DS-001, FL-DS-002)
 
-ADR-0020 §4 as code: `apps/desktop-flutter/lib/ui/`. The gallery (`lib/ui/gallery.dart`) shows
+`apps/desktop-flutter/lib/ui/`. Since FL-DS-002 (2026-11-22) the shell looks like the Tauri shell:
+the owner liked that design and asked for it back, in place of FL-DS-001's mix of Precision
+Instrument and Temporal Tactility. The reference is the Tauri shell as shipped
+(`apps/desktop-tauri/src/styles/` at the tag `tauri-shell-final`; ADR-0013's M1.6 design) and its
+screenshots (`docs/roadmap/verification/M1.6/macos/`). The gallery (`lib/ui/gallery.dart`) shows
 every control; its golden images, `test/ui/goldens/gallery-{dark,light}.png`, are the visual
 record.
 
-## Where the two directions meet
-| Taken from | What | Where |
-|------------|------|-------|
-| Temporal Tactility | Depth by tone steps (recessed, ground, bar, raised, sheet); no blur or glass | `AxiomColors`, `surfaces.dart` |
-| Temporal Tactility | A 1 px lit edge on raised surfaces, a 1 px contact shade, one soft shadow on sheets only | `Raised`, `Sheet` (painted, not stacked shadows) |
-| Temporal Tactility | Charcoal dark theme, dark grooves between rows | `AxiomColors.dark`, `Groove` |
-| Temporal Tactility | Ink underline under the selected tab or rail item | `AxTabs` (it springs to its place) |
-| Temporal Tactility | One ink circle for the primary action; the composer's bezel ring and two-tone labels | `InkCircleButton`, `AxTextInput(bezel: true)` |
-| Temporal Tactility | Answer first: one plain sentence per page, the only large type | `AnswerLine`, `AxiomType.answer` |
-| Temporal Tactility | Status dots in a cut-out ring | `StatusDot` |
-| Temporal Tactility | Springs with 1.5–4 % overshoot, only in answer to the person | `AxiomMotion.settle`, `.snap`, `.expressive` |
-| Precision Instrument | Brass accent for focus, the running state and links; IBM Plex; the hint line; Mod-written shortcuts as keycaps | `accent`, `focus`, `HintScope`, `Keycaps` |
-| Precision Instrument | Standard / Reduced / Off motion | `MotionMode` |
+## The Tauri design, as code
+| Tauri | Flutter |
+|-------|---------|
+| `--surface-canvas/-chrome/-panel/-editor/-well/-raised-1,-2/-overlay` | `AxiomColors.canvas`, `bar`, `panel`, `ground`, `recessed`, `raisedTop`/`raised`, `sheet` |
+| `--line`, `--line-mid`, `--line-input` | `groove`, `hairline`, `lineInput` |
+| `--text`, `--text-muted`, `--text-faint` | `ink`, `ink2`, `ink3` (see the deviations) |
+| `--accent`, `--accent-hi`, `--accent-lo`, `--primary-border` | `accent`, `accentHi`, `accentLo`, `primaryBorder` |
+| `--raised-*` (gradient, lit edge, contact shade) | `Raised`, `RaisedPainter` |
+| `--recessed-*` (inner shadow, lit edge) | `Well` |
+| `--overlay-shadow` | `Sheet` |
+| `.btn`, `.btn--primary/--quiet/--danger` | `AxButton` with `ButtonKind` |
+| `.icon-btn[aria-pressed]` | `AxIconButton(selected:)` (the rail passes `engaged: false`) |
+| `.input`, `.switch`, `.kbd`, `.glyph` | `AxTextInput`, `AxToggle`, `Keycaps`, `FileGlyph` |
+| `.rail`, `.panel__head`, `.tabs`, `.tree-row`, `.console__view`, `.statusbar` | `shell.dart`, `editor_area.dart`, `explorer.dart`, `tabs.dart`, `console.dart` |
+| `--r-1/-2/-3`, type 15/13/12/11 px, ease-out | `Metrics`, `AxiomType`, `AxiomMotion` (critically damped) |
 
-## Deviations from the owner's starting values
-- **Tertiary ink.** The tertiary ink (`ink3`) is `#63676E` in light and `#8F939B` in dark,
-  instead of `#868A91` and `#7D8189`. The original values fall under 4.5:1 for desktop-sized
-  text on bars, wells and hovered rows. `test/ui/tokens_test.dart` checks every text colour on
-  every surface in both themes.
-- **The sheet tone in dark.** The dark sheet is `#1F2125`, one step above the raised tone
-  `#1B1D21`, so menus stand off rows without a border.
-- **Keycaps.** They read Ctrl / Shift / Alt on Linux and Windows, and ⌘ ⇧ ⌥ on macOS.
+## Deviations from the Tauri values
+- **The faint ink.** `ink3` is `#A19D94` in dark and `#5D5A54` in light, not `#75726B` and
+  `#83807A`: Tauri's faint tier falls under 4.5:1 on several surfaces, and
+  `test/ui/tokens_test.dart` checks every text colour on every surface in both themes. Line
+  numbers (`#6C6962`, `#8A867E`) and comments (`#8A867E`, `#6B675F`) are lifted for the same reason.
+- **The tab's lit edge** does not glide between tabs; each active tab carries its own.
+- **Keycaps** read Ctrl / Shift / Alt on Linux and Windows, and ⌘ ⇧ ⌥ on macOS.
 
 ## Rules the tests enforce
 - No literal colour outside `tokens.dart`.
