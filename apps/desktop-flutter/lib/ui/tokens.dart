@@ -1,17 +1,22 @@
-// Design tokens: "Precision Instrument × Temporal Tactility" (ADR-0020 §4). Every colour, size and
-// duration the shell uses comes from here; widgets never write a literal colour (a test greps).
+// Design tokens: the Tauri shell's design (FL-DS-002; ADR-0013's M1.6 design as the Tauri shell
+// shipped it, apps/desktop-tauri/src/styles/tokens.css at the tag `tauri-shell-final`). Every
+// colour, size and duration the shell uses comes from here; widgets never write a literal colour
+// (a test greps).
 
 import 'package:flutter/widgets.dart';
 
-/// The palette of one theme.
+/// The palette of one theme: the Tauri shell's semantic tokens (tokens.css at `tauri-shell-final`).
 @immutable
 final class AxiomColors {
   const AxiomColors({
     required this.brightness,
+    required this.canvas,
     required this.recessed,
     required this.ground,
     required this.bar,
+    required this.panel,
     required this.raised,
+    required this.raisedTop,
     required this.sheet,
     required this.ink,
     required this.ink2,
@@ -19,14 +24,21 @@ final class AxiomColors {
     required this.onInk,
     required this.hairline,
     required this.groove,
+    required this.lineInput,
     required this.litEdge,
     required this.contactShade,
+    required this.wellShadow,
+    required this.lift,
     required this.sheetShadow,
     required this.scrim,
     required this.hover,
     required this.pressed,
+    required this.selected,
     required this.selection,
     required this.accent,
+    required this.accentHi,
+    required this.accentLo,
+    required this.primaryBorder,
     required this.accentText,
     required this.accentSoft,
     required this.focus,
@@ -38,28 +50,39 @@ final class AxiomColors {
     required this.danger,
     required this.dangerText,
     required this.dangerSoft,
+    required this.folder,
+    required this.treeGuide,
+    required this.thumbTop,
+    required this.thumbBottom,
     required this.syntax,
+    required this.glyphs,
   });
 
   final Brightness brightness;
 
-  // ---- surfaces, by depth (tone steps; no blur, no glass) ----
-  /// −1: wells (the console, inputs, the composer's bezel, the explorer's track).
+  /// The window behind every region (the seams show it).
+  final Color canvas;
+
+  /// −1: wells (fields, the console, the command field, keycap sockets).
   final Color recessed;
 
   /// 0: the editor and page backgrounds.
   final Color ground;
 
-  /// Chrome: the title row, rail, side bar, status bar.
+  /// Chrome: the title row, rail, tab strip, status bar.
   final Color bar;
 
-  /// +1: raised items (the active tab, a selected row, chips). Gets a lit edge.
+  /// Flat regions: the side bar, the console, the AI dock.
+  final Color panel;
+
+  /// +1: the lower stop of the raised gradient (buttons, keycaps, chips).
   final Color raised;
 
-  /// +2: menus, dialogs, the palette, tooltips. Gets the one soft shadow.
-  final Color sheet;
+  /// The upper stop of the raised gradient.
+  final Color raisedTop;
 
-  // ---- ink ----
+  /// +2: menus, dialogs, the palette, tooltips.
+  final Color sheet;
   final Color ink;
   final Color ink2;
   final Color ink3;
@@ -67,12 +90,14 @@ final class AxiomColors {
   /// Text and icons on an ink fill (the primary circle).
   final Color onInk;
 
-  // ---- edges ----
-  /// Between surfaces of the same tone.
+  /// Seams inside a region (under a panel head, between status segments).
   final Color hairline;
 
-  /// The dark groove between rows and between regions.
+  /// The seam between regions.
   final Color groove;
+
+  /// A field's border.
+  final Color lineInput;
 
   /// 1 px at the top inside edge of a raised surface.
   final Color litEdge;
@@ -80,20 +105,35 @@ final class AxiomColors {
   /// 1 px under a raised surface.
   final Color contactShade;
 
+  /// The inner shadow along a well's top.
+  final Color wellShadow;
+
+  /// White, which hovered keys are mixed toward (Tauri's `color-mix(…, white)`).
+  final Color lift;
+
   /// The sheet's soft shadow.
   final Color sheetShadow;
 
   /// Behind a modal dialog.
   final Color scrim;
-
-  // ---- states ----
   final Color hover;
   final Color pressed;
+
+  /// A selected row.
+  final Color selected;
+
+  /// Selected text.
   final Color selection;
 
-  // ---- meaning (one each) ----
-  /// Focus and the running state: Axiom's brass.
+  /// Brass: focus, the running state, the primary action, the region in focus.
   final Color accent;
+
+  /// The primary gradient's upper stop.
+  final Color accentHi;
+
+  /// The primary gradient's lower stop.
+  final Color accentLo;
+  final Color primaryBorder;
   final Color accentText;
   final Color accentSoft;
   final Color focus;
@@ -108,32 +148,55 @@ final class AxiomColors {
   final Color dangerText;
   final Color dangerSoft;
 
-  /// Code colours (Precision Instrument's syntax palette, checked against the editor's ground).
+  /// Folder icons in the tree.
+  final Color folder;
+
+  /// Indent guides in the tree.
+  final Color treeGuide;
+
+  /// The switch thumb's gradient.
+  final Color thumbTop;
+  final Color thumbBottom;
+
+  /// Code colours (checked against the editor's ground).
   final SyntaxColors syntax;
+
+  /// File-type chips (explorer rows, editor tabs).
+  final GlyphColors glyphs;
 
   bool get isDark => brightness == Brightness.dark;
 
   static const dark = AxiomColors(
     brightness: Brightness.dark,
-    recessed: Color(0xFF070809),
-    ground: Color(0xFF0E0F11),
-    bar: Color(0xFF15171A),
-    raised: Color(0xFF1B1D21),
-    sheet: Color(0xFF1F2125),
-    ink: Color(0xFFF3F4F6),
-    ink2: Color(0xFFA3A7AE),
-    ink3: Color(0xFF8F939B),
-    onInk: Color(0xFF0E0F11),
-    hairline: Color(0x17FFFFFF),
-    groove: Color(0xFF070809),
-    litEdge: Color(0x1AFFFFFF),
-    contactShade: Color(0x80000000),
-    sheetShadow: Color(0x99000000),
-    scrim: Color(0x99000000),
-    hover: Color(0x0FFFFFFF),
-    pressed: Color(0x1AFFFFFF),
-    selection: Color(0x40C9A35B),
+    canvas: Color(0xFF0B0C0D),
+    recessed: Color(0xFF111213),
+    ground: Color(0xFF17181A),
+    bar: Color(0xFF141517),
+    panel: Color(0xFF1E1F22),
+    raised: Color(0xFF28292C),
+    raisedTop: Color(0xFF303135),
+    sheet: Color(0xFF26272A),
+    ink: Color(0xFFE6E3DC),
+    ink2: Color(0xFFA3A097),
+    ink3: Color(0xFFA19D94),
+    onInk: Color(0xFF17181A),
+    hairline: Color(0xFF2B2C30),
+    groove: Color(0xFF0A0A0B),
+    lineInput: Color(0xFF6C6962),
+    litEdge: Color(0x16FFFFFF),
+    contactShade: Color(0x38000000),
+    wellShadow: Color(0x47000000),
+    lift: Color(0xFFFFFFFF),
+    sheetShadow: Color(0x8C000000),
+    scrim: Color(0x80060607),
+    hover: Color(0x0BFFFFFF),
+    pressed: Color(0x47000000),
+    selected: Color(0x13FFFFFF),
+    selection: Color(0x33C9A35B),
     accent: Color(0xFFC9A35B),
+    accentHi: Color(0xFFDDB96F),
+    accentLo: Color(0xFFA8853F),
+    primaryBorder: Color(0xFF654F26),
     accentText: Color(0xFFD9B672),
     accentSoft: Color(0x21C9A35B),
     focus: Color(0xFFD2AC63),
@@ -142,9 +205,13 @@ final class AxiomColors {
     okText: Color(0xFF9FCA90),
     warn: Color(0xFFE8904F),
     warnText: Color(0xFFEFA673),
-    danger: Color(0xFFFF6259),
-    dangerText: Color(0xFFFF7A72),
-    dangerSoft: Color(0x24FF6259),
+    danger: Color(0xFFE5645D),
+    dangerText: Color(0xFFF27C74),
+    dangerSoft: Color(0x1FE5645D),
+    folder: Color(0xFF8E8A82),
+    treeGuide: Color(0x0DFFFFFF),
+    thumbTop: Color(0xFFE2DED6),
+    thumbBottom: Color(0xFFB7B2A8),
     syntax: SyntaxColors(
       text: Color(0xFFDCD8D0),
       comment: Color(0xFF8A867E),
@@ -154,58 +221,108 @@ final class AxiomColors {
       number: Color(0xFFC4A7DE),
       punct: Color(0xFF9D998F),
       macro: Color(0xFF9FB8D8),
-      lineNumber: Color(0xFF6E727A),
-      lineNumberActive: Color(0xFFB8BCC3),
-      currentLine: Color(0x0AFFFFFF),
+      lineNumber: Color(0xFF6C6962),
+      lineNumberActive: Color(0xFFA3A097),
+      currentLine: Color(0x07FFFFFF),
+    ),
+    glyphs: GlyphColors(
+      rs: Color(0xFFDD9E80),
+      rsBg: Color(0x2BD18E6E),
+      md: Color(0xFFA9C1DF),
+      mdBg: Color(0x299FB8D8),
+      toml: Color(0xFF95C6B6),
+      tomlBg: Color(0x268EC2B2),
+      other: Color(0xFFA3A097),
+      otherBg: Color(0x12FFFFFF),
     ),
   );
 
   static const light = AxiomColors(
     brightness: Brightness.light,
-    recessed: Color(0xFFE5E7EB),
-    ground: Color(0xFFF2F3F5),
-    bar: Color(0xFFFAFAFB),
-    raised: Color(0xFFFFFFFF),
-    sheet: Color(0xFFFFFFFF),
-    ink: Color(0xFF0D0E10),
-    ink2: Color(0xFF5B5F66),
-    ink3: Color(0xFF63676E),
-    onInk: Color(0xFFFFFFFF),
-    hairline: Color(0x1A0D0E10),
-    groove: Color(0xFFE1E3E7),
-    litEdge: Color(0xBFFFFFFF),
-    contactShade: Color(0x140D0E10),
-    sheetShadow: Color(0x290D0E10),
-    scrim: Color(0x4D0D0E10),
-    hover: Color(0x0A0D0E10),
-    pressed: Color(0x140D0E10),
-    selection: Color(0x40B88A3A),
+    canvas: Color(0xFFC4C1BB),
+    recessed: Color(0xFFFFFFFF),
+    ground: Color(0xFFFCFBF9),
+    bar: Color(0xFFE6E4DF),
+    panel: Color(0xFFEFEDE9),
+    raised: Color(0xFFF1EFEB),
+    raisedTop: Color(0xFFFFFFFF),
+    sheet: Color(0xFFFCFBF9),
+    ink: Color(0xFF1D1D1B),
+    ink2: Color(0xFF5A5852),
+    ink3: Color(0xFF5D5A54),
+    onInk: Color(0xFFFCFBF9),
+    hairline: Color(0xFFDCD9D3),
+    groove: Color(0xFFC3C0BA),
+    lineInput: Color(0xFF86827C),
+    litEdge: Color(0xE6FFFFFF),
+    contactShade: Color(0x38000000),
+    wellShadow: Color(0x24000000),
+    lift: Color(0xFFFFFFFF),
+    sheetShadow: Color(0x2E281E16),
+    scrim: Color(0x2E3C372D),
+    hover: Color(0x0D281E0A),
+    pressed: Color(0x1A281E0A),
+    selected: Color(0x14281E0A),
+    selection: Color(0x38B88A3A),
     accent: Color(0xFFB88A3A),
-    accentText: Color(0xFF85601C),
+    accentHi: Color(0xFFC99A49),
+    accentLo: Color(0xFF9A722C),
+    primaryBorder: Color(0xFF5C441A),
+    accentText: Color(0xFF845F1B),
     accentSoft: Color(0x24B88A3A),
     focus: Color(0xFF9A722C),
-    onAccent: Color(0xFF1A1307),
+    onAccent: Color(0xFF1D1505),
     ok: Color(0xFF4F8F45),
     okText: Color(0xFF397330),
     warn: Color(0xFFA44E07),
     warnText: Color(0xFF8F4406),
-    danger: Color(0xFFC8322B),
+    danger: Color(0xFFBC342E),
     dangerText: Color(0xFFB02C26),
-    dangerSoft: Color(0x1AC8322B),
+    dangerSoft: Color(0x1ABC342E),
+    folder: Color(0xFF7A766E),
+    treeGuide: Color(0x12000000),
+    thumbTop: Color(0xFFE2DED6),
+    thumbBottom: Color(0xFFB7B2A8),
     syntax: SyntaxColors(
       text: Color(0xFF2B2925),
       comment: Color(0xFF6B675F),
-      keyword: Color(0xFFA0482A),
-      type: Color(0xFF2A6E5D),
-      string: Color(0xFF4D6E21),
-      number: Color(0xFF74489F),
-      punct: Color(0xFF65615A),
-      macro: Color(0xFF365F8F),
-      lineNumber: Color(0xFF7A7E86),
-      lineNumberActive: Color(0xFF2B2925),
-      currentLine: Color(0x0A0D0E10),
+      keyword: Color(0xFFA8502E),
+      type: Color(0xFF2F7A68),
+      string: Color(0xFF557A25),
+      number: Color(0xFF7A4EA8),
+      punct: Color(0xFF6D6961),
+      macro: Color(0xFF3B6A9E),
+      lineNumber: Color(0xFF8A867E),
+      lineNumberActive: Color(0xFF5A5852),
+      currentLine: Color(0x093C2D14),
+    ),
+    glyphs: GlyphColors(
+      rs: Color(0xFFA8502E),
+      rsBg: Color(0x1FA8502E),
+      md: Color(0xFF3B6A9E),
+      mdBg: Color(0x1F3B6A9E),
+      toml: Color(0xFF2F7A68),
+      tomlBg: Color(0x1F2F7A68),
+      other: Color(0xFF5B5852),
+      otherBg: Color(0x0F000000),
     ),
   );
+}
+
+/// File-type chip colours: a two-letter mono label on a tint of a syntax hue.
+@immutable
+final class GlyphColors {
+  const GlyphColors({
+    required this.rs,
+    required this.rsBg,
+    required this.md,
+    required this.mdBg,
+    required this.toml,
+    required this.tomlBg,
+    required this.other,
+    required this.otherBg,
+  });
+  final Color rs, rsBg, md, mdBg, toml, tomlBg, other, otherBg;
 }
 
 /// The editor's code colours.
@@ -228,16 +345,19 @@ final class SyntaxColors {
   final Color lineNumber, lineNumberActive, currentLine;
 }
 
-/// Sizes, spacing and shape.
+/// Sizes, spacing and shape (the Tauri shell's tokens.css: a 4 px grid, small radii).
 abstract final class Metrics {
   static const s1 = 2.0, s2 = 4.0, s3 = 6.0, s4 = 8.0, s5 = 12.0, s6 = 16.0, s7 = 24.0;
-  static const radiusControl = 6.0;
-  static const radiusRaised = 10.0;
-  static const radiusSheet = 14.0;
-  static const rowHeight = 24.0;
+  static const radiusControl = 3.0;
+  static const radiusRaised = 4.0;
+  static const radiusSheet = 6.0;
+  static const rowHeight = 22.0;
   static const controlHeight = 26.0;
+  static const controlHeightSmall = 22.0;
   static const tabHeight = 32.0;
   static const titleRowHeight = 38.0;
+  static const headHeight = 30.0;
+  static const crumbHeight = 24.0;
   static const statusBarHeight = 24.0;
   static const railWidth = 44.0;
   static const focusWidth = 2.0;
@@ -256,10 +376,12 @@ final class AxiomType {
   static const mono = 'IBM Plex Mono';
   static const _tabular = [FontFeature.tabularFigures()];
 
-  TextStyle get body => TextStyle(fontFamily: sans, fontSize: 13, height: 1.4, color: colors.ink);
+  TextStyle get body =>
+      TextStyle(fontFamily: sans, fontSize: 13, height: 18 / 13, color: colors.ink);
   TextStyle get small =>
-      TextStyle(fontFamily: sans, fontSize: 12, height: 1.35, color: colors.ink2);
-  TextStyle get tiny => TextStyle(fontFamily: sans, fontSize: 11, height: 1.3, color: colors.ink2);
+      TextStyle(fontFamily: sans, fontSize: 12, height: 16 / 12, color: colors.ink2);
+  TextStyle get tiny =>
+      TextStyle(fontFamily: sans, fontSize: 11, height: 14 / 11, color: colors.ink2);
   TextStyle get label => TextStyle(
     fontFamily: sans,
     fontSize: 12,
@@ -275,15 +397,16 @@ final class AxiomType {
     color: colors.ink,
   );
 
-  /// The page's answer line, the only large type (ADR-0020 §4, answer first).
+  /// A page's heading line (the Tauri welcome's title: 15 px, strong).
   TextStyle get answer => TextStyle(
     fontFamily: sans,
-    fontSize: 22,
-    height: 1.2,
+    fontSize: 15,
+    height: 20 / 15,
     fontWeight: FontWeight.w600,
     color: colors.ink,
   );
-  TextStyle get code => TextStyle(fontFamily: mono, fontSize: 13, height: 1.5, color: colors.ink);
+  TextStyle get code =>
+      TextStyle(fontFamily: mono, fontSize: 13, height: 20 / 13, color: colors.ink);
   TextStyle get codeSmall =>
       TextStyle(fontFamily: mono, fontSize: 12, height: 1.4, color: colors.ink2);
 
@@ -300,8 +423,9 @@ final class AxiomType {
 /// The person's motion setting (Settings → Appearance), as in ADR-0013.
 enum MotionMode { standard, reduced, off }
 
-/// Durations and springs. Springs overshoot slightly (1.5–4 %) and only answer something the
-/// person did; nothing loops while the window is hidden.
+/// Durations and springs, as the Tauri shell moved: ease-out, no overshoot (springs are
+/// critically damped); only in answer to something the person did; nothing loops while the window
+/// is hidden.
 @immutable
 final class AxiomMotion {
   const AxiomMotion(this.mode);
@@ -321,17 +445,17 @@ final class AxiomMotion {
   /// Hover intent before a tooltip or hint shows.
   Duration get intent => const Duration(milliseconds: 450);
 
-  /// About 3 % overshoot: tabs' underline, rail selection, splitters snapping home.
+  /// Tabs' lit edge, rail selection, splitters snapping home.
   SpringDescription get settle =>
-      SpringDescription.withDampingRatio(mass: 1, stiffness: 520, ratio: 0.745);
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 520, ratio: 1);
 
-  /// About 1.5 %: sheets and menus opening.
+  /// Sheets and menus opening.
   SpringDescription get snap =>
-      SpringDescription.withDampingRatio(mass: 1, stiffness: 700, ratio: 0.8);
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 700, ratio: 1);
 
-  /// About 4 %: the send button and expanding cards.
+  /// The send button and expanding cards.
   SpringDescription get expressive =>
-      SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 0.715);
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 1);
 
   bool get animates => mode != MotionMode.off;
   Curve get curve => const Cubic(0.2, 0.8, 0.2, 1);

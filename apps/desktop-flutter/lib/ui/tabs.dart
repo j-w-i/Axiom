@@ -27,7 +27,6 @@ class AxTabs extends StatefulWidget {
     required this.selected,
     required this.onSelect,
     this.height = Metrics.tabHeight,
-    this.fullUnderline = false,
   });
 
   /// The tab list's accessible name.
@@ -36,9 +35,6 @@ class AxTabs extends StatefulWidget {
   final String? selected;
   final ValueChanged<String> onSelect;
   final double height;
-
-  /// Underline the tab's whole width instead of a short mark.
-  final bool fullUnderline;
 
   @override
   State<AxTabs> createState() => _AxTabsState();
@@ -73,7 +69,8 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
     final row = _rowKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || row == null || !box.attached) return;
     final left = box.localToGlobal(Offset.zero, ancestor: row).dx;
-    final w = widget.fullUnderline ? box.size.width - 16 : Metrics.underlineWidth;
+    // Tauri's view tabs: the underline spans the whole selected tab.
+    final w = box.size.width;
     final x = left + (box.size.width - w) / 2;
     final m = context.axiom.motion;
     if (!animate || !m.animates || !_placed) {
@@ -143,15 +140,15 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
                             child: SizedBox(
                               height: widget.height,
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                padding: const EdgeInsets.symmetric(horizontal: Metrics.s4),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
                                       tab.label,
-                                      style: t.type.label.copyWith(
+                                      style: t.type.small.copyWith(
                                         color: on || s.hovered ? c.ink : c.ink2,
-                                        fontWeight: on ? FontWeight.w600 : FontWeight.w500,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                     if (tab.trailing != null) ...[
@@ -176,12 +173,7 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
                       width: _w.value.clamp(0, double.infinity),
                       height: Metrics.underlineHeight,
                       child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: c.ink,
-                            borderRadius: BorderRadius.circular(1),
-                          ),
-                        ),
+                        child: DecoratedBox(decoration: BoxDecoration(color: c.accent)),
                       ),
                     ),
                   ),

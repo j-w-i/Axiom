@@ -36,17 +36,18 @@ class ConsoleRegion extends StatelessWidget {
         return Semantics(
           label: 'Console',
           container: true,
+          // Tauri's console: a flat panel with a 30 px head and a seam under it.
           child: ColoredBox(
-            color: c.recessed,
+            color: c.panel,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(
                   height: 30,
                   child: ColoredBox(
-                    color: c.bar,
+                    color: c.panel,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: Metrics.s4),
+                      padding: const EdgeInsets.fromLTRB(Metrics.s2, 0, Metrics.s2, 0),
                       child: Row(
                         children: [
                           AxTabs(
@@ -83,7 +84,7 @@ class ConsoleRegion extends StatelessWidget {
                             icon: AxiomIcons.close,
                             label: 'Hide the console',
                             shortcut: 'Mod+J',
-                            size: 22,
+                            size: 26,
                             onPressed: () => app.consoleVisible = false,
                           ),
                         ],
@@ -91,7 +92,7 @@ class ConsoleRegion extends StatelessWidget {
                     ),
                   ),
                 ),
-                const Groove(),
+                const Hairline(),
                 Expanded(
                   child: switch (tab) {
                     'output' => const OutputView(),

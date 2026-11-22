@@ -850,14 +850,14 @@ class _TitleRow extends StatelessWidget {
         visible: s.focused,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: open ? c.pressed : (s.hovered ? c.hover : null),
+            color: open || s.hovered ? c.hover : null,
             borderRadius: BorderRadius.circular(Metrics.radiusControl),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
             child: Text(
               name,
-              style: t.type.label.copyWith(color: open || s.hovered ? c.ink : c.ink2),
+              style: t.type.small.copyWith(color: open || s.hovered ? c.ink : c.ink2),
             ),
           ),
         ),
@@ -868,15 +868,59 @@ class _TitleRow extends StatelessWidget {
       child: ColoredBox(
         color: c.bar,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: Metrics.s4),
+          padding: const EdgeInsets.fromLTRB(Metrics.s5, 0, Metrics.s4, 0),
           child: Row(
             children: [
-              AxiomIcon(AxiomIcons.logo, size: 18, color: c.accent),
+              // The brand: the brass mark and the word (Tauri's title row).
+              ExcludeSemantics(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AxiomIcon(AxiomIcons.logo, size: 17, color: c.accent),
+                    const SizedBox(width: 7),
+                    Text('Axiom', style: t.type.body.copyWith(fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
               const SizedBox(width: Metrics.s4),
               menu('File', 'File'),
               menu('View', 'View'),
               menu('Preferences', 'Preferences'),
               menu('Help', 'Help'),
+              // The open folder: its name and, quieter, its path.
+              ListenableBuilder(
+                listenable: app.workspace,
+                builder: (context, _) {
+                  final ws = app.workspace;
+                  if (!ws.isOpen) return const SizedBox.shrink();
+                  return Flexible(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(width: Metrics.s2),
+                        SizedBox(height: 18, width: 1, child: ColoredBox(color: c.groove)),
+                        const SizedBox(width: Metrics.s5),
+                        Text(
+                          ws.name,
+                          style: t.type.body.copyWith(fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(width: 7),
+                        Flexible(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 240),
+                            child: Text(
+                              ws.root,
+                              style: t.type.codeSmall.copyWith(fontSize: 11, color: c.ink3),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
               const Spacer(),
               Pressable(
                 label: 'Search files, run commands',
@@ -884,33 +928,33 @@ class _TitleRow extends StatelessWidget {
                 onPressed: onSearch,
                 builder: (context, s) => FocusRing(
                   visible: s.focused,
-                  child: Container(
+                  child: SizedBox(
                     width: 380,
                     height: 26,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: s.hovered ? Color.alphaBlend(c.hover, c.recessed) : c.recessed,
-                      borderRadius: BorderRadius.circular(Metrics.radiusControl),
-                      border: Border.all(color: c.hairline),
-                    ),
-                    child: Row(
-                      children: [
-                        AxiomIcon(AxiomIcons.search, size: 14, color: c.ink3),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: ListenableBuilder(
-                            listenable: app.workspace,
-                            builder: (context, _) => Text(
-                              app.workspace.isOpen
-                                  ? 'Search ${app.workspace.name}, run commands'
-                                  : 'Search files, run commands',
-                              style: t.type.small.copyWith(color: c.ink3),
-                              overflow: TextOverflow.ellipsis,
+                    child: Well(
+                      radius: Metrics.radiusRaised,
+                      border: s.hovered ? c.lineInput : null,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 4, 0),
+                        child: Row(
+                          children: [
+                            AxiomIcon(
+                              AxiomIcons.search,
+                              size: 14,
+                              color: s.hovered ? c.ink2 : c.ink3,
                             ),
-                          ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Search files, run commands',
+                                style: t.type.small.copyWith(color: s.hovered ? c.ink2 : c.ink3),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const Keycaps('Mod+K'),
+                          ],
                         ),
-                        const Keycaps('Mod+K'),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -918,11 +962,29 @@ class _TitleRow extends StatelessWidget {
               const SizedBox(width: Metrics.s4),
               const Transport(),
               const Spacer(),
-              AxIconButton(
-                icon: AxiomIcons.sidebar,
-                label: 'Toggle side bar',
-                shortcut: 'Mod+B',
-                onPressed: () => app.sideVisible = !app.sideVisible,
+              ListenableBuilder(
+                listenable: app.prefs,
+                builder: (context, _) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AxIconButton(
+                      icon: AxiomIcons.sidebar,
+                      label: 'Toggle side bar',
+                      shortcut: 'Mod+B',
+                      selected: app.sideVisible,
+                      onPressed: () => app.sideVisible = !app.sideVisible,
+                    ),
+                    const SizedBox(width: 2),
+                    AxIconButton(
+                      icon: AxiomIcons.panel,
+                      label: 'Toggle console',
+                      shortcut: 'Mod+J',
+                      selected: app.consoleVisible,
+                      onPressed: () => app.consoleVisible = !app.consoleVisible,
+                    ),
+                    const SizedBox(width: 2),
+                  ],
+                ),
               ),
               AxIconButton(
                 icon: AxiomIcons.gear,
@@ -962,10 +1024,13 @@ class _Rail extends StatefulWidget {
 class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
   late final AnimationController _y = AnimationController.unbounded(vsync: this);
   bool _placed = false;
-  static const _itemHeight = 40.0;
+  // Tauri's rail: 34 px destinations 4 px apart below 8 px of padding; the selected one has a
+  // 2 px brass marker on the window's edge, 7 px in from its top and bottom.
+  static const _itemHeight = 38.0;
+  static const _top = 8.0;
 
   double _target() =>
-      _railItems.indexWhere((x) => x.$1 == widget.selected) * _itemHeight + _itemHeight - 7;
+      _top + _railItems.indexWhere((x) => x.$1 == widget.selected) * _itemHeight + 2 + 7;
 
   @override
   void didUpdateWidget(_Rail old) {
@@ -1004,6 +1069,7 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
             children: [
               Column(
                 children: [
+                  const SizedBox(height: _top),
                   for (final (d, label, icon, shortcut) in _railItems)
                     SizedBox(
                       height: _itemHeight,
@@ -1031,13 +1097,15 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
                                             : environmentsRailLabel(n),
                                         shortcut: shortcut,
                                         selected: widget.selected == d,
-                                        size: 32,
+                                        engaged: false,
+                                        color: c.ink3,
+                                        size: 34,
                                         onPressed: () => widget.onSelect(d),
                                       ),
                                     ),
                                     if (n > 0)
                                       Positioned(
-                                        right: 4,
+                                        right: 6,
                                         top: 4,
                                         child: IgnorePointer(child: AxBadge(n)),
                                       ),
@@ -1051,7 +1119,9 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
                                 label: label,
                                 shortcut: shortcut,
                                 selected: widget.selected == d,
-                                size: 32,
+                                engaged: false,
+                                color: c.ink3,
+                                size: 34,
                                 onPressed: () => widget.onSelect(d),
                               ),
                             ),
@@ -1063,13 +1133,13 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
                   animation: _y,
                   builder: (context, _) => Positioned(
                     top: _y.value,
-                    left: (Metrics.railWidth - Metrics.underlineWidth) / 2,
-                    width: Metrics.underlineWidth,
-                    height: Metrics.underlineHeight,
+                    left: 0,
+                    width: 2,
+                    height: 34 - 14,
                     child: IgnorePointer(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: c.ink,
+                          color: c.accent,
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
@@ -1117,40 +1187,49 @@ class _SideBarState extends State<_SideBar> {
     final d = widget.destination;
     _shown.add(d);
     return ColoredBox(
-      color: c.bar,
+      color: c.panel,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Tauri's panel head: 30 px, a small strong title and quieter meta, a seam below.
           SizedBox(
-            height: 32,
+            height: Metrics.headHeight,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: Metrics.s5),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ListenableBuilder(
-                      listenable: app.workspace,
-                      builder: (context, _) => Semantics(
-                        header: true,
-                        child: Text(
-                          switch (d) {
-                            Destination.chat => 'Chat',
-                            Destination.search => 'Search',
-                            Destination.scm => 'Source Control',
-                            Destination.environments => 'Environments',
-                            Destination.inspector => 'Inspector',
-                            _ => app.workspace.isOpen ? app.workspace.name : 'Files',
-                          },
-                          style: t.type.label,
-                          overflow: TextOverflow.ellipsis,
+              padding: const EdgeInsets.fromLTRB(Metrics.s5, 0, Metrics.s2, 0),
+              child: ListenableBuilder(
+                listenable: app.workspace,
+                builder: (context, _) {
+                  final title = switch (d) {
+                    Destination.chat => 'Chat',
+                    Destination.search => 'Search',
+                    Destination.scm => 'Source Control',
+                    Destination.environments => 'Environments',
+                    Destination.inspector => 'Inspector',
+                    _ => 'Files',
+                  };
+                  final meta = app.workspace.isOpen ? app.workspace.name : null;
+                  return Semantics(
+                    header: true,
+                    child: Row(
+                      children: [
+                        Text(
+                          title,
+                          style: t.type.small.copyWith(color: c.ink, fontWeight: FontWeight.w600),
                         ),
-                      ),
+                        if (meta != null) ...[
+                          const SizedBox(width: Metrics.s4),
+                          Expanded(
+                            child: Text(meta, style: t.type.small, overflow: TextOverflow.ellipsis),
+                          ),
+                        ],
+                      ],
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
           ),
+          const Hairline(),
           Expanded(
             child: Stack(
               fit: StackFit.expand,
@@ -1247,6 +1326,7 @@ class _Work extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final t = context.axiom;
+    final c = t.colors;
     return ListenableBuilder(
       listenable: Listenable.merge([app.workspace, app.client.state, app.documents]),
       builder: (context, _) {
@@ -1280,61 +1360,100 @@ class _Work extends StatelessWidget {
         }
         if (ws.isOpen && app.documents.docs.isNotEmpty) return EditorArea(key: editor);
         if (ws.isOpen) {
-          return _Centered(
-            children: [
-              AnswerLine(ws.name, detail: ws.root),
-              const SizedBox(height: Metrics.s5),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Open a file from the explorer, or', style: t.type.small),
-                  const SizedBox(width: 6),
-                  AxButton(
-                    label: 'Go to File…',
-                    kind: ButtonKind.quiet,
-                    hint: 'Go to File… — Mod+P',
-                    onPressed: () => app.openGoToFile?.call(),
-                  ),
-                  const Keycaps('Mod+P'),
-                ],
-              ),
-              if (app.documents.banner.isNotEmpty) ...[
-                const SizedBox(height: Metrics.s4),
-                Text(
-                  app.documents.banner,
-                  style: t.type.small.copyWith(color: t.colors.dangerText),
+          // Tauri's empty editor: the ways in, each with its keys, quiet and centred.
+          Widget way(String label, String keys) => SizedBox(
+            height: 30,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 136,
+                  child: Text(label, style: t.type.body.copyWith(color: c.ink2)),
                 ),
+                Keycaps(keys),
               ],
+            ),
+          );
+          return Column(
+            children: [
+              _EmptyTabStrip(),
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      way('Command palette', 'Mod+K'),
+                      way('Go to file', 'Mod+P'),
+                      way('Run command', 'Mod+Shift+R'),
+                      way('Toggle console', 'Mod+J'),
+                      if (app.documents.banner.isNotEmpty) ...[
+                        const SizedBox(height: Metrics.s4),
+                        Text(
+                          app.documents.banner,
+                          style: t.type.small.copyWith(color: c.dangerText),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             ],
           );
         }
-        return _Centered(
-          children: [
-            AnswerLine(
-              ws.opening ? 'Opening the folder…' : 'No folder open',
-              detail: 'Axiom opens folders through its backend, axiomd.',
-            ),
-            const SizedBox(height: Metrics.s5),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AxButton(
-                  label: 'Open Folder…',
-                  icon: AxiomIcons.folderOpen,
-                  hint: 'Open Folder… — Mod+O',
-                  onPressed: daemon is DaemonReady && !ws.opening
-                      ? () => unawaited(app.pickFolder?.call())
-                      : null,
+        // Tauri's welcome: the brass mark, the title and its line, the primary action with its
+        // keys inside, then the recent folders.
+        return LayoutBuilder(
+          builder: (context, box) => SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(Metrics.s7, box.maxHeight * 0.22, Metrics.s7, Metrics.s7),
+            child: Center(
+              child: SizedBox(
+                width: 460,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ExcludeSemantics(child: AxiomIcon(AxiomIcons.logo, size: 32, color: c.accent)),
+                    const SizedBox(height: Metrics.s6),
+                    AnswerLine(
+                      ws.opening ? 'Opening the folder…' : 'Open a folder to start',
+                      detail: 'Axiom opens folders through its backend, axiomd.',
+                    ),
+                    const SizedBox(height: Metrics.s7),
+                    AxButton(
+                      label: 'Open Folder…',
+                      kind: ButtonKind.primary,
+                      hint: 'Open Folder… — Mod+O',
+                      trailing: const Keycaps('Mod+O'),
+                      onPressed: daemon is DaemonReady && !ws.opening
+                          ? () => unawaited(app.pickFolder?.call())
+                          : null,
+                    ),
+                    const SizedBox(height: Metrics.s7),
+                    const RecentList(),
+                  ],
                 ),
-                const SizedBox(width: Metrics.s4),
-                const Keycaps('Mod+O'),
-              ],
+              ),
             ),
-            const SizedBox(height: Metrics.s7),
-            const RecentList(),
-          ],
+          ),
         );
       },
+    );
+  }
+}
+
+/// The tab strip's chrome while no file is open (Tauri keeps the strip).
+class _EmptyTabStrip extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return SizedBox(
+      height: Metrics.tabHeight,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: c.bar,
+          border: Border(bottom: BorderSide(color: c.groove)),
+        ),
+      ),
     );
   }
 }
@@ -1367,40 +1486,50 @@ class _StatusBar extends StatelessWidget {
     final app = AppScope.of(context);
     final t = context.axiom;
     final c = t.colors;
+    // Tauri's status bar: segments separated by seams, small muted text.
+    final seam = SizedBox(width: 1, child: ColoredBox(color: c.hairline));
+    Widget seg(Widget child) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Metrics.s4),
+      child: Center(widthFactor: 1, child: child),
+    );
     return SizedBox(
       height: Metrics.statusBarHeight,
       child: ColoredBox(
         color: c.bar,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: Metrics.s4),
+          padding: EdgeInsets.zero,
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              ValueListenableBuilder(
-                valueListenable: app.client.state,
-                builder: (context, s, _) {
-                  final (dot, text) = switch (s) {
-                    DaemonReady(:final serverVersion) => (
-                      DotState.ok,
-                      'Connected — axiomd $serverVersion',
-                    ),
-                    DaemonStarting() => (DotState.running, 'Starting the backend…'),
-                    DaemonFailed() => (DotState.error, 'The backend stopped'),
-                    DaemonStopped() => (DotState.off, 'Backend stopped'),
-                  };
-                  return Semantics(
-                    liveRegion: true,
-                    label: text,
-                    excludeSemantics: true,
-                    child: Row(
-                      children: [
-                        StatusDot(dot),
-                        const SizedBox(width: Metrics.s2),
-                        Text(text, style: t.type.tiny),
-                      ],
-                    ),
-                  );
-                },
+              seg(
+                ValueListenableBuilder(
+                  valueListenable: app.client.state,
+                  builder: (context, s, _) {
+                    final (dot, text) = switch (s) {
+                      DaemonReady(:final serverVersion) => (
+                        DotState.ok,
+                        'Connected — axiomd $serverVersion',
+                      ),
+                      DaemonStarting() => (DotState.running, 'Starting the backend…'),
+                      DaemonFailed() => (DotState.error, 'The backend stopped'),
+                      DaemonStopped() => (DotState.off, 'Backend stopped'),
+                    };
+                    return Semantics(
+                      liveRegion: true,
+                      label: text,
+                      excludeSemantics: true,
+                      child: Row(
+                        children: [
+                          StatusDot(dot),
+                          const SizedBox(width: Metrics.s2),
+                          Text(text, style: t.type.small),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
+              seam,
               ListenableBuilder(
                 listenable: app.git,
                 builder: (context, _) {
@@ -1413,29 +1542,33 @@ class _StatusBar extends StatelessWidget {
                     if ((g.behind ?? 0) > 0) '↓${g.behind}',
                   ].join(' ');
                   final n = app.git.count();
-                  return Padding(
-                    padding: const EdgeInsets.only(left: Metrics.s6),
-                    child: Semantics(
-                      label:
-                          'Branch $branch${sync.isEmpty ? '' : ', $sync'}, '
-                          '$n change${n == 1 ? '' : 's'}',
-                      excludeSemantics: true,
-                      child: Row(
-                        children: [
-                          AxiomIcon(AxiomIcons.branch, size: 12, color: c.ink3),
-                          const SizedBox(width: 4),
-                          Text(branch, style: t.type.tiny),
-                          if (sync.isNotEmpty) ...[
-                            const SizedBox(width: 4),
-                            Text(sync, style: t.type.numeric.copyWith(fontSize: 11)),
-                          ],
-                        ],
+                  return Row(
+                    children: [
+                      seg(
+                        Semantics(
+                          label:
+                              'Branch $branch${sync.isEmpty ? '' : ', $sync'}, '
+                              '$n change${n == 1 ? '' : 's'}',
+                          excludeSemantics: true,
+                          child: Row(
+                            children: [
+                              AxiomIcon(AxiomIcons.branch, size: 12, color: c.ink3),
+                              const SizedBox(width: 4),
+                              Text(branch, style: t.type.small),
+                              if (sync.isNotEmpty) ...[
+                                const SizedBox(width: 4),
+                                Text(sync, style: t.type.numeric),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
+                      seam,
+                    ],
                   );
                 },
               ),
-              const SizedBox(width: Metrics.s6),
+              const SizedBox(width: Metrics.s5),
               // The hint line: what the hovered or focused control does, and its shortcut.
               Expanded(
                 child: ExcludeSemantics(
@@ -1457,7 +1590,7 @@ class _StatusBar extends StatelessWidget {
                           Flexible(
                             child: Text(
                               isKeys ? what : hint,
-                              style: t.type.tiny,
+                              style: t.type.small,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -1474,27 +1607,37 @@ class _StatusBar extends StatelessWidget {
                   final doc = app.documents.active;
                   if (doc == null) {
                     return app.workspace.isOpen
-                        ? Text(
-                            app.workspace.root,
-                            style: t.type.tiny,
-                            overflow: TextOverflow.ellipsis,
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              seam,
+                              seg(
+                                Text(
+                                  app.workspace.root,
+                                  style: t.type.small,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           )
                         : const SizedBox.shrink();
                   }
                   return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const LspStatus(),
-                      const SizedBox(width: Metrics.s5),
-                      if (app.documents.cursorText.isNotEmpty)
-                        Semantics(
-                          label: app.documents.cursorText,
-                          child: Text(
-                            app.documents.cursorText,
-                            style: t.type.numeric.copyWith(fontSize: 11),
+                      seam,
+                      seg(const LspStatus()),
+                      if (app.documents.cursorText.isNotEmpty) ...[
+                        seam,
+                        seg(
+                          Semantics(
+                            label: app.documents.cursorText,
+                            child: Text(app.documents.cursorText, style: t.type.numeric),
                           ),
                         ),
-                      const SizedBox(width: Metrics.s5),
-                      Text(languageName(doc.language), style: t.type.tiny),
+                      ],
+                      seam,
+                      seg(Text(languageName(doc.language), style: t.type.small)),
                     ],
                   );
                 },

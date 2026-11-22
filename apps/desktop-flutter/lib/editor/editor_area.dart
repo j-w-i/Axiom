@@ -15,10 +15,10 @@ import '../state/documents.dart';
 import '../state/git.dart';
 import '../ui/controls.dart';
 import '../ui/icon_data.dart';
+import '../ui/glyph.dart';
 import '../ui/icons.dart';
 import '../ui/pressable.dart';
 import '../ui/splitter.dart';
-import '../ui/surfaces.dart';
 import '../ui/text_input.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
@@ -153,8 +153,11 @@ class _TabStrip extends StatelessWidget {
     final c = t.colors;
     return SizedBox(
       height: Metrics.tabHeight,
-      child: ColoredBox(
-        color: c.bar,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: c.bar,
+          border: Border(bottom: BorderSide(color: c.groove)),
+        ),
         // The tab bar's role sits inside the scroll view, so its children are the tabs.
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -163,6 +166,7 @@ class _TabStrip extends StatelessWidget {
             label: group == 1 ? 'Open documents' : 'Right editor group',
             container: true,
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 for (final (i, p) in paths.indexed)
                   // A tab is dragged onto another to take its place (the left group's order;
@@ -248,13 +252,18 @@ class _Tab extends StatelessWidget {
         onPressed: onSelect,
         excludeChildSemantics: false,
         builder: (context, s) {
+          // Tauri's tab: the file's chip, its name, then the close slot (shown on the active tab,
+          // under the pointer and with focus; a dirty tab shows its dot there instead).
+          final showClose = selected || s.hovered || s.focused;
           final content = Padding(
-            padding: const EdgeInsets.only(left: 12, right: 4),
+            padding: const EdgeInsets.only(left: Metrics.s5, right: 3),
             child: Row(
               children: [
+                FileGlyph(doc.title),
+                const SizedBox(width: 7),
                 Text(
                   doc.title,
-                  style: t.type.label.copyWith(
+                  style: t.type.body.copyWith(
                     color: gitInk(c, mark?.kind) ?? (selected || s.hovered ? c.ink : c.ink2),
                   ),
                 ),
@@ -267,9 +276,9 @@ class _Tab extends StatelessWidget {
                     ),
                   ),
                 ],
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
                 SizedBox.square(
-                  dimension: 20,
+                  dimension: 24,
                   child: doc.dirty && !s.hovered
                       ? Center(
                           child: ExcludeSemantics(
@@ -283,42 +292,69 @@ class _Tab extends StatelessWidget {
                             ),
                           ),
                         )
-                      : AxIconButton(
-                          icon: AxiomIcons.close,
-                          label: closeLabel,
-                          size: 20,
-                          onPressed: onClose,
+                      : Opacity(
+                          opacity: showClose ? 1 : 0,
+                          child: AxIconButton(
+                            icon: AxiomIcons.close,
+                            label: closeLabel,
+                            size: 24,
+                            color: c.ink3,
+                            onPressed: onClose,
+                          ),
                         ),
                 ),
               ],
             ),
           );
-          Widget tab = selected
-              ? Raised(
-                  topOnly: true,
-                  radius: Metrics.radiusControl,
-                  color: c.ground,
-                  child: content,
-                )
-              : DecoratedBox(
-                  decoration: BoxDecoration(color: s.hovered ? c.hover : null),
-                  child: content,
-                );
-          tab = Stack(
-            children: [
-              tab,
-              if (selected)
+          // The active tab is a raised key in the editor's tone with side seams and no seam
+          // below; the others sit in the strip with a seam on their right. The brass lit edge
+          // runs along the active tab's top.
+          Widget tab = DecoratedBox(
+            decoration: BoxDecoration(
+              color: selected ? c.ground : (s.hovered ? c.hover : null),
+              border: selected
+                  ? Border(
+                      left: BorderSide(color: c.groove),
+                      right: BorderSide(color: c.groove),
+                    )
+                  : Border(
+                      right: BorderSide(color: c.hairline),
+                      bottom: BorderSide(color: c.groove),
+                    ),
+            ),
+            child: content,
+          );
+          if (selected) {
+            tab = Stack(
+              fit: StackFit.passthrough,
+              children: [
+                tab,
                 Positioned(
-                  left: 12,
-                  bottom: 0,
-                  width: Metrics.underlineWidth,
-                  height: Metrics.underlineHeight,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(color: c.ink, borderRadius: BorderRadius.circular(1)),
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  height: 9,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: const [0, 1.5 / 9, 1.5 / 9, 1],
+                          colors: [
+                            c.accent,
+                            c.accent,
+                            c.accentSoft,
+                            c.accentSoft.withValues(alpha: 0),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-            ],
-          );
+              ],
+            );
+          }
           return FocusRing(visible: s.focused, child: tab);
         },
       ),
@@ -355,11 +391,11 @@ class _Breadcrumbs extends StatelessWidget {
                 if (i > 0)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: AxiomIcon(AxiomIcons.chevron, size: 10, color: t.colors.ink3),
+                    child: AxiomIcon(AxiomIcons.chevron, size: 12, color: t.colors.ink3),
                   ),
                 Text(
                   parts[i],
-                  style: t.type.tiny.copyWith(
+                  style: t.type.small.copyWith(
                     color: i == parts.length - 1 ? t.colors.ink : t.colors.ink2,
                   ),
                 ),

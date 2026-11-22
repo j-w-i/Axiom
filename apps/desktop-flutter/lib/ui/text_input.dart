@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'pressable.dart';
+import 'surfaces.dart';
 import 'theme.dart';
 import 'tokens.dart';
 
@@ -43,7 +44,7 @@ class AxTextInput extends StatefulWidget {
   final Widget? leading;
   final Widget? trailing;
 
-  /// The composer's look: an outer bezel ring around a lighter inner surface.
+  /// The composer's look: the same field with more room.
   final bool bezel;
   final bool obscure;
   final List<TextInputFormatter>? inputFormatters;
@@ -172,7 +173,6 @@ class _AxTextInputState extends State<AxTextInput> {
         if (widget.trailing != null) ...[const SizedBox(width: Metrics.s3), widget.trailing!],
       ],
     );
-    final ring = _focused ? c.focus : c.hairline;
     // A press anywhere in the box focuses the field. A Listener, not a GestureDetector: the
     // editable's own tap recognizer wins the gesture arena over an ancestor's.
     Widget focusing(Widget child) => Listener(
@@ -182,41 +182,23 @@ class _AxTextInputState extends State<AxTextInput> {
       },
       child: child,
     );
-    if (widget.bezel) {
-      // An outer bezel ring around a slightly lighter inner surface (the Antigravity reference).
-      return focusing(
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: c.recessed,
-            borderRadius: BorderRadius.circular(Metrics.radiusSheet),
-            border: Border.all(color: _focused ? c.focus : c.hairline, width: _focused ? 1.5 : 1),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(3),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: c.raised,
-                borderRadius: BorderRadius.circular(Metrics.radiusSheet - 3),
-              ),
-              child: Padding(padding: const EdgeInsets.fromLTRB(12, 10, 8, 8), child: inner),
-            ),
-          ),
-        ),
-      );
-    }
+    // Tauri's field: a recessed well bordered by the input line; focus turns the border brass
+    // and adds a soft 2 px brass ring. The composer (bezel) is the same field, roomier.
+    final padding = widget.bezel
+        ? const EdgeInsets.fromLTRB(10, 8, 6, 6)
+        : EdgeInsets.symmetric(horizontal: 8, vertical: (widget.maxLines ?? 2) > 1 ? 6 : 4);
     return focusing(
       DecoratedBox(
         decoration: BoxDecoration(
-          color: c.recessed,
-          borderRadius: BorderRadius.circular(Metrics.radiusControl),
-          border: Border.all(color: ring, width: _focused ? 1.5 : 1),
-        ),
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: 8,
-            vertical: (widget.maxLines ?? 2) > 1 ? 6 : 4,
+          borderRadius: BorderRadius.circular(Metrics.radiusControl + 2),
+          border: Border.all(
+            color: _focused ? c.accentSoft : c.accentSoft.withValues(alpha: 0),
+            width: 2,
           ),
-          child: inner,
+        ),
+        child: Well(
+          border: _focused ? c.accent : c.lineInput,
+          child: Padding(padding: padding, child: inner),
         ),
       ),
     );

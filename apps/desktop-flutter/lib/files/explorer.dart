@@ -13,13 +13,14 @@ import '../state/git.dart';
 import '../state/workspace.dart';
 import '../ui/controls.dart';
 import '../ui/icon_data.dart';
+import '../ui/glyph.dart';
 import '../ui/icons.dart';
 import '../ui/pressable.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
 
 const rowExtent = 22.0;
-const _indent = 12.0;
+const _indent = 14.0;
 
 /// What opening a file does (the editor, from FL-EDIT-001 on). [focus]: move keyboard focus to
 /// the editor (opened by keyboard), or leave it in the explorer (a click).
@@ -159,7 +160,7 @@ class _ExplorerState extends State<Explorer> {
                 controller: _scroll,
                 itemExtent: rowExtent,
                 itemCount: _rows.length,
-                padding: const EdgeInsets.symmetric(horizontal: Metrics.s2),
+                padding: const EdgeInsets.only(top: 2, bottom: Metrics.s5),
                 itemBuilder: (context, i) {
                   final (:node, :depth) = _rows[i];
                   return _Row(
@@ -241,24 +242,31 @@ class _Row extends StatelessWidget {
       builder: (context, s) {
         Widget row = Row(
           children: [
-            SizedBox(width: depth * _indent + 4),
+            SizedBox(width: depth * _indent + Metrics.s4),
             SizedBox(
               width: 16,
               child: node.isDir
                   ? Transform.rotate(
                       angle: node.expanded ? 1.5708 : 0,
-                      child: AxiomIcon(AxiomIcons.chevron, size: 12, color: c.ink3),
+                      child: AxiomIcon(AxiomIcons.chevron, size: 13, color: c.ink3),
                     )
                   : null,
             ),
-            AxiomIcon(
-              node.isDir
-                  ? (node.expanded ? AxiomIcons.folderOpen : AxiomIcons.folder)
-                  : AxiomIcons.file,
-              size: 14,
-              color: node.ignored ? c.ink3 : c.ink2,
+            const SizedBox(width: 4),
+            // Tauri's tree: folders in the folder tone, files as their type's chip.
+            SizedBox(
+              width: 16,
+              child: Center(
+                child: node.isDir
+                    ? AxiomIcon(
+                        node.expanded ? AxiomIcons.folderOpen : AxiomIcons.folder,
+                        size: 15,
+                        color: node.ignored ? c.ink3 : c.folder,
+                      )
+                    : FileGlyph(node.name),
+              ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 4),
             Expanded(
               child: Text(
                 node.name,
@@ -285,22 +293,26 @@ class _Row extends StatelessWidget {
               ),
           ],
         );
+        // Tauri's selected row: the selected tint and a 2 px marker, brass while the tree has
+        // focus; full width, no rounding.
         if (selected) {
           row = DecoratedBox(
-            decoration: BoxDecoration(
-              color: s.focused ? c.accentSoft : c.raised,
-              borderRadius: BorderRadius.circular(Metrics.radiusControl),
+            decoration: BoxDecoration(color: c.selected),
+            child: Stack(
+              children: [
+                row,
+                Positioned(
+                  left: 0,
+                  top: 3,
+                  bottom: 3,
+                  width: 2,
+                  child: ColoredBox(color: s.focused ? c.accent : c.ink3),
+                ),
+              ],
             ),
-            child: row,
           );
         } else if (s.hovered) {
-          row = DecoratedBox(
-            decoration: BoxDecoration(
-              color: c.hover,
-              borderRadius: BorderRadius.circular(Metrics.radiusControl),
-            ),
-            child: row,
-          );
+          row = ColoredBox(color: c.hover, child: row);
         }
         if (node.error != null) {
           return _ErrorMark(error: node.error!, child: row);
@@ -386,26 +398,33 @@ class RecentList extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Semantics(header: true, child: Text('Recent', style: t.type.tiny)),
-            const SizedBox(height: Metrics.s3),
+            Semantics(
+              header: true,
+              child: Text('Recent', style: t.type.small.copyWith(fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(height: Metrics.s2),
+            // Tauri's recent rows: the name, then the path in quiet mono.
             for (final r in recent.take(8))
-              SizedBox(
-                width: 520,
+              Transform.translate(
+                offset: const Offset(-Metrics.s4, 0),
                 child: AxListRow(
                   label: 'Open ${r.name}, ${r.root}',
                   hint: 'Open ${r.root}',
                   height: 28,
                   onPressed: () => unawaited(app.workspace.openFolder(r.root)),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: Metrics.s4),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        AxiomIcon(AxiomIcons.folder, size: 14, color: t.colors.ink2),
-                        const SizedBox(width: 8),
-                        Text(r.name, style: t.type.body),
-                        const SizedBox(width: 10),
+                        Text(r.name, style: t.type.body.copyWith(fontWeight: FontWeight.w500)),
+                        const SizedBox(width: Metrics.s5),
                         Expanded(
-                          child: Text(r.root, style: t.type.small, overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            r.root,
+                            style: t.type.codeSmall.copyWith(fontSize: 11, color: t.colors.ink3),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ],
                     ),

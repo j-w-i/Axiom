@@ -14,7 +14,9 @@ import 'surfaces.dart';
 import 'theme.dart';
 import 'tokens.dart';
 
-enum ButtonKind { standard, quiet, danger }
+/// A button's look (the Tauri shell's `.btn` variants): a raised key, the brass primary, quiet
+/// (no fill until hovered), danger (a raised key with red text).
+enum ButtonKind { standard, primary, quiet, danger }
 
 /// A text button (optionally with a leading icon).
 class AxButton extends StatelessWidget {
@@ -27,11 +29,15 @@ class AxButton extends StatelessWidget {
     this.hint,
     this.autofocus = false,
     this.focusNode,
+    this.trailing,
   });
   final String label;
   final VoidCallback? onPressed;
   final ButtonKind kind;
   final IconData16? icon;
+
+  /// After the label, inside the button (the welcome's keycaps).
+  final Widget? trailing;
   final String? hint;
   final bool autofocus;
   final FocusNode? focusNode;
@@ -47,40 +53,59 @@ class AxButton extends StatelessWidget {
       autofocus: autofocus,
       focusNode: focusNode,
       builder: (context, s) {
-        final fg = !s.enabled
-            ? c.ink3
-            : kind == ButtonKind.danger
-            ? c.dangerText
-            : c.ink;
+        final fg = switch (kind) {
+          ButtonKind.primary => c.onAccent,
+          ButtonKind.danger => c.dangerText,
+          ButtonKind.quiet => s.hovered && s.enabled ? c.ink : c.ink2,
+          ButtonKind.standard => c.ink,
+        };
         final content = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[AxiomIcon(icon!, color: fg), const SizedBox(width: Metrics.s3)],
-            Text(label, style: t.type.label.copyWith(color: fg)),
+            Text(
+              label,
+              style: t.type.body.copyWith(
+                color: fg,
+                fontWeight: kind == ButtonKind.primary ? FontWeight.w600 : FontWeight.w500,
+              ),
+            ),
+            if (trailing != null) ...[const SizedBox(width: Metrics.s4), trailing!],
           ],
         );
         final body = SizedBox(
           height: Metrics.controlHeight,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: Metrics.s5),
             child: Center(widthFactor: 1, child: content),
           ),
         );
-        final overlay = s.pressed ? c.pressed : (s.hovered ? c.hover : null);
-        Widget box = kind == ButtonKind.quiet
-            ? DecoratedBox(
-                decoration: BoxDecoration(
-                  color: overlay,
-                  borderRadius: BorderRadius.circular(Metrics.radiusControl),
-                ),
-                child: body,
-              )
-            : Raised(
-                radius: Metrics.radiusControl,
-                color: overlay == null ? c.raised : Color.alphaBlend(overlay, c.raised),
-                child: body,
-              );
-        box = Opacity(opacity: s.enabled ? 1 : 0.55, child: box);
+        final down = s.pressed && s.enabled;
+        final over = s.hovered && s.enabled;
+        Widget box = switch (kind) {
+          ButtonKind.quiet => DecoratedBox(
+            decoration: BoxDecoration(
+              color: down ? c.pressed : (over ? c.hover : null),
+              borderRadius: BorderRadius.circular(Metrics.radiusControl),
+            ),
+            child: body,
+          ),
+          ButtonKind.primary => Raised(
+            top: down ? c.accentLo : (over ? Color.lerp(c.accentHi, c.lift, 0.15) : c.accentHi),
+            color: down ? c.accent : (c.isDark ? c.accentLo : c.accent),
+            border: c.primaryBorder,
+            lit: !down,
+            child: body,
+          ),
+          _ => Raised(
+            top: down ? c.raised : (over ? Color.lerp(c.raisedTop, c.lift, 0.12) : c.raisedTop),
+            color: down ? c.raisedTop : (over ? Color.lerp(c.raised, c.lift, 0.10) : c.raised),
+            lit: !down,
+            child: body,
+          ),
+        };
+        if (down) box = Transform.translate(offset: const Offset(0, 0.5), child: box);
+        box = Opacity(opacity: s.enabled ? 1 : 0.42, child: box);
         return FocusRing(visible: s.focused, child: box);
       },
     );
@@ -99,10 +124,15 @@ class AxIconButton extends StatelessWidget {
     this.size = Metrics.controlHeight,
     this.color,
     this.focusNode,
+    this.engaged = true,
   });
   final IconData16 icon;
   final String label;
   final VoidCallback? onPressed;
+
+  /// Selected shows pressed into a well (a toggle that is on); the rail marks its selection
+  /// itself and passes false.
+  final bool engaged;
 
   /// Shown in the tooltip and the hint line, written with `Mod` (e.g. `Mod+B`).
   final String? shortcut;
@@ -129,17 +159,24 @@ class AxIconButton extends StatelessWidget {
               : (selected ?? false) || s.hovered
               ? c.ink
               : (color ?? c.ink2);
+          final square = SizedBox.square(
+            dimension: size,
+            child: Center(child: AxiomIcon(icon, color: fg)),
+          );
           return FocusRing(
             visible: s.focused,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: s.pressed ? c.pressed : (s.hovered ? c.hover : null),
-                borderRadius: BorderRadius.circular(Metrics.radiusControl),
-              ),
-              child: SizedBox.square(
-                dimension: size,
-                child: Center(child: AxiomIcon(icon, color: fg)),
-              ),
+            child: Opacity(
+              opacity: s.enabled ? 1 : 0.42,
+              // Engaged (a toggle that is on): pressed into a well, as Tauri's aria-pressed.
+              child: (selected ?? false) && engaged
+                  ? Well(child: square)
+                  : DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: s.pressed ? c.pressed : (s.hovered ? c.hover : null),
+                        borderRadius: BorderRadius.circular(Metrics.radiusControl),
+                      ),
+                      child: square,
+                    ),
             ),
           );
         },
@@ -202,12 +239,17 @@ class _InkCircleButtonState extends State<InkCircleButton> with SingleTickerProv
           hint: widget.shortcut == null ? widget.label : '${widget.label} — ${widget.shortcut}',
           onPressed: widget.onPressed,
           builder: (context, s) {
-            final fill = s.enabled ? c.ink : c.raised;
+            // Tauri's composer send: an icon button in the brass text colour, faint when idle.
             final circle = DecoratedBox(
-              decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
+              decoration: BoxDecoration(
+                color: s.pressed ? c.pressed : (s.hovered && s.enabled ? c.hover : null),
+                borderRadius: BorderRadius.circular(Metrics.radiusControl),
+              ),
               child: SizedBox.square(
                 dimension: widget.diameter,
-                child: Center(child: AxiomIcon(widget.icon, color: s.enabled ? c.onInk : c.ink3)),
+                child: Center(
+                  child: AxiomIcon(widget.icon, color: s.enabled ? c.accentText : c.ink3),
+                ),
               ),
             );
             return FocusRing(
@@ -253,17 +295,20 @@ class Keycaps extends StatelessWidget {
           for (final k in keys(shortcut, mac: isMac))
             Padding(
               padding: const EdgeInsets.only(left: Metrics.s1),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: t.colors.recessed,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: t.colors.hairline),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  child: Text(
-                    k,
-                    style: t.type.numeric.copyWith(fontSize: 11, color: t.colors.ink2),
+              child: Raised(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    child: Text(
+                      k,
+                      textAlign: TextAlign.center,
+                      style: t.type.tiny.copyWith(
+                        height: 15 / 11,
+                        color: t.colors.ink2,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -287,14 +332,14 @@ class AxBadge extends StatelessWidget {
     final fg = attention ? t.colors.onAccent : t.colors.ink2;
     return ExcludeSemantics(
       child: DecoratedBox(
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(7)),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 3),
           child: Text(
             count > 99 ? '99+' : '$count',
             style: t.type.numeric.copyWith(
-              fontSize: 10,
-              height: 1.5,
+              fontSize: 11,
+              height: 14 / 11,
               color: fg,
               fontWeight: FontWeight.w600,
             ),
@@ -367,15 +412,18 @@ class AxCheckbox extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  color: value ? c.accent : c.recessed,
-                  borderRadius: BorderRadius.circular(3),
-                  border: Border.all(color: value ? c.accent : c.ink3),
-                ),
-                child: value ? AxiomIcon(_check, size: 14, color: c.onAccent) : null,
+              SizedBox.square(
+                dimension: 14,
+                child: value
+                    ? DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: c.accent,
+                          borderRadius: BorderRadius.circular(Metrics.radiusControl),
+                          border: Border.all(color: c.primaryBorder),
+                        ),
+                        child: AxiomIcon(_check, size: 14, color: c.onAccent),
+                      )
+                    : Well(border: c.lineInput, child: const SizedBox.expand()),
               ),
               const SizedBox(width: Metrics.s3),
               Text(label, style: t.type.body.copyWith(color: s.enabled ? c.ink : c.ink3)),
@@ -413,24 +461,33 @@ class AxToggle extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Tauri's switch: a recessed track with the input border; on, brass with the
+              // primary border; a light gradient thumb.
               AnimatedContainer(
-                duration: t.motion.fast,
+                duration: t.motion.medium,
                 curve: t.motion.curve,
-                width: 26,
-                height: 16,
-                padding: const EdgeInsets.all(2),
+                width: 30,
+                height: 17,
+                padding: const EdgeInsets.all(1),
                 decoration: BoxDecoration(
                   color: value ? c.accent : c.recessed,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: value ? c.accent : c.ink3),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: value ? c.primaryBorder : c.lineInput),
                 ),
                 alignment: value ? Alignment.centerRight : Alignment.centerLeft,
                 child: Container(
-                  width: 10,
-                  height: 10,
+                  width: 13,
+                  height: 13,
                   decoration: BoxDecoration(
-                    color: value ? c.onAccent : c.ink2,
                     shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [c.thumbTop, c.thumbBottom],
+                    ),
+                    boxShadow: [
+                      BoxShadow(color: c.contactShade, blurRadius: 2, offset: const Offset(0, 1)),
+                    ],
                   ),
                 ),
               ),
@@ -478,15 +535,25 @@ class AxListRow extends StatelessWidget {
       builder: (context, s) {
         Widget row = SizedBox(height: height, child: child);
         if (selected) {
-          row = Raised(radius: Metrics.radiusControl, child: row);
-        } else if (s.hovered || s.pressed) {
+          // Tauri's selected tree row: the selected tint and a 2 px marker on the left edge,
+          // brass while the list has focus.
           row = DecoratedBox(
-            decoration: BoxDecoration(
-              color: s.pressed ? c.pressed : c.hover,
-              borderRadius: BorderRadius.circular(Metrics.radiusControl),
+            decoration: BoxDecoration(color: c.selected),
+            child: Stack(
+              children: [
+                row,
+                Positioned(
+                  left: 0,
+                  top: 3,
+                  bottom: 3,
+                  width: 2,
+                  child: ColoredBox(color: s.focused ? c.accent : c.ink3),
+                ),
+              ],
             ),
-            child: row,
           );
+        } else if (s.hovered || s.pressed) {
+          row = ColoredBox(color: s.pressed ? c.pressed : c.hover, child: row);
         }
         row = FocusRing(visible: s.focused, child: row);
         if (!groove) return row;
