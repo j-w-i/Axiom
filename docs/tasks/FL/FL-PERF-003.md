@@ -41,5 +41,5 @@ measure how often frames were drawn. With the interval between frames added to t
   callback, so the engine falls back to a fixed 1/60 s timer
   (`engine/src/flutter/shell/common/vsync_waiter_fallback.cc`). Drawing at a 120 or 144 Hz
   display's rate needs the Linux embedder to drive vsync from the compositor's frame callbacks,
-  which means a patched Flutter engine (left to the owner's decision). On macOS the engine
+  which means a patched Flutter engine. The owner chose to keep 60 Hz for now (2026-11-22). On macOS the engine
   follows the display (ProMotion included).
