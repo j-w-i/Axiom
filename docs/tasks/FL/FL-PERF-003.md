@@ -35,6 +35,13 @@ measure how often frames were drawn. With the interval between frames added to t
   (`third_party/re_editor/PATCHES.md`).
 - After quick tab switching, the visible tab is highlighted (`frames_test.dart`).
 
+## A crash on quit, found afterwards
+With the UI on its own thread, Flutter's quit returned from `main()` while that thread still ran.
+`exit()` then ran the static destructors under it, and laying out text hit Skia's
+`check(fUnicode)` (SIGILL): every quit in a private KWin that closed the window crashed. The
+runner now ends the process with `_exit()` once the app has finished its own shutdown
+(`linux/runner/main.cc`). Destroying the window first was tried, and crashed in the GL driver.
+
 ## Result
 - **The frame interval:** 16.7 ms in every interaction (`verification/FL.md` §Frame rate).
 - **Above 60 Hz:** not reachable with the stock engine. On Linux the embedder registers no vsync

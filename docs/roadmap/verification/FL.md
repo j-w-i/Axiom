@@ -273,6 +273,25 @@ The report gained two columns:
   hold on this machine; a clean run on an idle machine is owed.
 - **Above 60 Hz:** needs a patched engine (FL-PERF-003 §Result).
 
+
+**Presenting without GTK's repaint (FL-PERF-004).** The same suite, the same build, A/B by
+`AXIOM_GTK_REDRAW=1`, load 2.5. CPU seconds over the run:
+
+| | GTK redraw | Direct commit |
+|---|---|---|
+| The app's GTK thread (input) | 31.4 | 0.4 |
+| The app | 66.8 | 29.7 |
+| KWin (private) | 15.0 | ~2 |
+
+| Interaction | GTK redraw: span p50 / p99 | Direct commit: span p50 / p99 |
+|---|---|---|
+| explorer fling | 3.4 / 7.5 ms | 2.7 / 5.0 ms |
+| typing | 6.3 / 23.7 ms | 5.1 / 20.0 ms |
+| drag selection | 5.5 / 11.4 ms | 4.5 / 6.1 ms |
+| editor fling | 5.9 / 10.5 ms | 4.6 / 6.8 ms |
+
+With the direct commit, the run had no frame over 16.7 ms.
+
 ## End to end
 `env_test.dart`: 1/1, in a private virtual KWin and in a private Xvfb, against the real daemon
 and two fixture providers served from loopback.
