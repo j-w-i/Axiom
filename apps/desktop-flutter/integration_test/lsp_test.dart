@@ -102,6 +102,56 @@ command = ["fake-lsp"]
     await tester.pump();
     expect(named('Suggestions'), findsNothing);
 
+    // 2b. Completion like VS Code (M5.5-EDIT-001): it opens as you type; the selected item's
+    //     documentation is resolved beside the list; a snippet's tab stops; an auto-import.
+    final original = main.controller.text;
+    final features = tester.state<LspEditorFeaturesState>(find.byType(LspEditorFeatures).first);
+    Future<void> type(String text) async {
+      for (final ch in text.split('')) {
+        main.controller.replaceSelection(ch);
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+    }
+
+    main.controller.selection = const CodeLineSelection.collapsed(index: 2, offset: 24);
+    await type('pri');
+    await until(
+      tester,
+      () => features.shownLabels.isNotEmpty && features.shownLabels.first == 'printLine',
+      what: 'the list as you type',
+      detail: () => '${features.shownLabels}',
+    );
+    await until(
+      tester,
+      () => find.textContaining('Prints a', findRichText: true).evaluate().isNotEmpty,
+      what: 'the resolved documentation',
+    );
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(main.controller.codeLines[2].text, endsWith('printLine(message, level)'));
+    expect(main.controller.selectedText, 'message');
+    await key(tester, LogicalKeyboardKey.tab);
+    expect(main.controller.selectedText, 'level');
+    await key(tester, LogicalKeyboardKey.tab);
+    expect(main.controller.selection.isCollapsed, isTrue);
+    expect(main.controller.selection.extentOffset, main.controller.codeLines[2].length);
+    await type(' Has');
+    await until(
+      tester,
+      () => features.shownLabels.contains('HashMap'),
+      what: 'HashMap offered',
+      detail: () => '${features.shownLabels}',
+    );
+    while (features.shownLabels.isNotEmpty && features.shownLabels.first != 'HashMap') {
+      await key(tester, LogicalKeyboardKey.arrowDown);
+    }
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(main.controller.codeLines[0].text, 'use std::collections::HashMap;');
+    expect(main.controller.codeLines[3].text, endsWith(' HashMap'));
+    main.controller.text = original;
+    await tester.pump(const Duration(milliseconds: 100));
+
     // 3. F12 opens the definition in another file, at its place.
     main.controller.selection = const CodeLineSelection.collapsed(index: 2, offset: 18);
     await tester.pump();

@@ -13,7 +13,8 @@
   for every frame. On a software renderer, that put an idle editor at about 27 % of a core.
 
 ## The patch
-Only `lib/src/code_editor.dart` and `lib/src/_code_editable.dart` change.
+`lib/src/code_editor.dart` and `lib/src/_code_editable.dart` change for the caret (FL-PERF-001);
+`lib/src/_code_field.dart` for a repaint after lines were removed (M5.5-EDIT-001, below).
 
 1. `CodeEditor` gets two new optional parameters, passed through to `_CodeEditable`:
    - `bool? cursorBlink`: false draws the caret solid. The default is true.
@@ -35,3 +36,11 @@ When upstream has an equivalent API:
 1. remove `dependency_overrides` from the app's `pubspec.yaml` and this directory;
 2. map the two parameters in `lib/editor/code_view.dart` to upstream's names;
 3. keep `test/editor/caret_blink_test.dart` passing.
+
+## A repaint after lines were removed (M5.5-EDIT-001)
+`_CodeFieldRender._buildDisplayRenderParagraphs` built every line of the render's own copy of
+the lines, which is updated on the next rebuild; the highlighter reads the controller's. A repaint
+forced in between (the shell's diagnostics arriving right after an edit that removed lines) asked
+the highlighter for a line that no longer existed. It now builds only the lines both have; the
+render's own update follows in the same frame.
+

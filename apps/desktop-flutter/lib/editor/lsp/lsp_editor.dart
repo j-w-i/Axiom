@@ -208,8 +208,17 @@ final class CompletionChoice {
     this.range,
     this.filter,
     this.sort,
+    this.snippet = false,
+    this.labelDetail,
+    this.documentation,
+    this.additional = const [],
+    this.commit = const [],
+    this.preselect = false,
+    this.raw,
   });
   final String label;
+
+  /// The text to insert: a snippet (tab stops) when [snippet].
   final String insert;
   final String? detail;
   final int? kind;
@@ -218,13 +227,61 @@ final class CompletionChoice {
   final LspRange? range;
   final String? filter;
   final String? sort;
+  final bool snippet;
+
+  /// `labelDetails` (a signature, a module), shown faint after the label.
+  final String? labelDetail;
+
+  /// Markdown (or plain text) shown beside the list; from `completionItem/resolve` when absent.
+  final String? documentation;
+
+  /// Edits elsewhere (an import), applied with the item in one undo step.
+  final List<({LspRange range, String text})> additional;
+
+  /// Characters that accept the item and are then typed (`.`, `(`).
+  final List<String> commit;
+  final bool preselect;
+
+  /// The item as the server sent it (`completionItem/resolve` takes it back).
+  final Map<Object?, Object?>? raw;
+
+  /// This item with what `completionItem/resolve` added.
+  CompletionChoice resolved(Object? r) {
+    if (r is! Map) return this;
+    final docs = _documentation(r['documentation']);
+    final more = r['additionalTextEdits'];
+    return CompletionChoice(
+      label: label,
+      insert: insert,
+      detail: r['detail'] as String? ?? detail,
+      kind: kind,
+      range: range,
+      filter: filter,
+      sort: sort,
+      snippet: snippet,
+      labelDetail: labelDetail,
+      documentation: docs ?? documentation ?? '',
+      additional: more is List ? _edits(more) : additional,
+      commit: commit,
+      preselect: preselect,
+      raw: raw,
+    );
+  }
 }
 
-/// A snippet's text without its tab stops (`${1:x}` → `x`, `$0` → nothing).
-String stripSnippet(String s) => s
-    .replaceAllMapped(RegExp(r'\$\{\d+:([^}]*)\}'), (m) => m[1]!)
-    .replaceAll(RegExp(r'\$\{\d+\}'), '')
-    .replaceAll(RegExp(r'\$\d+'), '');
+String? _documentation(Object? d) {
+  if (d is String) return d;
+  if (d is Map && d['value'] is String) {
+    final v = d['value']! as String;
+    return d['kind'] == 'markdown' ? v : '```\n$v\n```';
+  }
+  return null;
+}
+
+List<({LspRange range, String text})> _edits(List<Object?> list) => [
+  for (final e in list.whereType<Map<Object?, Object?>>())
+    (range: lspRange(e['range']), text: e['newText'] as String? ?? ''),
+];
 
 List<CompletionChoice> parseCompletion(Object? result) {
   final items = result is List
@@ -236,11 +293,16 @@ List<CompletionChoice> parseCompletion(Object? result) {
         final label = i['label'] as String? ?? '';
         final te = i['textEdit'];
         final snippet = (i['insertTextFormat'] as num?)?.toInt() == 2;
-        var text =
+        final text =
             (te is Map ? te['newText'] as String? : null) ?? i['insertText'] as String? ?? label;
-        if (snippet) text = stripSnippet(text);
         LspRange? range;
-        if (te is Map) range = lspRange(te['range'] ?? te['replace'] ?? te['insert']);
+        // insertReplaceSupport: the insert range (VS Code's default for typing).
+        if (te is Map) range = lspRange(te['insert'] ?? te['range'] ?? te['replace']);
+        final ld = i['labelDetails'];
+        final labelDetail = ld is Map
+            ? [ld['detail'], ld['description']].whereType<String>().join(' ').trim()
+            : null;
+        final more = i['additionalTextEdits'];
         return CompletionChoice(
           label: label,
           insert: text,
@@ -249,6 +311,13 @@ List<CompletionChoice> parseCompletion(Object? result) {
           range: range,
           filter: i['filterText'] as String?,
           sort: i['sortText'] as String?,
+          snippet: snippet,
+          labelDetail: (labelDetail?.isEmpty ?? true) ? null : labelDetail,
+          documentation: _documentation(i['documentation']),
+          additional: more is List ? _edits(more) : const [],
+          commit: [...?(i['commitCharacters'] as List?)?.whereType<String>()],
+          preselect: i['preselect'] == true,
+          raw: i,
         );
       }(),
   ];
@@ -310,6 +379,46 @@ Map<String, List<({LspRange range, String text})>> workspaceEdits(Object? edit) 
     }
   }
   return out;
+}
+
+/// [p] after [e] is applied (an edit at or after it leaves it where it is).
+LspPos _shift(LspPos p, ({LspRange range, String text}) e) {
+  final s = e.range.start, en = e.range.end;
+  final before = en.line < p.line || (en.line == p.line && en.character <= p.character);
+  if (!before) return p;
+  final added = e.text.split('\n');
+  final removedLines = en.line - s.line;
+  if (en.line < p.line) {
+    return (line: p.line + added.length - 1 - removedLines, character: p.character);
+  }
+  // On the edit's last line: the column follows the new text's last line.
+  final col = added.length == 1
+      ? s.character + added.first.length + (p.character - en.character)
+      : added.last.length + (p.character - en.character);
+  return (line: s.line + added.length - 1, character: col);
+}
+
+/// Applies [edits] as one undoable step and returns where [track] (a position before the edits
+/// are applied) ends up; the caret goes there.
+LspPos applyEditsTracking(
+  CodeLineEditingController c,
+  List<({LspRange range, String text})> edits,
+  LspPos track,
+) {
+  var at = track;
+  // Bottom up, so each edit's range is still in the original coordinates when compared.
+  final sorted = [...edits]
+    ..sort((a, b) {
+      final l = b.range.start.line.compareTo(a.range.start.line);
+      return l != 0 ? l : b.range.start.character.compareTo(a.range.start.character);
+    });
+  for (final e in sorted) {
+    // Edits wholly before the tracked position move it (the item's own edit starts at it, so
+    // it does not).
+    at = _shift(at, e);
+  }
+  applyEdits(c, edits);
+  return at;
 }
 
 /// Applies [edits] (LSP ranges) to [c] as one undoable step: the text is rebuilt once with every

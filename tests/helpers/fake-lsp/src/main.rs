@@ -1,7 +1,8 @@
 //! A fake language server for tests (LSP base protocol on stdio, full document sync).
 //! - `initialize`: completion, definition and hover; full sync.
 //! - `didOpen` / `didChange`: publishes one error diagnostic per line containing `ERROR`.
-//! - `textDocument/completion`: `alpha`, `beta`.
+//! - `textDocument/completion`: `alpha`, `beta`, a `printLine` snippet (documented on
+//!   `completionItem/resolve`) and `HashMap` (with an import as an additional edit).
 //! - `textDocument/definition`: line 0 of `$FAKE_LSP_DEFINITION` (a URI) or of the same file.
 //! - `textDocument/hover` on a document containing `SLOW`: answers only once `$/cancelRequest`
 //!   arrives (with RequestCancelled), else hover text with the document's version.
@@ -96,7 +97,7 @@ fn main() {
         };
         match method.as_str() {
             "initialize" => reply(json!({"capabilities":{
-                "textDocumentSync":1,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"hoverProvider":true,
+                "textDocumentSync":1,"completionProvider":{"triggerCharacters":["."],"resolveProvider":true},"definitionProvider":true,"hoverProvider":true,
                 "renameProvider":true,"documentFormattingProvider":true,
                 "referencesProvider":true,"documentSymbolProvider":true,"documentHighlightProvider":true,
                 "codeActionProvider":true,"signatureHelpProvider":{"triggerCharacters":["(",","]}},
@@ -129,7 +130,23 @@ fn main() {
                     docs.remove(uri);
                 }
             }
-            "textDocument/completion" => reply(json!([{"label":"alpha"},{"label":"beta"}])),
+            "textDocument/completion" => reply(json!([
+                {"label":"alpha"},{"label":"beta"},
+                {"label":"printLine","kind":3,"insertTextFormat":2,
+                 "insertText":"printLine(${1:message}, ${2:level})$0"},
+                {"label":"HashMap","kind":7,"insertText":"HashMap",
+                 "additionalTextEdits":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+                   "newText":"use std::collections::HashMap;\n"}]}
+            ])),
+            // M5.5-EDIT-001: documentation only on resolve.
+            "completionItem/resolve" => {
+                let mut item = p.clone();
+                if item["label"] == "printLine" {
+                    item["detail"] = json!("fn printLine(message, level)");
+                    item["documentation"] = json!({"kind":"markdown","value":"Prints a **line** at a level."});
+                }
+                reply(item)
+            }
             "textDocument/definition" => {
                 let uri = std::env::var("FAKE_LSP_DEFINITION").unwrap_or_else(|_| {
                     p["textDocument"]["uri"]

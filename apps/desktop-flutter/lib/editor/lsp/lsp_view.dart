@@ -12,14 +12,17 @@ import 'package:re_editor/re_editor.dart';
 
 import '../../app/app_state.dart';
 import '../../daemon/client.dart';
+import '../../daemon/protocol.g.dart' show ServerState;
 import '../../state/documents.dart';
 import '../../state/lsp.dart';
+import '../../chat/markdown_view.dart';
 import '../../ui/fuzzy.dart';
 import '../../ui/overlays.dart';
 import '../../ui/surfaces.dart';
 import '../../ui/text_input.dart';
 import '../../ui/theme.dart';
 import '../../ui/tokens.dart';
+import '../snippets.dart';
 import 'lsp_editor.dart';
 
 /// Geometry of the code view, for placing popups at a text position.
@@ -109,6 +112,14 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   Timer? _quick;
   final _listScroll = ScrollController();
 
+  // the documentation of the selected item (completionItem/resolve)
+  Timer? _resolveTimer;
+  CancelToken? _resolvePending;
+
+  // an accepted snippet's tab stops: absolute, in Tab order; [_stop] is the current one
+  List<({int index, int line, int start, int end})>? _stops;
+  int _stop = 0;
+
   // hover
   Timer? _hoverTimer;
   ({Offset at, String text})? _hover;
@@ -164,6 +175,8 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     _hoverPending?.cancel();
     _quick?.cancel();
     _hoverTimer?.cancel();
+    _resolveTimer?.cancel();
+    _resolvePending?.cancel();
     _listScroll.dispose();
     super.dispose();
   }
@@ -200,8 +213,11 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   void _onEdit() {
     final c = widget.controller;
     final now = c.codeLines;
-    final typed = !identical(now, _lastLines);
+    final before = _lastLines;
+    final typed = !identical(now, before);
     _lastLines = now;
+    if (typed && before != null) _followStops(before, now);
+    if (typed && completing && _commit(now)) return;
     _hide();
     _scheduleHighlight(edited: typed);
     if (typed && c.selection.isCollapsed) {
@@ -243,17 +259,22 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     }
     if (_triggers.contains(ch)) {
       unawaited(complete());
-    } else if (_word.hasMatch(ch) && s.extentOffset - _wordStart() >= 2) {
-      // Quick suggestions while typing a word, after a short pause.
+    } else if (_word.hasMatch(ch) && s.extentOffset - _wordStart() >= 1) {
+      // As you type a word (ADR-0021 §7): after the first character, debounced.
       _quick?.cancel();
-      _quick = Timer(const Duration(milliseconds: 120), () => unawaited(complete()));
+      _quick = Timer(const Duration(milliseconds: 30), () => unawaited(complete()));
     }
   }
 
   /// Ctrl+Space, a trigger character, or a pause in a word.
   Future<void> complete() async {
     final server = _server;
-    if (server == null) return;
+    final state = lsp.servers.where((s) => s.serverId == server).firstOrNull?.state;
+    // No server, or one that cannot answer: the document's words.
+    if (server == null || state == ServerState.missing || state == ServerState.failed) {
+      _completeWords();
+      return;
+    }
     _pending?.cancel();
     final token = _pending = CancelToken();
     final line = widget.controller.selection.extentIndex;
@@ -269,6 +290,25 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     }
   }
 
+  /// Where no server serves the language: the document's words (ADR-0021 §7).
+  void _completeWords() {
+    final c = widget.controller;
+    final s = c.selection;
+    final start = _wordStart();
+    final current = c.codeLines[s.extentIndex].text.substring(start, s.extentOffset);
+    // The lines around the caret (a long file is not scanned whole on every keystroke).
+    final from = (s.extentIndex - 1000).clamp(0, c.codeLines.length);
+    final to = (s.extentIndex + 1000).clamp(0, c.codeLines.length);
+    _items = [
+      for (final w in documentWords([
+        for (var i = from; i < to; i++) c.codeLines[i].text,
+      ], current: current).take(500))
+        CompletionChoice(label: w, insert: w, kind: 1),
+    ];
+    _anchor = (line: s.extentIndex, start: start);
+    _filter();
+  }
+
   void _filter() {
     final a = _anchor;
     if (a == null) return;
@@ -282,10 +322,40 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     if (prefix.isEmpty) {
       ranked.sort((x, y) => (x.item.sort ?? x.item.label).compareTo(y.item.sort ?? y.item.label));
     }
+    final pre = prefix.isEmpty ? ranked.indexWhere((r) => r.item.preselect) : -1;
     setState(() {
       _shown = ranked;
-      _active = 0;
+      _active = pre < 0 ? 0 : pre;
       if (_shown.isEmpty) _anchor = null;
+    });
+    _scheduleResolve();
+  }
+
+  /// The selected item's documentation, from the server when the item came without it.
+  void _scheduleResolve() {
+    _resolveTimer?.cancel();
+    if (_shown.isEmpty) return;
+    final item = _shown[_active].item;
+    final server = _server;
+    final caps = _caps?['completionProvider'];
+    if (item.documentation != null || item.raw == null || server == null) return;
+    if (caps is! Map || caps['resolveProvider'] != true) return;
+    _resolveTimer = Timer(const Duration(milliseconds: 60), () async {
+      _resolvePending?.cancel();
+      final token = _resolvePending = CancelToken();
+      try {
+        final r = await lsp.request(server, 'completionItem/resolve', item.raw, cancel: token);
+        if (!mounted || token.isCancelled) return;
+        final done = item.resolved(r);
+        setState(() {
+          _items = [for (final i in _items) identical(i, item) ? done : i];
+          _shown = [
+            for (final x in _shown) identical(x.item, item) ? (item: done, match: x.match) : x,
+          ];
+        });
+      } on DaemonException {
+        // No documentation then.
+      }
     });
   }
 
@@ -307,21 +377,120 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     final from = item.range != null && item.range!.start.line == s.extentIndex
         ? item.range!.start.character
         : a.start;
+    final parsed = item.snippet
+        ? parseSnippet(item.insert)
+        : (text: item.insert, stops: const <TabStop>[]);
+    final start = (line: s.extentIndex, character: from);
+    // The item and its additional edits (an import) are one undo step.
+    final at = applyEditsTracking(c, [
+      (
+        range: (start: start, end: (line: s.extentIndex, character: s.extentOffset)),
+        text: parsed.text,
+      ),
+      ...item.additional,
+    ], start);
+    _close();
+    final stops = [
+      for (final t in parsed.stops)
+        () {
+          final p0 = positionIn(parsed.text, t.start, at.line, at.character);
+          final p1 = positionIn(parsed.text, t.end, at.line, at.character);
+          return (
+            index: t.index,
+            line: p0.line,
+            start: p0.column,
+            end: p1.line == p0.line ? p1.column : p0.column,
+          );
+        }(),
+    ];
+    if (item.snippet && stops.length > 1) {
+      _stops = stops;
+      _goToStop(0);
+    } else {
+      final end = positionIn(parsed.text, parsed.text.length, at.line, at.character);
+      final last = parsed.stops.isEmpty ? null : stops.last;
+      c.selection = CodeLineSelection.collapsed(
+        index: last?.line ?? end.line,
+        offset: last?.start ?? end.column,
+      );
+      _stops = null;
+    }
+    _lastLines = c.codeLines;
+  }
+
+  /// Selects tab stop [i] (its placeholder text), the last one ends the snippet.
+  void _goToStop(int i) {
+    final stops = _stops;
+    if (stops == null || stops.isEmpty) return;
+    _stop = i.clamp(0, stops.length - 1);
+    final t = stops[_stop];
+    widget.controller.selection = CodeLineSelection(
+      baseIndex: t.line,
+      baseOffset: t.start,
+      extentIndex: t.line,
+      extentOffset: t.end,
+    );
+    if (_stop == stops.length - 1) _stops = null;
+  }
+
+  /// Typing inside the current stop moves the stops after it on that line; any other edit ends
+  /// the snippet.
+  void _followStops(CodeLines before, CodeLines now) {
+    final stops = _stops;
+    if (stops == null) return;
+    final t = stops[_stop];
+    final s = widget.controller.selection;
+    if (before.length != now.length || s.extentIndex != t.line || t.line >= now.length) {
+      _stops = null;
+      return;
+    }
+    final delta = now[t.line].text.length - before[t.line].text.length;
+    if (s.extentOffset < t.start || s.extentOffset > t.end + delta.clamp(0, 1 << 20)) {
+      _stops = null;
+      return;
+    }
+    _stops = [
+      for (final (k, x) in stops.indexed)
+        if (k == _stop || (x.index == t.index && x.line == t.line && x.start == t.start))
+          (index: x.index, line: x.line, start: x.start, end: x.end + delta)
+        else if (x.line == t.line && x.start >= t.end)
+          (index: x.index, line: x.line, start: x.start + delta, end: x.end + delta)
+        else
+          x,
+    ];
+  }
+
+  /// A commit character typed while the list is open accepts the item, then is typed (ADR-0021
+  /// §7). True when it did.
+  bool _commit(CodeLines now) {
+    if (_shown.isEmpty) return false;
+    final item = _shown[_active].item;
+    if (item.commit.isEmpty) return false;
+    final c = widget.controller;
+    final s = c.selection;
+    final line = now[s.extentIndex].text;
+    if (s.extentOffset == 0 || s.extentOffset > line.length) return false;
+    final ch = line[s.extentOffset - 1];
+    if (!item.commit.contains(ch)) return false;
     c.replaceSelection(
-      item.insert,
+      '',
       CodeLineSelection(
         baseIndex: s.extentIndex,
-        baseOffset: from,
+        baseOffset: s.extentOffset - 1,
         extentIndex: s.extentIndex,
         extentOffset: s.extentOffset,
       ),
     );
-    _close();
+    _accept();
+    c.replaceSelection(ch);
+    _lastLines = c.codeLines;
+    return true;
   }
 
   void _move(int d) {
     if (_shown.isEmpty) return;
     setState(() => _active = (_active + d + _shown.length) % _shown.length);
+    _scheduleResolve();
     const extent = 24.0;
     if (_listScroll.hasClients) {
       final top = _active * extent;
@@ -777,6 +946,8 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       onInvoke: (_) {
         if (completing) {
           _accept();
+        } else if (_stops != null) {
+          _goToStop(_stop + 1);
         } else if (app.tabMovesFocus.value) {
           // Ctrl+M: Tab leaves the editor (as in Monaco), for keyboard navigation.
           FocusScope.of(context).nextFocus();
@@ -788,7 +959,9 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     ),
     CodeShortcutOutdentIntent: CallbackAction<CodeShortcutOutdentIntent>(
       onInvoke: (_) {
-        if (app.tabMovesFocus.value) {
+        if (_stops != null) {
+          _goToStop(_stop - 1);
+        } else if (app.tabMovesFocus.value) {
           FocusScope.of(context).previousFocus();
         } else {
           widget.controller.applyOutdent();
@@ -798,7 +971,9 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     ),
     CodeShortcutEscIntent: CallbackAction<CodeShortcutEscIntent>(
       onInvoke: (_) {
-        if (completing || _hover != null || _signature != null) {
+        if (_stops != null && !completing) {
+          _stops = null;
+        } else if (completing || _hover != null || _signature != null) {
           _close();
           _hide();
           _closeSignature();
@@ -826,71 +1001,112 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       popup = Positioned(
         left: at.dx.clamp(0, double.infinity),
         top: at.dy + g.lineHeight + 2,
-        child: Semantics(
-          label: 'Suggestions',
-          container: true,
-          liveRegion: true,
-          child: SizedBox(
-            width: 380,
-            height: (_shown.length.clamp(1, 10)) * 24.0 + 8,
-            child: Sheet(
-              radius: Metrics.radiusRaised,
-              padding: const EdgeInsets.all(4),
-              child: ListView.builder(
-                controller: _listScroll,
-                itemExtent: 24,
-                itemCount: _shown.length,
-                itemBuilder: (context, i) {
-                  final (:item, :match) = _shown[i];
-                  final on = i == _active;
-                  return GestureDetector(
-                    onTap: () => _accept(i),
-                    child: Semantics(
-                      selected: on,
-                      label: [item.label, if (item.detail != null) item.detail!].join(', '),
-                      excludeSemantics: true,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: on ? c.raised : null,
-                          borderRadius: BorderRadius.circular(Metrics.radiusControl),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 18,
-                                child: Text(
-                                  _kind(item.kind),
-                                  style: t.type.codeSmall.copyWith(color: c.accentText),
-                                ),
-                              ),
-                              Expanded(
-                                child: _Highlighted(
-                                  text: item.label,
-                                  match: match,
-                                  style: t.type.code.copyWith(fontSize: 12.5),
-                                ),
-                              ),
-                              if (item.detail != null)
-                                Flexible(
-                                  child: Text(
-                                    item.detail!,
-                                    style: t.type.tiny,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.right,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              label: 'Suggestions',
+              container: true,
+              liveRegion: true,
+              child: SizedBox(
+                width: 380,
+                height: (_shown.length.clamp(1, 10)) * 24.0 + 8,
+                child: Sheet(
+                  radius: Metrics.radiusRaised,
+                  padding: const EdgeInsets.all(4),
+                  child: ListView.builder(
+                    controller: _listScroll,
+                    itemExtent: 24,
+                    itemCount: _shown.length,
+                    itemBuilder: (context, i) {
+                      final (:item, :match) = _shown[i];
+                      final on = i == _active;
+                      return GestureDetector(
+                        onTap: () => _accept(i),
+                        child: Semantics(
+                          selected: on,
+                          label: [item.label, if (item.detail != null) item.detail!].join(', '),
+                          excludeSemantics: true,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: on ? c.raised : null,
+                              borderRadius: BorderRadius.circular(Metrics.radiusControl),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 18,
+                                    child: Text(
+                                      _kind(item.kind),
+                                      style: t.type.codeSmall.copyWith(color: c.accentText),
+                                    ),
                                   ),
-                                ),
-                            ],
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Flexible(
+                                          child: _Highlighted(
+                                            text: item.label,
+                                            match: match,
+                                            style: t.type.code.copyWith(fontSize: 12.5),
+                                          ),
+                                        ),
+                                        if (item.labelDetail != null)
+                                          Flexible(
+                                            child: Text(
+                                              item.labelDetail!,
+                                              style: t.type.codeSmall.copyWith(color: c.ink3),
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 1,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (item.detail != null)
+                                    Flexible(
+                                      child: Text(
+                                        item.detail!,
+                                        style: t.type.tiny,
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: TextAlign.right,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  );
-                },
+                      );
+                    },
+                  ),
+                ),
               ),
             ),
-          ),
+            // The selected item's documentation beside the list (resolved when it came without).
+            if (_docOf(_shown[_active.clamp(0, _shown.length - 1)].item) case final doc?)
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Semantics(
+                  label: 'Documentation',
+                  container: true,
+                  child: SizedBox(
+                    width: 360,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 248),
+                      child: Sheet(
+                        radius: Metrics.radiusRaised,
+                        padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+                        child: SingleChildScrollView(child: MarkdownView(doc)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       );
     }
@@ -1042,6 +1258,15 @@ class _LspIntent extends Intent {
 }
 
 /// A letter for the completion item kind (LSP CompletionItemKind).
+/// What the documentation pane shows for [item]: its detail as code, then its documentation.
+String? _docOf(CompletionChoice item) {
+  final parts = [
+    if (item.detail case final d? when d.trim().isNotEmpty) '```\n${d.trim()}\n```',
+    if (item.documentation case final d? when d.trim().isNotEmpty) d.trim(),
+  ];
+  return parts.isEmpty ? null : parts.join('\n\n');
+}
+
 String _kind(int? k) => switch (k) {
   2 || 3 => 'ƒ',
   4 => 'c',

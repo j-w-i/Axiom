@@ -2,6 +2,7 @@
 // and applying edits to a controller.
 
 import 'package:axiom_desktop/editor/lsp/lsp_editor.dart';
+import 'package:axiom_desktop/editor/snippets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:re_editor/re_editor.dart';
 
@@ -32,7 +33,7 @@ void main() {
     expect(contentChange(['a', 'b', 'c'], ['a', 'bX', 'c']).containsKey('range'), isTrue);
   });
 
-  test('completion items: labels, snippets without tab stops, text edits', () {
+  test('completion items: labels, snippets with their tab stops, text edits', () {
     final items = parseCompletion({
       'isIncomplete': false,
       'items': [
@@ -56,7 +57,10 @@ void main() {
         {'label': 'call', 'insertTextFormat': 2, 'insertText': r'call(${1:arg})'},
       ],
     });
-    expect([for (final i in items) i.insert], ['norm()', 'x', 'call(arg)']);
+    // Snippets keep their tab stops (M5.5-EDIT-001); their text is what parseSnippet makes.
+    expect([for (final i in items) i.insert], [r'norm()$0', 'x', r'call(${1:arg})']);
+    expect([for (final i in items) i.snippet], [true, false, true]);
+    expect([for (final i in items) parseSnippet(i.insert).text], ['norm()', 'x', 'call(arg)']);
     expect(items[1].range!.start, (line: 1, character: 2));
     expect(
       parseCompletion([
@@ -146,5 +150,66 @@ void main() {
       }).keys,
       ['file:///w/b.rs'],
     );
+  });
+
+  test('completion details: labelDetails, documentation, auto-imports, commit characters', () {
+    final item = parseCompletion([
+      {
+        'label': 'HashMap',
+        'labelDetails': {'detail': '<K, V>', 'description': 'std::collections'},
+        'documentation': {'kind': 'markdown', 'value': 'A **hash** map.'},
+        'additionalTextEdits': [
+          {
+            'range': {
+              'start': {'line': 0, 'character': 0},
+              'end': {'line': 0, 'character': 0},
+            },
+            'newText': 'use std::collections::HashMap;\n',
+          },
+        ],
+        'commitCharacters': ['.', '('],
+        'preselect': true,
+      },
+    ]).single;
+    expect(item.labelDetail, '<K, V> std::collections');
+    expect(item.documentation, 'A **hash** map.');
+    expect(item.additional.single.text, 'use std::collections::HashMap;\n');
+    expect(item.commit, ['.', '(']);
+    expect(item.preselect, isTrue);
+    // A resolve answer fills what was missing.
+    final bare = parseCompletion([
+      {'label': 'len'},
+    ]).single;
+    expect(bare.documentation, isNull);
+    final done = bare.resolved({
+      'detail': 'fn len(&self) -> usize',
+      'documentation': 'Returns the length.',
+    });
+    expect(done.detail, 'fn len(&self) -> usize');
+    expect(done.documentation, 'Returns the length.');
+  });
+
+  test('an auto-import above the completion: one undo step, the caret after the item', () {
+    final c = CodeLineEditingController.fromText('fn main() {\n    let m = Ha\n}');
+    c.selection = const CodeLineSelection.collapsed(index: 1, offset: 14);
+    final at = applyEditsTracking(
+      c,
+      [
+        (
+          range: (start: (line: 1, character: 12), end: (line: 1, character: 14)),
+          text: 'HashMap::new()',
+        ),
+        (
+          range: (start: (line: 0, character: 0), end: (line: 0, character: 0)),
+          text: 'use std::collections::HashMap;\n\n',
+        ),
+      ],
+      (line: 1, character: 12),
+    );
+    expect(c.text, 'use std::collections::HashMap;\n\nfn main() {\n    let m = HashMap::new()\n}');
+    // The item's start moved down two lines.
+    expect(at, (line: 3, character: 12));
+    c.undo();
+    expect(c.text, 'fn main() {\n    let m = Ha\n}');
   });
 }
