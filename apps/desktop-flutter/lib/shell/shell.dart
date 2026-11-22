@@ -1874,7 +1874,9 @@ class _StatusBar extends StatelessWidget {
                         Semantics(
                           label:
                               'Branch $branch${sync.isEmpty ? '' : ', $sync'}, '
-                              '$n change${n == 1 ? '' : 's'}',
+                              '$n change${n == 1 ? '' : 's'}'
+                              '${(g.polling ?? false) ? ', file watching limited: changes are '
+                                        'checked every 10 seconds' : ''}',
                           excludeSemantics: true,
                           child: Row(
                             children: [
@@ -1894,6 +1896,14 @@ class _StatusBar extends StatelessWidget {
                               if (sync.isNotEmpty) ...[
                                 const SizedBox(width: 4),
                                 Text(sync, style: t.type.numeric),
+                              ],
+                              // No file watch could be made (the system's limit): changes show
+                              // up to 10 s late (AUD-012).
+                              if (g.polling ?? false) ...[
+                                const SizedBox(width: 6),
+                                AxiomIcon(AxiomIcons.warning, size: 11, color: c.warn),
+                                const SizedBox(width: 3),
+                                Text('watch limited', style: t.type.small.copyWith(color: c.warn)),
                               ],
                             ],
                           ),

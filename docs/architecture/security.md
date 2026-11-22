@@ -262,9 +262,9 @@ The Tauri shell's controls, kept as the record of how it was built:
   at most 16 MiB of output whatever `outputByteLimit` asks; non-string `args` are refused.
 - **A dead agent is not reused.** An agent whose process ended (crashed, or killed by a cancel
   it ignored) is started again on the next turn; agents and MCP servers are started without
-  holding the daemon-wide maps, so a slow one holds up no other session (AUD-032). Gap: idle
-  agents are not stopped before their session is deleted (an agent that cannot resume its
-  conversation would lose it).
+  holding the daemon-wide maps, so a slow one holds up no other session (AUD-032). A session's MCP
+  servers and its external agent are stopped after 15 minutes unused; the agent only when it
+  can resume the conversation (`loadSession`), otherwise it is kept so nothing is lost.
 - **Credentials.** Axiom passes no credentials; agents use their own sign-in. Their processes
   get no stdin other than the ACP stream and are killed with the session or the daemon.
 - **Limit.** What an agent does without the ACP fs/terminal methods is outside Axiom's gate.
@@ -408,6 +408,5 @@ must never reach a user:
   their home directory's permissions allow.
 - Since FL-QA-001 the shell depends on no web engine. The M5 preview *does* load arbitrary
   pages; it opens in the person's browser (ADR-0020 §8), whose isolation is that browser's.
-- Idle external agents and MCP servers run until their session is deleted.
 - The CLI's approval prompt shows untrusted text with control characters escaped (`\x1b`;
   AUD-045); the Flutter shell draws text as text.

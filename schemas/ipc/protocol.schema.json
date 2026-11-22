@@ -1770,6 +1770,10 @@
             "null"
           ]
         },
+        "polling": {
+          "description": "Protocol 0.6 (additive, AUD-012): no file watch could be made for this repository (the\nsystem's watch limit, for example), so its changes are looked for every few seconds and\n`git/didChange` comes late. Absent (false) otherwise.",
+          "type": "boolean"
+        },
         "reason": {
           "description": "Why `repo` is false: `git` not found, or not a repository.",
           "type": [

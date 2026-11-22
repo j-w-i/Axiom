@@ -196,6 +196,7 @@ pub fn parse_status(out: &[u8], prefix: &str) -> GitStatus {
         ahead: 0,
         behind: 0,
         files: Vec::new(),
+        polling: false,
     };
     let rel = |p: &str| -> Option<WorkspacePath> {
         p.strip_prefix(prefix).map(|r| WorkspacePath(r.to_string()))
@@ -305,6 +306,7 @@ fn no_repo(reason: String) -> GitStatus {
         ahead: 0,
         behind: 0,
         files: Vec::new(),
+        polling: false,
     }
 }
 

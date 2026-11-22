@@ -38,6 +38,8 @@ pub struct App {
     pub external_reads: Mutex<HashMap<WorkspaceId, std::collections::HashSet<PathBuf>>>,
     /// `git/didChange` watches, one per workspace that asked for its status (M4-GIT-001).
     pub git_watches: Mutex<HashMap<WorkspaceId, AbortHandle>>,
+    /// Workspaces whose change watch fell back to polling (`GitStatus.polling`, AUD-012).
+    pub git_polling: Mutex<std::collections::HashSet<WorkspaceId>>,
     /// Integrated terminals (M4, ADR-0018 §4).
     pub terminals: axiom_term::Terminals,
     /// The language-server event forwarder runs (started with the first router).
@@ -67,6 +69,9 @@ pub struct AgentServices {
     pub attached: Mutex<Vec<(axiom_protocol::agent::SessionId, Notifier)>>,
     /// Built-in tools (ADR-0015 §2), backed by this daemon's services.
     pub tools: axiom_agent::tools::Registry,
+    /// When each session last used its external agent or MCP servers: idle ones are stopped
+    /// (AUD-032, `handlers::sessions::spawn_idle_reaper`).
+    pub last_used: Mutex<HashMap<axiom_protocol::agent::SessionId, std::time::Instant>>,
 }
 
 /// How long a connection whose queue is full may hold up a daemon-wide relay (AUD-030).
@@ -153,6 +158,7 @@ fn agent_services(app: std::sync::Weak<App>, data_dir: &std::path::Path) -> Agen
             scripted,
         ),
         tools: crate::tools::registry(app),
+        last_used: Mutex::default(),
         gate: axiom_agent::gate::Gate::new(approvers.clone()),
         approvers,
         sessions: axiom_agent::live::Sessions::new(data_dir.join("sessions")),
@@ -223,6 +229,7 @@ impl App {
             lsp: axiom_lsp::Manager::default(),
             external_reads: Mutex::default(),
             git_watches: Mutex::default(),
+            git_polling: Mutex::default(),
             terminals: axiom_term::Terminals::default(),
             lsp_forwarding: std::sync::atomic::AtomicBool::new(false),
             previews: crate::handlers::ui::Previews::default(),

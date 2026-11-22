@@ -59,3 +59,15 @@ fn params_and_results() {
     let _: TrashParams = round_trip(json!({"workspaceId":"w1","path":"old.txt"}));
     let _: Empty = round_trip(json!({}));
 }
+
+/// AUD-012: `GitStatus.polling` is additive: absent means false, and false is not written.
+#[test]
+fn git_status_polling_is_additive() {
+    use axiom_protocol::git::GitStatus;
+    let s: GitStatus = round_trip(json!({"repo":true,"ahead":0,"behind":0,"files":[]}));
+    assert!(!s.polling);
+    assert!(serde_json::to_value(&s).unwrap().get("polling").is_none());
+    let s: GitStatus =
+        round_trip(json!({"repo":true,"ahead":0,"behind":0,"files":[],"polling":true}));
+    assert!(s.polling);
+}

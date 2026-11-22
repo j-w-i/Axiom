@@ -86,10 +86,37 @@ fn main() {
         };
         let p = msg["params"].clone();
         match msg["method"].as_str().unwrap_or("") {
-            "initialize" => send(json!({"jsonrpc":"2.0","id":id,"result":{
+            "initialize" => {
+                // FAKE_ACP_LOAD_SESSION=1: the agent can resume a conversation (session/load);
+                // with FAKE_ACP_STARTS, every start and load is logged there (the idle-stop test, AUD-032).
+                let load = std::env::var("FAKE_ACP_LOAD_SESSION").as_deref() == Ok("1");
+                if let Ok(log) = std::env::var("FAKE_ACP_STARTS") {
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(log)
+                    {
+                        let _ = writeln!(f, "started");
+                    }
+                }
+                send(json!({"jsonrpc":"2.0","id":id,"result":{
                 "protocolVersion":1,
-                "agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":false,"embeddedContext":false}},
-                "authMethods":[]}})),
+                "agentCapabilities":{"loadSession":load,"promptCapabilities":{"image":false,"embeddedContext":false}},
+                "authMethods":[]}}));
+            }
+            "session/load" => {
+                cwd = p["cwd"].as_str().unwrap_or("").to_string();
+                if let Ok(log) = std::env::var("FAKE_ACP_STARTS") {
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(log)
+                    {
+                        let _ = writeln!(f, "loaded {}", p["sessionId"]);
+                    }
+                }
+                send(json!({"jsonrpc":"2.0","id":id,"result":{}}));
+            }
             "session/new" => {
                 cwd = p["cwd"].as_str().unwrap_or("").to_string();
                 if let Ok(log) = std::env::var("FAKE_ACP_LOG") {

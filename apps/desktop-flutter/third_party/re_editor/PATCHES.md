@@ -104,3 +104,8 @@ Upstream still sent the whole text to a worker on every edit, which built one "j
 per line and sent them all back to be decoded on the UI thread: typing at the top of a 100 000-line
 file stalled the UI for over 4 s per burst and kept about 700 MiB (audit
 `audits/comprehensive-audit/PERFORMANCE_REPORT.md`).
+- `lib/src/_code_field.dart` (`_updateDisplayRenderParagraphs`): a jump back of more than 256
+  lines starts at the estimated line, as a jump forward already did. Upstream walked back line by
+  line, laying out every paragraph in between (100 000 for Ctrl+Home at the end of a 100 000-line
+  file: a 3.9 s frame and about 650 MB). With word wrap the estimate can place the view a little
+  off for wrapped lines, as the forward jump always could.

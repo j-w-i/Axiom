@@ -651,6 +651,7 @@ async fn acp_session(
     root: &std::path::Path,
     key_vars: &[String],
 ) -> Result<Arc<axiom_agent::acp::AcpSession>, String> {
+    touch(a, &live.id);
     {
         let mut m = a.agent.acp.lock().await;
         match m.get(&live.id) {
@@ -694,6 +695,79 @@ async fn acp_session(
     Ok(s)
 }
 
+/// A session used its external agent or MCP servers now.
+fn touch(app: &App, id: &SessionId) {
+    app.agent
+        .last_used
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(id.clone(), std::time::Instant::now());
+}
+
+/// How long a session's external agent and MCP servers may sit unused before they are stopped.
+pub const IDLE: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// Stops what idle sessions keep running (AUD-032): their MCP servers (started again on the next
+/// turn: they keep no conversation), and their external agent when it can resume the
+/// conversation (`loadSession`); one that cannot is kept, or the conversation would be lost.
+pub fn spawn_idle_reaper(app: &Arc<App>) {
+    let weak = Arc::downgrade(app);
+    // TEST ONLY: `AXIOM_TEST_AGENT_IDLE_MS` shortens the idle time (and the check's interval).
+    let idle = std::env::var("AXIOM_TEST_AGENT_IDLE_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(IDLE);
+    let every = (idle / 2).min(std::time::Duration::from_secs(60));
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(every);
+        loop {
+            tick.tick().await;
+            let Some(app) = weak.upgrade() else { return };
+            reap_idle(&app, idle).await;
+        }
+    });
+}
+
+/// One pass of [`spawn_idle_reaper`]: sessions unused for `idle` and not mid-turn.
+pub async fn reap_idle(app: &App, idle: std::time::Duration) {
+    let now = std::time::Instant::now();
+    let stale: Vec<SessionId> = app
+        .agent
+        .last_used
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .filter(|(_, t)| now.duration_since(**t) >= idle)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in stale {
+        if app.agent.sessions.get(&id).is_some_and(|l| l.running()) {
+            continue;
+        }
+        // Dropping a running MCP client stops its server.
+        app.agent.mcp.lock().await.remove(&id);
+        let acp = {
+            let mut m = app.agent.acp.lock().await;
+            match m.get(&id) {
+                Some(s) if s.caps.load_session => m.remove(&id),
+                _ => None,
+            }
+        };
+        if let Some(s) = acp {
+            s.conn.kill().await;
+        }
+        let keep = app.agent.acp.lock().await.contains_key(&id);
+        if !keep {
+            app.agent
+                .last_used
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&id);
+        }
+    }
+}
+
 /// The scratch folder of a conversation without a folder: `<data dir>/scratch/<session>`,
 /// created on first use and opened as a workspace (the same id while the daemon runs).
 async fn scratch_workspace(app: &App, id: &SessionId) -> Result<(WorkspaceId, PathBuf), RpcError> {
@@ -718,6 +792,7 @@ async fn session_registry(
     root: &std::path::Path,
     key_vars: &[String],
 ) -> axiom_agent::tools::Registry {
+    touch(app, &live.id);
     let mut reg = app.agent.tools.clone();
     let configs: Vec<axiom_agent::mcp_client::ServerConfig> = app
         .store_call(|s| s.setting_get(MCP_KEY))

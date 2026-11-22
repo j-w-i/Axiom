@@ -37,6 +37,18 @@ int pssKb(int pid) {
   }
 }
 
+/// Major page faults of this process so far (pages read back from disk or swap): a frame that
+/// is long without CPU work on the UI isolate is often paging on a loaded machine.
+int majorFaults() {
+  try {
+    final s = File('/proc/self/stat').readAsStringSync();
+    final f = s.substring(s.lastIndexOf(')') + 2).split(' ');
+    return int.parse(f[9]);
+  } on Object {
+    return -1;
+  }
+}
+
 /// All descendants' pids of [pid].
 List<int> children(int pid) {
   final out = <int>[];
@@ -142,6 +154,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 40));
       }
     })).toJson();
+    final faults0 = majorFaults();
     res['huge_typing_at_start'] = (await measureFrames('huge typing start', () async {
       doc.controller.selection = const CodeLineSelection.collapsed(index: 0, offset: 0);
       for (final ch in '// start edit'.split('')) {
@@ -149,6 +162,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 40));
       }
     })).toJson();
+    res['huge_typing_at_start_major_faults'] = majorFaults() - faults0;
     await rest(2000);
     res['mem_3_huge_edited'] = mem(app);
 

@@ -35,7 +35,16 @@ fn fake_acp() -> PathBuf {
 }
 
 async fn setup(log: &Path) -> (Daemon, common::Fixture, SessionId) {
-    let d = Daemon::spawn().await;
+    setup_with(log, Daemon::spawn().await, None).await
+}
+
+/// [`setup`] on a given daemon; with `starts`, the fake agent can resume a conversation and
+/// logs each start and load there.
+async fn setup_with(
+    log: &Path,
+    d: Daemon,
+    starts: Option<&Path>,
+) -> (Daemon, common::Fixture, SessionId) {
     let mut info = client_info();
     info.protocol_version = "0.3".into();
     info.capabilities = Some(ClientCapabilities { approvals: true });
@@ -45,6 +54,13 @@ async fn setup(log: &Path) -> (Daemon, common::Fixture, SessionId) {
         "FAKE_ACP_LOG".to_string(),
         log.to_string_lossy().into_owned(),
     );
+    if let Some(p) = starts {
+        env.insert("FAKE_ACP_LOAD_SESSION".to_string(), "1".to_string());
+        env.insert(
+            "FAKE_ACP_STARTS".to_string(),
+            p.to_string_lossy().into_owned(),
+        );
+    }
     d.client
         .request::<ConfigureProvider>(ConfigureProviderParams {
             id: "fake-agent".into(),
@@ -539,4 +555,80 @@ async fn acp_an_agent_that_exited_is_started_again() {
     let (evs, _) = turn(&d, &f.id, &sid, "read", None).await;
     assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
     assert!(said(&evs).starts_with("README: "), "{}", said(&evs));
+}
+
+/// AUD-032: an idle session's external agent is stopped when it can resume the conversation
+/// (it starts again, resumed, on the next turn); one that cannot resume is kept running.
+#[tokio::test]
+async fn acp_idle_agents_that_can_resume_are_stopped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let starts = tmp.path().join("starts.log");
+    let d = Daemon::spawn_configured(&tmp.path().join("data"), |c| {
+        c.env("AXIOM_TEST_AGENT_IDLE_MS", "400");
+    })
+    .await;
+    let (d, f, sid) = setup_with(&tmp.path().join("acp.log"), d, Some(&starts)).await;
+    idle_round_trip(&d, &f.id, &sid).await;
+    let text = std::fs::read_to_string(&starts).unwrap();
+    assert_eq!(
+        text.lines().filter(|l| *l == "started").count(),
+        2,
+        "restarted: {text}"
+    );
+    assert!(
+        text.lines().any(|l| l.starts_with("loaded")),
+        "resumed: {text}"
+    );
+}
+
+/// AUD-032: an agent that cannot resume a conversation is not stopped while idle.
+#[tokio::test]
+async fn acp_idle_agents_that_cannot_resume_are_kept() {
+    let tmp = tempfile::tempdir().unwrap();
+    let starts = tmp.path().join("starts.log");
+    let d = Daemon::spawn_configured(&tmp.path().join("data"), |c| {
+        c.env("AXIOM_TEST_AGENT_IDLE_MS", "400");
+    })
+    .await;
+    let (d, f, sid) = setup_with(&tmp.path().join("acp.log"), d, Some(&starts)).await;
+    // The same agent without loadSession: configure the provider again without the flag.
+    let mut env = std::collections::BTreeMap::new();
+    env.insert(
+        "FAKE_ACP_STARTS".to_string(),
+        starts.to_string_lossy().into_owned(),
+    );
+    d.client
+        .request::<ConfigureProvider>(ConfigureProviderParams {
+            id: "fake-agent".into(),
+            config: Some(ProviderConfig {
+                id: "fake-agent".into(),
+                kind: ProviderKind::Acp,
+                name: "Fake Agent".into(),
+                base_url: None,
+                api_key_env: None,
+                models: vec![],
+                capabilities: None,
+                command: vec![fake_acp().to_string_lossy().into_owned()],
+                env,
+            }),
+            api_key: None,
+            clear_key: false,
+        })
+        .await
+        .unwrap();
+    idle_round_trip(&d, &f.id, &sid).await;
+    let text = std::fs::read_to_string(&starts).unwrap();
+    assert_eq!(
+        text.lines().filter(|l| *l == "started").count(),
+        1,
+        "kept: {text}"
+    );
+}
+
+async fn idle_round_trip(d: &Daemon, ws: &WorkspaceId, sid: &SessionId) {
+    let (evs, _) = turn(d, ws, sid, "read", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let (evs, _) = turn(d, ws, sid, "read", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
 }

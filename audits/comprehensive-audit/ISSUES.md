@@ -32,14 +32,14 @@ Verification for every issue: the test or measurement named in its entry, plus t
 | AUD-002 | Fixed | folder switch closes the old folder's documents; data_safety_test.dart step 6 |
 | AUD-003 | Fixed | gutter strip full height; layout_test.dart checks it |
 | AUD-004 | Fixed | split bounds never cross; layout_test.dart at 900×560 with dock and split |
-| AUD-005 | Partially fixed | Partially fixed: the quadratic line loops (re_editor and the shell) and the oversized-highlight round trip are gone; open 1.29 s → 0.49 s, typing p99 build 5 ms; one ~3.9 s frame remains on the first edit at line 1 of a 100 000-line file (GC, not UI-isolate CPU: 1.0 s of CPU for 13 keys) and the retained heap after GC is 197 MiB (from 64) |
+| AUD-005 | Fixed | quadratic line loops removed (re_editor and shell), no highlight round trip above the size limit, far backward jumps no longer lay out every line between (re_editor `_code_field.dart`); 100k-line file: typing at line 1 max build 3938 → 5.7 ms, PSS after editing ~940 → 284 MiB (`evidence/perf/after-remediation-probe.json`) |
 | AUD-006 | Fixed |  |
 | AUD-007 | Fixed |  |
 | AUD-008 | Fixed | built-in servers that run project code are refused or restricted until the folder is trusted; Trust Folder line above the editor |
 | AUD-009 | Fixed |  |
 | AUD-010 | Fixed |  |
 | AUD-011 | Fixed |  |
-| AUD-012 | Partially fixed | Partially fixed: no spin, a 10 s poll fallback with one log line; the status-bar "file watching limited" note is not built |
+| AUD-012 | Fixed | no spin; a 10 s poll fallback; `GitStatus.polling` (0.6, additive) and a "watch limited" note in the status bar |
 | AUD-013 | Fixed |  |
 | AUD-014 | Fixed | fitPanels() bounds side bar, dock and console by the window; layout_test.dart |
 | AUD-015 | Fixed |  |
@@ -59,7 +59,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 | AUD-029 | Fixed |  |
 | AUD-030 | Fixed |  |
 | AUD-031 | Fixed |  |
-| AUD-032 | Partially fixed | Partially fixed: no daemon-wide lock across start; dead agents evicted and restarted; idle agents are not stopped (an agent that cannot resume its session would lose the conversation) |
+| AUD-032 | Fixed | no daemon-wide lock across start; dead agents restarted; idle MCP servers and resumable agents stopped after 15 min (`acp_idle_agents_that_can_resume_are_stopped`, `…_cannot_resume_are_kept`) |
 | AUD-033 | Fixed |  |
 | AUD-034 | Fixed |  |
 | AUD-035 | Fixed |  |
@@ -136,9 +136,9 @@ Verification for every issue: the test or measurement named in its entry, plus t
 | AUD-106 | Fixed |  |
 | AUD-107 | Fixed with a residual risk | Fixed with a residual risk: pinned uv 0.9.0 and rustup 1.28.2 (not verified online: confirm before release); the first install of a checksum URL trusts its origin, later changes are refused |
 | AUD-108 | Fixed |  |
-| AUD-109 | Partially fixed | Partially fixed: line caps, 0600 credential file, MCP principals per connection; env.planInstall keeps its declared effect `read` (frozen contract) |
+| AUD-109 | Fixed (contract-limited) | line caps, 0600 credential file, MCP principals per connection, env.planInstall runs no program; its declared effect stays `read` because the agent-tool contract is frozen |
 | AUD-110 | Fixed |  |
-| AUD-111 | Partially fixed | Partially fixed: Edit menu, palette ordered by recent use and category; Ctrl+N stays New Chat (the owner's binding), New File is in File and the explorer |
+| AUD-111 | Fixed (owner binding kept) | Edit menu; palette ordered by recent use then category; New File/New Folder/Save As in File and the explorer; Ctrl+N stays New Chat, as the owner set it |
 | AUD-112 | Partially fixed | Partially fixed: status docs, performance.md, security.md updated; the 44 `implemented` tasks still need the review procedure |
 
 ---

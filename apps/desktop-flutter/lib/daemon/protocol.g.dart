@@ -1881,6 +1881,7 @@ final class GitStatus implements Wire {
     this.branch,
     this.files,
     this.head,
+    this.polling,
     this.reason,
     required this.repo,
     this.upstream,
@@ -1896,6 +1897,11 @@ final class GitStatus implements Wire {
   /// The commit HEAD points at (abbreviated), when there is one.
   final String? head;
 
+  /// Protocol 0.6 (additive, AUD-012): no file watch could be made for this repository (the
+  /// system's watch limit, for example), so its changes are looked for every few seconds and
+  /// `git/didChange` comes late. Absent (false) otherwise.
+  final bool? polling;
+
   /// Why `repo` is false: `git` not found, or not a repository.
   final String? reason;
   final bool repo;
@@ -1909,6 +1915,7 @@ final class GitStatus implements Wire {
       branch: m['branch'] == null ? null : m['branch'] as String,
       files: m['files'] == null ? null : [for (final x in asList(m['files'])) GitFile.fromJson(x)],
       head: m['head'] == null ? null : m['head'] as String,
+      polling: m['polling'] == null ? null : m['polling'] as bool,
       reason: m['reason'] == null ? null : m['reason'] as String,
       repo: m['repo'] as bool,
       upstream: m['upstream'] == null ? null : m['upstream'] as String,
@@ -1922,6 +1929,7 @@ final class GitStatus implements Wire {
     if (branch != null) 'branch': branch!,
     if (files != null) 'files': [for (final x in files!) x.toJson()],
     if (head != null) 'head': head!,
+    if (polling != null) 'polling': polling!,
     if (reason != null) 'reason': reason!,
     'repo': repo,
     if (upstream != null) 'upstream': upstream!,

@@ -18,6 +18,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     {
         lsp::spawn_forwarder(&app);
         terminal::spawn_forwarder(&app);
+        sessions::spawn_idle_reaper(&app);
     }
 
     macro_rules! wire {

@@ -17,8 +17,14 @@ pub async fn status(app: Arc<App>, p: WorkspaceRef) -> Result<GitStatus, RpcErro
     let st = tokio::task::spawn_blocking(move || git::status(&root))
         .await
         .map_err(|_| internal())??;
+    let mut st = st;
     if st.repo {
         start_watch(&app, &p.workspace_id);
+        st.polling = app
+            .git_polling
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(&p.workspace_id);
     }
     Ok(st)
 }
@@ -83,6 +89,14 @@ fn start_watch(app: &Arc<App>, ws: &WorkspaceId) {
             }
         };
         let poll = (tree.is_none() || dir.is_none()).then_some(POLL);
+        if poll.is_some() {
+            if let Some(app) = weak.upgrade() {
+                app.git_polling
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(id.clone());
+            }
+        }
         relay(tree, dir, poll, || {
             let weak = weak.clone();
             let id = id.clone();
@@ -172,6 +186,10 @@ async fn relay<T, U, F, Fut>(
 
 /// Ends the workspace's change watch (the workspace closed).
 pub fn stop_watch(app: &App, ws: &WorkspaceId) {
+    app.git_polling
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(ws);
     if let Some(h) = app
         .git_watches
         .lock()
