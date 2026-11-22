@@ -43,7 +43,11 @@ void main() {
     final focus = FocusNode();
     await tester.pumpWidget(
       AxiomApp(
-        home: CodeView(controller: controller, language: Languages.instance.byId('rust'), focusNode: focus),
+        home: CodeView(
+          controller: controller,
+          language: Languages.instance.byId('rust'),
+          focusNode: focus,
+        ),
       ),
     );
     await Future<void>.delayed(const Duration(seconds: 2));

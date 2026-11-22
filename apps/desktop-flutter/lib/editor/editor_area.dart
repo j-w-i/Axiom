@@ -123,6 +123,7 @@ class _Group extends StatelessWidget {
           if (doc != null) _Breadcrumbs(path: doc.path),
           if (group == 1 && docs.banner.isNotEmpty)
             _Banner(text: docs.banner, onDismiss: docs.dismissBanner),
+          if (doc != null) _ServerOfferLine(doc: doc),
           Expanded(
             child: doc == null
                 ? const SizedBox.shrink()
@@ -434,6 +435,95 @@ class _Banner extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// "Python has a language server: basedpyright. Install… Not now" (ADR-0021 §5), then its install's
+/// progress or failure; the prerequisite first when the plan needs one.
+class _ServerOfferLine extends StatelessWidget {
+  const _ServerOfferLine({required this.doc});
+  final Doc doc;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final si = app.serverInstalls;
+    return ListenableBuilder(
+      listenable: si,
+      builder: (context, _) {
+        final offer = si.offerFor(doc);
+        if (offer == null) return const SizedBox.shrink();
+        final t = context.axiom;
+        final c = t.colors;
+        final env = app.environments;
+        final pid = offer.providerId;
+        final pre = si.prerequisiteOf(pid);
+        final running = env.installs[pid] ?? (pre == null ? null : env.installs[pre]);
+        final String text;
+        final List<Widget> actions;
+        if (running != null) {
+          final who = env.installs.containsKey(pid) ? offer.providerName : si.nameOf(pre!);
+          text = 'Installing $who… ${running.progress?.label ?? ''}'.trim();
+          actions = const [];
+        } else if (pre != null) {
+          text = '${offer.providerName} needs ${si.nameOf(pre)} first.';
+          actions = [
+            AxButton(
+              label: 'Install ${si.nameOf(pre)}…',
+              onPressed: () => unawaited(si.install(pre)),
+            ),
+          ];
+        } else if (env.failures[pid] case final why?) {
+          text = 'Could not install ${offer.providerName}: $why';
+          actions = [AxButton(label: 'Try again', onPressed: () => unawaited(si.install(pid)))];
+        } else if (env.planning == pid) {
+          text = 'Planning the install of ${offer.providerName}…';
+          actions = const [];
+        } else {
+          final what = pid == offer.server.providerId
+              ? '${offer.languageName} has a language server: ${offer.providerName}.'
+              : '${offer.server.serverId} for ${offer.languageName} needs ${offer.providerName}.';
+          text = what;
+          actions = [
+            AxButton(
+              label: 'Install…',
+              hint: 'Install ${offer.providerName}: review what it downloads first',
+              onPressed: () => unawaited(si.install(pid)),
+            ),
+            const SizedBox(width: Metrics.s2),
+            AxButton(
+              label: 'Not now',
+              kind: ButtonKind.quiet,
+              hint: 'Hide this for ${offer.languageName} until Axiom restarts',
+              onPressed: () => si.dismiss(offer.language),
+            ),
+          ];
+        }
+        return Semantics(
+          liveRegion: true,
+          container: true,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: c.panel,
+              border: Border(bottom: BorderSide(color: c.hairline)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+              child: Row(
+                children: [
+                  AxiomIcon(AxiomIcons.download, size: 14, color: c.accentText),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(text, style: t.type.small.copyWith(color: c.ink)),
+                  ),
+                  ...actions,
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

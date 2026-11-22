@@ -18,6 +18,11 @@ class SettingsStore extends ChangeNotifier {
   int editorFontSize = 13;
   String editorFontFamily = '';
   bool editorWordWrap = false;
+
+  /// M5.5 (ADR-0021 §5, §8).
+  bool lspAutoInstall = false;
+  bool editorInlayHints = true;
+  bool editorFormatOnSave = false;
   bool reopenLast = true;
   String? lastRoot;
   String error = '';
@@ -28,6 +33,9 @@ class SettingsStore extends ChangeNotifier {
     'editor.fontSize',
     'editor.fontFamily',
     'editor.wordWrap',
+    'lsp.autoInstall',
+    'editor.inlayHints',
+    'editor.formatOnSave',
     'workspace.reopenLast',
     'workspace.lastRoot',
   ];
@@ -59,6 +67,9 @@ class SettingsStore extends ChangeNotifier {
     if (size is num) editorFontSize = size.toInt().clamp(8, 40);
     if (v['editor.fontFamily'] is String) editorFontFamily = v['editor.fontFamily']! as String;
     if (v['editor.wordWrap'] is bool) editorWordWrap = v['editor.wordWrap']! as bool;
+    if (v['lsp.autoInstall'] is bool) lspAutoInstall = v['lsp.autoInstall']! as bool;
+    if (v['editor.inlayHints'] is bool) editorInlayHints = v['editor.inlayHints']! as bool;
+    if (v['editor.formatOnSave'] is bool) editorFormatOnSave = v['editor.formatOnSave']! as bool;
     if (v['workspace.reopenLast'] is bool) reopenLast = v['workspace.reopenLast']! as bool;
     lastRoot = v['workspace.lastRoot'] as String?;
   }
@@ -81,6 +92,9 @@ class SettingsStore extends ChangeNotifier {
     'editor.fontSize': editorFontSize,
     'editor.fontFamily': editorFontFamily,
     'editor.wordWrap': editorWordWrap,
+    'lsp.autoInstall': lspAutoInstall,
+    'editor.inlayHints': editorInlayHints,
+    'editor.formatOnSave': editorFormatOnSave,
     'workspace.reopenLast': reopenLast,
     'workspace.lastRoot': lastRoot,
   };

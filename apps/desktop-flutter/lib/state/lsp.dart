@@ -177,6 +177,20 @@ class LspStore extends ChangeNotifier {
     NotifyParams(workspaceId: workspace.id, serverId: serverId, method: method, params: params),
   );
 
+  /// After an install (a server, or a runtime or SDK one needs): every `missing` server tries
+  /// again, then the list is read anew (M5.5-UI-001).
+  Future<void> retryMissing() async {
+    if (!workspace.isOpen) return;
+    for (final s in servers.where((s) => s.state == ServerState.missing)) {
+      try {
+        await restart(s.serverId);
+      } on DaemonException {
+        // Still missing: its line says so.
+      }
+    }
+    await load();
+  }
+
   Future<void> restart(String serverId) =>
       client.call(Methods.lspRestart, ServerRef(workspaceId: workspace.id, serverId: serverId));
 

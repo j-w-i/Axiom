@@ -331,6 +331,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 onChanged: (v) => unawaited(s.setValue('editor.wordWrap', v)),
               ),
             ),
+            // M5.5 (ADR-0021 §5): a missing language server is installed without asking.
+            _row(
+              context,
+              'Language servers',
+              AxToggle(
+                label: 'Install language servers automatically',
+                value: s.lspAutoInstall,
+                onChanged: (v) => unawaited(s.setValue('lsp.autoInstall', v)),
+              ),
+              note: 'Off: Axiom asks first and shows what it will download.',
+            ),
           ],
         );
       case 'models':

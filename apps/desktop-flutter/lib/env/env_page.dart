@@ -37,42 +37,13 @@ class EnvironmentsPage extends StatefulWidget {
 
 class _EnvironmentsPageState extends State<EnvironmentsPage> {
   late final AppState app = AppScope.of(context);
-  bool _planShown = false;
 
   @override
   void initState() {
     super.initState();
-    app.environments.addListener(_onStore);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (app.environments.status == 'idle') unawaited(app.environments.refresh());
     });
-  }
-
-  @override
-  void dispose() {
-    app.environments.removeListener(_onStore);
-    super.dispose();
-  }
-
-  /// The plan the daemon returned is shown for approval.
-  void _onStore() {
-    final p = app.environments.plan;
-    if (p == null || _planShown || !mounted) return;
-    _planShown = true;
-    unawaited(
-      showAxDialog<bool>(
-        context: context,
-        label: 'Install ${p.providerName} ${p.plan.version}',
-        builder: (_) => PlanDialog(plan: p.plan, providerName: p.providerName),
-      ).then((install) {
-        _planShown = false;
-        if (install == true) {
-          unawaited(app.environments.approvePlan());
-        } else {
-          app.environments.dismissPlan();
-        }
-      }),
-    );
   }
 
   Future<void> _remove(ToolchainRow row) async {

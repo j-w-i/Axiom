@@ -92,6 +92,7 @@ class _ShellState extends State<Shell> {
           });
       app.showDock = _showDock;
       app.documents.addListener(_onDocuments);
+      app.environments.addListener(_onEnvironments);
     });
   }
 
@@ -141,8 +142,34 @@ class _ShellState extends State<Shell> {
     }
   }
 
+  bool _planShown = false;
+
+  /// An install plan is shown for approval wherever it was asked for (the Environments page, the
+  /// editor's language server line); one Axiom approves itself (auto-install) is not.
+  void _onEnvironments() {
+    final env = app.environments;
+    final p = env.plan;
+    if (p == null || _planShown || !mounted || env.planIsAutomatic) return;
+    _planShown = true;
+    unawaited(
+      showAxDialog<bool>(
+        context: context,
+        label: 'Install ${p.providerName} ${p.plan.version}',
+        builder: (_) => PlanDialog(plan: p.plan, providerName: p.providerName),
+      ).then((install) {
+        _planShown = false;
+        if (install == true) {
+          unawaited(env.approvePlan());
+        } else {
+          env.dismissPlan();
+        }
+      }),
+    );
+  }
+
   @override
   void dispose() {
+    app.environments.removeListener(_onEnvironments);
     app.documents.removeListener(_onDocuments);
     _sideSplitter.dispose();
     super.dispose();
