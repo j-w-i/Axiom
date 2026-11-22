@@ -152,12 +152,17 @@ void main() {
       );
       await key(tester, LogicalKeyboardKey.enter);
       await tester.pump(const Duration(milliseconds: 100));
-      // F12 on the accepted symbol opens the SDK's source (outside the workspace, read-only).
+      // F12 on the accepted symbol opens the SDK's source (outside the workspace, read-only). The
+      // caret goes into its name: a snippet (`new()`, `max(a, b)`) leaves it after the name, or on
+      // a placeholder.
       final s = c.selection;
+      final accepted = c.codeLines[s.extentIndex].text;
+      final at = accepted.lastIndexOf(want, s.extentOffset);
       c.selection = CodeLineSelection.collapsed(
         index: s.extentIndex,
-        offset: (s.extentOffset - 1).clamp(0, c.codeLines[s.extentIndex].length),
+        offset: at < 0 ? (s.extentOffset - 1).clamp(0, accepted.length) : at + 1,
       );
+      await tester.pump(const Duration(milliseconds: 100));
       await key(tester, LogicalKeyboardKey.f12);
       await until(
         tester,

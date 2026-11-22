@@ -1257,19 +1257,24 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
 
   /// The line rectangle at [line]:[column] in this view, from the editor's own layout (the
   /// arithmetic from the font size drifts from it further down a file), else from that.
-  Rect _lineRect(int line, int column) {
-    final stack = _stackKey.currentContext?.findRenderObject();
-    if (stack != null && line < widget.controller.codeLines.length) {
-      final r = codeEditorPositionRect(
-        stack,
-        CodeLinePosition(index: line, offset: column),
-        ancestor: stack,
-      );
-      if (r != null) return r;
-    }
+  /// A placement at [line]:[column]: the editor's own layout when the delegate lays the popup out
+  /// (after the editor, the same frame), else [fallback], from the font size, worked out here in
+  /// build: during layout nothing may read another box's size (the gutter's).
+  Rect Function() _lineRect(int line, int column) {
     final g = widget.geometry;
-    final at = g.at(line, column, widget.controller.codeLines[line].text);
-    return Rect.fromLTWH(at.dx, at.dy, 0, g.lineHeight);
+    final lines = widget.controller.codeLines;
+    final at = line < lines.length ? g.at(line, column, lines[line].text) : Offset.zero;
+    final fallback = Rect.fromLTWH(at.dx, at.dy, 0, g.lineHeight);
+    return () {
+      final stack = _stackKey.currentContext?.findRenderObject();
+      if (stack == null || line >= widget.controller.codeLines.length) return fallback;
+      return codeEditorPositionRect(
+            stack,
+            CodeLinePosition(index: line, offset: column),
+            ancestor: stack,
+          ) ??
+          fallback;
+    };
   }
 
   @override
@@ -1285,7 +1290,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final selected = _shown[_active.clamp(0, _shown.length - 1)].item;
       popup = Positioned.fill(
         child: CustomSingleChildLayout(
-          delegate: _AtText(() => _lineRect(line, column), inset: completionTextInset),
+          delegate: _AtText(_lineRect(line, column), inset: completionTextInset),
           child: _CompletionPopup(
             shown: _shown,
             active: _active,
@@ -1308,11 +1313,7 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       final base = t.type.code.copyWith(fontSize: 12.5, color: c.ink2);
       sigCard = Positioned.fill(
         child: CustomSingleChildLayout(
-          delegate: _AtText(
-            () => _lineRect(sel.extentIndex, sel.extentOffset),
-            inset: 24,
-            above: true,
-          ),
+          delegate: _AtText(_lineRect(sel.extentIndex, sel.extentOffset), inset: 24, above: true),
           child: Semantics(
             liveRegion: true,
             label: 'Signature: ${sig.label}',
