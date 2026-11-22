@@ -166,7 +166,8 @@ struct Conn {
     stderr: Arc<Mutex<VecDeque<String>>>,
     child: tokio::sync::Mutex<Child>,
     /// The server's process group (it is spawned as the group's leader), so its children (node
-    /// workers, a JVM's, gradle daemons) are stopped with it.
+    /// workers, a JVM's, gradle daemons) are stopped with it. Unix only.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pgid: Option<u32>,
     /// Becomes true when the process has exited (or its stdout closed).
     exited: watch::Receiver<bool>,

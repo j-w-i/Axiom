@@ -1230,7 +1230,8 @@ fn command_label(argv: &[String]) -> String {
 /// Runs argv (never through a shell) with extra variables, stdin closed. Each output line
 /// (stdout or stderr) is passed to `on_line` as it arrives. Returns stdout; a non-zero exit
 /// is an error carrying the end of the combined output.
-/// Kills a process group when dropped, unless disarmed (set to None).
+/// Kills a process group when dropped, unless disarmed (set to None). Unix only.
+#[cfg_attr(not(unix), allow(dead_code))]
 struct GroupGuard(Option<u32>);
 
 impl Drop for GroupGuard {
