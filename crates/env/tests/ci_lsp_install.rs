@@ -59,20 +59,32 @@ fn initializes(exe: &Path, args: &[&str], path_dir: Option<&Path>) {
     write!(stdin, "Content-Length: {}\r\n\r\n{body}", body.len()).unwrap();
     stdin.flush().unwrap();
     let mut out = BufReader::new(child.stdout.take().unwrap());
-    let mut len = 0usize;
-    loop {
-        let mut line = String::new();
-        out.read_line(&mut line).unwrap();
-        if line.trim().is_empty() {
+    // Servers may log or ask things before they answer (basedpyright's window/logMessage): the
+    // messages are read until the reply to id 1, at most 50.
+    let mut reply = serde_json::Value::Null;
+    for _ in 0..50 {
+        let mut len = 0usize;
+        loop {
+            let mut line = String::new();
+            assert!(
+                out.read_line(&mut line).unwrap() > 0,
+                "the server closed its output"
+            );
+            if line.trim().is_empty() {
+                break;
+            }
+            if let Some(v) = line.trim().strip_prefix("Content-Length:") {
+                len = v.trim().parse().unwrap();
+            }
+        }
+        let mut buf = vec![0; len];
+        out.read_exact(&mut buf).unwrap();
+        let msg: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        if msg["id"] == 1 && msg.get("method").is_none() {
+            reply = msg;
             break;
         }
-        if let Some(v) = line.trim().strip_prefix("Content-Length:") {
-            len = v.trim().parse().unwrap();
-        }
     }
-    let mut buf = vec![0; len];
-    out.read_exact(&mut buf).unwrap();
-    let reply: serde_json::Value = serde_json::from_slice(&buf).unwrap();
     assert!(reply["result"]["capabilities"].is_object(), "{reply}");
     let _ = child.kill();
     let _ = child.wait();
