@@ -105,10 +105,13 @@ class ServerInstalls extends ChangeNotifier {
   Future<void> install(String providerId) => environments.planInstall(providerId);
 
   void _changed() {
-    // The providers' names come with the environments' list.
-    if (!_providersAsked && environments.providers.isEmpty && lsp.workspace.isOpen) {
-      _providersAsked = true;
-      unawaited(environments.refresh());
+    // The providers' names, once an offer needs them (not detection: that runs tools).
+    if (!_providersAsked && environments.providers.isEmpty && documents.active != null) {
+      final d = documents.active!;
+      if (lsp.serverFor(lspLanguageId(d))?.state == ServerState.missing) {
+        _providersAsked = true;
+        unawaited(environments.loadProviders());
+      }
     }
     notifyListeners();
     if (settings.lspAutoInstall) _autoInstall();

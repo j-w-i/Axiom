@@ -77,11 +77,34 @@ async fn launch(
     root: PathBuf,
     def: &Definition,
 ) -> Result<Launch, RpcError> {
+    let base = LaunchBase::read(app, ws).await?;
+    Ok(launch_in(app, &base, root, def))
+}
+
+/// What every server of a workspace launches from, read once per listing (M5.5: with every
+/// provider's servers listed, reading it per server slowed opening a folder).
+struct LaunchBase {
+    env: BTreeMap<String, String>,
+    registry: axiom_env::registry::Registry,
+    settings: Option<Value>,
+}
+
+impl LaunchBase {
+    async fn read(app: &App, ws: &WorkspaceId) -> Result<Self, RpcError> {
+        Ok(Self {
+            env: process_environment(app, ws).await?,
+            registry: registry(app, Some(workspace(app, ws).await?)).await?,
+            settings: app.store_call(|s| s.setting_get(SETTINGS_KEY)).await?,
+        })
+    }
+}
+
+fn launch_in(app: &App, base: &LaunchBase, root: PathBuf, def: &Definition) -> Launch {
     let server_id = def.id.as_str();
-    let mut env = process_environment(app, ws).await?;
+    let mut env = base.env.clone();
     // M5.5 (ADR-0021 §4, §6): not in the workspace's environment → the newest managed install of
     // the server's provider; each required tool likewise from its provider's install.
-    let r = registry(app, Some(workspace(app, ws).await?)).await?;
+    let r = &base.registry;
     let installer = app.env.installer.clone();
     let overlay = |provider: &str, env: &mut BTreeMap<String, String>| -> bool {
         let Some(m) = r.get(provider) else {
@@ -140,20 +163,20 @@ async fn launch(
             break;
         }
     }
-    let all = app.store_call(|s| s.setting_get(SETTINGS_KEY)).await?;
-    let mine = all
+    let mine = base
+        .settings
         .as_ref()
         .and_then(|v| v.get(server_id))
         .cloned()
         .unwrap_or(Value::Null);
-    Ok(Launch {
+    Launch {
         root,
         env,
         settings: mine.get("settings").cloned().unwrap_or_else(|| json!({})),
         initialization_options: mine.get("initializationOptions").cloned(),
         blocked,
         install_provider: Some(def.provider_id.clone()),
-    })
+    }
 }
 
 /// The workspace's server with this id, created (idle) on first use.
@@ -185,6 +208,7 @@ pub async fn servers(app: Arc<App>, p: WorkspaceRef) -> Result<ServersResult, Rp
     // The first server (registry order) to claim a language serves it; a server whose every
     // language is already claimed is on standby (ADR-0021 §3).
     let mut claimed: std::collections::BTreeSet<String> = Default::default();
+    let mut base: Option<LaunchBase> = None;
     for def in defs {
         let standby =
             !def.languages.is_empty() && def.languages.iter().all(|l| claimed.contains(l));
@@ -192,7 +216,13 @@ pub async fn servers(app: Arc<App>, p: WorkspaceRef) -> Result<ServersResult, Rp
         let s = match app.lsp.get(&p.workspace_id, &def.id) {
             Some(s) => s,
             None => {
-                let l = launch(&app, &p.workspace_id, root.clone(), &def).await?;
+                if base.is_none() {
+                    base = Some(LaunchBase::read(&app, &p.workspace_id).await?);
+                }
+                let Some(b) = base.as_ref() else {
+                    return Err(internal());
+                };
+                let l = launch_in(&app, b, root.clone(), &def);
                 app.lsp.server(&p.workspace_id, def, l)
             }
         };

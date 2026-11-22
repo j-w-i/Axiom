@@ -226,6 +226,21 @@ class EnvironmentsStore extends ChangeNotifier {
       if ((p.errors?.length ?? 0) > 0) p,
   ];
 
+  /// The providers alone (their names), without detecting anything: cheap enough for opening a
+  /// folder (the language server line names the provider it offers).
+  Future<void> loadProviders() async {
+    if (!workspace.isOpen || providers.isNotEmpty) return;
+    try {
+      final r = await client.call(Methods.envProviders, ProvidersParams(workspaceId: workspace.id));
+      if (providers.isEmpty) {
+        providers = r.providers;
+        notifyListeners();
+      }
+    } on DaemonException {
+      // Ids stand in for names.
+    }
+  }
+
   Future<void> refresh() async {
     if (!workspace.isOpen) return;
     final gen = ++_generation;
