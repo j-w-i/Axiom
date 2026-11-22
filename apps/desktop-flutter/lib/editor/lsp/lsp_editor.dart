@@ -58,6 +58,7 @@ class LspSync {
   final LspStore lsp;
   final _open = <String, _Synced>{};
   int _seenDiagnostics = -1;
+  final _seenPath = <String, int>{};
 
   String? _serverFor(Doc d) => lsp.serverFor(lspLanguageId(d))?.serverId;
 
@@ -86,10 +87,12 @@ class LspSync {
     if (lsp.diagnosticsVersion == _seenDiagnostics) return;
     _seenDiagnostics = lsp.diagnosticsVersion;
     for (final d in docs.docs) {
+      // Only documents whose own diagnostics changed are redrawn.
+      final v = lsp.diagnosticsVersionOf(d.path);
+      if (_seenPath[d.path] == v) continue;
+      _seenPath[d.path] = v;
       final list = lsp.diagnosticsOn(d.path);
-      if (!identical(list, d.diagnostics) && !(list.isEmpty && d.diagnostics.isEmpty)) {
-        d.setDiagnostics(list);
-      }
+      if (!(list.isEmpty && d.diagnostics.isEmpty)) d.setDiagnostics(list);
     }
   }
 
@@ -104,7 +107,8 @@ class LspSync {
           'uri': lsp.uriOf(d.path),
           'languageId': s.languageId,
           'version': s.version,
-          'text': d.text,
+          // LF, as every change after it is (the server's copy has one kind of line break).
+          'text': _lines(d.controller.codeLines).join('\n'),
         },
       }),
     );
@@ -154,12 +158,16 @@ class LspSync {
     final caps = info?.capabilities;
     if (caps is! Map || caps['documentFormattingProvider'] == null) return;
     if (caps['documentFormattingProvider'] == false) return;
+    final before = d.controller.codeLines;
     final r = await lsp
         .request(s.server, 'textDocument/formatting', {
           'textDocument': {'uri': lsp.uriOf(d.path)},
           'options': {'tabSize': 4, 'insertSpaces': true},
         })
         .timeout(const Duration(seconds: 2));
+    // Typing while the formatter worked: its ranges are for the text before, so the document is
+    // saved as it is, unformatted (audit finding 5).
+    if (!identical(d.controller.codeLines, before)) return;
     if (r is List) {
       applyEdits(d.controller, [
         for (final e in r.whereType<Map<Object?, Object?>>())
@@ -312,7 +320,9 @@ List<CompletionChoice> parseCompletion(Object? result) {
   return [
     for (final i in items.whereType<Map<Object?, Object?>>())
       () {
-        final label = i['label'] as String? ?? '';
+        // clangd marks an item that adds an #include with a leading `•` and pads the others
+        // with a space: the name is what is shown, matched and inserted.
+        final label = (i['label'] as String? ?? '').replaceFirst(RegExp(r'^[\s•]+'), '');
         final te = i['textEdit'];
         final snippet = (i['insertTextFormat'] as num?)?.toInt() == 2;
         final text =

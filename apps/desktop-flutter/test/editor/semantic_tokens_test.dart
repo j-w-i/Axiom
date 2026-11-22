@@ -16,7 +16,7 @@ void main() {
     expect(r.keys, [0, 2]);
     expect(r[0]!.map((t) => (t.start, t.end)), [(0, 2), (3, 7)]);
     expect(r[0]![0].style.color, y.keyword);
-    expect(r[0]![1].style.color, y.macro);
+    expect(r[0]![1].style.color, y.function);
     expect(r[2]!.single.start, 4);
     expect(r[2]!.single.style.decoration, TextDecoration.lineThrough);
   });

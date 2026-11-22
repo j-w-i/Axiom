@@ -1,7 +1,7 @@
 schema = "axiom.provider/1"
 id = "lsp-sourcekit"
 name = "SourceKit-LSP"
-description = "Swift language server, part of the Swift toolchain (Apache-2.0); install Swift (or Xcode) to get it."
+description = "Swift language server, part of the Swift toolchain (Apache-2.0): Axiom installs Swift on Linux; on macOS, Xcode brings it."
 version = "0.1.0"
 homepage = "https://github.com/swiftlang/sourcekit-lsp"
 
@@ -15,4 +15,5 @@ required = false
 id = "sourcekit-lsp"
 languages = ["swift"]
 command = ["sourcekit-lsp"]
+requires = ["swift"]
 install_hint = "SourceKit-LSP comes with Swift: install a Swift toolchain (swift.org) or Xcode."

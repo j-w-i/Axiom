@@ -7,7 +7,8 @@ typedef IsolateCallback<Res> = void Function(Res res);
 // of task for the whole app, instead of new isolates for each editor (a tab switch
 // spawned three). Each tasker keeps only its newest request; a request is handed to a
 // worker only when one is free, newest tasker first, and a closed tasker's waiting
-// request is dropped. Typing or switching tabs quickly never queues stale work.
+// request is dropped. Typing or switching tabs quickly never queues stale work. A tasker has at
+// most one job running, so its results arrive in the order it asked (audit finding 7).
 class _IsolateLane {
   _IsolateLane(this.manager);
 
@@ -48,6 +49,7 @@ class _IsolateTasker<Req, Res> {
   final String name;
   final _IsolateLane _lane;
   bool _closed = false;
+  bool _running = false;
   Req? _req;
   IsolateCallback<Res>? _callback;
 
@@ -63,7 +65,10 @@ class _IsolateTasker<Req, Res> {
     }
     _req = req;
     _callback = callback;
-    _lane.schedule(this);
+    // A tasker with a job running waits for it to end, then asks again with its newest request.
+    if (!_running) {
+      _lane.schedule(this);
+    }
   }
 
   // The lane's turn: start this tasker's newest request, or null if there is none.
@@ -75,12 +80,18 @@ class _IsolateTasker<Req, Res> {
     if (_closed || req == null || callback == null) {
       return null;
     }
+    _running = true;
     final IsolateManager<Res, Req> manager = _lane.manager as IsolateManager<Res, Req>;
     return manager.compute(req).then((Res res) {
       if (!_closed) {
         callback(res);
       }
-    }, onError: (Object _) {});
+    }, onError: (Object _) {}).whenComplete(() {
+      _running = false;
+      if (_req != null && !_closed) {
+        _lane.schedule(this);
+      }
+    });
   }
 
   void close() {

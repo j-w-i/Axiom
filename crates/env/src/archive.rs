@@ -27,6 +27,64 @@ pub fn extract(
     root: &Path,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<u64, EnvError> {
+    let n = extract_entries(
+        archive,
+        format,
+        strip_components,
+        file_name,
+        root,
+        cancelled,
+    )?;
+    links_stay_inside(root)?;
+    Ok(n)
+}
+
+/// After extraction, every symbolic link resolves inside [root]. Each link was checked
+/// lexically when written, but a link through an earlier link (`up -> ../..`, then
+/// `x -> up/..`) is only seen by resolving it (audit finding 17).
+fn links_stay_inside(root: &Path) -> Result<(), EnvError> {
+    let canonical_root =
+        std::fs::canonicalize(root).map_err(EnvError::io("Cannot read the extracted directory"))?;
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        let entries =
+            std::fs::read_dir(&dir).map_err(EnvError::io("Cannot read the extracted directory"))?;
+        for e in entries {
+            let e = e.map_err(EnvError::io("Cannot read the extracted directory"))?;
+            let path = e.path();
+            let md = std::fs::symlink_metadata(&path)
+                .map_err(EnvError::io("Cannot read the extracted directory"))?;
+            if md.is_dir() {
+                dirs.push(path);
+            } else if md.file_type().is_symlink() {
+                // A link whose target does not exist is resolved as far as its directory.
+                let resolved = std::fs::canonicalize(&path).or_else(|_| {
+                    let target = std::fs::read_link(&path)?;
+                    let joined = path.parent().unwrap_or(root).join(target);
+                    let parent = joined.parent().unwrap_or(root).to_path_buf();
+                    std::fs::canonicalize(parent)
+                });
+                let inside = resolved.is_ok_and(|r| r.starts_with(&canonical_root));
+                if !inside {
+                    return Err(EnvError::UnsafeArchive(format!(
+                        "the link `{}` points outside the install",
+                        path.strip_prefix(root).unwrap_or(&path).display()
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn extract_entries(
+    archive: &Path,
+    format: ArchiveFormat,
+    strip_components: u32,
+    file_name: &str,
+    root: &Path,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<u64, EnvError> {
     let file = File::open(archive).map_err(EnvError::io("Cannot open the downloaded archive"))?;
     match format {
         ArchiveFormat::File => {
@@ -323,6 +381,22 @@ fn extract_zip(
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_through_a_link_out_of_the_root_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(root.join("sub/deep")).unwrap();
+        std::os::unix::fs::symlink("../..", root.join("sub/deep/up")).unwrap();
+        // Lexically inside (sub/deep/up/.. is sub/deep), but up is the root: `x` is its parent.
+        std::os::unix::fs::symlink("sub/deep/up/..", root.join("x")).unwrap();
+        assert!(super::link_stays_inside(Path::new(""), "sub/deep/up/.."));
+        assert!(super::links_stay_inside(&root).is_err());
+        std::fs::remove_file(root.join("x")).unwrap();
+        assert!(super::links_stay_inside(&root).is_ok());
+    }
+
     use super::*;
 
     #[test]

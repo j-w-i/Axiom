@@ -232,7 +232,8 @@ before the task that needs them** (no empty scaffolding).
   install plans and their execution into managed storage, uninstall, and resolving a
   project's `Environment` from `.axiom/project.toml` / `.axiom/project.lock`.
 - **Depends on:** `protocol`, `store` (installed-toolchain index, workspace trust); `reqwest`
-  (rustls), `sha2`, `tar`, `flate2`, `xz2`, `zip`, `toml`, `regex`, `semver` (ADR-0014 §3).
+  (rustls), `sha2`, `tar`, `flate2`, `xz2`, `zip`, `toml`, `regex`, `semver` (ADR-0014 §3);
+  `nix` on Unix (stopping a delegate's process group).
 - **Rule:** never executes anything not in an issued `InstallPlan`; never writes outside its
   managed root except the workspace's `.axiom/project.lock`.
 
@@ -272,7 +273,7 @@ before the task that needs them** (no empty scaffolding).
   shared id space with a pending map (many clients, one server), answers to server→client
   requests, a mirror of open documents, diagnostics per URI, a bounded restart policy.
 - **Depends on:** `protocol`; `tokio`, `tokio-util` (cancellation), `serde_json`, `url`,
-  `tracing`, `thiserror`.
+  `tracing`, `thiserror`; `nix` on Unix (signalling a server's process group, as `exec` does).
 - **Status:** built (M4-LSP-001). `axiomd` serves `lsp/*`, resolves each server's command in the
   workspace's environment (the daemon's plus the project's, as builds), and relays events to the
   workspace's clients. Tests: `crates/axiomd/tests/{lsp_server,lsp}.rs` against

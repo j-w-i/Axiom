@@ -61,6 +61,8 @@ void main() {
           ('number', y.number),
           ('punct', y.punct),
           ('macro', y.macro),
+          ('function', y.function),
+          ('variable', y.variable),
         ]) {
           final r = contrast(col, Color.alphaBlend(y.currentLine, c.ground));
           if (r < 4.5) failures.add('$n: ${r.toStringAsFixed(2)}');

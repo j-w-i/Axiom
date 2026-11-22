@@ -275,19 +275,23 @@ class GitStore extends ChangeNotifier {
     }
   }
 
-  /// The file's text at HEAD (null: not in HEAD, binary, or no repository).
-  Future<String?> headText(String path) => _heads.putIfAbsent(path, () async {
-    if (status?.repo != true) return null;
-    try {
-      final r = await client.call(
-        Methods.gitShow,
-        ShowParams(workspaceId: workspace.id, path: path, rev: GitRev.head),
-      );
-      return r.binary ? null : r.text;
-    } on DaemonException {
-      return null;
-    }
-  });
+  /// The file's text at HEAD (null: not in HEAD, binary, or no repository). Before the first
+  /// status has arrived nothing is known, and nothing is kept: the editor asks again when it
+  /// arrives (audit finding 14).
+  Future<String?> headText(String path) => status == null
+      ? Future<String?>.value()
+      : _heads.putIfAbsent(path, () async {
+          if (status?.repo != true) return null;
+          try {
+            final r = await client.call(
+              Methods.gitShow,
+              ShowParams(workspaceId: workspace.id, path: path, rev: GitRev.head),
+            );
+            return r.binary ? null : r.text;
+          } on DaemonException {
+            return null;
+          }
+        });
 
   void openDiff(String path) {
     diff = path;

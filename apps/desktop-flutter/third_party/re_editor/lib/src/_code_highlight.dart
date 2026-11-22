@@ -143,11 +143,21 @@ class _CodeHighlighter extends ValueNotifier<List<_HighlightResult>> {
       return null;
     }
     while(true) {
-      final TextStyle? style = _theme?.theme[className];
-      if (style != null) {
-        return style;
+      // Axiom patch: the most specific scope first (`title.function.invoke`, then
+      // `title.function`, then `title`), so a theme tells functions from classes.
+      String name = className!;
+      while (true) {
+        final TextStyle? style = _theme?.theme[name];
+        if (style != null) {
+          return style;
+        }
+        final int dot = name.lastIndexOf('.');
+        if (dot <= 0) {
+          break;
+        }
+        name = name.substring(0, dot);
       }
-      final int pieceIndex = className!.indexOf('-');
+      final int pieceIndex = className.indexOf('-');
       if (pieceIndex < 0) {
         break;
       }
@@ -263,27 +273,32 @@ class _CodeHighlightEngine {
     final String key = _keyOf(modes);
     final String code = codes.asString(TextLineBreak.lf, false);
     final List<String> languages = modes.keys.toList();
-    void send() {
-      final bool known = _sentKeys.contains(key);
-      _sentKeys.add(key);
-      _tasker.run(_HighlightPayload(
-        key: key,
-        highlight: known ? null : highlight,
-        code: code,
-        canHighlight: canHighlight,
-        languages: languages,
-      ), (List<_HighlightResult>? result) {
-        if (result == null) {
-          // The worker did not have this Highlight: send it once more.
-          _sentKeys.remove(key);
-          send();
-          return;
+    _latest = codes;
+    final bool known = _sentKeys.contains(key);
+    _sentKeys.add(key);
+    _tasker.run(_HighlightPayload(
+      key: key,
+      highlight: known ? null : highlight,
+      code: code,
+      canHighlight: canHighlight,
+      languages: languages,
+    ), (List<_HighlightResult>? result) {
+      if (result == null) {
+        // The worker did not have this Highlight: ask again, with it, for the newest text (a
+        // newer request may have been made meanwhile; it is not replaced by an older one).
+        _sentKeys.remove(key);
+        final CodeLines? latest = _latest;
+        if (latest != null) {
+          run(latest, callback);
         }
-        callback(result);
-      });
-    }
-    send();
+        return;
+      }
+      callback(result);
+    });
   }
+
+  /// The text of the newest request.
+  CodeLines? _latest;
 
   @pragma('vm:entry-point')
   static List<_HighlightResult>? _run(_HighlightPayload payload) {
@@ -378,7 +393,8 @@ class _HighlightLineRenderer implements HighlightRenderer {
     } else {
       newClassName = '$className-${node.scope!}';
     }
-    newClassName = newClassName?.split('.')[0];
+    // Axiom patch: the whole scope is kept (upstream kept `title` of `title.function`), and
+    // [_findStyle] resolves it from the most specific part.
     classNames.add(newClassName);
   }
 

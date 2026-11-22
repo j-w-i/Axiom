@@ -20,13 +20,14 @@ TextStyle? semanticStyle(String type, List<String> modifiers, SyntaxColors y) {
     'typeParameter' ||
     'builtinType' ||
     'selfType' => y.type,
-    'function' || 'method' || 'macro' || 'decorator' => y.macro,
+    'function' || 'method' => y.function,
+    'macro' || 'decorator' => y.macro,
     'keyword' || 'modifier' || 'selfKeyword' => y.keyword,
     'comment' => y.comment,
     'string' || 'regexp' => y.string,
     'number' || 'enumMember' || 'boolean' => y.number,
     'operator' || 'punctuation' => y.punct,
-    'parameter' || 'variable' || 'property' => y.text,
+    'parameter' || 'variable' || 'property' => y.variable,
     _ => null,
   };
   if (colour == null) return null;

@@ -36,7 +36,7 @@ use axiom_protocol::provider::{Checksum, InstallMethod, InstallScope, Platform, 
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio_util::sync::CancellationToken;
 
@@ -137,23 +137,71 @@ fn file_name_of(url: &str) -> String {
     url.rsplit('/').next().unwrap_or_default().to_string()
 }
 
-/// Removes a directory when dropped, unless disarmed.
-struct Cleanup(Option<PathBuf>);
+/// Where a staging directory's removal is left, for a failed install to wait on.
+type Removal = Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>;
+
+/// Removes a directory when dropped, unless disarmed: off the async threads, the handle left in
+/// the [Removal] slot.
+struct Cleanup(Option<PathBuf>, Removal);
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
         if let Some(p) = self.0.take() {
-            if let Err(e) = std::fs::remove_dir_all(&p) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    tracing::warn!("cannot remove {}: {e}", p.display());
+            *lock(&self.1) = remove_in_background(p);
+        }
+    }
+}
+
+/// Removes a directory off the async threads: a toolchain's (a JDK) takes seconds (audit
+/// finding 19). The handle of the removal, when it runs on the runtime's blocking pool.
+fn remove_in_background(p: PathBuf) -> Option<tokio::task::JoinHandle<()>> {
+    let remove = move || {
+        if let Err(e) = std::fs::remove_dir_all(&p) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!("cannot remove {}: {e}", p.display());
+            }
+        }
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(h) => Some(h.spawn_blocking(remove)),
+        Err(_) => {
+            remove();
+            None
+        }
+    }
+}
+
+/// Removes what interrupted installs left: `.staging-*` under each provider's toolchains and
+/// `.part-*` in the download cache. Called when the installer is made, before any install runs.
+fn sweep_debris(data_dir: &Path) {
+    let mut found = Vec::new();
+    let mut collect = |dir: PathBuf, prefix: &str| {
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                if e.file_name().to_string_lossy().starts_with(prefix) {
+                    found.push(e.path());
                 }
             }
+        }
+    };
+    collect(data_dir.join("cache"), ".part-");
+    if let Ok(rd) = std::fs::read_dir(data_dir.join("toolchains")) {
+        for e in rd.flatten() {
+            collect(e.path(), ".staging-");
+        }
+    }
+    for p in found {
+        if p.is_dir() {
+            let _ = remove_in_background(p);
+        } else {
+            let _ = std::fs::remove_file(&p);
         }
     }
 }
 
 impl Installer {
     pub fn new(data_dir: PathBuf, http: Http) -> Installer {
+        sweep_debris(&data_dir);
         Installer {
             data_dir,
             http,
@@ -514,7 +562,11 @@ impl Installer {
                 plan: plan.clone(),
                 manifest: m.clone(),
                 final_root: root,
-                verify_bin_dirs: built.bin_dirs,
+                verify_bin_dirs: built
+                    .bin_dirs
+                    .iter()
+                    .map(|d| detect::bin_dir(d, version))
+                    .collect(),
                 verify_env: built.env,
                 system_path: None,
                 expires: Instant::now() + self.plan_lifetime,
@@ -677,6 +729,26 @@ impl Installer {
         cancel: &CancellationToken,
         progress: &(dyn Fn(InstallProgress) + Send + Sync),
     ) -> Result<InstallResult, EnvError> {
+        let removal = Removal::default();
+        let r = self
+            .install_once(plan_id, current, cancel, progress, &removal)
+            .await;
+        // A failed install has removed what it staged when it reports the failure.
+        let pending = lock(&removal).take();
+        if let Some(h) = pending {
+            let _ = h.await;
+        }
+        r
+    }
+
+    async fn install_once(
+        &self,
+        plan_id: &str,
+        current: Option<&ProviderManifest>,
+        cancel: &CancellationToken,
+        progress: &(dyn Fn(InstallProgress) + Send + Sync),
+        removal: &Removal,
+    ) -> Result<InstallResult, EnvError> {
         let issued = lock(&self.plans).remove(plan_id).ok_or_else(|| {
             EnvError::ApprovalDenied("This install plan is unknown or was already used.".into())
         })?;
@@ -714,7 +786,7 @@ impl Installer {
             .map_err(EnvError::io("Cannot create the toolchains directory"))?;
         std::fs::create_dir(&staging)
             .map_err(EnvError::io("Cannot create the staging directory"))?;
-        let mut cleanup = Cleanup(Some(staging.clone()));
+        let mut cleanup = Cleanup(Some(staging.clone()), removal.clone());
         let staging_str = staging.to_string_lossy().into_owned();
         let relocate = |s: &str| s.replace(issued.final_root.as_str(), &staging_str);
 
@@ -869,8 +941,13 @@ impl Installer {
         cancel: &CancellationToken,
         report: &(dyn Fn(usize, String, Option<u64>, Option<u64>) + Sync),
     ) -> Result<PathBuf, EnvError> {
+        // The digest the download must have, and whether it is a SHA-512 (Microsoft's .NET
+        // publishes no SHA-256). The cache is keyed by it either way.
+        let sha512 = matches!(sha256, Sha256Source::Sha512Digest { .. });
         let expected = match sha256 {
-            Sha256Source::Digest { value } => value.to_ascii_lowercase(),
+            Sha256Source::Digest { value } | Sha256Source::Sha512Digest { value } => {
+                value.to_ascii_lowercase()
+            }
             Sha256Source::Url { url: sums } => {
                 let text = tokio::select! {
                     t = self.http.get_text(sums) => t?,
@@ -884,7 +961,8 @@ impl Installer {
                 })?
             }
         };
-        if !(expected.len() == 64 && expected.bytes().all(|b| b.is_ascii_hexdigit())) {
+        let digits = if sha512 { 128 } else { 64 };
+        if !(expected.len() == digits && expected.bytes().all(|b| b.is_ascii_hexdigit())) {
             return Err(EnvError::InvalidParams(
                 "The expected checksum is malformed.".into(),
             ));
@@ -895,7 +973,7 @@ impl Installer {
         let cached = cache.join(&expected);
         if cached.is_file() {
             let path = cached.clone();
-            let actual = tokio::task::spawn_blocking(move || sha256_file(&path))
+            let actual = tokio::task::spawn_blocking(move || hash_file(&path, sha512))
                 .await
                 .map_err(|_| EnvError::Unsupported("hashing task failed".into()))??;
             if actual == expected {
@@ -913,13 +991,20 @@ impl Installer {
             }
         };
         let result = self.http.download(url, &part, cancel, &mut on_chunk).await;
-        let (actual, _bytes) = match result {
+        let (mut actual, _bytes) = match result {
             Ok(r) => r,
             Err(e) => {
                 let _ = std::fs::remove_file(&part);
                 return Err(e);
             }
         };
+        if sha512 {
+            // The download hashed SHA-256 as it streamed; a SHA-512 is read back once.
+            let path = part.clone();
+            actual = tokio::task::spawn_blocking(move || hash_file(&path, true))
+                .await
+                .map_err(|_| EnvError::Unsupported("hashing task failed".into()))??;
+        }
         if actual != expected {
             let _ = std::fs::remove_file(&part);
             return Err(EnvError::ChecksumMismatch {
@@ -1018,6 +1103,7 @@ fn build_archive(
         bin_dirs,
         env,
         setup,
+        linux_names,
         ..
     } = method
     else {
@@ -1042,6 +1128,14 @@ fn build_archive(
         Checksum::Sha256Url { url } => Sha256Source::Url {
             url: expand_version(url, version)?,
         },
+        Checksum::Sha512 { values } => Sha256Source::Sha512Digest {
+            value: values.get(version).cloned().ok_or_else(|| {
+                EnvError::NotFound(format!(
+                    "The provider lists no checksum for {} {version}.",
+                    m.name
+                ))
+            })?,
+        },
     };
     let env = expand_map(env, version, root);
     let mut steps = vec![
@@ -1057,10 +1151,24 @@ fn build_archive(
         },
     ];
     if !setup.is_empty() {
+        let linux = if setup.iter().any(|a| a.contains("${linux}")) {
+            let release = std::fs::read_to_string("/etc/os-release")
+                .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+                .unwrap_or_default();
+            linux_name(linux_names, &release).ok_or_else(|| {
+                EnvError::UnsupportedPlatform(format!(
+                    "{} does not support this Linux distribution ({}).",
+                    m.name,
+                    os_release_field(&release, "PRETTY_NAME").unwrap_or_else(|| "unknown".into())
+                ))
+            })?
+        } else {
+            String::new()
+        };
         steps.push(Step::Run {
             argv: setup
                 .iter()
-                .map(|a| manifest::expand(a, version, root))
+                .map(|a| manifest::expand(a, version, root).replace("${linux}", &linux))
                 .collect(),
             env: env.clone(),
         });
@@ -1069,6 +1177,32 @@ fn build_archive(
         steps,
         bin_dirs: bin_dirs.clone(),
         env,
+    })
+}
+
+/// A field of an os-release file, unquoted.
+fn os_release_field(release: &str, key: &str) -> Option<String> {
+    release.lines().find_map(|l| {
+        let (k, v) = l.split_once('=')?;
+        (k.trim() == key).then(|| v.trim().trim_matches(['"', '\'']).to_string())
+    })
+}
+
+/// The first of [names] that matches the host described by the os-release text [release].
+pub fn linux_name(names: &[axiom_protocol::provider::LinuxName], release: &str) -> Option<String> {
+    let id = os_release_field(release, "ID").unwrap_or_default();
+    let like = os_release_field(release, "ID_LIKE").unwrap_or_default();
+    let version = os_release_field(release, "VERSION_ID").unwrap_or_default();
+    names.iter().find_map(|n| {
+        let by_id = n.ids.contains(&id)
+            && n.min_version.as_ref().is_none_or(|min| {
+                !version.is_empty() && compare_versions(&version, min) != std::cmp::Ordering::Less
+            });
+        let by_like = n.min_version.is_none()
+            && like
+                .split_whitespace()
+                .any(|l| n.ids.iter().any(|i| i.as_str() == l));
+        (by_id || by_like).then(|| n.name.clone())
     })
 }
 
@@ -1129,7 +1263,7 @@ fn delegate_uninstall(
     let exe = detect::managed_layouts(m).into_iter().find_map(|(d, _)| {
         detect::executable_names(program)
             .into_iter()
-            .map(|n| root.join(&d).join(n))
+            .map(|n| root.join(detect::bin_dir(&d, version)).join(n))
             .find(|p| p.is_file())
     })?;
     let mut argv = vec![exe.to_string_lossy().into_owned()];
@@ -1162,6 +1296,22 @@ fn command_label(argv: &[String]) -> String {
 /// Runs argv (never through a shell) with extra variables, stdin closed. Each output line
 /// (stdout or stderr) is passed to `on_line` as it arrives. Returns stdout; a non-zero exit
 /// is an error carrying the end of the combined output.
+/// Kills a process group when dropped, unless disarmed (set to None). Unix only.
+#[cfg_attr(not(unix), allow(dead_code))]
+struct GroupGuard(Option<u32>);
+
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.0 {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pgid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+    }
+}
+
 pub async fn run_program(
     argv: &[String],
     env: &BTreeMap<String, String>,
@@ -1181,9 +1331,14 @@ pub async fn run_program(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    // Its own process group, stopped whole when this returns early (cancelled) or is dropped:
+    // npm's node, go's compiler, and what they start go too (audit finding 19).
+    #[cfg(unix)]
+    cmd.process_group(0);
     let mut child = cmd
         .spawn()
         .map_err(|e| EnvError::Spawn(format!("Cannot start {}: {e}", command_label(&argv[..1]))))?;
+    let mut group = GroupGuard(child.id());
     let (Some(out), Some(err)) = (child.stdout.take(), child.stderr.take()) else {
         return Err(EnvError::Spawn("Cannot read the command's output".into()));
     };
@@ -1207,7 +1362,13 @@ pub async fn run_program(
             combined.drain(..cut);
         }
     };
+    // Once the program has exited, its output is read for at most two seconds more: a process
+    // it left behind holding the pipes open does not keep this waiting (audit finding 19).
+    let mut exited = None;
+    let mut drain_until: Option<tokio::time::Instant> = None;
     while out_open || err_open {
+        let until =
+            drain_until.unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(3600));
         tokio::select! {
             l = out.next_line(), if out_open => match l {
                 Ok(Some(l)) => keep(&l, true),
@@ -1217,13 +1378,23 @@ pub async fn run_program(
                 Ok(Some(l)) => keep(&l, false),
                 _ => err_open = false,
             },
+            s = child.wait(), if exited.is_none() => {
+                exited = Some(s.map_err(EnvError::io("Cannot run the command"))?);
+                drain_until = Some(tokio::time::Instant::now() + Duration::from_secs(2));
+            }
+            () = tokio::time::sleep_until(until), if drain_until.is_some() => break,
             _ = cancel.cancelled() => return Err(EnvError::Cancelled),
         }
     }
-    let status = tokio::select! {
-        s = child.wait() => s.map_err(EnvError::io("Cannot run the command"))?,
-        _ = cancel.cancelled() => return Err(EnvError::Cancelled),
+    let status = match exited {
+        Some(s) => s,
+        None => tokio::select! {
+            s = child.wait() => s.map_err(EnvError::io("Cannot run the command"))?,
+            _ = cancel.cancelled() => return Err(EnvError::Cancelled),
+        },
     };
+    // Finished: what it leaves running is its own business (a build daemon), not stopped.
+    group.0 = None;
     if status.success() {
         return Ok(stdout);
     }
@@ -1290,8 +1461,14 @@ pub fn relink(root: &Path, to: &Path) -> Result<u32, EnvError> {
     Ok(changed)
 }
 
-fn sha256_file(path: &Path) -> Result<String, EnvError> {
+/// A file's SHA-512 when [sha512], else its SHA-256, as lowercase hex.
+fn hash_file(path: &Path, sha512: bool) -> Result<String, EnvError> {
     let mut f = std::fs::File::open(path).map_err(EnvError::io("Cannot read the cache"))?;
+    if sha512 {
+        let mut h = sha2::Sha512::new();
+        std::io::copy(&mut f, &mut h).map_err(EnvError::io("Cannot read the cache"))?;
+        return Ok(hex::encode(h.finalize()));
+    }
     let mut h = Sha256::new();
     std::io::copy(&mut f, &mut h).map_err(EnvError::io("Cannot read the cache"))?;
     Ok(hex::encode(h.finalize()))
@@ -1299,6 +1476,48 @@ fn sha256_file(path: &Path) -> Result<String, EnvError> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_linux_host_gets_the_providers_name_for_it() {
+        use axiom_protocol::provider::LinuxName;
+        let n = |ids: &[&str], min: Option<&str>, name: &str| LinuxName {
+            ids: ids.iter().map(|s| s.to_string()).collect(),
+            min_version: min.map(String::from),
+            name: name.into(),
+        };
+        let names = [
+            n(&["fedora"], Some("41"), "fedora41"),
+            n(&["fedora"], Some("39"), "fedora39"),
+            n(&["ubuntu"], Some("24.04"), "ubuntu24.04"),
+            n(&["ubuntu"], None, "ubuntu22.04"),
+        ];
+        let host = |id: &str, version: &str, like: &str| {
+            format!("NAME=x\nID={id}\nVERSION_ID=\"{version}\"\nID_LIKE=\"{like}\"\n")
+        };
+        assert_eq!(
+            linux_name(&names, &host("fedora", "44", "")).as_deref(),
+            Some("fedora41")
+        );
+        assert_eq!(
+            linux_name(&names, &host("fedora", "40", "")).as_deref(),
+            Some("fedora39")
+        );
+        assert_eq!(linux_name(&names, &host("fedora", "38", "")), None);
+        assert_eq!(
+            linux_name(&names, &host("ubuntu", "26.04", "debian")).as_deref(),
+            Some("ubuntu24.04")
+        );
+        assert_eq!(
+            linux_name(&names, &host("ubuntu", "22.04", "debian")).as_deref(),
+            Some("ubuntu22.04")
+        );
+        assert_eq!(
+            linux_name(&names, &host("linuxmint", "22", "ubuntu debian")).as_deref(),
+            Some("ubuntu22.04")
+        );
+        assert_eq!(linux_name(&names, &host("arch", "", "")), None);
+    }
+
     use super::*;
 
     #[cfg(unix)]

@@ -32,11 +32,58 @@ QueueDraw real_queue_draw() {
   return real;
 }
 
-// Commits the surface of the window holding [widget]; false when that is not possible here.
+#ifdef GDK_WINDOWING_WAYLAND
+// What GTK last painted the window at. A commit applies everything GTK has set on the surface
+// and not yet committed with its own buffer: after a resize, a maximize or a change of scale,
+// GTK has set the new state and paints with the matching buffer on its next frame. Committing
+// before that would pair the new state with the old buffer (a protocol error for a scale the
+// buffer's size is not a multiple of), so until GTK has painted at the window's current size and
+// scale, the frame goes through GTK as before (audit finding 10).
+struct Painted {
+  int width = -1;
+  int height = -1;
+  int scale = -1;
+};
+
+void on_after_paint(GdkFrameClock*, gpointer data) {
+  GdkWindow* window = GDK_WINDOW(data);
+  auto* painted =
+      static_cast<Painted*>(g_object_get_data(G_OBJECT(window), "axiom-painted"));
+  if (painted != nullptr) {
+    painted->width = gdk_window_get_width(window);
+    painted->height = gdk_window_get_height(window);
+    painted->scale = gdk_window_get_scale_factor(window);
+  }
+}
+
+// True when GTK has painted [window] at its current size and scale; starts watching it.
+bool painted_as_now(GdkWindow* window) {
+  auto* painted =
+      static_cast<Painted*>(g_object_get_data(G_OBJECT(window), "axiom-painted"));
+  if (painted == nullptr) {
+    GdkFrameClock* clock = gdk_window_get_frame_clock(window);
+    if (clock == nullptr) {
+      return false;
+    }
+    painted = new Painted();
+    g_object_set_data_full(G_OBJECT(window), "axiom-painted", painted,
+                           [](gpointer p) { delete static_cast<Painted*>(p); });
+    g_signal_connect_object(clock, "after-paint", G_CALLBACK(on_after_paint), window,
+                            G_CONNECT_DEFAULT);
+    return false;
+  }
+  return painted->width == gdk_window_get_width(window) &&
+         painted->height == gdk_window_get_height(window) &&
+         painted->scale == gdk_window_get_scale_factor(window);
+}
+#endif
+
+// Commits the surface of the window holding [widget]; false when that is not possible here, or
+// when GTK has state of its own to paint first.
 bool commit_window_surface(GtkWidget* widget) {
 #ifdef GDK_WINDOWING_WAYLAND
   GdkWindow* window = gtk_widget_get_window(gtk_widget_get_toplevel(widget));
-  if (window == nullptr || !GDK_IS_WAYLAND_WINDOW(window)) {
+  if (window == nullptr || !GDK_IS_WAYLAND_WINDOW(window) || !painted_as_now(window)) {
     return false;
   }
   struct wl_surface* surface = gdk_wayland_window_get_wl_surface(window);
@@ -46,6 +93,13 @@ bool commit_window_surface(GtkWidget* widget) {
   wl_surface_commit(surface);
   wl_display_flush(
       gdk_wayland_display_get_wl_display(gdk_window_get_display(window)));
+  static bool announced = false;
+  if (!announced) {
+    announced = true;
+    // The frame suite checks for this line: it fails if a Flutter upgrade bypasses the hook
+    // (audit finding 11).
+    g_message("Axiom: Flutter frames are presented by committing the window surface");
+  }
   return true;
 #else
   (void)widget;
