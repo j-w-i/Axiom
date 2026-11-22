@@ -20,7 +20,11 @@ fn registry() -> Registry {
 async fn install(inst: &Installer, r: &Registry, provider: &str) -> std::path::PathBuf {
     let m = r.get(provider).unwrap().clone();
     let versions = inst.versions(&m).await.unwrap();
-    let version = versions.available.first().unwrap().clone();
+    let version = versions
+        .available
+        .first()
+        .unwrap_or_else(|| panic!("{provider}: no versions ({versions:?})"))
+        .clone();
     let plan = inst.plan(&m, &version, None).await.unwrap();
     inst.install(&plan.plan_id, Some(&m), &CancellationToken::new(), &|p| {
         if p.bytes_done.is_none() {
@@ -112,10 +116,10 @@ async fn every_server_provider_plans() {
             continue;
         }
         let versions = inst.versions(m).await.unwrap();
-        match inst
-            .plan(m, versions.available.first().unwrap(), None)
-            .await
-        {
+        let Some(version) = versions.available.first() else {
+            panic!("{}: no versions ({versions:?})", m.id);
+        };
+        match inst.plan(m, version, None).await {
             Ok(p) => println!("{}: {} steps", m.id, p.steps.len()),
             Err(axiom_env::error::EnvError::PrerequisiteMissing(why, _)) => {
                 println!("{}: {why}", m.id)
