@@ -4,6 +4,9 @@
 
 import 'dart:async';
 
+import 'dart:ui' show SemanticsRole;
+
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../app/app_state.dart';
@@ -11,7 +14,8 @@ import '../chat/models.dart';
 import '../daemon/client.dart';
 import '../state/settings.dart';
 import '../ui/controls.dart';
-import '../ui/tabs.dart';
+import '../ui/pressable.dart';
+import '../ui/surfaces.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
 
@@ -29,52 +33,192 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late String _section = widget.section;
 
+  static const _sections = [
+    ('appearance', 'Appearance'),
+    ('editor', 'Editor'),
+    ('workspace', 'Workspace'),
+    ('models', 'Models'),
+    ('about', 'About'),
+  ];
+
+  void _step(int d) {
+    final i = _sections.indexWhere((x) => x.$1 == _section);
+    setState(() => _section = _sections[(i + d + _sections.length) % _sections.length].$1);
+  }
+
+  // Tauri's Settings: two panes on the overlay; the sections on the chrome tone at the left (the
+  // selected one with the selected tint and a brass inset edge), the rows on the right.
   @override
   Widget build(BuildContext context) {
     final t = context.axiom;
+    final c = t.colors;
     final s = widget.app.settings;
     return SizedBox(
-      width: 680,
-      height: 560,
+      width: 820,
+      height: 600,
       child: ListenableBuilder(
         listenable: s,
-        builder: (context, _) => Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        builder: (context, _) => Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 200,
+              padding: const EdgeInsets.symmetric(vertical: Metrics.s5, horizontal: Metrics.s4),
+              decoration: BoxDecoration(
+                color: c.bar,
+                border: Border(right: BorderSide(color: c.groove)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Semantics(header: true, child: Text('Settings', style: t.type.title)),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(Metrics.s5, 0, 0, Metrics.s4),
+                    child: Semantics(
+                      header: true,
+                      child: Text(
+                        'Settings',
+                        style: t.type.small.copyWith(color: c.ink, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  Shortcuts(
+                    shortcuts: const {
+                      SingleActivator(LogicalKeyboardKey.arrowDown): _StepIntent(1),
+                      SingleActivator(LogicalKeyboardKey.arrowUp): _StepIntent(-1),
+                    },
+                    child: Actions(
+                      actions: {
+                        _StepIntent: CallbackAction<_StepIntent>(onInvoke: (i) => _step(i.d)),
+                      },
+                      child: Semantics(
+                        role: SemanticsRole.tabBar,
+                        label: 'Settings sections',
+                        container: true,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final (id, label) in _sections)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 1),
+                                child: Pressable(
+                                  label: label,
+                                  role: PressRole.tab,
+                                  selected: id == _section,
+                                  onPressed: () => setState(() => _section = id),
+                                  builder: (context, st) {
+                                    final on = id == _section;
+                                    return FocusRing(
+                                      visible: st.focused,
+                                      child: Stack(
+                                        children: [
+                                          Container(
+                                            height: 28,
+                                            alignment: Alignment.centerLeft,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: Metrics.s5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: on
+                                                  ? c.selected
+                                                  : (st.hovered ? c.hover : null),
+                                              borderRadius: BorderRadius.circular(
+                                                Metrics.radiusControl,
+                                              ),
+                                            ),
+                                            child: Text(
+                                              label,
+                                              style: t.type.body.copyWith(
+                                                color: on || st.hovered ? c.ink : c.ink2,
+                                              ),
+                                            ),
+                                          ),
+                                          if (on)
+                                            Positioned(
+                                              left: 0,
+                                              top: 0,
+                                              bottom: 0,
+                                              width: 2,
+                                              child: ColoredBox(color: c.accent),
+                                            ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                   const Spacer(),
-                  AxButton(
-                    label: 'Close',
-                    kind: ButtonKind.quiet,
-                    hint: 'Close — Esc',
-                    onPressed: () => Navigator.of(context).pop(),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: AxButton(
+                      label: 'Close',
+                      kind: ButtonKind.quiet,
+                      hint: 'Close — Esc',
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: Metrics.s3),
-              AxTabs(
-                label: 'Settings sections',
-                tabs: const [
-                  TabItem(id: 'appearance', label: 'Appearance'),
-                  TabItem(id: 'editor', label: 'Editor'),
-                  TabItem(id: 'workspace', label: 'Workspace'),
-                  TabItem(id: 'models', label: 'Models'),
-                  TabItem(id: 'about', label: 'About'),
-                ],
-                selected: _section,
-                onSelect: (id) => setState(() => _section = id),
-              ),
-              const SizedBox(height: Metrics.s6),
-              if (s.error.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: Metrics.s4),
-                  child: Text(s.error, style: t.type.small.copyWith(color: t.colors.dangerText)),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(Metrics.s7, Metrics.s6, Metrics.s7, Metrics.s6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (s.error.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: Metrics.s4),
+                        child: Text(s.error, style: t.type.small.copyWith(color: c.dangerText)),
+                      ),
+                    Expanded(child: SingleChildScrollView(child: _body(context, s))),
+                  ],
                 ),
-              Expanded(child: SingleChildScrollView(child: _body(context, s))),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Tauri's setting row: the label (and its description) at the left, the control at the
+  /// right, at least 52 px tall, a seam below.
+  Widget _row(BuildContext context, String label, Widget control, {String? note}) {
+    final t = context.axiom;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.colors.hairline)),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 52),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: Metrics.s4),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 200,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(label, style: t.type.body.copyWith(fontWeight: FontWeight.w500)),
+                    if (note != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(note, style: t.type.small),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: Metrics.s6),
+              Expanded(
+                child: Align(alignment: Alignment.centerRight, child: control),
+              ),
             ],
           ),
         ),
@@ -82,50 +226,26 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _row(BuildContext context, String label, Widget control, {String? note}) {
-    final t = context.axiom;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Metrics.s5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 160,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(label, style: t.type.label),
-            ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                control,
-                if (note != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(note, style: t.type.tiny),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
+  /// Tauri's segmented control: a recessed track, the choice raised.
   Widget _choice<T>(String group, List<(T, String)> options, T value, ValueChanged<T> onChoose) =>
-      Wrap(
-        spacing: Metrics.s2,
-        children: [
-          for (final (v, label) in options)
-            _ChoiceButton(
-              label: label,
-              group: group,
-              selected: v == value,
-              onPressed: () => onChoose(v),
-            ),
-        ],
+      Well(
+        radius: Metrics.radiusRaised,
+        border: context.colors.lineInput,
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final (v, label) in options)
+                _ChoiceButton(
+                  label: label,
+                  group: group,
+                  selected: v == value,
+                  onPressed: () => onChoose(v),
+                ),
+            ],
+          ),
+        ),
       );
 
   Widget _body(BuildContext context, SettingsStore s) {
@@ -263,15 +383,40 @@ class _ChoiceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.axiom;
+    final c = t.colors;
     return Semantics(
       selected: selected,
       inMutuallyExclusiveGroup: true,
-      child: AxButton(
+      child: Pressable(
         label: label,
         hint: '$group: $label',
-        kind: selected ? ButtonKind.standard : ButtonKind.quiet,
         onPressed: selected ? () {} : onPressed,
+        builder: (context, s) {
+          final text = Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Metrics.s5),
+            child: Center(
+              widthFactor: 1,
+              child: Text(
+                label,
+                style: t.type.small.copyWith(color: selected || s.hovered ? c.ink : c.ink2),
+              ),
+            ),
+          );
+          return FocusRing(
+            visible: s.focused,
+            child: SizedBox(
+              height: Metrics.controlHeightSmall - 2,
+              child: selected ? Raised(radius: Metrics.radiusControl, child: text) : text,
+            ),
+          );
+        },
       ),
     );
   }
+}
+
+class _StepIntent extends Intent {
+  const _StepIntent(this.d);
+  final int d;
 }

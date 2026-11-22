@@ -487,16 +487,36 @@ class ChatViewState extends State<ChatView> {
             if (r.sessionId != null && r.sessionId == a.activeId) r,
         ];
         return ColoredBox(
-          color: widget.dock ? c.bar : c.ground,
+          color: widget.dock ? c.panel : c.ground,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: EdgeInsets.fromLTRB(g, widget.dock ? 8 : 20, g, 8),
-                child: widget.dock
-                    ? _DockHeader(title: title ?? 'New conversation')
-                    : Semantics(liveRegion: running, child: AnswerLine(answer)),
+              // Tauri's chat head: 30 px, a small strong title, a seam under it.
+              SizedBox(
+                height: Metrics.headHeight,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(widget.dock ? Metrics.s4 : Metrics.s6, 0, 8, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: widget.dock
+                        ? _DockHeader(title: title ?? 'New conversation')
+                        : Semantics(
+                            liveRegion: running,
+                            header: true,
+                            child: Text(
+                              answer,
+                              style: t.type.small.copyWith(
+                                color: c.ink,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                  ),
+                ),
               ),
+              const Hairline(),
+              const SizedBox(height: Metrics.s4),
               if (a.error.isNotEmpty) _Banner(text: a.error, gutter: g, onDismiss: a.dismissError),
               Expanded(
                 child: a.status == 'ready' && !hasModel && a.activeId == null
@@ -979,10 +999,12 @@ class _ItemViewState extends State<_ItemView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Raised(
+                  // Tauri's user message: pressed into a well.
+                  Well(
+                    radius: Metrics.radiusRaised,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      child: Text(text, style: t.type.body.copyWith(fontSize: 14, height: 1.5)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Text(text, style: t.type.body.copyWith(height: 1.6)),
                     ),
                   ),
                   if (images.isNotEmpty)
@@ -1068,47 +1090,55 @@ class _ItemViewState extends State<_ItemView> {
           ToolState.ok => 'done',
           ToolState.error => 'failed',
         };
+        // Tauri's tool row: a bordered well, the name and targets in mono, the summary faint.
         return pad(
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              AxListRow(
-                label: '$tool ${targets.join(', ')}, $word${summary.isEmpty ? '' : ': $summary'}',
-                hint: output == null ? null : (_open ? 'Hide the output' : 'Show the output'),
-                onPressed: output == null ? null : () => setState(() => _open = !_open),
-                height: 28,
-                child: Row(
-                  children: [
-                    const SizedBox(width: 8),
-                    StatusDot(dot, ring: c.ground),
-                    const SizedBox(width: 8),
-                    Text(tool, style: t.type.codeSmall.copyWith(color: c.ink)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        targets.join(', '),
-                        style: t.type.codeSmall,
-                        overflow: TextOverflow.ellipsis,
+          Well(
+            radius: Metrics.radiusRaised,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AxListRow(
+                  label: '$tool ${targets.join(', ')}, $word${summary.isEmpty ? '' : ': $summary'}',
+                  hint: output == null ? null : (_open ? 'Hide the output' : 'Show the output'),
+                  onPressed: output == null ? null : () => setState(() => _open = !_open),
+                  height: Metrics.rowHeight + 2,
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 8),
+                      StatusDot(dot, ring: c.recessed),
+                      const SizedBox(width: 8),
+                      Text(tool, style: t.type.codeSmall.copyWith(color: c.ink)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          targets.join(', '),
+                          style: t.type.codeSmall,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                    Flexible(
-                      child: Text(summary, style: t.type.tiny, overflow: TextOverflow.ellipsis),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                ),
-              ),
-              if (_open && output != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: CodeBlock(
-                    code: output is String
-                        ? output
-                        : const JsonEncoder.withIndent('  ').convert(output),
-                    language: output is String ? '' : 'json',
+                      Flexible(
+                        child: Text(
+                          summary,
+                          style: t.type.small.copyWith(color: c.ink3),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                   ),
                 ),
-            ],
+                if (_open && output != null)
+                  Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: CodeBlock(
+                      code: output is String
+                          ? output
+                          : const JsonEncoder.withIndent('  ').convert(output),
+                      language: output is String ? '' : 'json',
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       case CheckpointItem(:final number, :final label):

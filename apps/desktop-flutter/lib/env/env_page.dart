@@ -15,7 +15,6 @@ import '../ui/controls.dart';
 import '../ui/icon_data.dart';
 import '../ui/icons.dart';
 import '../ui/overlays.dart';
-import '../ui/surfaces.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
 
@@ -129,7 +128,7 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
         return ColoredBox(
           color: c.ground,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
+            padding: const EdgeInsets.all(Metrics.s7),
             children: [
               Row(
                 children: [
@@ -154,13 +153,27 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                   container: true,
                   explicitChildNodes: true,
                   label: 'Toolchains',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _header(context),
-                      const Hairline(),
-                      for (final r in rows) _ToolchainRowView(row: r, onRemove: () => _remove(r)),
-                    ],
+                  // Tauri's table: on the panel tone in a bordered box, 40 px rows, a seam under
+                  // each.
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: c.panel,
+                      borderRadius: BorderRadius.circular(Metrics.radiusRaised),
+                      border: Border.all(color: c.groove),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _header(context),
+                        for (final r in rows) ...[
+                          SizedBox(height: 1, child: ColoredBox(color: c.groove)),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: Metrics.s5),
+                            child: _ToolchainRowView(row: r, onRemove: () => _remove(r)),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
               if (s.untrusted.isNotEmpty) ...[
@@ -211,10 +224,12 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
 
   Widget _header(BuildContext context) {
     final t = context.axiom;
-    Widget h(String s) => Text(s, style: t.type.tiny);
+    Widget h(String s) => Text(s, style: t.type.small);
     return ExcludeSemantics(
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 6),
+      child: Container(
+        height: 40,
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: Metrics.s5),
         child: Row(
           children: [
             Expanded(flex: 4, child: h('Toolchain')),
@@ -309,15 +324,15 @@ class _ToolchainRowView extends StatelessWidget {
       label:
           '${row.name}: ${row.word}, required ${row.selected ?? 'any'}, detected '
           '${row.detected ?? 'not found'}, $source',
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 40),
         child: Row(
           children: [
             Expanded(
               flex: 4,
               child: Row(
                 children: [
-                  StatusDot(_lamp(row.kind)),
+                  StatusDot(_lamp(row.kind), ring: c.panel),
                   const SizedBox(width: 8),
                   Text(row.name, style: t.type.label),
                   const SizedBox(width: 8),
