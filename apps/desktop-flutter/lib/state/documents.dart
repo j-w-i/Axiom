@@ -32,6 +32,15 @@ const _tabSaveDebounce = Duration(milliseconds: 500);
 
 String titleOf(String path) => path.split('/').last;
 
+/// The file's line break: the first one in it (CRLF, CR or LF), LF when it has none. The
+/// editor joins lines with it, so a CRLF file is the same bytes until edited and is saved with
+/// CRLF (requirement E-3; audit finding 2).
+TextLineBreak lineBreakOf(String text) {
+  final i = text.indexOf(RegExp('[\r\n]'));
+  if (i < 0 || text[i] == '\n') return TextLineBreak.lf;
+  return i + 1 < text.length && text[i + 1] == '\n' ? TextLineBreak.crlf : TextLineBreak.cr;
+}
+
 String _firstLine(String text) {
   final i = text.indexOf('\n');
   return i < 0 ? text : text.substring(0, i);
@@ -43,7 +52,11 @@ class Doc {
       languageNotifier = ValueNotifier(
         Languages.instance.detect(path, firstLine: _firstLine(text)),
       ) {
-    controller = CodeLineEditingController(codeLines: CodeLines.fromText(text), spanBuilder: _span);
+    controller = CodeLineEditingController(
+      codeLines: CodeLines.fromText(text),
+      options: CodeLineOptions(lineBreak: lineBreakOf(text)),
+      spanBuilder: _span,
+    );
   }
 
   final String path;
@@ -126,7 +139,11 @@ class Doc {
   CodeLineEditingController get secondary {
     final existing = _secondary;
     if (existing != null) return existing;
-    final c = CodeLineEditingController(codeLines: controller.codeLines, spanBuilder: _span);
+    final c = CodeLineEditingController(
+      codeLines: controller.codeLines,
+      options: controller.options,
+      spanBuilder: _span,
+    );
     void fromPrimary() {
       if (_syncing || identical(c.codeLines, controller.codeLines)) return;
       _syncing = true;

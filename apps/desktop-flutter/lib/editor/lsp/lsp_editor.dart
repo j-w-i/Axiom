@@ -104,7 +104,8 @@ class LspSync {
           'uri': lsp.uriOf(d.path),
           'languageId': s.languageId,
           'version': s.version,
-          'text': d.text,
+          // LF, as every change after it is (the server's copy has one kind of line break).
+          'text': _lines(d.controller.codeLines).join('\n'),
         },
       }),
     );
