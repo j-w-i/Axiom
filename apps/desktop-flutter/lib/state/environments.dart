@@ -129,6 +129,19 @@ class EnvironmentsStore extends ChangeNotifier {
 
   /// The plan shown for approval, and its provider's name.
   ({InstallPlan plan, String providerName})? plan;
+
+  /// Tools a provider's last plan was missing (`prerequisite_missing`), by provider: the shell
+  /// offers the provider that supplies them (M5.5-UI-001).
+  Map<String, List<String>> prerequisites = const {};
+
+  /// Called when an install of a provider succeeds (language servers start again).
+  void Function(String providerId)? onInstalled;
+
+  /// Plans approved without the dialog (the auto-install switch, ADR-0021 §5).
+  final _autoApprove = <String>{};
+
+  /// Whether the shown plan is being approved by Axiom itself (no dialog).
+  bool get planIsAutomatic => plan != null && _autoApprove.contains(plan!.plan.providerId);
   String? planning;
 
   final _planProvider = <String, String>{};
@@ -213,6 +226,21 @@ class EnvironmentsStore extends ChangeNotifier {
       if ((p.errors?.length ?? 0) > 0) p,
   ];
 
+  /// The providers alone (their names), without detecting anything: cheap enough for opening a
+  /// folder (the language server line names the provider it offers).
+  Future<void> loadProviders() async {
+    if (!workspace.isOpen || providers.isNotEmpty) return;
+    try {
+      final r = await client.call(Methods.envProviders, ProvidersParams(workspaceId: workspace.id));
+      if (providers.isEmpty) {
+        providers = r.providers;
+        notifyListeners();
+      }
+    } on DaemonException {
+      // Ids stand in for names.
+    }
+  }
+
   Future<void> refresh() async {
     if (!workspace.isOpen) return;
     final gen = ++_generation;
@@ -262,7 +290,10 @@ class EnvironmentsStore extends ChangeNotifier {
   }
 
   /// Asks the daemon for a plan: the selected version, else the newest available.
-  Future<void> planInstall(String providerId) async {
+  /// Plans [providerId]'s install; with [approve] runs it at once (no dialog).
+  Future<void> planInstall(String providerId, {bool approve = false}) async {
+    if (approve) _autoApprove.add(providerId);
+    prerequisites = {...prerequisites}..remove(providerId);
     final row = rows().where((r) => r.providerId == providerId).firstOrNull;
     planning = providerId;
     notifyListeners();
@@ -279,12 +310,23 @@ class EnvironmentsStore extends ChangeNotifier {
         Methods.envPlanInstall,
         PlanInstallParams(providerId: providerId, version: version),
       );
-      plan = (plan: p, providerName: row?.name ?? providerId);
+      final name =
+          row?.name ?? providers.where((x) => x.id == providerId).firstOrNull?.name ?? providerId;
+      plan = (plan: p, providerName: name);
       planning = null;
       notifyListeners();
+      if (approve) await approvePlan();
     } on DaemonException catch (e) {
       planning = null;
+      _autoApprove.remove(providerId);
       failures = {...failures, providerId: describeEnvError(e)};
+      if (e.kind == ErrorKind.prerequisiteMissing) {
+        final d = e.details is Map ? (e.details! as Map)['missing'] : null;
+        prerequisites = {
+          ...prerequisites,
+          providerId: [if (d is List) ...d.whereType<String>()],
+        };
+      }
       notifyListeners();
     }
   }
@@ -306,6 +348,7 @@ class EnvironmentsStore extends ChangeNotifier {
     installs = {...installs, providerId: (planId: planId, progress: null)};
     final cancel = _cancels[providerId] = CancelToken();
     notifyListeners();
+    var ok = false;
     try {
       await client.call(
         Methods.envInstall,
@@ -313,9 +356,12 @@ class EnvironmentsStore extends ChangeNotifier {
         timeout: const Duration(hours: 1),
         cancel: cancel,
       );
+      ok = true;
     } on DaemonException catch (e) {
       failures = {...failures, providerId: describeEnvError(e)};
     } finally {
+      _autoApprove.remove(providerId);
+      if (ok) onInstalled?.call(providerId);
       _cancels.remove(providerId);
       _planProvider.remove(planId);
       installs = {...installs}..remove(providerId);

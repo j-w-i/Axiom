@@ -13,7 +13,8 @@
   for every frame. On a software renderer, that put an idle editor at about 27 % of a core.
 
 ## The patch
-Only `lib/src/code_editor.dart` and `lib/src/_code_editable.dart` change.
+`lib/src/code_editor.dart` and `lib/src/_code_editable.dart` change for the caret (FL-PERF-001);
+`lib/src/_code_field.dart` for a repaint after lines were removed (M5.5-EDIT-001, below).
 
 1. `CodeEditor` gets two new optional parameters, passed through to `_CodeEditable`:
    - `bool? cursorBlink`: false draws the caret solid. The default is true.
@@ -35,3 +36,33 @@ When upstream has an equivalent API:
 1. remove `dependency_overrides` from the app's `pubspec.yaml` and this directory;
 2. map the two parameters in `lib/editor/code_view.dart` to upstream's names;
 3. keep `test/editor/caret_blink_test.dart` passing.
+
+## A repaint after lines were removed (M5.5-EDIT-001)
+`_CodeFieldRender._buildDisplayRenderParagraphs` built every line of the render's own copy of
+the lines, which is updated on the next rebuild; the highlighter reads the controller's. A repaint
+forced in between (the shell's diagnostics arriving right after an edit that removed lines) asked
+the highlighter for a line that no longer existed. It now builds only the lines both have; the
+render's own update follows in the same frame.
+
+
+## Shared workers, and no copies on the UI thread (FL-PERF-003)
+Upstream gives every editor three isolates of its own (highlighting, folding, find). It sends
+the whole document to them as `CodeLines` objects on every edit, and the highlighter also sends
+its `Highlight`, with every grammar it uses. Each send deep-copies those objects on the UI
+thread. On a 5000-line file, a tab switch spawned the isolates again and stalled the UI thread
+for up to 54 ms in `CopyMutableObjectGraph`; each keystroke paid the copy too.
+
+- `lib/src/_isolate.dart`: an `_IsolateLane` per kind of task, shared by every editor, with two
+  worker isolates. A tasker keeps only its newest request. A request is handed to a worker only
+  when one is free, and the newest tasker goes first. Closing a tasker drops its waiting request.
+  Results for a closed tasker are ignored, as upstream.
+- `lib/src/_code_highlight.dart`: the payload is the text as one `String` (strings are shared
+  between isolates, not copied), a key for the `Highlight` (the identity of its modes and
+  plugins), and the size check, now done before sending. The `Highlight` is sent only the first
+  time; a worker keeps the ones it was given (at most 64), and one that is missing is asked for
+  again. Also `reEditorHighlightsDelivered`, a counter for tests.
+- `lib/src/code_chunk.dart`: when no line is folded, the payload is the lines' text, and the
+  worker rebuilds the `CodeLines`. With folded lines it is the `CodeLines`, as upstream.
+
+`integration_test/frames_test.dart` measures tab switching and checks that the tab left showing
+is highlighted afterwards.

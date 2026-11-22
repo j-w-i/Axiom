@@ -50,6 +50,10 @@ jobs:
       - run: cargo test -p axiom-env --features ci-install --test ci_install -- --nocapture --test-threads=1
         env:
           AXIOM_CI_SYSTEM_INSTALL: ${{ runner.os == 'Linux' && '1' || '' }}
+      # M5.5-PROV-001: real language server installs (a plain binary, a .gz, an npm package)
+      # that answer `initialize`, and a plan for every server provider. Needs the internet.
+      - if: runner.os != 'Windows'
+        run: cargo test -p axiom-env --features ci-install --test ci_lsp_install -- --nocapture --test-threads=1
       - run: cargo run -q -p axiom-protocol --example export_schema -- --check
       - run: python3 scripts/tasks.py check
       - run: python3 scripts/check_deps.py

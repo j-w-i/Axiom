@@ -1,0 +1,63 @@
+schema = "axiom.provider/1"
+id = "java"
+name = "Java"
+description = "A Java development kit (Eclipse Temurin 21 LTS, GPL-2.0 with the Classpath Exception). jdtls needs Java 21 or later."
+version = "0.1.0"
+homepage = "https://adoptium.net"
+
+[project]
+any_file = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+
+[[tools]]
+id = "java"
+program = "java"
+version_args = ["-version"]
+version_regex = 'version "(\d+(?:\.\d+)*)'
+
+[[tools]]
+id = "javac"
+program = "javac"
+version_regex = 'javac (\d+(?:\.\d+)*)'
+required = false
+
+# Linux: the JDK at the root; macOS: inside Contents/Home.
+[[install]]
+kind = "archive"
+versions = { kind = "static", versions = ["21.0.13.1"] }
+bin_dirs = ["bin"]
+env = { JAVA_HOME = "${root}" }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13.1%2B2/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13.1_2.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "21.0.13.1" = "bb8a93f9ae6e7a693b2b721e85dbeff26ae1a77447985a8d7afcdd9c7cf6222e" } }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13.1%2B2/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.13.1_2.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "21.0.13.1" = "8c72816a6b308842d5ed1f13e5826b69c567da4784f7238d7e800efa71fe54b1" } }
+
+[[install]]
+kind = "archive"
+versions = { kind = "static", versions = ["21.0.13.1"] }
+bin_dirs = ["Contents/Home/bin"]
+env = { JAVA_HOME = "${root}/Contents/Home" }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "x86_64" }
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13.1%2B2/OpenJDK21U-jdk_x64_mac_hotspot_21.0.13.1_2.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "21.0.13.1" = "1b5eff1741bb83d32e2e19aade71452bb42e40f047c01d3e178d438304c9a26d" } }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "aarch64" }
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13.1%2B2/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.13.1_2.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "21.0.13.1" = "48067f2b7c958ed104a9d8a5749be7d25220b0a356b4d2d1bcfaab3e16ad0b14" } }
+

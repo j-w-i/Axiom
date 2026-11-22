@@ -1,7 +1,8 @@
 //! A fake language server for tests (LSP base protocol on stdio, full document sync).
 //! - `initialize`: completion, definition and hover; full sync.
 //! - `didOpen` / `didChange`: publishes one error diagnostic per line containing `ERROR`.
-//! - `textDocument/completion`: `alpha`, `beta`.
+//! - `textDocument/completion`: `alpha`, `beta`, a `printLine` snippet (documented on
+//!   `completionItem/resolve`) and `HashMap` (with an import as an additional edit).
 //! - `textDocument/definition`: line 0 of `$FAKE_LSP_DEFINITION` (a URI) or of the same file.
 //! - `textDocument/hover` on a document containing `SLOW`: answers only once `$/cancelRequest`
 //!   arrives (with RequestCancelled), else hover text with the document's version.
@@ -12,6 +13,9 @@
 //! - `textDocument/rename`: every whole-word occurrence of the word at the position, in every
 //!   open document, becomes the new name.
 //! - `textDocument/formatting`: removes trailing spaces.
+//!
+//! - M5.5-EDIT-002: semantic tokens (`fn` and the names after it), `workspace/symbol`, call
+//!   hierarchy (callers are the `fn`s whose bodies call the name) and organize imports (sorts the leading `use` lines).
 //!
 //! `FAKE_LSP_LOG` (optional): every received method is appended there, one per line.
 
@@ -96,10 +100,12 @@ fn main() {
         };
         match method.as_str() {
             "initialize" => reply(json!({"capabilities":{
-                "textDocumentSync":1,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"hoverProvider":true,
+                "textDocumentSync":1,"completionProvider":{"triggerCharacters":["."],"resolveProvider":true},"definitionProvider":true,"hoverProvider":true,
                 "renameProvider":true,"documentFormattingProvider":true,
                 "referencesProvider":true,"documentSymbolProvider":true,"documentHighlightProvider":true,
-                "codeActionProvider":true,"signatureHelpProvider":{"triggerCharacters":["(",","]}},
+                "codeActionProvider":true,"signatureHelpProvider":{"triggerCharacters":["(",","]},
+                "semanticTokensProvider":{"legend":{"tokenTypes":["keyword","function"],"tokenModifiers":[]},"full":true},
+                "workspaceSymbolProvider":true,"callHierarchyProvider":true},
                 "serverInfo":{"name":"fake-lsp","version":"0"}})),
             "textDocument/didOpen" => {
                 let td = &p["textDocument"];
@@ -129,7 +135,24 @@ fn main() {
                     docs.remove(uri);
                 }
             }
-            "textDocument/completion" => reply(json!([{"label":"alpha"},{"label":"beta"}])),
+            "textDocument/completion" => reply(json!([
+                {"label":"alpha"},{"label":"beta"},
+                {"label":"printLine","kind":3,"insertTextFormat":2,
+                 "insertText":"printLine(${1:message}, ${2:level})$0"},
+                {"label":"HashMap","kind":7,"insertText":"HashMap",
+                 "additionalTextEdits":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+                   "newText":"use std::collections::HashMap;\n"}]}
+            ])),
+            // M5.5-EDIT-001: documentation only on resolve.
+            "completionItem/resolve" => {
+                let mut item = p.clone();
+                if item["label"] == "printLine" {
+                    item["detail"] = json!("fn printLine(message, level)");
+                    item["documentation"] =
+                        json!({"kind":"markdown","value":"Prints a **line** at a level."});
+                }
+                reply(item)
+            }
             "textDocument/definition" => {
                 let uri = std::env::var("FAKE_LSP_DEFINITION").unwrap_or_else(|_| {
                     p["textDocument"]["uri"]
@@ -249,6 +272,97 @@ fn main() {
                 reply(Value::Array(out));
             }
             // `fn name` lines as functions, `let name` inside them as their children.
+            // M5.5-EDIT-002: `fn` keywords and the names after them.
+            "textDocument/semanticTokens/full" => {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let text = docs.get(uri).map(|(t, _)| t.clone()).unwrap_or_default();
+                let mut data: Vec<u64> = Vec::new();
+                let (mut last_line, mut last_start) = (0u64, 0u64);
+                for (i, l) in text.lines().enumerate() {
+                    if let Some(at) = l.find("fn ") {
+                        let name: String = l[at + 3..]
+                            .chars()
+                            .take_while(|c| c.is_alphanumeric() || *c == '_')
+                            .collect();
+                        for (start, len, ty) in [(at, 2, 0u64), (at + 3, name.len(), 1u64)] {
+                            if len == 0 {
+                                continue;
+                            }
+                            let (line, start) = (i as u64, start as u64);
+                            let dl = line - last_line;
+                            let ds = if dl == 0 { start - last_start } else { start };
+                            data.extend([dl, ds, len as u64, ty, 0]);
+                            last_line = line;
+                            last_start = start;
+                        }
+                    }
+                }
+                reply(json!({"data": data}))
+            }
+            // Every `fn` in the open documents whose name contains the query.
+            "workspace/symbol" => {
+                let q = p["query"].as_str().unwrap_or_default().to_string();
+                let mut out: Vec<Value> = Vec::new();
+                for (uri, (text, _)) in &docs {
+                    for (i, l) in text.lines().enumerate() {
+                        if let Some(at) = l.find("fn ") {
+                            let name: String = l[at + 3..]
+                                .chars()
+                                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                                .collect();
+                            if !name.is_empty() && name.contains(&q) {
+                                out.push(json!({"name": name, "kind": 12, "location": {"uri": uri,
+                                    "range": {"start": {"line": i, "character": at + 3},
+                                              "end": {"line": i, "character": at + 3 + name.len()}}}}));
+                            }
+                        }
+                    }
+                }
+                reply(json!(out))
+            }
+            // The word at the position is the item; its callers are the `fn`s whose bodies name it.
+            "textDocument/prepareCallHierarchy" => {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let line = p["position"]["line"].as_u64().unwrap_or(0) as usize;
+                let ch = p["position"]["character"].as_u64().unwrap_or(0) as usize;
+                let text = docs.get(uri).map(|(t, _)| t.clone()).unwrap_or_default();
+                let l = text.lines().nth(line).unwrap_or_default();
+                let word = |c: char| c.is_alphanumeric() || c == '_';
+                let start = l[..ch.min(l.len())]
+                    .rfind(|c: char| !word(c))
+                    .map_or(0, |i| i + 1);
+                let end = l[start..]
+                    .find(|c: char| !word(c))
+                    .map_or(l.len(), |i| start + i);
+                let name = &l[start..end];
+                let r = json!({"start":{"line":line,"character":start},"end":{"line":line,"character":end}});
+                reply(
+                    json!([{"name": name, "kind": 12, "uri": uri, "range": r, "selectionRange": r}]),
+                )
+            }
+            "callHierarchy/incomingCalls" => {
+                let name = p["item"]["name"].as_str().unwrap_or_default().to_string();
+                let mut out: Vec<Value> = Vec::new();
+                for (uri, (text, _)) in &docs {
+                    let mut current: Option<(String, usize)> = None;
+                    for (i, l) in text.lines().enumerate() {
+                        if let Some(at) = l.find("fn ") {
+                            let f: String = l[at + 3..]
+                                .chars()
+                                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                                .collect();
+                            current = Some((f, i));
+                        } else if let Some((f, at)) = &current {
+                            if l.contains(&format!("{name}(")) && f != &name {
+                                let r = json!({"start":{"line":at,"character":0},"end":{"line":at,"character":0}});
+                                out.push(json!({"from": {"name": f, "kind": 12, "uri": uri, "range": r, "selectionRange": r},
+                                    "fromRanges": [{"start":{"line":i,"character":0},"end":{"line":i,"character":0}}]}));
+                            }
+                        }
+                    }
+                }
+                reply(json!(out))
+            }
             "textDocument/documentSymbol" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
                 let text = docs.get(uri).map(|(t, _)| t.clone()).unwrap_or_default();
@@ -281,6 +395,27 @@ fn main() {
                 reply(Value::Array(out));
             }
             // One quick fix: a line without a trailing `;` gets one.
+            // M5.5-EDIT-002: organize imports sorts the leading `use` lines.
+            "textDocument/codeAction"
+                if p["context"]["only"]
+                    .as_array()
+                    .is_some_and(|o| o.iter().any(|k| k == "source.organizeImports")) =>
+            {
+                let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
+                let text = docs.get(uri).map(|(t, _)| t.clone()).unwrap_or_default();
+                let uses: Vec<&str> = text.lines().take_while(|l| l.starts_with("use ")).collect();
+                let mut sorted = uses.clone();
+                sorted.sort();
+                if uses.is_empty() || uses == sorted {
+                    reply(json!([]));
+                } else {
+                    let body: String = sorted.iter().map(|l| format!("{l}\n")).collect();
+                    reply(
+                        json!([{"title":"Organize imports","kind":"source.organizeImports",
+                        "edit":{"changes":{uri:[{"range":{"start":{"line":0,"character":0},"end":{"line":uses.len(),"character":0}},"newText":body}]}}}]),
+                    );
+                }
+            }
             "textDocument/codeAction" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or_default();
                 let line = p["range"]["start"]["line"].as_u64().unwrap_or(0) as usize;

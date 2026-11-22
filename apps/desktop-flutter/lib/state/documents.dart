@@ -17,7 +17,8 @@ import 'package:re_editor/re_editor.dart';
 
 import '../daemon/client.dart';
 import '../daemon/protocol.g.dart';
-import '../editor/code_view.dart';
+import '../editor/languages.dart';
+import '../editor/lsp/semantic_tokens.dart';
 import '../editor/lsp/underline.dart';
 import '../ui/tokens.dart';
 import 'lsp.dart';
@@ -31,15 +32,26 @@ const _tabSaveDebounce = Duration(milliseconds: 500);
 
 String titleOf(String path) => path.split('/').last;
 
+String _firstLine(String text) {
+  final i = text.indexOf('\n');
+  return i < 0 ? text : text.substring(0, i);
+}
+
 class Doc {
   Doc({required this.path, required String text, required this.savedVersion})
     : _savedText = text,
-      language = languageOf(path) {
+      languageNotifier = ValueNotifier(
+        Languages.instance.detect(path, firstLine: _firstLine(text)),
+      ) {
     controller = CodeLineEditingController(codeLines: CodeLines.fromText(text), spanBuilder: _span);
   }
 
   final String path;
-  final String? language;
+
+  /// The document's language: detected from its name and first line; the status bar's picker
+  /// changes it for the session.
+  final ValueNotifier<Language> languageNotifier;
+  Language get language => languageNotifier.value;
   late final CodeLineEditingController controller;
 
   /// The language servers' diagnostics on this document (set by the LSP layer).
@@ -56,6 +68,8 @@ class Doc {
     required TextStyle style,
   }) {
     var span = textSpan;
+    final sem = semantic[index];
+    if (sem != null && sem.isNotEmpty) span = applyStyles(span, sem, codeLine.text.length);
     if (highlights.isNotEmpty) {
       span = applyHighlights(
         span,
@@ -68,6 +82,16 @@ class Doc {
       span,
       underlinesOn(index, codeLine.text.length, diagnostics, underlineColor),
     );
+  }
+
+  /// The server's semantic tokens by line, over the grammar's colours (ADR-0021 §2).
+  Map<int, List<SemanticRange>> semantic = const {};
+
+  void setSemantic(Map<int, List<SemanticRange>> tokens) {
+    if (tokens.isEmpty && semantic.isEmpty) return;
+    semantic = tokens;
+    controller.forceRepaint();
+    _secondary?.forceRepaint();
   }
 
   /// The symbol under the caret, everywhere it is in this document (`documentHighlight`).
@@ -143,7 +167,14 @@ class Doc {
   String get text => controller.text;
 
   /// Recomputes [dirty]; true when it changed.
+  /// The lines the dirty mark was last computed for: a caret or selection move keeps them, so it
+  /// costs nothing (the comparison joins the whole document).
+  Object? _dirtyLines;
+
   bool refreshDirty() {
+    final lines = controller.codeLines;
+    if (identical(lines, _dirtyLines)) return false;
+    _dirtyLines = lines;
     final now = controller.text != _savedText;
     if (now == dirty) return false;
     dirty = now;
@@ -154,6 +185,7 @@ class Doc {
     savedVersion = version;
     _savedText = text;
     changedOnDisk = false;
+    _dirtyLines = null;
     refreshDirty();
   }
 
@@ -163,6 +195,7 @@ class Doc {
     _savedText = text;
     dirty = false;
     changedOnDisk = false;
+    _dirtyLines = controller.codeLines;
   }
 }
 
@@ -194,7 +227,12 @@ class DocumentsStore extends ChangeNotifier {
   String banner = '';
   Prompt? prompt;
   final _conflicts = <({String path, String text})>[];
-  String cursorText = '';
+
+  /// The status bar's caret text ("Ln 3, Col 7"), apart from the store: a caret or selection
+  /// move redraws the status bar, not every listener of the documents.
+  final cursor = ValueNotifier<String>('');
+  String get cursorText => cursor.value;
+  set cursorText(String v) => cursor.value = _cursorPending = v;
 
   /// Where to put the caret when a document shows (Go to File, Problems, search results).
   ({String path, int line, int column})? pendingReveal;
@@ -287,6 +325,14 @@ class DocumentsStore extends ChangeNotifier {
     _scheduleTabSave();
   }
 
+  /// Sets [path]'s language for the session (the status bar's picker).
+  void setLanguage(String path, Language language) {
+    final d = doc(path);
+    if (d == null || d.language.id == language.id) return;
+    d.languageNotifier.value = language;
+    notifyListeners();
+  }
+
   void activate(String path) {
     if (doc(path) == null) return;
     _setActive(path);
@@ -315,10 +361,25 @@ class DocumentsStore extends ChangeNotifier {
     final text = selected > 0
         ? 'Ln $line, Col $column ($selected selected)'
         : 'Ln $line, Col $column';
-    if (text == cursorText) return;
-    cursorText = text;
-    _notifySafely();
+    if (text == _cursorPending) return;
+    _cursorPending = text;
+    // Like _notifySafely: the caret moves while the editor builds or lays out; the status bar
+    // hears of it after the frame.
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
+      cursor.value = text;
+      return;
+    }
+    if (_cursorQueued) return;
+    _cursorQueued = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _cursorQueued = false;
+      cursor.value = _cursorPending;
+    });
   }
+
+  String _cursorPending = '';
+  bool _cursorQueued = false;
 
   bool _notifyQueued = false;
 
@@ -450,9 +511,17 @@ class DocumentsStore extends ChangeNotifier {
 
   // ---- saving -------------------------------------------------------------------------------
 
+  /// Runs before a save writes (format on save, ADR-0021 §8); its failure does not stop the save.
+  Future<void> Function(Doc d)? beforeSave;
+
   Future<void> save(String path) async {
     final d = doc(path);
     if (d == null) return;
+    try {
+      await beforeSave?.call(d);
+    } on Object {
+      // The text is saved as it is.
+    }
     await _write(d, d.text, overwrite: false);
   }
 

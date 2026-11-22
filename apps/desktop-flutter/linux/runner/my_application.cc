@@ -56,6 +56,11 @@ static void my_application_activate(GApplication* application) {
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
+  // The Dart UI runs on its own thread, not GTK's. On the GTK thread every frame
+  // waited for GTK to repaint the window after the previous one, so the shell drew
+  // at 30 frames a second on a 60 Hz display (FL-PERF-003).
+  fl_dart_project_set_ui_thread_policy(project,
+                                       FL_UI_THREAD_POLICY_RUN_ON_SEPARATE_THREAD);
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;

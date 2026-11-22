@@ -1,0 +1,12 @@
+schema = "axiom.provider/1"
+id = "lsp-dart"
+name = "Dart analysis server"
+description = "Dart and Flutter language server, part of the Dart SDK (BSD-3-Clause)."
+version = "0.1.0"
+homepage = "https://dart.dev/tools/analysis"
+
+[[lsp]]
+id = "dart"
+languages = ["dart"]
+command = ["dart", "language-server", "--protocol=lsp"]
+requires = ["dart"]

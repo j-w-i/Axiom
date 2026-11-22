@@ -120,7 +120,22 @@ class CodeChunkController extends ValueNotifier<List<CodeChunk>> {
 
   void _runChunkAnalyzeTask() {
     final CodeLines codeLines = _controller.codeLines;
-    _tasker.run(_CodeChunkAnalyzePayload(_analyzer, codeLines), (result) {
+    // Axiom patch (FL-PERF-003): without folded lines the worker is sent the lines'
+    // text (strings are shared between isolates, CodeLine objects are copied).
+    bool folded = false;
+    final List<String> texts = List<String>.filled(codeLines.length, '');
+    for (int i = 0; i < codeLines.length; i++) {
+      final CodeLine line = codeLines[i];
+      if (line.chunks.isNotEmpty) {
+        folded = true;
+        break;
+      }
+      texts[i] = line.text;
+    }
+    final _CodeChunkAnalyzePayload payload = folded
+        ? _CodeChunkAnalyzePayload(_analyzer, codeLines, null)
+        : _CodeChunkAnalyzePayload(_analyzer, null, texts);
+    _tasker.run(payload, (result) {
       if (_controller.codeLines.equals(codeLines)) {
         value = result.chunks;
         _expandInvalidCollapsedChunks(result.invalidCollapsedChunkIndexes);
@@ -137,10 +152,12 @@ class CodeChunkController extends ValueNotifier<List<CodeChunk>> {
 
   @pragma('vm:entry-point')
   static _CodeChunkAnalyzeResult _run(_CodeChunkAnalyzePayload payload) {
-    final List<CodeChunk> chunks = payload.analyzer.run(payload.codeLines);
+    final CodeLines codeLines =
+        payload.codeLines ?? CodeLines.of(payload.texts!.map((String text) => CodeLine(text)));
+    final List<CodeChunk> chunks = payload.analyzer.run(codeLines);
     final List<int> invalidCollapsedChunkIndexes = [];
-    for (int i = 0; i < payload.codeLines.length; i++) {
-      if (!payload.codeLines[i].chunkParent) {
+    for (int i = 0; i < codeLines.length; i++) {
+      if (!codeLines[i].chunkParent) {
         continue;
       }
       final int index = chunks.indexWhere((e) => e.index == i);
@@ -347,9 +364,10 @@ class CodeChunkSymbol {
 class _CodeChunkAnalyzePayload {
 
   final CodeChunkAnalyzer analyzer;
-  final CodeLines codeLines;
+  final CodeLines? codeLines;
+  final List<String>? texts;
 
-  const _CodeChunkAnalyzePayload(this.analyzer, this.codeLines);
+  const _CodeChunkAnalyzePayload(this.analyzer, this.codeLines, this.texts);
 
 }
 

@@ -104,10 +104,4 @@ kind = "run"
 label = "cargo run"
 command = ["cargo", "run"]
 
-# M4 (ADR-0018 §2): rust-analyzer from the workspace's environment (the managed toolchain's
-# rustup proxy, or the system's).
-[[lsp]]
-id = "rust-analyzer"
-languages = ["rust"]
-command = ["rust-analyzer"]
-install_hint = "Install it with: rustup component add rust-analyzer"
+# Its language server is the lsp-rust-analyzer provider since M5.5 (ADR-0021 §4).

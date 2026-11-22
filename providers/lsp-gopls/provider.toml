@@ -1,0 +1,36 @@
+schema = "axiom.provider/1"
+id = "lsp-gopls"
+name = "gopls"
+description = "Go language server (BSD-3-Clause), built with the Go toolchain."
+version = "0.1.0"
+homepage = "https://go.dev/gopls"
+
+[[tools]]
+id = "gopls"
+program = "gopls"
+version_regex = 'v(\d+\.\d+\.\d+)'
+version_args = ["version"]
+
+[[tools]]
+id = "go"
+program = "go"
+version_regex = 'go(\d+\.\d+(?:\.\d+)?)'
+version_args = ["version"]
+required = false
+
+[[install]]
+kind = "delegate"
+using = "go"
+scope = "managed"
+install = ["go", "install", "golang.org/x/tools/gopls@v${version}"]
+uninstall = []
+list_versions = ["go", "list", "-m", "-versions", "golang.org/x/tools/gopls"]
+versions = { kind = "static", versions = ["0.24.0"] }
+bin_dirs = ["bin"]
+env = { GOBIN = "${root}/bin", GOFLAGS = "-modcacherw", GOPATH = "${root}/gopath", GOTOOLCHAIN = "auto" }
+
+[[lsp]]
+id = "gopls"
+languages = ["go", "gomod", "gowork", "gotmpl"]
+command = ["gopls"]
+requires = ["go"]

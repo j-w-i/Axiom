@@ -185,6 +185,49 @@ impl Installer {
         self.data_dir.join("cache")
     }
 
+    /// A delegate tool of [m] (`npm`, `go`, `dotnet`): on the daemon's `PATH`, else in the newest
+    /// managed install of any provider (its `bin/` or root), with that directory to put on the
+    /// delegate's `PATH` (npm's script needs the `node` beside it). M5.5, ADR-0021 §4.
+    pub fn delegate_tool(
+        &self,
+        m: &ProviderManifest,
+        tool_id: &str,
+    ) -> Result<(PathBuf, Option<PathBuf>), EnvError> {
+        match system_tool(m, tool_id) {
+            Ok(p) => Ok((p, None)),
+            Err(e) => {
+                let Some(tool) = m.tools.iter().find(|t| t.id == tool_id) else {
+                    return Err(e);
+                };
+                let names = detect::executable_names(&tool.program);
+                let providers = std::fs::read_dir(self.toolchains_dir())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Result::ok)
+                    .filter(|d| d.file_type().is_ok_and(|t| t.is_dir()))
+                    .map(|d| d.file_name().to_string_lossy().into_owned());
+                let mut found = None;
+                for p in providers {
+                    let Some(v) = self.installed(&p).into_iter().next() else {
+                        continue;
+                    };
+                    let root = self.toolchains_dir().join(&p).join(v);
+                    for sub in ["bin", "."] {
+                        let dir = root.join(sub);
+                        if let Some(n) = names.iter().find(|n| dir.join(n).is_file()) {
+                            found = Some((dir.join(n), Some(dir.clone())));
+                            break;
+                        }
+                    }
+                    if found.is_some() {
+                        break;
+                    }
+                }
+                found.ok_or(e)
+            }
+        }
+    }
+
     /// Published versions of a provider in managed storage, newest first.
     pub fn installed(&self, provider_id: &str) -> Vec<String> {
         let mut v: Vec<String> = std::fs::read_dir(self.toolchains_dir().join(provider_id))
@@ -261,12 +304,12 @@ impl Installer {
         using: &str,
         argv: &[String],
     ) -> Result<Vec<String>, EnvError> {
-        let program = system_tool(m, using)?;
+        let (program, dir) = self.delegate_tool(m, using)?;
         let mut full = vec![program.to_string_lossy().into_owned()];
         full.extend(argv.iter().skip(1).cloned());
         let out = run_program(
             &full,
-            &BTreeMap::new(),
+            &path_with(dir.as_deref()),
             &std::env::temp_dir(),
             &CancellationToken::new(),
             &|_| {},
@@ -389,6 +432,7 @@ impl Installer {
                 let tool = m.tools.iter().find(|t| &t.id == using).ok_or_else(|| {
                     EnvError::InvalidParams(format!("{} has no tool {using}", m.id))
                 })?;
+                let mut delegate_dir = None;
                 let delegate = match bootstrap {
                     Some(b) => {
                         let built = build_archive(m, b, version, &root, &host)?;
@@ -400,7 +444,11 @@ impl Installer {
                             .unwrap_or_default();
                         Path::new(&root).join(dir).join(name)
                     }
-                    None => system_tool(m, using)?,
+                    None => {
+                        let (p, dir) = self.delegate_tool(m, using)?;
+                        delegate_dir = dir;
+                        p
+                    }
                 };
                 let mut argv = vec![delegate.to_string_lossy().into_owned()];
                 argv.extend(
@@ -410,10 +458,9 @@ impl Installer {
                         .map(|a| manifest::expand(a, version, &root)),
                 );
                 let env = expand_map(env, version, &root);
-                steps.push(Step::Run {
-                    argv,
-                    env: env.clone(),
-                });
+                let mut run_env = env.clone();
+                run_env.extend(path_with(delegate_dir.as_deref()));
+                steps.push(Step::Run { argv, env: run_env });
                 Built {
                     steps,
                     bin_dirs: bin_dirs.clone(),
@@ -696,6 +743,7 @@ impl Installer {
                 Step::Extract {
                     format,
                     strip_components,
+                    file_name,
                 } => {
                     report(i, "Extracting".into(), None, None);
                     let Some(src) = archive_path.clone() else {
@@ -703,7 +751,15 @@ impl Installer {
                     };
                     let (format, strip, dest, c) =
                         (*format, *strip_components, staging.clone(), cancel.clone());
-                    let name = download_name.clone();
+                    // `file` and `gz`: the artifact's name for the file, else the download's
+                    // (without `.gz`).
+                    let name = file_name.clone().unwrap_or_else(|| {
+                        if format == axiom_protocol::provider::ArchiveFormat::Gz {
+                            download_name.trim_end_matches(".gz").to_string()
+                        } else {
+                            download_name.clone()
+                        }
+                    });
                     tokio::task::spawn_blocking(move || {
                         archive::extract(&src, format, strip, &name, &dest, &|| c.is_cancelled())
                     })
@@ -997,6 +1053,7 @@ fn build_archive(
         Step::Extract {
             format: artifact.format,
             strip_components: artifact.strip_components,
+            file_name: artifact.file_name.clone(),
         },
     ];
     if !setup.is_empty() {
@@ -1013,6 +1070,21 @@ fn build_archive(
         bin_dirs: bin_dirs.clone(),
         env,
     })
+}
+
+/// `PATH` with [dir] first (nothing when there is no directory to add).
+fn path_with(dir: Option<&Path>) -> BTreeMap<String, String> {
+    let Some(dir) = dir else {
+        return BTreeMap::new();
+    };
+    let mut parts = vec![dir.to_path_buf()];
+    if let Some(p) = std::env::var_os("PATH") {
+        parts.extend(std::env::split_paths(&p));
+    }
+    std::env::join_paths(parts)
+        .ok()
+        .map(|p| BTreeMap::from([("PATH".to_string(), p.to_string_lossy().into_owned())]))
+        .unwrap_or_default()
 }
 
 /// A tool of the provider found on the daemon's `PATH`.

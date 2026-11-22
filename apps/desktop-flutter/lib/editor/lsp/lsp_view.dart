@@ -6,20 +6,25 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:re_editor/re_editor.dart';
 
 import '../../app/app_state.dart';
 import '../../daemon/client.dart';
+import '../../daemon/protocol.g.dart' show ServerState;
 import '../../state/documents.dart';
 import '../../state/lsp.dart';
+import '../../chat/markdown_view.dart';
 import '../../ui/fuzzy.dart';
 import '../../ui/overlays.dart';
 import '../../ui/surfaces.dart';
 import '../../ui/text_input.dart';
 import '../../ui/theme.dart';
 import '../../ui/tokens.dart';
+import '../snippets.dart';
+import 'semantic_tokens.dart';
 import 'lsp_editor.dart';
 
 /// Geometry of the code view, for placing popups at a text position.
@@ -98,7 +103,7 @@ class LspEditorFeatures extends StatefulWidget {
 class LspEditorFeaturesState extends State<LspEditorFeatures> {
   late final AppState app = AppScope.of(context);
   LspStore get lsp => app.lsp;
-  String? get _server => lsp.serverFor(lspLanguageId(widget.doc.path))?.serverId;
+  String? get _server => lsp.serverFor(lspLanguageId(widget.doc))?.serverId;
 
   // completion
   List<CompletionChoice> _items = const [];
@@ -108,6 +113,14 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   CancelToken? _pending;
   Timer? _quick;
   final _listScroll = ScrollController();
+
+  // the documentation of the selected item (completionItem/resolve)
+  Timer? _resolveTimer;
+  CancelToken? _resolvePending;
+
+  // an accepted snippet's tab stops: absolute, in Tab order; [_stop] is the current one
+  List<({int index, int line, int start, int end})>? _stops;
+  int _stop = 0;
 
   // hover
   Timer? _hoverTimer;
@@ -152,6 +165,66 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     super.initState();
     widget.controller.addListener(_onEdit);
     _lastLines = widget.controller.codeLines;
+    lsp.addListener(_onServers);
+    _scheduleStructure();
+  }
+
+  // ---- semantic tokens (ADR-0021 §2) ---------------------------------------------------------
+
+  Timer? _structureTimer;
+  CancelToken? _structurePending;
+  String? _structureServer;
+
+  /// A server became ready (or changed): ask again.
+  void _onServers() {
+    final s = _server;
+    final ready = lsp.servers.where((x) => x.serverId == s).firstOrNull?.state == ServerState.ready;
+    if (ready && _structureServer != s) _scheduleStructure();
+  }
+
+  void _scheduleStructure() {
+    _structureTimer?.cancel();
+    _structureTimer = Timer(const Duration(milliseconds: 250), () => unawaited(_structure()));
+  }
+
+  Future<void> _structure() async {
+    final server = _server;
+    final caps = _caps;
+    if (server == null || caps == null || !mounted) return;
+    final info = lsp.servers.where((x) => x.serverId == server).firstOrNull;
+    if (info?.state != ServerState.ready) return;
+    _structureServer = server;
+    _structurePending?.cancel();
+    final cancel = _structurePending = CancelToken();
+    final doc = {
+      'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
+    };
+    final sem = caps['semanticTokensProvider'];
+    // Files over 1 MiB keep the grammar alone.
+    final small = widget.controller.text.length <= 1 << 20;
+    if (sem is Map && sem['full'] != null && sem['full'] != false && small) {
+      try {
+        final r = await lsp.request(
+          server,
+          'textDocument/semanticTokens/full',
+          doc,
+          cancel: cancel,
+        );
+        final legend = sem['legend'];
+        if (!mounted || cancel.isCancelled || r is! Map || legend is! Map) return;
+        final data = [...?(r['data'] as List?)?.whereType<num>().map((n) => n.toInt())];
+        widget.doc.setSemantic(
+          decodeSemanticTokens(
+            data,
+            [...?(legend['tokenTypes'] as List?)?.whereType<String>()],
+            [...?(legend['tokenModifiers'] as List?)?.whereType<String>()],
+            context.colors.syntax,
+          ),
+        );
+      } on DaemonException {
+        // The grammar's colours stay.
+      }
+    }
   }
 
   @override
@@ -164,6 +237,11 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     _hoverPending?.cancel();
     _quick?.cancel();
     _hoverTimer?.cancel();
+    _resolveTimer?.cancel();
+    _resolvePending?.cancel();
+    _structureTimer?.cancel();
+    _structurePending?.cancel();
+    lsp.removeListener(_onServers);
     _listScroll.dispose();
     super.dispose();
   }
@@ -200,10 +278,14 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
   void _onEdit() {
     final c = widget.controller;
     final now = c.codeLines;
-    final typed = !identical(now, _lastLines);
+    final before = _lastLines;
+    final typed = !identical(now, before);
     _lastLines = now;
+    if (typed && before != null) _followStops(before, now);
+    if (typed && completing && _commit(now)) return;
     _hide();
     _scheduleHighlight(edited: typed);
+    if (typed) _scheduleStructure();
     if (typed && c.selection.isCollapsed) {
       final s = c.selection;
       final line = c.codeLines[s.extentIndex].text;
@@ -243,17 +325,22 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     }
     if (_triggers.contains(ch)) {
       unawaited(complete());
-    } else if (_word.hasMatch(ch) && s.extentOffset - _wordStart() >= 2) {
-      // Quick suggestions while typing a word, after a short pause.
+    } else if (_word.hasMatch(ch) && s.extentOffset - _wordStart() >= 1) {
+      // As you type a word (ADR-0021 §7): after the first character, debounced.
       _quick?.cancel();
-      _quick = Timer(const Duration(milliseconds: 120), () => unawaited(complete()));
+      _quick = Timer(const Duration(milliseconds: 30), () => unawaited(complete()));
     }
   }
 
   /// Ctrl+Space, a trigger character, or a pause in a word.
   Future<void> complete() async {
     final server = _server;
-    if (server == null) return;
+    final state = lsp.servers.where((s) => s.serverId == server).firstOrNull?.state;
+    // No server, or one that cannot answer: the document's words.
+    if (server == null || state == ServerState.missing || state == ServerState.failed) {
+      _completeWords();
+      return;
+    }
     _pending?.cancel();
     final token = _pending = CancelToken();
     final line = widget.controller.selection.extentIndex;
@@ -269,6 +356,25 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     }
   }
 
+  /// Where no server serves the language: the document's words (ADR-0021 §7).
+  void _completeWords() {
+    final c = widget.controller;
+    final s = c.selection;
+    final start = _wordStart();
+    final current = c.codeLines[s.extentIndex].text.substring(start, s.extentOffset);
+    // The lines around the caret (a long file is not scanned whole on every keystroke).
+    final from = (s.extentIndex - 1000).clamp(0, c.codeLines.length);
+    final to = (s.extentIndex + 1000).clamp(0, c.codeLines.length);
+    _items = [
+      for (final w in documentWords([
+        for (var i = from; i < to; i++) c.codeLines[i].text,
+      ], current: current).take(500))
+        CompletionChoice(label: w, insert: w, kind: 1),
+    ];
+    _anchor = (line: s.extentIndex, start: start);
+    _filter();
+  }
+
   void _filter() {
     final a = _anchor;
     if (a == null) return;
@@ -282,10 +388,40 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     if (prefix.isEmpty) {
       ranked.sort((x, y) => (x.item.sort ?? x.item.label).compareTo(y.item.sort ?? y.item.label));
     }
+    final pre = prefix.isEmpty ? ranked.indexWhere((r) => r.item.preselect) : -1;
     setState(() {
       _shown = ranked;
-      _active = 0;
+      _active = pre < 0 ? 0 : pre;
       if (_shown.isEmpty) _anchor = null;
+    });
+    _scheduleResolve();
+  }
+
+  /// The selected item's documentation, from the server when the item came without it.
+  void _scheduleResolve() {
+    _resolveTimer?.cancel();
+    if (_shown.isEmpty) return;
+    final item = _shown[_active].item;
+    final server = _server;
+    final caps = _caps?['completionProvider'];
+    if (item.documentation != null || item.raw == null || server == null) return;
+    if (caps is! Map || caps['resolveProvider'] != true) return;
+    _resolveTimer = Timer(const Duration(milliseconds: 60), () async {
+      _resolvePending?.cancel();
+      final token = _resolvePending = CancelToken();
+      try {
+        final r = await lsp.request(server, 'completionItem/resolve', item.raw, cancel: token);
+        if (!mounted || token.isCancelled) return;
+        final done = item.resolved(r);
+        setState(() {
+          _items = [for (final i in _items) identical(i, item) ? done : i];
+          _shown = [
+            for (final x in _shown) identical(x.item, item) ? (item: done, match: x.match) : x,
+          ];
+        });
+      } on DaemonException {
+        // No documentation then.
+      }
     });
   }
 
@@ -307,21 +443,120 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     final from = item.range != null && item.range!.start.line == s.extentIndex
         ? item.range!.start.character
         : a.start;
+    final parsed = item.snippet
+        ? parseSnippet(item.insert)
+        : (text: item.insert, stops: const <TabStop>[]);
+    final start = (line: s.extentIndex, character: from);
+    // The item and its additional edits (an import) are one undo step.
+    final at = applyEditsTracking(c, [
+      (
+        range: (start: start, end: (line: s.extentIndex, character: s.extentOffset)),
+        text: parsed.text,
+      ),
+      ...item.additional,
+    ], start);
+    _close();
+    final stops = [
+      for (final t in parsed.stops)
+        () {
+          final p0 = positionIn(parsed.text, t.start, at.line, at.character);
+          final p1 = positionIn(parsed.text, t.end, at.line, at.character);
+          return (
+            index: t.index,
+            line: p0.line,
+            start: p0.column,
+            end: p1.line == p0.line ? p1.column : p0.column,
+          );
+        }(),
+    ];
+    if (item.snippet && stops.length > 1) {
+      _stops = stops;
+      _goToStop(0);
+    } else {
+      final end = positionIn(parsed.text, parsed.text.length, at.line, at.character);
+      final last = parsed.stops.isEmpty ? null : stops.last;
+      c.selection = CodeLineSelection.collapsed(
+        index: last?.line ?? end.line,
+        offset: last?.start ?? end.column,
+      );
+      _stops = null;
+    }
+    _lastLines = c.codeLines;
+  }
+
+  /// Selects tab stop [i] (its placeholder text), the last one ends the snippet.
+  void _goToStop(int i) {
+    final stops = _stops;
+    if (stops == null || stops.isEmpty) return;
+    _stop = i.clamp(0, stops.length - 1);
+    final t = stops[_stop];
+    widget.controller.selection = CodeLineSelection(
+      baseIndex: t.line,
+      baseOffset: t.start,
+      extentIndex: t.line,
+      extentOffset: t.end,
+    );
+    if (_stop == stops.length - 1) _stops = null;
+  }
+
+  /// Typing inside the current stop moves the stops after it on that line; any other edit ends
+  /// the snippet.
+  void _followStops(CodeLines before, CodeLines now) {
+    final stops = _stops;
+    if (stops == null) return;
+    final t = stops[_stop];
+    final s = widget.controller.selection;
+    if (before.length != now.length || s.extentIndex != t.line || t.line >= now.length) {
+      _stops = null;
+      return;
+    }
+    final delta = now[t.line].text.length - before[t.line].text.length;
+    if (s.extentOffset < t.start || s.extentOffset > t.end + delta.clamp(0, 1 << 20)) {
+      _stops = null;
+      return;
+    }
+    _stops = [
+      for (final (k, x) in stops.indexed)
+        if (k == _stop || (x.index == t.index && x.line == t.line && x.start == t.start))
+          (index: x.index, line: x.line, start: x.start, end: x.end + delta)
+        else if (x.line == t.line && x.start >= t.end)
+          (index: x.index, line: x.line, start: x.start + delta, end: x.end + delta)
+        else
+          x,
+    ];
+  }
+
+  /// A commit character typed while the list is open accepts the item, then is typed (ADR-0021
+  /// §7). True when it did.
+  bool _commit(CodeLines now) {
+    if (_shown.isEmpty) return false;
+    final item = _shown[_active].item;
+    if (item.commit.isEmpty) return false;
+    final c = widget.controller;
+    final s = c.selection;
+    final line = now[s.extentIndex].text;
+    if (s.extentOffset == 0 || s.extentOffset > line.length) return false;
+    final ch = line[s.extentOffset - 1];
+    if (!item.commit.contains(ch)) return false;
     c.replaceSelection(
-      item.insert,
+      '',
       CodeLineSelection(
         baseIndex: s.extentIndex,
-        baseOffset: from,
+        baseOffset: s.extentOffset - 1,
         extentIndex: s.extentIndex,
         extentOffset: s.extentOffset,
       ),
     );
-    _close();
+    _accept();
+    c.replaceSelection(ch);
+    _lastLines = c.codeLines;
+    return true;
   }
 
   void _move(int d) {
     if (_shown.isEmpty) return;
     setState(() => _active = (_active + d + _shown.length) % _shown.length);
+    _scheduleResolve();
     const extent = 24.0;
     if (_listScroll.hasClients) {
       final top = _active * extent;
@@ -613,6 +848,146 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     }
   }
 
+  /// Mod+T: the workspace's symbols matching the word at the caret (or all), in a picker.
+  Future<void> workspaceSymbols() async {
+    final server = _server;
+    if (server == null) return;
+    final c = widget.controller;
+    final s = c.selection;
+    final line = c.codeLines[s.extentIndex].text;
+    var a = s.extentOffset.clamp(0, line.length), b = a;
+    while (a > 0 && _word.hasMatch(line[a - 1])) {
+      a--;
+    }
+    while (b < line.length && _word.hasMatch(line[b])) {
+      b++;
+    }
+    try {
+      final r = await lsp.request(server, 'workspace/symbol', {'query': line.substring(a, b)});
+      if (!mounted) return;
+      final items = <Command>[];
+      for (final (i, x) in (r is List ? r : const <Object?>[]).indexed) {
+        if (x is! Map) continue;
+        final loc = x['location'];
+        if (loc is! Map || loc['uri'] is! String) continue;
+        final path = lsp.pathOf(loc['uri']! as String);
+        if (path == null) continue;
+        final p = lspRange(loc['range']).start;
+        items.add(
+          Command(
+            id: 'wsym:$i',
+            title: '${x['name']}  $path',
+            category: 'Ln ${p.line + 1}',
+            run: () =>
+                unawaited(app.documents.open(path, line: p.line + 1, column: p.character + 1)),
+          ),
+        );
+      }
+      if (items.isEmpty) {
+        ToastHost.of(context).show('No matching symbol in the workspace.');
+        return;
+      }
+      app.openPicker?.call(
+        label: 'Workspace symbols',
+        inputLabel: 'Symbol',
+        placeholder: '${items.length} symbol${items.length == 1 ? '' : 's'}',
+        empty: 'No matching symbol',
+        items: items,
+      );
+    } on DaemonException catch (e) {
+      if (mounted) ToastHost.of(context).show('Symbols: ${e.message}', kind: ToastKind.error);
+    }
+  }
+
+  /// Shift+Alt+O: the server's "organize imports" source action, applied.
+  Future<void> organizeImports() async {
+    final server = _server;
+    if (server == null) return;
+    try {
+      final r = await lsp.request(server, 'textDocument/codeAction', {
+        'textDocument': {'uri': lsp.uriOf(widget.doc.path)},
+        'range': {
+          'start': {'line': 0, 'character': 0},
+          'end': {'line': widget.controller.codeLines.length, 'character': 0},
+        },
+        'context': {
+          'diagnostics': <Object?>[],
+          'only': ['source.organizeImports'],
+        },
+      });
+      if (!mounted) return;
+      final action = (r is List ? r : const <Object?>[])
+          .whereType<Map<Object?, Object?>>()
+          .firstOrNull;
+      if (action == null) {
+        ToastHost.of(context).show('The imports are already organized.');
+        return;
+      }
+      var a = action;
+      if (a['edit'] == null && a['data'] != null) {
+        final done = await lsp.request(server, 'codeAction/resolve', a);
+        if (done is Map<Object?, Object?>) a = done;
+      }
+      if (a['edit'] != null) await _applyWorkspaceEdit(a['edit']);
+    } on DaemonException catch (e) {
+      if (mounted) {
+        ToastHost.of(context).show('Organize imports: ${e.message}', kind: ToastKind.error);
+      }
+    }
+  }
+
+  /// Shift+Alt+H: who calls the symbol at the caret, in a picker.
+  Future<void> callHierarchy() async {
+    final server = _server;
+    if (server == null) return;
+    try {
+      final items = await lsp.request(server, 'textDocument/prepareCallHierarchy', _docPos());
+      final item = (items is List ? items : const <Object?>[]).firstOrNull;
+      if (item == null) {
+        if (mounted) ToastHost.of(context).show('No call hierarchy here.');
+        return;
+      }
+      final r = await lsp.request(server, 'callHierarchy/incomingCalls', {'item': item});
+      if (!mounted) return;
+      final out = <Command>[];
+      for (final (i, x) in (r is List ? r : const <Object?>[]).indexed) {
+        final from = x is Map ? x['from'] : null;
+        if (from is! Map || from['uri'] is! String) continue;
+        final path = lsp.pathOf(from['uri']! as String);
+        if (path == null) continue;
+        final ranges = (x as Map)['fromRanges'];
+        final at = ranges is List && ranges.isNotEmpty
+            ? lspRange(ranges.first).start
+            : lspRange(from['range']).start;
+        out.add(
+          Command(
+            id: 'call:$i',
+            title: '${from['name']}  $path',
+            category: 'Ln ${at.line + 1}',
+            run: () =>
+                unawaited(app.documents.open(path, line: at.line + 1, column: at.character + 1)),
+          ),
+        );
+      }
+      final name = item is Map ? item['name'] : '';
+      if (out.isEmpty) {
+        ToastHost.of(context).show('Nothing calls $name.');
+        return;
+      }
+      app.openPicker?.call(
+        label: 'Calls to $name',
+        inputLabel: 'Caller',
+        placeholder: '${out.length} caller${out.length == 1 ? '' : 's'}',
+        empty: 'No matching caller',
+        items: out,
+      );
+    } on DaemonException catch (e) {
+      if (mounted) {
+        ToastHost.of(context).show('Call hierarchy: ${e.message}', kind: ToastKind.error);
+      }
+    }
+  }
+
   /// Ctrl+Shift+O: the document's symbols, in a picker; one goes there.
   Future<void> symbols() async {
     final server = _server;
@@ -777,6 +1152,8 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       onInvoke: (_) {
         if (completing) {
           _accept();
+        } else if (_stops != null) {
+          _goToStop(_stop + 1);
         } else if (app.tabMovesFocus.value) {
           // Ctrl+M: Tab leaves the editor (as in Monaco), for keyboard navigation.
           FocusScope.of(context).nextFocus();
@@ -788,7 +1165,9 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     ),
     CodeShortcutOutdentIntent: CallbackAction<CodeShortcutOutdentIntent>(
       onInvoke: (_) {
-        if (app.tabMovesFocus.value) {
+        if (_stops != null) {
+          _goToStop(_stop - 1);
+        } else if (app.tabMovesFocus.value) {
           FocusScope.of(context).previousFocus();
         } else {
           widget.controller.applyOutdent();
@@ -798,7 +1177,9 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
     ),
     CodeShortcutEscIntent: CallbackAction<CodeShortcutEscIntent>(
       onInvoke: (_) {
-        if (completing || _hover != null || _signature != null) {
+        if (_stops != null && !completing) {
+          _stops = null;
+        } else if (completing || _hover != null || _signature != null) {
           _close();
           _hide();
           _closeSignature();
@@ -826,71 +1207,112 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
       popup = Positioned(
         left: at.dx.clamp(0, double.infinity),
         top: at.dy + g.lineHeight + 2,
-        child: Semantics(
-          label: 'Suggestions',
-          container: true,
-          liveRegion: true,
-          child: SizedBox(
-            width: 380,
-            height: (_shown.length.clamp(1, 10)) * 24.0 + 8,
-            child: Sheet(
-              radius: Metrics.radiusRaised,
-              padding: const EdgeInsets.all(4),
-              child: ListView.builder(
-                controller: _listScroll,
-                itemExtent: 24,
-                itemCount: _shown.length,
-                itemBuilder: (context, i) {
-                  final (:item, :match) = _shown[i];
-                  final on = i == _active;
-                  return GestureDetector(
-                    onTap: () => _accept(i),
-                    child: Semantics(
-                      selected: on,
-                      label: [item.label, if (item.detail != null) item.detail!].join(', '),
-                      excludeSemantics: true,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: on ? c.raised : null,
-                          borderRadius: BorderRadius.circular(Metrics.radiusControl),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 18,
-                                child: Text(
-                                  _kind(item.kind),
-                                  style: t.type.codeSmall.copyWith(color: c.accentText),
-                                ),
-                              ),
-                              Expanded(
-                                child: _Highlighted(
-                                  text: item.label,
-                                  match: match,
-                                  style: t.type.code.copyWith(fontSize: 12.5),
-                                ),
-                              ),
-                              if (item.detail != null)
-                                Flexible(
-                                  child: Text(
-                                    item.detail!,
-                                    style: t.type.tiny,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.right,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              label: 'Suggestions',
+              container: true,
+              liveRegion: true,
+              child: SizedBox(
+                width: 380,
+                height: (_shown.length.clamp(1, 10)) * 24.0 + 8,
+                child: Sheet(
+                  radius: Metrics.radiusRaised,
+                  padding: const EdgeInsets.all(4),
+                  child: ListView.builder(
+                    controller: _listScroll,
+                    itemExtent: 24,
+                    itemCount: _shown.length,
+                    itemBuilder: (context, i) {
+                      final (:item, :match) = _shown[i];
+                      final on = i == _active;
+                      return GestureDetector(
+                        onTap: () => _accept(i),
+                        child: Semantics(
+                          selected: on,
+                          label: [item.label, if (item.detail != null) item.detail!].join(', '),
+                          excludeSemantics: true,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: on ? c.raised : null,
+                              borderRadius: BorderRadius.circular(Metrics.radiusControl),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 18,
+                                    child: Text(
+                                      _kind(item.kind),
+                                      style: t.type.codeSmall.copyWith(color: c.accentText),
+                                    ),
                                   ),
-                                ),
-                            ],
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Flexible(
+                                          child: _Highlighted(
+                                            text: item.label,
+                                            match: match,
+                                            style: t.type.code.copyWith(fontSize: 12.5),
+                                          ),
+                                        ),
+                                        if (item.labelDetail != null)
+                                          Flexible(
+                                            child: Text(
+                                              item.labelDetail!,
+                                              style: t.type.codeSmall.copyWith(color: c.ink3),
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 1,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (item.detail != null)
+                                    Flexible(
+                                      child: Text(
+                                        item.detail!,
+                                        style: t.type.tiny,
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: TextAlign.right,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  );
-                },
+                      );
+                    },
+                  ),
+                ),
               ),
             ),
-          ),
+            // The selected item's documentation beside the list (resolved when it came without).
+            if (_docOf(_shown[_active.clamp(0, _shown.length - 1)].item) case final doc?)
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Semantics(
+                  label: 'Documentation',
+                  container: true,
+                  child: SizedBox(
+                    width: 360,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 248),
+                      child: Sheet(
+                        radius: Metrics.radiusRaised,
+                        padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+                        child: SingleChildScrollView(child: MarkdownView(doc)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       );
     }
@@ -963,6 +1385,15 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
         const SingleActivator(LogicalKeyboardKey.space, control: true, shift: true):
             const _LspIntent('signature'),
         const SingleActivator(LogicalKeyboardKey.f2): const _LspIntent('rename'),
+        SingleActivator(LogicalKeyboardKey.keyT, control: !_isMac, meta: _isMac): const _LspIntent(
+          'workspace-symbols',
+        ),
+        const SingleActivator(LogicalKeyboardKey.keyO, shift: true, alt: true): const _LspIntent(
+          'organize-imports',
+        ),
+        const SingleActivator(LogicalKeyboardKey.keyH, shift: true, alt: true): const _LspIntent(
+          'call-hierarchy',
+        ),
         const SingleActivator(LogicalKeyboardKey.keyI, control: true, shift: true):
             const _LspIntent('format'),
         const SingleActivator(LogicalKeyboardKey.keyF, shift: true, alt: true): const _LspIntent(
@@ -997,6 +1428,12 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
                   unawaited(rename());
                 case 'format':
                   unawaited(format());
+                case 'workspace-symbols':
+                  unawaited(workspaceSymbols());
+                case 'organize-imports':
+                  unawaited(organizeImports());
+                case 'call-hierarchy':
+                  unawaited(callHierarchy());
               }
               return null;
             },
@@ -1042,6 +1479,17 @@ class _LspIntent extends Intent {
 }
 
 /// A letter for the completion item kind (LSP CompletionItemKind).
+/// What the documentation pane shows for [item]: its detail as code, then its documentation.
+bool get _isMac => defaultTargetPlatform == TargetPlatform.macOS;
+
+String? _docOf(CompletionChoice item) {
+  final parts = [
+    if (item.detail case final d? when d.trim().isNotEmpty) '```\n${d.trim()}\n```',
+    if (item.documentation case final d? when d.trim().isNotEmpty) d.trim(),
+  ];
+  return parts.isEmpty ? null : parts.join('\n\n');
+}
+
 String _kind(int? k) => switch (k) {
   2 || 3 => 'ƒ',
   4 => 'c',

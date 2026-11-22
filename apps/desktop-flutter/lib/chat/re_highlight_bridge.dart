@@ -4,30 +4,31 @@ import 'package:flutter/painting.dart';
 import 'package:re_highlight/re_highlight.dart';
 
 import '../editor/code_view.dart';
+import '../editor/languages.dart';
 import '../ui/tokens.dart';
 
-final _hl = Highlight()..registerLanguages(highlightModes);
+final _hl = Highlight();
+final _registered = <String>{};
 
-/// Fence names to the editor's language names.
-String? _lang(String fence) => switch (fence.toLowerCase()) {
-  'rs' || 'rust' => 'rust',
-  'ts' || 'tsx' || 'typescript' => 'typescript',
-  'js' || 'jsx' || 'javascript' || 'mjs' => 'javascript',
-  'json' || 'jsonc' => 'json',
-  'sh' || 'bash' || 'shell' || 'console' || 'zsh' => 'bash',
-  'py' || 'python' => 'python',
-  'toml' || 'ini' => 'ini',
-  'yml' || 'yaml' => 'yaml',
-  'html' || 'xml' || 'svg' => 'xml',
-  'css' => 'css',
-  'c' || 'h' => 'c',
-  'cpp' || 'c++' || 'cc' => 'cpp',
-  'go' => 'go',
-  'java' => 'java',
-  'dart' => 'dart',
-  'sql' => 'sql',
-  'md' || 'markdown' => 'markdown',
-  _ => null,
+/// The highlight.js name for a fence (`rs`, `py`, `c++`), its grammar registered on first use.
+String? _lang(String fence) {
+  final reg = Languages.instance;
+  final l = reg.forFence(fence);
+  final h = l?.hljs;
+  if (h == null) return null;
+  for (final name in [h, ...?_embedded[h]]) {
+    if (_registered.add(name)) {
+      final m = reg.modeByHljs(name);
+      if (m != null) _hl.registerLanguage(name, m);
+    }
+  }
+  return h;
+}
+
+const _embedded = {
+  'xml': ['css', 'javascript'],
+  'vue': ['xml', 'css', 'javascript', 'typescript'],
+  'erb': ['ruby', 'xml'],
 };
 
 /// [code] as coloured spans (plain when the language is unknown or highlighting fails).

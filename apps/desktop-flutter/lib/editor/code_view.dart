@@ -5,115 +5,43 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:re_editor/re_editor.dart';
-import 'package:re_highlight/languages/bash.dart';
-import 'package:re_highlight/languages/c.dart';
-import 'package:re_highlight/languages/cpp.dart';
-import 'package:re_highlight/languages/css.dart';
-import 'package:re_highlight/languages/dart.dart';
-import 'package:re_highlight/languages/go.dart';
-import 'package:re_highlight/languages/ini.dart';
-import 'package:re_highlight/languages/java.dart';
-import 'package:re_highlight/languages/javascript.dart';
-import 'package:re_highlight/languages/json.dart';
-import 'package:re_highlight/languages/markdown.dart';
-import 'package:re_highlight/languages/python.dart';
-import 'package:re_highlight/languages/rust.dart';
-import 'package:re_highlight/languages/sql.dart';
-import 'package:re_highlight/languages/typescript.dart';
-import 'package:re_highlight/languages/xml.dart';
-import 'package:re_highlight/languages/yaml.dart';
-import 'package:re_highlight/re_highlight.dart';
 
 import '../state/git.dart';
+import 'languages.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
 
-/// Languages by file extension (and a few names); the LSP language id is the map's value.
-const _byExtension = {
-  'rs': 'rust',
-  'ts': 'typescript',
-  'tsx': 'typescript',
-  'mts': 'typescript',
-  'cts': 'typescript',
-  'js': 'javascript',
-  'jsx': 'javascript',
-  'mjs': 'javascript',
-  'cjs': 'javascript',
-  'json': 'json',
-  'md': 'markdown',
-  'py': 'python',
-  'sh': 'bash',
-  'bash': 'bash',
-  'toml': 'ini',
-  'ini': 'ini',
-  'yaml': 'yaml',
-  'yml': 'yaml',
-  'html': 'xml',
-  'xml': 'xml',
-  'svg': 'xml',
-  'css': 'css',
-  'c': 'c',
-  'h': 'c',
-  'cc': 'cpp',
-  'cpp': 'cpp',
-  'hpp': 'cpp',
-  'go': 'go',
-  'java': 'java',
-  'dart': 'dart',
-  'sql': 'sql',
+/// Grammars that embed others (highlight.js `subLanguage`): registered beside them.
+const _subLanguages = <String, List<String>>{
+  'xml': ['css', 'javascript'],
+  'vue': ['xml', 'css', 'javascript', 'typescript'],
+  'php': ['php-template', 'xml', 'css', 'javascript'],
+  'php-template': ['php', 'xml'],
+  'erb': ['ruby', 'xml', 'css', 'javascript'],
+  'haml': ['ruby', 'javascript', 'css'],
+  'handlebars': ['xml'],
+  'twig': ['xml'],
+  'django': ['xml'],
+  'markdown': ['xml'],
+  'mojolicious': ['perl', 'xml'],
+  'vbscript-html': ['vbscript', 'xml'],
 };
 
-/// The highlight language for [path], or null (plain text).
-String? languageOf(String path) {
-  final name = path.split('/').last;
-  if (name == 'Cargo.lock') return 'ini';
-  final dot = name.lastIndexOf('.');
-  if (dot < 0) return null;
-  return _byExtension[name.substring(dot + 1).toLowerCase()];
+/// The editor's highlight theme for [language]: its grammar and the ones it embeds.
+CodeHighlightTheme? highlightTheme(Language language, SyntaxColors y) {
+  final reg = Languages.instance;
+  final mode = reg.mode(language);
+  if (mode == null) return null;
+  final h = language.hljs!;
+  return CodeHighlightTheme(
+    languages: {
+      h: CodeHighlightThemeMode(mode: mode),
+      for (final sub in _subLanguages[h] ?? const <String>[])
+        if (reg.modeByHljs(sub) case final m?) sub: CodeHighlightThemeMode(mode: m),
+    },
+    theme: syntaxTheme(y),
+  );
 }
-
-/// A display name for the status bar.
-String languageName(String? lang) => switch (lang) {
-  null => 'Plain Text',
-  'rust' => 'Rust',
-  'typescript' => 'TypeScript',
-  'javascript' => 'JavaScript',
-  'json' => 'JSON',
-  'markdown' => 'Markdown',
-  'python' => 'Python',
-  'bash' => 'Shell',
-  'ini' => 'TOML',
-  'yaml' => 'YAML',
-  'xml' => 'XML',
-  'css' => 'CSS',
-  'c' => 'C',
-  'cpp' => 'C++',
-  'go' => 'Go',
-  'java' => 'Java',
-  'dart' => 'Dart',
-  'sql' => 'SQL',
-  _ => lang,
-};
-
-final highlightModes = <String, Mode>{
-  'rust': langRust,
-  'typescript': langTypescript,
-  'javascript': langJavascript,
-  'json': langJson,
-  'markdown': langMarkdown,
-  'python': langPython,
-  'bash': langBash,
-  'ini': langIni,
-  'yaml': langYaml,
-  'xml': langXml,
-  'css': langCss,
-  'c': langC,
-  'cpp': langCpp,
-  'go': langGo,
-  'java': langJava,
-  'dart': langDart,
-  'sql': langSql,
-};
 
 /// highlight.js scopes → the syntax palette (the same roles the Monaco theme used).
 Map<String, TextStyle> syntaxTheme(SyntaxColors y) {
@@ -184,7 +112,7 @@ class CodeView extends StatelessWidget {
   });
 
   final CodeLineEditingController controller;
-  final String? language;
+  final Language language;
   final FocusNode? focusNode;
   final CodeScrollController? scrollController;
   final CodeFindController? findController;
@@ -212,7 +140,6 @@ class CodeView extends StatelessWidget {
     final t = context.axiom;
     final c = t.colors;
     final y = c.syntax;
-    final mode = language == null ? null : highlightModes[language];
     return CodeEditor(
       controller: controller,
       focusNode: focusNode,
@@ -248,12 +175,7 @@ class CodeView extends StatelessWidget {
         cursorWidth: 2,
         cursorLineColor: y.currentLine,
         chunkIndicatorColor: y.lineNumber,
-        codeTheme: mode == null
-            ? null
-            : CodeHighlightTheme(
-                languages: {language!: CodeHighlightThemeMode(mode: mode)},
-                theme: syntaxTheme(y),
-              ),
+        codeTheme: highlightTheme(language, y),
       ),
       indicatorBuilder: (context, editingController, chunkController, notifier) => Row(
         key: gutterKey,
@@ -290,9 +212,13 @@ class _AxiomShortcuts extends CodeShortcutsActivatorsBuilder {
   const _AxiomShortcuts();
 
   @override
-  List<ShortcutActivator>? build(CodeShortcutType type) => type == CodeShortcutType.lineSelect
-      ? null
-      : const DefaultCodeShortcutsActivatorsBuilder().build(type);
+  List<ShortcutActivator>? build(CodeShortcutType type) => switch (type) {
+    CodeShortcutType.lineSelect => null,
+    // Ctrl+T is "workspace symbols" off macOS (as in VS Code, M5.5-EDIT-002); macOS keeps
+    // Control+T for transposing (its symbols key is Cmd+T).
+    CodeShortcutType.transposeCharacters when defaultTargetPlatform != TargetPlatform.macOS => null,
+    _ => const DefaultCodeShortcutsActivatorsBuilder().build(type),
+  };
 }
 
 /// The gutter's Git marks: a bar per added (green) or modified (brass) line, a wedge where lines

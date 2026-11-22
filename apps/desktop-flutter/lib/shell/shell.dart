@@ -14,9 +14,9 @@ import '../app/app_state.dart';
 import '../chat/chat_page.dart';
 import '../daemon/client.dart';
 import '../daemon/protocol.g.dart' show Methods, SearchMode, SearchParams;
-import '../editor/code_view.dart';
 import '../console/console.dart';
 import '../editor/editor_area.dart';
+import '../editor/languages.dart';
 import '../files/explorer.dart';
 import '../state/documents.dart';
 import '../state/settings.dart';
@@ -92,6 +92,7 @@ class _ShellState extends State<Shell> {
           });
       app.showDock = _showDock;
       app.documents.addListener(_onDocuments);
+      app.environments.addListener(_onEnvironments);
     });
   }
 
@@ -141,8 +142,34 @@ class _ShellState extends State<Shell> {
     }
   }
 
+  bool _planShown = false;
+
+  /// An install plan is shown for approval wherever it was asked for (the Environments page, the
+  /// editor's language server line); one Axiom approves itself (auto-install) is not.
+  void _onEnvironments() {
+    final env = app.environments;
+    final p = env.plan;
+    if (p == null || _planShown || !mounted || env.planIsAutomatic) return;
+    _planShown = true;
+    unawaited(
+      showAxDialog<bool>(
+        context: context,
+        label: 'Install ${p.providerName} ${p.plan.version}',
+        builder: (_) => PlanDialog(plan: p.plan, providerName: p.providerName),
+      ).then((install) {
+        _planShown = false;
+        if (install == true) {
+          unawaited(env.approvePlan());
+        } else {
+          env.dismissPlan();
+        }
+      }),
+    );
+  }
+
   @override
   void dispose() {
+    app.environments.removeListener(_onEnvironments);
     app.documents.removeListener(_onDocuments);
     _sideSplitter.dispose();
     super.dispose();
@@ -1640,7 +1667,7 @@ class _StatusBar extends StatelessWidget {
                 ),
               ),
               ListenableBuilder(
-                listenable: Listenable.merge([app.workspace, app.documents]),
+                listenable: Listenable.merge([app.workspace, app.documents, app.documents.cursor]),
                 builder: (context, _) {
                   final doc = app.documents.active;
                   if (doc == null) {
@@ -1675,7 +1702,37 @@ class _StatusBar extends StatelessWidget {
                         ),
                       ],
                       seam,
-                      seg(Text(languageName(doc.language), style: t.type.small)),
+                      // The language: a button that lists every language (ADR-0021 §1).
+                      Pressable(
+                        label: 'Language: ${doc.language.name}',
+                        hint: 'Change the language of ${titleOf(doc.path)}',
+                        onPressed: () => app.openPicker?.call(
+                          label: 'Language',
+                          inputLabel: 'Language name',
+                          placeholder: 'Choose a language for ${titleOf(doc.path)}',
+                          empty: 'No such language',
+                          items: [
+                            for (final l in Languages.instance.all)
+                              Command(
+                                id: 'language ${l.id}',
+                                title: l.id == doc.language.id ? '${l.name} (current)' : l.name,
+                                run: () => app.documents.setLanguage(doc.path, l),
+                              ),
+                          ],
+                        ),
+                        builder: (context, s) => FocusRing(
+                          visible: s.focused,
+                          child: ColoredBox(
+                            color: s.hovered ? c.hover : c.hover.withValues(alpha: 0),
+                            child: seg(
+                              Text(
+                                doc.language.name,
+                                style: t.type.small.copyWith(color: s.hovered ? c.ink : null),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   );
                 },

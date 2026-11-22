@@ -1,0 +1,35 @@
+schema = "axiom.provider/1"
+id = "lsp-bash"
+name = "Bash language server"
+description = "Bash language server (MIT)."
+version = "0.1.0"
+homepage = "https://github.com/bash-lsp/bash-language-server"
+
+# The server is an npm package, installed pinned into its own root with the npm of an
+# installed Node (ADR-0021 §4); it runs with that Node (`requires`).
+[[tools]]
+id = "bash-language-server"
+program = "bash-language-server"
+version_regex = '(\d+\.\d+\.\d+)'
+
+[[tools]]
+id = "npm"
+program = "npm"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "delegate"
+using = "npm"
+scope = "managed"
+install = ["npm", "install", "--prefix", "${root}", "--no-fund", "--no-audit", "--no-save", "bash-language-server@${version}"]
+uninstall = []
+list_versions = ["npm", "view", "bash-language-server", "versions", "--json"]
+versions = { kind = "static", versions = ["5.8.1"] }
+bin_dirs = ["node_modules/.bin"]
+
+[[lsp]]
+id = "bash-language-server"
+languages = ["shellscript"]
+command = ["bash-language-server", "start"]
+requires = ["node"]

@@ -163,6 +163,17 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'editor 1:src/main.rs');
 
+    // 8b. The status bar names the language; its picker changes it (M5.5-LANG-001).
+    expect(main.language.id, 'rust');
+    await tester.tap(named('Language: Rust'));
+    await tester.pump(const Duration(milliseconds: 150));
+    await typeFocused(tester, 'Python');
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.enter);
+    await until(tester, () => main.language.id == 'python', what: 'the picked language');
+    await tester.pump();
+    expect(named('Language: Python'), findsOneWidget);
+
     // 9. Restart: the tabs, the active one and the split come back.
     final before = [for (final d in docs.docs) d.path];
     await quit(tester, app);

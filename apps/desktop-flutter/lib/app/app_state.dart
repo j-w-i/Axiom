@@ -14,6 +14,7 @@ import '../state/git.dart';
 import '../state/search.dart';
 import '../state/tasks.dart';
 import '../state/terminals.dart';
+import '../state/server_installs.dart';
 import '../state/settings.dart';
 import '../state/workspace.dart';
 import '../ui/tokens.dart';
@@ -55,12 +56,23 @@ class AppState {
     lsp = LspStore(client, workspace);
     lspSync = LspSync(docs: documents, lsp: lsp);
     documents.onSaved = lspSync.saved;
+    documents.beforeSave = (d) async {
+      if (settings.editorFormatOnSave) await lspSync.formatForSave(d);
+    };
     problems = ProblemsStore(lsp, client: client, workspace: workspace);
     tasks = TasksStore(client, workspace)..onProviderStart = problems.begin;
     terminals = TerminalsStore(client, workspace);
     git = GitStore(client, workspace);
     search = SearchStore(client, workspace);
-    environments = EnvironmentsStore(client, workspace);
+    environments = EnvironmentsStore(client, workspace)
+      // A finished install may be a language server or what one needs (ADR-0021 §5).
+      ..onInstalled = (_) => unawaited(lsp.retryMissing());
+    serverInstalls = ServerInstalls(
+      documents: documents,
+      lsp: lsp,
+      environments: environments,
+      settings: settings,
+    );
     agent = AgentStore(client, workspace);
     inspector = InspectorStore(client, workspace);
   }
@@ -73,6 +85,9 @@ class AppState {
   late final DocumentsStore documents;
   late final LspStore lsp;
   late final LspSync lspSync;
+
+  /// Offers (and, when asked to, installs) missing language servers (M5.5-UI-001).
+  late final ServerInstalls serverInstalls;
   late final ProblemsStore problems;
   late final TasksStore tasks;
   late final TerminalsStore terminals;

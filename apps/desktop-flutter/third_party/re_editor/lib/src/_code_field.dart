@@ -1287,7 +1287,11 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   List<CodeLineRenderParagraph> _buildDisplayRenderParagraphs(int startIndex, double maxWidth) {
     double offset = startIndex * _preferredLineHeight;
     final List<CodeLineRenderParagraph> paragraphs = [];
-    for (int i = startIndex; i < _codes.length; i++) {
+    // Axiom (M5.5-EDIT-001): a repaint forced between an edit that removed lines and this
+    // render's next update (the shell's diagnostics arriving then) still holds the old lines; the
+    // highlighter reads the controller's. Only lines both have are built.
+    final int count = min(_codes.length, _highlighter._controller.codeLines.length);
+    for (int i = startIndex; i < count; i++) {
       final IParagraph paragraph = _buildParagraph(i, maxWidth);
       _displayParagraphs.add(CodeLineRenderParagraph(
         index: i,

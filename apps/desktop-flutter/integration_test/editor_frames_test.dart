@@ -5,6 +5,7 @@
 import 'dart:io';
 
 import 'package:axiom_desktop/editor/code_view.dart';
+import 'package:axiom_desktop/editor/languages.dart';
 import 'package:axiom_desktop/main.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
@@ -42,7 +43,11 @@ void main() {
     final focus = FocusNode();
     await tester.pumpWidget(
       AxiomApp(
-        home: CodeView(controller: controller, language: 'rust', focusNode: focus),
+        home: CodeView(
+          controller: controller,
+          language: Languages.instance.byId('rust'),
+          focusNode: focus,
+        ),
       ),
     );
     await Future<void>.delayed(const Duration(seconds: 2));

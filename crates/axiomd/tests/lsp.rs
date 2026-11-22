@@ -1,5 +1,5 @@
 //! `lsp/*` through the daemon (M4-LSP-001): a user provider declares tests/helpers/fake-lsp; the
-//! servers come from the providers that apply; requests, sync, diagnostics relayed to the
+//! servers come from every provider (M5.5: by language); requests, sync, diagnostics relayed to the
 //! workspace's clients, errors, reads outside the workspace, and closing the workspace. Then the
 //! real rust-analyzer, where it is installed (CI installs it).
 
@@ -126,10 +126,15 @@ async fn servers_requests_sync_diagnostics_and_external_reads() {
         (fake.provider_id.as_str(), fake.state),
         ("fakelang", ServerState::Idle)
     );
-    assert!(
-        s.servers.iter().all(|s| s.server_id != "rust-analyzer"),
-        "rust does not apply"
-    );
+    // Since M5.5 (ADR-0021 §3) every server applies by language: rust-analyzer is listed in
+    // this non-Rust folder, and stays unstarted until a Rust document opens.
+    if let Some(ra) = s.servers.iter().find(|s| s.server_id == "rust-analyzer") {
+        assert!(
+            matches!(ra.state, ServerState::Idle | ServerState::Missing),
+            "{:?}",
+            ra.state
+        );
+    }
 
     // didOpen starts it; its diagnostics reach this client.
     let a = uri(&f.root.join("a.fake"));
@@ -252,11 +257,14 @@ async fn a_missing_server_is_reported_with_its_hint() {
         })
         .await
         .unwrap();
-    assert_eq!(s.servers[0].state, ServerState::Missing);
+    // Built-in providers' servers are listed too since M5.5 (every server applies by language).
+    let fake = s.servers.iter().find(|x| x.server_id == "fake").unwrap();
+    assert_eq!(fake.state, ServerState::Missing);
     assert_eq!(
-        s.servers[0].install_hint.as_deref(),
+        fake.install_hint.as_deref(),
         Some("Build tests/helpers/fake-lsp.")
     );
+    assert_eq!(fake.install_provider.as_deref(), Some("fakelang"));
 }
 
 /// Whether the real rust-analyzer runs here. With `AXIOM_REQUIRE_LSP=1` (CI) its absence fails.

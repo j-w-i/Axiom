@@ -194,7 +194,7 @@ class LspStatus extends StatelessWidget {
       builder: (context, _) {
         final doc = app.documents.active;
         if (doc == null) return const SizedBox.shrink();
-        final server = app.lsp.serverFor(lspLanguageId(doc.path));
+        final server = app.lsp.serverFor(lspLanguageId(doc));
         if (server == null) return const SizedBox.shrink();
         final progress = app.lsp.progress[server.serverId];
         final (dot, word) = switch (server.state) {

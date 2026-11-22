@@ -1,0 +1,51 @@
+schema = "axiom.provider/1"
+id = "lsp-kotlin"
+name = "Kotlin language server"
+description = "Kotlin language server (JetBrains kotlin-lsp, Apache-2.0 with proprietary parts; Alpha). Bundles its Java runtime."
+version = "0.1.0"
+homepage = "https://github.com/Kotlin/kotlin-lsp"
+
+[[tools]]
+id = "intellij-server"
+program = "intellij-server"
+version_regex = '(\d+\.\d+\.\d+)'
+version_args = []
+required = false
+
+[[install]]
+kind = "archive"
+versions = { kind = "static", versions = ["271.2085.0"] }
+bin_dirs = ["bin"]
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "x86_64" }
+url = "https://download.jetbrains.com/language-server/kotlin-server/${version}/kotlin-server-${version}.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "271.2085.0" = "e398e799027f41749ea33faa57470307d13d40f910961858c7e30adbd778ae08" } }
+
+[[install.artifacts]]
+platform = { os = "linux", arch = "aarch64" }
+url = "https://download.jetbrains.com/language-server/kotlin-server/${version}/kotlin-server-${version}-aarch64.tar.gz"
+format = "tar.gz"
+strip_components = 1
+checksum = { kind = "sha256", values = { "271.2085.0" = "877aee612a17dab48144466282a6414ec58ab428a10b97c7e13edd9b6b3dc96e" } }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "x86_64" }
+url = "https://download.jetbrains.com/language-server/kotlin-server/${version}/kotlin-server-${version}.sit"
+format = "zip"
+strip_components = 1
+checksum = { kind = "sha256", values = { "271.2085.0" = "68457ab1825331e3eac85191b7c32737cbd8993867f5a9c50dfe012c5509e8f7" } }
+
+[[install.artifacts]]
+platform = { os = "macos", arch = "aarch64" }
+url = "https://download.jetbrains.com/language-server/kotlin-server/${version}/kotlin-server-${version}-aarch64.sit"
+format = "zip"
+strip_components = 1
+checksum = { kind = "sha256", values = { "271.2085.0" = "2d22388f58be6f4dfa7a8f18c1e231871164dcacc16e407559029d7232816b4a" } }
+
+[[lsp]]
+id = "kotlin-lsp"
+languages = ["kotlin"]
+command = ["intellij-server", "--stdio"]

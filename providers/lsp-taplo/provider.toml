@@ -1,0 +1,32 @@
+schema = "axiom.provider/1"
+id = "lsp-taplo"
+name = "Taplo"
+description = "TOML language server (MIT), built with cargo (its releases publish no checksums)."
+version = "0.1.0"
+homepage = "https://taplo.tamasfe.dev"
+
+[[tools]]
+id = "taplo"
+program = "taplo"
+version_regex = '(\d+\.\d+\.\d+)'
+
+[[tools]]
+id = "cargo"
+program = "cargo"
+version_regex = '(\d+\.\d+\.\d+)'
+required = false
+
+[[install]]
+kind = "delegate"
+using = "cargo"
+scope = "managed"
+install = ["cargo", "install", "taplo-cli", "--version", "${version}", "--locked", "--root", "${root}"]
+uninstall = []
+list_versions = ["cargo", "search", "taplo-cli", "--limit", "1"]
+versions = { kind = "static", versions = ["0.10.0"] }
+bin_dirs = ["bin"]
+
+[[lsp]]
+id = "taplo"
+languages = ["toml"]
+command = ["taplo", "lsp", "stdio"]

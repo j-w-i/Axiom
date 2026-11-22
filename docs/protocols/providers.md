@@ -136,11 +136,14 @@ Additive manifest fields (all optional; older manifests are unchanged):
 | `provides = [toolId]` | `archive` | this method installs that tool for another method (a bootstrap); it is not offered on its own |
 | `setup = [argv]` | `archive` | run once after extraction inside the new root, with the method's `env` |
 | `bin_dirs` | `delegate` | where the delegate's installed executables live, relative to the root |
+| `format = "gz"` | artifact | M5.5: one gzip-compressed executable, decompressed to the root under the URL's last segment without `.gz` |
+| `file_name` | `file`/`gz` artifact | M5.5: the executable's name in the root when the URL's is not it (`marksman-linux-x64` → `marksman`) |
 | `versions` | `delegate` | the installable versions; absent = `list_versions` through the delegate on `PATH` |
 
 - A delegate plan is: the bootstrap archive's steps when an `archive` method `provides` the
-  `using` tool for this host (download, place, `setup`), else the delegate from `PATH`
-  (absent → `prerequisite_missing`); then `install` with argv[0] replaced by that delegate's
+  `using` tool for this host (download, place, `setup`), else the delegate from `PATH`, else
+  (M5.5) from the newest managed install of any provider (its `bin/` or root, which is put first
+  on the delegate's `PATH` so npm finds its node), else `prerequisite_missing`; then `install` with argv[0] replaced by that delegate's
   absolute path; then `verify` for each required tool, run with the delegate's `env`.
 - `install`, `uninstall` and `list_versions` must start with the `using` tool's program
   (validated): a delegate method can only ever run its delegate.
@@ -155,6 +158,7 @@ Additive manifest fields (all optional; older manifests are unchanged):
   into the staging directory that an installer leaves behind (uv does) are re-pointed at the
   final root before the rename (M2-PROV-003).
 - Built-in providers in M2: `rust`, `node`, `cmake`, `ninja`, `python` (`providers/*`).
+  M5.5 adds a provider per tier-1 language server (`providers/lsp-*`, ADR-0021 §4).
 - Uninstall runs the delegate's `uninstall` command with the delegate from inside the root
   (a failure is logged, not fatal), then removes the root.
 - Detection runs a managed tool with its method's `env` expanded for that root (rustup's
@@ -222,11 +226,24 @@ languages = ["rust"]          # LSP language ids (the shell maps file extensions
 command = ["rust-analyzer"]   # argv, resolved in the workspace's environment
 install_hint = "Install it with: rustup component add rust-analyzer"
 # initialization_options = { ... }   # merged under settings lsp.<id>.initializationOptions
+# requires = ["java"]                 # M5.5: tools that must resolve for the server to run
 ```
 
-The daemon starts a server on first use for a workspace the provider applies to (M4-LSP-001).
-A command that is not found leaves the server `missing` with the hint; nothing is installed
-silently.
+The daemon starts a server on first use, when a document of one of its languages opens.
+
+M5.5 (ADR-0021 §3, §4, §6; additive):
+- A server applies to **every** workspace, whether or not its provider detects the project
+  (M4 required the provider to apply). A provider whose only content is a server (`[[tools]]`,
+  install methods and `[[lsp]]`) has no `[project]` table.
+- Its command resolves in the workspace's environment; when not found there, in the newest
+  managed install of its provider (that install's `bin_dirs` and method `env`); else the server
+  is `missing` with its provider id, so the shell can offer that provider's install.
+- `requires = ["toolId", ...]`: tools (an SDK, a runtime) that must resolve in the environment;
+  unresolved, the server is `missing` and its detail names the provider that supplies them.
+- When two servers claim a language, the one from the more specific source serves it
+  (workspace, then user, then built-in; then by id); the others are `standby`.
+- Nothing is installed without the person's approval unless they turned on the setting
+  `lsp.autoInstall` (default `false`).
 
 ## Template variables
 

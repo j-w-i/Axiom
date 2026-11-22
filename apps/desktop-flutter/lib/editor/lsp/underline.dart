@@ -55,6 +55,24 @@ TextSpan applyHighlights(TextSpan span, List<({int start, int end})> ranges, Col
       for (final r in ranges) (start: r.start, end: r.end, color: background),
     ], (style, u) => style.copyWith(backgroundColor: u.color));
 
+/// [span] with [styles] (semantic tokens) laid over it, clamped to the line's [length].
+TextSpan applyStyles(
+  TextSpan span,
+  List<({int start, int end, TextStyle style})> styles,
+  int length,
+) {
+  final byColour = <Color, TextStyle>{};
+  final ranges = [
+    for (final r in styles)
+      if (r.style.color != null && r.start < length)
+        (start: r.start.clamp(0, length), end: r.end.clamp(0, length), color: r.style.color!),
+  ];
+  for (final r in styles) {
+    if (r.style.color != null) byColour[r.style.color!] = r.style;
+  }
+  return _apply(span, ranges, (style, u) => style.merge(byColour[u.color]));
+}
+
 /// The ranges of [highlights] (LSP ranges) on line [index].
 List<({int start, int end})> highlightsOn(int index, int length, List<LspRange> highlights) => [
   for (final r in highlights)

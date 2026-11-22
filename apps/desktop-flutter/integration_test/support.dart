@@ -112,6 +112,7 @@ Future<void> key(
   bool mod = false,
   bool shift = false,
   bool ctrl = false,
+  bool alt = false,
 }) async {
   final modKey = Platform.isMacOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
   if (ctrl && !(mod && modKey == LogicalKeyboardKey.controlLeft)) {
@@ -119,8 +120,10 @@ Future<void> key(
   }
   if (mod) await _down(tester, modKey);
   if (shift) await _down(tester, LogicalKeyboardKey.shiftLeft);
+  if (alt) await _down(tester, LogicalKeyboardKey.altLeft);
   await _down(tester, k);
   await _up(tester, k);
+  if (alt) await _up(tester, LogicalKeyboardKey.altLeft);
   if (shift) await _up(tester, LogicalKeyboardKey.shiftLeft);
   if (mod) await _up(tester, modKey);
   if (ctrl && !(mod && modKey == LogicalKeyboardKey.controlLeft)) {

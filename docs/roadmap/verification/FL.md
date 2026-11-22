@@ -246,6 +246,52 @@ All four fail with upstream's behaviour (blinking forever, no setting).
   - **Verdict:** no regression. A clean run of the whole shell suite on an idle machine is still
     owed.
 
+## Frame rate (FL-PERF-003)
+_2026-11-22._ Measured with `apps/desktop-flutter/scripts/frames.sh`:
+- a profile build in a private virtual KWin, 2560×1440 at 125 %, on the NVIDIA GPU;
+- Impeller on OpenGL ES;
+- the window 4080×2240 physical, dpr 2.0.
+
+The report gained two columns:
+- **gap:** the time from one frame's vsync to the next one's;
+- **span:** the time from vsync to raster finished.
+
+| Interaction | Before: gap p50, span p50 | After: gap p50, span p50 |
+|---|---|---|
+| explorer fling | 33.3 ms, 29.3 ms | 16.7 ms, 3.7–4.3 ms |
+| editor fling | 33.3 ms, 32.9 ms | 16.7 ms, 6.1–6.7 ms |
+| typing | 33.3 ms, 35.6 ms | 16.7 ms, 5.9–9.0 ms |
+| drag selection | 33.3 ms, 33.5 ms | 16.7 ms, 5.4–6.8 ms |
+| tab switching | 33.3 ms, 38.4 ms (build max 12.7) | 16.7 ms, 3.1–6.3 ms (build max 135 → 15–18 after the isolate change) |
+
+- **Before:** the Dart UI shared GTK's thread, so the shell drew at 30 frames a second on a 60 Hz
+  display (FL-PERF-003 has the cause).
+- **After:** the UI has its own thread, and re_editor's workers are shared and copy nothing on
+  the UI thread.
+- **Load:** 5–6, two cores of it from unrelated stuck processes. One to two single frames over
+  16.7 ms land in a different interaction each run, so the suite's zero-over assertion does not
+  hold on this machine; a clean run on an idle machine is owed.
+- **Above 60 Hz:** needs a patched engine (FL-PERF-003 §Result).
+
+
+**Presenting without GTK's repaint (FL-PERF-004).** The same suite, the same build, A/B by
+`AXIOM_GTK_REDRAW=1`, load 2.5. CPU seconds over the run:
+
+| | GTK redraw | Direct commit |
+|---|---|---|
+| The app's GTK thread (input) | 31.4 | 0.4 |
+| The app | 66.8 | 29.7 |
+| KWin (private) | 15.0 | ~2 |
+
+| Interaction | GTK redraw: span p50 / p99 | Direct commit: span p50 / p99 |
+|---|---|---|
+| explorer fling | 3.4 / 7.5 ms | 2.7 / 5.0 ms |
+| typing | 6.3 / 23.7 ms | 5.1 / 20.0 ms |
+| drag selection | 5.5 / 11.4 ms | 4.5 / 6.1 ms |
+| editor fling | 5.9 / 10.5 ms | 4.6 / 6.8 ms |
+
+With the direct commit, the run had no frame over 16.7 ms.
+
 ## End to end
 `env_test.dart`: 1/1, in a private virtual KWin and in a private Xvfb, against the real daemon
 and two fixture providers served from loopback.
