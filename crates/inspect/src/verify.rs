@@ -19,6 +19,8 @@ use std::time::Duration;
 pub const TOLERANCE: f64 = 0.5;
 /// Quiet time before the page counts as settled.
 pub const QUIET: Duration = Duration::from_millis(150);
+/// How long a verification waits for the hot reload of a change it has not yet seen.
+pub const RELOAD_WAIT: Duration = Duration::from_millis(3000);
 
 /// What the page looked like before and after the change, and what went wrong meanwhile.
 #[derive(Debug, Clone)]
@@ -379,9 +381,21 @@ pub async fn verify(
     let s = inspect.session(preview)?;
     let since = p.since_ms.unwrap_or_else(|| s.last_verify_ms());
     let limit = Duration::from_millis(p.timeout_ms.unwrap_or(5000).min(30_000));
-    // A hot reload starts a moment after the file is written: give it the chance to.
+    // A hot reload starts a moment after the file is written, later on a loaded machine (CI
+    // measured more than 250 ms): unless one has already come since the previous verification,
+    // wait for it (bounded), then for the page to be quiet. A verification with no change behind
+    // it only costs the bounded wait.
+    let started = tokio::time::Instant::now();
     tokio::time::sleep(Duration::from_millis(250).min(limit)).await;
-    let settled = s.quiescence(QUIET, limit).await;
+    let _ = s
+        .hot_reload_since(
+            since,
+            RELOAD_WAIT.min(limit.saturating_sub(started.elapsed())),
+        )
+        .await;
+    let settled = s
+        .quiescence(QUIET, limit.saturating_sub(started.elapsed()))
+        .await;
     let before = s.latest_snapshot();
     let after: Snapshot = s
         .request(

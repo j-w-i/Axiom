@@ -197,7 +197,10 @@ otherwise `inconclusive`. Screenshot comparison alone can never produce
 `verified`: it shows that something changed, not that the right thing did.
 Before each capture the daemon waits for quiescence: no `didMutate` for
 150 ms, at most 2 s, and animations disabled where the adapter can
-(`prefers-reduced-motion` emulation on web).
+(`prefers-reduced-motion` emulation on web). `ui/verify` first waits for the change itself:
+unless a hot reload (`didMutate` with `reason: hotReload`) has come since the previous
+verification, it waits for one, at most 3 s (within the call's `timeoutMs`), so a loaded
+machine's slow reload is not mistaken for a settled page.
 
 E3 demonstrated the loop on one case: intent "+24 px left margin" → geometry
 delta exactly 24 px, pixels changed only around the two cards (the change

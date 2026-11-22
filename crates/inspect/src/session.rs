@@ -119,6 +119,23 @@ impl Session {
             .count()
     }
 
+    /// Waits, at most [limit], for a hot reload at or after [since_ms]. True when one came.
+    pub async fn hot_reload_since(&self, since_ms: u64, limit: Duration) -> bool {
+        let end = Instant::now() + limit;
+        loop {
+            // Registered before the check, so a reload between the two is not missed.
+            let notified = self.mutated.notified();
+            if self.reloads_since(since_ms) > 0 {
+                return true;
+            }
+            let now = Instant::now();
+            if now >= end {
+                return false;
+            }
+            let _ = tokio::time::timeout(end - now, notified).await;
+        }
+    }
+
     /// Waits until the page has not changed for [quiet], at most [limit]. True when it settled.
     pub async fn quiescence(&self, quiet: Duration, limit: Duration) -> bool {
         let end = Instant::now() + limit;
