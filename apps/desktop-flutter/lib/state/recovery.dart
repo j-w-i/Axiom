@@ -39,6 +39,13 @@ class RecoveryStore {
   final _timers = <String, Timer>{};
   final _pending = <String, ({String root, String path, String Function() text, String version})>{};
 
+  /// The write in progress for each key: writes of one key run one after another.
+  final _writing = <String, Future<void>>{};
+
+  /// Bumped by [forget]: a write that was under way when its key was forgotten removes what it
+  /// wrote, so a saved document's entry does not come back (review N10).
+  final _forgotten = <String, int>{};
+
   String _file(String root, String path) => '$dir/${fnv64(root)}/${fnv64(path)}.json';
   String _key(String root, String path) => '$root\u0000$path';
   String _textFile(String json) => '${json.substring(0, json.length - 5)}.txt';
@@ -53,14 +60,26 @@ class RecoveryStore {
     _timers[k] = Timer(delay, () => unawaited(_write(k)));
   }
 
-  Future<void> _write(String k) async {
+  Future<void> _write(String k) {
+    final before = _writing[k];
+    final next = before == null ? _writeNow(k) : before.then((_) => _writeNow(k));
+    _writing[k] = next;
+    return next.whenComplete(() {
+      if (!identical(_writing[k], next)) return;
+      _writing.remove(k);
+      _forgotten.remove(k);
+    });
+  }
+
+  Future<void> _writeNow(String k) async {
     _timers.remove(k);
     final p = _pending.remove(k);
     if (p == null) return;
+    final forgotten = _forgotten[k] ?? 0;
+    final f = File(_file(p.root, p.path));
+    final textFile = File(_textFile(f.path));
     try {
-      final f = File(_file(p.root, p.path));
       await f.parent.create(recursive: true);
-      final textFile = File(_textFile(f.path));
       final tmpText = File('${textFile.path}.tmp');
       await tmpText.writeAsString(p.text(), flush: true);
       await tmpText.rename(textFile.path);
@@ -73,14 +92,17 @@ class RecoveryStore {
     } on Object {
       // Best effort: recovery must never stop editing.
     }
+    // Forgotten (saved, closed, discarded) while this was being written: what it wrote goes.
+    if ((_forgotten[k] ?? 0) != forgotten) _delete(f, textFile);
   }
 
-  /// Writes every scheduled text now (before quitting).
+  /// Writes every scheduled text now (before quitting), and waits for writes under way.
   Future<void> flush() async {
     for (final k in [..._pending.keys]) {
       _timers.remove(k)?.cancel();
       await _write(k);
     }
+    await Future.wait([..._writing.values]);
   }
 
   /// [path] is saved, closed or discarded: nothing to recover.
@@ -89,11 +111,15 @@ class RecoveryStore {
     final k = _key(root, path);
     _timers.remove(k)?.cancel();
     _pending.remove(k);
+    if (_writing.containsKey(k)) _forgotten[k] = (_forgotten[k] ?? 0) + 1;
+    final f = File(_file(root, path));
+    _delete(f, File(_textFile(f.path)));
+  }
+
+  void _delete(File json, File text) {
     try {
-      final f = File(_file(root, path));
-      if (f.existsSync()) f.deleteSync();
-      final t = File(_textFile(f.path));
-      if (t.existsSync()) t.deleteSync();
+      if (json.existsSync()) json.deleteSync();
+      if (text.existsSync()) text.deleteSync();
     } on Object {
       // Ignore.
     }

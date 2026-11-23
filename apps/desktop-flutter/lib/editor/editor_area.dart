@@ -1084,6 +1084,39 @@ class FindBar extends StatelessWidget implements PreferredSizeWidget {
                 child: LayoutBuilder(
                   builder: (context, box) {
                     final narrow = box.maxWidth < 640;
+                    // Narrower still (a split group keeps 240 px): the toggles and the count, and
+                    // the replace buttons, go on lines of their own, which wrap (AUD-053).
+                    final tight = box.maxWidth < 360;
+                    final options = [
+                      toggle(
+                        'Match case',
+                        'Aa',
+                        v.option.caseSensitive,
+                        controller.toggleCaseSensitive,
+                        narrow,
+                      ),
+                      toggle(
+                        'Regular expression',
+                        '.*',
+                        v.option.regex,
+                        controller.toggleRegex,
+                        narrow,
+                      ),
+                      const SizedBox(width: 6),
+                      Semantics(liveRegion: true, child: Text(count, style: t.type.numeric)),
+                    ];
+                    final replaceButtons = [
+                      AxButton(
+                        label: 'Replace',
+                        kind: ButtonKind.quiet,
+                        onPressed: controller.replaceMatch,
+                      ),
+                      AxButton(
+                        label: 'Replace all',
+                        kind: ButtonKind.quiet,
+                        onPressed: controller.replaceAllMatches,
+                      ),
+                    ];
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -1102,22 +1135,7 @@ class FindBar extends StatelessWidget implements PreferredSizeWidget {
                               ),
                             ),
                             const SizedBox(width: 6),
-                            toggle(
-                              'Match case',
-                              'Aa',
-                              v.option.caseSensitive,
-                              controller.toggleCaseSensitive,
-                              narrow,
-                            ),
-                            toggle(
-                              'Regular expression',
-                              '.*',
-                              v.option.regex,
-                              controller.toggleRegex,
-                              narrow,
-                            ),
-                            const SizedBox(width: 6),
-                            Semantics(liveRegion: true, child: Text(count, style: t.type.numeric)),
+                            if (!tight) ...options,
                             const SizedBox(width: 6),
                             AxIconButton(
                               icon: AxiomIcons.arrowDown,
@@ -1146,6 +1164,14 @@ class FindBar extends StatelessWidget implements PreferredSizeWidget {
                             ),
                           ],
                         ),
+                        if (tight)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: options,
+                            ),
+                          ),
                         if (v.replaceMode)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
@@ -1163,19 +1189,14 @@ class FindBar extends StatelessWidget implements PreferredSizeWidget {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 6),
-                                AxButton(
-                                  label: 'Replace',
-                                  kind: ButtonKind.quiet,
-                                  onPressed: controller.replaceMatch,
-                                ),
-                                AxButton(
-                                  label: 'Replace all',
-                                  kind: ButtonKind.quiet,
-                                  onPressed: controller.replaceAllMatches,
-                                ),
+                                if (!tight) ...[const SizedBox(width: 6), ...replaceButtons],
                               ],
                             ),
+                          ),
+                        if (v.replaceMode && tight)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Wrap(children: replaceButtons),
                           ),
                       ],
                     );

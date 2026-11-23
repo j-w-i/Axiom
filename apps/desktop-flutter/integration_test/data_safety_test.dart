@@ -80,7 +80,8 @@ void main() {
     expect(app.documents.doc('src/main.rs')!.dirty, isTrue);
 
     // 3. The shell itself ends with unsaved text (no quit path): the next start offers it back.
-    await tester.pump(const Duration(seconds: 2)); // the recovery copy is written
+    // The recovery copy is written (as its timer would a moment after the edit), not waited for.
+    await app.documents.recovery.flush();
     await app.client.shutdown();
     await tester.pumpWidget(const SizedBox.shrink());
     app = await boot(tester, data.path);

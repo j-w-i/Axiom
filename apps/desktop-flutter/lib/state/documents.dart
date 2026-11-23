@@ -876,6 +876,8 @@ class DocumentsStore extends ChangeNotifier {
         }
         continue;
       }
+      // The file is there (again): not "deleted on disk" any more (review N10).
+      d.deletedOnDisk = false;
       if (!d.dirty) {
         if (d.editorText(r.text) != d.text) {
           d.replaceText(r.text, r.version);
@@ -884,12 +886,15 @@ class DocumentsStore extends ChangeNotifier {
         }
       } else if (d.editorText(r.text) == d.savedText) {
         d.savedVersion = r.version;
+        d.changedOnDisk = false;
       } else {
         d.changedOnDisk = true;
       }
     }
     _detachedRoot = '';
-    if (banner.startsWith('The backend stopped')) banner = '';
+    if (banner.startsWith('The backend stopped') || banner.contains('the backend is stopped')) {
+      banner = '';
+    }
     notifyListeners();
   }
 
@@ -900,16 +905,30 @@ class DocumentsStore extends ChangeNotifier {
     if (entries.isEmpty) return;
     final gen = _generation;
     var n = 0;
+    final gone = <String>[];
     for (final e in entries) {
       if (gen != _generation) return;
       var d = doc(e.path);
       if (d == null) {
         await _openInternal(e.path, silent: true, activate: false);
+        if (gen != _generation) return;
         d = doc(e.path);
       }
-      if (d == null || gen != _generation) {
-        // The file is gone: the text is still offered, as a new unsaved document is not possible
-        // without the file; it stays in the recovery folder.
+      if (d == null) {
+        // The file is gone (deleted, or moved while the shell was not running): the text opens as
+        // an unsaved document of that name, which Save creates again; closing it asks first
+        // (review N10). A file that is there but cannot be opened keeps its entry.
+        if (e.text.isEmpty || await _existsOnDisk(e.path) || gen != _generation) continue;
+        if (doc(e.path) != null) continue; // opened meanwhile
+        // Made from the text (its line breaks are kept), with nothing saved: every line unsaved.
+        d = Doc(path: e.path, text: e.text, savedVersion: '')
+          ..markSaved('', '')
+          ..deletedOnDisk = true;
+        _watch(d);
+        docs.add(d);
+        if (activePath.isEmpty) _setActive(d.path);
+        _scheduleTabSave();
+        gone.add(e.path);
         continue;
       }
       if (d.dirty || d.text == e.text) {
@@ -925,9 +944,13 @@ class DocumentsStore extends ChangeNotifier {
       d.restoreUnsaved(e.text);
       n++;
     }
-    if (n > 0) {
+    if (n > 0 || gone.isNotEmpty) {
+      final missing = gone.isEmpty
+          ? ''
+          : ' ${gone.length == 1 ? '${titleOf(gone.first)} is no longer on disk' : '${gone.length} of them are no longer on disk'}: Save creates ${gone.length == 1 ? 'it' : 'them'} again.';
+      final total = n + gone.length;
       banner =
-          'Recovered unsaved changes to ${n == 1 ? '1 file' : '$n files'} from the last session.';
+          'Recovered unsaved changes to ${total == 1 ? '1 file' : '$total files'} from the last session.$missing';
       notifyListeners();
     }
   }
@@ -1033,6 +1056,13 @@ class DocumentsStore extends ChangeNotifier {
     required String workspaceId,
   }) async {
     if (gen != _generation || !identical(doc(d.path), d) || d.detached) return false;
+    // A save queued behind one that conflicted would conflict too: the question already asked
+    // answers it, with this newer text (one question, not two; review N10).
+    final asked = _conflicts.indexWhere((c) => c.path == d.path);
+    if (!overwrite && asked >= 0) {
+      _conflicts[asked] = (path: d.path, text: text);
+      return false;
+    }
     final disk = d.diskText(text);
     try {
       final r = await client.call(
@@ -1192,6 +1222,19 @@ class DocumentsStore extends ChangeNotifier {
     notifyListeners();
     if (proceed == null) return;
     if (action == 'save') {
+      // A document kept while the backend is stopped cannot be saved until it is back: say so
+      // rather than do nothing (review N10). Its text stays, and in the recovery folder.
+      final waiting = [
+        for (final p in paths)
+          if (doc(p)?.detached ?? false) p,
+      ];
+      if (waiting.isNotEmpty) {
+        final what = waiting.length == 1 ? titleOf(waiting.first) : '${waiting.length} files';
+        banner =
+            'Could not save $what: the backend is stopped. Restart it, then save; your changes are kept until then.';
+        notifyListeners();
+        return;
+      }
       for (final p in paths) {
         final d = doc(p);
         if (d == null) continue;

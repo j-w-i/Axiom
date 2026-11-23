@@ -183,11 +183,31 @@ final class NoticeItem extends Item {
   final bool notice;
 }
 
-/// The transcript of a session's events (rewinds applied). Pure.
-List<Item> transcript(List<AgentEvent> events) {
+/// A turn cut off because the daemon went away (AUD-025): after the event [seq] (of [turn]), with
+/// the [text] that had been streamed of the reply.
+typedef Interruption = ({int seq, int turn, String text});
+
+/// What the transcript says where a turn was cut off.
+const interruptedMessage =
+    'Interrupted: the backend stopped while this reply was being written. Send again to continue.';
+
+/// The transcript of a session's events (rewinds applied), with the turn [interrupted] by the
+/// daemon's loss marked where it stopped. Pure.
+List<Item> transcript(List<AgentEvent> events, {Interruption? interrupted}) {
   var items = <Item>[];
   final tools = <String, int>{}; // callId → index in items
+  var marked = interrupted == null;
+  void mark() {
+    final m = interrupted!;
+    if (m.text.isNotEmpty) {
+      items.add(AssistantItem('interrupted-text-${m.seq}', m.turn, m.text, null));
+    }
+    items.add(NoticeItem('interrupted-${m.seq}', m.turn, interruptedMessage, notice: false));
+    marked = true;
+  }
+
   for (final e in events) {
+    if (!marked && e.seq > interrupted!.seq) mark();
     final key = '${e.seq}';
     switch (e.event) {
       case EventBodyUser(:final text, :final images):
@@ -256,6 +276,7 @@ List<Item> transcript(List<AgentEvent> events) {
         break; // usage, turnEnd, compaction, approvals: not items
     }
   }
+  if (!marked) mark();
   return items;
 }
 
@@ -269,13 +290,20 @@ UserItem? lastUser(List<Item> items) {
 }
 
 class Conversation {
-  Conversation({List<AgentEvent>? events, this.streaming = '', this.running = false})
-    : events = events ?? [];
+  Conversation({
+    List<AgentEvent>? events,
+    this.streaming = '',
+    this.running = false,
+    this.interrupted,
+  }) : events = events ?? [];
   final List<AgentEvent> events;
 
   /// Text streamed since the last complete block (not persisted).
   String streaming;
   bool running;
+
+  /// Where a turn was cut off by the daemon going away, in this window (AUD-025).
+  Interruption? interrupted;
 }
 
 String describeAgentError(Object e) {
@@ -303,14 +331,27 @@ class AgentStore extends ChangeNotifier {
 
   bool _daemonLost = false;
 
+  /// The daemon is back but the open conversation's folder is not open again yet: it is read
+  /// again once it is.
+  bool _reopenWhenOpen = false;
+
   /// The daemon went away mid-reply: no turn is running any more, and nothing waits for an
-  /// answer; when it is back, the open conversation is read again (AUD-025).
+  /// answer; a running turn is marked interrupted, with what had been streamed of it. When the
+  /// daemon is back, the open conversation is read again, in its own scope (AUD-025).
   void _onDaemonState() {
     final ready = client.state.value is DaemonReady;
     if (!ready) {
       if (_daemonLost) return;
       _daemonLost = true;
-      for (final c in _cache.values) {
+      for (final MapEntry(key: id, value: c) in _cache.entries) {
+        if (c.running) {
+          final last = c.events.lastOrNull;
+          c.interrupted = (
+            seq: last?.seq ?? 0,
+            turn: last?.turn ?? 0,
+            text: c.streaming + (_pendingDelta[id] ?? ''),
+          );
+        }
         c.running = false;
         c.streaming = '';
       }
@@ -326,6 +367,10 @@ class AgentStore extends ChangeNotifier {
     }
     if (!_daemonLost) return;
     _daemonLost = false;
+    if (scope == Scope.workspace && !workspace.isOpen) {
+      _reopenWhenOpen = true; // the folder is being opened again (AppState.restartBackend)
+      return;
+    }
     final id = activeId;
     if (id != null) unawaited(open(id));
   }
@@ -408,17 +453,23 @@ class AgentStore extends ChangeNotifier {
 
   void _onWorkspace() {
     final id = workspace.isOpen ? workspace.id : null;
-    // A folder switch passes through "no folder" while the next one opens: that is not a reason
-    // to leave the folder's scope (AUD-092).
-    if (id == null && workspace.opening) return;
-    if (id == _lastWs) return;
+    // A folder switch passes through "no folder" while the next one opens, and so does a daemon
+    // restart until the folder is open again: neither is a reason to leave the folder's scope
+    // (AUD-092, AUD-025).
+    if (id == null && (workspace.opening || !client.isReady)) return;
+    // The new daemon may give the folder the id it had (w1): it is read again all the same.
+    if (id == _lastWs && !(_reopenWhenOpen && id != null)) return;
     _lastWs = id;
     context = const [];
     if (id == null && scope == Scope.workspace) {
+      _reopenWhenOpen = false;
       newChat(Scope.general);
-    } else if (status != 'idle') {
-      unawaited(refreshSessions());
+      return;
     }
+    final reopen = _reopenWhenOpen ? activeId : null;
+    _reopenWhenOpen = false;
+    if (reopen != null) unawaited(open(reopen));
+    if (status != 'idle') unawaited(refreshSessions());
   }
 
   /// Loads providers and conversations (Chat's first open, or after a change).
@@ -524,6 +575,7 @@ class AgentStore extends ChangeNotifier {
         events: [...r.events, ...extra],
         streaming: prev?.streaming ?? '',
         running: r.session.running,
+        interrupted: prev?.interrupted,
       );
       _cache[id] = conv;
       approvals = [...approvals.where((a) => a.sessionId != id), ...?r.pending];
@@ -856,13 +908,18 @@ class AgentStore extends ChangeNotifier {
   List<Item> items() {
     final c = active;
     final memo = _itemsMemo;
-    if (memo != null && identical(memo.$1, c) && memo.$2 == c.events.length) return memo.$3;
-    final items = transcript(c.events);
-    _itemsMemo = (c, c.events.length, items);
+    if (memo != null &&
+        identical(memo.$1, c) &&
+        memo.$2 == c.events.length &&
+        memo.$3 == c.interrupted) {
+      return memo.$4;
+    }
+    final items = transcript(c.events, interrupted: c.interrupted);
+    _itemsMemo = (c, c.events.length, c.interrupted, items);
     return items;
   }
 
-  (Conversation, int, List<Item>)? _itemsMemo;
+  (Conversation, int, Interruption?, List<Item>)? _itemsMemo;
 
   void _patch(String id, {List<AgentEvent>? events, String? streaming, bool? running}) {
     final c = _cache.putIfAbsent(id, Conversation.new);

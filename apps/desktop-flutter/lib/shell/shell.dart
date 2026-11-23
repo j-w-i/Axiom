@@ -103,20 +103,11 @@ class _ShellState extends State<Shell> {
     if (d.prompt != null && !_promptShown) {
       _promptShown = true;
       final p = d.prompt!;
-      final what = p.names.length == 1 ? p.names.first : '${p.names.length} files';
       unawaited(
         showAxDialog<String>(
           context: context,
           label: 'Unsaved changes',
-          builder: (context) => AxQuestion(
-            title: 'Save the changes to $what?',
-            detail: switch (p.kind) {
-              'quit' => 'Your changes are lost if you quit without saving.',
-              'folder' => 'Your changes are lost if you switch folders without saving.',
-              _ => 'Your changes are lost if you close it without saving.',
-            },
-            actions: const [('save', 'Save'), ('discard', "Don't Save"), ('cancel', 'Cancel')],
-          ),
+          builder: (context) => unsavedQuestion(p),
         ).then((a) {
           _promptShown = false;
           unawaited(d.resolvePrompt(a ?? 'cancel'));
@@ -130,29 +121,7 @@ class _ShellState extends State<Shell> {
         showAxDialog<String>(
           context: context,
           label: d.conflictIsDeleted ? 'Deleted on disk' : 'Changed on disk',
-          // A file deleted on disk has no version to reload: save it again, or close it (AUD-019).
-          builder: (context) => d.conflictIsDeleted
-              ? AxQuestion(
-                  title: '$conflict was deleted on disk',
-                  detail: 'Another program deleted the file since you opened it. Save your version to create it again, or close it (your changes are lost).',
-                  actions: const [
-                    ('overwrite', 'Save'),
-                    ('close', 'Close Without Saving'),
-                    ('cancel', 'Cancel'),
-                  ],
-                  defaultAction: 'cancel',
-                )
-              : AxQuestion(
-                  title: '$conflict changed on disk',
-                  detail: 'Another program changed the file since you opened it. Overwrite it with your version, or reload the version on disk (your changes are lost).',
-                  actions: const [
-                    ('overwrite', 'Overwrite'),
-                    ('reload', 'Reload'),
-                    ('cancel', 'Cancel'),
-                  ],
-                  // Enter must not overwrite another program's changes (AUD-018).
-                  defaultAction: 'cancel',
-                ),
+          builder: (context) => conflictQuestion(conflict, deleted: d.conflictIsDeleted),
         ).then((a) {
           _conflictShown = false;
           unawaited(d.resolveConflict(a ?? 'cancel'));
@@ -2087,3 +2056,38 @@ class _GoToLineState extends State<_GoToLine> {
     );
   }
 }
+
+/// The question before unsaved work is lost (closing a tab, switching folders, quitting).
+AxQuestion unsavedQuestion(Prompt p) {
+  final what = p.names.length == 1 ? p.names.first : '${p.names.length} files';
+  return AxQuestion(
+    title: 'Save the changes to $what?',
+    detail: switch (p.kind) {
+      'quit' => 'Your changes are lost if you quit without saving.',
+      'folder' => 'Your changes are lost if you switch folders without saving.',
+      _ => 'Your changes are lost if you close it without saving.',
+    },
+    actions: const [('save', 'Save'), ('discard', "Don't Save"), ('cancel', 'Cancel')],
+  );
+}
+
+/// The question when a save finds [name] changed (or [deleted]) on disk since it was read.
+AxQuestion conflictQuestion(String name, {required bool deleted}) => deleted
+    // A file deleted on disk has no version to reload: save it again, or close it (AUD-019).
+    ? AxQuestion(
+        title: '$name was deleted on disk',
+        detail: 'Another program deleted the file since you opened it. Save your version to create it again, or close it (your changes are lost).',
+        actions: const [
+          ('overwrite', 'Save'),
+          ('close', 'Close Without Saving'),
+          ('cancel', 'Cancel'),
+        ],
+        defaultAction: 'cancel',
+      )
+    : AxQuestion(
+        title: '$name changed on disk',
+        detail: 'Another program changed the file since you opened it. Overwrite it with your version, or reload the version on disk (your changes are lost).',
+        actions: const [('overwrite', 'Overwrite'), ('reload', 'Reload'), ('cancel', 'Cancel')],
+        // Enter must not overwrite another program's changes (AUD-018).
+        defaultAction: 'cancel',
+      );
