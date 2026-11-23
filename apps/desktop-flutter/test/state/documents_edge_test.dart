@@ -1,16 +1,33 @@
 // Recovery and save edge cases in the documents store against the real daemon, headless (no
 // window): the independent review of AUD-REM-001 (audits/comprehensive-audit/REVIEW.md, N10, and
-// the follow-up review's C4, D3 and D6, from its probe rev3_probe_test.dart Q1 and Q2).
+// the follow-up review's C4, D3 and D6, from its probe rev3_probe_test.dart Q1 and Q2; the C/D
+// round review's E1, from its probe rev4_probe_test.dart R1, and E4).
 import 'dart:io';
 
 import 'package:axiom_desktop/daemon/client.dart';
 import 'package:axiom_desktop/daemon/protocol.g.dart';
+import 'package:axiom_desktop/daemon/protocol_runtime.dart' show Method;
 import 'package:axiom_desktop/state/documents.dart';
 import 'package:axiom_desktop/state/recovery.dart';
 import 'package:axiom_desktop/state/workspace.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'documents_safety_test.dart' show daemon, type, until;
+
+/// The real daemon, except that reading one of [failing] fails as if the backend did not answer
+/// in time (a failure that says nothing about the file).
+class FlakyClient extends DaemonClient {
+  FlakyClient(super.config);
+  final failing = <String>{};
+
+  @override
+  Future<R> call<P, R>(Method<P, R> method, P params, {Duration? timeout, CancelToken? cancel}) {
+    if (params is ReadFileParams && failing.contains(params.path)) {
+      return Future.error(DaemonException(ErrorKind.timeout, 'The backend did not answer'));
+    }
+    return super.call(method, params, timeout: timeout, cancel: cancel);
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -223,7 +240,7 @@ void main() {
     await docs.save('sub/x.txt');
     if (docs.conflictName != null) {
       expect(docs.conflictIsDeleted, isTrue);
-      await docs.resolveConflict('overwrite'); // the "deleted on disk" question's Save
+      await docs.resolveConflict('create'); // the "deleted on disk" question's Save
     }
     expect(docs.conflictName, isNull, reason: 'the question came back: the folder is missing');
     expect(File('${a.path}/sub/x.txt').readAsStringSync(), 'mine base\n');
@@ -281,4 +298,125 @@ void main() {
       expect(File('${a.path}/bin.dat').readAsBytesSync(), bytes);
     },
   );
+
+  test('E1 (R1): a file created again while the "deleted" question is open: Save leaves it, and '
+      'the question turns into "changed", with the text kept', () async {
+    File('${a.path}/x.txt').writeAsStringSync('base\n');
+    await ws.openFolder(a.path);
+    final d = await openDoc('x.txt');
+    type(d, 'mine ');
+    await watcherOn();
+    File('${a.path}/x.txt').deleteSync();
+    await docs.save('x.txt');
+    expect(docs.conflict?.kind, ConflictKind.deleted);
+    // While the question is open, another program writes the file.
+    File('${a.path}/x.txt').writeAsStringSync('theirs\n');
+    await until(() => !d.deletedOnDisk, 'the watcher saw it come back');
+    expect(
+      docs.conflict?.kind,
+      ConflictKind.changed,
+      reason: 'the open question follows the disk: it is not "deleted" any more',
+    );
+    // The person answers the "deleted" question's Save (pressed before the dialog changed).
+    await docs.resolveConflict('create');
+    expect(
+      File('${a.path}/x.txt').readAsStringSync(),
+      'theirs\n',
+      reason: 'the "deleted" Save replaced a file another program wrote',
+    );
+    expect(docs.conflict?.kind, ConflictKind.changed, reason: 'asked again, as "changed"');
+    expect(d.text, 'mine base\n');
+    expect(d.dirty, isTrue);
+    // The text was carried: Overwrite in the "changed" question writes it.
+    await docs.resolveConflict('overwrite');
+    expect(File('${a.path}/x.txt').readAsStringSync(), 'mine base\n');
+    expect(docs.conflictName, isNull);
+    expect(d.dirty, isFalse);
+  });
+
+  test('E1: the "deleted" Save answered before the watcher sees the file come back still leaves '
+      'it alone, and Reload takes it', () async {
+    File('${a.path}/x.txt').writeAsStringSync('base\n');
+    await ws.openFolder(a.path);
+    final d = await openDoc('x.txt');
+    type(d, 'mine ');
+    File('${a.path}/x.txt').deleteSync();
+    await docs.save('x.txt');
+    expect(docs.conflictIsDeleted, isTrue);
+    File('${a.path}/x.txt').writeAsStringSync('theirs\n');
+    await docs.resolveConflict('create');
+    expect(File('${a.path}/x.txt').readAsStringSync(), 'theirs\n');
+    expect(docs.conflict?.kind, ConflictKind.changed);
+    expect(d.deletedOnDisk, isFalse);
+    expect(d.text, 'mine base\n');
+    await docs.resolveConflict('reload');
+    expect(d.text, 'theirs\n');
+    expect(d.dirty, isFalse);
+  });
+
+  test('E4: an empty recovered text is kept when its file cannot be read for a moment', () async {
+    final flaky = FlakyClient(DaemonConfig(program: daemon, args: ['--data-dir', data.path]));
+    // The setUp's daemon shares the data folder: this test uses its own only.
+    await client.shutdown();
+    expect(await flaky.start(), isA<DaemonReady>());
+    addTearDown(flaky.shutdown);
+    final ws2 = WorkspaceStore(flaky);
+    final docs2 = DocumentsStore(flaky, ws2, recovery: recovery);
+    flaky.failing.add('empty.txt');
+    final root = await Directory(a.path).resolveSymbolicLinks();
+    recovery.keep(root, 'empty.txt', () => '', 'deadbeef');
+    recovery.keep(root, 'gone.txt', () => 'kept\n', 'deadbeef');
+    await recovery.flush();
+    await ws2.openFolder(a.path);
+    // The banner comes when every entry has been looked at.
+    await until(() => docs2.banner.startsWith('Recovered'), 'the entries looked at');
+    expect(docs2.doc('empty.txt'), isNull);
+    expect(
+      recovery.entries(root).map((e) => e.path),
+      containsAll(['empty.txt', 'gone.txt']),
+      reason: 'the read failed for a moment: that says nothing about the file',
+    );
+  });
+
+  test('E4: recovered text over a file that cannot be opened: the question says so, without '
+      'Reload; Overwrite replaces it with the text', () async {
+    final bytes = [0xff, 0xfe, 0x00, 0x80, 0x0a];
+    File('${a.path}/bin.dat').writeAsBytesSync(bytes);
+    final root = await Directory(a.path).resolveSymbolicLinks();
+    recovery.keep(root, 'bin.dat', () => 'my text\n', 'deadbeef');
+    await recovery.flush();
+    await ws.openFolder(a.path);
+    await until(() => docs.doc('bin.dat') != null, 'the text offered');
+    final d = docs.doc('bin.dat')!;
+    await docs.save('bin.dat');
+    expect(File('${a.path}/bin.dat').readAsBytesSync(), bytes);
+    expect(docs.conflict?.kind, ConflictKind.unreadable);
+    expect(docs.conflict?.reason, 'it is not a UTF-8 text file');
+    expect(docs.conflictIsDeleted, isFalse);
+    await docs.resolveConflict('overwrite');
+    expect(File('${a.path}/bin.dat').readAsStringSync(), 'my text\n');
+    expect(d.dirty, isFalse);
+    expect(d.unreadableOnDisk, isNull);
+    await recovery.flush();
+    expect(recovery.entries(root), isEmpty);
+  });
+
+  test('E4: a file that cannot be opened and becomes readable while the question is open: the '
+      'question becomes "changed", whose Reload takes it', () async {
+    File('${a.path}/bin.dat').writeAsBytesSync([0xff, 0xfe, 0x0a]);
+    final root = await Directory(a.path).resolveSymbolicLinks();
+    recovery.keep(root, 'bin.dat', () => 'my text\n', 'deadbeef');
+    await recovery.flush();
+    await ws.openFolder(a.path);
+    await until(() => docs.doc('bin.dat') != null, 'the text offered');
+    final d = docs.doc('bin.dat')!;
+    await watcherOn();
+    await docs.save('bin.dat');
+    expect(docs.conflict?.kind, ConflictKind.unreadable);
+    File('${a.path}/bin.dat').writeAsStringSync('readable\n');
+    await until(() => docs.conflict?.kind == ConflictKind.changed, 'the question follows');
+    await docs.resolveConflict('reload');
+    expect(d.text, 'readable\n');
+    expect(d.dirty, isFalse);
+  });
 }

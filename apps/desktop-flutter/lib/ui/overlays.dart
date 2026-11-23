@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -597,12 +598,15 @@ class _MenuItem extends StatelessWidget {
 
 /// Shows a modal dialog: a scrim, a sheet, focus trapped inside, Escape closes, focus returns
 /// to where it was. Resolves with the value the dialog pops. The sheet and the scrim follow the
-/// theme in scope while open (a theme or motion change in Settings shows at once; AUD-046).
+/// theme in scope while open (a theme or motion change in Settings shows at once; AUD-046). A
+/// dialog whose question can change while it is open names itself from [liveLabel] (its first
+/// value is [label]).
 Future<T?> showAxDialog<T>({
   required BuildContext context,
   required String label,
   required WidgetBuilder builder,
   bool dismissible = true,
+  ValueListenable<String>? liveLabel,
 }) {
   // Only for a caller outside every AxiomTheme (the route's own context normally has one).
   final opened = context.axiom;
@@ -617,15 +621,23 @@ Future<T?> showAxDialog<T>({
     transitionDuration: motion.medium,
     pageBuilder: (context, animation, _) {
       final t = live(context);
+      Widget named(String name, Widget child) => Semantics(
+        scopesRoute: true,
+        namesRoute: true,
+        label: name,
+        explicitChildNodes: true,
+        child: child,
+      );
+      final sheet = Sheet(child: Builder(builder: builder));
       Widget page = SafeArea(
         child: Center(
-          child: Semantics(
-            scopesRoute: true,
-            namesRoute: true,
-            label: label,
-            explicitChildNodes: true,
-            child: Sheet(child: Builder(builder: builder)),
-          ),
+          child: liveLabel == null
+              ? named(label, sheet)
+              : ValueListenableBuilder<String>(
+                  valueListenable: liveLabel,
+                  builder: (_, name, child) => named(name, child!),
+                  child: sheet,
+                ),
         ),
       );
       if (AxiomTheme.maybeOf(context) == null) page = AxiomTheme(data: t, child: page);

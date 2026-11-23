@@ -52,6 +52,45 @@ Future<(String?, List<AxButton>)> enterOn(
   return (chosen, buttons);
 }
 
+List<String> labels(WidgetTester tester) => tester
+    .widgetList<AxButton>(
+      find.descendant(of: find.byType(AxQuestion), matching: find.byType(AxButton)),
+    )
+    .map((b) => b.label)
+    .toList();
+
+/// Shows the conflict question the way the shell does ([showConflictQuestion], following
+/// [current]), runs [answer], and gives the answer.
+Future<String?> ask(
+  WidgetTester tester,
+  ValueNotifier<ConflictView?> current,
+  Future<void> Function() answer,
+) async {
+  String? chosen;
+  var answered = false;
+  await pumpAt(
+    tester,
+    Builder(
+      builder: (context) => Center(
+        child: AxButton(
+          label: 'Ask',
+          onPressed: () async {
+            chosen = await showConflictQuestion(context, current, () => current.value);
+            answered = true;
+          },
+        ),
+      ),
+    ),
+    const Size(900, 600),
+  );
+  await tester.tap(find.text('Ask'));
+  await tester.pumpAndSettle();
+  await answer();
+  await tester.pumpAndSettle();
+  expect(answered, isTrue, reason: 'the question was not answered');
+  return chosen;
+}
+
 void main() {
   testWidgets('"changed on disk": Cancel is the default, Enter cancels', (tester) async {
     final (chosen, buttons) = await enterOn(
@@ -73,6 +112,81 @@ void main() {
     expect(buttons.map((b) => b.label), ['Save', 'Close Without Saving', 'Cancel']);
     expect(buttons.firstWhere((b) => b.label == 'Cancel').kind, ButtonKind.primary);
     expect(chosen, 'cancel');
+  });
+
+  testWidgets('"cannot be opened": no Reload; Cancel is the default, Enter cancels', (
+    tester,
+  ) async {
+    final (chosen, buttons) = await enterOn(
+      tester,
+      'Cannot open file',
+      () => conflictQuestion('x.dat', deleted: false, cannotOpen: 'it is not a UTF-8 text file'),
+    );
+    expect(buttons.map((b) => b.label), ['Overwrite', 'Close Without Saving', 'Cancel']);
+    expect(buttons.firstWhere((b) => b.label == 'Cancel').kind, ButtonKind.primary);
+    expect(chosen, 'cancel');
+  });
+
+  testWidgets('the "deleted" question\'s Save answers create-only, not overwrite', (tester) async {
+    final chosen = await ask(
+      tester,
+      ValueNotifier<ConflictView?>((name: 'x.txt', kind: ConflictKind.deleted, reason: '')),
+      () => tester.tap(find.text('Save')),
+    );
+    expect(chosen, 'create');
+  });
+
+  testWidgets('E1: an open "deleted" question becomes "changed" when the file comes back, and '
+      'Enter still cancels', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final current = ValueNotifier<ConflictView?>((
+      name: 'x.txt',
+      kind: ConflictKind.deleted,
+      reason: '',
+    ));
+    final chosen = await ask(tester, current, () async {
+      expect(find.text('x.txt was deleted on disk'), findsOneWidget);
+      expect(find.bySemanticsLabel('Deleted on disk'), findsOneWidget);
+      expect(labels(tester), ['Save', 'Close Without Saving', 'Cancel']);
+      // The person moves the focus to Save (Shift+Tab from Cancel, twice).
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      // Another program writes the file: the store's conflict is "changed" now.
+      current.value = (name: 'x.txt', kind: ConflictKind.changed, reason: '');
+      await tester.pumpAndSettle();
+      expect(find.text('x.txt was deleted on disk'), findsNothing);
+      expect(find.text('x.txt changed on disk'), findsOneWidget);
+      expect(find.bySemanticsLabel('Changed on disk'), findsOneWidget);
+      expect(labels(tester), ['Overwrite', 'Reload', 'Cancel']);
+      // The new question's default answer has the focus, not Overwrite where Save was: Enter
+      // does not overwrite.
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    });
+    expect(chosen, 'cancel');
+    semantics.dispose();
+  });
+
+  testWidgets('a "cannot be opened" question becomes "changed" when the file opens again', (
+    tester,
+  ) async {
+    final current = ValueNotifier<ConflictView?>((
+      name: 'x.dat',
+      kind: ConflictKind.unreadable,
+      reason: 'it is not a UTF-8 text file',
+    ));
+    final chosen = await ask(tester, current, () async {
+      expect(find.text('x.dat cannot be opened'), findsOneWidget);
+      expect(find.textContaining('(it is not a UTF-8 text file)'), findsOneWidget);
+      expect(find.text('Reload'), findsNothing);
+      current.value = (name: 'x.dat', kind: ConflictKind.changed, reason: '');
+      await tester.pumpAndSettle();
+      expect(labels(tester), ['Overwrite', 'Reload', 'Cancel']);
+      await tester.tap(find.text('Reload'));
+    });
+    expect(chosen, 'reload');
   });
 
   testWidgets('"unsaved changes": Enter saves, it never discards', (tester) async {

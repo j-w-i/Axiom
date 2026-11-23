@@ -1,7 +1,8 @@
 // Open documents (FL-EDIT-001): a port of the Tauri shell's DocumentsStore, with the same rules,
 // minus the editor bridge (the text lives in each document's controller here).
-// - Saving sends `expectedVersion`; a `conflict` puts the save in the conflict queue (Overwrite,
-//   Reload, Cancel).
+// - Saving sends `expectedVersion`; a `conflict` puts the save in the conflict queue, asked as
+//   what is on disk now: changed (Overwrite, Reload, Cancel), deleted (Save creates it where
+//   nothing is, Close, Cancel) or not openable (Overwrite, Close, Cancel).
 // - An external change: the version decides. A clean document reloads; a dirty one is marked
 //   "changed on disk".
 // - Closing a dirty tab, switching or closing the folder and quitting ask first (Save, Don't
@@ -408,6 +409,10 @@ class Doc {
   /// The file was deleted on disk while the document was open (AUD-019).
   bool deletedOnDisk = false;
 
+  /// Why the file on disk cannot be opened (no longer UTF-8, too large, not readable); null when
+  /// it can, or is not there. Its save question has no Reload (review E4).
+  String? unreadableOnDisk;
+
   /// The text as last saved or read (the dirty mark compares with it).
   String get savedText => _savedText;
 
@@ -439,6 +444,7 @@ class Doc {
     _savedText = text;
     changedOnDisk = false;
     deletedOnDisk = false;
+    unreadableOnDisk = null;
     _dirtyLines = null;
     refreshDirty();
   }
@@ -453,6 +459,7 @@ class Doc {
     dirty = false;
     changedOnDisk = false;
     deletedOnDisk = false;
+    unreadableOnDisk = null;
     controller.text = shown;
     _dirtyLines = controller.codeLines;
   }
@@ -464,6 +471,15 @@ class Doc {
     refreshDirty();
   }
 }
+
+/// What a save conflict asks about, from what is on disk now: the file changed (Overwrite,
+/// Reload), is gone (Save creates it again, never over a file that is there; review E1), or is
+/// there but cannot be opened (Overwrite; there is nothing to reload; review E4).
+enum ConflictKind { changed, deleted, unreadable }
+
+/// How a save writes: checked against the version it was based on, over whatever is there (the
+/// person chose Overwrite), or only where nothing is (the "deleted" question's Save).
+enum _Write { checked, overwrite, create }
 
 /// A question about unsaved work.
 final class Prompt {
@@ -537,6 +553,25 @@ class DocumentsStore extends ChangeNotifier {
 
   Doc? get active => doc(activePath);
   String? get conflictName => _conflicts.isEmpty ? null : titleOf(_conflicts.first.path);
+
+  /// The first conflict as it stands now (its kind follows the disk while it is asked; review
+  /// E1), with why the file cannot be opened for [ConflictKind.unreadable]; null when none.
+  ({String name, ConflictKind kind, String reason})? get conflict {
+    if (_conflicts.isEmpty) return null;
+    final path = _conflicts.first.path;
+    final d = doc(path);
+    final reason = d?.unreadableOnDisk;
+    return (
+      name: titleOf(path),
+      kind: (d?.deletedOnDisk ?? false)
+          ? ConflictKind.deleted
+          : reason != null
+          ? ConflictKind.unreadable
+          : ConflictKind.changed,
+      reason: reason ?? '',
+    );
+  }
+
   List<String> get dirtyPaths => [
     for (final d in docs)
       if (d.dirty) d.path,
@@ -893,11 +928,13 @@ class DocumentsStore extends ChangeNotifier {
           _drop([d]);
         } else if (gone) {
           d.deletedOnDisk = true;
+          d.unreadableOnDisk = null;
         }
         continue;
       }
       // The file is there (again): not "deleted on disk" any more (review N10).
       d.deletedOnDisk = false;
+      d.unreadableOnDisk = null;
       if (!d.dirty) {
         if (d.editorText(r.text) != d.text) {
           d.replaceText(r.text, r.version);
@@ -936,29 +973,31 @@ class DocumentsStore extends ChangeNotifier {
         d = doc(e.path);
       }
       if (d == null) {
+        final failure = await _readFailure(e.path);
+        if (gen != _generation) return;
+        if (doc(e.path) != null) continue; // opened meanwhile
+        // The backend stopped (or the file opens now): the entry is kept and offered on the next
+        // open of the folder, empty or not (review E4).
+        if (failure == null || _transient.contains(failure.kind)) continue;
         // Empty text whose file does not open: nothing to give back, and the entry would stay
         // for ever (review D6).
         if (e.text.isEmpty) {
           recovery.forget(workspace.root, e.path);
           continue;
         }
-        final failure = await _readFailure(e.path);
-        if (gen != _generation) return;
-        if (doc(e.path) != null) continue; // opened meanwhile
-        // The backend stopped (or the file opens now): the entry is kept and offered on the next
-        // open of the folder.
-        if (failure == null || _transient.contains(failure.kind)) continue;
         // The file is gone (deleted, or moved while the shell was not running): the text opens as
         // an unsaved document of that name, which Save creates again, with its folder; closing it
         // asks first (review N10, D3). A file that is there but cannot be opened (no longer
         // UTF-8, too large, not readable) is not left in the recovery folder unseen: the text
         // opens the same way, and as nothing was read of the file, Save asks before it replaces
-        // it ("changed on disk"); closing it without saving forgets the text (review D6).
+        // it, saying the file cannot be opened (no Reload: there is nothing to read; review E4);
+        // closing it without saving forgets the text (review D6).
         final deleted = failure.kind == ErrorKind.notFound;
         // Made from the text (its line breaks are kept), with nothing saved: every line unsaved.
         d = Doc(path: e.path, text: e.text, savedVersion: '')
           ..markSaved('', '')
-          ..deletedOnDisk = deleted;
+          ..deletedOnDisk = deleted
+          ..unreadableOnDisk = deleted ? null : _cannotOpenReason(failure);
         _watch(d);
         docs.add(d);
         if (activePath.isEmpty) _setActive(d.path);
@@ -1061,7 +1100,7 @@ class DocumentsStore extends ChangeNotifier {
     // The folder may have changed while the formatter ran: this document's text is not written
     // into the next folder's file of the same name (AUD-002, review B3).
     if (gen != _generation || !identical(doc(path), d)) return;
-    await _write(d, d.text, overwrite: false);
+    await _write(d, d.text, _Write.checked);
   }
 
   Future<void> saveAll() async {
@@ -1075,14 +1114,14 @@ class DocumentsStore extends ChangeNotifier {
   final _saving = <String, Future<bool>>{};
 
   /// True when the save succeeded.
-  Future<bool> _write(Doc d, String text, {required bool overwrite}) {
+  Future<bool> _write(Doc d, String text, _Write mode) {
     // The folder and generation of the request, not of the moment a queued save runs: a save
     // waiting behind another must not land in a folder opened meanwhile (review B3).
     final gen = _generation;
     final workspaceId = workspace.id;
     final before = _saving[d.path];
     final next = (before == null ? Future<bool>.value(true) : before.then((_) => true)).then(
-      (_) => _writeNow(d, text, overwrite: overwrite, gen: gen, workspaceId: workspaceId),
+      (_) => _writeNow(d, text, mode, gen: gen, workspaceId: workspaceId),
     );
     _saving[d.path] = next;
     next.whenComplete(() {
@@ -1093,8 +1132,8 @@ class DocumentsStore extends ChangeNotifier {
 
   Future<bool> _writeNow(
     Doc d,
-    String text, {
-    required bool overwrite,
+    String text,
+    _Write mode, {
     required int gen,
     required String workspaceId,
   }) async {
@@ -1102,28 +1141,37 @@ class DocumentsStore extends ChangeNotifier {
     // A save queued behind one that conflicted would conflict too: the question already asked
     // answers it, with this newer text (one question, not two; review N10).
     final asked = _conflicts.indexWhere((c) => c.path == d.path);
-    if (!overwrite && asked >= 0) {
+    if (mode == _Write.checked && asked >= 0) {
       _conflicts[asked] = (path: d.path, text: text);
       return false;
     }
     final disk = d.diskText(text);
     // A file deleted on disk is created again, and so is its folder when that is gone too: the
     // write alone fails with "not found" and the question would come back (review D3).
-    if (d.deletedOnDisk) {
+    if (d.deletedOnDisk || mode == _Write.create) {
       await _createParent(workspaceId, d.path);
       if (gen != _generation || !identical(doc(d.path), d)) return false;
     }
     try {
-      final r = await client.call(
-        Methods.fsWriteFile,
-        WriteFileParams(
-          workspaceId: workspaceId,
-          path: d.path,
-          text: disk,
-          overwrite: overwrite ? true : null,
-          expectedVersion: overwrite || d.savedVersion.isEmpty ? null : d.savedVersion,
-        ),
-      );
+      final r = mode == _Write.create
+          // Created where nothing is, never over a file: another program may have written one
+          // since the "deleted" question was asked (review E1).
+          ? await client.call(
+              Methods.fsCreateFile,
+              CreateFileParams(workspaceId: workspaceId, path: d.path, text: disk),
+            )
+          : await client.call(
+              Methods.fsWriteFile,
+              WriteFileParams(
+                workspaceId: workspaceId,
+                path: d.path,
+                text: disk,
+                overwrite: mode == _Write.overwrite ? true : null,
+                expectedVersion: mode == _Write.overwrite || d.savedVersion.isEmpty
+                    ? null
+                    : d.savedVersion,
+              ),
+            );
       if (gen != _generation) return false;
       d.markSaved(r.version, text, disk: disk);
       if (!d.dirty) recovery.forget(_root, d.path);
@@ -1132,15 +1180,23 @@ class DocumentsStore extends ChangeNotifier {
       return true;
     } on DaemonException catch (e) {
       if (gen != _generation) return false;
-      if (e.kind == ErrorKind.conflict) {
+      if (e.kind == ErrorKind.conflict || e.kind == ErrorKind.alreadyExists) {
         // A file deleted on disk is not "changed": its own question (AUD-019). Asked of the disk
         // each time: a document marked deleted whose file another program has created since is
-        // "changed", or the "deleted" question's Save would replace that file (review C4).
-        d.deletedOnDisk = !await _existsOnDisk(d.path);
+        // "changed" (or cannot be opened), or the "deleted" question's Save would replace that
+        // file (review C4, E4).
+        await _markFromDisk(d);
         if (gen != _generation) return false;
-        _conflicts.add((path: d.path, text: text));
+        if (mode == _Write.create) {
+          // The "deleted" question's Save found a file there: asked again, now as what it is,
+          // with the same text (review E1).
+          _conflicts.insert(0, (path: d.path, text: text));
+        } else {
+          _conflicts.add((path: d.path, text: text));
+        }
       } else if (e.kind == ErrorKind.notFound) {
         d.deletedOnDisk = true;
+        d.unreadableOnDisk = null;
         _conflicts.add((path: d.path, text: text));
       } else {
         banner = 'Could not save ${d.title}: ${e.message}';
@@ -1151,8 +1207,7 @@ class DocumentsStore extends ChangeNotifier {
   }
 
   /// Whether the first conflict is a file deleted on disk (the dialog asks differently).
-  bool get conflictIsDeleted =>
-      _conflicts.isNotEmpty && (doc(_conflicts.first.path)?.deletedOnDisk ?? false);
+  bool get conflictIsDeleted => conflict?.kind == ConflictKind.deleted;
 
   /// Creates the folders above [path] that are missing (none for a file at the root). A failure
   /// is left to the write that follows, which says why it could not save.
@@ -1169,18 +1224,19 @@ class DocumentsStore extends ChangeNotifier {
     }
   }
 
-  Future<bool> _existsOnDisk(String path) async {
-    try {
-      await client.call(Methods.fsReadFile, ReadFileParams(workspaceId: workspace.id, path: path));
-      return true;
-    } on DaemonException catch (e) {
-      return e.kind != ErrorKind.notFound;
-    }
+  /// Marks [d] with what is at its path now: deleted, there but not openable (and why), or there.
+  Future<void> _markFromDisk(Doc d) async {
+    final failure = await _readFailure(d.path);
+    d.deletedOnDisk = failure?.kind == ErrorKind.notFound;
+    d.unreadableOnDisk = failure == null || d.deletedOnDisk || _transient.contains(failure.kind)
+        ? null
+        : _cannotOpenReason(failure);
   }
 
   /// The answer to "changed on disk": overwrite it with ours, reload theirs, or leave it. For a
-  /// file deleted on disk: `overwrite` writes it again (recreates it), `close` closes the tab
-  /// without saving (AUD-019).
+  /// file deleted on disk: `create` writes it again where nothing is (a file another program has
+  /// written meanwhile asks again, as "changed"; review E1), `close` closes the tab without
+  /// saving (AUD-019). For a file that cannot be opened: `overwrite` or `close` (review E4).
   Future<void> resolveConflict(String action) async {
     if (_conflicts.isEmpty) return;
     final c = _conflicts.removeAt(0);
@@ -1188,7 +1244,9 @@ class DocumentsStore extends ChangeNotifier {
     final d = doc(c.path);
     if (d == null) return;
     if (action == 'overwrite') {
-      await _write(d, c.text, overwrite: true);
+      await _write(d, c.text, _Write.overwrite);
+    } else if (action == 'create') {
+      await _write(d, c.text, _Write.create);
     } else if (action == 'reload' && !d.deletedOnDisk) {
       await _reloadFromDisk(c.path);
     } else if (action == 'close') {
@@ -1235,7 +1293,7 @@ class DocumentsStore extends ChangeNotifier {
     if (!workspace.isOpen) return;
     final gen = _generation;
     ReadFileResult? r;
-    var gone = false;
+    DaemonException? failure;
     try {
       r = await client.call(
         Methods.fsReadFile,
@@ -1243,23 +1301,44 @@ class DocumentsStore extends ChangeNotifier {
       );
     } on DaemonException catch (e) {
       r = null;
-      gone = e.kind == ErrorKind.notFound;
+      failure = e;
     }
     final d = doc(path);
     if (gen != _generation || d == null) return;
     if (r == null) {
+      final gone = failure?.kind == ErrorKind.notFound;
       // Deleted on disk: the tab says so (AUD-019); a dirty one keeps its text to save again.
       if (gone && !d.deletedOnDisk) {
         d.deletedOnDisk = true;
+        d.unreadableOnDisk = null;
         notifyListeners();
-      } else if (!gone && d.dirty && !d.changedOnDisk) {
-        d.changedOnDisk = true;
-        notifyListeners();
+      } else if (!gone) {
+        // There, but it does not open: an open save question says so (review E4).
+        final reason = failure == null || _transient.contains(failure.kind)
+            ? null
+            : _cannotOpenReason(failure);
+        var changed = false;
+        if (reason != null && (d.unreadableOnDisk != reason || d.deletedOnDisk)) {
+          d.unreadableOnDisk = reason;
+          d.deletedOnDisk = false;
+          changed = true;
+        }
+        if (d.dirty && !d.changedOnDisk) {
+          d.changedOnDisk = true;
+          changed = true;
+        }
+        if (changed) notifyListeners();
       }
       return;
     }
-    if (d.deletedOnDisk) d.deletedOnDisk = false;
-    if (r.version == d.savedVersion) return;
+    // There again (or readable again): an open "deleted" question becomes "changed" (review E1).
+    final back = d.deletedOnDisk || d.unreadableOnDisk != null;
+    d.deletedOnDisk = false;
+    d.unreadableOnDisk = null;
+    if (r.version == d.savedVersion) {
+      if (back) notifyListeners();
+      return;
+    }
     if (!d.dirty) {
       d.replaceText(r.text, r.version);
       notifyListeners();
@@ -1308,7 +1387,7 @@ class DocumentsStore extends ChangeNotifier {
       for (final p in paths) {
         final d = doc(p);
         if (d == null) continue;
-        if (!await _write(d, d.text, overwrite: false)) return; // a failed save stops here
+        if (!await _write(d, d.text, _Write.checked)) return; // a failed save stops here
       }
       proceed();
     } else if (action == 'discard') {

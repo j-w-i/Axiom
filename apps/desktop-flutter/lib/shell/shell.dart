@@ -114,15 +114,10 @@ class _ShellState extends State<Shell> {
         }),
       );
     }
-    final conflict = d.conflictName;
-    if (conflict != null && !_conflictShown) {
+    if (d.conflict != null && !_conflictShown) {
       _conflictShown = true;
       unawaited(
-        showAxDialog<String>(
-          context: context,
-          label: d.conflictIsDeleted ? 'Deleted on disk' : 'Changed on disk',
-          builder: (context) => conflictQuestion(conflict, deleted: d.conflictIsDeleted),
-        ).then((a) {
+        showConflictQuestion(context, d, () => d.conflict).then((a) {
           _conflictShown = false;
           unawaited(d.resolveConflict(a ?? 'cancel'));
         }),
@@ -2071,14 +2066,82 @@ AxQuestion unsavedQuestion(Prompt p) {
   );
 }
 
-/// The question when a save finds [name] changed (or [deleted]) on disk since it was read.
-AxQuestion conflictQuestion(String name, {required bool deleted}) => deleted
+/// A save conflict as the question shows it (see [DocumentsStore.conflict]).
+typedef ConflictView = ({String name, ConflictKind kind, String reason});
+
+/// The dialog's name for a question of [kind].
+String conflictLabel(ConflictKind kind) => switch (kind) {
+  ConflictKind.changed => 'Changed on disk',
+  ConflictKind.deleted => 'Deleted on disk',
+  ConflictKind.unreadable => 'Cannot open file',
+};
+
+/// Asks about the save conflict [current] gives, and resolves with the answer. The question
+/// follows [current] while it is open ([changes] says when to look again): a file deleted on disk
+/// that another program creates again is asked about as "changed", so the question shown is
+/// never one whose answer would do something else (review E1). A question of another kind is a
+/// new one, focused on its default answer.
+Future<String?> showConflictQuestion(
+  BuildContext context,
+  Listenable changes,
+  ConflictView? Function() current,
+) {
+  final first = current();
+  if (first == null) return Future.value();
+  final view = ValueNotifier<ConflictView>(first);
+  final label = ValueNotifier<String>(conflictLabel(first.kind));
+  void follow() {
+    // None any more (closed, or the folder went): the dialog keeps what it showed until it goes.
+    final now = current();
+    if (now == null) return;
+    view.value = now;
+    label.value = conflictLabel(now.kind);
+  }
+
+  changes.addListener(follow);
+  return showAxDialog<String>(
+    context: context,
+    label: label.value,
+    liveLabel: label,
+    builder: (context) => ValueListenableBuilder<ConflictView>(
+      valueListenable: view,
+      builder: (context, v, _) => KeyedSubtree(
+        key: ValueKey(v.kind),
+        child: conflictQuestion(
+          v.name,
+          deleted: v.kind == ConflictKind.deleted,
+          cannotOpen: v.kind == ConflictKind.unreadable ? v.reason : null,
+        ),
+      ),
+    ),
+    // The two notifiers are not disposed here: the route still listens to them while it fades
+    // out, and nothing else holds them once it has gone.
+  ).whenComplete(() => changes.removeListener(follow));
+}
+
+/// The question when a save finds [name] changed (or [deleted]) on disk since it was read, or
+/// there but impossible to open ([cannotOpen], why).
+AxQuestion conflictQuestion(String name, {required bool deleted, String? cannotOpen}) => deleted
     // A file deleted on disk has no version to reload: save it again, or close it (AUD-019).
+    // Save creates it only where nothing is: a file there by then is asked about (review E1).
     ? AxQuestion(
         title: '$name was deleted on disk',
         detail: 'Another program deleted the file since you opened it. Save your version to create it again, or close it (your changes are lost).',
         actions: const [
-          ('overwrite', 'Save'),
+          ('create', 'Save'),
+          ('close', 'Close Without Saving'),
+          ('cancel', 'Cancel'),
+        ],
+        defaultAction: 'cancel',
+      )
+    : cannotOpen != null
+    // Nothing was read of the file, so there is nothing to reload (review E4).
+    ? AxQuestion(
+        title: '$name cannot be opened',
+        detail:
+            'The file on disk cannot be opened ($cannotOpen), so your version was not saved over it. Overwrite it with your version, or close it (your changes are lost).',
+        actions: const [
+          ('overwrite', 'Overwrite'),
           ('close', 'Close Without Saving'),
           ('cancel', 'Cancel'),
         ],
