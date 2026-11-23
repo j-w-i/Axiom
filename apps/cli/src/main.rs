@@ -98,9 +98,80 @@ enum AgentCmd {
     },
 }
 
+/// Text from a model, a file or an agent made safe for a terminal: every control character
+/// but newline and tab (C0, DEL, C1, which start escape sequences that could erase or rewrite
+/// what is shown, such as an approval prompt) is shown as an escape (`\x1b`) instead of being
+/// sent (AUD-045). So are the characters that reorder or hide text without being seen (bidi
+/// controls, zero-width characters, line and paragraph separators): `rm\u{202e}` cannot show
+/// as something else (review N8). For text that is meant to be several lines (model output, a
+/// card's preview); a single field uses [`tty_safe_line`].
+fn tty_safe(text: &str) -> String {
+    escape_for_tty(text, true)
+}
+
+/// [`tty_safe`] for one line (a tool name, a target, a summary): a newline is shown as `\x0a`
+/// too, so a target cannot pass for another one, or for the prompt's own lines.
+fn tty_safe_line(text: &str) -> String {
+    escape_for_tty(text, false)
+}
+
+/// Bidi embeddings, overrides, isolates and marks; zero-width spaces, joiners and the word
+/// joiner, invisible operators, the byte order mark; line and paragraph separators.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061c}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{feff}'
+    )
+}
+
+fn escape_for_tty(text: &str, multiline: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\t' => out.push(c),
+            '\n' if multiline => out.push(c),
+            c if c.is_control() || invisible(c) => {
+                let n = c as u32;
+                if n <= 0xff {
+                    out.push_str(&format!("\\x{n:02x}"));
+                } else {
+                    out.push_str(&format!("\\u{{{n:x}}}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn fail(e: impl std::fmt::Display) -> ExitCode {
-    eprintln!("axiom: {e}");
+    eprintln!("{}", error_text(e));
     ExitCode::from(1)
+}
+
+/// An error as shown: the daemon's text (which can quote a file name, a provider's id, an
+/// agent's words) made terminal-safe (review D5).
+fn error_text(e: impl std::fmt::Display) -> String {
+    format!("axiom: {}", tty_safe(&e.to_string()))
+}
+
+/// One line of `agent sessions`: every field the daemon sent (a title is the model's or an
+/// agent's words) made terminal-safe, each on this one line (review D5).
+fn session_line(s: &axiom_protocol::agent::SessionInfo) -> String {
+    format!(
+        "{}\t{}\t{}/{}\t{}",
+        tty_safe_line(&s.session_id.0),
+        s.updated_ms,
+        tty_safe_line(&s.provider_id),
+        tty_safe_line(&s.model),
+        tty_safe_line(&s.title)
+    )
 }
 
 fn rpc(e: RpcError) -> String {
@@ -280,10 +351,7 @@ async fn agent(c: &Client, what: AgentCmd, approvals: bool) -> Result<ExitCode, 
                 .await
                 .map_err(rpc)?;
             for s in list.sessions {
-                println!(
-                    "{}\t{}\t{}/{}\t{}",
-                    s.session_id.0, s.updated_ms, s.provider_id, s.model, s.title
-                );
+                println!("{}", session_line(&s));
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -326,7 +394,7 @@ async fn agent(c: &Client, what: AgentCmd, approvals: bool) -> Result<ExitCode, 
             })
             .await
             .map_err(rpc)?;
-            eprintln!("session {}", sid.0);
+            eprintln!("session {}", tty_safe_line(&sid.0));
             stream_turn(c, &mut rx, &sid, ws, approvals).await
         }
     }
@@ -382,6 +450,11 @@ async fn stream_turn(
                 }
                 match e.event {
                     EventBody::TextDelta { text } => {
+                        let text = if std::io::stdout().is_terminal() {
+                            tty_safe(&text)
+                        } else {
+                            text
+                        };
                         let _ = out.write_all(text.as_bytes());
                         let _ = out.flush();
                     }
@@ -389,20 +462,29 @@ async fn stream_turn(
                         let _ = out.write_all(b"\n");
                     }
                     EventBody::ToolCall { tool, targets, .. } => {
-                        eprintln!("  ▸ {tool} {}", targets.join(", "));
+                        eprintln!(
+                            "  ▸ {} {}",
+                            tty_safe_line(&tool),
+                            tty_safe_line(&targets.join(", "))
+                        );
                     }
                     EventBody::ToolResult {
                         is_error, summary, ..
                     } => {
-                        eprintln!("    {} {summary}", if is_error { "✗" } else { "✓" });
+                        eprintln!(
+                            "    {} {}",
+                            if is_error { "✗" } else { "✓" },
+                            tty_safe_line(&summary)
+                        );
                     }
                     EventBody::Checkpoint { checkpoint } => {
                         eprintln!(
                             "  ⚑ checkpoint {} · {}",
-                            checkpoint.number, checkpoint.label
+                            checkpoint.number,
+                            tty_safe_line(&checkpoint.label)
                         );
                     }
-                    EventBody::Error { message, .. } => eprintln!("axiom: {message}"),
+                    EventBody::Error { message, .. } => eprintln!("axiom: {}", tty_safe(&message)),
                     EventBody::TurnEnd { reason } => {
                         return Ok(match reason {
                             TurnEndReason::Error => ExitCode::from(1),
@@ -432,25 +514,47 @@ async fn stream_turn(
     }
 }
 
-/// Asks on the terminal. Anything but y/s is a denial.
-async fn ask(r: &ApprovalRequest) -> ApprovalDecision {
+/// How each line of a card's preview starts on the terminal.
+const PREVIEW_MARK: &str = "  | ";
+
+/// The approval prompt, every untrusted part made terminal-safe and the targets one per line
+/// (an argument cannot pass for another target). Every line of the preview (a diff, the
+/// variables an agent sets, which it writes itself) is marked as the preview's, so none can
+/// pass for a line of the prompt (review E6).
+fn prompt_text(r: &ApprovalRequest) -> String {
     let effect = serde_json::to_value(r.effect)
         .ok()
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_default();
+    let mut t = String::new();
     if let Some(p) = &r.preview {
-        eprintln!("{p}");
+        for line in tty_safe(p).split('\n') {
+            t.push_str(PREVIEW_MARK);
+            t.push_str(line);
+            t.push('\n');
+        }
     }
-    eprint!(
-        "Allow {} ({effect}) on {}? [y] once{} / [N]o: ",
-        r.tool,
-        r.targets.join(", "),
+    t.push_str(&format!(
+        "Allow {} ({effect}) on:\n",
+        tty_safe_line(&r.tool)
+    ));
+    for target in &r.targets {
+        t.push_str(&format!("  {}\n", tty_safe_line(target)));
+    }
+    t.push_str(&format!(
+        "[y] once{} / [N]o: ",
         if r.can_remember {
             " / [s] for this session"
         } else {
             ""
         }
-    );
+    ));
+    t
+}
+
+/// Asks on the terminal. Anything but y/s is a denial.
+async fn ask(r: &ApprovalRequest) -> ApprovalDecision {
+    eprint!("{}", prompt_text(r));
     let _ = std::io::stderr().flush();
     let line = tokio::task::spawn_blocking(|| {
         let mut s = String::new();
@@ -463,5 +567,144 @@ async fn ask(r: &ApprovalRequest) -> ApprovalDecision {
         "y" | "yes" => ApprovalDecision::Once,
         "s" if r.can_remember => ApprovalDecision::Session,
         _ => ApprovalDecision::Deny,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review D5: what the daemon sends back is shown, not sent, in errors and session lists.
+    #[test]
+    fn daemon_errors_and_session_titles_are_terminal_safe() {
+        assert_eq!(
+            error_text("no file `a\x1b[2Kb`\nsecond line"),
+            "axiom: no file `a\\x1b[2Kb`\nsecond line"
+        );
+        let s = axiom_protocol::agent::SessionInfo {
+            session_id: SessionId("s\x1b1".into()),
+            title: "Fix\x1b]0;owned\x07 it\nnext\u{202e}".into(),
+            provider_id: "p\r".into(),
+            model: "m\u{200b}".into(),
+            created_ms: 1,
+            updated_ms: 2,
+            running: false,
+            pending_approvals: 0,
+        };
+        assert_eq!(
+            session_line(&s),
+            "s\\x1b1\t2\tp\\x0d/m\\u{200b}\tFix\\x1b]0;owned\\x07 it\\x0anext\\u{202e}"
+        );
+    }
+
+    #[test]
+    fn control_sequences_are_shown_not_sent() {
+        assert_eq!(tty_safe("ok\n\tline"), "ok\n\tline");
+        assert_eq!(tty_safe("\x1b[2K\x1b[1Ahi\r"), "\\x1b[2K\\x1b[1Ahi\\x0d");
+        assert_eq!(tty_safe("\u{9b}31m\u{7f}"), "\\x9b31m\\x7f");
+        assert_eq!(tty_safe("é ✓"), "é ✓");
+    }
+
+    #[test]
+    fn bidi_and_zero_width_characters_are_shown_and_single_lines_stay_single() {
+        // "cat x.txt" written with a right-to-left override, and a word with hidden spaces.
+        assert_eq!(tty_safe("cat \u{202e}txt.x"), "cat \\u{202e}txt.x");
+        assert_eq!(
+            tty_safe("r\u{200b}m \u{2066}a\u{2069}"),
+            "r\\u{200b}m \\u{2066}a\\u{2069}"
+        );
+        for c in [
+            '\u{061c}', '\u{180e}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{2028}',
+            '\u{2029}', '\u{202a}', '\u{2060}', '\u{2064}', '\u{2068}', '\u{feff}',
+        ] {
+            let shown = tty_safe(&c.to_string());
+            assert_eq!(shown, format!("\\u{{{:x}}}", c as u32), "{c:?}");
+            assert_eq!(tty_safe_line(&c.to_string()), shown, "{c:?}");
+        }
+        // Visible neighbours are kept.
+        assert_eq!(
+            tty_safe("\u{2010}\u{2030}\u{fefc}"),
+            "\u{2010}\u{2030}\u{fefc}"
+        );
+        // Multi-line text keeps its lines; a single field does not.
+        assert_eq!(tty_safe("a\nb"), "a\nb");
+        assert_eq!(tty_safe_line("a\n\tb\u{2028}c"), "a\\x0a\tb\\u{2028}c");
+    }
+
+    #[test]
+    fn the_approval_prompt_cannot_be_rewritten_by_its_content() {
+        let r = ApprovalRequest {
+            request_id: "r1".into(),
+            session_id: None,
+            principal: "session:s".into(),
+            tool: "task.run".into(),
+            effect: axiom_protocol::agent::Effect::Execute,
+            targets: vec!["cargo test\x1b[2K\r rm -rf /".into()],
+            argv: None,
+            preview: Some("\x1b]0;title\x07diff".into()),
+            rule: None,
+            checkpoint_planned: true,
+            can_remember: false,
+        };
+        let p = prompt_text(&r);
+        assert!(!p.chars().any(|c| c.is_control() && c != '\n'), "{p:?}");
+        assert!(p.contains("\\x1b[2K\\x0d rm -rf /"), "{p}");
+        assert!(p.contains("\\x1b]0;title\\x07diff"), "{p}");
+
+        // A target cannot add a line that passes for another target, nor hide what it says.
+        let r = ApprovalRequest {
+            targets: vec![
+                "notes.txt\n  ~/.ssh/authorized_keys".into(),
+                "a\u{202e}b".into(),
+            ],
+            preview: None,
+            ..r
+        };
+        let p = prompt_text(&r);
+        assert_eq!(
+            p,
+            "Allow task.run (execute) on:\n  notes.txt\\x0a  ~/.ssh/authorized_keys\n  \
+             a\\u{202e}b\n[y] once / [N]o: "
+        );
+    }
+
+    /// Review E6: a preview (here the variables an agent sets, one with line breaks in its
+    /// value) cannot add lines above the prompt that pass for the prompt's own: each of its
+    /// lines is marked, and the only line that asks is the real one.
+    #[test]
+    fn a_preview_cannot_pass_for_the_prompt() {
+        let r = ApprovalRequest {
+            request_id: "r1".into(),
+            session_id: None,
+            principal: "session:s".into(),
+            tool: "acp.terminal".into(),
+            effect: axiom_protocol::agent::Effect::Execute,
+            targets: vec!["rm -rf build".into()],
+            argv: None,
+            preview: Some(
+                "The agent sets these variables:\n  X=1\nAllow fs.read (read) on:\n  notes.txt\n\
+                 [y] once / [N]o: y\r"
+                    .into(),
+            ),
+            rule: None,
+            checkpoint_planned: true,
+            can_remember: false,
+        };
+        let p = prompt_text(&r);
+        let lines: Vec<&str> = p.split('\n').collect();
+        let real = lines.len() - 3;
+        assert_eq!(lines[real], "Allow acp.terminal (execute) on:", "{p}");
+        for (i, line) in lines[..real].iter().enumerate() {
+            assert!(
+                line.starts_with(PREVIEW_MARK),
+                "line {i} is not marked: {p}"
+            );
+        }
+        assert_eq!(
+            lines.iter().filter(|l| l.starts_with("Allow ")).count(),
+            1,
+            "{p}"
+        );
+        assert!(p.ends_with("  rm -rf build\n[y] once / [N]o: "), "{p}");
     }
 }

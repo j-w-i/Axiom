@@ -13,7 +13,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -59,7 +59,11 @@ pub struct McpClient {
     stdin: tokio::sync::Mutex<tokio::process::ChildStdin>,
     waiters: Waiters,
     next: AtomicI64,
-    _child: tokio::process::Child,
+    /// The server's process, in a process group of its own registered with the daemon's exit
+    /// watchdog (AUD-027); killed when the client is dropped.
+    _process: crate::process::Supervised,
+    /// The server's output ended: it exited or became unusable (AUD-032).
+    ended: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -75,29 +79,35 @@ pub struct RemoteTool {
 }
 
 impl McpClient {
-    /// Starts the server, initialises it and lists its tools.
+    /// Starts the server, initialises it and lists its tools. It gets the daemon's environment
+    /// minus `withhold` (Axiom's model-key variables, AUD-010), plus its configured `env`.
     pub async fn start(
         cfg: &ServerConfig,
         cwd: &std::path::Path,
+        withhold: &[String],
     ) -> Result<(Arc<McpClient>, Vec<RemoteTool>), String> {
         cfg.validate()?;
-        let mut child = tokio::process::Command::new(&cfg.argv[0])
-            .args(&cfg.argv[1..])
+        let mut cmd = tokio::process::Command::new(&cfg.argv[0]);
+        for name in withhold {
+            cmd.env_remove(name);
+        }
+        cmd.args(&cfg.argv[1..])
             .envs(&cfg.env)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
+            .stderr(Stdio::null());
+        let (process, pipes) = crate::process::spawn(&mut cmd)
             .map_err(|e| format!("cannot start MCP server `{}`: {e}", cfg.name))?;
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let (Some(stdin), Some(stdout)) = (pipes.stdin, pipes.stdout) else {
             return Err("no stdio".into());
         };
         let waiters: Waiters = Arc::default();
         let w = waiters.clone();
+        let ended: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let end = ended.clone();
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
+            let mut lines = crate::lines::Lines::new(stdout, crate::lines::MAX_LINE);
             while let Ok(Some(l)) = lines.next_line().await {
                 let Ok(v) = serde_json::from_str::<Value>(&l) else {
                     continue;
@@ -117,6 +127,7 @@ impl McpClient {
                     let _ = tx.send(outcome);
                 }
             }
+            end.store(true, Ordering::SeqCst);
             for (_, tx) in lock(&w).drain() {
                 let _ = tx.send(Err("the MCP server exited".into()));
             }
@@ -126,7 +137,8 @@ impl McpClient {
             stdin: tokio::sync::Mutex::new(stdin),
             waiters,
             next: AtomicI64::new(1),
-            _child: child,
+            _process: process,
+            ended,
         });
         let init = tokio::time::timeout(
             START_TIMEOUT,
@@ -173,6 +185,12 @@ impl McpClient {
             }
         }
         Ok((c, tools))
+    }
+
+    /// The server has exited (or its output became unusable): start it again rather than
+    /// reuse it.
+    pub fn is_ended(&self) -> bool {
+        self.ended.load(Ordering::SeqCst)
     }
 
     async fn send(&self, v: Value) -> Result<(), String> {
@@ -234,11 +252,16 @@ impl Tool for McpTool {
             if !input.is_object() {
                 return Err(ToolError::invalid("The input must be an object."));
             }
+            // Its arguments decide what it does and are not in the targets: an approval covers
+            // this call only (AUD-009). The card shows them.
+            let args = serde_json::to_string_pretty(input).unwrap_or_default();
             Ok(Targets {
                 argv: Some(vec![
                     format!("mcp:{}", self.client.name),
                     self.remote.clone(),
                 ]),
+                preview: Some(format!("arguments:\n{args}")),
+                opaque: true,
                 ..Default::default()
             })
         })

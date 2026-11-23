@@ -445,6 +445,10 @@ void main() {
     expect(app.agent.providers.where((p) => p.usable), isEmpty);
 
     // 2. An OpenAI-compatible server with a key: added and chosen; the key leaves the field.
+    // The setup page scrolls, and what is above the tabs (the agents found) differs by
+    // computer: each control is brought into view before it is clicked.
+    await tester.ensureVisible(named('OpenAI-compatible'));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(named('OpenAI-compatible'));
     await tester.pump(const Duration(milliseconds: 100));
     Finder field(String label) => find.descendant(
@@ -453,6 +457,8 @@ void main() {
     );
     // Clicked, then typed (the text goes to the field the click focused).
     Future<void> typeInto(Finder f, String text) async {
+      await tester.ensureVisible(f);
+      await tester.pump(const Duration(milliseconds: 100));
       await tester.tap(f);
       await tester.pump(const Duration(milliseconds: 50));
       final focused = tester.state<EditableTextState>(f).widget.focusNode.hasFocus;
@@ -467,6 +473,9 @@ void main() {
       base,
     );
 
+    // The setup page scrolls: the button may be below the fold.
+    await tester.ensureVisible(named('Add provider'));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(named('Add provider'));
     await until(
       tester,

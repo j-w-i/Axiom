@@ -2097,7 +2097,12 @@ class _CodeLineEditingControllerDelegate implements CodeLineEditingController {
       value.addListener(listener);
     }
     _delegate = value;
-    notifyListeners();
+    // Axiom patch: only this editor's own listeners hear of the new controller. Notifying the
+    // controller itself reached every editor showing the document, one of them possibly being
+    // torn down in this frame (a split: "Cannot get renderObject of inactive element").
+    for (final listener in List.of(_listeners)) {
+      listener();
+    }
   }
 
   @override

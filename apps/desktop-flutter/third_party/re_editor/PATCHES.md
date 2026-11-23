@@ -88,3 +88,31 @@ is highlighted afterwards.
 `test/editor/highlight_colours_test.dart` resolves scopes the same way and checks every fixture
 gets several colours. `test/editor/highlight_pipeline_test.dart` checks that results reach each
 editor through the shared workers.
+
+## Linear line loops; no worker round trip for a document too large to highlight (AUD-005, 2026-11-23)
+- `lib/src/code_lines.dart`: `CodeLines.length` is a plain loop, and `lines` (every line, one
+  pass over the segments) and `texts` (every line's text) are new. `codeLines[i]` walks the
+  segments from the start, so the loops over `[i]` up to `length` in the highlighter's size check
+  and the folding task were quadratic: a CPU profile of typing at line 1 of a 100 000-line file
+  spent 15 s of 18 s in `CodeLines.length`/`[]` (the shell's own loops had the same pattern and
+  now use `lines`/`texts` too).
+- `lib/src/code_chunk.dart` and `lib/src/_code_highlight.dart` use `lines`/`texts`.
+
+`lib/src/_code_highlight.dart`: when the size check fails (over `maxSize`, 4 MiB by default, or a
+line over `maxLineLength`), `run` answers with no results at once, so every line is drawn plain.
+Upstream still sent the whole text to a worker on every edit, which built one "just text" result
+per line and sent them all back to be decoded on the UI thread: typing at the top of a 100 000-line
+file stalled the UI for over 4 s per burst and kept about 700 MiB (audit
+`audits/comprehensive-audit/PERFORMANCE_REPORT.md`).
+- `lib/src/_code_field.dart` (`_updateDisplayRenderParagraphs`): a jump back of more than 256
+  lines starts at the estimated line, as a jump forward already did. Upstream walked back line by
+  line, laying out every paragraph in between (100 000 for Ctrl+Home at the end of a 100 000-line
+  file: a 3.9 s frame and about 650 MB). With word wrap the estimate can place the view a little
+  off for wrapped lines, as the forward jump always could.
+
+## A new editor's controller no longer pings every editor of the document (2026-11-23)
+`lib/src/_code_line.dart` (`_CodeLineEditingControllerDelegate.delegate=`): attaching a
+controller notifies only the editor's own listeners. Upstream called the shared controller's
+`notifyListeners()`, which reached every editor showing the document, including one being torn
+down in the same frame when the editor splits; its input controller then asked an inactive
+element for its render object (an exception on every split, found by the audit's GUI pass).

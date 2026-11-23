@@ -2,7 +2,7 @@
 id: FL-EDIT-003
 title: The completion list as Xcode has it - under the line being typed, the names on the typed word, kind badges, the declaration and documentation below
 status: implemented
-status_note: 2026-11-22; Linux (lsp_test.dart step 2b' 400 lines down: the list below the typed line, its names within 1.5 px of the typed word; check.sh flutter passes; a screenshot checked by eye)
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [M5.5-EDIT-001]
 order: 613
 scope: apps/desktop-flutter/lib/editor/lsp/lsp_view.dart, apps/desktop-flutter/lib/editor/editor_area.dart, apps/desktop-flutter/third_party/re_editor/, apps/desktop-flutter/integration_test/lsp_test.dart

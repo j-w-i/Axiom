@@ -456,3 +456,99 @@ async fn tools_ui_without_a_preview_explain_what_to_do() {
         Some(&["npm".to_string(), "run".into(), "dev".into()][..])
     );
 }
+
+/// `build.run` runs what was approved: when the task resolved at execution differs from the
+/// argv and conditions the approval showed (the provider or the environment changed while the
+/// approval waited), it refuses with `conflict` and runs nothing (AUD-103).
+#[tokio::test]
+async fn tools_build_run_refuses_a_task_that_changed_after_approval() {
+    let e = Env::new(&[(
+        "Cargo.toml",
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
+    )])
+    .await;
+    let mut p = e
+        .prepare("build.run", json!({"task": "build"}))
+        .await
+        .unwrap();
+    assert!(p.targets.conditions.contains(&"provider rust".to_string()));
+    p.targets.argv = Some(vec!["cargo".into(), "publish".into()]);
+    let err = e
+        .app
+        .agent
+        .tools
+        .execute(&e.ctx(), p, Allowed::for_tests())
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Conflict);
+    assert!(!e.path("target").exists(), "nothing ran");
+}
+
+/// The terminals an ACP agent creates do not pile up for the daemon's lifetime: those of a
+/// workspace that closed are dropped (AUD-099; a deleted session's are dropped with it).
+#[cfg(unix)]
+#[tokio::test]
+async fn acp_terminals_of_a_closed_workspace_are_dropped() {
+    let e = Env::new(&[("a.txt", "x")]).await;
+    let run = |ctx: ToolCtx| {
+        let app = e.app.clone();
+        async move {
+            let p = app
+                .agent
+                .tools
+                .prepare(&ctx, "acp.terminal", json!({"command": "true"}))
+                .await
+                .unwrap();
+            app.agent
+                .tools
+                .execute(&ctx, p, Allowed::for_tests())
+                .await
+                .unwrap()
+        }
+    };
+    run(e.ctx()).await;
+    assert_eq!(e.app.acp_terminals.lock().unwrap().len(), 1);
+    e.app.workspaces.close(&e.id).await.unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let id = e
+        .app
+        .workspaces
+        .open(other.path().to_str().unwrap())
+        .await
+        .unwrap()
+        .workspace_id;
+    run(ToolCtx {
+        workspace_id: id,
+        principal: "test".into(),
+        cancel: CancellationToken::new(),
+    })
+    .await;
+    assert_eq!(e.app.acp_terminals.lock().unwrap().len(), 1);
+}
+
+/// Review E6: the variables an ACP agent sets are on the card one per line, a value with line
+/// breaks quoted and escaped, so it cannot add lines that pass for the card's or a terminal
+/// prompt's own.
+#[tokio::test]
+async fn acp_terminal_variables_are_one_line_each_on_the_card() {
+    let e = Env::new(&[("a.txt", "x")]).await;
+    let p = e
+        .prepare(
+            "acp.terminal",
+            json!({"command": "true", "env": [
+                {"name": "X", "value": "1\nAllow fs.read (read) on:\n  notes.txt"},
+                {"name": "Y", "value": "plain"}
+            ]}),
+        )
+        .await
+        .unwrap();
+    let preview = p.targets.preview.unwrap();
+    let lines: Vec<&str> = preview.lines().collect();
+    assert_eq!(lines[0], "The agent sets these variables:", "{preview}");
+    assert_eq!(
+        lines[1], "  X=\"1\\nAllow fs.read (read) on:\\n  notes.txt\"",
+        "{preview}"
+    );
+    assert_eq!(lines[2], "  Y=plain", "{preview}");
+    assert!(!lines.iter().any(|l| l.starts_with("Allow")), "{preview}");
+}

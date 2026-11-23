@@ -183,11 +183,35 @@ final class NoticeItem extends Item {
   final bool notice;
 }
 
-/// The transcript of a session's events (rewinds applied). Pure.
-List<Item> transcript(List<AgentEvent> events) {
+/// A turn cut off because the daemon went away (AUD-025): after the event [seq] (of [turn]), with
+/// the [text] that had been streamed of the reply.
+typedef Interruption = ({int seq, int turn, String text});
+
+/// What the transcript says where a turn was cut off.
+const interruptedMessage =
+    'Interrupted: the backend stopped while this reply was being written. Send again to continue.';
+
+/// The transcript of a session's events (rewinds applied), with each turn [interrupted] by the
+/// daemon's loss marked where it stopped (oldest first). Pure.
+List<Item> transcript(List<AgentEvent> events, {List<Interruption> interrupted = const []}) {
   var items = <Item>[];
   final tools = <String, int>{}; // callId → index in items
+  var next = 0; // the first interruption not marked yet
+  void mark() {
+    final m = interrupted[next];
+    // Keyed by its place in the list too: two losses after the same event stay two marks.
+    final key = '$next-${m.seq}';
+    if (m.text.isNotEmpty) {
+      items.add(AssistantItem('interrupted-text-$key', m.turn, m.text, null));
+    }
+    items.add(NoticeItem('interrupted-$key', m.turn, interruptedMessage, notice: false));
+    next++;
+  }
+
   for (final e in events) {
+    while (next < interrupted.length && e.seq > interrupted[next].seq) {
+      mark();
+    }
     final key = '${e.seq}';
     switch (e.event) {
       case EventBodyUser(:final text, :final images):
@@ -256,6 +280,9 @@ List<Item> transcript(List<AgentEvent> events) {
         break; // usage, turnEnd, compaction, approvals: not items
     }
   }
+  while (next < interrupted.length) {
+    mark();
+  }
   return items;
 }
 
@@ -269,13 +296,22 @@ UserItem? lastUser(List<Item> items) {
 }
 
 class Conversation {
-  Conversation({List<AgentEvent>? events, this.streaming = '', this.running = false})
-    : events = events ?? [];
+  Conversation({
+    List<AgentEvent>? events,
+    this.streaming = '',
+    this.running = false,
+    this.interrupted = const [],
+  }) : events = events ?? [];
   final List<AgentEvent> events;
 
   /// Text streamed since the last complete block (not persisted).
   String streaming;
   bool running;
+
+  /// Where turns were cut off by the daemon going away, in this window, oldest first (AUD-025):
+  /// a later loss adds its mark and keeps the earlier ones (review D6). Replaced, not changed in
+  /// place, so the transcript's memo sees the change.
+  List<Interruption> interrupted;
 }
 
 String describeAgentError(Object e) {
@@ -298,7 +334,68 @@ class AgentStore extends ChangeNotifier {
       }),
     ];
     workspace.addListener(_onWorkspace);
+    client.state.addListener(_onDaemonState);
   }
+
+  bool _daemonLost = false;
+
+  /// The daemon is back but the open conversation's folder is not open again yet: it is read
+  /// again once it is.
+  bool _reopenWhenOpen = false;
+
+  /// The daemon went away mid-reply: no turn is running any more, and nothing waits for an
+  /// answer; a running turn is marked interrupted, with what had been streamed of it. When the
+  /// daemon is back, the open conversation is read again, in its own scope (AUD-025).
+  void _onDaemonState() {
+    final ready = client.state.value is DaemonReady;
+    if (!ready) {
+      if (_daemonLost) return;
+      _daemonLost = true;
+      for (final MapEntry(key: id, value: c) in _cache.entries) {
+        if (c.running) {
+          final last = c.events.lastOrNull;
+          c.interrupted = [
+            ...c.interrupted,
+            (
+              seq: last?.seq ?? 0,
+              turn: last?.turn ?? 0,
+              text: c.streaming + (_pendingDelta[id] ?? ''),
+            ),
+          ];
+        }
+        c.running = false;
+        c.streaming = '';
+      }
+      _pendingDelta.clear();
+      approvals = const [];
+      sessions = [
+        for (final x in sessions)
+          if (x.running) _withRunning(x, false) else x,
+      ];
+      if (activeId != null && active.running) active.running = false;
+      notifyListeners();
+      return;
+    }
+    if (!_daemonLost) return;
+    _daemonLost = false;
+    if (scope == Scope.workspace && !workspace.isOpen) {
+      _reopenWhenOpen = true; // the folder is being opened again (AppState.restartBackend)
+      return;
+    }
+    final id = activeId;
+    if (id != null) unawaited(open(id));
+  }
+
+  SessionInfo _withRunning(SessionInfo s, bool running) => SessionInfo(
+    sessionId: s.sessionId,
+    title: s.title,
+    providerId: s.providerId,
+    model: s.model,
+    createdMs: s.createdMs,
+    updatedMs: s.updatedMs,
+    pendingApprovals: s.pendingApprovals,
+    running: running,
+  );
 
   final DaemonClient client;
   final WorkspaceStore workspace;
@@ -367,14 +464,23 @@ class AgentStore extends ChangeNotifier {
 
   void _onWorkspace() {
     final id = workspace.isOpen ? workspace.id : null;
-    if (id == _lastWs) return;
+    // A folder switch passes through "no folder" while the next one opens, and so does a daemon
+    // restart until the folder is open again: neither is a reason to leave the folder's scope
+    // (AUD-092, AUD-025).
+    if (id == null && (workspace.opening || !client.isReady)) return;
+    // The new daemon may give the folder the id it had (w1): it is read again all the same.
+    if (id == _lastWs && !(_reopenWhenOpen && id != null)) return;
     _lastWs = id;
     context = const [];
     if (id == null && scope == Scope.workspace) {
+      _reopenWhenOpen = false;
       newChat(Scope.general);
-    } else if (status != 'idle') {
-      unawaited(refreshSessions());
+      return;
     }
+    final reopen = _reopenWhenOpen ? activeId : null;
+    _reopenWhenOpen = false;
+    if (reopen != null) unawaited(open(reopen));
+    if (status != 'idle') unawaited(refreshSessions());
   }
 
   /// Loads providers and conversations (Chat's first open, or after a change).
@@ -460,7 +566,9 @@ class AgentStore extends ChangeNotifier {
 
   Future<void> open(String id) async {
     activeId = id;
-    active = _cache[id] ?? Conversation();
+    // Cached before the call, so events the daemon sends ahead of its answer are kept and merged
+    // (AUD-088).
+    active = _cache.putIfAbsent(id, Conversation.new);
     sendError = '';
     notifyListeners();
     try {
@@ -478,6 +586,7 @@ class AgentStore extends ChangeNotifier {
         events: [...r.events, ...extra],
         streaming: prev?.streaming ?? '',
         running: r.session.running,
+        interrupted: prev?.interrupted ?? const [],
       );
       _cache[id] = conv;
       approvals = [...approvals.where((a) => a.sessionId != id), ...?r.pending];
@@ -810,13 +919,18 @@ class AgentStore extends ChangeNotifier {
   List<Item> items() {
     final c = active;
     final memo = _itemsMemo;
-    if (memo != null && identical(memo.$1, c) && memo.$2 == c.events.length) return memo.$3;
-    final items = transcript(c.events);
-    _itemsMemo = (c, c.events.length, items);
+    if (memo != null &&
+        identical(memo.$1, c) &&
+        memo.$2 == c.events.length &&
+        identical(memo.$3, c.interrupted)) {
+      return memo.$4;
+    }
+    final items = transcript(c.events, interrupted: c.interrupted);
+    _itemsMemo = (c, c.events.length, c.interrupted, items);
     return items;
   }
 
-  (Conversation, int, List<Item>)? _itemsMemo;
+  (Conversation, int, List<Interruption>, List<Item>)? _itemsMemo;
 
   void _patch(String id, {List<AgentEvent>? events, String? streaming, bool? running}) {
     final c = _cache.putIfAbsent(id, Conversation.new);
@@ -896,6 +1010,7 @@ class AgentStore extends ChangeNotifier {
       off();
     }
     workspace.removeListener(_onWorkspace);
+    client.state.removeListener(_onDaemonState);
     super.dispose();
   }
 }

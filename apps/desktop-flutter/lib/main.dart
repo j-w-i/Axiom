@@ -19,6 +19,7 @@ import 'ui/tokens.dart';
 
 /// Axiom's desktop shell (ADR-0020).
 Future<void> main(List<String> argv) async {
+  final entered = DateTime.now().microsecondsSinceEpoch;
   WidgetsFlutterBinding.ensureInitialized();
   final args = AppArgs.parse(argv);
   if (args.gallery) {
@@ -33,7 +34,40 @@ Future<void> main(List<String> argv) async {
     exit(code);
   }
   runApp(AxiomApp(app: app));
-  unawaited(app.start());
+  if (Platform.environment['AXIOM_STARTUP_TRACE'] == '1') {
+    unawaited(startupTrace(app, entered));
+  } else {
+    unawaited(app.start());
+  }
+}
+
+/// `AXIOM_STARTUP_TRACE=1` (scripts/perf.sh, audit AUD-061): prints, on stderr, when `main` was
+/// entered, when the first frame was rasterised, when the daemon was ready and (with
+/// `AXIOM_STARTUP_OPEN=<folder>`) when that folder was listed, as microseconds since the epoch;
+/// then quits after `AXIOM_STARTUP_HOLD_MS` (default 1500), so the harness can sample the idle
+/// process meanwhile.
+Future<void> startupTrace(AppState app, int entered) async {
+  void mark(String what) =>
+      stderr.writeln('AXIOM_STARTUP $what=${DateTime.now().microsecondsSinceEpoch}');
+  stderr.writeln('AXIOM_STARTUP main=$entered');
+  unawaited(WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) => mark('first_frame')));
+  await app.start();
+  mark('ready');
+  final folder = Platform.environment['AXIOM_STARTUP_OPEN'];
+  if (folder != null && folder.isNotEmpty) {
+    await app.workspace.openFolder(folder);
+    while (app.workspace.isOpen && !app.workspace.rootLoaded) {
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+    }
+    mark('folder');
+    final file = Platform.environment['AXIOM_STARTUP_FILE'];
+    if (file != null && file.isNotEmpty) await app.documents.open(file);
+  }
+  stderr.writeln('AXIOM_STARTUP pids shell=$pid daemon=${app.client.pid}');
+  final hold = int.tryParse(Platform.environment['AXIOM_STARTUP_HOLD_MS'] ?? '') ?? 1500;
+  await Future<void>.delayed(Duration(milliseconds: hold));
+  await app.shutdown();
+  exit(0);
 }
 
 /// Starts the daemon, waits for `initialize`, prints `connected <daemon> <version> <protocol>`

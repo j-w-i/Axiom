@@ -19,8 +19,12 @@ changes from implementation tasks go in `proposed/` as change requests.
 | [0012](ADR-0012-desktop-shell-tauri.md) | Desktop shell on Tauri 2 + React; Qt retired after a gated migration | Superseded by 0020 (shell); the process split stands |
 | [0013](ADR-0013-visual-identity.md) | Visual identity "Precision Instrument": material grammar, generated themes, motion policy, M1.6 scope rule; OFL font assets | Accepted (amended by 0020) |
 | [0014](ADR-0014-environments-and-builds.md) | Environments and builds (M2): protocol additions, dependencies, install approval | Accepted |
-| [0015](ADR-0015-agent-runtime-m3.md) | Agent runtime (M3): protocol 0.3, crates, credentials, checkpoints, clients, MCP | Accepted |
-| [0016](ADR-0016-external-agents-acp-m3.md) | External agents (Claude Code, Codex, Gemini CLI) through ACP | Accepted |
+| [0015](ADR-0015-agent-runtime-m3.md) | Agent runtime (M3): protocol 0.3, crates, credentials, checkpoints, clients, MCP | Accepted (amended by 0023) |
+| [0016](ADR-0016-external-agents-acp-m3.md) | External agents (Claude Code, Codex, Gemini CLI) through ACP | Accepted (amended by 0023) |
 | [0017](ADR-0017-chat-first-class-surface.md) | Chat is a first-class surface, not only a dock | Accepted (amended by 0020) |
 | [0018](ADR-0018-editor-depth-m4.md) | Editor depth (M4): protocol 0.4, language servers, terminal, Git, search | Accepted |
+| [0019](ADR-0019-visual-intelligence-m5.md) | Visual intelligence (M5): protocol 0.5, injected web adapter, no CDP | Accepted |
 | [0020](ADR-0020-flutter-shell.md) | The desktop shell moves to Flutter; Tauri retired after a gated migration | Accepted, implemented (FL-QA-001) |
+| [0021](ADR-0021-every-language-m5-5.md) | Every language (M5.5): servers by language, ask before installing | Accepted (amended by 0023) |
+| [0022](ADR-0022-workspace-file-operations.md) | Workspace file operations: protocol 0.6 create, rename, trash; nothing overwritten or deleted permanently | Accepted (resolves CR-AUD-022) |
+| [0023](ADR-0023-agent-gate-trust-supply-chain.md) | What an approval covers, untrusted folders, supply chain | Accepted (resolves CR-AUD-SEC) |

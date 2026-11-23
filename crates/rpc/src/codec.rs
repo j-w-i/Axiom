@@ -60,13 +60,45 @@ fn strip_cr(buf: &mut Vec<u8>) {
     }
 }
 
-/// Parses a line; the error is the response-ready `RpcError`.
-pub(crate) fn parse_message(line: &[u8]) -> Result<Message, RpcError> {
-    let value: Value = serde_json::from_slice(line)
-        .map_err(|e| RpcError::new(ErrorKind::ParseError, format!("Invalid JSON: {e}.")))?;
+/// Parses a line; the error is the response-ready `RpcError` with the id to answer: the
+/// message's own when it is a request whose id can be read (JSON-RPC 2.0 §5: `null` only when
+/// the id cannot be determined; AUD-096), else `None`. A message without `method` is never
+/// answered with its id: it may be a malformed response, and answering it could loop.
+pub(crate) fn parse_message(line: &[u8]) -> Result<Message, (Option<RequestId>, RpcError)> {
+    let value: Value = serde_json::from_slice(line).map_err(|e| {
+        (
+            None,
+            RpcError::new(ErrorKind::ParseError, format!("Invalid JSON: {e}.")),
+        )
+    })?;
+    let id = value
+        .as_object()
+        .filter(|o| o.contains_key("method"))
+        .and_then(|o| o.get("id"))
+        .and_then(|id| serde_json::from_value::<RequestId>(id.clone()).ok());
     serde_json::from_value(value).map_err(|e| {
-        RpcError::new(ErrorKind::InvalidRequest, "Not a valid JSON-RPC message.")
-            .with_details(serde_json::json!({ "reason": e.to_string() }))
+        (
+            id,
+            RpcError::new(ErrorKind::InvalidRequest, "Not a valid JSON-RPC message.")
+                .with_details(serde_json::json!({ "reason": e.to_string() })),
+        )
+    })
+}
+
+/// A line longer than [`MAX_LINE`] is a fatal protocol error for the peer (ipc.md §Transport):
+/// such a response is replaced by a `too_large` error for its id (AUD-100).
+fn too_large(id: Option<RequestId>, len: usize) -> String {
+    encode(&Response {
+        jsonrpc: JsonRpcVersion::V2,
+        id,
+        result: None,
+        error: Some(
+            RpcError::new(
+                ErrorKind::TooLarge,
+                "The response is larger than the protocol's 64 MiB line limit.",
+            )
+            .with_details(serde_json::json!({ "bytes": len, "limit": MAX_LINE })),
+        ),
     })
 }
 
@@ -83,27 +115,49 @@ pub(crate) fn encode<T: serde::Serialize>(msg: &T) -> String {
 }
 
 pub(crate) fn response_ok(id: RequestId, result: Value) -> String {
-    encode(&Response {
+    let line = encode(&Response {
         jsonrpc: JsonRpcVersion::V2,
-        id: Some(id),
+        id: Some(id.clone()),
         result: Some(result),
         error: None,
-    })
+    });
+    if line.len() - 1 > MAX_LINE {
+        tracing::error!(
+            "the response to {id:?} is {} bytes: sent as too_large",
+            line.len()
+        );
+        return too_large(Some(id), line.len() - 1);
+    }
+    line
 }
 
 pub(crate) fn response_err(id: Option<RequestId>, error: RpcError) -> String {
-    encode(&Response {
+    let line = encode(&Response {
         jsonrpc: JsonRpcVersion::V2,
-        id,
+        id: id.clone(),
         result: None,
         error: Some(error),
-    })
+    });
+    if line.len() - 1 > MAX_LINE {
+        return too_large(id, line.len() - 1);
+    }
+    line
 }
 
-pub(crate) fn notification_line(method: &str, params: Value) -> String {
-    encode(&WireNotification {
+/// The notification's line, or `None` if it would exceed [`MAX_LINE`] (it is dropped: a peer
+/// would have to close the connection on it).
+pub(crate) fn notification_line(method: &str, params: Value) -> Option<String> {
+    let line = encode(&WireNotification {
         jsonrpc: JsonRpcVersion::V2,
         method: method.to_string(),
         params: Some(params),
-    })
+    });
+    if line.len() - 1 > MAX_LINE {
+        tracing::error!(
+            "a {method} notification of {} bytes was dropped",
+            line.len()
+        );
+        return None;
+    }
+    Some(line)
 }

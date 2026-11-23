@@ -6,7 +6,7 @@
 
 import 'protocol_runtime.dart';
 
-const protocolVersion = '0.5';
+const protocolVersion = '0.6';
 
 final class Accessibility implements Wire {
   const Accessibility({this.description, this.name, this.role});
@@ -797,6 +797,59 @@ enum ConflictReason {
   );
 
   String toJson() => wire;
+}
+
+/// `fs/createDirectory` (0.6).
+final class CreateDirectoryParams implements Wire {
+  const CreateDirectoryParams({this.parents, required this.path, required this.workspaceId});
+
+  /// Also create missing parent directories (`mkdir -p`).
+  final bool? parents;
+  final WorkspacePath path;
+  final WorkspaceId workspaceId;
+
+  static CreateDirectoryParams fromJson(Object? json) {
+    final m = asMap(json);
+    return CreateDirectoryParams(
+      parents: m['parents'] == null ? null : m['parents'] as bool,
+      path: m['path'] as String,
+      workspaceId: m['workspaceId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    if (parents != null) 'parents': parents!,
+    'path': path,
+    'workspaceId': workspaceId,
+  };
+}
+
+/// `fs/createFile` (0.6).
+final class CreateFileParams implements Wire {
+  const CreateFileParams({required this.path, this.text, required this.workspaceId});
+
+  final WorkspacePath path;
+
+  /// The new file's content; empty when absent.
+  final String? text;
+  final WorkspaceId workspaceId;
+
+  static CreateFileParams fromJson(Object? json) {
+    final m = asMap(json);
+    return CreateFileParams(
+      path: m['path'] as String,
+      text: m['text'] == null ? null : m['text'] as String,
+      workspaceId: m['workspaceId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {
+    'path': path,
+    if (text != null) 'text': text!,
+    'workspaceId': workspaceId,
+  };
 }
 
 final class CreateParams implements Wire {
@@ -1828,6 +1881,7 @@ final class GitStatus implements Wire {
     this.branch,
     this.files,
     this.head,
+    this.polling,
     this.reason,
     required this.repo,
     this.upstream,
@@ -1843,6 +1897,11 @@ final class GitStatus implements Wire {
   /// The commit HEAD points at (abbreviated), when there is one.
   final String? head;
 
+  /// Protocol 0.6 (additive, AUD-012): no file watch could be made for this repository (the
+  /// system's watch limit, for example), so its changes are looked for every few seconds and
+  /// `git/didChange` comes late. Absent (false) otherwise.
+  final bool? polling;
+
   /// Why `repo` is false: `git` not found, or not a repository.
   final String? reason;
   final bool repo;
@@ -1856,6 +1915,7 @@ final class GitStatus implements Wire {
       branch: m['branch'] == null ? null : m['branch'] as String,
       files: m['files'] == null ? null : [for (final x in asList(m['files'])) GitFile.fromJson(x)],
       head: m['head'] == null ? null : m['head'] as String,
+      polling: m['polling'] == null ? null : m['polling'] as bool,
       reason: m['reason'] == null ? null : m['reason'] as String,
       repo: m['repo'] as bool,
       upstream: m['upstream'] == null ? null : m['upstream'] as String,
@@ -1869,6 +1929,7 @@ final class GitStatus implements Wire {
     if (branch != null) 'branch': branch!,
     if (files != null) 'files': [for (final x in files!) x.toJson()],
     if (head != null) 'head': head!,
+    if (polling != null) 'polling': polling!,
     if (reason != null) 'reason': reason!,
     'repo': repo,
     if (upstream != null) 'upstream': upstream!,
@@ -3530,6 +3591,27 @@ final class RelatedInfo implements Wire {
 
   @override
   Map<String, Object?> toJson() => {'location': location.toJson(), 'message': message};
+}
+
+/// `fs/rename` (0.6).
+final class RenameParams implements Wire {
+  const RenameParams({required this.from, required this.to, required this.workspaceId});
+
+  final WorkspacePath from;
+  final WorkspacePath to;
+  final WorkspaceId workspaceId;
+
+  static RenameParams fromJson(Object? json) {
+    final m = asMap(json);
+    return RenameParams(
+      from: m['from'] as String,
+      to: m['to'] as String,
+      workspaceId: m['workspaceId'] as String,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'from': from, 'to': to, 'workspaceId': workspaceId};
 }
 
 final class RequestParams implements Wire {
@@ -5408,6 +5490,22 @@ final class ToolsResult implements Wire {
   };
 }
 
+/// `fs/trash` (0.6).
+final class TrashParams implements Wire {
+  const TrashParams({required this.path, required this.workspaceId});
+
+  final WorkspacePath path;
+  final WorkspaceId workspaceId;
+
+  static TrashParams fromJson(Object? json) {
+    final m = asMap(json);
+    return TrashParams(path: m['path'] as String, workspaceId: m['workspaceId'] as String);
+  }
+
+  @override
+  Map<String, Object?> toJson() => {'path': path, 'workspaceId': workspaceId};
+}
+
 final class TrustParams implements Wire {
   const TrustParams({required this.trusted, required this.workspaceId});
 
@@ -5920,11 +6018,21 @@ abstract final class Methods {
     'env/versions',
     VersionsResult.fromJson,
   );
+  static const fsCreateDirectory = Method<CreateDirectoryParams, Empty>(
+    'fs/createDirectory',
+    Empty.fromJson,
+  );
+  static const fsCreateFile = Method<CreateFileParams, WriteFileResult>(
+    'fs/createFile',
+    WriteFileResult.fromJson,
+  );
   static const fsList = Method<ListParams, ListResult>('fs/list', ListResult.fromJson);
   static const fsReadFile = Method<ReadFileParams, ReadFileResult>(
     'fs/readFile',
     ReadFileResult.fromJson,
   );
+  static const fsRename = Method<RenameParams, Empty>('fs/rename', Empty.fromJson);
+  static const fsTrash = Method<TrashParams, Empty>('fs/trash', Empty.fromJson);
   static const fsWatch = Method<WatchParams, Empty>('fs/watch', Empty.fromJson);
   static const fsWriteFile = Method<WriteFileParams, WriteFileResult>(
     'fs/writeFile',

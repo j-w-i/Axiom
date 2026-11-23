@@ -1,6 +1,7 @@
 // Output (FL-CONSOLE-001): the run prompt (Enter runs, ↑↓ walk the history), the task's output
-// with stdout and stderr told apart, its exit status, Stop, Rerun and Clear; and the title row's
-// transport (what runs, for how long, how fast it writes, Stop; Rerun when idle).
+// with stdout and stderr told apart, its exit status, Stop, Rerun and Clear; long lines wrap
+// (a toggle; AUD-058); and the title row's transport (what runs, for how long, how fast it
+// writes, Stop; Rerun when idle).
 
 import 'dart:async';
 
@@ -103,9 +104,10 @@ class OutputViewState extends State<OutputView> {
     final c = t.colors;
     final tasks = app.tasks;
     return ListenableBuilder(
-      listenable: Listenable.merge([tasks, app.workspace]),
+      listenable: Listenable.merge([tasks, app.workspace, app.prefs]),
       builder: (context, _) {
         final rows = tasks.rows;
+        final wrap = app.prefs.flag(wrapKey, true);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -146,6 +148,13 @@ class OutputViewState extends State<OutputView> {
                       onPressed: tasks.canRun ? _run : null,
                     ),
                   const SizedBox(width: Metrics.s2),
+                  AxIconButton(
+                    icon: AxiomIcons.wrap,
+                    label: wrap ? 'Wrap long lines: on' : 'Wrap long lines: off',
+                    selected: wrap,
+                    onPressed: () => app.prefs.set(wrapKey, !wrap),
+                  ),
+                  const SizedBox(width: Metrics.s2),
                   AxButton(
                     label: 'Clear',
                     kind: ButtonKind.quiet,
@@ -173,8 +182,11 @@ class OutputViewState extends State<OutputView> {
                         focusNode: _selection,
                         child: ListView.builder(
                           controller: _scroll,
-                          itemExtent: 19,
-                          padding: const EdgeInsets.fromLTRB(Metrics.s4, 0, Metrics.s4, 8),
+                          // Wrapped rows vary in height; unwrapped ones are one line each.
+                          itemExtent: wrap
+                              ? null
+                              : context.scaled(19, fontSize: 12, lineHeight: 17.4),
+                          padding: const EdgeInsets.fromLTRB(Metrics.s4, 0, Metrics.s4, Metrics.s4),
                           itemCount: rows.length + (tasks.dropped > 0 ? 1 : 0),
                           itemBuilder: (context, i) {
                             if (tasks.dropped > 0 && i == 0) {
@@ -184,7 +196,7 @@ class OutputViewState extends State<OutputView> {
                               );
                             }
                             final r = rows[i - (tasks.dropped > 0 ? 1 : 0)];
-                            return OutputLine(row: r);
+                            return OutputLine(row: r, wrap: wrap);
                           },
                         ),
                       ),
@@ -197,9 +209,15 @@ class OutputViewState extends State<OutputView> {
   }
 }
 
+/// The preference that wraps Output's long lines (on unless turned off).
+const wrapKey = 'output.wrap';
+
 class OutputLine extends StatelessWidget {
-  const OutputLine({super.key, required this.row});
+  const OutputLine({super.key, required this.row, this.wrap = true});
   final OutputRow row;
+
+  /// Long lines wrap (all of the text shows); off, a line is clipped at the view's edge.
+  final bool wrap;
 
   @override
   Widget build(BuildContext context) {
@@ -221,9 +239,9 @@ class OutputLine extends StatelessWidget {
       child: Text(
         row.text,
         style: style,
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.clip,
+        maxLines: wrap ? null : 1,
+        softWrap: wrap,
+        overflow: wrap ? null : TextOverflow.clip,
       ),
     );
   }
@@ -267,19 +285,32 @@ class TransportState extends State<Transport> {
     super.initState();
     app.tasks.addListener(_changed);
     app.environments.addListener(_changed);
+    _window.addListener(_changed);
   }
 
+  final _window = WindowActivity.instance.active;
+  bool _tickActive = true;
+
+  /// The meter samples at 4 Hz while the window is active; in the background only the elapsed
+  /// time moves, once a second, and the meter rests (performance.md P9; AUD-080).
   void _changed() {
-    if (app.tasks.running && _tick == null) {
-      _rates.fillRange(0, _rates.length, 0);
-      _lastSeq = app.tasks.outputSeq;
-      _tick = Timer.periodic(const Duration(milliseconds: 250), (_) {
+    final active = _window.value;
+    if (app.tasks.running && (_tick == null || _tickActive != active)) {
+      _tick?.cancel();
+      if (_tick == null) {
+        _rates.fillRange(0, _rates.length, 0);
+        _lastSeq = app.tasks.outputSeq;
+      }
+      _tickActive = active;
+      _tick = Timer.periodic(Duration(milliseconds: active ? 250 : 1000), (_) {
         if (!mounted) return;
         final seq = app.tasks.outputSeq;
         setState(() {
-          _rates
-            ..removeAt(0)
-            ..add(seq - _lastSeq);
+          if (_tickActive) {
+            _rates
+              ..removeAt(0)
+              ..add(seq - _lastSeq);
+          }
           _lastSeq = seq;
         });
       });
@@ -293,6 +324,7 @@ class TransportState extends State<Transport> {
   @override
   void dispose() {
     _tick?.cancel();
+    _window.removeListener(_changed);
     app.tasks.removeListener(_changed);
     app.environments.removeListener(_changed);
     super.dispose();
@@ -315,10 +347,10 @@ class TransportState extends State<Transport> {
           mainAxisSize: MainAxisSize.min,
           children: [
             StatusDot(DotState.running, ring: c.bar),
-            const SizedBox(width: 6),
+            const SizedBox(width: Metrics.s3),
             Text('Installing ${install.name}', style: t.type.small.copyWith(color: c.ink2)),
             if (install.progress != null) ...[
-              const SizedBox(width: 6),
+              const SizedBox(width: Metrics.s3),
               Text(
                 '${install.progress!.step + 1}/${install.progress!.steps}',
                 style: t.type.numeric,
@@ -351,7 +383,7 @@ class TransportState extends State<Transport> {
         mainAxisSize: MainAxisSize.min,
         children: [
           StatusDot(lamp, ring: c.bar),
-          const SizedBox(width: 6),
+          const SizedBox(width: Metrics.s3),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 220),
             child: Text(
@@ -360,9 +392,12 @@ class TransportState extends State<Transport> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (time != null) ...[const SizedBox(width: 6), Text(time, style: t.type.numeric)],
+          if (time != null) ...[
+            const SizedBox(width: Metrics.s3),
+            Text(time, style: t.type.numeric),
+          ],
           if (tasks.running) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: Metrics.s3),
             ExcludeSemantics(
               child: SizedBox(
                 width: 16 * 3.0,
@@ -384,7 +419,7 @@ class TransportState extends State<Transport> {
               ),
             ),
           ],
-          const SizedBox(width: 4),
+          const SizedBox(width: Metrics.s2),
           if (tasks.running)
             AxIconButton(
               icon: AxiomIcons.stop,

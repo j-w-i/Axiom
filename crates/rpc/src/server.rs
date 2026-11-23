@@ -112,8 +112,8 @@ where
         }
         let msg = match codec::parse_message(line) {
             Ok(m) => m,
-            Err(e) => {
-                let _ = tx.send(Out::Line(codec::response_err(None, e))).await;
+            Err((id, e)) => {
+                let _ = tx.send(Out::Line(codec::response_err(id, e))).await;
                 continue;
             }
         };
@@ -199,6 +199,9 @@ where
     let _ = tx.send(Out::Stop).await;
     drop(tx);
     let _ = writer_task.await;
+    for hook in &router.disconnect_hooks {
+        hook(notifier.clone()).await;
+    }
     result
 }
 
@@ -353,6 +356,13 @@ async fn dispatch(
     }
     let ctx = RequestCtx::new(cancel, notifier.clone());
     let after = ctx.after.clone();
+    let discarded = ctx.discarded.clone();
+    // The handler succeeded but its answer was replaced by `cancelled`: undo (AUD-098).
+    let run_discarded = move || {
+        for f in std::mem::take(&mut *lock(&discarded)) {
+            tokio::spawn(f);
+        }
+    };
     let fut = handler(params_or_empty(params), ctx);
     let in_flight = in_flight.clone();
     let tx = tx.clone();
@@ -376,6 +386,9 @@ async fn dispatch(
                 let still_ours = lock(&in_flight).remove(&id).is_some();
                 if !still_ours {
                     permit.send(Out::Line(codec::response_err(Some(id), cancelled_error())));
+                    if outcome.is_ok() {
+                        run_discarded();
+                    }
                     return;
                 }
                 match outcome {
@@ -390,8 +403,10 @@ async fn dispatch(
                 }
             }
             _ = cancelled_rx => {
-                if tokio::time::timeout(CANCEL_GRACE, &mut handle).await.is_err() {
-                    handle.abort();
+                match tokio::time::timeout(CANCEL_GRACE, &mut handle).await {
+                    Ok(Ok(Ok(_))) => run_discarded(),
+                    Ok(_) => {}
+                    Err(_) => handle.abort(),
                 }
                 let _ = tx
                     .send(Out::Line(codec::response_err(Some(id), cancelled_error())))

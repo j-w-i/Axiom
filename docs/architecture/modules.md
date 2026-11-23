@@ -15,7 +15,6 @@ crates/
   workspace/               workspace registry, fs access, watching         M1
   exec/                    process supervision                             M1
   axiomd/                  daemon binary: wires services to methods        M1
-  desktop-bridge/          daemon process + protocol 0.1 client for a GUI  M1.5 (no shell links it since FL-QA-001)
   env/                     provider registry, detection, installation      M2
   build/                   task templates, diagnostics parsing             M2
   agent/                   model providers, agent loop, tools, permissions M3
@@ -144,28 +143,12 @@ before the task that needs them** (no empty scaffolding).
 - **Status:** M1 implementation, superseded by ADR-0012. Kept building and
   tested until task T-15; no new features.
 
-### `crates/desktop-bridge` — `axiom-desktop-bridge`
-- **Responsibility:** act as the GUI's protocol-0.1 *client*: locate and spawn
-  `axiomd`, one JSON message per line over its stdio, correlate ids, deliver
-  notifications, enforce per-request timeouts (`$/cancel` on expiry), answer
-  every request exactly once, detect process failure, restart, and shut down
-  in bounded time (`docs/architecture/processes.md` §Daemon lifecycle).
-- **Depends on:** `axiom-protocol` (envelope types and the method registry),
-  `tokio`, `serde_json`. Nothing else.
-- **Must not know:** Tauri, any GUI toolkit, or any domain service. It must not
-  interpret payloads beyond the envelope.
-- **Public interface:** `DaemonBridge` (`start`, `request`, `request_forward`,
-  `cancel_forward`, `restart`, `shutdown`, `state`), `BridgeConfig`,
-  `BridgeEvent`, `DaemonState`, `locate_daemon`, `ui_callable`.
-- **Rule:** requests the UI may issue are forwarded as events into the same
-  ordered stream as notifications, so a client sees the `task/start` response
-  before that task's first `task/output`.
-- **Tests:** `tests/bridge.rs` against the real `axiomd` binary (concurrency,
-  ordering, cancel, timeout, crash, restart, shutdown, missing binary).
-- **Status:** the Tauri host was its only user; since FL-QA-001 no shell links it. It stays in
-  the Cargo workspace and `scripts/check.sh rust` still runs its tests, which pin the daemon's
-  lifecycle from a client's side. The Flutter shell's Dart client keeps the same observable
-  behaviour (`apps/desktop-flutter/lib/daemon/client.dart`).
+### `crates/desktop-bridge` — removed
+The Tauri shell's Rust daemon client (ADR-0012, M1.5). No shell linked it after FL-QA-001, so it
+was removed (audit AUD-102, 2026-11-23); the daemon-side lifecycle behaviours its tests pinned
+are in `crates/axiomd/tests/lifecycle.rs`, and the client lifecycle lives in the Flutter shell's
+Dart client (`apps/desktop-flutter/lib/daemon/client.dart`, tested by
+`test/daemon/client_test.dart`). Recover it from tag `tauri-shell-final`.
 
 ### `apps/desktop-tauri` — Tauri 2 shell
 - **Status:** retired by FL-QA-001 (2026-11-22, ADR-0020): removed from the tree and from the
@@ -252,7 +235,8 @@ before the task that needs them** (no empty scaffolding).
   and result bounding, the permission gate and audit log, checkpoints (shadow git), the session
   journal and compaction, the loop, and the MCP codec (server and client halves).
 - **Depends on:** `protocol`, `store`; `reqwest` (rustls), `keyring`, `tokio`, `serde_json`,
-  `futures-util` (ADR-0015 §3). Runs the `git` program for checkpoints.
+  `futures-util` (ADR-0015 §3); `nix` on Unix (killing an external agent's or MCP server's
+  process group, as `exec` does; review D2). Runs the `git` program for checkpoints.
 - **Must not know:** the workspace, exec, env or build crates. Tools reach services only through
   the closures `axiomd` registers (`modules.md` rule "agent → none").
 - **Rule:** no tool executes without a gate decision; no write without a checkpoint.
@@ -321,22 +305,21 @@ no new edge.
 
 ## Dependency matrix (allowed edges)
 
-| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | lsp | term | inspect | desktop-bridge | axiomd |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
-| lsp       | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
-| term      | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
-| inspect   | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
-| desktop-bridge | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
-| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | – |
-| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| From ↓ / To → | protocol | rpc | store | workspace | exec | env | build | agent | lsp | term | inspect | axiomd |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| protocol  | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| rpc       | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| store     | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| workspace | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| exec      | ✓ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| env       | ✓ | ✗ | ✓ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| build     | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | – | ✗ | ✗ | ✗ | ✗ | ✗ |
+| agent     | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ | ✗ |
+| lsp       | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ | ✗ |
+| term      | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | ✗ |
+| inspect   | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ |
+| axiomd    | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| cli       | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
 
 The `env` and `build` rows are ADR-0014 §4; the `agent` and `cli` rows are ADR-0015 §2; the
 `lsp` and `term` rows and `axiomd → lsp, term` are ADR-0018 §7; the `inspect` row and
@@ -351,12 +334,7 @@ wire-format changes.
 
 The Flutter shell is not a Cargo package and has no row: its only edge is the wire protocol
 (its types are generated from `schemas/`). The `desktop-tauri` row (→ `desktop-bridge` only)
-went with the Tauri shell.
-
-`desktop-bridge` is a GUI-side client and deliberately does not depend on
-`axiom-rpc` (which serves the *server* side of the same framing); a future task
-may share the codec, which would add one edge and is then an architecture
-change to record here.
+went with the Tauri shell, and the `desktop-bridge` row with that crate (AUD-102).
 
 `scripts/check.sh` enforces this matrix (`scripts/check_deps.py`, via
 `cargo metadata`).

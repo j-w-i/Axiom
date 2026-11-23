@@ -4,7 +4,6 @@ use axiom_protocol::fs::{DirEntry, EntryKind, FileVersion, ReadFileResult, MAX_T
 use axiom_protocol::{WorkspaceId, WorkspacePath};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -23,7 +22,7 @@ pub struct Workspace {
     pub(crate) inner: Arc<Inner>,
 }
 
-fn version_of(bytes: &[u8]) -> FileVersion {
+pub(crate) fn version_of(bytes: &[u8]) -> FileVersion {
     let digest = Sha256::digest(bytes);
     let mut s = String::with_capacity(64);
     for b in digest {
@@ -32,7 +31,7 @@ fn version_of(bytes: &[u8]) -> FileVersion {
     FileVersion(s)
 }
 
-fn join_err(e: tokio::task::JoinError) -> WsError {
+pub(crate) fn join_err(e: tokio::task::JoinError) -> WsError {
     WsError::Io(std::io::Error::other(e))
 }
 
@@ -127,6 +126,98 @@ impl Workspace {
         Ok(result)
     }
 
+    /// [`Self::resolve`]d and made relative to the root again: the path a file really has in the
+    /// workspace, through any symlink inside it (`link/hooks/x` with `link -> .git` is
+    /// `.git/hooks/x`). What the agent gate judges (AUD-104, review B4).
+    pub fn canonical_path(&self, path: &WorkspacePath) -> Result<WorkspacePath, WsError> {
+        let abs = self.resolve(path)?;
+        let rel = abs
+            .strip_prefix(&self.inner.root)
+            .map_err(|_| WsError::Escapes(display_path(&path.0)))?;
+        let mut parts = Vec::new();
+        for c in rel.components() {
+            match c {
+                Component::Normal(s) => parts.push(s.to_string_lossy().into_owned()),
+                _ => return Err(WsError::Escapes(display_path(&path.0))),
+            }
+        }
+        Ok(WorkspacePath(parts.join("/")))
+    }
+
+    /// A host path as the workspace path it is, through any symlink, when it is inside the
+    /// workspace (the root itself is the empty path); `None` outside it, or not valid Unicode.
+    /// What exists is resolved as the disk does, a part that does not exist yet is taken as
+    /// written. For paths git names (the agent gate, review E2). Blocking.
+    pub fn workspace_path_of(&self, abs: &Path) -> Option<WorkspacePath> {
+        let mut real = PathBuf::new();
+        let mut exists = true;
+        for c in abs.components() {
+            match c {
+                Component::Prefix(_) | Component::RootDir => real.push(c),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    real.pop();
+                }
+                Component::Normal(n) => {
+                    real.push(n);
+                    if exists {
+                        match dunce::canonicalize(&real) {
+                            Ok(r) => real = r,
+                            Err(_) => exists = false,
+                        }
+                    }
+                }
+            }
+        }
+        let rel = real.strip_prefix(&self.inner.root).ok()?;
+        let mut parts = Vec::new();
+        for c in rel.components() {
+            match c {
+                Component::Normal(s) => parts.push(s.to_str()?.to_string()),
+                _ => return None,
+            }
+        }
+        if parts.is_empty() {
+            return Some(WorkspacePath(String::new()));
+        }
+        self.canonical_path(&WorkspacePath(parts.join("/"))).ok()
+    }
+
+    /// Right before an operation, under its lock: `path` must still resolve to `abs`, the host
+    /// path it had when the operation started (`entry`: resolved as an entry, its own name not
+    /// followed), and, with `judged`, be the workspace path the agent gate judged when the call
+    /// was prepared ([`Self::canonical_path`]). A directory on the way that was replaced since
+    /// (by a symlink, say) is [`WsError::Changed`] (review N14, R5).
+    pub(crate) fn recheck(
+        &self,
+        path: &WorkspacePath,
+        abs: &Path,
+        entry: bool,
+        judged: Option<&WorkspacePath>,
+    ) -> Result<(), WsError> {
+        let now = if entry {
+            self.resolve_entry(path)?
+        } else {
+            self.resolve(path)?
+        };
+        if now != abs {
+            return Err(WsError::Changed(display_path(&path.0)));
+        }
+        if let Some(judged) = judged {
+            let rel = abs
+                .strip_prefix(&self.inner.root)
+                .map_err(|_| WsError::Escapes(display_path(&path.0)))?;
+            let rel: Vec<String> = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            if rel.join("/") != judged.0 {
+                return Err(WsError::Changed(display_path(&path.0)));
+            }
+        }
+        Ok(())
+    }
+
     pub async fn list(&self, dir: &WorkspacePath) -> Result<Vec<DirEntry>, WsError> {
         let ws = self.clone();
         let dir = dir.clone();
@@ -194,19 +285,7 @@ impl Workspace {
         let file = file.clone();
         tokio::task::spawn_blocking(move || {
             let abs = ws.resolve(&file)?;
-            let md = std::fs::metadata(&abs).map_err(|e| WsError::from_io(e, &file.0))?;
-            if md.is_dir() {
-                return Err(WsError::IsADirectory(display_path(&file.0)));
-            }
-            if md.len() > MAX_TEXT_FILE_BYTES {
-                return Err(WsError::TooLarge { bytes: md.len() });
-            }
-            let bytes = std::fs::read(&abs).map_err(|e| WsError::from_io(e, &file.0))?;
-            if bytes.len() as u64 > MAX_TEXT_FILE_BYTES {
-                return Err(WsError::TooLarge {
-                    bytes: bytes.len() as u64,
-                });
-            }
+            let bytes = ws.read_resolved(&abs, &file.0, MAX_TEXT_FILE_BYTES)?;
             let version = version_of(&bytes);
             let text = String::from_utf8(bytes)
                 .map_err(|_| WsError::UnsupportedEncoding(display_path(&file.0)))?;
@@ -216,7 +295,28 @@ impl Workspace {
         .map_err(join_err)?
     }
 
-    fn lock_for(&self, abs: &Path) -> Arc<tokio::sync::Mutex<()>> {
+    /// Reads the regular file at `abs` (resolved by [`Self::resolve`]). On Unix through its
+    /// directory opened without following symlinks, so a directory swapped for a symlink since
+    /// the path was resolved cannot redirect the read (review N14).
+    pub(crate) fn read_resolved(
+        &self,
+        abs: &Path,
+        rel: &str,
+        limit: u64,
+    ) -> Result<Vec<u8>, WsError> {
+        #[cfg(unix)]
+        {
+            let (parent, name) = split(abs, rel)?;
+            crate::beneath::Dir::open_beneath(&self.inner.root, parent, rel)?
+                .read_regular(name, rel, limit)
+        }
+        #[cfg(not(unix))]
+        {
+            read_regular(abs, rel, limit)
+        }
+    }
+
+    pub(crate) fn lock_for(&self, abs: &Path) -> Arc<tokio::sync::Mutex<()>> {
         let mut map = self
             .inner
             .file_locks
@@ -234,6 +334,26 @@ impl Workspace {
         file: &WorkspacePath,
         expected: &FileVersion,
     ) -> Result<(), WsError> {
+        self.remove_file_inner(file, None, expected).await
+    }
+
+    /// [`Self::remove_file`], refused ([`WsError::Changed`]) unless `file` is still `judged`,
+    /// the path the agent gate judged when the call was prepared (review R5).
+    pub async fn remove_file_checked(
+        &self,
+        file: &WorkspacePath,
+        judged: &WorkspacePath,
+        expected: &FileVersion,
+    ) -> Result<(), WsError> {
+        self.remove_file_inner(file, Some(judged), expected).await
+    }
+
+    async fn remove_file_inner(
+        &self,
+        file: &WorkspacePath,
+        judged: Option<&WorkspacePath>,
+        expected: &FileVersion,
+    ) -> Result<(), WsError> {
         let abs = {
             let (ws, file) = (self.clone(), file.clone());
             tokio::task::spawn_blocking(move || ws.resolve(&file))
@@ -242,21 +362,12 @@ impl Workspace {
         };
         let lock = self.lock_for(&abs);
         let _guard = lock.lock().await;
-        let rel = file.0.clone();
+        let ws = self.clone();
+        let (file2, judged) = (file.clone(), judged.cloned());
         let expected = expected.clone();
         tokio::task::spawn_blocking(move || {
-            let md = std::fs::symlink_metadata(&abs).map_err(|e| WsError::from_io(e, &rel))?;
-            if md.is_dir() {
-                return Err(WsError::IsADirectory(display_path(&rel)));
-            }
-            let bytes = std::fs::read(&abs).map_err(|e| WsError::from_io(e, &rel))?;
-            let current = version_of(&bytes);
-            if current != expected {
-                return Err(WsError::Conflict {
-                    current: Some(current),
-                });
-            }
-            std::fs::remove_file(&abs).map_err(|e| WsError::from_io(e, &rel))
+            ws.recheck(&file2, &abs, false, judged.as_ref())?;
+            remove_blocking(ws.root(), &abs, &file2.0, &expected)
         })
         .await
         .map_err(join_err)??;
@@ -268,6 +379,32 @@ impl Workspace {
     pub async fn write_text(
         &self,
         file: &WorkspacePath,
+        text: &str,
+        expected: Option<&FileVersion>,
+        overwrite: bool,
+    ) -> Result<FileVersion, WsError> {
+        self.write_text_inner(file, None, text, expected, overwrite)
+            .await
+    }
+
+    /// [`Self::write_text`], refused ([`WsError::Changed`]) unless `file` is still `judged`,
+    /// the path the agent gate judged when the call was prepared (review R5).
+    pub async fn write_text_checked(
+        &self,
+        file: &WorkspacePath,
+        judged: &WorkspacePath,
+        text: &str,
+        expected: Option<&FileVersion>,
+        overwrite: bool,
+    ) -> Result<FileVersion, WsError> {
+        self.write_text_inner(file, Some(judged), text, expected, overwrite)
+            .await
+    }
+
+    async fn write_text_inner(
+        &self,
+        file: &WorkspacePath,
+        judged: Option<&WorkspacePath>,
         text: &str,
         expected: Option<&FileVersion>,
         overwrite: bool,
@@ -292,9 +429,19 @@ impl Workspace {
         let lock = self.lock_for(&abs);
         let _guard = lock.lock().await;
 
-        let rel = file.0.clone();
+        let judged = judged.cloned();
+        let ws2 = ws.clone();
+        let file2 = file.clone();
         let version = tokio::task::spawn_blocking(move || {
-            write_blocking(&abs, &rel, &bytes, expected.as_ref(), overwrite)
+            ws2.recheck(&file2, &abs, false, judged.as_ref())?;
+            write_blocking(
+                ws2.root(),
+                &abs,
+                &file2.0,
+                &bytes,
+                expected.as_ref(),
+                overwrite,
+            )
         })
         .await
         .map_err(join_err)??;
@@ -303,11 +450,58 @@ impl Workspace {
     }
 }
 
+/// Reads a regular file of at most `limit` bytes (`TooLarge` beyond). Anything else (a FIFO, a
+/// device, a socket) is refused without blocking: on Unix the file is opened non-blocking and
+/// checked after opening, so a FIFO swapped in after a check cannot hang a thread either; the
+/// read itself stops after `limit + 1` bytes whatever the size claimed (AUD-097).
+pub(crate) fn read_regular(abs: &Path, rel: &str, limit: u64) -> Result<Vec<u8>, WsError> {
+    use std::io::Read;
+    let md = std::fs::metadata(abs).map_err(|e| WsError::from_io(e, rel))?;
+    if md.is_dir() {
+        return Err(WsError::IsADirectory(display_path(rel)));
+    }
+    if !md.is_file() {
+        return Err(WsError::NotAFile(display_path(rel)));
+    }
+    if md.len() > limit {
+        return Err(WsError::TooLarge { bytes: md.len() });
+    }
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
+    }
+    let f = opts.open(abs).map_err(|e| WsError::from_io(e, rel))?;
+    let md = f.metadata().map_err(|e| WsError::from_io(e, rel))?;
+    if !md.is_file() {
+        return Err(WsError::NotAFile(display_path(rel)));
+    }
+    let mut bytes = Vec::with_capacity(md.len().min(limit) as usize);
+    f.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|e| WsError::from_io(e, rel))?;
+    if bytes.len() as u64 > limit {
+        return Err(WsError::TooLarge {
+            bytes: bytes.len() as u64,
+        });
+    }
+    Ok(bytes)
+}
+
+/// [`read_regular`] for a host path outside any workspace (a language server's location, read
+/// only through `fs/readFile`'s allow list); `shown` names it in errors.
+pub fn read_regular_file(abs: &Path, shown: &str, limit: u64) -> Result<Vec<u8>, WsError> {
+    read_regular(abs, shown, limit)
+}
+
 /// Renames the temp file over the target. On Windows a replace can fail with
 /// access-denied while another process (an indexer, a virus scanner, or a reader
 /// that has not closed its handle yet) still has the destination open; retrying
 /// briefly is what every Windows editor does. On Unix `rename` either succeeds or
 /// fails for a reason that retrying cannot fix.
+#[cfg(not(unix))]
 fn persist_with_retry(tmp: tempfile::NamedTempFile, abs: &Path, rel: &str) -> Result<(), WsError> {
     #[cfg(windows)]
     {
@@ -336,7 +530,115 @@ fn persist_with_retry(tmp: tempfile::NamedTempFile, abs: &Path, rel: &str) -> Re
     }
 }
 
-fn write_blocking(
+/// The directory and the name of a resolved path (never the root: it has no parent). Used by
+/// the operations that act in a directory opened without following symlinks (Unix only).
+#[cfg(unix)]
+pub(crate) fn split<'a>(
+    abs: &'a Path,
+    rel: &str,
+) -> Result<(&'a Path, &'a std::ffi::OsStr), WsError> {
+    match (abs.parent(), abs.file_name()) {
+        (Some(p), Some(n)) => Ok((p, n)),
+        _ => Err(WsError::IsADirectory(display_path(rel))),
+    }
+}
+
+/// The `fs/writeFile` decision table and the write itself, in the file's directory opened
+/// without following symlinks (review N14): the temp file, the version check and the rename
+/// all act in that directory, so a directory on the way that is swapped for a symlink cannot
+/// redirect them. The rename replaces the entry, so a hard link to the file elsewhere keeps its
+/// old content (review R5).
+#[cfg(unix)]
+pub(crate) fn write_blocking(
+    root: &Path,
+    abs: &Path,
+    rel: &str,
+    bytes: &[u8],
+    expected: Option<&FileVersion>,
+    overwrite: bool,
+) -> Result<FileVersion, WsError> {
+    use rustix::fs::FileType;
+    let (parent, name) = split(abs, rel)?;
+    let dir = crate::beneath::Dir::open_beneath(root, parent, rel)?;
+    let existing = dir.kind_of(name, rel)?;
+    match &existing {
+        Some(k) if k.is_dir() => return Err(WsError::IsADirectory(display_path(rel))),
+        // `resolve` followed it, so it was not a symlink then.
+        Some(k) if k.file_type == FileType::Symlink => {
+            return Err(WsError::Changed(display_path(rel)))
+        }
+        _ => {}
+    }
+    if !overwrite {
+        let current = match &existing {
+            Some(_) => Some(version_of(&dir.read_regular(name, rel, u64::MAX)?)),
+            None => None,
+        };
+        let allowed = match (&current, expected) {
+            (None, None) => true,
+            (Some(cur), Some(exp)) => cur == exp,
+            _ => false,
+        };
+        if !allowed {
+            return Err(WsError::Conflict { current });
+        }
+    }
+    let tmp = dir.temp_with(bytes, existing.as_ref().map(|k| k.mode), rel)?;
+    tmp.rename_to(name, true)
+        .map_err(|e| WsError::from_io(e, rel))?;
+    Ok(version_of(bytes))
+}
+
+/// [`Workspace::remove_file`]'s check and removal, in the file's directory opened without
+/// following symlinks (review N14).
+#[cfg(unix)]
+pub(crate) fn remove_blocking(
+    root: &Path,
+    abs: &Path,
+    rel: &str,
+    expected: &FileVersion,
+) -> Result<(), WsError> {
+    let (parent, name) = split(abs, rel)?;
+    let dir = crate::beneath::Dir::open_beneath(root, parent, rel)?;
+    match dir.kind_of(name, rel)? {
+        None => return Err(WsError::NotFound(display_path(rel))),
+        Some(k) if k.is_dir() => return Err(WsError::IsADirectory(display_path(rel))),
+        Some(_) => {}
+    }
+    // A FIFO or a device is refused rather than read (it could block).
+    let current = version_of(&dir.read_regular(name, rel, u64::MAX)?);
+    if current != *expected {
+        return Err(WsError::Conflict {
+            current: Some(current),
+        });
+    }
+    dir.unlink(name, rel)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn remove_blocking(
+    _root: &Path,
+    abs: &Path,
+    rel: &str,
+    expected: &FileVersion,
+) -> Result<(), WsError> {
+    let md = std::fs::symlink_metadata(abs).map_err(|e| WsError::from_io(e, rel))?;
+    if md.is_dir() {
+        return Err(WsError::IsADirectory(display_path(rel)));
+    }
+    // A FIFO or a device is refused rather than read (it could block).
+    let current = version_of(&read_regular(abs, rel, u64::MAX)?);
+    if current != *expected {
+        return Err(WsError::Conflict {
+            current: Some(current),
+        });
+    }
+    std::fs::remove_file(abs).map_err(|e| WsError::from_io(e, rel))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn write_blocking(
+    _root: &Path,
     abs: &Path,
     rel: &str,
     bytes: &[u8],
@@ -360,9 +662,7 @@ fn write_blocking(
 
     if !overwrite {
         let current = match &existing_meta {
-            Some(_) => Some(version_of(
-                &std::fs::read(abs).map_err(|e| WsError::from_io(e, rel))?,
-            )),
+            Some(_) => Some(version_of(&read_regular(abs, rel, u64::MAX)?)),
             None => None,
         };
         let allowed = match (&current, expected) {
@@ -386,7 +686,7 @@ fn write_blocking(
     let mut tmp = builder
         .tempfile_in(parent)
         .map_err(|e| WsError::from_io(e, rel))?;
-    tmp.write_all(bytes).map_err(|e| WsError::from_io(e, rel))?;
+    std::io::Write::write_all(&mut tmp, bytes).map_err(|e| WsError::from_io(e, rel))?;
     tmp.as_file()
         .sync_all()
         .map_err(|e| WsError::from_io(e, rel))?;

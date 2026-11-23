@@ -7,13 +7,59 @@
 //! - a symbolic link's target must be relative and stay inside the root, resolved lexically from
 //!   the link's own directory; hard links must name an earlier regular file inside the root;
 //! - devices, FIFOs and other special entries are skipped;
-//! - permissions keep only the `rwx` bits (no setuid, setgid or sticky).
+//! - permissions keep only the `rwx` bits (no setuid, setgid or sticky);
+//! - what is written is bounded ([`Limits`]): a decompression bomb fills no disk (AUD-108).
 
 use crate::error::EnvError;
 use axiom_protocol::provider::ArchiveFormat;
+use std::cell::Cell;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+
+/// How much one extraction may write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub bytes: u64,
+    pub entries: u64,
+}
+
+impl Limits {
+    /// For a verified archive of `size` bytes: 50 times its size (more than any toolchain
+    /// archive expands to), between 1 GiB and 32 GiB, and a million entries.
+    pub fn for_archive(size: u64) -> Limits {
+        Limits {
+            bytes: size.saturating_mul(50).clamp(1 << 30, 32 << 30),
+            entries: 1_000_000,
+        }
+    }
+}
+
+/// What is left of the limits while extracting.
+struct Budget {
+    bytes: Cell<u64>,
+    entries: Cell<u64>,
+}
+
+impl Budget {
+    fn new(l: Limits) -> Budget {
+        Budget {
+            bytes: Cell::new(l.bytes),
+            entries: Cell::new(l.entries),
+        }
+    }
+
+    fn entry(&self) -> Result<(), EnvError> {
+        let left = self.entries.get();
+        if left == 0 {
+            return Err(EnvError::UnsafeArchive(
+                "the archive has more entries than an install may have".into(),
+            ));
+        }
+        self.entries.set(left - 1);
+        Ok(())
+    }
+}
 
 /// Extracts `archive` into the existing, empty directory `root`, dropping the first
 /// `strip_components` path components of every entry. `cancelled` is polled between entries.
@@ -27,6 +73,31 @@ pub fn extract(
     root: &Path,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<u64, EnvError> {
+    let size = std::fs::metadata(archive)
+        .map_err(EnvError::io("Cannot open the downloaded archive"))?
+        .len();
+    extract_limited(
+        archive,
+        format,
+        strip_components,
+        file_name,
+        root,
+        cancelled,
+        Limits::for_archive(size),
+    )
+}
+
+/// [`extract`] with explicit limits.
+pub fn extract_limited(
+    archive: &Path,
+    format: ArchiveFormat,
+    strip_components: u32,
+    file_name: &str,
+    root: &Path,
+    cancelled: &dyn Fn() -> bool,
+    limits: Limits,
+) -> Result<u64, EnvError> {
+    let budget = Budget::new(limits);
     let n = extract_entries(
         archive,
         format,
@@ -34,6 +105,7 @@ pub fn extract(
         file_name,
         root,
         cancelled,
+        &budget,
     )?;
     links_stay_inside(root)?;
     Ok(n)
@@ -84,6 +156,7 @@ fn extract_entries(
     file_name: &str,
     root: &Path,
     cancelled: &dyn Fn() -> bool,
+    budget: &Budget,
 ) -> Result<u64, EnvError> {
     let file = File::open(archive).map_err(EnvError::io("Cannot open the downloaded archive"))?;
     match format {
@@ -98,7 +171,7 @@ fn extract_entries(
                     "unusable file name `{file_name}`"
                 )));
             }
-            write_file(&root.join(rel), file, Some(0o755))?;
+            write_file(&root.join(rel), file, Some(0o755), budget)?;
             Ok(1)
         }
         ArchiveFormat::Gz => {
@@ -116,6 +189,7 @@ fn extract_entries(
                 &root.join(rel),
                 flate2::read::GzDecoder::new(file),
                 Some(0o755),
+                budget,
             )?;
             Ok(1)
         }
@@ -124,14 +198,16 @@ fn extract_entries(
             strip_components,
             root,
             cancelled,
+            budget,
         ),
         ArchiveFormat::TarXz => extract_tar(
             xz2::read::XzDecoder::new(file),
             strip_components,
             root,
             cancelled,
+            budget,
         ),
-        ArchiveFormat::Zip => extract_zip(file, strip_components, root, cancelled),
+        ArchiveFormat::Zip => extract_zip(file, strip_components, root, cancelled, budget),
     }
 }
 
@@ -216,7 +292,12 @@ fn create_parent(path: &Path) -> Result<(), EnvError> {
     Ok(())
 }
 
-fn write_file(path: &Path, mut data: impl Read, mode: Option<u32>) -> Result<(), EnvError> {
+fn write_file(
+    path: &Path,
+    data: impl Read,
+    mode: Option<u32>,
+    budget: &Budget,
+) -> Result<(), EnvError> {
     create_parent(path)?;
     // A previous entry of the same name is replaced, never followed.
     if let Ok(md) = std::fs::symlink_metadata(path) {
@@ -229,7 +310,16 @@ fn write_file(path: &Path, mut data: impl Read, mode: Option<u32>) -> Result<(),
         std::fs::remove_file(path).map_err(EnvError::io("Cannot replace a file"))?;
     }
     let mut out = File::create(path).map_err(EnvError::io("Cannot create a file"))?;
-    io::copy(&mut data, &mut out).map_err(EnvError::io("Cannot extract a file"))?;
+    let left = budget.bytes.get();
+    // One byte more than is left tells "exactly the budget" from "over it".
+    let written = io::copy(&mut data.take(left.saturating_add(1)), &mut out)
+        .map_err(EnvError::io("Cannot extract a file"))?;
+    if written > left {
+        return Err(EnvError::UnsafeArchive(
+            "the archive expands to more than an install may take".into(),
+        ));
+    }
+    budget.bytes.set(left - written);
     set_mode(path, mode)?;
     Ok(())
 }
@@ -279,6 +369,7 @@ fn extract_tar(
     strip: u32,
     root: &Path,
     cancelled: &dyn Fn() -> bool,
+    budget: &Budget,
 ) -> Result<u64, EnvError> {
     let mut ar = tar::Archive::new(reader);
     let mut count = 0;
@@ -288,6 +379,7 @@ fn extract_tar(
             return Err(EnvError::Cancelled);
         }
         let mut entry = entry.map_err(bad)?;
+        budget.entry()?;
         let raw = String::from_utf8_lossy(&entry.path_bytes()).into_owned();
         let Some(rel) = entry_path(&raw, strip)? else {
             continue;
@@ -299,7 +391,7 @@ fn extract_tar(
         if kind.is_dir() {
             std::fs::create_dir_all(&path).map_err(EnvError::io("Cannot create a directory"))?;
         } else if kind.is_file() {
-            write_file(&path, &mut entry, mode)?;
+            write_file(&path, &mut entry, mode, budget)?;
         } else if kind.is_symlink() {
             let target = entry
                 .link_name_bytes()
@@ -343,6 +435,7 @@ fn extract_zip(
     strip: u32,
     root: &Path,
     cancelled: &dyn Fn() -> bool,
+    budget: &Budget,
 ) -> Result<u64, EnvError> {
     let bad =
         |e: zip::result::ZipError| EnvError::UnsafeArchive(format!("unreadable archive: {e}"));
@@ -353,6 +446,7 @@ fn extract_zip(
             return Err(EnvError::Cancelled);
         }
         let mut f = ar.by_index(i).map_err(bad)?;
+        budget.entry()?;
         let raw = f.name().map_err(bad)?.into_owned();
         let Some(rel) = entry_path(&raw, strip)? else {
             continue;
@@ -372,7 +466,7 @@ fn extract_zip(
                 .map_err(|e| EnvError::UnsafeArchive(format!("unreadable link `{raw}`: {e}")))?;
             symlink(root, &rel, &target)?;
         } else {
-            write_file(&path, &mut f, mode)?;
+            write_file(&path, &mut f, mode, budget)?;
         }
         count += 1;
     }
@@ -439,6 +533,55 @@ mod tests {
         let root2 = dir.path().join("root2");
         std::fs::create_dir(&root2).unwrap();
         assert!(extract(&gz, ArchiveFormat::Gz, 0, "a/b", &root2, &|| false).is_err());
+    }
+
+    /// A small archive that expands to more than the limit stops at the limit (AUD-108).
+    #[test]
+    fn a_decompression_bomb_stops_at_the_limit() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let tgz = dir.path().join("bomb.tar.gz");
+        let gz =
+            flate2::write::GzEncoder::new(File::create(&tgz).unwrap(), flate2::Compression::best());
+        let mut tar = tar::Builder::new(gz);
+        let size = 64 * 1024 * 1024u64;
+        let mut h = tar::Header::new_gnu();
+        h.set_size(size);
+        h.set_mode(0o644);
+        h.set_cksum();
+        tar.append_data(&mut h, "zeros", io::repeat(0).take(size))
+            .unwrap();
+        for i in 0..20 {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(1);
+            h.set_mode(0o644);
+            h.set_cksum();
+            tar.append_data(&mut h, format!("f{i}"), &b"x"[..]).unwrap();
+        }
+        tar.into_inner().unwrap().finish().unwrap().flush().unwrap();
+        let limited = |bytes, entries| {
+            let root = tempfile::tempdir_in(dir.path()).unwrap();
+            extract_limited(
+                &tgz,
+                ArchiveFormat::TarGz,
+                0,
+                "",
+                root.path(),
+                &|| false,
+                Limits { bytes, entries },
+            )
+        };
+        assert!(matches!(
+            limited(1024 * 1024, 100),
+            Err(EnvError::UnsafeArchive(_))
+        ));
+        assert!(matches!(
+            limited(1 << 30, 5),
+            Err(EnvError::UnsafeArchive(_))
+        ));
+        assert_eq!(limited(1 << 30, 100).unwrap(), 21);
+        assert_eq!(Limits::for_archive(10).bytes, 1 << 30);
+        assert_eq!(Limits::for_archive(1 << 40).bytes, 32 << 30);
     }
 
     #[test]

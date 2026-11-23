@@ -18,6 +18,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     {
         lsp::spawn_forwarder(&app);
         terminal::spawn_forwarder(&app);
+        sessions::spawn_idle_reaper(&app);
     }
 
     macro_rules! wire {
@@ -43,7 +44,7 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(axiom_protocol::ui::Highlight, ui::highlight);
     wire!(axiom_protocol::ui::Verify, ui::verify);
     wire!(pws::Open, workspace::open, ctx);
-    wire!(pws::Close, workspace::close);
+    wire!(pws::Close, workspace::close, ctx);
     wire!(pws::Recent, workspace::recent);
     wire!(pws::GetState, workspace::get_state);
     wire!(pws::SetState, workspace::set_state);
@@ -63,6 +64,10 @@ pub fn build_router(app: Arc<App>) -> Router {
     wire!(pfs::ReadFile, fs::read_file);
     wire!(pfs::WriteFile, fs::write_file);
     wire!(pfs::Watch, fs::watch, ctx);
+    wire!(pfs::CreateFile, fs::create_file);
+    wire!(pfs::CreateDirectory, fs::create_directory);
+    wire!(pfs::Rename, fs::rename);
+    wire!(pfs::Trash, fs::trash);
     wire!(ptask::Start, task::start, ctx);
     wire!(ptask::Cancel, task::cancel);
     wire!(ptask::ListTasks, task::list);
@@ -103,17 +108,46 @@ pub fn build_router(app: Arc<App>) -> Router {
             a.agent.approvers.add(notifier);
         }
     });
+    let a = app.clone();
+    r.on_disconnect(move |n| workspace::release_connection(a.clone(), n));
     let a = app;
     r.on_shutdown(move || {
         let a = a.clone();
         async move {
             a.stop_all_watchers();
-            a.terminals.close_all();
-            // Together: the shell gives the daemon a few seconds before it kills it.
-            tokio::join!(a.lsp.stop_all(), a.executor.shutdown());
+            git::stop_all_watches(&a);
+            // Together: the shell gives the daemon a few seconds before it kills it. Terminals
+            // are waited for (their SIGKILL escalation must run before the process exits,
+            // AUD-027); external agents and MCP servers are stopped explicitly.
+            let terms = a.clone();
+            let terminals =
+                tokio::task::spawn_blocking(move || terms.terminals.close_all_and_wait());
+            let _ = tokio::join!(
+                a.lsp.stop_all(),
+                a.executor.shutdown(),
+                stop_agents(&a),
+                terminals
+            );
         }
     });
     r
+}
+
+/// Ends the external agents (ACP) and MCP servers of every session. Bounded: a map held by a
+/// handshake in progress is not waited for long (the processes die with their handles).
+async fn stop_agents(a: &App) {
+    const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+    if let Ok(mut m) = tokio::time::timeout(LOCK_WAIT, a.agent.acp.lock()).await {
+        let sessions: Vec<_> = m.drain().map(|(_, s)| s).collect();
+        drop(m);
+        for s in sessions {
+            let _ = tokio::time::timeout(LOCK_WAIT, s.kill()).await;
+        }
+    }
+    if let Ok(mut m) = tokio::time::timeout(LOCK_WAIT, a.agent.mcp.lock()).await {
+        // `kill_on_drop`: dropping the clients ends the servers.
+        m.clear();
+    }
 }
 
 /// Protocol methods registered by a milestone's first task whose handlers later tasks add. Each

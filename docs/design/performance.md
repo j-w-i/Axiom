@@ -103,6 +103,20 @@ P6 cold open equally in the pre-redesign build. Numbers, causes and owners:
 
 ### 4.1 Existing harness
 
+**The Flutter shell (since the audit of 2026-11-22, AUD-061):**
+- `apps/desktop-flutter/scripts/frames.sh` — frame timings of the interactions (P3, P4, P5, P11
+  and typing), in a profile build at the owner's 125 %.
+- `scripts/perf.sh [--runs N]` (or `scripts/check.sh perf`) — startup cold and warm (exec →
+  `main`, first frame, daemon ready, folder listed; the shell's `AXIOM_STARTUP_TRACE=1` hook),
+  idle CPU and PSS of the release app with a folder and a document (P7, P10), and the
+  profile-mode probe `integration_test/perf_probe_test.dart` (memory over repeated open/close,
+  a 100 000-line file, search with thousands of hits, a console flood, typing under streaming
+  output: P1, P11, P12). Results: `target/perf/<host>-<time>.json` with the load average.
+  Compare builds by running each, interleaved, on the same machine.
+
+The rest of this section describes the retired Tauri harness (`apps/desktop-tauri/bench`, tag
+`tauri-shell-final`), kept as the record of how the earlier numbers were taken:
+
 `apps/desktop-tauri/bench/run.sh --runs 3 --heavy-runs 3` (quote the `medians`
 block and the load average). Results go to `bench/results/` with the host name.
 

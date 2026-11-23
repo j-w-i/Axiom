@@ -231,10 +231,27 @@ pub fn validate(m: &ProviderManifest) -> Vec<String> {
                 if packages.values().all(Vec::is_empty) {
                     errors.push(format!("{at}: no packages listed"));
                 }
+                for (manager, list) in packages {
+                    for p in list {
+                        if !valid_package(p) {
+                            errors.push(format!("{at}: `{p}` is not a package name for {manager}"));
+                        }
+                    }
+                }
             }
         }
     }
     errors
+}
+
+/// A package name an elevated package manager can be given: a letter or digit first (never
+/// `-`, which the manager would read as an option), then letters, digits and `+._:@/-`
+/// (AUD-105). Covers apt, dnf, pacman, Homebrew (`owner/tap/name`) and winget ids.
+pub fn valid_package(p: &str) -> bool {
+    let mut chars = p.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && p.len() <= 200
+        && chars.all(|c| c.is_ascii_alphanumeric() || "+._:@/-".contains(c))
 }
 
 fn check_bin_dirs(dirs: &[String], at: &str, errors: &mut Vec<String>) {
@@ -385,6 +402,32 @@ version = "0.1.0"
         assert_eq!(errs.len(), 2, "{errs:?}");
         assert!(errs.iter().any(|e| e.contains("64 lowercase hex")));
         assert!(errs.iter().any(|e| e.contains("inside the root")));
+    }
+
+    /// A package name that an elevated package manager would read as an option is refused
+    /// (AUD-105).
+    #[test]
+    fn system_package_names_are_validated() {
+        let text = |pkgs: &str| {
+            format!(
+                "{MIN}[[install]]\nkind = \"system_package\"\npackages = {{ apt = [{pkgs}] }}\n"
+            )
+        };
+        assert!(parse(&text("\"build-essential\", \"g++\", \"libc6:amd64\"")).is_ok());
+        for bad in [
+            "\"-oAPT::Update::Pre-Invoke::=sh\"",
+            "\"--option=Dpkg::Pre-Invoke=x\"",
+            "\"a b\"",
+            "\"\"",
+            "\"x;rm\"",
+        ] {
+            let errs = parse(&text(bad)).unwrap_err();
+            assert!(
+                errs.iter().any(|e| e.contains("not a package name")),
+                "{bad}: {errs:?}"
+            );
+        }
+        assert!(valid_package("Kitware.CMake") && valid_package("homebrew/core/cmake"));
     }
 
     #[test]

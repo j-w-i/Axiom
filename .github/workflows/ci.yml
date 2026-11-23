@@ -23,7 +23,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      # crates/desktop-bridge's tests spawn the real daemon binary.
+      # The CLI's tests spawn the real daemon binary.
       - run: cargo build -p axiomd
       # M5-PREVIEW-001: the preview test runs the inspector fixture (React + Vite) in headless
       # Chrome; required on Linux.

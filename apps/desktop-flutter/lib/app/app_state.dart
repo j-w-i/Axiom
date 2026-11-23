@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
@@ -6,6 +7,7 @@ import '../daemon/client.dart';
 import '../editor/lsp/lsp_editor.dart';
 import '../state/agent.dart';
 import '../state/documents.dart';
+import '../state/recovery.dart';
 import '../state/lsp.dart';
 import '../state/problems.dart';
 import '../state/environments.dart';
@@ -52,7 +54,11 @@ class AppState {
   AppState({required this.args, required this.client, required this.prefs})
     : settings = SettingsStore(client),
       workspace = WorkspaceStore(client) {
-    documents = DocumentsStore(client, workspace);
+    documents = DocumentsStore(
+      client,
+      workspace,
+      recovery: RecoveryStore('${args.shellDir()}${Platform.pathSeparator}recovery'),
+    );
     lsp = LspStore(client, workspace);
     lspSync = LspSync(docs: documents, lsp: lsp);
     documents.onSaved = lspSync.saved;
@@ -133,6 +139,9 @@ class AppState {
   /// Focuses the Search page's query (set by the page).
   VoidCallback? focusSearch;
 
+  /// Opens the explorer's menu for its selected row (set by the side bar; AUD-022).
+  VoidCallback? openFileMenu;
+
   /// Focuses the run prompt (set by the Output view).
   VoidCallback? focusRunPrompt;
 
@@ -168,16 +177,24 @@ class AppState {
     await workspace.reopenLast();
   }
 
+  /// Restarts the daemon and reopens the folder that was open, so the documents it kept (with
+  /// their unsaved text) attach to it again (AUD-001).
   Future<void> restartBackend() async {
     final s = await client.restart();
     if (s is DaemonReady) {
       await settings.load();
-      await workspace.reopenLast();
+      final lost = workspace.lostRoot;
+      if (lost.isNotEmpty) {
+        await workspace.openFolder(lost);
+      } else {
+        await workspace.reopenLast();
+      }
     }
   }
 
   /// The quit path: save the shell's state, stop the daemon (bounded).
   Future<void> shutdown() async {
+    await documents.recovery.flush();
     await documents.saveTabState();
     await workspace.flushState();
     await prefs.flush();

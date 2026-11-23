@@ -109,6 +109,18 @@ Methods and their errors: `ipc.md` §Protocol 0.2.
 - `system_package` plans always need explicit approval and run the package
   manager through the platform's elevation prompt (pkexec/sudo/UAC). Axiom
   never caches elevated credentials.
+  Package names must start with a letter or digit and hold only letters, digits and
+  `+._:@/-` (manifest validation, AUD-105); apt and pacman get `--` before them.
+- **Checksums** (AUD-107). A `sha256_url` checksum file comes from the artifact's own origin:
+  it detects corruption, not a compromised release. Artifact and checksum URLs name one release
+  (never a moving `latest`; the contract test `no_artifact_or_checksum_tracks_latest` enforces
+  it for built-ins); the digest first verified for a URL is kept in `<data dir>/cache/pins.json`
+  and a later, different one is refused. A bootstrap archive (`provides`) names its release in
+  its URLs, because `${version}` there is the delegate's version (uv 0.9.0, rustup 1.28.2).
+- **Limits** (AUD-108): an extraction writes at most 50 × the archive's size (1–32 GiB) and a
+  million entries; a download at most its `Content-Length` + 1 MiB, never over 8 GiB.
+- Version probes, `list_versions` and system package managers run in `<data dir>/work`
+  (private, empty), never the shared temp directory (AUD-044).
 - A project selects its environment in `.axiom/project.toml`
   (`[environment] rust = "1.84.0"`), which is human-readable and committed.
   The resolved lock (exact versions + digests) is `.axiom/project.lock`.

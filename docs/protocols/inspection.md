@@ -105,7 +105,7 @@ are enforced (`MappingMethod::max_confidence`, tested). Rules:
 
 | Method | Notes |
 |--------|-------|
-| `inspect/hello` | token check; returns `Capabilities` |
+| `inspect/hello` | token check (and, at the WebSocket handshake, an `Origin` that is absent or `http(s)` on a loopback host, else 403; AUD-043); returns `Capabilities`. A page becomes the preview's session only once the previous page has gone (a reload; waits up to 3 s), never by replacing a live one |
 | `inspect/snapshot` | flat node list, parents first; `maxNodes` default 5000; sets `truncated` instead of failing |
 | `inspect/hitTest` | returns the hit node and its ancestors; `not_found` if empty space |
 | `inspect/nodeDetails` | adds `properties` (framework vocabulary, namespaced keys: `css.margin-left`, `qml.anchors.leftMargin`) |
@@ -146,7 +146,11 @@ Two cooperating parts; see ADR-0008 for why both.
 
    **Inspect mode** (`inspect/setMode`): with it on, the adapter takes the pointer: hover
    highlights the element under it (`inspect/hovered`), and a click selects it
-   (`inspect/selected`, the node and its ancestors) and is not passed to the app.
+   (`inspect/selected`, the node and its ancestors) and is not passed to the app. A hover is
+   resolved without the workspace text search; a selection searches, off the runtime's
+   workers, with results cached until the page reloads (AUD-042). The plugin serves the adapter
+   module (which carries the token) only to the dev server's own page (`Sec-Fetch-Site`
+   `same-origin`/`none`, else 403; AUD-043).
 
 Without the build plugin the web adapter still gives Level 2, and the daemon
 adds `sourceMap` candidates for CSS rules and `heuristic` candidates for

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import axiom, { loadBabel, stamp } from "../plugin.mjs";
+import axiom, { adapterRequestAllowed, loadBabel, stamp } from "../plugin.mjs";
 
 const root = "/proj";
 const file = path.join(root, "src/App.jsx");
@@ -90,4 +90,44 @@ test("with Babel the transform stamps; it warns once and passes through without 
   assert.equal(await q.transform.call(ctx, "<p/>", "/x/A.jsx"), null);
   assert.equal(await q.transform.call(ctx, "<p/>", "/x/B.jsx"), null);
   assert.equal(warnings.length, 1);
+});
+
+test("the adapter module (it holds the token) is served to the dev server's own page only", () => {
+  assert.equal(adapterRequestAllowed({ "sec-fetch-site": "same-origin", host: "127.0.0.1:5173" }), true);
+  assert.equal(adapterRequestAllowed({ "sec-fetch-site": "none" }), true);
+  assert.equal(adapterRequestAllowed({ "sec-fetch-site": "cross-site", origin: "https://evil.example" }), false);
+  assert.equal(adapterRequestAllowed({ "sec-fetch-site": "same-site" }), false);
+  assert.equal(adapterRequestAllowed({ host: "127.0.0.1:5173", origin: "https://evil.example" }), false);
+  assert.equal(adapterRequestAllowed({ host: "127.0.0.1:5173", origin: "http://127.0.0.1:5173" }), true);
+  assert.equal(adapterRequestAllowed({ host: "127.0.0.1:5173" }), true);
+
+  // The middleware answers 403 for a cross-site request and passes everything else on.
+  const plugin = axiom({ endpoint: "ws://127.0.0.1:1/", token: "t" });
+  let handler;
+  plugin.configureServer({ middlewares: { use: (h) => (handler = h) } });
+  const run = (url, headers) => {
+    const res = { statusCode: 200, end() {} };
+    let passed = false;
+    handler({ url, headers }, res, () => (passed = true));
+    return passed ? "next" : res.statusCode;
+  };
+  assert.equal(run("/@id/__x00__virtual:axiom-adapter", { "sec-fetch-site": "cross-site" }), 403);
+  assert.equal(run("/@id/__x00__virtual:axiom-adapter", { "sec-fetch-site": "same-origin" }), "next");
+  assert.equal(run("/src/App.jsx", { "sec-fetch-site": "cross-site" }), "next");
+
+  // Vite decodes the path before it resolves it (N4): an encoded spelling of the adapter's URL
+  // is refused as well, however it is encoded.
+  const cross = { "sec-fetch-site": "cross-site" };
+  for (const url of [
+    "/@id/__x00__virtual%3Aaxiom-adapter",
+    "/@id/__x00__virtual:axiom%2Dadapter",
+    "/@id/__x00__%76irtual:axiom-adapter?import",
+    "/@id/__x00__virtual:axiom%252Dadapter",
+    "/@id/%5F%5Fx00%5F%5Fvirtual%3Aaxiom%2dadapter",
+  ]) {
+    assert.equal(run(url, cross), 403, url);
+    assert.equal(run(url, { "sec-fetch-site": "same-origin" }), "next", url);
+  }
+  assert.equal(run("/src/100%25.jsx", cross), "next");
+  assert.equal(run("/src/%E0%A4%A.jsx", cross), "next");
 });

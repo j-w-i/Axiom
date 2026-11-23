@@ -36,6 +36,7 @@ pub(crate) type HandlerFn =
 pub(crate) type HookFn = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 pub(crate) type InitHookFn =
     Arc<dyn Fn(&axiom_protocol::lifecycle::InitializeParams, Notifier) + Send + Sync>;
+pub(crate) type DisconnectHookFn = Arc<dyn Fn(Notifier) -> BoxFuture<'static, ()> + Send + Sync>;
 
 /// Method registry. Build once, share via `Arc` across connections.
 #[derive(Default)]
@@ -43,6 +44,7 @@ pub struct Router {
     pub(crate) handlers: HashMap<&'static str, HandlerFn>,
     pub(crate) hooks: Vec<HookFn>,
     pub(crate) init_hooks: Vec<InitHookFn>,
+    pub(crate) disconnect_hooks: Vec<DisconnectHookFn>,
 }
 
 impl Router {
@@ -118,6 +120,19 @@ impl Router {
         self
     }
 
+    /// Called once per connection when it has ended (every connection, the stdio one included),
+    /// with its notifier, which is closed by then: the daemon releases what that connection
+    /// held, e.g. its share of open workspaces (AUD-029).
+    pub fn on_disconnect<F, Fut>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(Notifier) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.disconnect_hooks
+            .push(Arc::new(move |n: Notifier| hook(n).boxed()));
+        self
+    }
+
     /// Registered methods plus `initialize` and `shutdown`, sorted.
     pub fn method_names(&self) -> Vec<String> {
         let mut v: Vec<String> = self.handlers.keys().map(|s| s.to_string()).collect();
@@ -135,6 +150,7 @@ pub struct RequestCtx {
     pub cancel: CancellationToken,
     pub notifier: Notifier,
     pub(crate) after: Arc<Mutex<Vec<BoxFuture<'static, ()>>>>,
+    pub(crate) discarded: Arc<Mutex<Vec<BoxFuture<'static, ()>>>>,
 }
 
 impl RequestCtx {
@@ -143,6 +159,20 @@ impl RequestCtx {
             cancel,
             notifier,
             after: Arc::default(),
+            discarded: Arc::default(),
+        }
+    }
+
+    /// Registers a future that the router spawns only if this request's handler returned `Ok`
+    /// but the client was answered `cancelled` (a `$/cancel` that raced the success). It undoes
+    /// what the handler did that the client will never learn about, e.g. cancels a task it
+    /// started (AUD-098). Never runs together with [`RequestCtx::after_response`]'s futures.
+    pub fn on_discarded<Fut>(&self, fut: Fut)
+    where
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        if let Ok(mut v) = self.discarded.lock() {
+            v.push(fut.boxed());
         }
     }
 
@@ -184,9 +214,28 @@ impl Notifier {
             tracing::error!("failed to serialise {}: {e}", N::NAME);
             Closed
         })?;
-        self.tx
-            .send(Out::Line(codec::notification_line(N::NAME, value)))
-            .await
-            .map_err(|_| Closed)
+        let Some(line) = codec::notification_line(N::NAME, value) else {
+            // Over the frame limit: dropped (logged); the connection is fine.
+            return Ok(());
+        };
+        self.tx.send(Out::Line(line)).await.map_err(|_| Closed)
+    }
+
+    /// Queues a notification only if the connection's queue has room: `Ok(false)` when it is
+    /// full (the peer is not reading). For relays that must not let one slow connection hold up
+    /// the others (AUD-030).
+    pub fn try_notify<N: Notification>(&self, params: N::Params) -> Result<bool, Closed> {
+        let value = serde_json::to_value(params).map_err(|e| {
+            tracing::error!("failed to serialise {}: {e}", N::NAME);
+            Closed
+        })?;
+        let Some(line) = codec::notification_line(N::NAME, value) else {
+            return Ok(true);
+        };
+        match self.tx.try_send(Out::Line(line)) {
+            Ok(()) => Ok(true),
+            Err(mpsc::error::TrySendError::Full(_)) => Ok(false),
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(Closed),
+        }
     }
 }

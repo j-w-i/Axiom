@@ -164,29 +164,51 @@ pub fn decide(
 }
 
 /// `*` matches within a segment, `**` any number of segments, `?` one character.
+///
+/// Linear-time in practice and `O(pattern × path)` at worst, whatever the number of `*`: a
+/// policy comes partly from the repository, so its patterns are untrusted (AUD-106).
 pub fn glob(pattern: &str, path: &str) -> bool {
     let p: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
     let s: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    segs(&p, &s)
-}
-
-fn segs(p: &[&str], s: &[&str]) -> bool {
-    match p.first() {
-        None => s.is_empty(),
-        Some(&"**") => (0..=s.len()).any(|i| segs(&p[1..], &s[i..])),
-        Some(first) => {
-            !s.is_empty() && seg(first.as_bytes(), s[0].as_bytes()) && segs(&p[1..], &s[1..])
-        }
-    }
+    wildcard(
+        &p,
+        &s,
+        |p| *p == "**",
+        |p, s| seg(p.as_bytes(), s.as_bytes()),
+    )
 }
 
 fn seg(p: &[u8], s: &[u8]) -> bool {
-    match p.first() {
-        None => s.is_empty(),
-        Some(b'*') => (0..=s.len()).any(|i| seg(&p[1..], &s[i..])),
-        Some(b'?') => !s.is_empty() && seg(&p[1..], &s[1..]),
-        Some(c) => s.first() == Some(c) && seg(&p[1..], &s[1..]),
+    wildcard(p, s, |c| *c == b'*', |c, x| *c == b'?' || c == x)
+}
+
+/// Wildcard matching over any items: `is_star` items match any run (also empty), others match
+/// one item when `one` says so. The classic greedy match that backtracks only to the last star,
+/// which is exact for a single kind of star.
+fn wildcard<P, S>(
+    p: &[P],
+    s: &[S],
+    is_star: impl Fn(&P) -> bool,
+    one: impl Fn(&P, &S) -> bool,
+) -> bool {
+    let (mut pi, mut si) = (0, 0);
+    let mut back: Option<(usize, usize)> = None;
+    while si < s.len() {
+        if pi < p.len() && is_star(&p[pi]) {
+            back = Some((pi, si));
+            pi += 1;
+        } else if pi < p.len() && one(&p[pi], &s[si]) {
+            pi += 1;
+            si += 1;
+        } else if let Some((bp, bs)) = back {
+            pi = bp + 1;
+            si = bs + 1;
+            back = Some((bp, bs + 1));
+        } else {
+            return false;
+        }
     }
+    p[pi..].iter().all(is_star)
 }
 
 #[derive(serde::Deserialize)]
@@ -257,9 +279,33 @@ mod tests {
             ("src/?.rs", "src/a.rs", true),
             ("src/?.rs", "src/ab.rs", false),
             ("Cargo.toml", "Cargo.toml", true),
+            ("**", "", true),
+            ("**/b/**", "a/b/c", true),
+            ("**/b/**", "a/c", false),
+            ("a/**/c", "a/c", true),
+            ("a/**/c", "a/x/y/c", true),
+            ("a/**/c", "a/x/y/d", false),
+            ("*a*b", "xaxb", true),
+            ("*a*b", "xaxbx", false),
+            ("a*", "a", true),
+            ("", "", true),
+            ("x", "", false),
         ] {
             assert_eq!(glob(p, s), want, "{p} vs {s}");
         }
+    }
+
+    /// A pattern with many stars against a long name finishes at once (AUD-106: the recursive
+    /// matcher took exponential time).
+    #[test]
+    fn glob_is_not_exponential() {
+        let name = "a".repeat(255);
+        let started = std::time::Instant::now();
+        assert!(!glob("*a*a*a*a*a*a*a*a*a*a*a*a*b", &name));
+        let deep = vec!["a"; 200].join("/");
+        assert!(!glob("**/a/**/a/**/a/**/a/**/a/**/b", &deep));
+        assert!(glob("**/a/**/a/**/a/**", &deep));
+        assert!(started.elapsed() < std::time::Duration::from_millis(50));
     }
 
     type Case = (

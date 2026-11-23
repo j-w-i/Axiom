@@ -1,0 +1,374 @@
+{
+  "timings": {
+    "boot_to_ready_ms": 398,
+    "open_folder_to_root_listed_ms": 40,
+    "expand_3000_dir_ms": 187,
+    "open_50k_lines_ms": 523,
+    "big_file_20_flings_ms": 16400,
+    "open_longline_ms": 922,
+    "palette_open_ms": 1232,
+    "go_to_file_query_ms": 746,
+    "search_3000_files_ms": 775,
+    "60_toggles_ms": 9165,
+    "restart_backend_ms": 416,
+    "shutdown_ms": 354
+  },
+  "results": [
+    {
+      "step": "boot (connect to daemon)",
+      "status": "pass",
+      "ms": 1393,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "welcome in dark",
+      "status": "pass",
+      "ms": 1007,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "welcome in light",
+      "status": "pass",
+      "ms": 984,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "File menu opens",
+      "status": "pass",
+      "ms": 1221,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "View menu opens",
+      "status": "pass",
+      "ms": 1149,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "Help menu + About",
+      "status": "pass",
+      "ms": 1149,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "rail with no folder: each destination",
+      "status": "pass",
+      "ms": 8365,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open folder (3000+ files, git)",
+      "status": "pass",
+      "ms": 2051,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "expand many/ (3000 entries) in explorer",
+      "status": "pass",
+      "ms": 1648,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "expand deep path",
+      "status": "framework-errors",
+      "ms": 9668,
+      "detail": null,
+      "frameworkErrors": [
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.",
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.",
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 26 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.",
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.",
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 26 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.",
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex."
+      ]
+    },
+    {
+      "step": "open main.rs from explorer",
+      "status": "pass",
+      "ms": 2034,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open several files (tabs)",
+      "status": "pass",
+      "ms": 2929,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "CRLF file not dirty after open+click",
+      "status": "pass",
+      "ms": 332,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open 50k-line file and scroll",
+      "status": "pass",
+      "ms": 19605,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open 20k-char single line",
+      "status": "pass",
+      "ms": 1484,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open binary file",
+      "status": "pass",
+      "ms": 1364,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "edit + dirty indicator + close prompt",
+      "status": "pass",
+      "ms": 4620,
+      "detail": null,
+      "frameworkErrors": [],
+      "note": "dirty after undo/redo: true"
+    },
+    {
+      "step": "undo/redo",
+      "status": "pass",
+      "ms": 870,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "save via Mod+S",
+      "status": "pass",
+      "ms": 237,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "external change conflict dialog",
+      "status": "pass",
+      "ms": 2965,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "split editor right",
+      "status": "framework-errors",
+      "ms": 2407,
+      "detail": null,
+      "frameworkErrors": [
+        "══╡ EXCEPTION CAUGHT BY FOUNDATION LIBRARY ╞═════════════════════\nThe following assertion was thrown while dispatching\nnotifications for Listenable:\nCannot get renderObject of inactive element.\nIn order for an element to have a valid renderObject, it must be\nactive, which means it is part of the tree.\nInstead, this element is in the _ElementLifecycle.inactive state.\nIf you called this method from a State object, consider guarding\nit with State.mounted.\nThe findRenderObject() method was called for the following\nelement:\n  _CodeField-[GlobalKey#f5238]"
+      ]
+    },
+    {
+      "step": "command palette",
+      "status": "pass",
+      "ms": 4935,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "go to file among 3000 files",
+      "status": "pass",
+      "ms": 1799,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "search: needle across 3000 files",
+      "status": "pass",
+      "ms": 6349,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "source control",
+      "status": "pass",
+      "ms": 4163,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "environments",
+      "status": "pass",
+      "ms": 5067,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "inspector",
+      "status": "pass",
+      "ms": 1699,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "chat with no model configured",
+      "status": "pass",
+      "ms": 1674,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "AI dock",
+      "status": "pass",
+      "ms": 2682,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "console: run a command",
+      "status": "pass",
+      "ms": 6847,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "terminal",
+      "status": "pass",
+      "ms": 5065,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "settings",
+      "status": "pass",
+      "ms": 2353,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "light theme workbench",
+      "status": "pass",
+      "ms": 7430,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "window 1024x700",
+      "status": "pass",
+      "ms": 1332,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "window 800x600",
+      "status": "pass",
+      "ms": 1322,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "window 640x480",
+      "status": "framework-errors",
+      "ms": 1331,
+      "detail": null,
+      "frameworkErrors": [
+        "══╡ EXCEPTION CAUGHT BY WIDGETS LIBRARY ╞════════════════════════\nThe following ArgumentError was thrown building LayoutBuilder:\nInvalid argument(s): 240.0\n\nThe relevant error-causing widget was:\n  LayoutBuilder\n  LayoutBuilder:<audit-copy>/lib/editor/editor_area.dart:76:16\n\nWhen the exception was thrown, this was the stack:\n#0      double.clamp (dart:core-patch/double.dart:225:7)\n#1      EditorAreaState.build.<anonymous closure>.<anonymous closure> (package:axiom_desktop/editor/editor_area.dart:78:56)\n#2      _LayoutBuilderElement._rebuildWithConstraints.updateChildCallback (package:flutter/src/widgets/layout_builder.dart:232:74)",
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 32 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/shell/shell.dart:904:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.",
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 11 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/scm/scm_page.dart:308:28\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex."
+      ]
+    },
+    {
+      "step": "high DPI 2x at 1440x900 logical 720x450",
+      "status": "pass",
+      "ms": 1892,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "text scale 1.5",
+      "status": "pass",
+      "ms": 3083,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "rapid toggles (side bar, console) x30",
+      "status": "pass",
+      "ms": 9658,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "rapid palette open/close x30",
+      "status": "pass",
+      "ms": 9740,
+      "detail": null,
+      "frameworkErrors": [],
+      "note": "Chat | Search | Source Control | Environments | Inspector | row .git | row big | row deep | row deep/a | row deep/a/b | row deep/a/b/c | row deep/a/b/c/d | row deep/a/b/c/d/e | row deep/a/b/c/d/e/f | row deep/a/b/c/d/e/f/g | row deep/a/b/c/d/e/f/g/h | row deep/a/b/c/d/e/f/g/h/i | row deep/a/b/c/d/e/f/g/h/i/j | row deep/a/b/c/d/e/f/g/h/i/j/k | row deep/a/b/c/d/e/f/g/h/i/j/k/l | row deep/a/b/c/d/e/f/g/h/i/j/k/l/m | row deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n | row deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o | row deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p | row deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/leaf.txt"
+    },
+    {
+      "step": "keyboard focus traversal (Tab x25)",
+      "status": "framework-errors",
+      "ms": 3121,
+      "detail": null,
+      "frameworkErrors": [
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.",
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex."
+      ]
+    },
+    {
+      "step": "workspace folder deleted while open",
+      "status": "pass",
+      "ms": 5250,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "daemon killed: backend failed + restart",
+      "status": "pass",
+      "ms": 5455,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "reduced motion setting",
+      "status": "pass",
+      "ms": 1138,
+      "detail": null,
+      "frameworkErrors": [],
+      "note": "unlabeled actionable: 0\n"
+    },
+    {
+      "step": "semantics: unlabeled actionable nodes",
+      "status": "pass",
+      "ms": 15,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "quit (shutdown) timing",
+      "status": "pass",
+      "ms": 356,
+      "detail": null,
+      "frameworkErrors": []
+    }
+  ],
+  "frameworkErrorCount": 12,
+  "frameworkErrors": [
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#aa434 OVERFLOWING:\n  parentData: <none> (can use size)\n  constraints: BoxConstraints(w=260.0, h=22.0)\n  size: Size(260.0, 22.0)\n  direction: horizontal",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#5f93d relayoutBoundary=up1 OVERFLOWING:\n  parentData: not positioned; offset=Offset(0.0, 0.0) (can use\n    size)\n  constraints: BoxConstraints(0.0<=w<=260.0, 0.0<=h<=22.0)\n  size: Size(260.0, 22.0)",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 26 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#bdb62 OVERFLOWING:\n  parentData: <none> (can use size)\n  constraints: BoxConstraints(w=260.0, h=22.0)\n  size: Size(260.0, 22.0)\n  direction: horizontal",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#5b2d4 OVERFLOWING:\n  parentData: <none> (can use size)\n  constraints: BoxConstraints(w=260.0, h=22.0)\n  size: Size(260.0, 22.0)\n  direction: horizontal",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 26 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#32062 relayoutBoundary=up1 OVERFLOWING:\n  parentData: not positioned; offset=Offset(0.0, 0.0) (can use\n    size)\n  constraints: BoxConstraints(0.0<=w<=260.0, 0.0<=h<=22.0)\n  size: Size(260.0, 22.0)",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#1b890 OVERFLOWING:\n  parentData: <none> (can use size)\n  constraints: BoxConstraints(w=260.0, h=22.0)\n  size: Size(260.0, 22.0)\n  direction: horizontal",
+    "══╡ EXCEPTION CAUGHT BY FOUNDATION LIBRARY ╞═════════════════════\nThe following assertion was thrown while dispatching\nnotifications for Listenable:\nCannot get renderObject of inactive element.\nIn order for an element to have a valid renderObject, it must be\nactive, which means it is part of the tree.\nInstead, this element is in the _ElementLifecycle.inactive state.\nIf you called this method from a State object, consider guarding\nit with State.mounted.\nThe findRenderObject() method was called for the following\nelement:\n  _CodeField-[GlobalKey#f5238]\n\nWhen the exception was thrown, this was the stack:\n#0      Element.findRenderObject.<anonymous closure> (package:flutter/src/widgets/framework.dart:4917:9)\n#1      Element.findRenderObject (package:flutter/src/widgets/framework.dart:4930:6)\n#2      _CodeInputController._updateRemoteComposingIfNeeded (package:re_editor/src/_code_input.dart:383:66)\n#3      _CodeInputController._onCodeEditingChanged (package:re_editor/src/_code_input.dart:353:5)\n#4      ChangeNotifier.notifyListeners (package:listen/src/listen.dart:443:24)\n#5      _CodeLineEditingControllerDelegate.notifyListeners (package:re_editor/src/_code_line.dart:2425:15)\n#6      _CodeLineEditingControllerDelegate.delegate= (package:re_editor/src/_code_line.dart:2100:5)\n#7      _CodeEditorState.initState (package:re_editor/src/code_editor.dart:383:24)\n#8      StatefulElement._firstBuild (package:flutter/src/widgets/framework.dart:5968:55)\n#9      ComponentElement.mount (package:flutter/src/widgets/framework.dart:5811:5)\n...     Normal element mounting (27 frames)",
+    "══╡ EXCEPTION CAUGHT BY WIDGETS LIBRARY ╞════════════════════════\nThe following ArgumentError was thrown building LayoutBuilder:\nInvalid argument(s): 240.0\n\nThe relevant error-causing widget was:\n  LayoutBuilder\n  LayoutBuilder:<audit-copy>/lib/editor/editor_area.dart:76:16\n\nWhen the exception was thrown, this was the stack:\n#0      double.clamp (dart:core-patch/double.dart:225:7)\n#1      EditorAreaState.build.<anonymous closure>.<anonymous closure> (package:axiom_desktop/editor/editor_area.dart:78:56)\n#2      _LayoutBuilderElement._rebuildWithConstraints.updateChildCallback (package:flutter/src/widgets/layout_builder.dart:232:74)\n#3      BuildOwner.buildScope (package:flutter/src/widgets/framework.dart:3119:19)\n#4      _LayoutBuilderElement._rebuildWithConstraints (package:flutter/src/widgets/layout_builder.dart:270:12)\n#5      RenderAbstractLayoutBuilderMixin.layoutCallback (package:flutter/src/widgets/layout_builder.dart:333:38)\n#6      RenderObjectWithLayoutCallbackMixin.runLayoutCallback.<anonymous closure> (package:flutter/src/rendering/object.dart:4319:33)\n#7      RenderObject.invokeLayoutCallback.<anonymous closure> (package:flutter/src/rendering/object.dart:3048:17)\n#8      PipelineOwner._enableMutationsToDirtySubtrees (package:flutter/src/rendering/object.dart:1224:15)\n#9      RenderObject.invokeLayoutCallback (package:flutter/src/rendering/object.dart:3047:14)\n#10     RenderObjectWithLayoutCallbackMixin.runLayoutCallback (package:flutter/src/rendering/object.dart:4319:5)\n#11     _RenderLayoutBuilder.performLayout (package:flutter/src/widgets/layout_builder.dart:447:5)\n#12     RenderObject.layout (package:flutter/src/rendering/object.dart:2929:7)\n#13     RenderOffstage.performLayout (package:flutter/src/rendering/proxy_box.dart:3858:14)\n#14     RenderObject.layout (package:flutter/src/rendering/object.dart:2929:7)\n#15     ChildLayoutHelper.layoutChild (package:flutter/src/rendering/layout_helper.dart:65:11)",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 32 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/shell/shell.dart:904:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#478d0 relayoutBoundary=up7 OVERFLOWING:\n  needs compositing\n  parentData: offset=Offset(0.0, 0.0) (can use size)\n  constraints: BoxConstraints(0.0<=w<=620.0, h=38.0)\n  size: Size(620.0, 38.0)",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 11 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/scm/scm_page.dart:308:28\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#cdfc5 OVERFLOWING:\n  needs compositing\n  parentData: offset=Offset(8.0, 0.0) (can use size)\n  constraints: BoxConstraints(w=314.0, h=32.0)\n  size: Size(314.0, 32.0)",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#3460d OVERFLOWING:\n  parentData: <none> (can use size)\n  constraints: BoxConstraints(w=260.0, h=22.0)\n  size: Size(260.0, 22.0)\n  direction: horizontal",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 12 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/files/explorer.dart:243:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#be8b1 OVERFLOWING:\n  parentData: <none> (can use size)\n  constraints: BoxConstraints(w=260.0, h=22.0)\n  size: Size(260.0, 22.0)\n  direction: horizontal"
+  ]
+}

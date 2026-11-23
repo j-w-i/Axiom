@@ -1,7 +1,8 @@
-# IPC protocol 0.5 (shell/CLI/agents ↔ daemon)
+# IPC protocol 0.6 (shell/CLI/agents ↔ daemon)
 
 **State: 0.1 frozen for M1; each later minor's additions frozen by its milestone's first task
-(0.2 M2-ARCH-001, 0.3 M3-ARCH-001, 0.4 M4-ARCH-001, 0.5 M5-ARCH-001).**
+(0.2 M2-ARCH-001, 0.3 M3-ARCH-001, 0.4 M4-ARCH-001, 0.5 M5-ARCH-001); 0.6 by the owner-approved
+change request `docs/decisions/proposed/CR-AUD-022-workspace-file-operations.md`.**
 Source of truth for types: `crates/protocol`.
 Machine-readable form: `schemas/ipc/protocol.schema.json` (generated). This
 document specifies the behaviour the types cannot express.
@@ -14,7 +15,10 @@ document specifies the behaviour the types cannot express.
 - M1 transport: the daemon's stdin (client→daemon) and stdout (daemon→client).
   stderr is unstructured log text and is not part of the protocol.
 - Maximum line length: 64 MiB. A longer line is a fatal protocol error: the
-  receiver closes the connection.
+  receiver closes the connection. A sender never writes one (AUD-100): the daemon answers a
+  request whose response would be longer with a `too_large` error for its id (details
+  `{ "bytes", "limit" }`) and drops (and logs) a notification that would be; `axiom_rpc::Client`
+  refuses such a request with `too_large` without sending it.
 - Either side may send requests and notifications. In 0.1 the daemon sends no
   requests, only notifications.
 
@@ -39,6 +43,10 @@ Why NDJSON rather than LSP's `Content-Length` framing: see ADR-0003.
 - Every request gets exactly one response, including cancelled ones.
 - Unknown method → `method_not_found`. Params that fail to deserialize →
   `invalid_params` with details `{ "reason": "<serde message>" }`.
+- A message that is not valid JSON-RPC is answered `invalid_request`, with its `id` when it has
+  a `method` member and an `id` that is a number or a string (JSON-RPC 2.0 §5, AUD-096), else
+  with `id: null` (a message without `method` may be a malformed response, which is never
+  answered with its id).
 - Unknown *fields* in params are ignored (forward compatibility). Unknown
   enum values are an `invalid_params` error.
 - Requests are handled concurrently. Responses may arrive in any order.
@@ -78,9 +86,9 @@ Why NDJSON rather than LSP's `Content-Length` framing: see ADR-0003.
 | `not_initialized` | request before `initialize` |
 | `cancelled`, `timeout`, `unsupported` | protocol level |
 | `not_found` | file, directory, task or parent directory does not exist |
-| `already_exists` | reserved (create operations, M2+) |
+| `already_exists` | a create, or a rename onto, a name that is taken (0.6 `fs/*`) |
 | `permission_denied` | OS permission, or path escapes the workspace |
-| `conflict` | `expectedVersion` mismatch, or creating an existing file |
+| `conflict` | `expectedVersion` mismatch, or `fs/writeFile` without `overwrite` onto a file that exists (§`fs/writeFile` decision table); `fs/createFile` onto a taken name is `already_exists`; or a directory on the path was replaced while the call ran (no details) |
 | `io` | any other OS I/O failure (details: `{ "osError": string }`) |
 | `unsupported_encoding` | file is not valid UTF-8 |
 | `too_large` | file > 16 MiB, state value > 1 MiB |
@@ -211,7 +219,7 @@ runtime).
 | `agent/approve` | `ApproveParams → {}` | `not_found` |
 | `agent/installAgent` | `InstallAgentParams → InstallAgentResult` (ADR-0020 §6, additive) | `not_found`, `prerequisite_missing` (npm), `io`, `timeout` |
 | `agent/checkpoints` | `SessionRef → CheckpointsResult` | `not_found` |
-| `agent/restore` | `RestoreParams → RestoreResult` | `not_found`, `checkpoint_conflict`, `prerequisite_missing` |
+| `agent/restore` | `RestoreParams → RestoreResult` | `not_found`, `checkpoint_conflict`, `prerequisite_missing`, `timeout` (a checkpoint's git did not finish in its bound) |
 | `agent/tools` | `WorkspaceRef → ToolsResult` | `workspace_not_open` |
 | `agent/toolCall` | `ToolCallParams → ToolCallResult` | `approval_denied`, `approval_required`, `invalid_params` |
 | `agent/policy` | `PolicyParams → PolicyResult` | — |
@@ -291,7 +299,13 @@ terminal,git}.rs` and `workspace.rs` (`workspace/search`).
   path outside the root stays `permission_denied`.
 - **Terminals** are not agent tools and pass no gate (the person's own shell). `terminal/output`
   carries UTF-8 text; `seq` increases by one per notification of a terminal, and `terminal/list`
-  returns the backlog up to a `seq`, so a client can redraw and continue without gaps.
+  returns the backlog up to a `seq`, so a client can redraw and continue without gaps. Memory:
+  a terminal stops reading its PTY (the program waits) while 4 MiB of its output is not yet
+  queued for every connection, and one event carries at most 256 KiB. A connection's outgoing
+  queue is bounded by count (1024 lines), not bytes, so one connection that stops reading can
+  hold up to about 256 MiB of terminal text (more once JSON-escaped) until it reads again or
+  ends. Once its queue is full and stays full for 500 ms it misses the notifications there is no
+  room for, and the next `seq` it gets shows the gap.
 - **Git** is read-only; status paths are workspace-relative and paths outside the workspace are
   omitted.
 - **Provider manifests** gain an optional `lsp` table (`LspServerSpec`: `id`, `languages`,
@@ -335,6 +349,57 @@ Additive only, under the same rules: the daemon reports `0.5`. Types:
   `skipped` in M5. A skipped check neither passes nor fails the verdict.
 - New error kinds: `preview_failed` (-32029), `adapter_unavailable` (-32030).
 
+## Protocol 0.6 (audit AUD-022)
+
+Additive only: four methods, one optional field (`GitStatus.polling`, AUD-012: absent unless
+the repository is polled), no new notification, no new error kind; the daemon reports `0.6`,
+and a 0.5 client gets `0.5` and unchanged behaviour for every method it already calls.
+`initialize.methods` lists every method the daemon serves whatever minor was negotiated, so a
+0.5 client sees the four there too, and the daemon answers them if it calls them; methods are
+not gated by the negotiated minor. Types: `crates/protocol/src/fs.rs`. Why: the change request
+`docs/decisions/proposed/CR-AUD-022-workspace-file-operations.md`.
+
+| Method | Params → Result | Errors (besides the generic ones) |
+|--------|-----------------|-----------------------------------|
+| `fs/createFile` | `CreateFileParams {workspaceId, path, text?}` → `WriteFileResult {version}` | `already_exists`, `not_found` (directory missing), `permission_denied`, `too_large`, `invalid_params` |
+| `fs/createDirectory` | `CreateDirectoryParams {workspaceId, path, parents?}` → `{}` | `already_exists`, `not_found` (parent missing, without `parents`), `permission_denied`, `invalid_params` |
+| `fs/rename` | `RenameParams {workspaceId, from, to}` → `{}` | `already_exists`, `not_found` (`from`, or `to`'s directory), `permission_denied`, `invalid_params` (into itself, the root) |
+| `fs/trash` | `TrashParams {workspaceId, path}` → `{}` | `not_found`, `unsupported` (no trash it can go to), `permission_denied`, `invalid_params` (the root) |
+
+- **Containment.** Every path is a `WorkspacePath` resolved as for every other `fs/*` method
+  (lexical rules, then symlinks resolved, then inside the root, else `permission_denied`). The
+  entry a path names is never followed itself: renaming or trashing a symlink moves the link,
+  never what it points to (inside the workspace or not). The root itself cannot be created,
+  renamed or trashed. A path whose directories change while the call runs (one replaced by a
+  symlink, say) is refused, never redirected: `permission_denied` when it now leads outside the
+  workspace, else `conflict` ("a directory on its path was replaced"); this holds for
+  `fs/writeFile` too. On Unix the change is made in the directory opened from the root without
+  following symlinks; on Windows the path is checked again right before the change.
+- **Never replaces.** `fs/createFile` and `fs/createDirectory` fail with `already_exists` when
+  anything has the name (a file, a directory, a symlink, a dangling one too). `fs/rename` fails
+  with `already_exists` when `to` exists, an empty directory included; the rename is atomic
+  where the platform allows (Linux `renameat2(RENAME_NOREPLACE)`, macOS `renamex_np(RENAME_EXCL)`;
+  elsewhere checked right before). A case-only rename of the same entry
+  (`a.txt` → `A.txt` on a case-insensitive volume) is allowed. Renaming a path to itself is `{}`.
+- **`fs/createFile`** writes like `fs/writeFile` (temp file in the same directory, fsync, then a
+  rename that never replaces): the file appears complete or not at all. `text` defaults to
+  empty. Never creates parent directories; `fs/createDirectory` with `parents: true` does.
+- **`fs/trash`** moves the entry (a directory with everything in it) to the person's trash; it
+  never deletes permanently. Linux and other freedesktop.org desktops: the Trash specification
+  1.0. On the same file system as `$XDG_DATA_HOME` (default `~/.local/share`), into
+  `$XDG_DATA_HOME/Trash/files/` with `info/<name>.trashinfo` (`Path` absolute, percent-encoded;
+  `DeletionDate` written in UTC, as the daemon has no time-zone database); on another file
+  system, `$topdir/.Trash/$uid` when `$topdir/.Trash` is a real directory with the sticky bit,
+  else `$topdir/.Trash-$uid` (`Path` relative to `$topdir`). A name taken in the trash gets a
+  number (`a.2.txt`). macOS: renamed into `~/.Trash` when on the same volume as the home
+  folder. That is a plain rename, not the Finder's "Move to Trash": the Finder's "Put Back" does
+  not work for it, and an entry on another volume (an external disk, a second APFS volume)
+  cannot be trashed (`unsupported`, the message says so). Anything else (another volume on
+  macOS, a file system where no trash folder can be made, Windows): `unsupported`, and the entry
+  stays where it was.
+- **Notifications.** No new ones: a client watching the workspace (`fs/watch`) gets the usual
+  `fs/didChange` (`created`; `removed` + `created` for a rename; `removed` for a trash).
+
 ## Behavioural details
 
 ### `fs/writeFile` decision table
@@ -365,6 +430,16 @@ by remove is `removed`). Changes under ignored directories (and under `.git`) ar
 dropped; a change to an individually ignored file in a non-ignored
 directory is reported, because `fs/list` lists such files. If the OS reports an overflow, the daemon sends one change with
 `path: ""`, `kind: "modified"`, meaning "re-list everything you show".
+`fs/watch` is per connection: every connection that enabled it gets every batch, enabling it
+twice on one connection is one subscription, and a connection's subscription ends with it
+(AUD-028).
+
+### `workspace/close`
+A workspace opened by several connections (the same folder gives the same `workspaceId`) is
+held by each of them. `workspace/close` releases the calling connection's hold (and its
+`fs/watch`); the workspace's tasks, language servers, terminals, watches and previews stop, and
+its id becomes unknown, only when the last connection holding it closes it or disconnects
+(AUD-029).
 
 ### Tasks
 - `argv[0]` is resolved against the task's `PATH` (after `env` is applied).
@@ -376,7 +451,18 @@ directory is reported, because `fs/list` lists such files. If the OS reports an 
   grandchildren.
 - `task/cancel`: Unix `SIGTERM` to the group, `SIGKILL` after 3 s. Windows:
   `TerminateJobObject` immediately (there is no portable graceful signal for
-  non-console children).
+  non-console children). On Windows the process is created suspended and resumed only once it
+  is in its job object, so nothing it starts escapes the job (AUD-101).
+- A task ends when its own process has exited and its output pipes are drained, but the drain
+  is bounded (AUD-007): if a descendant still holds stdout or stderr 2 s after the process
+  exited (`server &`, a daemonising tool), the task's process group is killed, and if the pipes
+  are still open 500 ms later (a descendant that left the group) reading stops; `task/exited`
+  then reports the process's own exit status. Output such a descendant writes later is lost.
+  A cancel during that drain kills the group at once. `task/cancel` and `workspace/close`
+  therefore never wait on a pipe.
+- A `$/cancel` that races a successful `task/start` or `build/run` (the response is then
+  `cancelled`) cancels the task it started, so no task runs on that the client never learnt
+  about (AUD-098).
 - Finished tasks are kept for `task/list` (50 per workspace); their output is
   not retained by the daemon in 0.1.
 
@@ -404,8 +490,8 @@ it to this table and the daemon's registry.
 - MINOR bump: new methods, notifications, optional fields, settings keys.
 - MAJOR bump: anything that could break an existing client. Needs an ADR.
 - The daemon must keep serving every method listed for the MAJOR it speaks.
-- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 to 0.5 added
-  methods and optional fields only, so a 0.1 client talking to a 0.5 daemon gets `"0.1"` and
+- Negotiation: the session runs at `min(client minor, server minor)`; 0.2 to 0.6 added
+  methods and optional fields only, so a 0.1 client talking to a 0.6 daemon gets `"0.1"` and
   unchanged behaviour.
 
 ## Example session
@@ -423,7 +509,8 @@ it to this table and the daemon's registry.
 
 ## Contract tests
 
-- Shape: `crates/protocol/tests/contract.rs` (0.1) and `tests/m2_contract.rs` (0.2 additions).
+- Shape: `crates/protocol/tests/contract.rs` (0.1), `tests/m2_contract.rs` (0.2 additions), and
+  so on per minor; `tests/fs_ops_contract.rs` for 0.6.
 - Behaviour: `crates/axiomd/tests/` spawns the real binary and exercises every
   row of every table in this document (task M1-DAEMON-002). A behaviour stated
   here without a test there is a defect in the test suite.

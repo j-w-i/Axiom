@@ -4,6 +4,7 @@
 
 use crate::docs::Documents;
 use crate::framing::{read_message, write_message};
+use crate::restricted::Restriction;
 use crate::{Event, LspError};
 use axiom_protocol::lsp::{ServerInfo, ServerState};
 use serde_json::{json, Value};
@@ -58,6 +59,9 @@ pub struct Launch {
     pub blocked: Option<(String, String)>,
     /// The provider to install when the command itself is not found (the server's own).
     pub install_provider: Option<String>,
+    /// How it runs in a folder the person has not trusted (AUD-008): set by
+    /// [`crate::restricted::restrict`].
+    pub restriction: crate::restricted::Restriction,
 }
 
 /// The client capabilities Axiom declares: what the editor's client implements (M4-LSP-002).
@@ -395,13 +399,18 @@ impl LanguageServer {
         launch: Launch,
         events: tokio::sync::broadcast::Sender<Event>,
     ) -> Arc<Self> {
+        // Refused in an untrusted folder: `stopped` with why from the start (AUD-008).
+        let (state, detail) = match &launch.restriction {
+            Restriction::Refused { detail } => (ServerState::Stopped, Some(detail.clone())),
+            _ => (ServerState::Idle, None),
+        };
         Arc::new(Self {
             def,
             workspace_id,
             launch: Mutex::new(launch),
             inner: Mutex::new(Inner {
-                state: ServerState::Idle,
-                detail: None,
+                state,
+                detail,
                 capabilities: None,
                 conn: None,
                 crashes: VecDeque::new(),
@@ -433,9 +442,37 @@ impl LanguageServer {
         }
     }
 
-    /// Replaces how the next start runs (the environment or settings changed).
+    /// Replaces how the next start runs (the environment, settings or trust changed). A server
+    /// that was refused for an untrusted folder and no longer is becomes `idle` again.
     pub fn set_launch(&self, launch: Launch) {
-        *lock(&self.launch) = launch;
+        let refused = match &launch.restriction {
+            Restriction::Refused { detail } => Some(detail.clone()),
+            _ => None,
+        };
+        let was = std::mem::replace(&mut *lock(&self.launch), launch);
+        let was_refused = matches!(was.restriction, Restriction::Refused { .. });
+        match (refused, self.state()) {
+            (Some(detail), ServerState::Idle | ServerState::Stopped) => {
+                self.set_state(ServerState::Stopped, Some(detail));
+            }
+            (None, ServerState::Stopped) if was_refused => {
+                self.set_state(ServerState::Idle, None);
+            }
+            _ => {}
+        }
+    }
+
+    /// How it runs (or would) in its folder: as configured, restricted, refused (AUD-008).
+    pub fn restriction(&self) -> Restriction {
+        lock(&self.launch).restriction.clone()
+    }
+
+    /// Refused until the folder is trusted: why.
+    fn refused(&self) -> Option<String> {
+        match &lock(&self.launch).restriction {
+            Restriction::Refused { detail } => Some(detail.clone()),
+            _ => None,
+        }
     }
 
     pub fn info(&self) -> ServerInfo {
@@ -541,7 +578,13 @@ impl LanguageServer {
                         }
                         false
                     }
-                    ServerState::Idle | ServerState::Stopped => true,
+                    ServerState::Idle | ServerState::Stopped => {
+                        // Refused in an untrusted folder: say so now, not after a 60 s wait.
+                        if let Some(detail) = self.refused() {
+                            return Err(LspError::Unavailable(ServerState::Stopped, Some(detail)));
+                        }
+                        true
+                    }
                     ServerState::Starting => false,
                     s => return Err(LspError::Unavailable(s, i.detail.clone())),
                 }
@@ -593,6 +636,11 @@ impl LanguageServer {
         };
         if let Some((detail, _)) = &launch.blocked {
             self.end_start(gen, ServerState::Missing, Some(detail.clone()));
+            return;
+        }
+        // Not in an untrusted folder (AUD-008): stopped, with why.
+        if let Restriction::Refused { detail } = &launch.restriction {
+            self.end_start(gen, ServerState::Stopped, Some(detail.clone()));
             return;
         }
         let Some(exe) = which(program, &launch.env) else {
@@ -697,7 +745,11 @@ impl LanguageServer {
             // waiting on that lock finds the server ready and sends, rather than seeing it
             // starting and leaving the change to a replay that has already happened.
             i.state = ServerState::Ready;
-            i.detail = None;
+            // A restricted server says so while it runs.
+            i.detail = match &launch.restriction {
+                Restriction::Restricted { note } => Some(note.clone()),
+                _ => None,
+            };
         }
         let _ = self.events.send(Event::State {
             workspace_id: self.workspace_id.clone(),
@@ -810,6 +862,9 @@ impl LanguageServer {
                     // workspace).
                     _ if method == "textDocument/didClose" => Ok(()),
                     ServerState::Idle | ServerState::Stopped => {
+                        if let Some(detail) = self.refused() {
+                            return Err(LspError::Unavailable(ServerState::Stopped, Some(detail)));
+                        }
                         self.stopping.store(false, Ordering::SeqCst);
                         self.spawn_start();
                         Ok(())
@@ -983,6 +1038,11 @@ fn spawn_conn(
     cmd.process_group(0);
     let mut child = cmd.spawn()?;
     let pgid = child.id();
+    // The daemon's orphan watchdog ends the group if the daemon dies (AUD-027).
+    #[cfg(unix)]
+    if let (Some(h), Some(g)) = (GROUP_HOOKS.get(), pgid) {
+        (h.0)(g);
+    }
     let stdin = child
         .stdin
         .take()
@@ -1108,8 +1168,22 @@ fn spawn_conn(
                     .await;
             let _ = conn.child.lock().await.start_kill();
         }
+        #[cfg(unix)]
+        if let (Some(h), Some(g)) = (GROUP_HOOKS.get(), pgid) {
+            (h.1)(g);
+        }
     });
     Ok(conn)
+}
+
+/// Called with a server's process group when it starts and when it has ended.
+type GroupHook = fn(u32);
+static GROUP_HOOKS: std::sync::OnceLock<(GroupHook, GroupHook)> = std::sync::OnceLock::new();
+
+/// Lets the daemon register each server's process group with its orphan watchdog
+/// (`axiom_exec::guard`, AUD-027) without this crate depending on `exec`. The first call wins.
+pub fn set_group_hooks(started: GroupHook, ended: GroupHook) {
+    let _ = GROUP_HOOKS.set((started, ended));
 }
 
 #[cfg(test)]

@@ -737,6 +737,46 @@
         }
       ]
     },
+    "CreateDirectoryParams": {
+      "description": "`fs/createDirectory` (0.6).",
+      "properties": {
+        "parents": {
+          "description": "Also create missing parent directories (`mkdir -p`).",
+          "type": "boolean"
+        },
+        "path": {
+          "$ref": "#/$defs/WorkspacePath"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "path"
+      ],
+      "type": "object"
+    },
+    "CreateFileParams": {
+      "description": "`fs/createFile` (0.6).",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/WorkspacePath"
+        },
+        "text": {
+          "description": "The new file's content; empty when absent.",
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "path"
+      ],
+      "type": "object"
+    },
     "CreateParams": {
       "properties": {
         "argv": {
@@ -1729,6 +1769,10 @@
             "string",
             "null"
           ]
+        },
+        "polling": {
+          "description": "Protocol 0.6 (additive, AUD-012): no file watch could be made for this repository (the\nsystem's watch limit, for example), so its changes are looked for every few seconds and\n`git/didChange` comes late. Absent (false) otherwise.",
+          "type": "boolean"
         },
         "reason": {
           "description": "Why `repo` is false: `git` not found, or not a repository.",
@@ -3320,6 +3364,26 @@
       "required": [
         "message",
         "location"
+      ],
+      "type": "object"
+    },
+    "RenameParams": {
+      "description": "`fs/rename` (0.6).",
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/WorkspacePath"
+        },
+        "to": {
+          "$ref": "#/$defs/WorkspacePath"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "from",
+        "to"
       ],
       "type": "object"
     },
@@ -5028,6 +5092,22 @@
       ],
       "type": "object"
     },
+    "TrashParams": {
+      "description": "`fs/trash` (0.6).",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/WorkspacePath"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "path"
+      ],
+      "type": "object"
+    },
     "TrustParams": {
       "properties": {
         "trusted": {
@@ -5680,6 +5760,22 @@
         "$ref": "#/$defs/VersionsResult"
       }
     },
+    "fs/createDirectory": {
+      "params": {
+        "$ref": "#/$defs/CreateDirectoryParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    "fs/createFile": {
+      "params": {
+        "$ref": "#/$defs/CreateFileParams"
+      },
+      "result": {
+        "$ref": "#/$defs/WriteFileResult"
+      }
+    },
     "fs/list": {
       "params": {
         "$ref": "#/$defs/ListParams"
@@ -5694,6 +5790,22 @@
       },
       "result": {
         "$ref": "#/$defs/ReadFileResult"
+      }
+    },
+    "fs/rename": {
+      "params": {
+        "$ref": "#/$defs/RenameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    "fs/trash": {
+      "params": {
+        "$ref": "#/$defs/TrashParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
       }
     },
     "fs/watch": {
@@ -6089,5 +6201,5 @@
       }
     }
   },
-  "protocolVersion": "0.5"
+  "protocolVersion": "0.6"
 }

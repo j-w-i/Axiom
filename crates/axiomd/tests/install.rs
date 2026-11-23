@@ -344,3 +344,96 @@ async fn unknown_provider_and_plain_http_without_the_test_switch() {
     assert_eq!(kind(&e), ErrorKind::InvalidParams, "{e:?}");
     assert!(e.message.contains("HTTPS"), "{}", e.message);
 }
+
+/// An agent's `env.install` runs only a plan the same principal made with `env.planInstall`
+/// (not one a client issued), and its approval card shows the plan: provider, version, each
+/// download with how it is verified; it is never "allowed for the session" (AUD-041).
+#[tokio::test]
+async fn an_agent_installs_only_its_own_plan_shown_on_the_card() {
+    use axiom_protocol::agent::{
+        ApprovalDecision, ApprovalRequest, Approve, ApproveParams, ToolCall, ToolCallParams,
+    };
+    use axiom_protocol::lifecycle::{ClientCapabilities, Initialize};
+    let body = archive("3.1.4", 1024);
+    let base = serve(body.clone(), Duration::ZERO).await;
+    let data = TempDir::new().unwrap();
+    user_provider(
+        data.path(),
+        &base,
+        "3.1.4",
+        &hex::encode(Sha256::digest(&body)),
+    );
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("AXIOM_TEST_INSECURE_LOOPBACK_HTTP", "1");
+    })
+    .await;
+    let mut info = client_info();
+    info.protocol_version = "0.3".into();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    let f = d.open_fixture().await;
+    let tool = |name: &str, input: serde_json::Value| ToolCallParams {
+        workspace_id: f.id.clone(),
+        tool: name.into(),
+        input,
+        principal: "cli".into(),
+    };
+
+    let client_plan = d
+        .client
+        .request::<PlanInstall>(PlanInstallParams {
+            provider_id: "demo".into(),
+            version: "3.1.4".into(),
+            method: None,
+        })
+        .await
+        .unwrap();
+    let r = d
+        .client
+        .request::<ToolCall>(tool(
+            "env.install",
+            serde_json::json!({"planId": client_plan.plan_id}),
+        ))
+        .await
+        .unwrap();
+    assert!(r.is_error && r.text.contains("of yours"), "{}", r.text);
+
+    let r = d
+        .client
+        .request::<ToolCall>(tool(
+            "env.planInstall",
+            serde_json::json!({"provider": "demo", "version": "3.1.4"}),
+        ))
+        .await
+        .unwrap();
+    assert!(!r.is_error, "{}", r.text);
+    let plan_id = r.output["planId"].as_str().unwrap().to_string();
+    let call = d
+        .client
+        .request::<ToolCall>(tool("env.install", serde_json::json!({"planId": plan_id})));
+    let answer = async {
+        let n = d.next_notification("agent/approvalRequested", WAIT).await;
+        let req: ApprovalRequest = serde_json::from_value(n).unwrap();
+        d.client
+            .request::<Approve>(ApproveParams {
+                request_id: req.request_id.clone(),
+                decision: ApprovalDecision::Once,
+            })
+            .await
+            .unwrap();
+        req
+    };
+    let (r, req) = tokio::join!(call, answer);
+    let r = r.unwrap();
+    assert!(!r.is_error, "{}", r.text);
+    let preview = req.preview.unwrap();
+    assert!(preview.contains("Install demo 3.1.4"), "{preview}");
+    assert!(
+        preview.contains(&format!(
+            "download {base}/demo-3.1.4.tar.gz (SHA-256 from the manifest)"
+        )),
+        "{preview}"
+    );
+    assert!(req.targets.iter().any(|t| t.contains("demo 3.1.4")));
+    assert!(!req.can_remember);
+}

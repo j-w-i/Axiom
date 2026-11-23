@@ -145,9 +145,7 @@ pub fn spawn_forwarder(app: &Arc<App>, inspect: &axiom_inspect::Inspect) {
                         preview_id: preview,
                         node,
                     };
-                    for c in app.clients_of(&ws) {
-                        let _ = c.notify::<Hovered>(n.clone()).await;
-                    }
+                    app.notify_clients::<Hovered>(&ws, n).await;
                 }
                 InspectEvent::Selected { preview, chain } => {
                     let Some(ws) = app.previews.workspace(&preview) else {
@@ -158,9 +156,7 @@ pub fn spawn_forwarder(app: &Arc<App>, inspect: &axiom_inspect::Inspect) {
                         preview_id: preview,
                         chain,
                     };
-                    for c in app.clients_of(&ws) {
-                        let _ = c.notify::<Selected>(n.clone()).await;
-                    }
+                    app.notify_clients::<Selected>(&ws, n).await;
                 }
                 InspectEvent::Mutated { preview, reason } => {
                     let Some(ws) = app.previews.workspace(&preview) else {
@@ -170,9 +166,7 @@ pub fn spawn_forwarder(app: &Arc<App>, inspect: &axiom_inspect::Inspect) {
                         preview_id: preview,
                         reason,
                     };
-                    for c in app.clients_of(&ws) {
-                        let _ = c.notify::<DidMutate>(n.clone()).await;
-                    }
+                    app.notify_clients::<DidMutate>(&ws, n).await;
                 }
             }
         }
@@ -181,9 +175,8 @@ pub fn spawn_forwarder(app: &Arc<App>, inspect: &axiom_inspect::Inspect) {
 
 /// `preview/state` to the preview's workspace's clients.
 pub async fn notify_state(app: &App, info: PreviewInfo) {
-    for c in app.clients_of(&info.workspace_id) {
-        let _ = c.notify::<State>(info.clone()).await;
-    }
+    let ws = info.workspace_id.clone();
+    app.notify_clients::<State>(&ws, info).await;
 }
 
 pub async fn verify(
@@ -225,14 +218,20 @@ pub fn is_build_error(line: &str) -> bool {
     .any(|p| l.contains(p))
 }
 
+/// Build-error lines kept per preview.
+pub const MAX_BUILD_ERRORS: usize = 500;
+
 /// The daemon's previews (M5-PREVIEW-001 starts them) and the inspection service, which starts
 /// with the first preview.
 #[derive(Default)]
 pub struct Previews {
     inner: std::sync::Mutex<std::collections::HashMap<PreviewId, PreviewInfo>>,
     inspect: tokio::sync::OnceCell<Arc<axiom_inspect::Inspect>>,
-    /// Build errors the dev server printed, with the daemon's time (ms since the epoch).
-    errors: std::sync::Mutex<std::collections::HashMap<PreviewId, Vec<(u64, String)>>>,
+    /// Build errors the dev server printed, with the daemon's time (ms since the epoch): the
+    /// newest [`MAX_BUILD_ERRORS`] (AUD-038: keeping the first ones hid every later error).
+    errors: std::sync::Mutex<
+        std::collections::HashMap<PreviewId, std::collections::VecDeque<(u64, String)>>,
+    >,
     /// The person's latest selection in each page (inspect mode), `chain[0]` the node.
     selections: std::sync::Mutex<std::collections::HashMap<PreviewId, Vec<UiNode>>>,
 }
@@ -274,11 +273,63 @@ impl Previews {
     }
 
     pub fn remove(&self, id: &PreviewId) -> Option<PreviewInfo> {
+        self.forget_details(id);
+        self.lock().remove(id)
+    }
+
+    /// Drops what a stopped preview no longer needs (its build errors and selection), keeping
+    /// its small info (AUD-099).
+    pub fn forget_details(&self, id: &PreviewId) {
         self.selections
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(id);
-        self.lock().remove(id)
+        self.errors
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(id);
+    }
+
+    /// Puts `info` (a new preview, `Starting`) in unless the workspace already has one that is
+    /// starting or ready, which is returned instead: one check and insert under one lock, so
+    /// two concurrent starts make one preview (AUD-034). Stopped previews of the workspace are
+    /// forgotten here.
+    pub fn claim(&self, info: PreviewInfo) -> Option<PreviewInfo> {
+        let ws = info.workspace_id.clone();
+        let stopped: Vec<PreviewId>;
+        {
+            let mut m = self.lock();
+            if let Some(running) = m
+                .values()
+                .filter(|i| i.workspace_id == ws)
+                .filter(|i| matches!(i.state, PreviewState::Ready | PreviewState::Starting))
+                .min_by(|a, b| a.preview_id.0.cmp(&b.preview_id.0))
+            {
+                return Some(running.clone());
+            }
+            stopped = m
+                .values()
+                .filter(|i| i.workspace_id == ws && i.state == PreviewState::Stopped)
+                .map(|i| i.preview_id.clone())
+                .collect();
+            for id in &stopped {
+                m.remove(id);
+            }
+            m.insert(info.preview_id.clone(), info);
+        }
+        for id in &stopped {
+            self.forget_details(id);
+        }
+        None
+    }
+
+    /// Every preview of a workspace, whatever its state.
+    pub fn all_of_workspace(&self, ws: &WorkspaceId) -> Vec<PreviewInfo> {
+        self.lock()
+            .values()
+            .filter(|i| &i.workspace_id == ws)
+            .cloned()
+            .collect()
     }
 
     pub fn workspace(&self, id: &PreviewId) -> Option<WorkspaceId> {
@@ -302,11 +353,17 @@ impl Previews {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
+        self.record_error_at(id, line, ms);
+    }
+
+    /// Keeps a build-error line with its time; the oldest is dropped past the bound.
+    fn record_error_at(&self, id: &PreviewId, line: &str, ms: u64) {
         let mut m = self.errors.lock().unwrap_or_else(|p| p.into_inner());
         let v = m.entry(id.clone()).or_default();
-        if v.len() < 500 {
-            v.push((ms, line.trim().chars().take(500).collect()));
+        if v.len() >= MAX_BUILD_ERRORS {
+            v.pop_front();
         }
+        v.push_back((ms, line.trim().chars().take(500).collect()));
     }
 
     pub fn build_errors_since(&self, id: &PreviewId, since: u64) -> Vec<String> {
@@ -348,5 +405,32 @@ impl Previews {
             .collect();
         v.sort_by(|a, b| a.preview_id.0.cmp(&b.preview_id.0));
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AUD-038: after 600 errors, the newest are kept, so an error after a patch is seen.
+    #[test]
+    fn the_newest_build_errors_are_kept() {
+        let p = Previews::default();
+        let id = PreviewId("p1".into());
+        for i in 0..600u64 {
+            p.record_error_at(&id, &format!("error: old {i}"), i);
+        }
+        p.record_error_at(&id, "error: after the patch", 1000);
+        assert_eq!(
+            p.build_errors_since(&id, 1000),
+            vec!["error: after the patch"]
+        );
+        let since = p.build_errors_since(&id, 550);
+        assert_eq!(since.len(), 51);
+        assert_eq!(since[0], "error: old 550");
+        assert_eq!(
+            p.errors.lock().unwrap().get(&id).unwrap().len(),
+            MAX_BUILD_ERRORS
+        );
     }
 }

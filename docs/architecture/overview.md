@@ -78,8 +78,6 @@ output).
 ```
 apps/desktop-flutter ──▶ (wire protocol only, types generated from schemas/) ──▶ axiomd
 
-crates/desktop-bridge ──▶ axiom-protocol      (a client library; no shell links it today)
-
 axiomd ──▶ service crates ──▶ axiom-protocol
            (workspace, exec, store, ...)
 axiomd ──▶ axiom-rpc ──▶ axiom-protocol
@@ -90,11 +88,10 @@ axiomd ──▶ axiom-rpc ──▶ axiom-protocol
   and return `axiom-protocol` types and report events on a channel.
 - `axiom-rpc` knows framing, dispatch and cancellation. It knows nothing about
   workspaces or tasks.
-- `axiom-desktop-bridge` knows the daemon process and protocol 0.1 as a
-  client. It knows nothing about any UI. It served the Tauri host; the
-  Flutter shell's Dart client (`lib/daemon/client.dart`) keeps its observable
-  behaviour, and its tests still pin the daemon's lifecycle from a client's
-  side.
+- The client side of the daemon's lifecycle (spawn, initialize timeout, bounded shutdown,
+  restart) is the Flutter shell's Dart client (`lib/daemon/client.dart`). The Rust client the
+  Tauri host used, `crates/desktop-bridge`, was removed (AUD-102); the daemon-side behaviours
+  its tests pinned are in `crates/axiomd/tests/lifecycle.rs`.
 - `axiomd` is the only place where services are wired to methods.
 - The shell contains no business logic: if a behaviour would be needed by a
   CLI or an agent too, it belongs in the daemon.

@@ -93,9 +93,9 @@ A tool is a typed operation with a declared effect (`Effect` in `agent.rs`):
 | `fs.list`, `fs.read` (line range, paged, numbered lines) | workspace | read |
 | `fs.applyPatch` (search/replace blocks against the current version; create; delete) | workspace | writeWorkspace |
 | `task.run` (argv only; waits up to a timeout; exit status, output tail, diagnostics) | exec, build | execute |
-| `build.run` (a provider task; waits; status + diagnostics), `build.diagnostics` | build | execute / read |
-| `env.detect`, `env.planInstall` | env | read |
-| `env.install` (an issued plan id only) | env | install |
+| `build.run` (a provider task; waits up to `timeoutSecs`, default 600, at most 3600 (additive, AUD-035); status + diagnostics; `conflict` if the task changed after approval, AUD-103), `build.diagnostics` | build | execute / read |
+| `env.detect`, `env.planInstall` (without `version`: the newest the manifest lists; never runs a provider's `list_versions` program, AUD-109) | env | read |
+| `env.install` (a plan id this principal got from `env.planInstall`; never a client's plan or a system plan; the card shows the plan, AUD-041) | env | install |
 | `editor.open` (reveal a location: the `agent/reveal` notification) | clients | read |
 | `mcp.<server>.<tool>` (user-configured MCP servers) | MCP client | execute (+ network) |
 | `preview.start` (the dev server with the inspector; gated as the command it runs; returns the URL and whether a page is connected) | preview | execute |
@@ -136,7 +136,19 @@ validate input against the tool's schema                     → invalid_params 
 ```
 
 Principals: `session:<id>` (the loop), `mcp:<client name>` (the MCP front end through
-`agent/toolCall`), `cli`.
+`agent/toolCall`), `cli`. The daemon makes an external principal its connection's own:
+cards and the audit log show `mcp:<client name>#c<n>` / `cli#c<n>` (AUD-009).
+
+Processes an agent starts (`task.run`, `build.run`, `acp.terminal`) do not get the daemon's
+secret-looking variables or the providers' `apiKeyEnv` variables, unless settings
+`agent.passEnv` names them; the card says how many are withheld (`security.md` §Processes;
+AUD-010). `SSH_AUTH_SOCK` is among them (review N7), so an agent's `git push` or `fetch` over
+SSH, SSH commit signing and `git+ssh` dependencies fail unless the person adds it to
+`agent.passEnv`; external ACP agents and MCP servers keep it. When it is withheld, the card
+names it first and says how to pass it. The result text of `task.run`, `build.run` and
+`preview.start` ends with the same line (review E5), so an auto-allowed command that shows no
+card still says what it did not get. Output is kept as a bounded tail while a command
+runs.
 
 ## Permission policy
 
@@ -159,8 +171,29 @@ decision = "deny"
   the longer `argvPrefix`); among equals, deny > ask > allow. No match → `default`.
 - The built-in user policy: `default = "ask"`, `read → allow`.
 - Workspace rules are merged so they can only turn allow into ask/deny or ask into deny.
-- "Allow for session" adds an in-memory rule for that tool and target set; never for
-  `credentials` or `deploy`.
+- "Allow for session" records exactly that call: tool, effect, paths, argv (exact, not a
+  prefix) and its conditions (an ACP terminal's agent-set variables and working directory,
+  `build.run`'s provider and `PATH` prepend), in that workspace, for that principal. It is not
+  offered for `credentials`, `deploy`, protected paths, opaque calls (MCP tools, installs) or
+  calls without targets other than reads; it ends when the session is deleted, rewound or
+  restored, or the external principal's connection closes (AUD-009).
+- Protected paths: a write or delete always asks, whatever the policy or a grant says, and can
+  never be remembered, under `.axiom/`, `.husky/`, `.gitattributes` and a `.git` directory at
+  any depth; a bare repository's `<name>.git/`; one of git's directory entries written into a
+  folder that already holds `HEAD`, `commondir`, `objects` or `refs`; and anything git's
+  configuration names for any repository in the workspace (hooks directories, including those
+  an include whose condition is false today would set; configuration files and include
+  targets; programs such as `core.fsmonitor`, `filter.*`, `diff.*`, `merge.*.driver`,
+  `core.sshCommand`, `credential.helper`, `gpg.program`, editors, pagers, `core.askPass`, `!`
+  aliases, `core.attributesFile`). The path is judged through symlinks. git is asked again
+  during a turn whenever its configuration files change or a command has run. If git cannot
+  say what it reads for a repository in the workspace, every write asks: "protected: git could
+  not say what its configuration runs in this workspace (is git 2.31 or later installed, and
+  its configuration valid?), so every write asks" (AUD-104; reviews B4, D-round, E2–E3,
+  G2–G8).
+- A call whose conditions change what an approved command does (an agent-set variable, a
+  working directory other than the root) asks even where a rule allows its argv (AUD-039).
+- `path` globs are matched in linear time per candidate (AUD-106).
 - Content a model reads (files, tool results, web pages) cannot change policy.
 - Audit log: `<data dir>/audit/<workspace hash>.jsonl`, append-only.
 
@@ -178,11 +211,66 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
   if its content equals what the agent last left; otherwise it is a conflict
   (`modifiedSinceAgent`, `deletedSinceAgent`, `createdSinceAgent`). With conflicts nothing is
   restored unless `skipConflicts`. Restore takes a checkpoint first.
-- As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir; the agent's
+- A restore writes a new file and renames it over the entry (a hard link is never written
+  through), never writes through a directory that is a symlink (unless the restore itself
+  removes that symlink first). `.axiom/` is restored like any file (a restore is the person's
+  own undo).
+- A restore leaves alone, and does not count as a conflict (the rest is restored):
+  - a path inside a git directory (`.git`, or a `<name>.git` that is a repository, or one of
+    git's own entries in it; review E3), and a write of one of git's own entries into a folder
+    that holds, or that the same restore also writes, `HEAD`, `commondir`, `objects` or `refs`
+    (the gate's rule; the entry the path itself names does not count; review H8);
+  - anything at or under a nested repository: a git link in the checkpoint, now or in the
+    agent's last state, or a folder with its own `.git` on disk (reported once, by the
+    repository's path; review H2);
+  - a path whose content the checkpoint or the snapshot now could not capture: over 16 MiB,
+    unreadable, a nested repository with no commit, or a file on disk the snapshot lacks
+    because it is ignored now (review H1). The undo checkpoint records those, so undoing the
+    restore leaves them too. A name that is a captured file under another case (on a
+    case-insensitive file system) is restored.
+  `agent/restore`'s result has no field for them (IPC frozen), so right after the `restored`
+  event the session gets an `error` event with `kind: "notice"` naming them, grouped by reason
+  (at most 20 per group, then "and N more"); it is journalled with the transcript.
+- The store's operations that change it hold its lock: within the process, and `axiom.lock` in
+  the shadow directory across processes (a second daemon on one data dir). While it is held no
+  git of ours runs there, so a stale `axiom-index.lock` (left by a git killed at its bound or
+  with its daemon) is removed, and so are `HEAD.lock`, `packed-refs.lock` and any `*.lock`
+  under `refs/axiom/` (left by a SIGKILL or power loss inside `update-ref`); a git killed at its
+  bound also has its index lock, and for `update-ref` its ref lock, removed at once (reviews H3,
+  I3). On a file system without file locks, the store is serialised only within one daemon and
+  a stale lock is left.
+- A restore removes files first and writes afterwards: on a case-insensitive file system a
+  name it writes can be the same file as one it removes (the agent renamed `README.md` to
+  `readme.md`), and in that order the restored file stays (review I1).
+- A name the restore would create, where the disk holds a captured file under another case
+  (the same file, on a case-insensitive file system), is written only if this restore also
+  removes or replaces that file; otherwise that file is someone else's, and the name is a
+  conflict too (with that file's reason, or `createdSinceAgent`) and is not written (review
+  I2).
+- A file the agent turned into a folder is restored when the folder holds only what the agent
+  made, unchanged since: the restore removes those files, then the folders they leave empty,
+  then writes the file. If the folder holds anything else (a person's file, an ignored file, a
+  repository), the path is a `modifiedSinceAgent` conflict and the folder is kept (review I4).
+- Conflicts found on disk (the two cases above) are known before anything changes: like the
+  others, they make a restore without `skipConflicts` change nothing, and are listed with
+  them.
+- Every `git` the shadow store runs is bounded and killed on expiry: 10 minutes for the commands
+  that walk the workspace (`ls-files`, `add`, `rm`, `write-tree`, `ls-tree`), 60 s for the
+  others. The checkpoint then fails: `timeout` from `agent/restore`, a failed tool ("the
+  checkpoint failed …") in a turn.
+- What `git add` cannot index is left out of the snapshot, and the checkpoint is still taken (an
+  unreadable file, or a nested repository with no commit yet). It is recorded in the
+  checkpoint's own metadata, not in `CheckpointInfo.skipped`, which stays the files over
+  16 MiB.
+- The shadow git reads no configuration but its own (no system or global configuration, no
+  repository's `.git/config`, hooks and fsmonitor off), so no filter, fsmonitor or hook the
+  workspace or a nested repository configures runs, whatever its `.gitattributes` say. A restored file keeps the permission bits of the file it
+  replaces, without setuid, setgid or sticky (review R5, D4).
+- As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir, its cross-process lock `axiom.lock`; the agent's
   latest state is `refs/axiom/<session>/post`, taken after each writing tool; a restore with
   conflicts changes nothing (not even the undo checkpoint) unless `skipConflicts`. Nested
-  repositories are recorded as git links and never restored. First checkpoint of this
-  repository: 0.94 s; later ones: 21 ms.
+  repositories with a commit are recorded as git links and never restored. First checkpoint of
+  this repository: about 1.5 s; later ones under 0.1 s.
 - Concurrent write-capable agents on one workspace are not offered in M3 (worktrees: M6).
 
 ## Sessions
@@ -274,8 +362,21 @@ ADR-0015 §7.
     executor task.
   - **Permission requests.** `session/request_permission` is decided by the gate as the policy
     tool `<provider id>.<agent tool name>`, with the effect from the ACP `kind`. An approval
-    adds one-turn grants: `acp.writeFile` on the requested paths and, for `execute`, the next
-    terminal. So the person is asked once, not twice.
+    the person gave adds one-turn grants: for an edit or delete, `acp.writeFile` on the
+    requested paths; for `execute`, the next terminal if it runs the command the request showed
+    (`rawInput.command`). A request the policy allowed unseen (a `read`) adds none (AUD-040).
+    So the person is asked once, not twice, and never for less than what runs.
+  - **Terminals.** `acp.terminal` shows the variables the agent sets and its working directory
+    on the card (they ask even under an argv rule); `outputByteLimit` is capped at 16 MiB;
+    non-string `args` are refused. A deleted session's terminals, and a closed workspace's, are
+    dropped (AUD-039, AUD-099). A terminal belongs to the session that created it (its
+    principal), not to the agent process: after an idle reap and resume the agent still
+    reaches its terminals; another session's agent is refused (review N5, D5). On the card, the
+    variables an agent sets are one per line, a name or value with whitespace, quotes or control
+    characters quoted with `\` escapes; the CLI shows each line of a card's preview after
+    `  | ` (review E6).
+  - **Lifetime.** An agent whose process ended is started again on the next turn; agents and
+    MCP servers start without holding the daemon-wide maps (AUD-032).
   - **Updates.** Message and thought chunks become `textDelta` + `assistantText` (thoughts with
     `kind: thought`). The final `plan` becomes `assistantText` with `kind: plan`. `tool_call`
     and `tool_call_update` become `toolCall`/`toolResult` (diffs rendered as unified diffs).

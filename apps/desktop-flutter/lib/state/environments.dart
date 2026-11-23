@@ -153,6 +153,7 @@ class EnvironmentsStore extends ChangeNotifier {
     final id = workspace.isOpen ? workspace.id : null;
     if (id == _lastWs) return;
     _lastWs = id;
+    _providersLoaded = false;
     _generation++;
     status = 'idle';
     error = '';
@@ -228,20 +229,28 @@ class EnvironmentsStore extends ChangeNotifier {
 
   /// The providers alone (their names), without detecting anything: cheap enough for opening a
   /// folder (the language server line names the provider it offers).
+  bool _providersLoaded = false, _providersLoading = false;
+
+  /// Asked once per folder: a daemon that lists no providers is not asked again on every
+  /// rebuild (AUD-075).
   Future<void> loadProviders() async {
-    if (providers.isNotEmpty) return;
+    if (providers.isNotEmpty || _providersLoaded || _providersLoading) return;
+    _providersLoading = true;
     try {
       // Without a folder, the built-in and user providers (any toolchain can be installed).
       final r = await client.call(
         Methods.envProviders,
         ProvidersParams(workspaceId: workspace.isOpen ? workspace.id : null),
       );
-      if (providers.isEmpty) {
+      _providersLoaded = true;
+      if (r.providers.isNotEmpty && providers.isEmpty) {
         providers = r.providers;
         notifyListeners();
       }
     } on DaemonException {
       // Ids stand in for names.
+    } finally {
+      _providersLoading = false;
     }
   }
 

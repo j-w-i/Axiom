@@ -2,7 +2,7 @@
 id: FL-DS-001
 title: Design system: Precision Instrument × Temporal Tactility tokens, controls, motion, themes
 status: implemented
-status_note: 2026-11-22; Linux verified, CI pending
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-ARCH-001]
 order: 522
 scope: apps/desktop-flutter/lib/ui/, apps/desktop-flutter/assets/fonts/, apps/desktop-flutter/test/ui/, docs/design/flutter/

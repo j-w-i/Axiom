@@ -14,6 +14,9 @@ type Exit = (Option<i32>, Option<String>);
 
 pub struct Terminal {
     task: TaskId,
+    /// Whose it is: the session's principal and workspace, so it goes with them (AUD-099).
+    principal: String,
+    workspace: axiom_protocol::WorkspaceId,
     output: Mutex<(String, bool)>,
     exit: watch::Receiver<Option<Exit>>,
 }
@@ -24,14 +27,22 @@ impl Terminal {
     /// Registers a started task as a terminal and returns its id.
     pub fn start(
         app: &App,
+        ctx: &axiom_agent::tools::ToolCtx,
         task: TaskId,
         mut rx: mpsc::Receiver<TaskEvent>,
         limit: usize,
     ) -> String {
+        // Terminals of workspaces closed since: gone (their tasks ended with the workspace).
+        app.acp_terminals
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|_, t| app.workspaces.get(&t.workspace).is_ok());
         let id = format!("term-{}", NEXT.fetch_add(1, Ordering::Relaxed));
         let (tx, exit) = watch::channel(None);
         let t = Arc::new(Terminal {
             task,
+            principal: ctx.principal.clone(),
+            workspace: ctx.workspace_id.clone(),
             output: Mutex::new((String::new(), false)),
             exit,
         });
@@ -65,6 +76,25 @@ impl Terminal {
     }
 }
 
+/// Drops the terminals a session's agent created (the session was deleted), stopping those
+/// still running (AUD-099: the table was never cleared).
+pub async fn drop_session(app: &App, principal: &str) {
+    let gone: Vec<Arc<Terminal>> = {
+        let mut m = app.acp_terminals.lock().unwrap_or_else(|p| p.into_inner());
+        let ids: Vec<String> = m
+            .iter()
+            .filter(|(_, t)| t.principal == principal)
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.iter().filter_map(|id| m.remove(id)).collect()
+    };
+    for t in gone {
+        if t.exit.borrow().is_none() {
+            let _ = app.executor.cancel(&t.task).await;
+        }
+    }
+}
+
 /// `axiom_agent::acp::Terminals` over the daemon's terminal table.
 pub struct Terminals(pub Arc<App>);
 
@@ -81,6 +111,10 @@ impl Terminals {
 }
 
 impl axiom_agent::acp::Terminals for Terminals {
+    fn owner(&self, id: &str) -> Option<String> {
+        self.get(id).ok().map(|t| t.principal.clone())
+    }
+
     fn output<'a>(
         &'a self,
         id: &'a str,

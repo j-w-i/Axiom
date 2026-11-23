@@ -68,12 +68,40 @@ pub(crate) async fn process_environment(
     let w = workspace(app, id).await?;
     let r = registry(app, Some(w)).await?;
     let environment = project_environment(app, id, &r).await?;
-    let mut env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    let mut env = utf8_environment(std::env::vars_os());
     env.extend(axiom_env::project::process_env(
         &environment,
         std::env::var_os("PATH"),
     ));
     Ok(env)
+}
+
+/// The daemon's environment as UTF-8 pairs. `std::env::vars()` panics on a variable that is not
+/// UTF-8 (a path in a legacy encoding), which broke every terminal, language server and preview
+/// (AUD-037); such a variable is left out of the map (a task still inherits it: its spawn adds
+/// to the inherited environment) and logged once.
+pub(crate) fn utf8_environment(
+    vars: impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> std::collections::BTreeMap<String, String> {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    let mut skipped = Vec::new();
+    let env = vars
+        .filter_map(|(k, v)| match (k.into_string(), v.into_string()) {
+            (Ok(k), Ok(v)) => Some((k, v)),
+            (k, _) => {
+                skipped.push(k.unwrap_or_else(|k| k.to_string_lossy().into_owned()));
+                None
+            }
+        })
+        .collect();
+    if !skipped.is_empty() {
+        WARNED.call_once(|| {
+            tracing::warn!(
+                "environment variables that are not UTF-8 are not passed on: {skipped:?}"
+            )
+        });
+    }
+    env
 }
 
 pub async fn providers(app: Arc<App>, p: ProvidersParams) -> Result<ProvidersResult, RpcError> {
@@ -227,4 +255,22 @@ pub async fn uninstall(app: Arc<App>, p: UninstallParams) -> Result<Empty, RpcEr
         .uninstall(&p.provider_id, &p.version, m.as_ref())
         .await?;
     Ok(Empty {})
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn a_variable_that_is_not_utf8_is_left_out_without_a_panic() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        let vars = vec![
+            (OsString::from("GOOD"), OsString::from("yes")),
+            (OsString::from("BAD"), OsString::from_vec(b"\xff".to_vec())),
+            (OsString::from_vec(b"K\xfe".to_vec()), OsString::from("v")),
+        ];
+        let env = super::utf8_environment(vars.into_iter());
+        assert_eq!(env.len(), 1);
+        assert_eq!(env["GOOD"], "yes");
+    }
 }

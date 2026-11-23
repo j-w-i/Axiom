@@ -395,3 +395,28 @@ impl RawSession {
         self.stdin = None;
     }
 }
+
+/// Records a test that returned early because something it needs is missing here, so
+/// `scripts/check.sh` can list it after `cargo test` (a passing test hides its stderr; audit
+/// AUD-060). The list is `target/tmp/skipped-tests.txt`.
+#[allow(dead_code)]
+pub fn note_skipped(what: &str, why: &str) {
+    let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("skipped-tests.txt");
+    append_skip_line(&path, what, why);
+}
+
+/// Appends `what: why` to `path` as one line. The line is formatted first and written with one
+/// `write_all` on a file opened for append, so two tests skipping at once cannot interleave
+/// their lines (a `writeln!` with arguments is several writes; review N16).
+#[allow(dead_code)]
+pub fn append_skip_line(path: &Path, what: &str, why: &str) {
+    use std::io::Write;
+    let line = format!("{what}: {why}\n");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
+}

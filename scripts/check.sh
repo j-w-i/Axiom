@@ -6,6 +6,7 @@
 #        scripts/check.sh inspectors (only the web inspector, inspectors/web)
 #        scripts/check.sh e2e        (the shell's end-to-end suites, private compositor)
 #        scripts/check.sh package    (build the packages and verify them as installed copies)
+#        scripts/check.sh perf       (startup, idle, memory and large-file measurements; scripts/perf.sh)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -17,10 +18,16 @@ if [[ "$what" == all || "$what" == rust ]]; then
   step "cargo fmt --check";            cargo fmt --all --check
   step "cargo clippy (deny warnings)"
   cargo clippy --workspace --all-targets -- -D warnings
-  # The bridge tests spawn the real daemon binary.
-  step "cargo build -p axiomd (for the desktop-bridge tests)"
+  # The CLI's tests spawn the real daemon binary.
+  step "cargo build -p axiomd (for the CLI tests)"
   cargo build -p axiomd
-  step "cargo test";                   cargo test --workspace
+  step "cargo test"
+  rm -f target/tmp/skipped-tests.txt
+  cargo test --workspace
+  # Tests that returned early because something is missing here are listed, not hidden (AUD-060).
+  if [[ -s target/tmp/skipped-tests.txt ]]; then
+    echo "NOT RUN here (passed without running):"; sort -u target/tmp/skipped-tests.txt | sed 's/^/  /'
+  fi
   step "schema files are current";     cargo run -q -p axiom-protocol --example export_schema -- --check
   step "task board is consistent";     python3 scripts/tasks.py check
   step "dependency matrix";            python3 scripts/check_deps.py
@@ -74,6 +81,14 @@ fi
 if [[ "$what" == e2e || "$what" == flutter-e2e ]]; then
   step "desktop shell: end-to-end (private compositor)"
   apps/desktop-flutter/scripts/e2e.sh
+fi
+
+# Performance beyond the frame gate (startup, idle, memory, large files): opt-in,
+# `scripts/check.sh perf` (audit AUD-061). It measures; the budgets are judged by a person
+# comparing runs (docs/design/performance.md §4).
+if [[ "$what" == perf ]]; then
+  step "desktop shell: performance (private compositor)"
+  scripts/perf.sh
 fi
 
 # Packaging, as an installed copy behaves: build the packages, unpack each to a prefix, run it

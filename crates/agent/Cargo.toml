@@ -25,6 +25,10 @@ url = "2"
 # ADR-0015 §3: platform stores; Secret Service over pure-Rust D-Bus (zbus) on Linux.
 keyring = { version = "3.6", features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
 
+[target.'cfg(unix)'.dependencies]
+# Killing an external agent's or MCP server's whole process group (review D2), as `exec` does.
+nix.workspace = true
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tempfile.workspace = true

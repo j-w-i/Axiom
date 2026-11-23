@@ -2,7 +2,7 @@
 id: M5-ARCH-001
 title: Freeze the M5 contracts: protocol 0.5 (preview/*, ui/*), the inspection adapter protocol, module edges
 status: implemented
-status_note: 2026-11-22; Linux (cargo test -p axiom-protocol, full check.sh)
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: []
 order: 601
 scope: crates/protocol/, schemas/ (regenerated), apps/desktop-tauri/src/daemon/protocol.gen.ts (regenerated), crates/axiomd/src/router.rs (NOT_YET_SERVED), crates/desktop-bridge/ (version), docs/protocols/{ipc,inspection}.md, docs/architecture/{modules,governance,security}.md, scripts/check_deps.py

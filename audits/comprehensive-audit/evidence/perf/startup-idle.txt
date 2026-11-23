@@ -1,0 +1,13 @@
+cold exec->main 818 ms, exec->first_frame 1042 ms, exec->ready 850 ms, exec->folder_listed 853 ms, shutdown 3.886 ms
+warm exec->main 246 ms, exec->first_frame 469 ms, exec->ready 279 ms, exec->folder_listed 281 ms, shutdown 3.371 ms
+cold exec->main 251 ms, exec->first_frame 477 ms, exec->ready 282 ms, exec->folder_listed 284 ms, shutdown 3.282 ms
+warm exec->main 209 ms, exec->first_frame 321 ms, exec->ready 246 ms, exec->folder_listed 254 ms, shutdown 8.567 ms
+cold exec->main 245 ms, exec->first_frame 456 ms, exec->ready 277 ms, exec->folder_listed 279 ms, shutdown 3.114 ms
+warm exec->main 207 ms, exec->first_frame 294 ms, exec->ready 251 ms, exec->folder_listed 256 ms, shutdown 4.462 ms
+cold exec->main 275 ms, exec->first_frame 498 ms, exec->ready 310 ms, exec->folder_listed 314 ms, shutdown 3.718 ms
+warm exec->main 203 ms, exec->first_frame 273 ms, exec->ready 237 ms, exec->folder_listed 244 ms, shutdown 6.741 ms
+cold exec->main 249 ms, exec->first_frame 483 ms, exec->ready 286 ms, exec->folder_listed 289 ms, shutdown 5.74 ms
+warm exec->main 202 ms, exec->first_frame 318 ms, exec->ready 274 ms, exec->folder_listed 296 ms, shutdown 3.416 ms
+cold exec->main 251 ms, exec->first_frame 484 ms, exec->ready 280 ms, exec->folder_listed 286 ms, shutdown 3.2 ms
+warm exec->main 200 ms, exec->first_frame 276 ms, exec->ready 233 ms, exec->folder_listed 250 ms, shutdown 5.817 ms
+idle (folder + document, 10 s after 15 s): shell CPU 0% , daemon CPU 0% (ticks/10s == percent), shell PSS 138 MiB, daemon PSS 22 MiB, threads shell 17

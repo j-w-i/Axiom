@@ -2,7 +2,7 @@
 id: FL-QA-001
 title: Parity, performance, accessibility and packaging; the Flutter shell becomes the default and the Tauri shell is retired
 status: implemented
-status_note: 2026-11-22; Linux verified (every suite, frames, packages, startup); macOS and the M2 real install in CI; Windows owed
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-EDIT-002, FL-CONSOLE-001, FL-GIT-001, FL-ENV-001, FL-CHAT-001]
 order: 531
 scope: apps/desktop-flutter/, scripts/run.sh, scripts/bundle.sh, .github/workflows/, docs/roadmap/verification/FL.md, apps/desktop-tauri/ and editor/ (removal), docs/

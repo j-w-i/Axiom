@@ -47,8 +47,29 @@ class _AxSplitterState extends State<AxSplitter> {
   bool _hover = false;
   bool _drag = false;
   bool _focusVisible = false;
+  ValueNotifier<String?>? _hintLine;
+  String? _shown;
 
-  void _set(double v) => widget.onChanged(v.clamp(widget.min, widget.max).roundToDouble());
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _hintLine = HintScope.maybeOf(context);
+  }
+
+  @override
+  void dispose() {
+    // A splitter that goes away under the pointer gets no exit event (AUD-064).
+    final h = _hintLine;
+    final shown = _shown;
+    if (h != null && shown != null) clearHintLater(h, shown);
+    super.dispose();
+  }
+
+  /// [v] within the range; a degenerate range (max below min, a window too small for both
+  /// sides) settles on min instead of throwing (AUD-004).
+  double _clamp(double v) => v.clamp(widget.min, widget.max < widget.min ? widget.min : widget.max);
+
+  void _set(double v) => widget.onChanged(_clamp(v).roundToDouble());
 
   @override
   Widget build(BuildContext context) {
@@ -59,8 +80,8 @@ class _AxSplitterState extends State<AxSplitter> {
     return Semantics(
       label: widget.label,
       value: '${widget.value.round()}',
-      increasedValue: '${(widget.value + step).clamp(widget.min, widget.max).round()}',
-      decreasedValue: '${(widget.value - step).clamp(widget.min, widget.max).round()}',
+      increasedValue: '${_clamp(widget.value + step).round()}',
+      decreasedValue: '${_clamp(widget.value - step).round()}',
       onIncrease: () => _set(widget.value + step),
       onDecrease: () => _set(widget.value - step),
       slider: true,
@@ -71,13 +92,14 @@ class _AxSplitterState extends State<AxSplitter> {
             : SystemMouseCursors.resizeRow,
         onShowHoverHighlight: (v) {
           setState(() => _hover = v);
-          final h = HintScope.maybeOf(context);
+          final h = _hintLine;
           if (h != null) {
             final text = widget.hint ?? '${widget.label} — Drag, or Arrow keys';
             if (v) {
-              h.value = text;
-            } else if (h.value == text) {
-              h.value = null;
+              h.value = _shown = text;
+            } else {
+              if (h.value == text) h.value = null;
+              _shown = null;
             }
           }
         },

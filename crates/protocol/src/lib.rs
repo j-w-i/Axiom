@@ -1,4 +1,4 @@
-//! Axiom wire protocol, version 0.4.
+//! Axiom wire protocol, version 0.6.
 //!
 //! This crate is the single source of truth for the contract between the
 //! daemon (`axiomd`) and every client (desktop shell, CLI, agents, tests).
@@ -16,6 +16,9 @@
 //! - [`agent`]: the protocol 0.3 additions (milestone M3, ADR-0015).
 //! - [`lsp`], [`terminal`], [`git`] and `workspace/search`: the protocol 0.4 additions
 //!   (milestone M4, ADR-0018).
+//! - [`preview`] and [`ui`]: the protocol 0.5 additions (milestone M5, ADR-0019).
+//! - `fs/createFile`, `fs/createDirectory`, `fs/rename`, `fs/trash`: the protocol 0.6 additions
+//!   (audit AUD-022, `docs/decisions/proposed/CR-AUD-022-workspace-file-operations.md`).
 //! - DRAFT contracts for later milestones, compiled and schema-exported but
 //!   not served yet: [`inspection`]. [`diagnostics`] and [`provider`] were drafts and are
 //!   frozen for M2 (used by [`env`] and [`build`]).
@@ -52,7 +55,7 @@ pub use envelope::{
 pub use method::{Method, Notification};
 
 /// Protocol version implemented by this crate. `MAJOR.MINOR`.
-pub const PROTOCOL_VERSION: &str = "0.5";
+pub const PROTOCOL_VERSION: &str = "0.6";
 
 /// A path inside a workspace: relative to the workspace root, `/`-separated,
 /// UTF-8, with no `.`/`..` segments, no leading `/`, and no trailing `/`.

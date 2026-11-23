@@ -50,6 +50,9 @@ final class AxiomColors {
     required this.danger,
     required this.dangerText,
     required this.dangerSoft,
+    required this.diffAdd,
+    required this.diffDel,
+    required this.approvalBorder,
     required this.folder,
     required this.treeGuide,
     required this.thumbTop,
@@ -148,6 +151,14 @@ final class AxiomColors {
   final Color dangerText;
   final Color dangerSoft;
 
+  /// Behind an added and a removed line in a diff (the ok and danger hues at 12 %); the
+  /// contrast test checks the code and diff text colours on them.
+  final Color diffAdd;
+  final Color diffDel;
+
+  /// The border of an approval card (the accent at 50 %).
+  final Color approvalBorder;
+
   /// Folder icons in the tree.
   final Color folder;
 
@@ -208,6 +219,9 @@ final class AxiomColors {
     danger: Color(0xFFE5645D),
     dangerText: Color(0xFFF27C74),
     dangerSoft: Color(0x1FE5645D),
+    diffAdd: Color(0x1F8FBF7F),
+    diffDel: Color(0x1FE5645D),
+    approvalBorder: Color(0x80C9A35B),
     folder: Color(0xFF8E8A82),
     treeGuide: Color(0x0DFFFFFF),
     thumbTop: Color(0xFFE2DED6),
@@ -270,17 +284,20 @@ final class AxiomColors {
     accentHi: Color(0xFFC99A49),
     accentLo: Color(0xFF9A722C),
     primaryBorder: Color(0xFF5C441A),
-    accentText: Color(0xFF845F1B),
+    accentText: Color(0xFF785616),
     accentSoft: Color(0x24B88A3A),
     focus: Color(0xFF9A722C),
     onAccent: Color(0xFF1D1505),
     ok: Color(0xFF4F8F45),
-    okText: Color(0xFF397330),
+    okText: Color(0xFF33682B),
     warn: Color(0xFFA44E07),
     warnText: Color(0xFF8F4406),
     danger: Color(0xFFBC342E),
     dangerText: Color(0xFFB02C26),
     dangerSoft: Color(0x1ABC342E),
+    diffAdd: Color(0x1F4F8F45),
+    diffDel: Color(0x1FBC342E),
+    approvalBorder: Color(0x80B88A3A),
     folder: Color(0xFF7A766E),
     treeGuide: Color(0x12000000),
     thumbTop: Color(0xFFE2DED6),
@@ -361,6 +378,12 @@ abstract final class Metrics {
   static const radiusControl = 3.0;
   static const radiusRaised = 4.0;
   static const radiusSheet = 6.0;
+
+  /// Fully rounded ends (badges, the switch's track).
+  static const radiusPill = 999.0;
+
+  /// The soft focus halo around a field: the control's radius plus the ring's width.
+  static const radiusHalo = radiusControl + focusWidth;
   static const rowHeight = 22.0;
   static const controlHeight = 26.0;
   static const controlHeightSmall = 22.0;
@@ -370,6 +393,13 @@ abstract final class Metrics {
   static const crumbHeight = 24.0;
   static const statusBarHeight = 24.0;
   static const railWidth = 44.0;
+
+  /// The inset of a side panel's content from its edges: text, fields and buttons sit 12 px in;
+  /// a list is inset [sideListInset] and its rows pad their content by [rowInset], which lands
+  /// the rows' text on the same 12 px line.
+  static const sideGutter = s5;
+  static const sideListInset = s2;
+  static const rowInset = s4;
   static const focusWidth = 2.0;
   static const iconSize = 16.0;
   static const underlineWidth = 16.0;
@@ -405,6 +435,16 @@ final class AxiomType {
     height: 1.3,
     fontWeight: FontWeight.w600,
     color: colors.ink,
+  );
+
+  /// A heading inside a side panel (Source Control's groups, the Inspector's sections, Recent):
+  /// one style for every equivalent heading.
+  TextStyle get sectionHeading => TextStyle(
+    fontFamily: sans,
+    fontSize: 12,
+    height: 16 / 12,
+    fontWeight: FontWeight.w600,
+    color: colors.ink2,
   );
 
   /// A page's heading line (the Tauri welcome's title: 15 px, strong).
@@ -468,6 +508,23 @@ final class AxiomMotion {
       SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 1);
 
   bool get animates => mode != MotionMode.off;
+
+  /// Glides (tab underline, the rail's selection, the switch's thumb, springs): Standard only;
+  /// at Reduced they jump (motion-system.md §6).
+  bool get glides => mode == MotionMode.standard;
+
+  /// Looping indicators (spinners, pulses): Standard only; Reduced and Off draw them still
+  /// (motion-system.md §5.6).
+  bool get loops => mode == MotionMode.standard;
+
+  /// Presence (dialogs, menus, toasts) moves or scales only at Standard; Reduced fades.
+  bool get travels => mode == MotionMode.standard;
+
+  /// The enter offset of presence (`--travel`): 8 px at Standard, none otherwise.
+  double get travel => travels ? 8 : 0;
+
+  /// The press's half-pixel drop (Reduced keeps the pressed look without the movement).
+  bool get pressMoves => mode == MotionMode.standard;
 
   /// The editor's caret blinks only at Standard: Reduced and Off make loops static (ADR-0013).
   bool get caretBlinks => mode == MotionMode.standard;

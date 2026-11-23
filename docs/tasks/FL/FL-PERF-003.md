@@ -2,7 +2,7 @@
 id: FL-PERF-003
 title: The shell draws at the display's rate (60 Hz, not 30) - the Dart UI on its own thread; editors share their worker isolates and copy nothing on the UI thread
 status: implemented
-status_note: 2026-11-22; Linux (Fedora 44, private virtual KWin on the NVIDIA GPU at 125 %): frame interval 33.3 → 16.7 ms and vsync-to-raster 29–38 → 4–7 ms in every interaction; the worst tab-switch frame 59 → 15–18 ms. Single frames over 16.7 ms move between interactions from run to run under load 5–6 (a clean run on an idle machine owed). Above 60 Hz needs the Flutter engine changed (see Result)
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-PERF-002]
 order: 611
 scope: apps/desktop-flutter/linux/runner/my_application.cc, apps/desktop-flutter/third_party/re_editor/, apps/desktop-flutter/integration_test/frame_report.dart, apps/desktop-flutter/integration_test/frames_test.dart, docs/roadmap/verification/FL.md

@@ -22,8 +22,18 @@ pub enum WsError {
     WorkspaceNotOpen(String),
     #[error("the file changed on disk")]
     Conflict { current: Option<FileVersion> },
+    /// The path no longer leads where it did when the operation started (a directory on the
+    /// way was replaced, by a symlink for example); nothing was done (review N14, R5).
+    #[error("`{0}` now leads somewhere else")]
+    Changed(String),
     #[error("`{0}` is not valid UTF-8")]
     UnsupportedEncoding(String),
+    #[error("`{0}` already exists")]
+    AlreadyExists(String),
+    #[error("`{0}` is not a regular file")]
+    NotAFile(String),
+    #[error("{0}")]
+    Unsupported(String),
     #[error("file is too large ({bytes} bytes)")]
     TooLarge { bytes: u64 },
     #[error("I/O error: {0}")]
@@ -88,10 +98,26 @@ impl From<WsError> for RpcError {
                 RpcError::new(ErrorKind::Conflict, "The file changed on disk.")
                     .with_details(json!({ "currentVersion": current.map(|v| v.0) }))
             }
+            WsError::Changed(p) => RpcError::new(
+                ErrorKind::Conflict,
+                sentence(format!(
+                    "`{p}` changed on disk while it was being changed: a directory on its path \
+                     was replaced. Nothing was changed"
+                )),
+            ),
             WsError::UnsupportedEncoding(p) => RpcError::new(
                 ErrorKind::UnsupportedEncoding,
                 sentence(format!("`{p}` is not valid UTF-8")),
             ),
+            WsError::AlreadyExists(p) => RpcError::new(
+                ErrorKind::AlreadyExists,
+                sentence(format!("`{p}` already exists")),
+            ),
+            WsError::NotAFile(p) => RpcError::new(
+                ErrorKind::InvalidParams,
+                sentence(format!("`{p}` is not a regular file")),
+            ),
+            WsError::Unsupported(m) => RpcError::new(ErrorKind::Unsupported, sentence(m)),
             WsError::TooLarge { bytes } => RpcError::new(
                 ErrorKind::TooLarge,
                 sentence(format!(

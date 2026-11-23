@@ -74,7 +74,7 @@ class AxButton extends StatelessWidget {
           ],
         );
         final body = SizedBox(
-          height: Metrics.controlHeight,
+          height: context.scaled(Metrics.controlHeight),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: Metrics.s5),
             child: Center(widthFactor: 1, child: content),
@@ -104,7 +104,9 @@ class AxButton extends StatelessWidget {
             child: body,
           ),
         };
-        if (down) box = Transform.translate(offset: const Offset(0, 0.5), child: box);
+        if (down && t.motion.pressMoves) {
+          box = Transform.translate(offset: const Offset(0, 0.5), child: box);
+        }
         box = Opacity(opacity: s.enabled ? 1 : 0.42, child: box);
         return FocusRing(visible: s.focused, child: box);
       },
@@ -125,6 +127,7 @@ class AxIconButton extends StatelessWidget {
     this.color,
     this.focusNode,
     this.engaged = true,
+    this.tooltipSide = OverlaySide.below,
   });
   final IconData16 icon;
   final String label;
@@ -141,12 +144,16 @@ class AxIconButton extends StatelessWidget {
   final Color? color;
   final FocusNode? focusNode;
 
+  /// Where the tooltip goes (right for the rail's buttons).
+  final OverlaySide tooltipSide;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     return AxTooltip(
       message: label,
       shortcut: shortcut,
+      side: tooltipSide,
       child: Pressable(
         label: label,
         hint: shortcut == null ? label : '$label — $shortcut',
@@ -211,7 +218,8 @@ class _InkCircleButtonState extends State<InkCircleButton> with SingleTickerProv
 
   void _spring(double to) {
     final m = context.axiom.motion;
-    if (!m.animates) {
+    // A spring is a glide: Standard only (motion-system.md §6).
+    if (!m.glides) {
       _scale.value = to;
       return;
     }
@@ -332,9 +340,12 @@ class AxBadge extends StatelessWidget {
     final fg = attention ? t.colors.onAccent : t.colors.ink2;
     return ExcludeSemantics(
       child: DecoratedBox(
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(7)),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(Metrics.radiusPill),
+        ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 3),
+          padding: const EdgeInsets.symmetric(horizontal: Metrics.s1 + 1),
           child: Text(
             count > 99 ? '99+' : '$count',
             style: t.type.numeric.copyWith(
@@ -352,14 +363,16 @@ class AxBadge extends StatelessWidget {
 
 enum DotState { off, ok, running, warn, error }
 
-/// A status dot set in a cut-out ring of the surface it sits on (the "older Discord" mark). The
-/// state is also given in words by the control around it.
+/// A status dot, optionally set in a cut-out ring of the surface it sits on (the "older Discord"
+/// mark, where it overlaps something). The state is also given in words by the control around it.
 class StatusDot extends StatelessWidget {
   const StatusDot(this.state, {super.key, this.size = 8, this.ring});
   final DotState state;
   final double size;
 
-  /// The surface behind it (the cut-out); defaults to the bar tone.
+  /// The surface behind it, drawn as the cut-out ring; none by default (a ring in another tone
+  /// than the surface reads as a halo; AUD-069). Pass the exact surface colour when the dot sits
+  /// on something it must stand out from.
   final Color? ring;
 
   @override
@@ -376,7 +389,7 @@ class StatusDot extends StatelessWidget {
       child: Container(
         width: size + 4,
         height: size + 4,
-        decoration: BoxDecoration(color: ring ?? c.bar, shape: BoxShape.circle),
+        decoration: ring == null ? null : BoxDecoration(color: ring, shape: BoxShape.circle),
         alignment: Alignment.center,
         child: Container(
           width: size,
@@ -406,9 +419,9 @@ class AxCheckbox extends StatelessWidget {
       onPressed: onChanged == null ? null : () => onChanged!(!value),
       builder: (context, s) => FocusRing(
         visible: s.focused,
-        radius: 4,
+        radius: Metrics.radiusRaised,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: Metrics.s1, vertical: 3),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -455,14 +468,15 @@ class AxToggle extends StatelessWidget {
       onPressed: onChanged == null ? null : () => onChanged!(!value),
       builder: (context, s) => FocusRing(
         visible: s.focused,
-        radius: 10,
+        radius: Metrics.radiusPill,
         child: Padding(
-          padding: const EdgeInsets.all(2),
+          padding: const EdgeInsets.all(Metrics.s1),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               // Tauri's switch: a recessed track with the input border; on, brass with the
-              // primary border; a light gradient thumb.
+              // primary border; a light gradient thumb. The thumb glides by a transform
+              // (Standard only); the track's colour changes in step.
               AnimatedContainer(
                 duration: t.motion.medium,
                 curve: t.motion.curve,
@@ -471,23 +485,30 @@ class AxToggle extends StatelessWidget {
                 padding: const EdgeInsets.all(1),
                 decoration: BoxDecoration(
                   color: value ? c.accent : c.recessed,
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(Metrics.radiusPill),
                   border: Border.all(color: value ? c.primaryBorder : c.lineInput),
                 ),
-                alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-                child: Container(
-                  width: 13,
-                  height: 13,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [c.thumbTop, c.thumbBottom],
+                alignment: Alignment.centerLeft,
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(end: value ? 13 : 0),
+                  duration: t.motion.glides ? t.motion.medium : Duration.zero,
+                  curve: t.motion.curve,
+                  builder: (context, x, child) =>
+                      Transform.translate(offset: Offset(x, 0), child: child),
+                  child: Container(
+                    width: 13,
+                    height: 13,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [c.thumbTop, c.thumbBottom],
+                      ),
+                      boxShadow: [
+                        BoxShadow(color: c.contactShade, blurRadius: 2, offset: const Offset(0, 1)),
+                      ],
                     ),
-                    boxShadow: [
-                      BoxShadow(color: c.contactShade, blurRadius: 2, offset: const Offset(0, 1)),
-                    ],
                   ),
                 ),
               ),
@@ -513,27 +534,40 @@ class AxListRow extends StatelessWidget {
     this.height = Metrics.rowHeight,
     this.groove = false,
     this.focusNode,
+    this.skipTraversal = false,
+    this.listFocused,
   });
   final String label;
   final Widget child;
   final VoidCallback? onPressed;
   final bool selected;
   final String? hint;
+
+  /// At text scale 1: grown with the system's text scale ([AxiomContext.scaled]).
   final double height;
   final bool groove;
   final FocusNode? focusNode;
 
+  /// A row of a list with one Tab stop ([RovingFocus]): out of the Tab order.
+  final bool skipTraversal;
+
+  /// Whether the list holds focus (the selected row's marker is brass then, whether focus came
+  /// from the keyboard or a click); null follows this row's keyboard focus.
+  final bool? listFocused;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final h = context.scaled(height);
     return Pressable(
       label: label,
       hint: hint,
       onPressed: onPressed,
       selected: selected,
       focusNode: focusNode,
+      skipTraversal: skipTraversal,
       builder: (context, s) {
-        Widget row = SizedBox(height: height, child: child);
+        Widget row = SizedBox(height: h, child: child);
         if (selected) {
           // Tauri's selected tree row: the selected tint and a 2 px marker on the left edge,
           // brass while the list has focus.
@@ -547,7 +581,7 @@ class AxListRow extends StatelessWidget {
                   top: 3,
                   bottom: 3,
                   width: 2,
-                  child: ColoredBox(color: s.focused ? c.accent : c.ink3),
+                  child: ColoredBox(color: (listFocused ?? s.focused) ? c.accent : c.ink3),
                 ),
               ],
             ),
@@ -563,31 +597,69 @@ class AxListRow extends StatelessWidget {
   }
 }
 
-/// A smooth spinner. It turns only while its ticker runs (stopped when the window is hidden, by
-/// TickerMode) and is a still arc with motion off.
+/// A spinner, stepped at 8 frames a second (motion-system.md §5: `steps(8)` over 0.8 s). It
+/// turns only at Standard motion, while the window is active ([WindowActivity]) and its ticker
+/// runs (TickerMode stops it on hidden pages); otherwise, or when [still], it is a still arc.
+/// A region shows one turning spinner; the others pass [still] (§5.3).
 class Spinner extends StatefulWidget {
-  const Spinner({super.key, this.size = 14, this.label = 'Working'});
+  const Spinner({super.key, this.size = 14, this.label = 'Working', this.still = false});
   final double size;
   final String label;
+
+  /// Drawn still (another spinner in the same region already turns).
+  final bool still;
+
+  /// Frames per second and per turn.
+  static const steps = 8;
 
   @override
   State<Spinner> createState() => _SpinnerState();
 }
 
 class _SpinnerState extends State<Spinner> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker = createTicker((d) => setState(() => _t = d.inMicroseconds / 1e6));
-  double _t = 0;
+  late final Ticker _ticker = createTicker(_tick);
+  int _step = 0;
+  final _active = WindowActivity.instance.active;
+
+  void _tick(Duration d) {
+    final step = (d.inMilliseconds * Spinner.steps ~/ 1000) % Spinner.steps;
+    if (step != _step) setState(() => _step = step);
+  }
+
+  bool get _turns => !widget.still && _active.value && context.axiom.motion.loops;
+
+  void _sync() {
+    if (!mounted) return;
+    final turns = _turns;
+    if (turns && !_ticker.isActive) _ticker.start();
+    if (!turns && _ticker.isActive) _ticker.stop();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _active.addListener(_sync);
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final animates = context.axiom.motion.animates;
-    if (animates && !_ticker.isActive) _ticker.start();
-    if (!animates && _ticker.isActive) _ticker.stop();
+    _sync();
   }
 
   @override
+  void didUpdateWidget(Spinner old) {
+    super.didUpdateWidget(old);
+    _sync();
+  }
+
+  /// Whether it is turning (tests).
+  @visibleForTesting
+  bool get turning => _ticker.isActive;
+
+  @override
   void dispose() {
+    _active.removeListener(_sync);
     _ticker.dispose();
     super.dispose();
   }
@@ -599,7 +671,9 @@ class _SpinnerState extends State<Spinner> with SingleTickerProviderStateMixin {
       label: widget.label,
       child: SizedBox.square(
         dimension: widget.size,
-        child: CustomPaint(painter: _ArcPainter(c.accent, c.hairline, _t * 2 * math.pi * 1.2)),
+        child: CustomPaint(
+          painter: _ArcPainter(c.accent, c.hairline, _step * 2 * math.pi / Spinner.steps),
+        ),
       ),
     );
   }

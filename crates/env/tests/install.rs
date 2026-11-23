@@ -369,6 +369,59 @@ async fn zip_and_checksum_url_install() {
     assert_eq!(r.verified[0].version, "1.10.0");
 }
 
+/// A checksum file is from the artifact's own origin: the first digest verified for a URL is
+/// kept, and a later, different published digest for the same URL is refused (AUD-107).
+#[tokio::test]
+async fn a_changed_checksum_file_for_the_same_url_is_refused() {
+    let srv = Server::start().await;
+    let (name, body) = tool_entry("1.10.0");
+    let path = format!("demo-1.10.0/bin/{name}");
+    let archive = zip_of(&[(path.as_str(), &body)]);
+    let url = srv.put("/demo-1.10.0.zip", archive.clone());
+    let sums_for = |a: &[u8]| format!("{}  demo-1.10.0.zip\n", sha256(a)).into_bytes();
+    let sums = srv.put("/SHASUMS256.txt", sums_for(&archive));
+    let data = tempfile::tempdir().unwrap();
+    let inst = installer(data.path());
+    let m = manifest(
+        &url.replace("1.10.0", "${version}"),
+        "zip",
+        &format!(r#"{{ kind = "sha256_url", url = "{sums}" }}"#),
+    );
+    let (_, progress) = recorder();
+    let plan = inst.plan(&m, "1.10.0", None).await.unwrap();
+    inst.install(
+        &plan.plan_id,
+        Some(&m),
+        &CancellationToken::new(),
+        &progress,
+    )
+    .await
+    .unwrap();
+    inst.uninstall("demo", "1.10.0", Some(&m)).await.unwrap();
+    // The release is replaced: a matching pair, as a compromised origin would serve.
+    let evil = zip_of(&[(path.as_str(), b"#!/bin/sh\necho evil 1.10.0\n".as_slice())]);
+    srv.put("/demo-1.10.0.zip", evil.clone());
+    srv.put("/SHASUMS256.txt", sums_for(&evil));
+    let plan = inst.plan(&m, "1.10.0", None).await.unwrap();
+    match inst
+        .install(
+            &plan.plan_id,
+            Some(&m),
+            &CancellationToken::new(),
+            &progress,
+        )
+        .await
+    {
+        Err(EnvError::ChecksumMismatch {
+            expected, actual, ..
+        }) => {
+            assert_eq!(expected, sha256(&archive));
+            assert_eq!(actual, sha256(&evil));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn checksum_mismatch_cleans_up() {
     let srv = Server::start().await;

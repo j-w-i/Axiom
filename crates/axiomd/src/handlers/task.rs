@@ -25,6 +25,14 @@ pub async fn start(
         label: p.label,
     };
     let (task_id, mut rx) = app.executor.start(p.workspace_id, spec).await?;
+    // A `$/cancel` that raced this success answers `cancelled`: the client never learns the
+    // task id, so the task must not run on unseen (AUD-098).
+    {
+        let (ex, id) = (app.executor.clone(), task_id.clone());
+        ctx.on_discarded(async move {
+            let _ = ex.cancel(&id).await;
+        });
+    }
     // Notifications may only follow the response to this request.
     let notifier = ctx.notifier.clone();
     ctx.after_response(async move {

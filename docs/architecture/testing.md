@@ -11,7 +11,6 @@ and in CI. A task is not Tested until it passes.
 | Unit | One crate's logic | `crates/<name>/tests/`, `src/**` `#[cfg(test)]` | other crates' internals |
 | RPC | Framing, dispatch, cancellation, backpressure | `crates/rpc/tests/` (in-process duplex streams) | a daemon |
 | Daemon integration (behaviour contract) | Every behaviour in `docs/protocols/ipc.md`, against the real `axiomd` binary over stdio | `crates/axiomd/tests/` | a shell |
-| Bridge client | Process supervision, framing, correlation, cancel, timeout, crash/restart, bounded shutdown against the real `axiomd` (the Rust client no shell links today; it still pins the lifecycle) | `crates/desktop-bridge/tests/bridge.rs` | a shell, a display |
 | Shell daemon client | The same lifecycle in the shell's Dart client, and every generated wire type round-tripped against what the real `axiomd` sends | `apps/desktop-flutter/test/daemon/{client,roundtrip}_test.dart` (`flutter test`) | a display |
 | Shell unit and widget | Stores' logic (task output assembly, Git, agent events), the LSP editor layer, Markdown, controls' keyboard and semantics, fuzzy matching | `apps/desktop-flutter/test/{state,editor,chat,ui}/` (`flutter_test`) | a daemon (mostly), a display |
 | Shell design guard | No literal colours outside `lib/ui/tokens.dart`, WCAG contrast of every text token on every surface in both themes, no Material or Cupertino import, golden images of the gallery in both themes (Linux) | `test/ui/tokens_test.dart`, `test/no_material_test.dart`, `test/ui/gallery_golden_test.dart` | — |

@@ -1,8 +1,8 @@
 use crate::app::App;
 use axiom_protocol::fs::DidChangeParams;
 use axiom_protocol::fs::{
-    DidChange, ListParams, ListResult, ReadFileParams, ReadFileResult, WatchParams,
-    WriteFileParams, WriteFileResult,
+    CreateDirectoryParams, CreateFileParams, DidChange, ListParams, ListResult, ReadFileParams,
+    ReadFileResult, RenameParams, TrashParams, WatchParams, WriteFileParams, WriteFileResult,
 };
 use axiom_protocol::lifecycle::Empty;
 use axiom_protocol::RpcError;
@@ -40,22 +40,14 @@ async fn read_external(app: &App, p: &ReadFileParams) -> Result<ReadFileResult, 
     if !app.external_read_allowed(&p.workspace_id, &path) {
         return Err(denied());
     }
-    let bytes = tokio::fs::read(&path).await.map_err(|e| {
-        RpcError::new(
-            if e.kind() == std::io::ErrorKind::NotFound {
-                axiom_protocol::ErrorKind::NotFound
-            } else {
-                axiom_protocol::ErrorKind::Io
-            },
-            format!("{} cannot be read: {e}", path.display()),
-        )
-    })?;
-    if bytes.len() > 16 * 1024 * 1024 {
-        return Err(RpcError::new(
-            axiom_protocol::ErrorKind::TooLarge,
-            "The file is over 16 MiB.",
-        ));
-    }
+    // A regular file of at most 16 MiB, checked before reading and read with a limit: a
+    // location naming `/dev/zero`, a FIFO or a huge file is refused at once (AUD-097).
+    let shown = path.display().to_string();
+    let bytes = tokio::task::spawn_blocking(move || {
+        axiom_workspace::read_regular_file(&path, &shown, axiom_protocol::fs::MAX_TEXT_FILE_BYTES)
+    })
+    .await
+    .map_err(|_| crate::app::internal())??;
     let version = {
         use sha2::Digest;
         axiom_protocol::fs::FileVersion(hex::encode(sha2::Sha256::digest(&bytes)))
@@ -77,24 +69,36 @@ pub async fn write_file(app: Arc<App>, p: WriteFileParams) -> Result<WriteFileRe
     Ok(WriteFileResult { version })
 }
 
+/// `fs/watch`: per connection (AUD-028). Each connection that enables it gets every batch;
+/// enabling twice on one connection is idempotent; a connection's forwarder ends with it.
 pub async fn watch(app: Arc<App>, p: WatchParams, ctx: RequestCtx) -> Result<Empty, RpcError> {
     let ws = app.workspaces.get(&p.workspace_id)?;
     if !p.enabled {
-        app.stop_watcher(&p.workspace_id);
+        app.stop_watcher_of(&p.workspace_id, &ctx.notifier);
         return Ok(Empty {});
     }
-    // Idempotent: already watching.
-    if app
-        .watchers
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .contains_key(&p.workspace_id)
-    {
+    let watching = |app: &App| {
+        let mut m = app.watchers.lock().unwrap_or_else(|e| e.into_inner());
+        let v = m.entry(p.workspace_id.clone()).or_default();
+        v.retain(|(n, h)| !n.is_closed() && !h.is_finished());
+        v.iter().any(|(n, _)| n.same_connection(&ctx.notifier))
+    };
+    if watching(&app) {
         return Ok(Empty {});
     }
-    let mut handle = ws.watch()?;
+    // The first watch of a workspace walks its whole tree: off the async threads (AUD-031).
+    let w = ws.clone();
+    let mut handle = tokio::task::spawn_blocking(move || w.watch())
+        .await
+        .map_err(|_| crate::app::internal())??;
     let id = p.workspace_id.clone();
     let notifier = ctx.notifier.clone();
+    let mut m = app.watchers.lock().unwrap_or_else(|e| e.into_inner());
+    let v = m.entry(p.workspace_id.clone()).or_default();
+    // Checked again under the same lock as the insert: two concurrent enables make one.
+    if v.iter().any(|(n, _)| n.same_connection(&ctx.notifier)) {
+        return Ok(Empty {});
+    }
     let task = tokio::spawn(async move {
         while let Some(changes) = handle.changes.recv().await {
             let params = DidChangeParams {
@@ -106,9 +110,82 @@ pub async fn watch(app: Arc<App>, p: WatchParams, ctx: RequestCtx) -> Result<Emp
             }
         }
     });
-    app.watchers
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(p.workspace_id, task.abort_handle());
+    v.push((ctx.notifier.clone(), task.abort_handle()));
     Ok(Empty {})
+}
+
+/// `fs/createFile` (protocol 0.6, AUD-022).
+pub async fn create_file(app: Arc<App>, p: CreateFileParams) -> Result<WriteFileResult, RpcError> {
+    let ws = app.workspaces.get(&p.workspace_id)?;
+    let version = ws.create_file(&p.path, &p.text).await?;
+    Ok(WriteFileResult { version })
+}
+
+/// `fs/createDirectory` (protocol 0.6).
+pub async fn create_directory(app: Arc<App>, p: CreateDirectoryParams) -> Result<Empty, RpcError> {
+    let ws = app.workspaces.get(&p.workspace_id)?;
+    ws.create_dir(&p.path, p.parents).await?;
+    Ok(Empty {})
+}
+
+/// `fs/rename` (protocol 0.6).
+pub async fn rename(app: Arc<App>, p: RenameParams) -> Result<Empty, RpcError> {
+    let ws = app.workspaces.get(&p.workspace_id)?;
+    ws.rename(&p.from, &p.to).await?;
+    Ok(Empty {})
+}
+
+/// `fs/trash` (protocol 0.6): to the person's trash, never a permanent delete.
+pub async fn trash(app: Arc<App>, p: TrashParams) -> Result<Empty, RpcError> {
+    let ws = app.workspaces.get(&p.workspace_id)?;
+    ws.trash(&p.path).await?;
+    Ok(Empty {})
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use axiom_protocol::{ErrorKind, WorkspacePath};
+    use std::time::Duration;
+
+    /// AUD-097: a language server's location naming `/dev/zero` or a FIFO is refused at once
+    /// (it was read to the end before the size check: out of memory, or a blocked thread).
+    #[tokio::test]
+    async fn external_reads_refuse_devices_and_fifos_at_once() {
+        let app = App::new(axiom_store::Store::open_in_memory().unwrap());
+        let ws_dir = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let fifo = other.path().join("p");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        let opened = app
+            .workspaces
+            .open(ws_dir.path().to_str().unwrap())
+            .await
+            .unwrap();
+        let fifo_uri = url::Url::from_file_path(&fifo).unwrap().to_string();
+        app.allow_external_reads(
+            &opened.workspace_id,
+            std::path::Path::new(&opened.root),
+            &["file:///dev/zero".to_string(), fifo_uri.clone()],
+        );
+        for uri in ["file:///dev/zero".to_string(), fifo_uri] {
+            let r = tokio::time::timeout(
+                Duration::from_secs(5),
+                read_file(
+                    app.clone(),
+                    ReadFileParams {
+                        workspace_id: opened.workspace_id.clone(),
+                        path: WorkspacePath(uri.clone()),
+                    },
+                ),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("reading {uri} blocked"));
+            assert_eq!(r.unwrap_err().data.kind, ErrorKind::InvalidParams, "{uri}");
+        }
+    }
 }

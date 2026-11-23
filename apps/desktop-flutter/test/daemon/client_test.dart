@@ -190,6 +190,26 @@ void main() {
     },
   );
 
+  test(
+    'a request written to a daemon that just died fails; the broken pipe is not uncaught',
+    () async {
+      await client.start();
+      final pid = client.pid!;
+      Process.killPid(pid, ProcessSignal.sigkill);
+      // Synchronously, so the client has not seen the exit yet and still writes to the pipe.
+      final end = DateTime.now().add(const Duration(seconds: 5));
+      while (processAlive(pid) && DateTime.now().isBefore(end)) {}
+      expect(processAlive(pid), isFalse);
+      final calls = [for (var i = 0; i < 20; i++) open()];
+      for (final c in calls) {
+        await expectLater(c, throwsA(isA<DaemonException>()));
+      }
+      await eventually(() => client.state.value is DaemonFailed);
+      // Time for a late write error to surface as an uncaught one (it fails the test if it does).
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    },
+  );
+
   test('shutdown ends the process within its bound and leaves the client stopped', () async {
     await client.start();
     final pid = client.pid!;
@@ -227,6 +247,135 @@ read -r line
     order.add('response');
     await eventually(() => order.length == 2);
     expect(order, ['response', 'notification']);
+  });
+
+  test('200 concurrent requests are each answered once, with their own answer', () async {
+    // Was crates/desktop-bridge's concurrent_requests_each_answered_once (AUD-102).
+    await client.start();
+    for (var i = 0; i < 200; i++) {
+      File('${ws.path}/f$i.txt').writeAsStringSync('file $i\n');
+    }
+    final id = await open();
+    final answers = List.filled(200, 0);
+    final calls = [
+      for (var i = 0; i < 200; i++)
+        (i.isEven
+                ? client
+                      .call(Methods.fsReadFile, ReadFileParams(workspaceId: id, path: 'f$i.txt'))
+                      .then((r) => r.text)
+                : client.call(Methods.settingsGet, const GetParams()).then((_) => 'file $i\n'))
+            .then((text) {
+              answers[i]++;
+              return text;
+            }),
+    ];
+    final texts = await Future.wait(calls).timeout(const Duration(seconds: 20));
+    for (var i = 0; i < 200; i++) {
+      expect(texts[i], 'file $i\n', reason: "request $i got another request's answer");
+    }
+    // A second answer to any of them would complete a future twice (an uncaught error that
+    // fails the test) or change a count.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(answers, everyElement(1));
+  });
+
+  test(r'a $/cancel racing a fast request: the answer or cancelled, exactly once', () async {
+    // Was crates/desktop-bridge's cancel_of_a_forwarded_request_still_answers_once (AUD-102).
+    await client.start();
+    final outcomes = <Future<String>>[];
+    final counts = List.filled(100, 0);
+    for (var i = 0; i < 100; i++) {
+      final token = CancelToken();
+      outcomes.add(
+        client
+            .call(Methods.workspaceRecent, const Empty(), cancel: token)
+            .then<String>(
+              (_) => 'result',
+              onError: (Object e) {
+                expect(
+                  e,
+                  isA<DaemonException>().having((x) => x.kind, 'kind', ErrorKind.cancelled),
+                );
+                return 'cancelled';
+              },
+            )
+            .whenComplete(() => counts[i]++),
+      );
+      token.cancel();
+    }
+    final got = await Future.wait(outcomes).timeout(const Duration(seconds: 10));
+    expect(got, everyElement(anyOf('result', 'cancelled')));
+    await Future<void>.delayed(const Duration(milliseconds: 200)); // time for a late answer
+    expect(counts, everyElement(1));
+    // The daemon is still usable after the race.
+    expect(
+      (await client.call(Methods.workspaceRecent, const Empty())).workspaces,
+      isA<List<RecentWorkspace>>(),
+    );
+  });
+
+  test("after a restart the old daemon's notifications are not dispatched (AUD-086)", () async {
+    // A fake daemon: the first process, told to stop (its stdin closed), still sends a
+    // notification on its way out; the second sends its own once it is initialized.
+    final dir = Directory.systemTemp.createTempSync('axiom-fl-fake-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final script = File('${dir.path}/fake-axiomd')
+      ..writeAsStringSync(r"""#!/bin/sh
+count="$(dirname "$0")/count"
+n=$(cat "$count" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$count"
+read -r line
+id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9]*\).*/\1/')
+printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"0.6","server":{"name":"fake","version":"0"},"methods":[],"host":{"os":"linux","arch":"x86_64","pathSeparator":"/"}}}\n' "$id"
+if [ "$n" = 1 ]; then
+  while read -r line; do :; done
+  printf '%s\n' '{"jsonrpc":"2.0","method":"$/log","params":{"level":"info","message":"old"}}'
+  sleep 0.3
+else
+  printf '%s\n' '{"jsonrpc":"2.0","method":"$/log","params":{"level":"info","message":"new"}}'
+  while read -r line; do :; done
+fi
+""");
+    Process.runSync('chmod', ['+x', script.path]);
+    final fake = DaemonClient(
+      DaemonConfig(program: script.path, shutdownAnswerWait: const Duration(milliseconds: 100)),
+    );
+    addTearDown(fake.shutdown);
+    final heard = <String>[];
+    fake.onRaw(r'$/log', (p) => heard.add((p! as Map)['message']! as String));
+    expect(await fake.start(), isA<DaemonReady>());
+    expect(await fake.restart(), isA<DaemonReady>());
+    await eventually(() => heard.contains('new'));
+    // The old process speaks after its stdin closes and lives 0.3 s more.
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    expect(File('${dir.path}/count').readAsStringSync().trim(), '2');
+    expect(heard, ['new']);
+  });
+
+  test('an answer that does not decode is a DaemonException, not a TypeError (AUD-091)', () async {
+    final dir = Directory.systemTemp.createTempSync('axiom-fl-fake-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final script = File('${dir.path}/fake-axiomd')
+      ..writeAsStringSync(r"""#!/bin/sh
+read -r line
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"0.6","server":{"name":"fake","version":"0"},"methods":["fs/readFile"],"host":{"os":"linux","arch":"x86_64","pathSeparator":"/"}}}'
+read -r line
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"text":5,"version":null}}'
+while read -r line; do :; done
+""");
+    Process.runSync('chmod', ['+x', script.path]);
+    final fake = DaemonClient(
+      DaemonConfig(program: script.path, shutdownAnswerWait: const Duration(milliseconds: 100)),
+    );
+    addTearDown(fake.shutdown);
+    expect(await fake.start(), isA<DaemonReady>());
+    await expectLater(
+      fake.call(Methods.fsReadFile, ReadFileParams(workspaceId: 'w1', path: 'x')),
+      throwsA(
+        isA<DaemonException>()
+            .having((e) => e.kind, 'kind', ErrorKind.internal)
+            .having((e) => e.message, 'message', contains('not understood')),
+      ),
+    );
   });
 
   test('locateDaemon: explicit, then AXIOMD, then a sibling, then PATH', () {

@@ -45,7 +45,9 @@ Map<String, Object?> contentChange(List<String> before, List<String> after) {
   };
 }
 
-List<String> _lines(CodeLines c) => [for (var i = 0; i < c.length; i++) c[i].text];
+/// Every line's text in one pass (indexing `[i]` walks the segments each time: quadratic in a
+/// long document, AUD-005).
+List<String> _lines(CodeLines c) => c.texts;
 
 /// Keeps every open document in sync with its server and its diagnostics on screen.
 class LspSync {
@@ -78,6 +80,13 @@ class LspSync {
   }
 
   void _onLsp() {
+    // A server that is gone (the daemon went away, the folder closed): its documents are opened
+    // again, with their current text, once a server for them is listed (AUD-001).
+    for (final path in [..._open.keys]) {
+      final d = docs.doc(path);
+      final s = _open[path]!;
+      if (d == null || _serverFor(d) != s.server) _open.remove(path)?.detach?.call();
+    }
     // Servers listed late (the workspace just opened): open what is waiting.
     for (final d in docs.docs) {
       if (!_open.containsKey(d.path)) {
@@ -198,10 +207,18 @@ class LspSync {
     return 2;
   }
 
+  /// The last failure logged per server: a server that failed to start answers every edit with
+  /// the same error, which is logged once, not once per keystroke (AUD-065). The edits are still
+  /// sent, so the daemon's copy of the document stays current for when the server starts.
+  final _lastLogged = <String, String>{};
+
   Future<void> _notify(String server, String method, Object? params) async {
     try {
       await lsp.notify(server, method, params);
+      _lastLogged.remove(server);
     } on DaemonException catch (e) {
+      if (_lastLogged[server] == e.message) return;
+      _lastLogged[server] = e.message;
       debugPrint('lsp $method: ${e.message}');
     }
   }
@@ -457,7 +474,7 @@ LspPos applyEditsTracking(
 /// edit (last first) and set as one value, the caret kept where it was (clamped).
 void applyEdits(CodeLineEditingController c, List<({LspRange range, String text})> edits) {
   if (edits.isEmpty) return;
-  final lines = [for (var i = 0; i < c.lineCount; i++) c.codeLines[i].text];
+  final lines = c.codeLines.texts.toList(); // growable: edits replace ranges
   final sorted = [...edits]
     ..sort((a, b) {
       final l = b.range.start.line.compareTo(a.range.start.line);

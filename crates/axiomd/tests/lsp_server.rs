@@ -25,11 +25,16 @@ fn fake_lsp() -> PathBuf {
     });
     // Always built: a no-op when up to date, and a binary left from before a change to the
     // helper would not have it.
-    assert!(std::process::Command::new(env!("CARGO"))
-        .args(["build", "-q", "-p", "fake-lsp"])
-        .status()
-        .unwrap()
-        .success());
+    // Built once per test process (the tests run in parallel): a build per call could relink
+    // the binary while another test's server is (re)starting, which then finds no fake-lsp.
+    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| {
+        assert!(std::process::Command::new(env!("CARGO"))
+            .args(["build", "-q", "-p", "fake-lsp"])
+            .status()
+            .unwrap()
+            .success());
+    });
     p
 }
 
@@ -59,6 +64,7 @@ fn launch(root: &Path, log: &Path, extra: &[(&str, String)], settings: Value) ->
         initialization_options: None,
         blocked: None,
         install_provider: None,
+        restriction: Default::default(),
     }
 }
 
@@ -360,4 +366,78 @@ async fn closing_the_workspace_stops_its_servers() {
     f.manager.close_workspace(&f.ws).await;
     assert_eq!(s.state(), ServerState::Stopped);
     assert!(f.manager.of_workspace(&f.ws).is_empty());
+}
+
+fn def_as(id: &str) -> Definition {
+    Definition {
+        id: id.into(),
+        ..def(&fake_lsp().to_string_lossy())
+    }
+}
+
+/// In a folder the person has not trusted, a built-in server that would run the project's
+/// code starts with those features off and says so (AUD-008): here jdtls's Gradle and Maven
+/// imports, in the settings it is answered with and its initialization options.
+#[tokio::test]
+async fn an_untrusted_folder_runs_a_restricted_server_with_its_features_off() {
+    let f = fixture();
+    let d = def_as("jdtls");
+    let l = axiom_lsp::restrict(
+        &d,
+        launch(&f.root, &f.log, &[], json!({"fake": {"answer": 42}})),
+    );
+    let s = f.manager.server(&f.ws, d, l);
+    let none = CancellationToken::new();
+    let cfg = s.request("fake/config", json!({}), &none).await.unwrap();
+    assert_eq!(cfg[0], 42, "the person's settings stay: {cfg}");
+    assert_eq!(
+        cfg[1]["java"]["import"]["gradle"]["enabled"], false,
+        "{cfg}"
+    );
+    assert_eq!(cfg[1]["java"]["import"]["maven"]["enabled"], false, "{cfg}");
+    assert_eq!(s.state(), ServerState::Ready);
+    assert!(s.info().detail.unwrap().starts_with("Restricted"));
+    s.stop().await;
+}
+
+/// A built-in server no setting keeps from running the project's code is not started in an
+/// untrusted folder: it is `stopped`, every request says why at once (not after the 60 s start
+/// timeout), and nothing runs; trusting the folder (a new launch) makes it idle and usable.
+#[tokio::test]
+async fn an_untrusted_folder_does_not_start_a_refused_server() {
+    let f = fixture();
+    let d = def_as("rust-analyzer");
+    let l = axiom_lsp::restrict(&d, launch(&f.root, &f.log, &[], json!({})));
+    let s = f.manager.server(&f.ws, d.clone(), l);
+    let none = CancellationToken::new();
+    let started = std::time::Instant::now();
+    match s.request("fake/echo", json!({"n": 1}), &none).await {
+        Err(LspError::Unavailable(ServerState::Stopped, Some(detail))) => {
+            assert!(detail.starts_with(axiom_lsp::TRUST_TO_ENABLE), "{detail}")
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(s
+        .notify(
+            "textDocument/didOpen",
+            open(&uri(&f.root, "a.rs"), "x\n", 1)
+        )
+        .await
+        .is_err());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!f.log.exists(), "the server ran");
+    let info = s.info();
+    assert_eq!(info.state, ServerState::Stopped);
+    assert!(info.detail.unwrap().starts_with(axiom_lsp::TRUST_TO_ENABLE));
+    // Trusted: as configured.
+    s.set_launch(launch(&f.root, &f.log, &[], json!({})));
+    assert_eq!(s.state(), ServerState::Idle);
+    assert_eq!(
+        s.request("fake/echo", json!({"n": 2}), &none)
+            .await
+            .unwrap(),
+        json!({"n": 2})
+    );
+    s.stop().await;
 }

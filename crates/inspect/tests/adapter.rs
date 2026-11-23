@@ -318,3 +318,102 @@ async fn unregistering_ends_the_session_and_the_token() {
     let url = format!("ws://127.0.0.1:{}/?token={token}", inspect.port());
     assert!(tokio_tungstenite::connect_async(url).await.is_err());
 }
+
+/// A website the person has open elsewhere cannot connect to the adapter socket, even with the
+/// token: only no `Origin` or a loopback one is accepted (AUD-043).
+#[tokio::test]
+async fn a_foreign_origin_is_refused() {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let (inspect, _preview, token, _root) = setup().await;
+    let url = format!("ws://127.0.0.1:{}/?token={token}", inspect.port());
+    let mut req = url.clone().into_client_request().unwrap();
+    req.headers_mut()
+        .insert("origin", "https://evil.example".parse().unwrap());
+    match tokio_tungstenite::connect_async(req).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(r)) => assert_eq!(r.status(), 403),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
+    let mut req = url.into_client_request().unwrap();
+    req.headers_mut()
+        .insert("origin", "http://127.0.0.1:5173".parse().unwrap());
+    assert!(tokio_tungstenite::connect_async(req).await.is_ok());
+}
+
+/// A page that answers hello, and goes away (as on a reload) when told.
+async fn closable_page(port: u16, token: &str) -> tokio::sync::oneshot::Sender<()> {
+    let url = format!("ws://127.0.0.1:{port}/?token={token}");
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let (tx, mut rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                m = ws.next() => {
+                    let Some(Ok(Message::Text(t))) = m else { return };
+                    let v: Value = serde_json::from_str(&t).unwrap();
+                    if v["method"] == "inspect/hello" {
+                        let _ = ws
+                            .send(Message::text(json!({"jsonrpc": "2.0", "id": v["id"], "result": caps()}).to_string()))
+                            .await;
+                    }
+                }
+                _ = &mut rx => {
+                    let _ = ws.close(None).await;
+                    return;
+                }
+            }
+        }
+    });
+    tx
+}
+
+/// A second connection with the token does not take over a live page's session (AUD-043: it
+/// used to replace it silently); once the page goes, as on a reload, the next one is adopted.
+#[tokio::test]
+async fn a_second_page_does_not_replace_a_live_one() {
+    let (inspect, preview, token, _root) = setup().await;
+    let first = closable_page(inspect.port(), &token).await;
+    connected(&inspect, &preview).await;
+    let live = inspect.session(&preview).unwrap();
+    let _intruder = adapter(inspect.port(), &token, &[]).await;
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert!(Arc::ptr_eq(&inspect.session(&preview).unwrap(), &live));
+    // A reload: the old page closes and the new one connects.
+    let _ = first.send(());
+    let _reloaded = adapter(inspect.port(), &token, &[]).await;
+    for _ in 0..100 {
+        if let Ok(s) = inspect.session(&preview) {
+            if !Arc::ptr_eq(&s, &live) {
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the reloaded page never became the session");
+}
+
+/// A hover never runs the workspace text search; a click does (AUD-042).
+#[tokio::test]
+async fn hover_does_not_search_the_workspace() {
+    let (inspect, preview, token, _root) = setup().await;
+    let mut events = inspect.subscribe();
+    let a = adapter(inspect.port(), &token, &[]).await;
+    connected(&inspect, &preview).await;
+    let _ = events.recv().await; // connected
+    let text_only = node("t", None, None, Some("Pay now please"));
+    a.send(json!({"jsonrpc": "2.0", "method": "inspect/hovered", "params": {"node": text_only.clone()}}))
+        .unwrap();
+    match events.recv().await.unwrap() {
+        InspectEvent::Hovered { node: Some(n), .. } => assert!(n.sources.is_empty(), "{n:?}"),
+        e => panic!("{e:?}"),
+    }
+    a.send(
+        json!({"jsonrpc": "2.0", "method": "inspect/selected", "params": {"chain": [text_only]}}),
+    )
+    .unwrap();
+    match events.recv().await.unwrap() {
+        InspectEvent::Selected { chain, .. } => {
+            assert_eq!(chain[0].sources[0].method, MappingMethod::Heuristic);
+        }
+        e => panic!("{e:?}"),
+    }
+}

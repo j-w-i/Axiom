@@ -1,0 +1,352 @@
+{
+  "timings": {
+    "boot_to_ready_ms": 394,
+    "open_folder_to_root_listed_ms": 42,
+    "expand_3000_dir_ms": 218,
+    "open_50k_lines_ms": 374,
+    "big_file_20_flings_ms": 14776,
+    "open_longline_ms": 876,
+    "palette_open_ms": 1190,
+    "go_to_file_query_ms": 674,
+    "search_3000_files_ms": 455,
+    "60_toggles_ms": 8089,
+    "restart_backend_ms": 269,
+    "shutdown_ms": 329
+  },
+  "results": [
+    {
+      "step": "boot (connect to daemon)",
+      "status": "pass",
+      "ms": 1404,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "welcome in dark",
+      "status": "pass",
+      "ms": 1012,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "welcome in light",
+      "status": "pass",
+      "ms": 988,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "File menu opens",
+      "status": "pass",
+      "ms": 1200,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "View menu opens",
+      "status": "pass",
+      "ms": 1165,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "Help menu + About",
+      "status": "pass",
+      "ms": 1149,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "rail with no folder: each destination",
+      "status": "pass",
+      "ms": 8313,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open folder (3000+ files, git)",
+      "status": "pass",
+      "ms": 2055,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "expand many/ (3000 entries) in explorer",
+      "status": "pass",
+      "ms": 1680,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "expand deep path",
+      "status": "pass",
+      "ms": 9696,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open main.rs from explorer",
+      "status": "pass",
+      "ms": 2036,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open several files (tabs)",
+      "status": "pass",
+      "ms": 2930,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "CRLF file not dirty after open+click",
+      "status": "pass",
+      "ms": 319,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open 50k-line file and scroll",
+      "status": "pass",
+      "ms": 17750,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open 20k-char single line",
+      "status": "pass",
+      "ms": 1429,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "open binary file",
+      "status": "pass",
+      "ms": 1371,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "edit + dirty indicator + close prompt",
+      "status": "pass",
+      "ms": 4531,
+      "detail": null,
+      "frameworkErrors": [],
+      "note": "dirty after undo/redo: true"
+    },
+    {
+      "step": "undo/redo",
+      "status": "pass",
+      "ms": 723,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "save via Mod+S",
+      "status": "pass",
+      "ms": 266,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "external change conflict dialog",
+      "status": "pass",
+      "ms": 2970,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "split editor right",
+      "status": "framework-errors",
+      "ms": 2518,
+      "detail": null,
+      "frameworkErrors": [
+        "══╡ EXCEPTION CAUGHT BY FOUNDATION LIBRARY ╞═════════════════════\nThe following assertion was thrown while dispatching\nnotifications for Listenable:\nCannot get renderObject of inactive element.\nIn order for an element to have a valid renderObject, it must be\nactive, which means it is part of the tree.\nInstead, this element is in the _ElementLifecycle.inactive state.\nIf you called this method from a State object, consider guarding\nit with State.mounted.\nThe findRenderObject() method was called for the following\nelement:\n  _CodeField-[GlobalKey#582f2]"
+      ]
+    },
+    {
+      "step": "command palette",
+      "status": "pass",
+      "ms": 4673,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "go to file among 3000 files",
+      "status": "pass",
+      "ms": 1716,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "search: needle across 3000 files",
+      "status": "pass",
+      "ms": 5801,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "source control",
+      "status": "pass",
+      "ms": 4159,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "environments",
+      "status": "pass",
+      "ms": 5022,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "inspector",
+      "status": "pass",
+      "ms": 1652,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "chat with no model configured",
+      "status": "pass",
+      "ms": 1598,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "AI dock",
+      "status": "pass",
+      "ms": 2791,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "console: run a command",
+      "status": "pass",
+      "ms": 6623,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "terminal",
+      "status": "pass",
+      "ms": 4889,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "settings",
+      "status": "pass",
+      "ms": 2300,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "light theme workbench",
+      "status": "pass",
+      "ms": 7376,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "window 1024x700",
+      "status": "pass",
+      "ms": 1362,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "window 800x600",
+      "status": "pass",
+      "ms": 1265,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "window 640x480",
+      "status": "framework-errors",
+      "ms": 1320,
+      "detail": null,
+      "frameworkErrors": [
+        "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 69 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/shell/shell.dart:1048:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex."
+      ]
+    },
+    {
+      "step": "high DPI 2x at 1440x900 logical 720x450",
+      "status": "pass",
+      "ms": 1837,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "text scale 1.5",
+      "status": "pass",
+      "ms": 3090,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "rapid toggles (side bar, console) x30",
+      "status": "pass",
+      "ms": 8622,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "rapid palette open/close x30",
+      "status": "pass",
+      "ms": 8155,
+      "detail": null,
+      "frameworkErrors": [],
+      "note": "Chat | Search | Source Control | Environments | Inspector | row deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/leaf.txt | New File… | New Folder… | menu trigger | side bar splitter | diff | Open the file | Close the diff | Focus | Output | Problems | Terminal | Hide the console | bash | New terminal | Close bash | terminal t1 | terminal t1 | terminal t1 | terminal t1"
+    },
+    {
+      "step": "keyboard focus traversal (Tab x25)",
+      "status": "pass",
+      "ms": 2752,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "workspace folder deleted while open",
+      "status": "pass",
+      "ms": 5306,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "daemon killed: backend failed + restart",
+      "status": "pass",
+      "ms": 5321,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "reduced motion setting",
+      "status": "pass",
+      "ms": 1080,
+      "detail": null,
+      "frameworkErrors": [],
+      "note": "unlabeled actionable: 0\n"
+    },
+    {
+      "step": "semantics: unlabeled actionable nodes",
+      "status": "pass",
+      "ms": 16,
+      "detail": null,
+      "frameworkErrors": []
+    },
+    {
+      "step": "quit (shutdown) timing",
+      "status": "pass",
+      "ms": 334,
+      "detail": null,
+      "frameworkErrors": []
+    }
+  ],
+  "frameworkErrorCount": 2,
+  "frameworkErrors": [
+    "══╡ EXCEPTION CAUGHT BY FOUNDATION LIBRARY ╞═════════════════════\nThe following assertion was thrown while dispatching\nnotifications for Listenable:\nCannot get renderObject of inactive element.\nIn order for an element to have a valid renderObject, it must be\nactive, which means it is part of the tree.\nInstead, this element is in the _ElementLifecycle.inactive state.\nIf you called this method from a State object, consider guarding\nit with State.mounted.\nThe findRenderObject() method was called for the following\nelement:\n  _CodeField-[GlobalKey#582f2]\n\nWhen the exception was thrown, this was the stack:\n#0      Element.findRenderObject.<anonymous closure> (package:flutter/src/widgets/framework.dart:4917:9)\n#1      Element.findRenderObject (package:flutter/src/widgets/framework.dart:4930:6)\n#2      _CodeInputController._updateRemoteComposingIfNeeded (package:re_editor/src/_code_input.dart:383:66)\n#3      _CodeInputController._onCodeEditingChanged (package:re_editor/src/_code_input.dart:353:5)\n#4      ChangeNotifier.notifyListeners (package:listen/src/listen.dart:443:24)\n#5      _CodeLineEditingControllerDelegate.notifyListeners (package:re_editor/src/_code_line.dart:2425:15)\n#6      _CodeLineEditingControllerDelegate.delegate= (package:re_editor/src/_code_line.dart:2100:5)\n#7      _CodeEditorState.initState (package:re_editor/src/code_editor.dart:383:24)\n#8      StatefulElement._firstBuild (package:flutter/src/widgets/framework.dart:5968:55)\n#9      ComponentElement.mount (package:flutter/src/widgets/framework.dart:5811:5)\n...     Normal element mounting (27 frames)",
+    "══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞══════════════════════\nThe following assertion was thrown during layout:\nA RenderFlex overflowed by 69 pixels on the right.\n\nThe relevant error-causing widget was:\n  Row\n  Row:<audit-copy>/lib/shell/shell.dart:1048:22\n\nThe overflowing RenderFlex has an orientation of Axis.horizontal.\nThe edge of the RenderFlex that is overflowing has been marked in\nthe rendering with a yellow and black striped pattern. This is\nusually caused by the contents being too big for the RenderFlex.\nConsider applying a flex factor (e.g. using an Expanded widget)\nto force the children of the RenderFlex to fit within the\navailable space instead of being sized to their natural size.\nThis is considered an error condition because it indicates that\nthere is content that cannot be seen. If the content is\nlegitimately bigger than the available space, consider clipping\nit with a ClipRect widget before putting it in the flex, or using\na scrollable container rather than a Flex, like a ListView.\nThe specific RenderFlex in question is: RenderFlex#29c1d relayoutBoundary=up7 OVERFLOWING:\n  needs compositing\n  parentData: offset=Offset(0.0, 0.0) (can use size)\n  constraints: BoxConstraints(0.0<=w<=620.0, h=38.0)\n  size: Size(620.0, 38.0)"
+  ]
+}

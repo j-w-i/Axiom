@@ -1,13 +1,24 @@
-// The transcript built from a session's events (the Tauri store's tests, ported).
+// The transcript built from a session's events (the Tauri store's tests, ported), and the store
+// across a daemon's loss and restart, against the real daemon with its scripted model (AUD-025,
+// AUD-092; run `cargo build -p axiomd` first).
 
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:axiom_desktop/daemon/client.dart';
 import 'package:axiom_desktop/daemon/protocol.g.dart';
 import 'package:axiom_desktop/state/agent.dart';
+import 'package:axiom_desktop/state/workspace.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'documents_safety_test.dart' show daemon, until;
 
 AgentEvent ev(int seq, int turn, EventBody b) =>
     AgentEvent(sessionId: 's', seq: seq, turn: turn, tsMs: seq, event: b);
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('user, assistant, a tool call and its result, a checkpoint and a notice', () {
     final items = transcript([
       ev(1, 1, const EventBodyUser(text: 'hi')),
@@ -71,5 +82,267 @@ void main() {
       ev(2, 1, const EventBodyInterrupted(callId: 'c')),
     ]);
     expect((items.single as ToolItem).state, ToolState.error);
+  });
+  test('an interrupted turn is marked where it stopped, with what was streamed of it', () {
+    final events = [
+      ev(1, 1, const EventBodyUser(text: 'hi')),
+      ev(2, 1, const EventBodyAssistantText(text: 'Part one.')),
+      ev(3, 1, const EventBodyTurnEnd(reason: TurnEndReason.error)), // the daemon's repair
+      ev(4, 2, const EventBodyUser(text: 'again')),
+    ];
+    final items = transcript(events, interrupted: [(seq: 2, turn: 1, text: 'and part')]);
+    expect(items.map((i) => i.runtimeType.toString()), [
+      'UserItem',
+      'AssistantItem',
+      'AssistantItem',
+      'NoticeItem',
+      'UserItem',
+    ]);
+    expect((items[2] as AssistantItem).text, 'and part');
+    final n = items[3] as NoticeItem;
+    expect((n.message, n.notice), (interruptedMessage, false));
+    // A rewind of that turn takes the mark with it.
+    final rewound = transcript(
+      [...events, ev(5, 1, const EventBodyRewind(fromTurn: 1))],
+      interrupted: [(seq: 2, turn: 1, text: '')],
+    );
+    expect(rewound.whereType<NoticeItem>(), isEmpty);
+  });
+  test('two turns cut off in one conversation: each keeps its mark, in order (review D6)', () {
+    final events = [
+      ev(1, 1, const EventBodyUser(text: 'hi')),
+      ev(2, 1, const EventBodyTurnEnd(reason: TurnEndReason.error)), // the daemon's repair
+      ev(3, 2, const EventBodyUser(text: 'again')),
+      ev(4, 2, const EventBodyTurnEnd(reason: TurnEndReason.error)),
+    ];
+    final items = transcript(
+      events,
+      interrupted: [(seq: 1, turn: 1, text: 'first part'), (seq: 3, turn: 2, text: 'second part')],
+    );
+    expect(
+      [
+        for (final i in items)
+          switch (i) {
+            UserItem(:final text) => 'user:$text',
+            AssistantItem(:final text) => 'assistant:$text',
+            NoticeItem() => 'mark',
+            _ => i.runtimeType.toString(),
+          },
+      ],
+      ['user:hi', 'assistant:first part', 'mark', 'user:again', 'assistant:second part', 'mark'],
+    );
+    expect(items.map((i) => i.key).toSet(), hasLength(items.length), reason: 'keys are unique');
+    // Two losses after the same event (nothing came in between) are two marks, not one.
+    final twice = transcript(
+      events.take(1).toList(),
+      interrupted: [(seq: 1, turn: 1, text: ''), (seq: 1, turn: 1, text: '')],
+    );
+    expect(twice.whereType<NoticeItem>(), hasLength(2));
+    expect(twice.map((i) => i.key).toSet(), hasLength(twice.length));
+  });
+
+  group('across a daemon loss (real daemon, scripted model)', () {
+    late Directory data, folder;
+    late String script;
+    late DaemonClient client;
+    late WorkspaceStore ws;
+    late AgentStore agent;
+
+    void writeScript(List<Map<String, Object?>> turns) =>
+        File(script).writeAsStringSync(jsonEncode({'turns': turns}));
+
+    setUp(() async {
+      data = Directory.systemTemp.createTempSync('axiom-fl-agent-');
+      folder = Directory.systemTemp.createTempSync('axiom-fl-agent-ws-');
+      script = '${data.path}/script.json';
+      writeScript([
+        {
+          'events': [
+            {'type': 'text', 'text': 'partial words'},
+            {'type': 'hang'},
+          ],
+        },
+      ]);
+      client = DaemonClient(
+        DaemonConfig(
+          program: daemon,
+          args: ['--data-dir', '${data.path}/data'],
+          environment: {
+            'AXIOM_TEST_SCRIPTED_MODEL': script,
+            'AXIOM_TEST_CREDENTIALS_FILE': '${data.path}/credentials.json',
+          },
+        ),
+      );
+      expect(await client.start(), isA<DaemonReady>());
+      ws = WorkspaceStore(client);
+      agent = AgentStore(client, ws);
+    });
+    tearDown(() async {
+      await client.shutdown();
+      data.deleteSync(recursive: true);
+      folder.deleteSync(recursive: true);
+    });
+
+    Future<void> kill() async {
+      Process.killPid(client.pid!, ProcessSignal.sigkill);
+      await until(() => client.state.value is DaemonFailed, 'the daemon gone');
+    }
+
+    /// The reply text streamed to the shell from now on (the scripted model hangs after it): the
+    /// tests wait on it rather than sleep (review D6).
+    String Function() streamedText() {
+      final b = StringBuffer();
+      final off = client.on(Notifications.agentEvent, (e) {
+        if (e.event case EventBodyTextDelta(:final text)) b.write(text);
+      });
+      addTearDown(off);
+      return b.toString;
+    }
+
+    test(
+      'a turn cut off is marked interrupted, stops "writing", and Send works after a restart',
+      () async {
+        await agent.load();
+        expect(agent.model?.providerId, 'scripted');
+        final streamed = streamedText();
+        expect(await agent.send('hello'), isTrue);
+        await until(
+          () => agent.active.events.any((e) => e.event is EventBodyUser),
+          'the turn started',
+        );
+        expect(agent.active.running, isTrue);
+        await until(() => streamed() == 'partial words', 'the text streamed (then it hangs)');
+        await kill();
+        expect(agent.active.running, isFalse);
+        expect(agent.sessions.where((s) => s.running), isEmpty);
+        List<String> shown() => [
+          for (final i in agent.items())
+            switch (i) {
+              UserItem(:final text) => 'user:$text',
+              AssistantItem(:final text) => 'assistant:$text',
+              NoticeItem(:final message, :final notice) =>
+                '${notice ? 'notice' : 'error'}:$message',
+              _ => i.runtimeType.toString(),
+            },
+        ];
+        expect(shown(), ['user:hello', 'assistant:partial words', 'error:$interruptedMessage']);
+
+        // Back: the conversation is read again (the daemon ends the cut-off turn); the mark stays.
+        final before = agent.active;
+        writeScript([
+          {
+            'events': [
+              {'type': 'text', 'text': 'second answer'},
+            ],
+          },
+        ]);
+        expect(await client.restart(), isA<DaemonReady>());
+        await until(() => !identical(agent.active, before), 'read again');
+        expect(agent.sendError, isEmpty);
+        expect(agent.active.events.last.event, isA<EventBodyTurnEnd>());
+        expect(shown(), ['user:hello', 'assistant:partial words', 'error:$interruptedMessage']);
+        expect(await agent.send('again'), isTrue);
+        await until(
+          () => !agent.active.running && agent.items().last is AssistantItem,
+          'the second answer',
+        );
+        expect(shown(), [
+          'user:hello',
+          'assistant:partial words',
+          'error:$interruptedMessage',
+          'user:again',
+          'assistant:second answer',
+        ]);
+      },
+    );
+
+    test('a second loss in the same conversation keeps the first mark (review D6)', () async {
+      await agent.load();
+      final streamed = streamedText();
+      expect(await agent.send('hello'), isTrue);
+      await until(() => streamed() == 'partial words', 'the first text streamed');
+      await kill();
+      final before = agent.active;
+      writeScript([
+        {
+          'events': [
+            {'type': 'text', 'text': ' and more'},
+            {'type': 'hang'},
+          ],
+        },
+      ]);
+      expect(await client.restart(), isA<DaemonReady>());
+      await until(() => !identical(agent.active, before), 'read again');
+      expect(await agent.send('again'), isTrue);
+      await until(() => agent.active.running, 'the second turn started');
+      await until(() => streamed() == 'partial words and more', 'the second text streamed');
+      await kill();
+      expect(
+        [
+          for (final i in agent.items())
+            switch (i) {
+              UserItem(:final text) => 'user:$text',
+              AssistantItem(:final text) => 'assistant:$text',
+              NoticeItem(:final message, :final notice) =>
+                '${notice ? 'notice' : 'error'}:$message',
+              _ => i.runtimeType.toString(),
+            },
+        ],
+        [
+          'user:hello',
+          'assistant:partial words',
+          'error:$interruptedMessage',
+          'user:again',
+          'assistant: and more',
+          'error:$interruptedMessage',
+        ],
+      );
+    });
+
+    test(
+      "a daemon restart keeps Chat in the folder's scope and reads its conversation again",
+      () async {
+        writeScript([
+          {
+            'events': [
+              {'type': 'text', 'text': 'answer'},
+            ],
+          },
+        ]);
+        expect(await client.restart(), isA<DaemonReady>());
+        await ws.openFolder(folder.path);
+        agent.setScope(Scope.workspace);
+        await until(() => agent.status == 'ready', 'loaded');
+        expect(await agent.send('hello'), isTrue);
+        await until(
+          () => agent.active.events.any((e) => e.event is EventBodyTurnEnd),
+          'the answer',
+        );
+        final id = agent.activeId;
+        final before = agent.active;
+        await kill();
+        expect(agent.scope, Scope.workspace, reason: 'daemon loss switched Chat to General');
+        expect(agent.activeId, id);
+        // AppState.restartBackend: the daemon, then the folder that was open.
+        expect(await client.restart(), isA<DaemonReady>());
+        await ws.openFolder(ws.lostRoot);
+        await until(() => !identical(agent.active, before), 'read again');
+        expect(agent.scope, Scope.workspace);
+        expect(agent.activeId, id);
+        expect(agent.sendError, isEmpty, reason: 'read in the wrong scope');
+        await until(() => agent.sessions.any((s) => s.sessionId == id), "the folder's sessions");
+      },
+    );
+
+    test('switching folders keeps Chat in the folder scope (AUD-092)', () async {
+      final other = Directory.systemTemp.createTempSync('axiom-fl-agent-ws2-');
+      addTearDown(() => other.deleteSync(recursive: true));
+      await ws.openFolder(folder.path);
+      agent.setScope(Scope.workspace);
+      await until(() => agent.status == 'ready', 'loaded');
+      await ws.openFolder(other.path);
+      expect(ws.isOpen, isTrue);
+      expect(agent.scope, Scope.workspace);
+    });
   });
 }

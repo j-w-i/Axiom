@@ -16,18 +16,25 @@ pub struct App {
     pub store: Arc<Store>,
     pub workspaces: Workspaces,
     pub executor: Executor,
-    /// Forwarder tasks for `fs/watch`, one per workspace. Aborting a task
-    /// drops the `WatchHandle` it owns.
-    pub watchers: Mutex<HashMap<WorkspaceId, AbortHandle>>,
+    /// Forwarder tasks for `fs/watch`: one per workspace and connection that enabled it (each
+    /// connection gets the events, AUD-028). Aborting a task drops the `WatchHandle` it owns.
+    pub watchers: Mutex<HashMap<WorkspaceId, Vec<(Notifier, AbortHandle)>>>,
     pub env: EnvConfig,
     pub agent: AgentServices,
     /// The newest build's diagnostics per workspace (`build.diagnostics` tool).
     pub last_diagnostics: Mutex<HashMap<WorkspaceId, (TaskId, Vec<Diagnostic>)>>,
     /// Terminals ACP agents created (`terminal/create`).
     pub acp_terminals: Mutex<HashMap<String, Arc<crate::acp::Terminal>>>,
-    /// Connections that opened each workspace, for daemon-initiated notifications
-    /// (`agent/reveal`). Closed connections are dropped on the next send.
+    /// Connections that opened each workspace (one entry per connection), for daemon-initiated
+    /// notifications. They also hold the workspace open: it is torn down when the last one
+    /// closes it or disconnects (AUD-029). Closed connections are pruned on every read (AUD-030).
     pub clients: Mutex<HashMap<WorkspaceId, Vec<Notifier>>>,
+    /// Held by `workspace/open` and by a close's "last holder? then tear down": an open during a
+    /// teardown waits for it and opens the folder afresh, rather than getting the id that is
+    /// being closed (AUD-029, review B5).
+    pub workspace_lifecycle: tokio::sync::Mutex<()>,
+    /// Connections that let a relay time out on their full queue (see `notify_clients`).
+    lagging: Mutex<Vec<Notifier>>,
     /// Language servers (M4, ADR-0018 §2).
     pub lsp: axiom_lsp::Manager,
     /// Files outside each workspace that one of its language servers returned in a location:
@@ -35,6 +42,8 @@ pub struct App {
     pub external_reads: Mutex<HashMap<WorkspaceId, std::collections::HashSet<PathBuf>>>,
     /// `git/didChange` watches, one per workspace that asked for its status (M4-GIT-001).
     pub git_watches: Mutex<HashMap<WorkspaceId, AbortHandle>>,
+    /// Workspaces whose change watch fell back to polling (`GitStatus.polling`, AUD-012).
+    pub git_polling: Mutex<std::collections::HashSet<WorkspaceId>>,
     /// Integrated terminals (M4, ADR-0018 §4).
     pub terminals: axiom_term::Terminals,
     /// The language-server event forwarder runs (started with the first router).
@@ -64,7 +73,21 @@ pub struct AgentServices {
     pub attached: Mutex<Vec<(axiom_protocol::agent::SessionId, Notifier)>>,
     /// Built-in tools (ADR-0015 §2), backed by this daemon's services.
     pub tools: axiom_agent::tools::Registry,
+    /// When each session last used its external agent or MCP servers: idle ones are stopped
+    /// (AUD-032, `handlers::sessions::spawn_idle_reaper`).
+    pub last_used: Mutex<HashMap<axiom_protocol::agent::SessionId, std::time::Instant>>,
 }
+
+/// How long a connection whose queue is full may hold up a daemon-wide relay (AUD-030).
+pub const SLOW_CLIENT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How long an approval prompt waits for room on a connection whose queue is full. Much longer
+/// than [`SLOW_CLIENT`]: a prompt is for the person, and a connection that is busy but reading
+/// (the shell during an output flood) catches up well within it, where giving up would answer
+/// "no approver" (review R4). The other approvers are not held up: each send is separate, and
+/// the gate listens for the answer and a cancel while the prompt is still being delivered
+/// (review D1), so the bound only decides when a call nobody received is refused.
+pub const APPROVAL_DELIVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// TEST ONLY: a script file for the scripted model provider (ADR-0015 §4). When set, the daemon
 /// offers the provider `scripted` that replays it.
@@ -95,18 +118,25 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
         req: &'a axiom_protocol::agent::ApprovalRequest,
     ) -> futures_util::future::BoxFuture<'a, usize> {
         Box::pin(async move {
-            let mut sent = 0;
-            let mut live = Vec::new();
-            for n in self.all() {
-                if n.notify::<axiom_protocol::agent::ApprovalRequested>(req.clone())
-                    .await
-                    .is_ok()
-                {
-                    sent += 1;
-                    live.push(n);
-                }
-            }
-            *self.0.lock().unwrap_or_else(|p| p.into_inner()) = live;
+            // To every approving connection at once, none waited on past APPROVAL_DELIVERY: one
+            // that stopped reading does not hold the prompt back from the others (review B6b,
+            // R4). One that is slow but open stays an approver; only closed ones are dropped.
+            let sends = self.all().into_iter().map(|n| async move {
+                let r = tokio::time::timeout(
+                    APPROVAL_DELIVERY,
+                    n.notify::<axiom_protocol::agent::ApprovalRequested>(req.clone()),
+                )
+                .await;
+                (matches!(r, Ok(Ok(()))), n)
+            });
+            let results = futures_util::future::join_all(sends).await;
+            let sent = results.iter().filter(|(ok, _)| *ok).count();
+            // The list is kept, not replaced by the ones just sent to: a connection that
+            // attached while this delivery waited is an approver too (review C3).
+            self.0
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .retain(|n| !n.is_closed());
             sent
         })
     }
@@ -115,10 +145,22 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
         res: &'a axiom_protocol::agent::ApprovalResolution,
     ) -> futures_util::future::BoxFuture<'a, ()> {
         Box::pin(async move {
+            // Queued at once where there is room, so a connection that is reading has the
+            // resolution before the reply to its own `agent/approve`. One whose queue is full
+            // gets it from a task of its own: a stuck approver holds up neither that reply nor
+            // the call that waited for the answer (review D1).
             for n in self.all() {
-                let _ = n
-                    .notify::<axiom_protocol::agent::ApprovalResolved>(res.clone())
-                    .await;
+                use axiom_protocol::agent::ApprovalResolved;
+                if let Ok(false) = n.try_notify::<ApprovalResolved>(res.clone()) {
+                    let res = res.clone();
+                    tokio::spawn(async move {
+                        let _ = tokio::time::timeout(
+                            APPROVAL_DELIVERY,
+                            n.notify::<ApprovalResolved>(res),
+                        )
+                        .await;
+                    });
+                }
             }
         })
     }
@@ -147,6 +189,7 @@ fn agent_services(app: std::sync::Weak<App>, data_dir: &std::path::Path) -> Agen
             scripted,
         ),
         tools: crate::tools::registry(app),
+        last_used: Mutex::default(),
         gate: axiom_agent::gate::Gate::new(approvers.clone()),
         approvers,
         sessions: axiom_agent::live::Sessions::new(data_dir.join("sessions")),
@@ -213,9 +256,12 @@ impl App {
             last_diagnostics: Mutex::default(),
             acp_terminals: Mutex::default(),
             clients: Mutex::default(),
+            workspace_lifecycle: tokio::sync::Mutex::default(),
+            lagging: Mutex::default(),
             lsp: axiom_lsp::Manager::default(),
             external_reads: Mutex::default(),
             git_watches: Mutex::default(),
+            git_polling: Mutex::default(),
             terminals: axiom_term::Terminals::default(),
             lsp_forwarding: std::sync::atomic::AtomicBool::new(false),
             previews: crate::handlers::ui::Previews::default(),
@@ -236,23 +282,102 @@ impl App {
         entry.1.extend(d.diagnostics.iter().cloned());
     }
 
+    /// Records that the connection of `n` has `ws` open (once per connection, AUD-030).
     pub fn add_client(&self, ws: &WorkspaceId, n: Notifier) {
-        self.clients
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .entry(ws.clone())
-            .or_default()
-            .push(n);
+        let mut m = self.clients.lock().unwrap_or_else(|p| p.into_inner());
+        let v = m.entry(ws.clone()).or_default();
+        v.retain(|c| !c.is_closed());
+        if !v.iter().any(|c| c.same_connection(&n)) {
+            v.push(n);
+        }
     }
 
-    /// The connections that opened `ws`.
+    /// The live connections that opened `ws` (closed ones are pruned here).
     pub fn clients_of(&self, ws: &WorkspaceId) -> Vec<Notifier> {
+        let mut m = self.clients.lock().unwrap_or_else(|p| p.into_inner());
+        match m.get_mut(ws) {
+            Some(v) => {
+                v.retain(|c| !c.is_closed());
+                v.clone()
+            }
+            None => Vec::new(),
+        }
+    }
+
+    /// Removes the connection of `n` from `ws`'s holders; true if no live connection holds the
+    /// workspace any more (the caller tears it down).
+    pub fn release_client(&self, ws: &WorkspaceId, n: &Notifier) -> bool {
+        let mut m = self.clients.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(v) = m.get_mut(ws) else {
+            return true;
+        };
+        v.retain(|c| !c.is_closed() && !c.same_connection(n));
+        v.is_empty()
+    }
+
+    /// The workspaces the connection of `n` holds open.
+    pub fn workspaces_of(&self, n: &Notifier) -> Vec<WorkspaceId> {
         self.clients
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .get(ws)
-            .cloned()
-            .unwrap_or_default()
+            .iter()
+            .filter(|(_, v)| v.iter().any(|c| c.same_connection(n)))
+            .map(|(w, _)| w.clone())
+            .collect()
+    }
+
+    /// Sends a notification to every live connection of `ws` at once, without letting a slow
+    /// one hold up the others (AUD-030): a connection whose queue is full gets
+    /// [`SLOW_CLIENT`] to make room, then misses this notification. Returns how many
+    /// connections got it.
+    pub async fn notify_clients<N>(&self, ws: &WorkspaceId, params: N::Params) -> usize
+    where
+        N: axiom_protocol::Notification,
+        N::Params: Clone,
+    {
+        let sends = self.clients_of(ws).into_iter().map(|c| {
+            let p = params.clone();
+            async move {
+                match c.try_notify::<N>(p.clone()) {
+                    Ok(true) => {
+                        self.set_lagging(&c, false);
+                        true
+                    }
+                    Err(_) => false,
+                    // Already known to be stuck: no more waiting on it until it reads again.
+                    Ok(false) if self.is_lagging(&c) => false,
+                    Ok(false) => match tokio::time::timeout(SLOW_CLIENT, c.notify::<N>(p)).await {
+                        Ok(r) => r.is_ok(),
+                        Err(_) => {
+                            tracing::warn!("a connection is not reading; it misses notifications");
+                            self.set_lagging(&c, true);
+                            false
+                        }
+                    },
+                }
+            }
+        });
+        futures_util::future::join_all(sends)
+            .await
+            .into_iter()
+            .filter(|sent| *sent)
+            .count()
+    }
+
+    fn is_lagging(&self, n: &Notifier) -> bool {
+        self.lagging
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .any(|c| c.same_connection(n))
+    }
+
+    fn set_lagging(&self, n: &Notifier, on: bool) {
+        let mut v = self.lagging.lock().unwrap_or_else(|p| p.into_inner());
+        v.retain(|c| !c.is_closed() && !c.same_connection(n));
+        if on {
+            v.push(n.clone());
+        }
     }
 
     /// Records the `file://` URIs outside `root` that a language server returned, so the editor
@@ -282,14 +407,30 @@ impl App {
             .is_some_and(|s| s.contains(path))
     }
 
+    /// Stops every connection's `fs/watch` of the workspace.
     pub fn stop_watcher(&self, id: &WorkspaceId) {
-        let handle = self
+        let handles = self
             .watchers
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .remove(id);
-        if let Some(h) = handle {
+            .remove(id)
+            .unwrap_or_default();
+        for (_, h) in handles {
             h.abort();
+        }
+    }
+
+    /// Stops the `fs/watch` of one connection (`n`) on the workspace.
+    pub fn stop_watcher_of(&self, id: &WorkspaceId, n: &Notifier) {
+        let mut m = self.watchers.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(v) = m.get_mut(id) {
+            v.retain(|(c, h)| {
+                let mine = c.same_connection(n);
+                if mine {
+                    h.abort();
+                }
+                !mine
+            });
         }
     }
 
@@ -299,7 +440,7 @@ impl App {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .drain()
-            .map(|(_, h)| h)
+            .flat_map(|(_, v)| v.into_iter().map(|(_, h)| h))
             .collect();
         for h in all {
             h.abort();
@@ -338,5 +479,92 @@ pub(crate) fn store_error(e: StoreError) -> RpcError {
             tracing::error!("store error: {other}");
             internal()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axiom_protocol::workspace::WorkspaceRef;
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.6","client":{"name":"t","version":"0"}}}"#;
+
+    /// A served connection: its notifier, and the client's end of the stream.
+    async fn connection(
+        router: Arc<axiom_rpc::Router>,
+        seen: Arc<Mutex<Vec<Notifier>>>,
+    ) -> (Notifier, BufReader<tokio::io::DuplexStream>) {
+        let (mut cw, sr) = tokio::io::duplex(4096);
+        let (sw, cr) = tokio::io::duplex(4096);
+        let info = axiom_rpc::ServerInfo {
+            name: "t".into(),
+            version: "0".into(),
+        };
+        tokio::spawn(axiom_rpc::serve(sr, sw, router, info));
+        cw.write_all(format!("{INIT}\n").as_bytes()).await.unwrap();
+        let mut r = BufReader::new(cr);
+        let mut line = String::new();
+        r.read_line(&mut line).await.unwrap();
+        // Keep the writer open (EOF would end the connection).
+        std::mem::forget(cw);
+        let n = seen.lock().unwrap().pop().unwrap();
+        (n, r)
+    }
+
+    /// AUD-030: one connection that stops reading does not hold up a daemon-wide relay: the
+    /// other connection gets every notification, promptly.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_stalled_connection_does_not_block_the_others() {
+        let app = App::new(Store::open_in_memory().unwrap());
+        let seen: Arc<Mutex<Vec<Notifier>>> = Arc::default();
+        let mut r = axiom_rpc::Router::new();
+        let s2 = seen.clone();
+        r.on_initialize(move |_, n| s2.lock().unwrap().push(n));
+        let router = Arc::new(r);
+        let ws = WorkspaceId("w1".into());
+        let (stalled, _keep) = connection(router.clone(), seen.clone()).await;
+        let (live, reader) = connection(router.clone(), seen.clone()).await;
+        app.add_client(&ws, stalled);
+        app.add_client(&ws, live.clone());
+        // Adding the same connection again keeps one entry.
+        app.add_client(&ws, live);
+        assert_eq!(app.clients_of(&ws).len(), 2);
+        const N: usize = 3000;
+        let reading = tokio::spawn(async move {
+            let mut reader = reader;
+            let mut got = 0;
+            let mut line = String::new();
+            while got < N {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap() == 0 {
+                    break;
+                }
+                got += 1;
+            }
+            got
+        });
+        let t = std::time::Instant::now();
+        let sending = async {
+            for _ in 0..N {
+                app.notify_clients::<axiom_protocol::git::DidChange>(
+                    &ws,
+                    WorkspaceRef {
+                        workspace_id: ws.clone(),
+                    },
+                )
+                .await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(20), sending)
+            .await
+            .expect("the relay was held up by the stalled connection");
+        let got = tokio::time::timeout(Duration::from_secs(10), reading)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(got, N);
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
     }
 }

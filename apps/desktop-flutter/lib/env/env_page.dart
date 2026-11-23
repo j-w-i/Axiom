@@ -20,6 +20,13 @@ import '../ui/tokens.dart';
 
 const _projectFile = '.axiom/project.toml';
 
+final _reveals = Expando<ValueNotifier<String?>>('environments reveal');
+
+/// The toolchain (provider id) the side bar asked the page to show: the page scrolls to its
+/// row, focuses it and marks it (AUD-056).
+ValueNotifier<String?> environmentsReveal(EnvironmentsStore s) =>
+    _reveals[s] ??= ValueNotifier<String?>(null);
+
 DotState _lamp(RowKind k) => switch (k) {
   RowKind.ready => DotState.ok,
   RowKind.installing => DotState.running,
@@ -37,13 +44,59 @@ class EnvironmentsPage extends StatefulWidget {
 
 class _EnvironmentsPageState extends State<EnvironmentsPage> {
   late final AppState app = AppScope.of(context);
+  late final _reveal = environmentsReveal(app.environments);
+  final _rowKeys = <String, GlobalKey>{};
+  final _rowFocus = <String, FocusNode>{};
+
+  /// The folder (or none) the providers were asked for: once per folder, never from build
+  /// (a daemon answering with no providers would otherwise be asked again on every rebuild;
+  /// AUD-075).
+  String? _providersFor;
 
   @override
   void initState() {
     super.initState();
+    _reveal.addListener(_onReveal);
+    app.workspace.addListener(_onWorkspace);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       if (app.environments.status == 'idle') unawaited(app.environments.refresh());
+      _onWorkspace();
+      _onReveal();
     });
+  }
+
+  void _onWorkspace() {
+    final key = app.workspace.isOpen ? app.workspace.id : '';
+    if (_providersFor == key || app.workspace.isOpen) {
+      // With a folder, refresh() lists what the folder needs (and the providers with it).
+      _providersFor = key;
+      return;
+    }
+    _providersFor = key;
+    unawaited(app.environments.loadProviders());
+  }
+
+  void _onReveal() {
+    final id = _reveal.value;
+    if (id == null || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _rowKeys[id]?.currentContext;
+      if (!mounted || ctx == null) return;
+      unawaited(Scrollable.ensureVisible(ctx, alignment: 0.3));
+      _rowFocus[id]?.requestFocus();
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _reveal.removeListener(_onReveal);
+    app.workspace.removeListener(_onWorkspace);
+    for (final n in _rowFocus.values) {
+      n.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _remove(ToolchainRow row) async {
@@ -75,7 +128,6 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
           child: Column(mainAxisSize: MainAxisSize.min, children: children),
         );
         if (!app.workspace.isOpen) {
-          unawaited(s.loadProviders());
           return ColoredBox(
             color: c.ground,
             child: ListView(
@@ -150,9 +202,12 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                         _header(context),
                         for (final r in rows) ...[
                           SizedBox(height: 1, child: ColoredBox(color: c.groove)),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: Metrics.s5),
-                            child: _ToolchainRowView(row: r, onRemove: () => _remove(r)),
+                          _revealable(
+                            r.providerId,
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: Metrics.s5),
+                              child: _ToolchainRowView(row: r, onRemove: () => _remove(r)),
+                            ),
                           ),
                         ],
                       ],
@@ -207,6 +262,26 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
     );
   }
 
+  /// A toolchain's row, which the side bar can scroll to and focus (marked while focused).
+  Widget _revealable(String id, Widget child) {
+    final c = context.colors;
+    final node = _rowFocus.putIfAbsent(
+      id,
+      () => FocusNode(debugLabel: 'toolchain $id', skipTraversal: true),
+    );
+    return Focus(
+      key: _rowKeys.putIfAbsent(id, GlobalKey.new),
+      focusNode: node,
+      // Only a place to reveal: the row's own controls carry its semantics.
+      includeSemantics: false,
+      onFocusChange: (_) => setState(() {}),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: node.hasFocus ? c.selected : null),
+        child: child,
+      ),
+    );
+  }
+
   Widget _header(BuildContext context) {
     final t = context.axiom;
     Widget h(String s) => Text(s, style: t.type.small);
@@ -246,6 +321,11 @@ class _AllToolchains extends StatelessWidget {
         if (p.trusted && (p.errors?.isEmpty ?? true)) p,
     ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     if (usable.isEmpty) return const SizedBox.shrink();
+    // What this folder's detection found ready: offered as installed, not again (AUD-068).
+    final ready = {
+      for (final r in s.rows())
+        if (r.kind == RowKind.ready) r.providerId: r,
+    };
     Widget group(String title, List<ProviderInfo> list) => Semantics(
       container: true,
       explicitChildNodes: true,
@@ -266,7 +346,7 @@ class _AllToolchains extends StatelessWidget {
               children: [
                 for (var i = 0; i < list.length; i++) ...[
                   if (i > 0) SizedBox(height: 1, child: ColoredBox(color: c.groove)),
-                  _InstallRow(provider: list[i]),
+                  _InstallRow(provider: list[i], ready: ready[list[i].id]),
                 ],
               ],
             ),
@@ -294,8 +374,11 @@ class _AllToolchains extends StatelessWidget {
 }
 
 class _InstallRow extends StatelessWidget {
-  const _InstallRow({required this.provider});
+  const _InstallRow({required this.provider, this.ready});
   final ProviderInfo provider;
+
+  /// This folder's row for the provider when it is ready.
+  final ToolchainRow? ready;
 
   @override
   Widget build(BuildContext context) {
@@ -327,6 +410,30 @@ class _InstallRow extends StatelessWidget {
       );
     } else if (s.planning == id) {
       action = const Spinner(label: 'Planning');
+    } else if (ready != null) {
+      final r = ready!;
+      action = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AxiomIcon(AxiomIcons.check, size: 14, color: c.okText),
+          const SizedBox(width: Metrics.s2),
+          Text(
+            'Installed${r.source == null ? '' : ' (${r.source!.kind})'}',
+            style: t.type.small.copyWith(color: c.okText),
+          ),
+          const SizedBox(width: Metrics.s3),
+          AxButton(
+            label: 'Manage',
+            kind: ButtonKind.quiet,
+            hint: 'Show ${provider.name} in this folder\'s toolchains',
+            onPressed: () {
+              final reveal = environmentsReveal(s);
+              reveal.value = null;
+              reveal.value = id;
+            },
+          ),
+        ],
+      );
     } else {
       action = AxButton(
         label: 'Install…',
@@ -387,7 +494,7 @@ class _ToolchainRowView extends StatelessWidget {
           return Row(
             children: [
               AxiomIcon(AxiomIcons.check, size: 14, color: c.okText),
-              const SizedBox(width: 4),
+              const SizedBox(width: Metrics.s2),
               Text('Ready', style: t.type.small.copyWith(color: c.okText)),
             ],
           );
@@ -399,7 +506,7 @@ class _ToolchainRowView extends StatelessWidget {
                 width: 90,
                 child: Meter(value: progressValue(row.progress), label: 'Installing ${row.name}'),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: Metrics.s3),
               Flexible(
                 child: Text(label, style: t.type.tiny, overflow: TextOverflow.ellipsis),
               ),
@@ -426,7 +533,7 @@ class _ToolchainRowView extends StatelessWidget {
                     ),
                   ),
                 ),
-              const SizedBox(width: 6),
+              const SizedBox(width: Metrics.s3),
               s.planning == row.providerId
                   ? const Spinner(label: 'Planning')
                   : AxButton(
@@ -455,9 +562,9 @@ class _ToolchainRowView extends StatelessWidget {
               child: Row(
                 children: [
                   StatusDot(_lamp(row.kind), ring: c.panel),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: Metrics.s4),
                   Text(row.name, style: t.type.label),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: Metrics.s4),
                   Flexible(
                     child: Text(
                       row.tools.join(' · '),
@@ -520,14 +627,17 @@ class Meter extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: c.recessed,
-            borderRadius: BorderRadius.circular(3),
+            borderRadius: BorderRadius.circular(Metrics.radiusControl),
             border: Border.all(color: c.hairline),
           ),
           child: FractionallySizedBox(
             alignment: Alignment.centerLeft,
             widthFactor: value.clamp(0, 1),
             child: DecoratedBox(
-              decoration: BoxDecoration(color: c.accent, borderRadius: BorderRadius.circular(3)),
+              decoration: BoxDecoration(
+                color: c.accent,
+                borderRadius: BorderRadius.circular(Metrics.radiusControl),
+              ),
             ),
           ),
         ),
@@ -600,7 +710,7 @@ class PlanDialog extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AxiomIcon(icon, size: 16, color: c.ink2),
-              const SizedBox(width: 10),
+              const SizedBox(width: Metrics.s4),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -691,39 +801,57 @@ class EnvironmentsSide extends StatelessWidget {
         final rows = s.rows();
         if (rows.isEmpty) {
           return Padding(
-            padding: const EdgeInsets.all(Metrics.s5),
+            padding: const EdgeInsets.all(Metrics.sideGutter),
             child: Text(
               s.status == 'loading' ? 'Detecting…' : 'No toolchains for this folder',
               style: t.type.small,
             ),
           );
         }
+        final reveal = environmentsReveal(s);
         return Semantics(
           container: true,
           explicitChildNodes: true,
           label: 'Toolchains',
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: Metrics.s2),
-            children: [
-              for (final r in rows)
-                AxListRow(
-                  label:
-                      '${r.name}: ${r.kind == RowKind.ready ? 'Ready${r.detected == null ? '' : ', ${r.detected}'}' : r.word}',
-                  height: 28,
-                  onPressed: () {},
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Row(
-                      children: [
-                        StatusDot(_lamp(r.kind)),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(r.name, style: t.type.body)),
-                        Text(r.detected ?? r.word, style: t.type.tiny),
-                      ],
+          child: ValueListenableBuilder(
+            valueListenable: reveal,
+            builder: (context, shown, _) => ListView(
+              padding: const EdgeInsets.symmetric(horizontal: Metrics.sideListInset),
+              children: [
+                for (final r in rows)
+                  // Shows the toolchain's row on the page (scrolled to, focused, marked).
+                  AxListRow(
+                    label:
+                        '${r.name}: ${r.kind == RowKind.ready ? 'Ready${r.detected == null ? '' : ', ${r.detected}'}' : r.word}',
+                    hint: 'Show ${r.name} on the Environments page',
+                    height: 28,
+                    selected: shown == r.providerId,
+                    onPressed: () {
+                      // The same row again scrolls to it again.
+                      reveal.value = null;
+                      reveal.value = r.providerId;
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: Metrics.rowInset),
+                      child: Row(
+                        children: [
+                          StatusDot(_lamp(r.kind)),
+                          const SizedBox(width: Metrics.s4),
+                          Expanded(
+                            child: Text(
+                              r.name,
+                              style: t.type.body,
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          Text(r.detected ?? r.word, style: t.type.tiny),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         );
       },

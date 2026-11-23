@@ -161,3 +161,68 @@ async fn ten_megabytes_of_output_keep_the_backlog_bounded() {
     // asserted (timing); every event was counted.
     assert!(events > 0 && l.seq >= 1);
 }
+
+/// AUD-036: a program printing as fast as it can while nobody reads the events is held back by
+/// the terminal's output budget: the bytes in undelivered events stay bounded, and output flows
+/// again once they are read.
+#[tokio::test]
+async fn output_is_bounded_by_bytes_while_nobody_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let terms = Terminals::default();
+    let mut rx = terms.subscribe();
+    let t = terms
+        .create(spec(dir.path(), &["sh", "-c", "yes 0123456789abcdef"]))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let held = t.held_output_bytes();
+    assert!(
+        held <= axiom_term::OUTPUT_BUDGET_BYTES + axiom_term::EVENT_MAX_BYTES,
+        "{held} bytes held"
+    );
+    assert!(held > 0, "the program printed nothing");
+    // Reading releases the budget and output continues.
+    let mut seen = 0usize;
+    let r = tokio::time::timeout(Duration::from_secs(10), async {
+        while seen < 2 * axiom_term::OUTPUT_BUDGET_BYTES {
+            if let Ok(TermEvent::Output { data, .. }) = rx.recv().await {
+                seen += data.len();
+            }
+        }
+    })
+    .await;
+    assert!(r.is_ok(), "output stalled after {seen} bytes");
+    terms.close_all_and_wait();
+    assert!(!t.is_running());
+}
+
+/// AUD-027: closing everything at shutdown waits for the escalation: a shell that ignores the
+/// hang-up is killed before `close_all_and_wait` returns.
+#[tokio::test]
+async fn close_all_and_wait_kills_what_ignores_the_hang_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let terms = Terminals::default();
+    let mut rx = terms.subscribe();
+    let t = terms
+        .create(spec(
+            dir.path(),
+            &[
+                "sh",
+                "-c",
+                "trap '' HUP; echo ready; while :; do sleep 1; done",
+            ],
+        ))
+        .unwrap();
+    until(&mut rx, "ready").await;
+    let pid = t.pid.unwrap() as i32;
+    let started = std::time::Instant::now();
+    tokio::task::spawn_blocking(move || terms.close_all_and_wait())
+        .await
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(4));
+    let alive = |pid: i32| nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok();
+    let end = std::time::Instant::now() + Duration::from_secs(2);
+    while alive(pid) && std::time::Instant::now() < end {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!alive(pid), "the shell {pid} survived");
+}

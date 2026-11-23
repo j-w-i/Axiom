@@ -45,6 +45,11 @@ pub struct GitStatus {
     pub behind: u32,
     #[serde(default)]
     pub files: Vec<GitFile>,
+    /// Protocol 0.6 (additive, AUD-012): no file watch could be made for this repository (the
+    /// system's watch limit, for example), so its changes are looked for every few seconds and
+    /// `git/didChange` comes late. Absent (false) otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub polling: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

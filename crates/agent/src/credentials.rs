@@ -96,9 +96,28 @@ impl FileCredentials {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     }
+    /// Written readable by the owner only (`0600` on Unix): it holds keys in plain text
+    /// (AUD-109).
     fn save(&self, m: &BTreeMap<String, String>) -> Result<(), CredentialError> {
+        use std::io::Write;
         let text = serde_json::to_string(m).map_err(|e| CredentialError::Failed(e.to_string()))?;
-        std::fs::write(&self.0, text).map_err(|e| CredentialError::Failed(e.to_string()))
+        let failed = |e: std::io::Error| CredentialError::Failed(e.to_string());
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            o.mode(0o600);
+        }
+        let mut f = o.open(&self.0).map_err(failed)?;
+        // A file that existed with wider permissions is narrowed too.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))
+                .map_err(failed)?;
+        }
+        f.write_all(text.as_bytes()).map_err(failed)
     }
 }
 
@@ -167,6 +186,15 @@ mod tests {
         s.delete("a").unwrap();
         s.delete("a").unwrap();
         assert_eq!(s.get("a").unwrap(), None);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.path().join("c.json"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 
     /// Exercises the real platform store; run with `--features keyring-live` on a desktop

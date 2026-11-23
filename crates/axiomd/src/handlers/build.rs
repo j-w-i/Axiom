@@ -48,6 +48,14 @@ pub async fn run(app: Arc<App>, p: RunParams, ctx: RequestCtx) -> Result<RunResu
         &prepared.diagnostics,
         vec![root.clone()],
     );
+    // A `$/cancel` that raced this success: the client never learns the task id, so the build
+    // must not run on unseen (AUD-098).
+    {
+        let (ex, id) = (app.executor.clone(), task_id.clone());
+        ctx.on_discarded(async move {
+            let _ = ex.cancel(&id).await;
+        });
+    }
     let notifier = ctx.notifier.clone();
     let history_root = root.to_string_lossy().into_owned();
     let (provider, task) = (p.provider_id, p.task);

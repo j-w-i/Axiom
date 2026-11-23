@@ -1,0 +1,391 @@
+{
+  "load_average": [
+    5.95947265625,
+    5.7607421875,
+    4.935546875
+  ],
+  "startup_ms": {
+    "cold_median": {
+      "main": 234.5,
+      "first_frame": 436.5,
+      "ready": 270.5,
+      "folder": 272.5
+    },
+    "warm_median": {
+      "main": 208.5,
+      "first_frame": 315.0,
+      "ready": 268.0,
+      "folder": 275.0
+    },
+    "cold": [
+      [
+        870,
+        1089,
+        907,
+        910
+      ],
+      [
+        237,
+        439,
+        273,
+        275
+      ],
+      [
+        232,
+        432,
+        268,
+        270
+      ],
+      [
+        229,
+        434,
+        261,
+        263
+      ]
+    ],
+    "warm": [
+      [
+        228,
+        431,
+        269,
+        271
+      ],
+      [
+        189,
+        323,
+        275,
+        285
+      ],
+      [
+        187,
+        301,
+        224,
+        233
+      ],
+      [
+        232,
+        307,
+        267,
+        279
+      ]
+    ]
+  },
+  "idle": {
+    "cpu_pct_shell": 0.0,
+    "cpu_pct_daemon": 0.0,
+    "pss_mib_shell": 139,
+    "pss_mib_daemon": 23
+  },
+  "probe": {
+    "boot_to_ready_ms": 35,
+    "mem_0_no_folder": {
+      "shell_rss_kb": 275672,
+      "shell_pss_kb": 176022,
+      "daemon_rss_kb": 16816,
+      "daemon_pss_kb": 13242,
+      "daemon_children": 1
+    },
+    "open_folder_ms": 11,
+    "mem_1_folder": {
+      "shell_rss_kb": 275052,
+      "shell_pss_kb": 175386,
+      "daemon_rss_kb": 24644,
+      "daemon_pss_kb": 20855,
+      "daemon_children": 1
+    },
+    "mem_open_close_rounds": [
+      {
+        "shell_rss_kb": 292892,
+        "shell_pss_kb": 193226,
+        "daemon_rss_kb": 25404,
+        "daemon_pss_kb": 21615,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 293392,
+        "shell_pss_kb": 193726,
+        "daemon_rss_kb": 25584,
+        "daemon_pss_kb": 21795,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 316256,
+        "shell_pss_kb": 216590,
+        "daemon_rss_kb": 25660,
+        "daemon_pss_kb": 21871,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 301380,
+        "shell_pss_kb": 201714,
+        "daemon_rss_kb": 25672,
+        "daemon_pss_kb": 21883,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 317060,
+        "shell_pss_kb": 217394,
+        "daemon_rss_kb": 25984,
+        "daemon_pss_kb": 22195,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 316596,
+        "shell_pss_kb": 212834,
+        "daemon_rss_kb": 26012,
+        "daemon_pss_kb": 22223,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 322456,
+        "shell_pss_kb": 218690,
+        "daemon_rss_kb": 26484,
+        "daemon_pss_kb": 22695,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 323572,
+        "shell_pss_kb": 219815,
+        "daemon_rss_kb": 26484,
+        "daemon_pss_kb": 22696,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 317968,
+        "shell_pss_kb": 214211,
+        "daemon_rss_kb": 26484,
+        "daemon_pss_kb": 22696,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 323440,
+        "shell_pss_kb": 219683,
+        "daemon_rss_kb": 27032,
+        "daemon_pss_kb": 23244,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 329588,
+        "shell_pss_kb": 225831,
+        "daemon_rss_kb": 26780,
+        "daemon_pss_kb": 22992,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 325912,
+        "shell_pss_kb": 222151,
+        "daemon_rss_kb": 26788,
+        "daemon_pss_kb": 23000,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 322276,
+        "shell_pss_kb": 218519,
+        "daemon_rss_kb": 26788,
+        "daemon_pss_kb": 23000,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 329884,
+        "shell_pss_kb": 226125,
+        "daemon_rss_kb": 26792,
+        "daemon_pss_kb": 23004,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 329464,
+        "shell_pss_kb": 225701,
+        "daemon_rss_kb": 26796,
+        "daemon_pss_kb": 23008,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 331312,
+        "shell_pss_kb": 227553,
+        "daemon_rss_kb": 27204,
+        "daemon_pss_kb": 23416,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 330880,
+        "shell_pss_kb": 227121,
+        "daemon_rss_kb": 26876,
+        "daemon_pss_kb": 23088,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 334020,
+        "shell_pss_kb": 230261,
+        "daemon_rss_kb": 26880,
+        "daemon_pss_kb": 23092,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 328476,
+        "shell_pss_kb": 224662,
+        "daemon_rss_kb": 26884,
+        "daemon_pss_kb": 23096,
+        "daemon_children": 1
+      },
+      {
+        "shell_rss_kb": 332468,
+        "shell_pss_kb": 228649,
+        "daemon_rss_kb": 26888,
+        "daemon_pss_kb": 23100,
+        "daemon_children": 1
+      }
+    ],
+    "open_100k_lines_ms": 373,
+    "huge_first_second": {
+      "frames": 97,
+      "build_p50_ms": 0.139,
+      "build_p99_ms": 7.39,
+      "build_max_ms": 31.343,
+      "raster_p50_ms": 3.668,
+      "raster_p99_ms": 4.92,
+      "raster_max_ms": 5.83,
+      "gap_p50_ms": 16.667,
+      "gap_p90_ms": 16.667,
+      "span_p50_ms": 4.479,
+      "span_p99_ms": 32.509,
+      "over_budget": 1
+    },
+    "mem_2_huge_open": {
+      "shell_rss_kb": 399868,
+      "shell_pss_kb": 296270,
+      "daemon_rss_kb": 41516,
+      "daemon_pss_kb": 37728,
+      "daemon_children": 1
+    },
+    "huge_fling": {
+      "frames": 370,
+      "build_p50_ms": 2.099,
+      "build_p99_ms": 8.399,
+      "build_max_ms": 14.082,
+      "raster_p50_ms": 2.729,
+      "raster_p99_ms": 5.367,
+      "raster_max_ms": 7.534,
+      "gap_p50_ms": 16.667,
+      "gap_p90_ms": 16.667,
+      "span_p50_ms": 5.131,
+      "span_p99_ms": 13.074,
+      "over_budget": 0
+    },
+    "huge_typing_at_end": {
+      "frames": 90,
+      "build_p50_ms": 0.139,
+      "build_p99_ms": 7.622,
+      "build_max_ms": 11.02,
+      "raster_p50_ms": 3.499,
+      "raster_p99_ms": 8.581,
+      "raster_max_ms": 8.995,
+      "gap_p50_ms": 33.333,
+      "gap_p90_ms": 116.666,
+      "span_p50_ms": 8.57,
+      "span_p99_ms": 123.667,
+      "over_budget": 0
+    },
+    "huge_typing_at_start": {
+      "frames": 67,
+      "build_p50_ms": 0.136,
+      "build_p99_ms": 6.031,
+      "build_max_ms": 9.791,
+      "raster_p50_ms": 3.629,
+      "raster_p99_ms": 6.922,
+      "raster_max_ms": 7.322,
+      "gap_p50_ms": 16.667,
+      "gap_p90_ms": 33.333,
+      "span_p50_ms": 4.615,
+      "span_p99_ms": 31.13,
+      "over_budget": 0
+    },
+    "huge_typing_at_start_major_faults": 0,
+    "mem_3_huge_edited": {
+      "shell_rss_kb": 419280,
+      "shell_pss_kb": 318032,
+      "daemon_rss_kb": 47080,
+      "daemon_pss_kb": 43292,
+      "daemon_children": 1
+    },
+    "search_total": 2000,
+    "search_first_hit_ms": 58,
+    "search_render": {
+      "frames": 189,
+      "build_p50_ms": 0.154,
+      "build_p99_ms": 4.201,
+      "build_max_ms": 16.636,
+      "raster_p50_ms": 3.359,
+      "raster_p99_ms": 5.457,
+      "raster_max_ms": 5.805,
+      "gap_p50_ms": 16.667,
+      "gap_p90_ms": 16.667,
+      "span_p50_ms": 3.792,
+      "span_p99_ms": 10.072,
+      "over_budget": 0
+    },
+    "search_fling": {
+      "frames": 250,
+      "build_p50_ms": 0.201,
+      "build_p99_ms": 3.544,
+      "build_max_ms": 4.052,
+      "raster_p50_ms": 3.919,
+      "raster_p99_ms": 10.018,
+      "raster_max_ms": 11.118,
+      "gap_p50_ms": 16.667,
+      "gap_p90_ms": 16.667,
+      "span_p50_ms": 4.834,
+      "span_p99_ms": 11.818,
+      "over_budget": 0
+    },
+    "mem_4_search": {
+      "shell_rss_kb": 403300,
+      "shell_pss_kb": 301000,
+      "daemon_rss_kb": 51500,
+      "daemon_pss_kb": 47712,
+      "daemon_children": 1
+    },
+    "console_flood": {
+      "frames": 378,
+      "build_p50_ms": 0.1,
+      "build_p99_ms": 2.144,
+      "build_max_ms": 3.486,
+      "raster_p50_ms": 2.536,
+      "raster_p99_ms": 4.954,
+      "raster_max_ms": 6.69,
+      "gap_p50_ms": 16.667,
+      "gap_p90_ms": 16.667,
+      "span_p50_ms": 2.807,
+      "span_p99_ms": 6.579,
+      "over_budget": 0
+    },
+    "mem_5_console": {
+      "shell_rss_kb": 406356,
+      "shell_pss_kb": 305942,
+      "daemon_rss_kb": 53836,
+      "daemon_pss_kb": 50048,
+      "daemon_children": 1
+    },
+    "typing_under_stream": {
+      "frames": 135,
+      "build_p50_ms": 1.764,
+      "build_p99_ms": 11.059,
+      "build_max_ms": 11.344,
+      "raster_p50_ms": 3.563,
+      "raster_p99_ms": 5.277,
+      "raster_max_ms": 6.235,
+      "gap_p50_ms": 16.667,
+      "gap_p90_ms": 16.667,
+      "span_p50_ms": 6.459,
+      "span_p99_ms": 16.189,
+      "over_budget": 0
+    },
+    "mem_6_end": {
+      "shell_rss_kb": 386996,
+      "shell_pss_kb": 283010,
+      "daemon_rss_kb": 53980,
+      "daemon_pss_kb": 50192,
+      "daemon_children": 2
+    },
+    "shutdown_ms": 19
+  }
+}

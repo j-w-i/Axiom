@@ -179,7 +179,20 @@ impl Client {
             params,
         });
         let inner = self.inner.clone();
-        (id, async move {
+        let too_long = line.len() - 1 > codec::MAX_LINE;
+        (id.clone(), async move {
+            if too_long {
+                // The peer would close the connection on it (AUD-100): refuse here.
+                inner
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&id);
+                return Err(RpcError::new(
+                    ErrorKind::TooLarge,
+                    "The request is larger than the protocol's 64 MiB line limit.",
+                ));
+            }
             if already_closed || inner.tx.send(line).await.is_err() {
                 return Err(closed());
             }
@@ -188,12 +201,11 @@ impl Client {
     }
 
     pub async fn notify<N: Notification>(&self, params: N::Params) {
-        if let Ok(v) = serde_json::to_value(params) {
-            let _ = self
-                .inner
-                .tx
-                .send(codec::notification_line(N::NAME, v))
-                .await;
+        if let Some(line) = serde_json::to_value(params)
+            .ok()
+            .and_then(|v| codec::notification_line(N::NAME, v))
+        {
+            let _ = self.inner.tx.send(line).await;
         }
     }
 

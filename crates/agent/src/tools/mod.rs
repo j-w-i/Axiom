@@ -54,17 +54,62 @@ pub struct Targets {
     pub versions: Vec<(WorkspacePath, Option<axiom_protocol::fs::FileVersion>)>,
     /// This call's effect when it is more than the tool's (an `fs.applyPatch` delete).
     pub effect: Option<Effect>,
+    /// What else decides what the call does, one line each (an environment variable the agent
+    /// sets, a working directory other than the root, the plan an install runs). Shown on the
+    /// approval card and in the audit log, and part of what an "allow for session" grant must
+    /// match exactly (AUD-009, AUD-039, AUD-041).
+    pub conditions: Vec<String>,
+    /// The conditions change what an approved command does (an agent-set `LD_PRELOAD`,
+    /// `PATH`, `NODE_OPTIONS`, a working directory): a policy rule that allows the bare call
+    /// does not allow this one; only the person or an exact session grant can (AUD-039).
+    pub escalate: bool,
+    /// The targets do not describe everything the call does (an MCP tool's arguments, an
+    /// install plan): an approval covers this call only and is never remembered (AUD-009).
+    pub opaque: bool,
 }
 
 impl Targets {
-    /// Display strings: the paths, or the argv joined.
+    /// Display strings: the paths, the argv (quoted where an argument needs it), then the
+    /// conditions.
     pub fn display(&self) -> Vec<String> {
         let mut v: Vec<String> = self.paths.iter().map(|p| p.0.clone()).collect();
         if let Some(a) = &self.argv {
-            v.push(a.join(" "));
+            v.push(display_argv(a));
         }
+        v.extend(self.conditions.iter().cloned());
         v
     }
+}
+
+/// An argv for people: arguments joined by spaces, an argument that is empty or contains
+/// whitespace, quotes or control characters quoted (with `\` escapes), so a display cannot be
+/// mistaken for a different command (AUD-045).
+pub fn display_argv(argv: &[String]) -> String {
+    argv.iter()
+        .map(|a| {
+            let plain = !a.is_empty()
+                && a.chars()
+                    .all(|c| !c.is_whitespace() && !c.is_control() && c != '"' && c != '\'');
+            if plain {
+                a.clone()
+            } else {
+                let mut q = String::from("\"");
+                for c in a.chars() {
+                    match c {
+                        '"' => q.push_str("\\\""),
+                        '\\' => q.push_str("\\\\"),
+                        '\n' => q.push_str("\\n"),
+                        '\t' => q.push_str("\\t"),
+                        c if c.is_control() => q.push_str(&format!("\\u{{{:x}}}", c as u32)),
+                        c => q.push(c),
+                    }
+                }
+                q.push('"');
+                q
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Debug, Clone, PartialEq)]

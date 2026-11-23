@@ -62,6 +62,9 @@ struct Issued {
     verify_env: BTreeMap<String, String>,
     /// A system plan: no staging root; verification searches this `PATH`.
     system_path: Option<Option<std::ffi::OsString>>,
+    /// Who asked for the plan, when it was an agent (its principal): only it may install it
+    /// through the agent's `env.install` (AUD-041).
+    owner: Option<String>,
     expires: Instant,
 }
 
@@ -202,6 +205,7 @@ fn sweep_debris(data_dir: &Path) {
 impl Installer {
     pub fn new(data_dir: PathBuf, http: Http) -> Installer {
         sweep_debris(&data_dir);
+        crate::set_work_dir(data_dir.join("work"));
         Installer {
             data_dir,
             http,
@@ -358,7 +362,7 @@ impl Installer {
         let out = run_program(
             &full,
             &path_with(dir.as_deref()),
-            &std::env::temp_dir(),
+            &work_dir()?,
             &CancellationToken::new(),
             &|_| {},
         )
@@ -569,6 +573,7 @@ impl Installer {
                     .collect(),
                 verify_env: built.env,
                 system_path: None,
+                owner: None,
                 expires: Instant::now() + self.plan_lifetime,
             },
         );
@@ -631,6 +636,7 @@ impl Installer {
                 verify_bin_dirs: Vec::new(),
                 verify_env: BTreeMap::new(),
                 system_path: Some(self.system.path.clone()),
+                owner: None,
                 expires: Instant::now() + self.plan_lifetime,
             },
         );
@@ -675,14 +681,7 @@ impl Installer {
                             report(i, line.trim().chars().take(200).collect());
                         }
                     };
-                    run_program(
-                        argv,
-                        &BTreeMap::new(),
-                        &std::env::temp_dir(),
-                        cancel,
-                        &on_line,
-                    )
-                    .await?;
+                    run_program(argv, &BTreeMap::new(), &work_dir()?, cancel, &on_line).await?;
                 }
                 Step::Verify { tool_id } => {
                     report(i, format!("Verifying {tool_id}"));
@@ -715,6 +714,43 @@ impl Installer {
     }
 
     /// The provider an issued, unexpired plan is for (to look up its current manifest).
+    /// Marks an issued plan as an agent's (its principal): see [`Installer::issued`].
+    pub fn set_owner(&self, plan_id: &str, owner: &str) {
+        if let Some(p) = lock(&self.plans).get_mut(plan_id) {
+            p.owner = Some(owner.to_string());
+        }
+    }
+
+    /// An unexpired issued plan and who asked for it (`None`: a client, not an agent).
+    pub fn issued(&self, plan_id: &str) -> Option<(InstallPlan, Option<String>)> {
+        lock(&self.plans)
+            .get(plan_id)
+            .filter(|p| p.expires > Instant::now())
+            .map(|p| (p.plan.clone(), p.owner.clone()))
+    }
+
+    /// The versions a provider lists without running a program (an archive's or a delegate's
+    /// `versions`); `None` when only its `list_versions` program would say (a read-only caller
+    /// such as the agent's `env.planInstall` must not run it; AUD-109).
+    pub async fn listed_versions(
+        &self,
+        m: &ProviderManifest,
+    ) -> Result<Option<Vec<String>>, EnvError> {
+        for i in &m.install {
+            match i {
+                InstallMethod::Archive { provides, .. } if !provides.is_empty() => continue,
+                InstallMethod::Archive { versions, .. }
+                | InstallMethod::Delegate {
+                    versions: Some(versions),
+                    ..
+                } => return self.cached_versions(&m.id, versions).await.map(Some),
+                InstallMethod::Delegate { .. } => return Ok(None),
+                InstallMethod::SystemPackage { .. } => continue,
+            }
+        }
+        Ok(Some(Vec::new()))
+    }
+
     pub fn plan_provider(&self, plan_id: &str) -> Option<String> {
         lock(&self.plans)
             .get(plan_id)
@@ -953,12 +989,26 @@ impl Installer {
                     t = self.http.get_text(sums) => t?,
                     _ = cancel.cancelled() => return Err(EnvError::Cancelled),
                 };
-                digest_from_checksum_file(&text, &file_name_of(url)).ok_or_else(|| {
-                    EnvError::NotFound(format!(
-                        "The checksum file has no entry for {}.",
-                        file_name_of(url)
-                    ))
-                })?
+                let published =
+                    digest_from_checksum_file(&text, &file_name_of(url)).ok_or_else(|| {
+                        EnvError::NotFound(format!(
+                            "The checksum file has no entry for {}.",
+                            file_name_of(url)
+                        ))
+                    })?;
+                // A checksum file comes from the artifact's own origin: it detects corruption,
+                // not a compromised release. The first digest seen for a (version-pinned) URL
+                // is kept, and a later different one is refused (AUD-107).
+                if let Some(pinned) = self.pinned_digest(url) {
+                    if pinned != published.to_ascii_lowercase() {
+                        return Err(EnvError::ChecksumMismatch {
+                            url: url.to_string(),
+                            expected: pinned,
+                            actual: published,
+                        });
+                    }
+                }
+                published
             }
         };
         let digits = if sha512 { 128 } else { 64 };
@@ -1014,7 +1064,42 @@ impl Installer {
             });
         }
         std::fs::rename(&part, &cached).map_err(EnvError::io("Cannot store the download"))?;
+        if matches!(sha256, Sha256Source::Url { .. }) {
+            self.pin_digest(url, &expected);
+        }
         Ok(cached)
+    }
+
+    /// `<data dir>/cache/pins.json`: the digest first verified for each artifact whose
+    /// checksum comes from a checksum file.
+    fn pins_path(&self) -> PathBuf {
+        self.cache_dir().join("pins.json")
+    }
+
+    fn pinned_digest(&self, url: &str) -> Option<String> {
+        let text = std::fs::read_to_string(self.pins_path()).ok()?;
+        let pins: BTreeMap<String, String> = serde_json::from_str(&text).ok()?;
+        pins.get(url).cloned()
+    }
+
+    fn pin_digest(&self, url: &str, digest: &str) {
+        let path = self.pins_path();
+        let mut pins: BTreeMap<String, String> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        if pins.get(url).map(String::as_str) == Some(digest) {
+            return;
+        }
+        pins.insert(url.to_string(), digest.to_string());
+        let tmp = path.with_extension("json.part");
+        let written = serde_json::to_string_pretty(&pins)
+            .map_err(std::io::Error::other)
+            .and_then(|t| std::fs::write(&tmp, t))
+            .and_then(|()| std::fs::rename(&tmp, &path));
+        if let Err(e) = written {
+            tracing::warn!("cannot record the digest of {url}: {e}");
+        }
     }
 
     /// `env/uninstall`: runs a delegate's declared `uninstall` command with the delegate from
@@ -1312,6 +1397,70 @@ impl Drop for GroupGuard {
     }
 }
 
+/// Lines of a program's output, each cut at [`CappedLines::MAX`] bytes (the rest of an overlong
+/// line is dropped): a program that never prints a newline cannot grow the daemon's memory
+/// (AUD-109). Cancel-safe, as `select!` needs.
+struct CappedLines<R> {
+    reader: tokio::io::BufReader<R>,
+    buf: Vec<u8>,
+    /// Inside an overlong line: dropping until its newline.
+    skipping: bool,
+}
+
+impl<R: tokio::io::AsyncRead + Unpin> CappedLines<R> {
+    const MAX: usize = 64 * 1024;
+
+    fn new(r: R) -> Self {
+        Self {
+            reader: tokio::io::BufReader::new(r),
+            buf: Vec::new(),
+            skipping: false,
+        }
+    }
+
+    async fn next_line(&mut self) -> std::io::Result<Option<String>> {
+        use tokio::io::AsyncBufReadExt;
+        loop {
+            let avail = self.reader.fill_buf().await?;
+            if avail.is_empty() {
+                if self.buf.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(self.take()));
+            }
+            let nl = avail.iter().position(|&b| b == b'\n');
+            let chunk = &avail[..nl.unwrap_or(avail.len())];
+            if !self.skipping {
+                let room = Self::MAX - self.buf.len();
+                self.buf.extend_from_slice(&chunk[..chunk.len().min(room)]);
+                self.skipping = chunk.len() > room;
+            }
+            let used = nl.map_or(avail.len(), |i| i + 1);
+            self.reader.consume(used);
+            if nl.is_some() {
+                self.skipping = false;
+                return Ok(Some(self.take()));
+            }
+        }
+    }
+
+    fn take(&mut self) -> String {
+        let mut line = std::mem::take(&mut self.buf);
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        String::from_utf8_lossy(&line).into_owned()
+    }
+}
+
+/// [`crate::work_dir`], or why there is none (then nothing runs).
+fn work_dir() -> Result<PathBuf, EnvError> {
+    crate::work_dir().map_err(|source| EnvError::Io {
+        context: "Cannot prepare a private working directory".into(),
+        source,
+    })
+}
+
 pub async fn run_program(
     argv: &[String],
     env: &BTreeMap<String, String>,
@@ -1319,7 +1468,6 @@ pub async fn run_program(
     cancel: &CancellationToken,
     on_line: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, EnvError> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
     let Some((program, args)) = argv.split_first() else {
         return Err(EnvError::InvalidParams("empty command".into()));
     };
@@ -1342,8 +1490,8 @@ pub async fn run_program(
     let (Some(out), Some(err)) = (child.stdout.take(), child.stderr.take()) else {
         return Err(EnvError::Spawn("Cannot read the command's output".into()));
     };
-    let mut out = BufReader::new(out).lines();
-    let mut err = BufReader::new(err).lines();
+    let mut out = CappedLines::new(out);
+    let mut err = CappedLines::new(err);
     let (mut stdout, mut combined) = (String::new(), String::new());
     let (mut out_open, mut err_open) = (true, true);
     let mut keep = |line: &str, is_out: bool| {
@@ -1519,6 +1667,20 @@ mod tests {
     }
 
     use super::*;
+
+    /// A program that never prints a newline cannot grow the daemon's memory: each line is cut
+    /// at the bound and the rest of it dropped (AUD-109).
+    #[tokio::test]
+    async fn program_output_lines_are_bounded() {
+        let max = CappedLines::<&[u8]>::MAX;
+        let mut input = vec![b'x'; 3 * max + 5];
+        input.extend_from_slice(b"\nnext\r\nlast");
+        let mut l = CappedLines::new(&input[..]);
+        assert_eq!(l.next_line().await.unwrap().unwrap().len(), max);
+        assert_eq!(l.next_line().await.unwrap().as_deref(), Some("next"));
+        assert_eq!(l.next_line().await.unwrap().as_deref(), Some("last"));
+        assert_eq!(l.next_line().await.unwrap(), None);
+    }
 
     #[cfg(unix)]
     #[test]

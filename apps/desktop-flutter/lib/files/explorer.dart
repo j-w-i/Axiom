@@ -1,7 +1,9 @@
 // The explorer (FL-FILES-001): the workspace's tree, listed lazily by the daemon. Keyboard as in
 // the Tauri shell: ↑/↓ move, → expands (or goes to the first child), ← collapses (or goes to the
-// parent), Enter opens a file or toggles a folder, Home/End go to the first/last row. Rows have
-// a fixed height so long folders scroll without layout work.
+// parent), Enter opens a file or toggles a folder, Home/End go to the first/last row. The tree is
+// one Tab stop (AUD-021). Rows have a fixed height (grown with the system's text scale, AUD-020)
+// so long folders scroll without layout work; deep nesting stops indenting before the name runs
+// out of room (AUD-016).
 
 import 'dart:async';
 
@@ -16,11 +18,31 @@ import '../ui/icon_data.dart';
 import '../ui/glyph.dart';
 import '../ui/icons.dart';
 import '../ui/pressable.dart';
+import '../ui/roving.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart';
+import 'file_actions.dart';
 
+/// A row's height at text scale 1.
 const rowExtent = 22.0;
 const _indent = 14.0;
+
+/// What a row needs besides its indent: the left pad, the chevron, the icon and their gaps, and
+/// room for the trailing Git letter or spinner.
+const _rowFixed = Metrics.s4 + 16 + 4 + 16 + 4 + 26;
+
+/// The smallest width a row keeps for the name, however deep it is.
+const minNameWidth = 64.0;
+
+/// The indent of a row at [depth] in a tree [width] px wide: 14 px a level, but never more than
+/// 40 % of the width and never so much that the name gets less than [minNameWidth] (AUD-016).
+/// Deeper rows than that share the deepest indent; the hint line gives their full path.
+double explorerIndent(int depth, double width) {
+  final cap = [width * 0.4, width - _rowFixed - minNameWidth].reduce((a, b) => a < b ? a : b);
+  final want = depth * _indent;
+  if (cap <= 0) return 0;
+  return want < cap ? want : cap.floorToDouble();
+}
 
 /// What opening a file does (the editor, from FL-EDIT-001 on). [focus]: move keyboard focus to
 /// the editor (opened by keyboard), or leave it in the explorer (a click).
@@ -37,19 +59,18 @@ class Explorer extends StatefulWidget {
 
 class _ExplorerState extends State<Explorer> {
   final _scroll = ScrollController();
-  final _nodes = <String, FocusNode>{};
+  final _nodes = RowFocusNodes(debugPrefix: 'row');
   String? _current;
   List<VisibleRow> _rows = const [];
+  double _extent = rowExtent;
 
-  FocusNode _node(String path) =>
-      _nodes.putIfAbsent(path, () => FocusNode(debugLabel: 'row $path'));
+  /// Focus is somewhere in the tree (the selected row's marker is brass).
+  bool _treeFocused = false;
 
   @override
   void dispose() {
     _scroll.dispose();
-    for (final n in _nodes.values) {
-      n.dispose();
-    }
+    _nodes.dispose();
     super.dispose();
   }
 
@@ -58,15 +79,26 @@ class _ExplorerState extends State<Explorer> {
     i = i.clamp(0, _rows.length - 1);
     final path = _rows[i].node.path;
     setState(() => _current = path);
+    widget.workspace.selection = path;
     // Bring the row into view first (rows off screen are not built), then focus it.
-    final top = i * rowExtent;
-    final view = _scroll.position.viewportDimension;
-    if (top < _scroll.offset) {
-      _scroll.jumpTo(top);
-    } else if (top + rowExtent > _scroll.offset + view) {
-      _scroll.jumpTo(top + rowExtent - view);
+    if (_scroll.hasClients) {
+      final top = i * _extent + 2;
+      final view = _scroll.position.viewportDimension;
+      if (top < _scroll.offset) {
+        _scroll.jumpTo(top);
+      } else if (top + _extent > _scroll.offset + view) {
+        _scroll.jumpTo(top + _extent - view);
+      }
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _node(path).requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _nodes[path].requestFocus();
+    });
+  }
+
+  /// Tab reached the tree: focus the selected row, or the first.
+  void _enter() {
+    final i = _index;
+    _focusIndex(i < 0 ? 0 : i);
   }
 
   int get _index => _rows.indexWhere((r) => r.node.path == _current);
@@ -86,7 +118,15 @@ class _ExplorerState extends State<Explorer> {
       return;
     }
     final n = _rows[i].node;
+    final app = AppScope.of(context);
     switch (k) {
+      // The file operations by keyboard (AUD-022).
+      case _TreeKey.rename:
+        unawaited(renamePath(context, app, n.path));
+      case _TreeKey.trash:
+        unawaited(trashPath(context, app, n.path));
+      case _TreeKey.menu:
+        app.openFileMenu?.call();
       case _TreeKey.down:
         _focusIndex(i + 1);
       case _TreeKey.up:
@@ -122,6 +162,9 @@ class _ExplorerState extends State<Explorer> {
       builder: (context, _) {
         final ws = widget.workspace;
         _rows = ws.visibleRows();
+        _extent = context.scaled(rowExtent);
+        // One turning spinner in the tree (motion-system.md §5.3): the first loading folder's.
+        final firstLoading = _rows.indexWhere((r) => r.node.loading && !r.node.loaded);
         if (!ws.rootLoaded) {
           return Center(child: Spinner(label: 'Listing ${ws.name}'));
         }
@@ -150,35 +193,58 @@ class _ExplorerState extends State<Explorer> {
             SingleActivator(LogicalKeyboardKey.arrowLeft): _TreeIntent(_TreeKey.left),
             SingleActivator(LogicalKeyboardKey.home): _TreeIntent(_TreeKey.home),
             SingleActivator(LogicalKeyboardKey.end): _TreeIntent(_TreeKey.end),
+            SingleActivator(LogicalKeyboardKey.f2): _TreeIntent(_TreeKey.rename),
+            SingleActivator(LogicalKeyboardKey.delete): _TreeIntent(_TreeKey.trash),
+            SingleActivator(LogicalKeyboardKey.f10, shift: true): _TreeIntent(_TreeKey.menu),
+            SingleActivator(LogicalKeyboardKey.contextMenu): _TreeIntent(_TreeKey.menu),
           },
           child: Actions(
             actions: {_TreeIntent: CallbackAction<_TreeIntent>(onInvoke: (i) => _key(i.key))},
             child: Semantics(
               label: 'Files in ${ws.name}',
               container: true,
-              child: ListView.builder(
-                controller: _scroll,
-                itemExtent: rowExtent,
-                itemCount: _rows.length,
-                padding: const EdgeInsets.only(top: 2, bottom: Metrics.s5),
-                itemBuilder: (context, i) {
-                  final (:node, :depth) = _rows[i];
-                  return _Row(
-                    key: ValueKey(node.path),
-                    node: node,
-                    depth: depth,
-                    focusNode: _node(node.path),
-                    selected: node.path == _current,
-                    onPressed: () {
-                      setState(() => _current = node.path);
-                      _activate(node);
+              child: RovingFocus(
+                onEnter: _enter,
+                onFocusChange: (v) => setState(() => _treeFocused = v),
+                child: LayoutBuilder(
+                  builder: (context, box) => ListView.builder(
+                    controller: _scroll,
+                    itemExtent: _extent,
+                    itemCount: _rows.length,
+                    padding: const EdgeInsets.only(top: Metrics.s1, bottom: Metrics.s5),
+                    itemBuilder: (context, i) {
+                      final (:node, :depth) = _rows[i];
+                      // A right-click selects the row and opens its menu (AUD-022).
+                      return GestureDetector(
+                        // The row's own semantics (and its menu key) describe it.
+                        excludeFromSemantics: true,
+                        onSecondaryTapUp: (_) {
+                          setState(() => _current = node.path);
+                          widget.workspace.selection = node.path;
+                          AppScope.of(context).openFileMenu?.call();
+                        },
+                        child: ExplorerRow(
+                          key: ValueKey(node.path),
+                          node: node,
+                          indent: explorerIndent(depth, box.maxWidth),
+                          focusNode: _nodes[node.path],
+                          selected: node.path == _current,
+                          treeFocused: _treeFocused,
+                          spinnerStill: i != firstLoading,
+                          onPressed: () {
+                            setState(() => _current = node.path);
+                            widget.workspace.selection = node.path;
+                            _activate(node);
+                          },
+                          colors: c,
+                          type: t.type,
+                          mark: git.marks[node.path],
+                          folderKind: node.isDir ? git.folders[node.path] : null,
+                        ),
+                      );
                     },
-                    colors: c,
-                    type: t.type,
-                    mark: git.marks[node.path],
-                    folderKind: node.isDir ? git.folders[node.path] : null,
-                  );
-                },
+                  ),
+                ),
               ),
             ),
           ),
@@ -188,30 +254,42 @@ class _ExplorerState extends State<Explorer> {
   }
 }
 
-enum _TreeKey { up, down, left, right, home, end }
+enum _TreeKey { up, down, left, right, home, end, rename, trash, menu }
 
 class _TreeIntent extends Intent {
   const _TreeIntent(this.key);
   final _TreeKey key;
 }
 
-class _Row extends StatelessWidget {
-  const _Row({
+/// One row of the tree: indent, chevron, icon or file chip, name (ellipsised, never squeezed out),
+/// Git letter or folder dot, a spinner while it lists.
+class ExplorerRow extends StatelessWidget {
+  const ExplorerRow({
     super.key,
     required this.node,
-    required this.depth,
-    required this.focusNode,
+    required this.indent,
     required this.selected,
     required this.onPressed,
     required this.colors,
     required this.type,
+    this.focusNode,
+    this.treeFocused = false,
+    this.spinnerStill = false,
     this.mark,
     this.folderKind,
   });
   final TreeNode node;
-  final int depth;
-  final FocusNode focusNode;
+
+  /// From [explorerIndent].
+  final double indent;
+  final FocusNode? focusNode;
   final bool selected;
+
+  /// Focus is in the tree: the selected row's marker is brass.
+  final bool treeFocused;
+
+  /// Another row's spinner already turns.
+  final bool spinnerStill;
   final VoidCallback onPressed;
   final AxiomColors colors;
   final AxiomType type;
@@ -234,15 +312,17 @@ class _Row extends StatelessWidget {
     ].join(', ');
     return Pressable(
       label: label,
-      hint: node.isDir ? '${node.name} — Enter or → to expand' : '${node.name} — Enter to open',
+      // The full path: a deep row's indent no longer shows all of it.
+      hint: node.isDir ? '${node.path} — Enter or → to expand' : '${node.path} — Enter to open',
       onPressed: onPressed,
       selected: selected,
       expanded: node.isDir ? node.expanded : null,
       focusNode: focusNode,
+      skipTraversal: true,
       builder: (context, s) {
         Widget row = Row(
           children: [
-            SizedBox(width: depth * _indent + Metrics.s4),
+            SizedBox(width: indent + Metrics.s4),
             SizedBox(
               width: 16,
               child: node.isDir
@@ -252,7 +332,7 @@ class _Row extends StatelessWidget {
                     )
                   : null,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: Metrics.s2),
             // Tauri's tree: folders in the folder tone, files as their type's chip.
             SizedBox(
               width: 16,
@@ -266,7 +346,7 @@ class _Row extends StatelessWidget {
                     : FileGlyph(node.name),
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: Metrics.s2),
             Expanded(
               child: Text(
                 node.name,
@@ -276,15 +356,18 @@ class _Row extends StatelessWidget {
               ),
             ),
             if (node.loading && !node.loaded)
-              const Padding(padding: EdgeInsets.only(right: 6), child: Spinner(size: 10)),
+              Padding(
+                padding: const EdgeInsets.only(right: Metrics.s3),
+                child: Spinner(size: 10, still: spinnerStill, label: 'Listing ${node.name}'),
+              ),
             if (mark != null)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.only(right: Metrics.s4),
                 child: Text(mark!.letter, style: type.codeSmall.copyWith(color: tint)),
               )
             else if (folderKind != null)
               Padding(
-                padding: const EdgeInsets.only(right: 10),
+                padding: const EdgeInsets.only(right: Metrics.s4 + Metrics.s1),
                 child: Container(
                   width: 5,
                   height: 5,
@@ -306,7 +389,7 @@ class _Row extends StatelessWidget {
                   top: 3,
                   bottom: 3,
                   width: 2,
-                  child: ColoredBox(color: s.focused ? c.accent : c.ink3),
+                  child: ColoredBox(color: treeFocused || s.focused ? c.accent : c.ink3),
                 ),
               ],
             ),
@@ -335,8 +418,8 @@ class _ErrorMark extends StatelessWidget {
       children: [
         child,
         Positioned(
-          right: 6,
-          top: 4,
+          right: Metrics.s3,
+          top: Metrics.s2,
           child: Semantics(
             label: 'Could not list: $error',
             child: AxiomIcon(AxiomIcons.warning, size: 14, color: context.colors.danger),
@@ -398,10 +481,7 @@ class RecentList extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Semantics(
-              header: true,
-              child: Text('Recent', style: t.type.small.copyWith(fontWeight: FontWeight.w600)),
-            ),
+            Semantics(header: true, child: Text('Recent', style: t.type.sectionHeading)),
             const SizedBox(height: Metrics.s2),
             // Tauri's recent rows: the name, then the path in quiet mono.
             for (final r in recent.take(8))

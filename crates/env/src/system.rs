@@ -102,9 +102,11 @@ pub fn install_commands(m: &Manager, packages: &[String]) -> Vec<Vec<String>> {
     match m.name {
         // Non-interactive: the elevated process has no terminal to answer a prompt; the
         // plan shows the flag.
-        "apt" => vec![with(&["install", "-y"])],
+        // `--` ends the options where the manager supports it: no package can be read as one
+        // (AUD-105; names are validated too, `manifest::valid_package`).
+        "apt" => vec![with(&["install", "-y", "--"])],
         "dnf" => vec![with(&["install", "-y"])],
-        "pacman" => vec![with(&["-S", "--needed", "--noconfirm"])],
+        "pacman" => vec![with(&["-S", "--needed", "--noconfirm", "--"])],
         "brew" => vec![with(&["install"])],
         // winget installs one id per call.
         "winget" => packages
@@ -155,4 +157,27 @@ pub fn packages_for<'a>(
     m: &Manager,
 ) -> Option<&'a Vec<String>> {
     packages.get(m.name).filter(|p| !p.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `--` ends the options before the packages where the manager supports it (AUD-105).
+    #[test]
+    fn packages_follow_an_end_of_options_marker() {
+        let m = |name, program: &str| Manager {
+            name,
+            program: PathBuf::from(program),
+        };
+        let pkgs = ["hello".to_string()];
+        assert_eq!(
+            install_commands(&m("apt", "apt-get"), &pkgs),
+            [["apt-get", "install", "-y", "--", "hello"]]
+        );
+        assert_eq!(
+            install_commands(&m("pacman", "pacman"), &pkgs),
+            [["pacman", "-S", "--needed", "--noconfirm", "--", "hello"]]
+        );
+    }
 }

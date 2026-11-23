@@ -2,7 +2,7 @@
 id: FL-PERF-001
 title: An idle editor draws no frames: the caret's blink stops after 10 s (re_editor patched); solid under Reduced and Off motion
 status: implemented
-status_note: 2026-11-22; Linux (Fedora 44): P7 --ab with a document open, 28.1 % → 0.0 % (workspace only 0.0 %); caret_blink_test 4/4; check.sh flutter passes; editor frames clean, shell frames show no regression under load 7.5–11.5 (a clean run on an idle machine owed)
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-QA-001]
 order: 609
 scope: apps/desktop-flutter/third_party/re_editor/, apps/desktop-flutter/lib/editor/code_view.dart, apps/desktop-flutter/lib/ui/tokens.dart, apps/desktop-flutter/pubspec.yaml, apps/desktop-flutter/analysis_options.yaml, apps/desktop-flutter/test/editor/, docs/roadmap/verification/FL.md, docs/roadmap/verification/FL-bench/, docs/design/workspace-spec.md, docs/design/motion-system.md, docs/architecture/modules.md

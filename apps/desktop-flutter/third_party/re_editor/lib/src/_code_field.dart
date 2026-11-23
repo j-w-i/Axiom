@@ -1005,6 +1005,9 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     return null;
   }
 
+  /// Axiom patch (AUD-005): a backward jump of more lines than this starts at the estimated line.
+  static const int _kFarJumpLines = 256;
+
   void _updateDisplayRenderParagraphs() {
     final double effectiveWidth;
     if (_horizontalViewport == null) {
@@ -1028,7 +1031,18 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
         _updateDisplayRenderParagraphs();
         return;
       }
-      if (target < _displayParagraphs.first.top) {
+      // Axiom patch (AUD-005): a jump far back (Ctrl+Home, or the caret moved to the top of a
+      // long document) starts at the estimated line, as a jump forward does. Walking back line by
+      // line laid out every paragraph in between: 100 000 for a jump to the top of a 100 000-line
+      // file, seconds of work and hundreds of MB.
+      final int backTo = target <= paddingTop
+          ? 0
+          : min(((target - paddingTop) / _preferredLineHeight).floor(), _codes.length - 1);
+      if (target < _displayParagraphs.first.top &&
+          _displayParagraphs.first.index - backTo > _kFarJumpLines) {
+        _displayParagraphs.clear();
+        _displayParagraphs.addAll(_buildDisplayRenderParagraphs(backTo, effectiveWidth));
+      } else if (target < _displayParagraphs.first.top) {
         int startIndex = 0;
         double delta = 0;
         double offset = _displayParagraphs.first.top;

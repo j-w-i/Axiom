@@ -35,7 +35,7 @@ pub struct Session {
     next: AtomicU64,
     open: AtomicBool,
     capabilities: Mutex<Option<Capabilities>>,
-    normalizer: Normalizer,
+    normalizer: Arc<Normalizer>,
     snapshot: Mutex<Option<Snapshot>>,
     /// When the page last changed (for quiescence), and why.
     last_mutation: Mutex<Option<Instant>>,
@@ -74,7 +74,7 @@ impl Session {
             .expect("a session is adopted only after hello")
     }
 
-    pub fn normalizer(&self) -> &Normalizer {
+    pub fn normalizer(&self) -> &Arc<Normalizer> {
         &self.normalizer
     }
 
@@ -211,12 +211,51 @@ pub(crate) fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// A page may connect from the preview's dev server only: no `Origin` (a non-browser client)
+/// or an `http(s)` origin on a loopback host, where the generated config serves the preview.
+/// A website the person has open elsewhere cannot connect (AUD-043).
+pub fn origin_allowed(origin: Option<&str>) -> bool {
+    let Some(o) = origin else { return true };
+    let Some(rest) = o
+        .strip_prefix("http://")
+        .or_else(|| o.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let host = if let Some(v6) = rest.strip_prefix('[') {
+        match v6.split_once(']') {
+            Some((h, tail)) if tail.is_empty() || tail.starts_with(':') => h,
+            _ => return false,
+        }
+    } else {
+        rest.split(':').next().unwrap_or("")
+    };
+    let port_ok = |r: &str| {
+        r.rsplit_once(':')
+            .is_none_or(|(_, p)| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1") && !rest.contains('/') && port_ok(rest)
+}
+
+/// How long a new connection waits for the preview's current page to go (a reload closes it)
+/// before it is refused (AUD-043: a second connection no longer replaces a live one).
+const HANDOVER: Duration = Duration::from_secs(3);
+
 /// One connection: the token in the URL decides the preview; then hello; then the message loop.
 pub(crate) async fn accept(inspect: Arc<Inspect>, stream: TcpStream) {
     let mut token = None;
     // The library's callback type returns its error response by value.
     #[allow(clippy::result_large_err)]
     let check = |req: &Request, resp: Response| -> Result<Response, ErrorResponse> {
+        let origin = req
+            .headers()
+            .get("origin")
+            .map(|v| v.to_str().unwrap_or("invalid"));
+        if !origin_allowed(origin) {
+            let mut e = ErrorResponse::new(Some("origin not allowed".into()));
+            *e.status_mut() = StatusCode::FORBIDDEN;
+            return Err(e);
+        }
         let t = req.uri().query().and_then(|q| {
             q.split('&')
                 .find_map(|kv| kv.strip_prefix("token=").map(str::to_string))
@@ -264,7 +303,7 @@ pub(crate) async fn accept(inspect: Arc<Inspect>, stream: TcpStream) {
         next: AtomicU64::new(1),
         open: AtomicBool::new(true),
         capabilities: Mutex::new(None),
-        normalizer: Normalizer::new(reg.root),
+        normalizer: Arc::new(Normalizer::new(reg.root)),
         snapshot: Mutex::new(None),
         last_mutation: Mutex::new(None),
         mutated: Notify::new(),
@@ -306,7 +345,17 @@ pub(crate) async fn accept(inspect: Arc<Inspect>, stream: TcpStream) {
     {
         Ok(caps) => {
             *lock(&session.capabilities) = Some(caps.clone());
-            inspect.adopt(reg.preview.clone(), session.clone());
+            if !inspect
+                .adopt(reg.preview.clone(), session.clone(), HANDOVER)
+                .await
+            {
+                tracing::warn!(
+                    "a second page connected to a preview whose page is still connected; refused"
+                );
+                session.close();
+                reader.abort();
+                return;
+            }
             inspect.emit(InspectEvent::Connected {
                 preview: reg.preview,
                 capabilities: caps,
@@ -320,7 +369,7 @@ pub(crate) async fn accept(inspect: Arc<Inspect>, stream: TcpStream) {
     }
 }
 
-fn handle(inspect: &Inspect, s: &Session, v: Value) {
+fn handle(inspect: &Arc<Inspect>, s: &Session, v: Value) {
     // An answer to one of our requests.
     if v.get("method").is_none() {
         let Some(id) = v.get("id").and_then(Value::as_u64) else {
@@ -346,6 +395,8 @@ fn handle(inspect: &Inspect, s: &Session, v: Value) {
                 return;
             };
             s.mutation();
+            // Files may have changed: text-search results are stale.
+            s.normalizer.clear_cache();
             if p.reason == axiom_protocol::inspection::MutationReason::HotReload {
                 lock(&s.reloads).push(now_ms());
             }
@@ -358,15 +409,26 @@ fn handle(inspect: &Inspect, s: &Session, v: Value) {
             let Ok(p) = serde_json::from_value::<AdapterHoveredParams>(params) else {
                 return;
             };
-            let node = p.node.map(|n| s.normalizer.node(n, None));
+            // Hover comes at pointer-move rate: its own sources and owners only, never the
+            // workspace text search (AUD-042); a click (selected) searches.
+            let node = p.node.map(|n| s.normalizer.node_without_search(n, None));
             inspect.emit(InspectEvent::Hovered { preview, node });
         }
         "inspect/selected" => {
             let Ok(r) = serde_json::from_value::<HitTestResult>(params) else {
                 return;
             };
-            let chain = s.normalizer.chain(r).chain;
-            inspect.emit(InspectEvent::Selected { preview, chain });
+            // The text search reads files: on the blocking pool, not this reader's worker.
+            let norm = s.normalizer.clone();
+            let inspect = inspect.clone();
+            tokio::spawn(async move {
+                if let Ok(r) = tokio::task::spawn_blocking(move || norm.chain(r)).await {
+                    inspect.emit(InspectEvent::Selected {
+                        preview,
+                        chain: r.chain,
+                    });
+                }
+            });
         }
         "inspect/runtimeError" => {
             let Ok(p) = serde_json::from_value::<RuntimeErrorParams>(params) else {
@@ -380,5 +442,36 @@ fn handle(inspect: &Inspect, s: &Session, v: Value) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::origin_allowed;
+
+    #[test]
+    fn only_loopback_origins_may_connect() {
+        for ok in [
+            None,
+            Some("http://127.0.0.1:5173"),
+            Some("http://localhost:3000"),
+            Some("https://localhost"),
+            Some("http://[::1]:8080"),
+        ] {
+            assert!(origin_allowed(ok), "{ok:?}");
+        }
+        for bad in [
+            "https://evil.example",
+            "http://127.0.0.1.evil.example",
+            "http://localhost.evil.example:80",
+            "http://evil.example/127.0.0.1",
+            "null",
+            "file://",
+            "http://127.0.0.1:80/x",
+            "http://[::1]evil",
+            "http://localhost:",
+        ] {
+            assert!(!origin_allowed(Some(bad)), "{bad}");
+        }
     }
 }

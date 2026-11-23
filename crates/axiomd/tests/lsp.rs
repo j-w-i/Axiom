@@ -9,6 +9,7 @@
 
 mod common;
 
+use axiom_protocol::env::{Trust, TrustParams};
 use axiom_protocol::fs::{ReadFile, ReadFileParams};
 use axiom_protocol::lsp::{
     Notify, NotifyParams, Request, RequestParams, ServerState, Servers, ServersResult,
@@ -32,11 +33,16 @@ fn fake_lsp() -> PathBuf {
     });
     // Always built: a no-op when up to date, and a binary left from before a change to the
     // helper would not have it.
-    assert!(std::process::Command::new(env!("CARGO"))
-        .args(["build", "-q", "-p", "fake-lsp"])
-        .status()
-        .unwrap()
-        .success());
+    // Built once per test process (the tests run in parallel): a build per call could relink
+    // the binary while another test's server is (re)starting, which then finds no fake-lsp.
+    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| {
+        assert!(std::process::Command::new(env!("CARGO"))
+            .args(["build", "-q", "-p", "fake-lsp"])
+            .status()
+            .unwrap()
+            .success());
+    });
     p
 }
 
@@ -127,13 +133,15 @@ async fn servers_requests_sync_diagnostics_and_external_reads() {
         ("fakelang", ServerState::Idle)
     );
     // Since M5.5 (ADR-0021 §3) every server applies by language: rust-analyzer is listed in
-    // this non-Rust folder, and stays unstarted until a Rust document opens.
+    // this non-Rust folder, and stays unstarted; in this untrusted folder it is `stopped` until
+    // the folder is trusted, because it would run the project's build scripts (AUD-008).
     if let Some(ra) = s.servers.iter().find(|s| s.server_id == "rust-analyzer") {
-        assert!(
-            matches!(ra.state, ServerState::Idle | ServerState::Missing),
-            "{:?}",
-            ra.state
-        );
+        assert_eq!(ra.state, ServerState::Stopped, "{ra:?}");
+        assert!(ra
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with(axiom_lsp::TRUST_TO_ENABLE));
     }
 
     // didOpen starts it; its diagnostics reach this client.
@@ -279,6 +287,10 @@ fn rust_analyzer_available() -> bool {
             "AXIOM_REQUIRE_LSP=1 but rust-analyzer does not run"
         );
         eprintln!("NOT RUN: rust-analyzer is not installed (rustup component add rust-analyzer)");
+        common::note_skipped(
+            "real rust-analyzer",
+            "rust-analyzer is not installed (rustup component add rust-analyzer)",
+        );
     }
     ok
 }
@@ -301,6 +313,15 @@ async fn real_rust_analyzer_definition_and_diagnostics() {
     )
     .unwrap();
     let f = d.open_dir(dir).await;
+    // rust-analyzer builds build scripts and macros, so it waits for the folder to be trusted
+    // (AUD-008); this fixture is ours.
+    d.client
+        .request::<Trust>(TrustParams {
+            workspace_id: f.id.clone(),
+            trusted: true,
+        })
+        .await
+        .unwrap();
     let s: ServersResult = d
         .client
         .request::<Servers>(WorkspaceRef {
@@ -380,4 +401,121 @@ async fn real_rust_analyzer_definition_and_diagnostics() {
             break;
         }
     }
+}
+
+/// AUD-030, review B6b: a connection that opened the workspace and stopped reading does not
+/// stop the language servers' notifications for the others. Its queue is filled with terminal
+/// output first; the relay then does not wait on it past a bound.
+#[tokio::test]
+async fn a_connection_that_stopped_reading_does_not_stop_diagnostics() {
+    use axiom_protocol::terminal::{Close as CloseTerminal, Create, CreateParams, TerminalRef};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let data = tempfile::tempdir().unwrap();
+    let pdir = data.path().join("providers").join("fakelang");
+    std::fs::create_dir_all(&pdir).unwrap();
+    std::fs::write(pdir.join("provider.toml"), MANIFEST).unwrap();
+    let bin = fake_lsp();
+    let d = Daemon::spawn_configured(data.path(), move |c| {
+        c.env("PATH", path_with(bin.parent().unwrap()));
+    })
+    .await;
+    d.initialize().await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("fake.marker"), "").unwrap();
+    std::fs::write(dir.path().join("a.fake"), "fine\nERROR here\n").unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+
+    // The stuck connection: it opens the workspace first (so a relay that sends to one
+    // connection after another reaches it before this client, review R1), then never reads
+    // again.
+    let run = data.path().join("run");
+    let token = std::fs::read_to_string(run.join("axiomd.token")).unwrap();
+    let stream = tokio::net::UnixStream::connect(run.join("axiomd.sock"))
+        .await
+        .unwrap();
+    let (r, mut w) = stream.into_split();
+    let mut r = BufReader::new(r);
+    for (id, method, params) in [
+        (
+            1,
+            "initialize",
+            json!({"protocolVersion": "0.6", "client": {"name": "stuck", "version": "0"}, "authToken": token}),
+        ),
+        (2, "workspace/open", json!({"path": root})),
+    ] {
+        let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        w.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        loop {
+            let mut line = String::new();
+            r.read_line(&mut line).await.unwrap();
+            let v: Value = serde_json::from_str(&line).unwrap();
+            if v["id"] == id {
+                assert!(v.get("error").is_none(), "{method}: {v}");
+                break;
+            }
+        }
+    }
+
+    let f = d.open_dir(dir).await;
+
+    // Fill its queue: terminal output goes to every connection of the workspace. A terminal's
+    // output comes in large chunks, so a dozen run until this client has seen 1500, well past
+    // the 1024 messages a queue holds; then they stop and this client drains its own.
+    let mut terminals = Vec::new();
+    for _ in 0..12 {
+        let t = d
+            .client
+            .request::<Create>(CreateParams {
+                workspace_id: f.id.clone(),
+                argv: Some(vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "yes 0123456789012345678901234567890123456789".into(),
+                ]),
+                cols: 80,
+                rows: 24,
+            })
+            .await
+            .unwrap();
+        terminals.push(t.terminal_id);
+    }
+    // The stuck connection got each of these too, until its queue was full.
+    let mut n = 0usize;
+    // The cap only matters on a slow runner: a run ends at 1500 outputs (CI 000d4e8: Ubuntu
+    // reached about 1430 in 30 s with these floods running side by side).
+    let flood_end = tokio::time::Instant::now() + Duration::from_secs(120);
+    while n < 1500 && tokio::time::Instant::now() < flood_end {
+        if !d
+            .no_notification("terminal/output", Duration::from_millis(100))
+            .await
+        {
+            n += 1;
+        }
+    }
+    assert!(
+        n >= 1500,
+        "only {n} terminal outputs: the stuck queue may not be full"
+    );
+    for terminal_id in terminals {
+        d.client
+            .request::<CloseTerminal>(TerminalRef { terminal_id })
+            .await
+            .unwrap();
+    }
+    d.drain_until_quiet(Duration::from_millis(500)).await;
+
+    // The diagnostics of a didOpen still reach this client.
+    let a = uri(&f.root.join("a.fake"));
+    d.client
+        .request::<Notify>(NotifyParams {
+            workspace_id: f.id.clone(),
+            server_id: "fake".into(),
+            method: "textDocument/didOpen".into(),
+            params: json!({"textDocument":{"uri":a,"languageId":"fakelang","version":1,"text":"fine\nERROR here\n"}}),
+        })
+        .await
+        .unwrap();
+    let diag = diagnostics_for(&d, &a).await;
+    assert_eq!(diag["serverId"], "fake");
+    drop((r, w));
 }

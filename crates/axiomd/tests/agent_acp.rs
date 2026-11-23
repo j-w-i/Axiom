@@ -35,7 +35,16 @@ fn fake_acp() -> PathBuf {
 }
 
 async fn setup(log: &Path) -> (Daemon, common::Fixture, SessionId) {
-    let d = Daemon::spawn().await;
+    setup_with(log, Daemon::spawn().await, None).await
+}
+
+/// [`setup`] on a given daemon; with `starts`, the fake agent can resume a conversation and
+/// logs each start and load there.
+async fn setup_with(
+    log: &Path,
+    d: Daemon,
+    starts: Option<&Path>,
+) -> (Daemon, common::Fixture, SessionId) {
     let mut info = client_info();
     info.protocol_version = "0.3".into();
     info.capabilities = Some(ClientCapabilities { approvals: true });
@@ -45,6 +54,13 @@ async fn setup(log: &Path) -> (Daemon, common::Fixture, SessionId) {
         "FAKE_ACP_LOG".to_string(),
         log.to_string_lossy().into_owned(),
     );
+    if let Some(p) = starts {
+        env.insert("FAKE_ACP_LOAD_SESSION".to_string(), "1".to_string());
+        env.insert(
+            "FAKE_ACP_STARTS".to_string(),
+            p.to_string_lossy().into_owned(),
+        );
+    }
     d.client
         .request::<ConfigureProvider>(ConfigureProviderParams {
             id: "fake-agent".into(),
@@ -464,4 +480,431 @@ async fn install_agent_puts_a_builtin_agent_in_the_data_directory() {
         .await
         .unwrap_err();
     assert_eq!(common::kind(&e), axiom_protocol::ErrorKind::NotFound);
+}
+
+/// What the gate's approval covers is what was approved (AUD-039, AUD-040):
+/// - a permission of kind `read`, allowed by the default policy without asking, does not let
+///   the agent write that file unseen;
+/// - a policy rule allowing the bare command does not allow it with variables the agent sets
+///   (`LD_PRELOAD`), and the card lists them.
+#[tokio::test]
+async fn acp_approvals_cover_only_what_was_shown() {
+    use axiom_protocol::agent::{Decision, Policy, PolicyRule, SetPolicy};
+    let tmp = tempfile::tempdir().unwrap();
+    let (d, f, sid) = setup(&tmp.path().join("acp.log")).await;
+    let (evs, asked) = turn(&d, &f.id, &sid, "peek", Some(ApprovalDecision::Deny)).await;
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert_eq!(asked[0].tool, "acp.writeFile");
+    assert!(said(&evs).starts_with("write refused"), "{}", said(&evs));
+    assert!(!f.root.join("notes.md").exists());
+
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Ask,
+            rules: vec![
+                PolicyRule {
+                    effect: Some(axiom_protocol::agent::Effect::Read),
+                    tool: None,
+                    path: None,
+                    argv_prefix: None,
+                    decision: Decision::Allow,
+                },
+                PolicyRule {
+                    effect: None,
+                    tool: None,
+                    path: None,
+                    argv_prefix: Some(vec!["sh".into()]),
+                    decision: Decision::Allow,
+                },
+            ],
+        })
+        .await
+        .unwrap();
+    let (evs, asked) = turn(&d, &f.id, &sid, "run", None).await;
+    assert!(
+        asked.is_empty(),
+        "the rule allows the bare command: {asked:?}"
+    );
+    assert_eq!(said(&evs), "ran: term-out exit 0");
+    let (evs, asked) = turn(&d, &f.id, &sid, "envrun", Some(ApprovalDecision::Deny)).await;
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(
+        asked[0]
+            .targets
+            .iter()
+            .any(|t| t == "env LD_PRELOAD=/tmp/evil.so"),
+        "{:?}",
+        asked[0].targets
+    );
+    assert!(asked[0]
+        .preview
+        .as_deref()
+        .unwrap_or_default()
+        .contains("LD_PRELOAD=/tmp/evil.so"));
+    assert!(said(&evs).starts_with("terminal refused"), "{}", said(&evs));
+}
+
+/// An agent that exits mid-turn is not kept: the next turn starts it again instead of failing
+/// against the dead process until the session is deleted (AUD-032).
+#[tokio::test]
+async fn acp_an_agent_that_exited_is_started_again() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (d, f, sid) = setup(&tmp.path().join("acp.log")).await;
+    let (evs, _) = turn(&d, &f.id, &sid, "crash", None).await;
+    assert_eq!(end(&evs), TurnEndReason::Error);
+    let (evs, _) = turn(&d, &f.id, &sid, "read", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    assert!(said(&evs).starts_with("README: "), "{}", said(&evs));
+}
+
+/// AUD-032: an idle session's external agent is stopped when it can resume the conversation
+/// (it starts again, resumed, on the next turn); one that cannot resume is kept running.
+#[tokio::test]
+async fn acp_idle_agents_that_can_resume_are_stopped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let starts = tmp.path().join("starts.log");
+    let d = Daemon::spawn_configured(&tmp.path().join("data"), |c| {
+        c.env("AXIOM_TEST_AGENT_IDLE_MS", "400");
+    })
+    .await;
+    let (d, f, sid) = setup_with(&tmp.path().join("acp.log"), d, Some(&starts)).await;
+    idle_round_trip(&d, &f.id, &sid).await;
+    let text = std::fs::read_to_string(&starts).unwrap();
+    assert_eq!(
+        text.lines().filter(|l| *l == "started").count(),
+        2,
+        "restarted: {text}"
+    );
+    assert!(
+        text.lines().any(|l| l.starts_with("loaded")),
+        "resumed: {text}"
+    );
+}
+
+/// AUD-032: an agent that cannot resume a conversation is not stopped while idle.
+#[tokio::test]
+async fn acp_idle_agents_that_cannot_resume_are_kept() {
+    let tmp = tempfile::tempdir().unwrap();
+    let starts = tmp.path().join("starts.log");
+    let d = Daemon::spawn_configured(&tmp.path().join("data"), |c| {
+        c.env("AXIOM_TEST_AGENT_IDLE_MS", "400");
+    })
+    .await;
+    let (d, f, sid) = setup_with(&tmp.path().join("acp.log"), d, Some(&starts)).await;
+    // The same agent without loadSession: configure the provider again without the flag.
+    let mut env = std::collections::BTreeMap::new();
+    env.insert(
+        "FAKE_ACP_STARTS".to_string(),
+        starts.to_string_lossy().into_owned(),
+    );
+    d.client
+        .request::<ConfigureProvider>(ConfigureProviderParams {
+            id: "fake-agent".into(),
+            config: Some(ProviderConfig {
+                id: "fake-agent".into(),
+                kind: ProviderKind::Acp,
+                name: "Fake Agent".into(),
+                base_url: None,
+                api_key_env: None,
+                models: vec![],
+                capabilities: None,
+                command: vec![fake_acp().to_string_lossy().into_owned()],
+                env,
+            }),
+            api_key: None,
+            clear_key: false,
+        })
+        .await
+        .unwrap();
+    idle_round_trip(&d, &f.id, &sid).await;
+    let text = std::fs::read_to_string(&starts).unwrap();
+    assert_eq!(
+        text.lines().filter(|l| *l == "started").count(),
+        1,
+        "kept: {text}"
+    );
+}
+
+async fn idle_round_trip(d: &Daemon, ws: &WorkspaceId, sid: &SessionId) {
+    let (evs, _) = turn(d, ws, sid, "read", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let (evs, _) = turn(d, ws, sid, "read", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+}
+
+/// Configures an external agent `id` that runs `command` with `env`.
+async fn configure_agent(
+    d: &Daemon,
+    id: &str,
+    command: Vec<String>,
+    env: std::collections::BTreeMap<String, String>,
+) {
+    d.client
+        .request::<ConfigureProvider>(ConfigureProviderParams {
+            id: id.into(),
+            config: Some(ProviderConfig {
+                id: id.into(),
+                kind: ProviderKind::Acp,
+                name: id.into(),
+                base_url: None,
+                api_key_env: None,
+                models: vec![],
+                capabilities: None,
+                command,
+                env,
+            }),
+            api_key: None,
+            clear_key: false,
+        })
+        .await
+        .unwrap();
+}
+
+async fn create_session(d: &Daemon, ws: &WorkspaceId, provider: &str) -> SessionId {
+    d.client
+        .request::<SessionCreate>(SessionCreateParams {
+            workspace_id: Some(ws.clone()),
+            provider_id: provider.into(),
+            model: "default".into(),
+            title: None,
+        })
+        .await
+        .unwrap()
+        .session_id
+}
+
+/// A minimal ACP agent in `sh`: it answers `initialize` and `session/new`; on each prompt it
+/// sends the requests `$ROLE` names, appends Axiom's answer to each to `$OUT`, and ends the
+/// turn. `create` starts a terminal running `sleep 30` (and keeps it); `peek` reads the
+/// terminal id from `$TERMFILE` and asks for that terminal's output, then kills, waits for and
+/// releases it.
+const SH_AGENT: &str = r#"
+read -r l
+echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{},"authMethods":[]}}'
+read -r l
+echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sh-1"}}'
+ask() {
+  echo "$1"
+  read -r r
+  printf '%s\n' "$r" >> "$OUT"
+}
+while read -r l; do
+  case "$l" in
+    *'"session/prompt"'*)
+      id=$(printf '%s' "$l" | grep -o '"id":[0-9]*' | head -n 1 | cut -d: -f2)
+      if [ "$ROLE" = create ]; then
+        ask '{"jsonrpc":"2.0","id":100,"method":"terminal/create","params":{"sessionId":"sh-1","command":"sleep","args":["30"]}}'
+      else
+        t=$(sed -n 's/.*"terminalId":"\([^"]*\)".*/\1/p' "$TERMFILE" | head -n 1)
+        for m in output kill wait_for_exit release; do
+          ask '{"jsonrpc":"2.0","id":101,"method":"terminal/'"$m"'","params":{"sessionId":"sh-1","terminalId":"'"$t"'"}}'
+        done
+      fi
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn"}}'
+      ;;
+  esac
+done
+"#;
+
+/// One session's agent cannot reach another session's terminal by guessing its id (the ids
+/// are sequential): `terminal/output|kill|wait_for_exit|release` on it are refused, and the
+/// terminal keeps running (review N5).
+#[tokio::test]
+async fn acp_an_agent_reaches_only_its_own_terminals() {
+    use axiom_protocol::task::{ListTasks, ListTasksParams};
+    let tmp = tempfile::tempdir().unwrap();
+    let script = tmp.path().join("agent.sh");
+    std::fs::write(&script, SH_AGENT).unwrap();
+    let (a_out, b_out) = (tmp.path().join("a.out"), tmp.path().join("b.out"));
+    let (d, f, _) = setup(&tmp.path().join("acp.log")).await;
+    let env = |pairs: &[(&str, &Path)]| {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string_lossy().into_owned()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let sh = vec!["sh".to_string(), script.to_string_lossy().into_owned()];
+    let mut a_env = env(&[("OUT", &a_out)]);
+    a_env.insert("ROLE".into(), "create".into());
+    configure_agent(&d, "sh-create", sh.clone(), a_env).await;
+    let mut b_env = env(&[("OUT", &b_out), ("TERMFILE", &a_out)]);
+    b_env.insert("ROLE".into(), "peek".into());
+    configure_agent(&d, "sh-peek", sh, b_env).await;
+
+    let a = create_session(&d, &f.id, "sh-create").await;
+    let (evs, asked) = turn(&d, &f.id, &a, "go", Some(ApprovalDecision::Once)).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    let created = std::fs::read_to_string(&a_out).unwrap();
+    assert!(created.contains("\"terminalId\""), "{created}");
+
+    let b = create_session(&d, &f.id, "sh-peek").await;
+    let (evs, _) = turn(&d, &f.id, &b, "go", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    let answers = std::fs::read_to_string(&b_out).unwrap();
+    let answers: Vec<Value> = answers
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(answers.len(), 4, "{answers:?}");
+    for a in &answers {
+        assert!(
+            a.get("result").is_none() && a["error"]["message"].is_string(),
+            "another session's terminal was reached: {answers:?}"
+        );
+    }
+    // Still running: the other agent's kill did not reach it.
+    let tasks = d
+        .client
+        .request::<ListTasks>(ListTasksParams {
+            workspace_id: f.id.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(tasks.tasks.iter().any(|t| t.exit.is_none()), "{tasks:?}");
+}
+
+/// [`SH_AGENT`] that can resume (`loadSession`) and logs each start to `$STARTS`. On a prompt
+/// it starts a terminal running `sleep 30` if `$OUT` has none yet; otherwise it asks for that
+/// terminal's output, then kills, waits for and releases it.
+const SH_RESUMING_AGENT: &str = r#"
+read -r l
+echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[]}}'
+read -r l
+echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sh-1"}}'
+echo started >> "$STARTS"
+ask() {
+  echo "$1"
+  read -r r
+  printf '%s\n' "$r" >> "$OUT"
+}
+while read -r l; do
+  case "$l" in
+    *'"session/prompt"'*)
+      id=$(printf '%s' "$l" | grep -o '"id":[0-9]*' | head -n 1 | cut -d: -f2)
+      t=$(sed -n 's/.*"terminalId":"\([^"]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n 1)
+      if [ -z "$t" ]; then
+        ask '{"jsonrpc":"2.0","id":100,"method":"terminal/create","params":{"sessionId":"sh-1","command":"sleep","args":["30"]}}'
+      else
+        for m in output kill wait_for_exit release; do
+          ask '{"jsonrpc":"2.0","id":101,"method":"terminal/'"$m"'","params":{"sessionId":"sh-1","terminalId":"'"$t"'"}}'
+        done
+      fi
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn"}}'
+      ;;
+  esac
+done
+"#;
+
+/// Review D5: a terminal belongs to the session, not to the agent process. After the idle reaper
+/// stopped the agent and the next turn started it again (resumed), the agent still reaches the
+/// terminal it started before: output, kill, wait and release all answer.
+#[tokio::test]
+async fn acp_a_resumed_agent_still_reaches_its_terminals() {
+    let tmp = tempfile::tempdir().unwrap();
+    let script = tmp.path().join("agent.sh");
+    std::fs::write(&script, SH_RESUMING_AGENT).unwrap();
+    let (out, starts) = (tmp.path().join("out"), tmp.path().join("starts"));
+    let d = Daemon::spawn_configured(&tmp.path().join("data"), |c| {
+        c.env("AXIOM_TEST_AGENT_IDLE_MS", "400");
+    })
+    .await;
+    let (d, f, _) = setup_with(&tmp.path().join("acp.log"), d, None).await;
+    let env = [("OUT", &out), ("STARTS", &starts)]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string_lossy().into_owned()))
+        .collect();
+    let sh = vec!["sh".to_string(), script.to_string_lossy().into_owned()];
+    configure_agent(&d, "sh-resume", sh, env).await;
+    let s = create_session(&d, &f.id, "sh-resume").await;
+    let (evs, asked) = turn(&d, &f.id, &s, "go", Some(ApprovalDecision::Once)).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    let created = std::fs::read_to_string(&out).unwrap();
+    assert!(created.contains("\"terminalId\""), "{created}");
+
+    // Idle: the agent is stopped; the next turn starts it again, resumed.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let (evs, _) = turn(&d, &f.id, &s, "go", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    let started = std::fs::read_to_string(&starts).unwrap();
+    assert_eq!(started.lines().count(), 2, "not restarted: {started}");
+    let answers: Vec<Value> = std::fs::read_to_string(&out)
+        .unwrap()
+        .lines()
+        .skip(1)
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(answers.len(), 4, "{answers:?}");
+    for a in &answers {
+        assert!(
+            a.get("result").is_some(),
+            "the resumed agent lost its terminal: {answers:?}"
+        );
+    }
+}
+
+/// AUD-032: an external agent that never answers its handshake holds up only its own session.
+/// Another session's turn runs meanwhile, with the idle reaper running too (the session that is
+/// starting is mid-turn, so it is not reaped).
+#[tokio::test]
+async fn acp_an_agent_that_hangs_in_its_handshake_holds_up_no_other_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = Daemon::spawn_configured(&tmp.path().join("data"), |c| {
+        c.env("AXIOM_TEST_AGENT_IDLE_MS", "200");
+    })
+    .await;
+    let (d, f, sid) = setup_with(&tmp.path().join("acp.log"), d, None).await;
+    // Reads everything, answers nothing: `initialize` waits for its 60 s timeout.
+    configure_agent(
+        &d,
+        "hang",
+        vec![
+            "sh".into(),
+            "-c".into(),
+            "while read -r l; do :; done".into(),
+        ],
+        Default::default(),
+    )
+    .await;
+    let stuck = create_session(&d, &f.id, "hang").await;
+    let mut rx = d.client.notifications();
+    d.client
+        .request::<Send>(send(&f.id, &stuck, "hello"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    d.client
+        .request::<Send>(send(&f.id, &sid, "read"))
+        .await
+        .unwrap();
+    let mut said = String::new();
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let (m, p) = rx.recv().await.unwrap();
+            if m != "agent/event" {
+                continue;
+            }
+            let e: AgentEvent = serde_json::from_value(p).unwrap();
+            let end = matches!(e.event, EventBody::TurnEnd { .. });
+            assert!(
+                !(end && e.session_id == stuck),
+                "the hanging agent's turn ended: {e:?}"
+            );
+            if e.session_id != sid {
+                continue;
+            }
+            match e.event {
+                EventBody::AssistantText { text, kind: None } => said.push_str(&text),
+                EventBody::TurnEnd { reason } => return reason,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the other session's turn ran while an agent hung in its handshake");
+    assert_eq!(ended, TurnEndReason::EndTurn);
+    assert!(said.starts_with("README: "), "{said}");
 }

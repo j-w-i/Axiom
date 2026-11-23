@@ -2,7 +2,7 @@
 id: FL-ENV-001
 title: Environments page: tools, install plans, installs, remove
 status: implemented
-status_note: 2026-11-22; Linux verified (env_test in KWin and Xvfb); env_rust_test (needs the internet) not run here, runs in CI on Ubuntu
+status_note: 2026-11-23; audited (audits/comprehensive-audit), findings fixed in AUD-REM-001; awaits review by another session (REVIEW_GUIDE)
 depends_on: [FL-SHELL-001]
 order: 529
 scope: apps/desktop-flutter/lib/env/, apps/desktop-flutter/integration_test/env_test.dart

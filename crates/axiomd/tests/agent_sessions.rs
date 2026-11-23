@@ -678,3 +678,64 @@ async fn agent_uses_the_tools_of_a_configured_mcp_server() {
         "annotations never lower the effect"
     );
 }
+
+/// A send that fails after the turn would begin (a malformed `[agent.policy]` in the
+/// workspace, which is untrusted content) leaves the session usable: the next send runs, not
+/// `conflict` (AUD-011), and this connection still gets the session's events, although its
+/// first request to the session failed (AUD-033: it was marked attached without a forwarder).
+#[tokio::test]
+async fn agent_a_failed_send_leaves_the_session_usable_and_attachable() {
+    use axiom_protocol::workspace::{Open, OpenParams};
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let ws_dir = tempfile::tempdir().unwrap();
+    std::fs::write(ws_dir.path().join("README.md"), "# demo\n").unwrap();
+    let s = script(
+        tmp.path(),
+        "s.json",
+        json!({"turns": [{"events": [{"type":"text","text":"Fine."}]}]}),
+    );
+    let open = |d: &Daemon| {
+        let c = d.client.clone();
+        let path = ws_dir.path().to_string_lossy().into_owned();
+        async move {
+            c.request::<Open>(OpenParams { path })
+                .await
+                .unwrap()
+                .workspace_id
+        }
+    };
+    let d = daemon(data.path(), &s).await;
+    let ws = open(&d).await;
+    let sid = create(&d, Some(&ws)).await;
+    d.shutdown().await;
+
+    // A new connection whose first request to the session fails.
+    let d = daemon(data.path(), &s).await;
+    allow_all(&d).await;
+    let ws = open(&d).await;
+    std::fs::create_dir_all(ws_dir.path().join(".axiom")).unwrap();
+    std::fs::write(
+        ws_dir.path().join(".axiom/project.toml"),
+        "[agent.policy]\nbogus = 1\n",
+    )
+    .unwrap();
+    let e = d
+        .client
+        .request::<Send>(send_params(Some(&ws), &sid, "Hello?"))
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&e), ErrorKind::InvalidParams, "{}", e.message);
+    std::fs::remove_file(ws_dir.path().join(".axiom/project.toml")).unwrap();
+    d.client
+        .request::<Send>(send_params(Some(&ws), &sid, "Hello?"))
+        .await
+        .expect("the session is not stuck running");
+    let evs = turn_events(&d, &sid).await;
+    assert_eq!(
+        end_reason(&evs),
+        TurnEndReason::EndTurn,
+        "{:?}",
+        errors(&evs)
+    );
+}

@@ -20,11 +20,16 @@ fn fake_lsp() -> PathBuf {
     let p = dir.join("fake-lsp");
     // Always built: a no-op when up to date, and a binary left from before a change to the
     // helper would not have it.
-    assert!(std::process::Command::new(env!("CARGO"))
-        .args(["build", "-q", "-p", "fake-lsp"])
-        .status()
-        .unwrap()
-        .success());
+    // Built once per test process (the tests run in parallel): a build per call could relink
+    // the binary while another test's server is (re)starting, which then finds no fake-lsp.
+    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| {
+        assert!(std::process::Command::new(env!("CARGO"))
+            .args(["build", "-q", "-p", "fake-lsp"])
+            .status()
+            .unwrap()
+            .success());
+    });
     p
 }
 
@@ -330,4 +335,66 @@ async fn a_second_server_for_a_language_is_on_standby() {
     let b = s.servers.iter().find(|x| x.server_id == "fake-b").unwrap();
     assert_ne!(a.state, ServerState::Standby);
     assert_eq!(b.state, ServerState::Standby);
+}
+
+/// Opening a folder runs none of its code (AUD-008): until the folder is trusted, a built-in
+/// server that would (rust-analyzer builds build scripts and macros) is not started and says
+/// so; one that runs no project code is not held back; trusting the folder lifts it.
+#[tokio::test]
+async fn built_in_servers_that_run_project_code_wait_for_trust() {
+    use axiom_protocol::env::{Trust, TrustParams};
+    let d = Daemon::ready().await;
+    let f = d.open_fixture().await;
+    let ra = |s: &ServersResult| {
+        s.servers
+            .iter()
+            .find(|x| x.server_id == "rust-analyzer")
+            .cloned()
+            .unwrap()
+    };
+    let started = std::time::Instant::now();
+    let e = d
+        .client
+        .request::<Request>(RequestParams {
+            workspace_id: f.id.clone(),
+            server_id: "rust-analyzer".into(),
+            method: "workspace/symbol".into(),
+            params: json!({"query": "x"}),
+        })
+        .await
+        .unwrap_err();
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert!(e.message.contains("Trust this folder"), "{}", e.message);
+    let s = servers(&d, &f.id).await;
+    let r = ra(&s);
+    assert_eq!(r.state, ServerState::Stopped);
+    assert!(r.detail.unwrap().starts_with(axiom_lsp::TRUST_TO_ENABLE));
+    // A server that only parses files is not refused.
+    let yaml = s
+        .servers
+        .iter()
+        .find(|x| x.server_id == "yaml-language-server")
+        .unwrap();
+    assert!(!yaml
+        .detail
+        .as_deref()
+        .unwrap_or_default()
+        .starts_with(axiom_lsp::TRUST_TO_ENABLE));
+
+    d.client
+        .request::<Trust>(TrustParams {
+            workspace_id: f.id.clone(),
+            trusted: true,
+        })
+        .await
+        .unwrap();
+    let r = ra(&servers(&d, &f.id).await);
+    assert!(
+        !r.detail
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with(axiom_lsp::TRUST_TO_ENABLE),
+        "{r:?}"
+    );
+    assert_ne!(r.state, ServerState::Stopped);
 }

@@ -1403,6 +1403,8 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
         const SingleActivator(LogicalKeyboardKey.space, control: true, shift: true):
             const _LspIntent('signature'),
         const SingleActivator(LogicalKeyboardKey.f2): const _LspIntent('rename'),
+        // The hover documentation by keyboard, at the caret (AUD-077).
+        const SingleActivator(LogicalKeyboardKey.f1, alt: true): const _LspIntent('hover'),
         SingleActivator(LogicalKeyboardKey.keyT, control: !_isMac, meta: _isMac): const _LspIntent(
           'workspace-symbols',
         ),
@@ -1452,6 +1454,9 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
                   unawaited(organizeImports());
                 case 'call-hierarchy':
                   unawaited(callHierarchy());
+                case 'hover':
+                  final sel = widget.controller.selection;
+                  unawaited(_hoverAt(_lineRect(sel.extentIndex, sel.extentOffset)().center));
               }
               return null;
             },
@@ -1466,31 +1471,34 @@ class LspEditorFeaturesState extends State<LspEditorFeatures> {
               Positioned.fill(child: widget.builder(context, _overrides())),
               ?sigCard,
               ?popup,
+              // Below the pointer, or above it when there is no room; never past the editor's
+              // right edge (AUD-052).
               if (hover != null)
-                Positioned(
-                  left: (hover.at.dx - 40).clamp(0, double.infinity),
-                  top: hover.at.dy + 18,
-                  child: MouseRegion(
-                    onEnter: (_) {
-                      _overHoverCard = true;
-                      _hoverTimer?.cancel();
-                      _hoverHideTimer?.cancel();
-                    },
-                    onExit: (_) {
-                      _overHoverCard = false;
-                      _hideSoon();
-                    },
-                    child: Semantics(
-                      liveRegion: true,
-                      label: 'Hover: ${hover.text}',
-                      container: true,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 320),
-                        child: Sheet(
-                          radius: Metrics.radiusRaised,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          // Headings, lists, links and code as the completion docs show them.
-                          child: SingleChildScrollView(child: MarkdownView(hover.text)),
+                Positioned.fill(
+                  child: CustomSingleChildLayout(
+                    delegate: _NearPoint(hover.at),
+                    child: MouseRegion(
+                      onEnter: (_) {
+                        _overHoverCard = true;
+                        _hoverTimer?.cancel();
+                        _hoverHideTimer?.cancel();
+                      },
+                      onExit: (_) {
+                        _overHoverCard = false;
+                        _hideSoon();
+                      },
+                      child: Semantics(
+                        liveRegion: true,
+                        label: 'Hover: ${hover.text}',
+                        container: true,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 320),
+                          child: Sheet(
+                            radius: Metrics.radiusRaised,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            // Headings, lists, links and code as the completion docs show them.
+                            child: SingleChildScrollView(child: MarkdownView(hover.text)),
+                          ),
                         ),
                       ),
                     ),
@@ -1517,6 +1525,40 @@ bool get _isMac => defaultTargetPlatform == TargetPlatform.macOS;
 /// the word being completed, and the kind badges hang to their left (as in Xcode).
 const completionTextInset = _popupPad + _rowPad + _badgeSize + _badgeGap;
 const _popupPad = 4.0, _rowPad = 6.0, _badgeSize = 18.0, _badgeGap = 6.0;
+
+/// Places its child near [point]: 18 px below it, or above it when it does not fit below; moved
+/// left so it stays inside, and given at most the room there is.
+final class _NearPoint extends SingleChildLayoutDelegate {
+  _NearPoint(this.point);
+  final Offset point;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints c) {
+    final below = c.maxHeight - point.dy - 18 - 4;
+    final above = point.dy - 8 - 4;
+    final room = below >= 160 || below >= above ? below : above;
+    return BoxConstraints(
+      maxWidth: (c.maxWidth - 8).clamp(0.0, 560.0),
+      maxHeight: room.clamp(0.0, 320.0),
+    );
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size child) {
+    final below = point.dy + 18;
+    final y = below + child.height <= size.height - 4
+        ? below
+        : (point.dy - 8 - child.height).clamp(4.0, double.infinity);
+    final x = (point.dx - 40).clamp(
+      4.0,
+      (size.width - child.width - 4).clamp(4.0, double.infinity),
+    );
+    return Offset(x, y);
+  }
+
+  @override
+  bool shouldRelayout(_NearPoint old) => old.point != point;
+}
 
 /// Places its child at a text position: below the line (above when [above], or when there is
 /// no room below), with the child's text [inset] from its left edge on the position. Laid out
@@ -1582,7 +1624,7 @@ class _CompletionPopup extends StatelessWidget {
       final n = item.label.length + (item.labelDetail?.length ?? 0);
       if (n > longest) longest = n;
     }
-    final width = (completionTextInset + longest * charWidth + _rowPad + _popupPad + 8).clamp(
+    final natural = (completionTextInset + longest * charWidth + _rowPad + _popupPad + 8).clamp(
       320.0,
       680.0,
     );
@@ -1590,104 +1632,107 @@ class _CompletionPopup extends StatelessWidget {
     final doc = selected.documentation?.trim();
     final hasDeclaration = declaration != null && declaration.isNotEmpty;
     final hasDoc = doc != null && doc.isNotEmpty;
-    return SizedBox(
-      width: width,
-      child: Sheet(
-        radius: Metrics.radiusSheet,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Semantics(
-              label: 'Suggestions',
-              container: true,
-              liveRegion: true,
-              child: SizedBox(
-                height: shown.length.clamp(1, _visibleRows) * rowExtent + _popupPad * 2,
-                child: Padding(
-                  padding: const EdgeInsets.all(_popupPad),
-                  child: ListView.builder(
-                    controller: scroll,
-                    itemExtent: rowExtent,
-                    itemCount: shown.length,
-                    itemBuilder: (context, i) {
-                      final (:item, :match) = shown[i];
-                      final on = i == active;
-                      return GestureDetector(
-                        onTap: () => onTap(i),
-                        child: Semantics(
-                          selected: on,
-                          label: [item.label, if (item.detail != null) item.detail!].join(', '),
-                          excludeSemantics: true,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: on ? c.accentSoft : null,
-                              borderRadius: BorderRadius.circular(Metrics.radiusRaised),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: _rowPad),
-                              child: Row(
-                                children: [
-                                  _KindBadge(kind: item.kind, size: _badgeSize),
-                                  const SizedBox(width: _badgeGap),
-                                  Expanded(
-                                    child: Text.rich(
-                                      TextSpan(
-                                        style: text.copyWith(color: c.ink),
-                                        children: [
-                                          _highlightedSpan(item.label, match, c),
-                                          if (item.labelDetail case final d?)
-                                            TextSpan(
-                                              text: d,
-                                              style: TextStyle(color: c.ink3),
-                                            ),
-                                        ],
+    // Never wider than the editor group it is in (a narrow split group clipped it, AUD-052).
+    return LayoutBuilder(
+      builder: (context, box) => SizedBox(
+        width: box.maxWidth.isFinite ? natural.clamp(0.0, box.maxWidth) : natural,
+        child: Sheet(
+          radius: Metrics.radiusSheet,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Semantics(
+                label: 'Suggestions',
+                container: true,
+                liveRegion: true,
+                child: SizedBox(
+                  height: shown.length.clamp(1, _visibleRows) * rowExtent + _popupPad * 2,
+                  child: Padding(
+                    padding: const EdgeInsets.all(_popupPad),
+                    child: ListView.builder(
+                      controller: scroll,
+                      itemExtent: rowExtent,
+                      itemCount: shown.length,
+                      itemBuilder: (context, i) {
+                        final (:item, :match) = shown[i];
+                        final on = i == active;
+                        return GestureDetector(
+                          onTap: () => onTap(i),
+                          child: Semantics(
+                            selected: on,
+                            label: [item.label, if (item.detail != null) item.detail!].join(', '),
+                            excludeSemantics: true,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: on ? c.accentSoft : null,
+                                borderRadius: BorderRadius.circular(Metrics.radiusRaised),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: _rowPad),
+                                child: Row(
+                                  children: [
+                                    _KindBadge(kind: item.kind, size: _badgeSize),
+                                    const SizedBox(width: _badgeGap),
+                                    Expanded(
+                                      child: Text.rich(
+                                        TextSpan(
+                                          style: text.copyWith(color: c.ink),
+                                          children: [
+                                            _highlightedSpan(item.label, match, c),
+                                            if (item.labelDetail case final d?)
+                                              TextSpan(
+                                                text: d,
+                                                style: TextStyle(color: c.ink3),
+                                              ),
+                                          ],
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        softWrap: false,
                                       ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      softWrap: false,
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ),
-            if (hasDeclaration || hasDoc) ...[
-              SizedBox(height: 1, child: ColoredBox(color: c.hairline)),
-              Semantics(
-                label: 'Documentation',
-                container: true,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 180),
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (hasDeclaration)
-                          Text(
-                            declaration,
-                            style: text.copyWith(fontSize: text.fontSize! * 0.92, color: c.ink2),
-                            maxLines: 4,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        if (hasDeclaration && hasDoc) const SizedBox(height: 6),
-                        if (hasDoc) MarkdownView(doc),
-                      ],
+                        );
+                      },
                     ),
                   ),
                 ),
               ),
+              if (hasDeclaration || hasDoc) ...[
+                SizedBox(height: 1, child: ColoredBox(color: c.hairline)),
+                Semantics(
+                  label: 'Documentation',
+                  container: true,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 180),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (hasDeclaration)
+                            Text(
+                              declaration,
+                              style: text.copyWith(fontSize: text.fontSize! * 0.92, color: c.ink2),
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          if (hasDeclaration && hasDoc) const SizedBox(height: 6),
+                          if (hasDoc) MarkdownView(doc),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

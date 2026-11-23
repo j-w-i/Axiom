@@ -173,7 +173,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(named('Installing Slow Demo'), findsWidgets, reason: 'the transport shows it');
     expect(find.byType(Transport), findsOneWidget);
-    await tester.tap(named('Cancel'));
+    // The transport's own Cancel, by its full name: a plain "Cancel" also matched the plan
+    // dialog's button while it closed (CI on 5a8cdae: two widgets).
+    await tester.tap(named('Cancel installing Slow Demo'));
     await until(
       tester,
       () => row('slowdemo').kind == RowKind.error,

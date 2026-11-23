@@ -29,6 +29,18 @@ class ProblemsStore extends ChangeNotifier {
   final _byTask = <String, List<Diagnostic>>{};
   bool _wasOpen = false;
 
+  /// The sorted list and its counts, kept until something changes: the console reads the
+  /// counts and the list on every rebuild (AUD-072).
+  List<Diagnostic>? _sorted;
+  Map<Severity, int>? _counts;
+
+  @override
+  void notifyListeners() {
+    _sorted = null;
+    _counts = null;
+    super.notifyListeners();
+  }
+
   void _onWorkspace() {
     final open = _workspace?.isOpen ?? false;
     if (_wasOpen && !open) {
@@ -56,8 +68,20 @@ class ProblemsStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Errors first, then warnings, then the rest; by file and line within each.
+  /// Errors first, then warnings, then the rest; by file and line within each. The same
+  /// (unmodifiable) list until the problems change.
   List<Diagnostic> all() {
+    if (_sortedAt != lsp.diagnosticsVersion) {
+      _sorted = null;
+      _counts = null;
+      _sortedAt = lsp.diagnosticsVersion;
+    }
+    return _sorted ??= List.unmodifiable(_sort());
+  }
+
+  int _sortedAt = -1;
+
+  List<Diagnostic> _sort() {
     final list = [..._build, ...lsp.problems()];
     int rank(Severity s) => switch (s) {
       Severity.error => 0,
@@ -75,7 +99,15 @@ class ProblemsStore extends ChangeNotifier {
     return list;
   }
 
-  int count(Severity s) => all().where((d) => d.severity == s).length;
+  int count(Severity s) => (_counts ??= _count())[s] ?? 0;
+
+  Map<Severity, int> _count() {
+    final out = <Severity, int>{};
+    for (final d in all()) {
+      out[d.severity] = (out[d.severity] ?? 0) + 1;
+    }
+    return out;
+  }
 
   @override
   void dispose() {
