@@ -2,7 +2,7 @@
 
 _Last updated: 2026-11-23._
 
-## Audit remediation: implemented and reviewed, awaiting CI and merge (2026-11-23)
+## Audit remediation: verified, merged on CI green (2026-11-23)
 
 A comprehensive audit of `main` at `751ffc2` (2026-11-22) found 112 issues: 1 P0, 12 P1, 49 P2,
 50 P3 (`audits/comprehensive-audit/`). The owner authorised fixing all of them; the work is on
@@ -10,17 +10,16 @@ branch `task/audit-remediation` (task AUD-REM-001), committed in the batches of
 `audits/comprehensive-audit/REMEDIATION_PLAN.md`. Issue statuses are in
 `audits/comprehensive-audit/ISSUES.md`: all 112 are marked fixed, five of them with a
 qualification (a deviation, a residual risk, a contract limit, a kept owner binding, a review
-hand-off). Task status `implemented`, PR j-w-i/Axiom#13. An independent review requested
+hand-off). Task status `verified`, PR j-w-i/Axiom#13. An independent review requested
 changes (blocking B1–B6); they were fixed and the re-review passed. Its follow-up findings
 (R1–R5, N1–N18) were fixed or documented, and the two change requests became ADR-0022 and
 ADR-0023; a review of that round requested changes again (C1–C4, D1–D7), fixed and reviewed;
 the next (E1–E6) was fixed and reviewed; the one after (G1–G8 and three checkpoint gaps) was
 fixed and reviewed; the next (H1–H2, blocking restore data loss, and H3, H5–H8) was fixed and
-reviewed with no blocking findings; its follow-ups (I1–I5, restore edge cases) are fixed and
-awaiting review.
+reviewed with no blocking findings; its follow-ups (I1–I5, restore edge cases) were fixed, and the
+review verified the task (no findings left).
 
-**Next: the review's sign-off on I1–I5, CI green on the PR, then the task to `verified` and
-the merge to main; then M6.** The owner accepted, as documented, that what an agent writes can
+**Next: M6.** The owner accepted, as documented, that what an agent writes can
 be run later by tools outside the gate (ADR-0023, Consequences; 2026-11-23). Still open for the
 owner: confirm ADR-0022 and ADR-0023; jdtls in untrusted folders (ADR-0023, Consequences).
 
