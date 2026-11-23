@@ -5,6 +5,7 @@ use axiom_protocol::agent::ConflictReason;
 use axiom_protocol::WorkspacePath;
 use std::path::Path;
 use std::process::Command;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 fn wp(s: &str) -> WorkspacePath {

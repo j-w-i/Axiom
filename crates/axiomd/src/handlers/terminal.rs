@@ -60,8 +60,10 @@ pub async fn create(app: Arc<App>, p: CreateParams) -> Result<TerminalInfo, RpcE
     let t = tokio::task::spawn_blocking(move || terms.terminals.create(spec))
         .await
         .map_err(|_| crate::app::internal())??;
-    // Ended by the watchdog if the daemon dies without closing it (AUD-027).
+    // Ended by the watchdog if the daemon dies without closing it (AUD-027), once the
+    // registration is in its pipe: not before the client has the terminal.
     watch(&t);
+    axiom_exec::guard::flushed(std::time::Duration::from_secs(1)).await;
     Ok(t.info())
 }
 

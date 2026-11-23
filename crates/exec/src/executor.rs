@@ -158,6 +158,8 @@ impl Executor {
         }
         let group = child.id().unwrap_or(0);
         crate::guard::watch_group(group);
+        // In the watchdog's pipe before the task is handed out (see `guard::flushed`).
+        crate::guard::flushed(std::time::Duration::from_secs(1)).await;
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 

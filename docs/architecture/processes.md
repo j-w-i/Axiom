@@ -58,7 +58,9 @@ daemon exit by design: they are killed.
     event. Registrations are counted per owner: one owner's unregister does not drop
     another's (review D5).
   - Registering never blocks the daemon: the lines go through a channel to a thread of their
-    own, which writes the pipe.
+    own, which writes the pipe. `terminal/create` and a task's start answer only once their
+    registration is in the pipe (`guard::flushed`, at most 1 s, off the async threads), so a
+    daemon killed right after the answer still takes the process along.
   - Stopping an external agent or an MCP server (session deleted, idle reap, MCP restart,
     daemon shutdown) SIGKILLs its whole process group while the leader is still unreaped, then
     reaps the leader and unregisters the group. One whose leader exited by itself stays

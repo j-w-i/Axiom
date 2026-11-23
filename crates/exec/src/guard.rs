@@ -13,10 +13,25 @@
 //! still answers.
 //!
 //! Registering never blocks the caller (async code): the lines go through a channel to a thread
-//! of their own, which does the writes, in order (review N13).
+//! of their own, which does the writes, in order (review N13). A caller about to hand a new
+//! process to a client waits (bounded, off the async thread) with [`flushed`] until its
+//! registration is in the pipe, so a daemon killed right after the reply still takes it along.
 
 use std::collections::BTreeMap;
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::sync::{mpsc, Condvar, Mutex, OnceLock};
+use std::time::Duration;
+
+/// Lines queued so far (counted under [`WATCHED`]'s lock, with the queueing) and lines the
+/// pipe's thread has written (`u64::MAX` once the watchdog is gone: nothing left to wait for).
+static QUEUED: Mutex<u64> = Mutex::new(0);
+static WRITTEN: (Mutex<u64>, Condvar) = (Mutex::new(0), Condvar::new());
+
+#[cfg(unix)]
+fn written_up_to(n: u64) {
+    let (m, cv) = &WRITTEN;
+    *m.lock().unwrap_or_else(|e| e.into_inner()) = n;
+    cv.notify_all();
+}
 
 struct Guard {
     lines: Mutex<mpsc::Sender<String>>,
@@ -60,11 +75,15 @@ pub fn install(argv: &[std::ffi::OsString]) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("axiom-watchdog-pipe".into())
         .spawn(move || {
+            let mut n = 0u64;
             for line in rx {
                 // A watchdog that is gone cannot help; the daemon carries on.
                 if pipe.write_all(line.as_bytes()).is_err() {
+                    written_up_to(u64::MAX);
                     return;
                 }
+                n += 1;
+                written_up_to(n);
             }
         })?;
     let _ = GUARD.set(Guard {
@@ -84,8 +103,35 @@ pub fn install(_argv: &[std::ffi::OsString]) -> std::io::Result<()> {
 /// the lines are queued in the order the set changed.
 fn send(line: String) {
     if let Some(g) = GUARD.get() {
-        let _ = g.lines.lock().unwrap_or_else(|e| e.into_inner()).send(line);
+        let tx = g.lines.lock().unwrap_or_else(|e| e.into_inner());
+        if tx.send(line).is_ok() {
+            *QUEUED.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        }
     }
+}
+
+/// Waits until every line queued so far is in the watchdog's pipe, or `timeout` passes; true if
+/// it is (or there is no watchdog). Blocks: from async code, use [`flushed`].
+pub fn flush(timeout: Duration) -> bool {
+    if GUARD.get().is_none() {
+        return true;
+    }
+    let target = *QUEUED.lock().unwrap_or_else(|e| e.into_inner());
+    let (m, cv) = &WRITTEN;
+    let written = m.lock().unwrap_or_else(|e| e.into_inner());
+    let (written, _) = cv
+        .wait_timeout_while(written, timeout, |w| *w < target)
+        .unwrap_or_else(|e| e.into_inner());
+    *written >= target
+}
+
+/// [`flush`] off the async thread: called before a reply hands a client a process just
+/// registered (a terminal, a task), so a daemon killed right after it still takes the process
+/// along (CI on 1840dc9: a terminal created just before the daemon was killed outlived it).
+pub async fn flushed(timeout: Duration) -> bool {
+    tokio::task::spawn_blocking(move || flush(timeout))
+        .await
+        .unwrap_or(false)
 }
 
 /// Registers a process group (its leader's pid) to end if the daemon dies. Call it while the
