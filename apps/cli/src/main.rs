@@ -101,13 +101,42 @@ enum AgentCmd {
 /// Text from a model, a file or an agent made safe for a terminal: every control character
 /// but newline and tab (C0, DEL, C1, which start escape sequences that could erase or rewrite
 /// what is shown, such as an approval prompt) is shown as an escape (`\x1b`) instead of being
-/// sent (AUD-045).
+/// sent (AUD-045). So are the characters that reorder or hide text without being seen (bidi
+/// controls, zero-width characters, line and paragraph separators): `rm\u{202e}` cannot show
+/// as something else (review N8). For text that is meant to be several lines (model output, a
+/// card's preview); a single field uses [`tty_safe_line`].
 fn tty_safe(text: &str) -> String {
+    escape_for_tty(text, true)
+}
+
+/// [`tty_safe`] for one line (a tool name, a target, a summary): a newline is shown as `\x0a`
+/// too, so a target cannot pass for another one, or for the prompt's own lines.
+fn tty_safe_line(text: &str) -> String {
+    escape_for_tty(text, false)
+}
+
+/// Bidi embeddings, overrides, isolates and marks; zero-width spaces, joiners and the word
+/// joiner, invisible operators, the byte order mark; line and paragraph separators.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061c}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{feff}'
+    )
+}
+
+fn escape_for_tty(text: &str, multiline: bool) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         match c {
-            '\n' | '\t' => out.push(c),
-            c if c.is_control() => {
+            '\t' => out.push(c),
+            '\n' if multiline => out.push(c),
+            c if c.is_control() || invisible(c) => {
                 let n = c as u32;
                 if n <= 0xff {
                     out.push_str(&format!("\\x{n:02x}"));
@@ -417,7 +446,11 @@ async fn stream_turn(
                         let _ = out.write_all(b"\n");
                     }
                     EventBody::ToolCall { tool, targets, .. } => {
-                        eprintln!("  ▸ {} {}", tty_safe(&tool), tty_safe(&targets.join(", ")));
+                        eprintln!(
+                            "  ▸ {} {}",
+                            tty_safe_line(&tool),
+                            tty_safe_line(&targets.join(", "))
+                        );
                     }
                     EventBody::ToolResult {
                         is_error, summary, ..
@@ -425,13 +458,14 @@ async fn stream_turn(
                         eprintln!(
                             "    {} {}",
                             if is_error { "✗" } else { "✓" },
-                            tty_safe(&summary)
+                            tty_safe_line(&summary)
                         );
                     }
                     EventBody::Checkpoint { checkpoint } => {
                         eprintln!(
                             "  ⚑ checkpoint {} · {}",
-                            checkpoint.number, checkpoint.label
+                            checkpoint.number,
+                            tty_safe_line(&checkpoint.label)
                         );
                     }
                     EventBody::Error { message, .. } => eprintln!("axiom: {}", tty_safe(&message)),
@@ -476,9 +510,12 @@ fn prompt_text(r: &ApprovalRequest) -> String {
         t.push_str(&tty_safe(p));
         t.push('\n');
     }
-    t.push_str(&format!("Allow {} ({effect}) on:\n", tty_safe(&r.tool)));
+    t.push_str(&format!(
+        "Allow {} ({effect}) on:\n",
+        tty_safe_line(&r.tool)
+    ));
     for target in &r.targets {
-        t.push_str(&format!("  {}\n", tty_safe(target)));
+        t.push_str(&format!("  {}\n", tty_safe_line(target)));
     }
     t.push_str(&format!(
         "[y] once{} / [N]o: ",
@@ -522,6 +559,32 @@ mod tests {
     }
 
     #[test]
+    fn bidi_and_zero_width_characters_are_shown_and_single_lines_stay_single() {
+        // "cat x.txt" written with a right-to-left override, and a word with hidden spaces.
+        assert_eq!(tty_safe("cat \u{202e}txt.x"), "cat \\u{202e}txt.x");
+        assert_eq!(
+            tty_safe("r\u{200b}m \u{2066}a\u{2069}"),
+            "r\\u{200b}m \\u{2066}a\\u{2069}"
+        );
+        for c in [
+            '\u{061c}', '\u{180e}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{2028}',
+            '\u{2029}', '\u{202a}', '\u{2060}', '\u{2064}', '\u{2068}', '\u{feff}',
+        ] {
+            let shown = tty_safe(&c.to_string());
+            assert_eq!(shown, format!("\\u{{{:x}}}", c as u32), "{c:?}");
+            assert_eq!(tty_safe_line(&c.to_string()), shown, "{c:?}");
+        }
+        // Visible neighbours are kept.
+        assert_eq!(
+            tty_safe("\u{2010}\u{2030}\u{fefc}"),
+            "\u{2010}\u{2030}\u{fefc}"
+        );
+        // Multi-line text keeps its lines; a single field does not.
+        assert_eq!(tty_safe("a\nb"), "a\nb");
+        assert_eq!(tty_safe_line("a\n\tb\u{2028}c"), "a\\x0a\tb\\u{2028}c");
+    }
+
+    #[test]
     fn the_approval_prompt_cannot_be_rewritten_by_its_content() {
         let r = ApprovalRequest {
             request_id: "r1".into(),
@@ -540,5 +603,21 @@ mod tests {
         assert!(!p.chars().any(|c| c.is_control() && c != '\n'), "{p:?}");
         assert!(p.contains("\\x1b[2K\\x0d rm -rf /"), "{p}");
         assert!(p.contains("\\x1b]0;title\\x07diff"), "{p}");
+
+        // A target cannot add a line that passes for another target, nor hide what it says.
+        let r = ApprovalRequest {
+            targets: vec![
+                "notes.txt\n  ~/.ssh/authorized_keys".into(),
+                "a\u{202e}b".into(),
+            ],
+            preview: None,
+            ..r
+        };
+        let p = prompt_text(&r);
+        assert_eq!(
+            p,
+            "Allow task.run (execute) on:\n  notes.txt\\x0a  ~/.ssh/authorized_keys\n  \
+             a\\u{202e}b\n[y] once / [N]o: "
+        );
     }
 }

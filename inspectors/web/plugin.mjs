@@ -42,6 +42,29 @@ export function adapterRequestAllowed(headers) {
   }
 }
 
+/**
+ * Whether the request URL [raw] names the adapter module. Vite decodes the path before
+ * resolving it (`decodeURI`, so `/@id/__x00__virtual:axiom%2Dadapter` loads the adapter), so the
+ * path is matched decoded: fully (`decodeURIComponent`) and repeatedly, a superset of Vite's
+ * single `decodeURI`. A malformed escape ends the decoding; Vite serves nothing for one.
+ */
+export function namesAdapter(raw) {
+  let url = (raw ?? "").split("?")[0];
+  if (url.includes(VIRTUAL)) return true;
+  for (let i = 0; i < 4; i++) {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(url);
+    } catch {
+      break;
+    }
+    if (decoded === url) break;
+    url = decoded;
+    if (url.includes(VIRTUAL)) return true;
+  }
+  return false;
+}
+
 /** `@babel/core`, from the project first, then from beside this file; null if neither has it. */
 export async function loadBabel(root) {
   for (const from of [path.join(root, "package.json"), path.join(here, "package.json")]) {
@@ -113,8 +136,7 @@ export default function axiom({ endpoint, token, adapterSource } = {}) {
     },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const url = (req.url ?? "").split("?")[0];
-        if ((url === SERVED || url.endsWith(VIRTUAL)) && !adapterRequestAllowed(req.headers)) {
+        if (namesAdapter(req.url) && !adapterRequestAllowed(req.headers)) {
           res.statusCode = 403;
           res.end();
           return;

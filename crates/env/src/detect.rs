@@ -326,10 +326,17 @@ async fn run_version(
     env: &BTreeMap<String, String>,
     re: &regex::Regex,
 ) -> Option<String> {
+    let dir = match crate::work_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("version command {} not run: {e}", bin.display());
+            return None;
+        }
+    };
     let mut cmd = tokio::process::Command::new(bin);
     cmd.args(args)
         .envs(env)
-        .current_dir(crate::work_dir())
+        .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -386,7 +393,7 @@ mod tests {
         assert_ne!(std::path::Path::new(&cwd), tmp);
         assert_eq!(
             std::path::Path::new(&cwd),
-            std::fs::canonicalize(crate::work_dir()).unwrap()
+            std::fs::canonicalize(crate::work_dir().unwrap()).unwrap()
         );
     }
 

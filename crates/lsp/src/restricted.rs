@@ -15,6 +15,11 @@
 //!
 //! Servers the person added (user and workspace providers) are their choice and run as
 //! configured. Trusting the folder restarts every server as configured.
+//!
+//! Residual (review N8): restricted jdtls does not import Gradle or Maven builds, but jdtls has
+//! no setting that turns annotation processing off, so an Eclipse-format project whose
+//! `.settings/org.eclipse.jdt.apt.core.prefs` enables APT can still run the processor JARs its
+//! `.factorypath` names.
 
 use crate::server::{which, Definition, Launch};
 use serde_json::{json, Value};

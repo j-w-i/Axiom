@@ -114,4 +114,20 @@ test("the adapter module (it holds the token) is served to the dev server's own 
   assert.equal(run("/@id/__x00__virtual:axiom-adapter", { "sec-fetch-site": "cross-site" }), 403);
   assert.equal(run("/@id/__x00__virtual:axiom-adapter", { "sec-fetch-site": "same-origin" }), "next");
   assert.equal(run("/src/App.jsx", { "sec-fetch-site": "cross-site" }), "next");
+
+  // Vite decodes the path before it resolves it (N4): an encoded spelling of the adapter's URL
+  // is refused as well, however it is encoded.
+  const cross = { "sec-fetch-site": "cross-site" };
+  for (const url of [
+    "/@id/__x00__virtual%3Aaxiom-adapter",
+    "/@id/__x00__virtual:axiom%2Dadapter",
+    "/@id/__x00__%76irtual:axiom-adapter?import",
+    "/@id/__x00__virtual:axiom%252Dadapter",
+    "/@id/%5F%5Fx00%5F%5Fvirtual%3Aaxiom%2dadapter",
+  ]) {
+    assert.equal(run(url, cross), 403, url);
+    assert.equal(run(url, { "sec-fetch-site": "same-origin" }), "next", url);
+  }
+  assert.equal(run("/src/100%25.jsx", cross), "next");
+  assert.equal(run("/src/%E0%A4%A.jsx", cross), "next");
 });

@@ -362,7 +362,7 @@ impl Installer {
         let out = run_program(
             &full,
             &path_with(dir.as_deref()),
-            &crate::work_dir(),
+            &work_dir()?,
             &CancellationToken::new(),
             &|_| {},
         )
@@ -681,8 +681,7 @@ impl Installer {
                             report(i, line.trim().chars().take(200).collect());
                         }
                     };
-                    run_program(argv, &BTreeMap::new(), &crate::work_dir(), cancel, &on_line)
-                        .await?;
+                    run_program(argv, &BTreeMap::new(), &work_dir()?, cancel, &on_line).await?;
                 }
                 Step::Verify { tool_id } => {
                     report(i, format!("Verifying {tool_id}"));
@@ -1452,6 +1451,14 @@ impl<R: tokio::io::AsyncRead + Unpin> CappedLines<R> {
         }
         String::from_utf8_lossy(&line).into_owned()
     }
+}
+
+/// [`crate::work_dir`], or why there is none (then nothing runs).
+fn work_dir() -> Result<PathBuf, EnvError> {
+    crate::work_dir().map_err(|source| EnvError::Io {
+        context: "Cannot prepare a private working directory".into(),
+        source,
+    })
 }
 
 pub async fn run_program(

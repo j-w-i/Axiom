@@ -56,12 +56,16 @@ for s in "${suites[@]}"; do
   set -e
   [[ $status -eq 0 ]] || fail=1
   # Skipped cases are reported, not counted as passes (audit AUD-060). Two reporters: the
-  # terminal's "+3 ~1: All tests passed!" and, under GitHub Actions, "3 tests passed, 1 skipped."
+  # terminal's "+3 ~1: All tests passed!" and, under GitHub Actions, the github reporter's
+  # summary, a line of its own: "🎉 4 tests passed, 2 skipped.", "::error::2 tests passed,
+  # 1 failed." (shown as "##[error]…"), with ", N flaky" before the skips. Only that whole line
+  # is read, never "N skipped" from a test's own output (review N17).
   # A summary line that is not found is no skip (grep must not end the run under set -e).
   last="$(grep -Eo '[+][0-9]+( ~[0-9]+)?( -[0-9]+)?: (All tests (passed|skipped)|Some tests failed)' "$log" | tail -1 || true)"
   skipped="$(sed -nE 's/.* ~([0-9]+).*/\1/p' <<<"$last")"
   if [[ -z "$skipped" ]]; then
-    skipped="$(grep -Eo '[0-9]+ skipped' "$log" | tail -1 | grep -Eo '^[0-9]+' || true)"
+    gh_summary='^(🎉 |::(error|warning)::|##\[(error|warning)\])?[0-9]+ tests? passed(, [0-9]+ failed)?(, [0-9]+ flaky)?(, [0-9]+ skipped)?\.$'
+    skipped="$(tr -d '\r' <"$log" | grep -E "$gh_summary" | tail -1 | sed -nE 's/.*, ([0-9]+) skipped\.$/\1/p' || true)"
   fi
   [[ -n "$skipped" ]] && summary+=("$s: $skipped skipped")
   rm -f "$log"
