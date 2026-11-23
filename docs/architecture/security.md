@@ -251,38 +251,56 @@ The Tauri shell's controls, kept as the record of how it was built:
   `.axiom/project.toml` `[agent.policy]` can only make a decision stricter (the stricter of
   the two wins). Path globs are matched in `O(pattern × path)` (AUD-106: the recursive matcher
   was exponential in the number of `*`, and the workspace's patterns are untrusted).
-- **Protected paths** (AUD-104; review B4, D-round, E2, E3). A write or delete always asks,
-  whatever a policy rule, a session grant or an ACP permission says, and cannot be allowed for
-  the session, under:
-  - `.axiom/` (the workspace policy, its providers' tasks and language servers), `.husky/` at
-    any depth, and a `.git` directory at any depth;
-  - a `<name>.git` directory that is a bare repository (it has a `HEAD`), or a write of one of
-    git's own entries directly in one (`HEAD`, `config`, `hooks/`, `objects/`, `refs/`, …), so
-    one cannot be built a file at a time;
-  - what git itself reads for the workspace's repository, when it is inside the workspace,
-    asked of git for each call off the async thread (`git rev-parse --git-path hooks`,
-    `git config --list --show-origin`): the hooks directory however `core.hooksPath` is set
-    (an included file, the global configuration) or the git directory's own; the git directory
-    and the common directory when a `.git` file points elsewhere (worktree, submodule,
-    `--separate-git-dir`); every configuration file git reads, and every file an `include.path`
-    or `includeIf.*.path` names, whether it exists yet or not. With `core.hooksPath = .` the
-    git hook names at the root ask. A `.git/config` in a folder that is not yet a repository is
-    read with `git config --file`.
-  - When git cannot answer (not installed, a configuration it refuses, dubious ownership, a
-    timeout), every path with a segment starting `.git`, ending `gitconfig` or ending `hooks`
-    asks instead.
+- **Protected paths** (AUD-104; reviews B4, D-round, E2–E3, G2–G8). A write or delete always
+  asks, whatever a policy rule, a session grant or an ACP permission says, and cannot be allowed
+  for the session, under:
+  - `.axiom/` (the workspace policy, its providers' tasks and language servers), `.husky/` and
+    `.gitattributes` at any depth, and a `.git` directory at any depth;
+  - a `<name>.git` directory that is a bare repository (it has a `HEAD`), or one of git's own
+    entries (`HEAD`, `config`, `commondir`, `hooks`, …) written into a folder that already holds
+    `HEAD`, `commondir`, `objects` or `refs`, so an ordinary folder cannot be made a git
+    directory one file at a time;
+  - what git's configuration makes protected, asked of git (off the async thread) for every
+    repository in the workspace: the root's, and every one a bounded walk finds (folders with a
+    `.git` directory or file, and folders that are git directories; at most 100,000 folders, 32
+    levels and 64 repositories). For each: the hooks directories (the live one, and every
+    `core.hooksPath` set in any file); the git directory and its common directory; every
+    configuration file git reads, and every `include.path` / `includeIf.*.path` target whatever
+    its condition (targets git did not open are read with `git config --file`, and their own
+    includes too); every in-workspace program a configuration value names (`core.fsmonitor`,
+    filters, diff and merge drivers, `core.sshCommand`, credential helpers, `gpg` programs,
+    editors, pagers, `core.askPass`, `!` aliases, `core.attributesFile`, and the other
+    program-valued keys).
+  - The answer is asked again whenever a file it came from changes (the mtime and size of each
+    configuration file and include target, each repository's `HEAD` and `.git`), after any
+    command, and at least every 30 s; a repository made by other means is seen within 30 s.
+  - When git cannot answer for a repository that exists (git missing or older than 2.31, an
+    invalid or refused configuration, dubious ownership, a timeout), every write asks ("git
+    could not say what its configuration runs in this workspace"): an include or hooks folder
+    can have any name, so names alone are not enough. When git cannot answer and no repository
+    exists, or the walk was cut short, names that may be git's ask (`.git*`, `*gitconfig`,
+    `*hooks`, git's directory entry names).
 
   The gate judges the path through symlinks inside the workspace, and the write refuses if it
-  no longer resolves there (§Paths). Reading them is not restricted. Not covered: a nested
-  repository's own configuration (only its `.git` directory is protected, by name);
-  `~user/` and `%(prefix)/` include paths; a configuration change the person approves during an
-  agent turn protects what it names only from the next turn (sessions read the policies once per
-  turn; external tool calls per call); clean/smudge filters a configured driver names can run
-  when `git status` refreshes the index (the driver's configuration is in protected files or
-  the person's global configuration).
-- **The daemon's own git** runs no program the repository's configuration names: `git status`
-  and `git show` run with `core.fsmonitor=false` and `core.hooksPath=/dev/null`, and `show`
-  with `--no-ext-diff --no-textconv` (review E2).
+  no longer resolves there (§Paths). Reading them is not restricted. Not covered: `~user/` and
+  `%(prefix)/` include paths; a program named by a bare word is protected as `<top>/<word>`
+  (harmless over-protection of a root file named, say, `less`); a checkpoint restore can still
+  write git's entries into an ordinary folder (it restores only what the workspace held at the
+  checkpoint, and skips existing git directories).
+- **The daemon's own git runs no repository program** (reviews E2, G1). Every `git status` and
+  `git show` the daemon runs has `core.fsmonitor=false` and `core.hooksPath=/dev/null`, and
+  switches off every filter driver git has configured for the workspace: git is asked for its
+  `filter.*` keys, and each gets an empty `clean`, `smudge` and `process` and `required=false`
+  (through `--config-env` for a name containing `=`, which needs git 2.31), so an agent-written
+  `.gitattributes` cannot route a file through a filter. `status` passes
+  `--ignore-submodules=dirty` (otherwise git runs inside each submodule, under that
+  submodule's configuration), and `show` passes `--no-ext-diff --no-textconv`. `rev-parse` and
+  `config` run nothing; credential helpers, `core.sshCommand`, `core.askPass`, editors and
+  pagers are never reached (no network command; `--no-pager`). As a result, a submodule shows
+  as changed only when its commit changes, and a file a filter would normalise (Git LFS, say)
+  may show as modified until git next refreshes the index. An empty attribute source
+  (`--attr-source`) is not used: it needs git 2.40+, differs for SHA-256 repositories, and
+  would drop `text`/`eol` attributes.
 - **What the card shows is what is approved.** The targets are the paths, the argv (arguments
   with spaces or control characters quoted) and the call's *conditions*: an environment
   variable an ACP agent sets, a working directory other than the root, `build.run`'s provider

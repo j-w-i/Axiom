@@ -14,9 +14,10 @@ hand-off). Task status `implemented`, PR j-w-i/Axiom#13. An independent review r
 changes (blocking B1–B6); they were fixed and the re-review passed. Its follow-up findings
 (R1–R5, N1–N18) were fixed or documented, and the two change requests became ADR-0022 and
 ADR-0023; a review of that round requested changes again (C1–C4, D1–D7), fixed and reviewed;
-the next review (E1, blocking, and E2–E6) is fixed and awaiting its review.
+the next (E1–E6) was fixed and reviewed; the one after (G1–G3, blocking, G4–G8 and three
+checkpoint gaps) is fixed and awaiting its review.
 
-**Next: the review's sign-off on E1–E6, CI green on the PR, then the task to `verified` and
+**Next: the review's sign-off on G1–G8, CI green on the PR, then the task to `verified` and
 the merge to main; then M6.** Open for the owner: confirm ADR-0022 and ADR-0023; jdtls in
 untrusted folders (ADR-0023, Consequences).
 

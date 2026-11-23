@@ -219,7 +219,7 @@ runtime).
 | `agent/approve` | `ApproveParams → {}` | `not_found` |
 | `agent/installAgent` | `InstallAgentParams → InstallAgentResult` (ADR-0020 §6, additive) | `not_found`, `prerequisite_missing` (npm), `io`, `timeout` |
 | `agent/checkpoints` | `SessionRef → CheckpointsResult` | `not_found` |
-| `agent/restore` | `RestoreParams → RestoreResult` | `not_found`, `checkpoint_conflict`, `prerequisite_missing` |
+| `agent/restore` | `RestoreParams → RestoreResult` | `not_found`, `checkpoint_conflict`, `prerequisite_missing`, `timeout` (a checkpoint's git did not finish in its bound) |
 | `agent/tools` | `WorkspaceRef → ToolsResult` | `workspace_not_open` |
 | `agent/toolCall` | `ToolCallParams → ToolCallResult` | `approval_denied`, `approval_required`, `invalid_params` |
 | `agent/policy` | `PolicyParams → PolicyResult` | — |

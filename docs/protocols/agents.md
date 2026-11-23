@@ -177,10 +177,20 @@ decision = "deny"
   offered for `credentials`, `deploy`, protected paths, opaque calls (MCP tools, installs) or
   calls without targets other than reads; it ends when the session is deleted, rewound or
   restored, or the external principal's connection closes (AUD-009).
-- Protected paths: a write or delete under `.axiom/`, a `.git` directory at any depth, a bare
-  repository's `<name>.git/`, `.husky/`, or the workspace's configured `core.hooksPath` (read
-  from its own `.git/config`) always asks, whatever the policy or a grant says; the path is
-  judged through symlinks (AUD-104, review B4 and D-round).
+- Protected paths: a write or delete always asks, whatever the policy or a grant says, and can
+  never be remembered, under `.axiom/`, `.husky/`, `.gitattributes` and a `.git` directory at
+  any depth; a bare repository's `<name>.git/`; one of git's directory entries written into a
+  folder that already holds `HEAD`, `commondir`, `objects` or `refs`; and anything git's
+  configuration names for any repository in the workspace (hooks directories, including those
+  an include whose condition is false today would set; configuration files and include
+  targets; programs such as `core.fsmonitor`, `filter.*`, `diff.*`, `merge.*.driver`,
+  `core.sshCommand`, `credential.helper`, `gpg.program`, editors, pagers, `core.askPass`, `!`
+  aliases, `core.attributesFile`). The path is judged through symlinks. git is asked again
+  during a turn whenever its configuration files change or a command has run. If git cannot
+  say what it reads for a repository in the workspace, every write asks: "protected: git could
+  not say what its configuration runs in this workspace (is git 2.31 or later installed, and
+  its configuration valid?), so every write asks" (AUD-104; reviews B4, D-round, E2–E3,
+  G2–G8).
 - A call whose conditions change what an approved command does (an agent-set variable, a
   working directory other than the root) asks even where a rule allows its argv (AUD-039).
 - `path` globs are matched in linear time per candidate (AUD-106).
@@ -203,16 +213,34 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
   restored unless `skipConflicts`. Restore takes a checkpoint first.
 - A restore writes a new file and renames it over the entry (a hard link is never written
   through), never writes through a directory that is a symlink (unless the restore itself
-  removes that symlink first), and never writes into a git directory: a path inside `.git`,
-  or inside a `<name>.git` that is a repository (or one of git's own entries in it), is skipped
-  and left out of `restored`, and the rest is restored (review E3). `.axiom/` is restored like
-  any file (a restore is the person's own undo). A restored file keeps the permission bits of the file it
+  removes that symlink first). `.axiom/` is restored like any file (a restore is the person's
+  own undo).
+- A restore leaves alone, and does not count as a conflict: a path inside a git directory
+  (`.git`, or a `<name>.git` that is a repository, or one of git's own entries in it; review
+  E3); a nested repository, whether it is a git link in the checkpoint or now (its directory is
+  never removed or replaced); and a path whose content the checkpoint or the workspace's
+  snapshot now could not capture (over 16 MiB, unreadable, or a nested repository with no
+  commit), so such a file is never removed as "created since". The rest is restored.
+  `agent/restore`'s result has no field for them (IPC frozen), so right after the `restored`
+  event the session gets an `error` event with `kind: "notice"` naming them, grouped by reason
+  (at most 20 per group, then "and N more"); it is journalled with the transcript.
+- Every `git` the shadow store runs is bounded and killed on expiry: 10 minutes for the commands
+  that walk the workspace (`ls-files`, `add`, `rm`, `write-tree`, `ls-tree`), 60 s for the
+  others. The checkpoint then fails: `timeout` from `agent/restore`, a failed tool ("the
+  checkpoint failed …") in a turn.
+- What `git add` cannot index is left out of the snapshot, and the checkpoint is still taken (an
+  unreadable file, or a nested repository with no commit yet). It is recorded in the
+  checkpoint's own metadata, not in `CheckpointInfo.skipped`, which stays the files over
+  16 MiB.
+- The shadow git reads no configuration but its own (no system or global configuration, no
+  repository's `.git/config`, hooks and fsmonitor off), so no filter, fsmonitor or hook the
+  workspace or a nested repository configures runs, whatever its `.gitattributes` say. A restored file keeps the permission bits of the file it
   replaces, without setuid, setgid or sticky (review R5, D4).
 - As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir; the agent's
   latest state is `refs/axiom/<session>/post`, taken after each writing tool; a restore with
   conflicts changes nothing (not even the undo checkpoint) unless `skipConflicts`. Nested
-  repositories are recorded as git links and never restored. First checkpoint of this
-  repository: 0.94 s; later ones: 21 ms.
+  repositories with a commit are recorded as git links and never restored. First checkpoint of
+  this repository: about 1.5 s; later ones under 0.1 s.
 - Concurrent write-capable agents on one workspace are not offered in M3 (worktrees: M6).
 
 ## Sessions
