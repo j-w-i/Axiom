@@ -427,15 +427,30 @@ impl Shadow {
         if !conflicts.is_empty() && !skip_conflicts {
             return Err(CheckpointError::Conflicts(conflicts));
         }
-        // Every path is checked before anything changes: a restore that would write through a
-        // symlinked directory, or into a git directory, changes nothing (review D4).
-        // A symlink the restore itself removes or replaces first (it sorts before what is under
-        // it) is no obstacle; the write checks again once it is gone.
-        let replaced: std::collections::BTreeSet<&str> =
-            restore.iter().map(|(p, _)| p.as_str()).collect();
-        for (p, _) in &restore {
-            writable(&self.root, p, |dir| replaced.contains(dir))?;
-        }
+        // Every path is checked before anything changes, off the async thread (review E3). A
+        // path inside a git directory (`.git`, or a `<name>.git` that is a bare repository or is
+        // being made one: `gate::git_dir_of`) is skipped, not restored: hooks run from there, so
+        // they change only through the gate, with the person's approval each time; the rest is
+        // restored. A restore that would write through a symlinked directory changes nothing
+        // (review D4). A symlink the restore itself removes or replaces first (it sorts before
+        // what is under it) is no obstacle; the write checks again once it is gone.
+        let root = self.root.clone();
+        let restore = tokio::task::spawn_blocking(move || {
+            let (skipped, kept): (Vec<_>, Vec<_>) = restore
+                .into_iter()
+                .partition(|(p, _)| crate::gate::git_dir_of(&root, p).is_some());
+            for (p, _) in &skipped {
+                tracing::warn!("restore: `{p}` is inside a git directory; not restored");
+            }
+            let replaced: std::collections::BTreeSet<&str> =
+                kept.iter().map(|(p, _)| p.as_str()).collect();
+            for (p, _) in &kept {
+                writable(&root, p, |dir| replaced.contains(dir))?;
+            }
+            Ok::<_, CheckpointError>(kept)
+        })
+        .await
+        .map_err(|e| CheckpointError::Io(e.to_string()))??;
         let undo = self
             .create_locked(session, &format!("before restore to {number}"), turn)
             .await?;
@@ -577,8 +592,9 @@ fn escape_pattern(path: &str) -> String {
 /// The host path a restore may write or remove for a tree path (review D4): [`contained`], no
 /// directory on the way a symlink (a symlinked directory inside the workspace, such as one into
 /// `.git/hooks`, would take the write somewhere the checkpoint never named), and not inside a
-/// git directory (`.git`, or a bare repository's `*.git`: hooks run from there, so they change
-/// only through the gate, with the person's approval each time). The workspace's own
+/// git directory (`.git`, or a `<name>.git` that is a bare repository: hooks run from there, so
+/// they change only through the gate, with the person's approval each time; `restore` skips
+/// those paths before it starts, this refuses one that became so since). The workspace's own
 /// configuration (`.axiom/`) and hooks kept in the tree (`.husky/`) are restored like any file:
 /// a restore is the person's own undo, and touches only what the agent last left.
 /// `replaced`: directories on the way that the restore removes before it gets to `rel`.
@@ -589,7 +605,7 @@ fn writable(
 ) -> Result<PathBuf, CheckpointError> {
     let path = contained(root, rel)?;
     let parts: Vec<&str> = rel.split('/').collect();
-    if let Some(dir) = parts.iter().find(|s| crate::gate::git_dir_name(s)) {
+    if let Some(dir) = crate::gate::git_dir_of(root, rel) {
         return Err(CheckpointError::Io(format!(
             "`{rel}` is inside a git directory (`{dir}`): a restore never writes there"
         )));

@@ -16,7 +16,7 @@ use axiom_protocol::{ErrorKind, WorkspaceId, WorkspacePath};
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -39,16 +39,47 @@ pub struct Policies {
     pub user: Policy,
     /// `.axiom/project.toml` `[agent.policy]`: stricter only.
     pub workspace: Option<Policy>,
-    /// More directories that are protected as [`protected_path`]s are: the workspace's
-    /// configured git hooks directory (`core.hooksPath`, [`hooks_path`]) when it is inside the
-    /// workspace. Workspace paths, through any symlink.
+    /// More paths that are protected as [`protected_path`]s are, from what git reads for the
+    /// workspace's repository, where they are inside the workspace (review E2): the hooks
+    /// directory git uses (`core.hooksPath` wherever it is set), the git directory when it is
+    /// not `.git`, every configuration file git reads and every file a configuration includes.
+    /// Workspace paths, through any symlink. A path protects itself and what is under it.
     pub protected: Vec<WorkspacePath>,
+    /// Git could not be asked what it reads (no `git`, an error, a timeout): every name that
+    /// may be git's configuration or hooks is protected instead ([`git_config_like`]).
+    pub git_unknown: bool,
+    /// The workspace root, to tell whether a `<name>.git` directory on a written path is a
+    /// bare repository ([`Policies::protects_any`]). `None`: every such directory is taken to
+    /// be one.
+    pub root: Option<PathBuf>,
 }
 
 impl Policies {
-    /// Whether writing `p` always asks: a [`protected_path`], or under [`Self::protected`].
+    /// Whether writing `p` always asks, by its name alone: a [`protected_path`], under
+    /// [`Self::protected`], or [`git_config_like`] while git could not be asked.
     pub fn protects(&self, p: &WorkspacePath) -> bool {
-        protected_path(p) || self.protected.iter().any(|d| within(p, d))
+        protected_path(p)
+            || self.protected.iter().any(|d| within(p, d))
+            || (self.git_unknown && git_config_like(p))
+    }
+
+    /// Whether writing any of `paths` always asks: [`Self::protects`], or a path inside a
+    /// `<name>.git` directory that is a bare repository on disk ([`bare_repository`]; checked
+    /// off the async thread, and only for paths with such a name).
+    pub async fn protects_any(&self, paths: &[WorkspacePath]) -> bool {
+        if paths.iter().any(|p| self.protects(p)) {
+            return true;
+        }
+        let dirs: Vec<String> = paths.iter().flat_map(|p| bare_candidates(&p.0)).collect();
+        if dirs.is_empty() {
+            return false;
+        }
+        let Some(root) = self.root.clone() else {
+            return true;
+        };
+        tokio::task::spawn_blocking(move || dirs.iter().any(|d| bare_repository(&root, d)))
+            .await
+            .unwrap_or(true)
     }
 }
 
@@ -115,92 +146,132 @@ pub struct Gate {
 /// policy or a grant says: the workspace's own Axiom configuration (`.axiom/project.toml` holds
 /// the workspace policy, `.axiom/providers/` defines tasks and language servers), git's
 /// directory (hooks run on the person's next commit) at any depth (a nested repository or a
-/// submodule has its own), a bare repository's directory (`<name>.git`, whose `hooks/` git runs
-/// for pushes to it), and husky's `.husky/` (the hooks directory `core.hooksPath` names in a
-/// repository that uses it). AUD-104, review rev3. The callers pass the path through any
-/// symlink (`Workspace::canonical_path`, review B4). A hooks directory configured elsewhere is
-/// added per workspace ([`Policies::protected`]).
+/// submodule has its own), what makes a `<name>.git` directory a bare repository or changes
+/// what git runs in one (its `HEAD`, `config`, `hooks/`, …: [`GIT_DIR_ENTRIES`]; git runs its
+/// `hooks/` for pushes to it), and husky's `.husky/` (the hooks directory `core.hooksPath`
+/// names in a repository that uses it). AUD-104, review rev3, E3. The callers pass the path
+/// through any symlink (`Workspace::canonical_path`, review B4). By name only: a `<name>.git`
+/// directory that is already a repository is found on disk ([`Policies::protects_any`]), and
+/// what git's configuration names is added per workspace ([`Policies::protected`]).
 pub fn protected_path(p: &WorkspacePath) -> bool {
     let mut parts = p.0.split('/');
     let first = parts.next().unwrap_or("");
     first.eq_ignore_ascii_case(".axiom")
-        || p.0
-            .split('/')
-            .any(|s| git_dir_name(s) || s.eq_ignore_ascii_case(".husky"))
+        || p.0.split('/').any(|s| s.eq_ignore_ascii_case(".husky"))
+        || git_dir_by_name(&p.0).is_some()
 }
 
-/// A path segment that names a git directory: `.git`, or a bare repository's `<name>.git`.
-pub(crate) fn git_dir_name(s: &str) -> bool {
+/// What git looks for in a repository's directory, and what changes what git runs there: a
+/// write of one of these directly inside a `<name>.git` directory always asks, so an agent
+/// cannot make one a bare repository with hooks one unasked file at a time (review E3).
+pub const GIT_DIR_ENTRIES: &[&str] = &[
+    "HEAD",
+    "config",
+    "config.worktree",
+    "commondir",
+    "gitdir",
+    "hooks",
+    "objects",
+    "refs",
+    "packed-refs",
+    "worktrees",
+];
+
+/// `.git`, compared without regard to ASCII case.
+fn dot_git(s: &str) -> bool {
+    s.eq_ignore_ascii_case(".git")
+}
+
+/// `<name>.git` (not `.git` itself): the name of a bare repository's directory, if it is one.
+fn bare_name(s: &str) -> bool {
     let b = s.as_bytes();
-    b.len() >= 4 && b[b.len() - 4..].eq_ignore_ascii_case(b".git")
+    b.len() > 4 && b[b.len() - 4..].eq_ignore_ascii_case(b".git")
 }
 
-/// `core.hooksPath` from the text of a repository's `.git/config`, as written (the last one
-/// wins, as in git). Only that file: an `[include]`d file, the global and system configuration
-/// and `git -c` are not read. `None` if it is not set.
-pub fn hooks_path(config: &str) -> Option<String> {
-    let mut in_core = false;
-    let mut found = None;
-    for line in config.lines() {
-        let mut rest = line.trim_start();
-        if let Some(after) = rest.strip_prefix('[') {
-            let Some(end) = after.find(']') else {
-                in_core = false;
-                continue;
-            };
-            in_core = after[..end].trim().eq_ignore_ascii_case("core");
-            // A variable may follow the header on the same line.
-            rest = after[end + 1..].trim_start();
-        }
-        if !in_core || rest.is_empty() || rest.starts_with(['#', ';']) {
-            continue;
-        }
-        let (key, value) = match rest.split_once('=') {
-            Some((k, v)) => (k.trim(), v),
-            None => (rest.trim(), ""),
-        };
-        if key.eq_ignore_ascii_case("hookspath") {
-            found = Some(config_value(value));
-        }
-    }
-    found.filter(|v| !v.is_empty())
+/// The git directory `rel` is in by its name alone, as the path of that directory: a `.git`
+/// segment, or a `<name>.git` segment followed by one of [`GIT_DIR_ENTRIES`].
+pub(crate) fn git_dir_by_name(rel: &str) -> Option<String> {
+    let parts: Vec<&str> = rel.split('/').collect();
+    parts.iter().enumerate().find_map(|(i, s)| {
+        let named = dot_git(s)
+            || (bare_name(s)
+                && parts
+                    .get(i + 1)
+                    .is_some_and(|n| GIT_DIR_ENTRIES.iter().any(|e| e.eq_ignore_ascii_case(n))));
+        named.then(|| parts[..=i].join("/"))
+    })
 }
 
-/// A git config value: quotes removed, `\"`, `\\`, `\n` and `\t` unescaped, an unquoted `#` or
-/// `;` starting a comment, unquoted surrounding blanks dropped.
-fn config_value(raw: &str) -> String {
-    let mut out = String::new();
-    let mut quoted = false;
-    // Length of `out` up to its last character that is not unquoted trailing blank.
-    let mut keep = 0;
-    let mut chars = raw.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => quoted = !quoted,
-            '\\' => {
-                match chars.next() {
-                    Some('n') => out.push('\n'),
-                    Some('t') => out.push('\t'),
-                    Some(c) => out.push(c),
-                    None => {}
-                }
-                keep = out.len();
-                continue;
-            }
-            '#' | ';' if !quoted => break,
-            c if c.is_whitespace() && !quoted => {
-                if !out.is_empty() {
-                    out.push(c);
-                }
-                continue;
-            }
-            c => out.push(c),
-        }
-        keep = out.len();
-    }
-    out.truncate(keep);
-    out
+/// The `<name>.git` directories on `rel` (as workspace paths, `rel` itself included) that may be
+/// bare repositories: [`bare_repository`] tells.
+pub(crate) fn bare_candidates(rel: &str) -> Vec<String> {
+    let parts: Vec<&str> = rel.split('/').collect();
+    (0..parts.len())
+        .filter(|&i| bare_name(parts[i]))
+        .map(|i| parts[..=i].join("/"))
+        .collect()
 }
+
+/// Whether the workspace directory `dir` under `root` is a git repository's directory: it has
+/// a `HEAD` (what git looks for first). Blocking.
+pub fn bare_repository(root: &Path, dir: &str) -> bool {
+    let mut p = root.to_path_buf();
+    p.extend(dir.split('/'));
+    std::fs::symlink_metadata(p.join("HEAD")).is_ok()
+}
+
+/// The git directory `rel` is in, if any: by name (as [`protected_path`] tells) or on disk
+/// ([`bare_repository`]). Blocking.
+pub fn git_dir_of(root: &Path, rel: &str) -> Option<String> {
+    git_dir_by_name(rel).or_else(|| {
+        bare_candidates(rel)
+            .into_iter()
+            .find(|d| bare_repository(root, d))
+    })
+}
+
+/// While git cannot be asked what it reads (review E2): a path with a segment that may be git's
+/// configuration (`.git*`, `*gitconfig`) or a hooks directory (`*hooks`), compared without
+/// regard to ASCII case.
+pub fn git_config_like(p: &WorkspacePath) -> bool {
+    p.0.split('/').any(|s| {
+        let s = s.to_ascii_lowercase();
+        s.starts_with(".git") || s.ends_with("gitconfig") || s.ends_with("hooks")
+    })
+}
+
+/// The hooks git runs, by name (`githooks(5)`): where the hooks directory is the workspace root
+/// itself (`core.hooksPath = .`), these names in it always ask, not the whole workspace.
+pub const HOOK_NAMES: &[&str] = &[
+    "applypatch-msg",
+    "pre-applypatch",
+    "post-applypatch",
+    "pre-commit",
+    "pre-merge-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+    "pre-rebase",
+    "post-checkout",
+    "post-merge",
+    "pre-push",
+    "pre-receive",
+    "update",
+    "proc-receive",
+    "post-receive",
+    "post-update",
+    "reference-transaction",
+    "push-to-checkout",
+    "pre-auto-gc",
+    "post-rewrite",
+    "sendemail-validate",
+    "fsmonitor-watchman",
+    "p4-changelist",
+    "p4-prepare-changelist",
+    "p4-post-changelist",
+    "p4-pre-submit",
+    "post-index-change",
+];
 
 fn writes(effect: Effect) -> bool {
     !matches!(effect, Effect::Read)
@@ -210,7 +281,10 @@ fn writes(effect: Effect) -> bool {
 /// protected path ([`Policies::protects`]).
 fn must_ask(protected: bool, escalate: bool) -> Option<String> {
     if protected {
-        return Some("protected: Axiom configuration, .git and git hooks always ask".into());
+        return Some(
+            "protected: Axiom configuration, git's directories, configuration and hooks always ask"
+                .into(),
+        );
     }
     escalate.then(|| "the call sets its environment or working directory".into())
 }
@@ -327,7 +401,7 @@ impl Gate {
             argv: prepared.targets.argv.as_deref(),
         };
         let protected =
-            writes(prepared.effect) && prepared.targets.paths.iter().any(|p| policies.protects(p));
+            writes(prepared.effect) && policies.protects_any(&prepared.targets.paths).await;
         let (mut decision, mut rule) = {
             let mut rules = granted;
             if !protected && !prepared.targets.escalate {
@@ -517,7 +591,7 @@ impl Gate {
         // No session grant covers a permission request (none is ever made for one).
         let (mut decision, mut rule) =
             policy::decide(&policies.user, &[], policies.workspace.as_ref(), call);
-        let protected = writes(call.effect) && call.paths.iter().any(|p| policies.protects(p));
+        let protected = writes(call.effect) && policies.protects_any(call.paths).await;
         if decision == Decision::Allow {
             if let Some(why) = must_ask(protected, false) {
                 decision = Decision::Ask;
@@ -952,6 +1026,8 @@ mod tests {
             user: policy::default_policy(),
             workspace: None,
             protected: vec![],
+            git_unknown: false,
+            root: None,
         }
     }
 
@@ -1042,6 +1118,8 @@ mod tests {
             },
             workspace: None,
             protected: vec![],
+            git_unknown: false,
+            root: None,
         };
         let plain = prepared("acp.terminal", Effect::Execute, argv(&["npm", "test"]));
         assert!(!asks(&g, &a, &w, &plain, &pol).await);
@@ -1139,24 +1217,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn hooks_path_is_read_from_a_git_config() {
-        let cfg = "[core]\n\trepositoryformatversion = 0\n\thooksPath = .husky/_\n";
-        assert_eq!(hooks_path(cfg).as_deref(), Some(".husky/_"));
-        // Case-insensitive names, the last value wins, quotes, comments, a value after the
-        // header, other sections ignored.
-        let cfg = "[remote \"origin\"]\n\thooksPath = no\n[CORE] HooksPath = first\n\
-                   [core]\n  hookspath = \"tools/my hooks\" ; a comment\n[user]\nhooksPath = x\n";
-        assert_eq!(hooks_path(cfg).as_deref(), Some("tools/my hooks"));
-        assert_eq!(
-            hooks_path("[core]\nhooksPath = a\\\\b # c\n").as_deref(),
-            Some("a\\b")
-        );
-        assert_eq!(hooks_path("[core]\n\tbare = false\n"), None);
-        assert_eq!(hooks_path("[core]\nhooksPath =\n"), None);
-        assert_eq!(hooks_path("hooksPath = outside-a-section\n"), None);
-    }
-
     #[tokio::test]
     async fn protected_paths_always_ask_and_are_never_remembered() {
         let (g, a) = gate();
@@ -1174,6 +1234,8 @@ mod tests {
             },
             workspace: None,
             protected: vec![],
+            git_unknown: false,
+            root: None,
         };
         for path in [
             ".axiom/project.toml",
@@ -1258,5 +1320,91 @@ mod tests {
             },
         );
         assert!(!asks(&g, &a, &w, &read, &pol).await);
+    }
+
+    fn allow_writes(root: Option<PathBuf>, git_unknown: bool) -> Policies {
+        Policies {
+            user: Policy {
+                default: Decision::Allow,
+                rules: vec![],
+            },
+            workspace: None,
+            protected: vec![],
+            git_unknown,
+            root,
+        }
+    }
+
+    fn write_to(path: &str) -> Prepared {
+        prepared(
+            "fs.applyPatch",
+            Effect::WriteWorkspace,
+            Targets {
+                paths: vec![WorkspacePath(path.into())],
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Review E3: a name ending in `.git` asks only where it is a repository's directory: one
+    /// that is on disk (it has a `HEAD`), or a write that would make one or add hooks to one
+    /// (`HEAD`, `config`, `hooks/`, … directly inside it). An ordinary file or folder with such
+    /// a name does not ask. `.git` itself always asks. Without the root to look at, every such
+    /// directory is taken to be a repository.
+    #[tokio::test]
+    async fn a_name_ending_in_git_asks_only_for_a_repository() {
+        let (g, a) = gate();
+        let w = ws("w");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("vendor/mirror.git")).unwrap();
+        std::fs::write(dir.path().join("vendor/mirror.git/HEAD"), "ref: x\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("vendor/lib.git")).unwrap();
+        let pol = allow_writes(Some(dir.path().to_path_buf()), false);
+        for path in [
+            "deps.git",
+            "vendor/lib.git/README.md",
+            "vendor/lib.git/src/hooks.rs",
+            "notes/my.git/description",
+        ] {
+            assert!(!asks(&g, &a, &w, &write_to(path), &pol).await, "{path}");
+        }
+        for path in [
+            ".git/config",
+            "sub/.GIT/hooks/pre-commit",
+            "vendor/mirror.git/description",
+            "vendor/mirror.git",
+            "new.git/HEAD",
+            "new.git/hooks/post-update",
+            "new.git/Config",
+            "new.git/objects/aa/bb",
+            "vendor/lib.git/refs/heads/main",
+        ] {
+            assert!(asks(&g, &a, &w, &write_to(path), &pol).await, "{path}");
+            assert!(!lock(&a.asked).last().unwrap().can_remember, "{path}");
+        }
+        let unknown_root = allow_writes(None, false);
+        assert!(asks(&g, &a, &w, &write_to("deps.git/README.md"), &unknown_root).await);
+        assert!(!asks(&g, &a, &w, &write_to("src/git.rs"), &unknown_root).await);
+    }
+
+    /// Review E2: while git cannot be asked what it reads, what may be git's configuration or a
+    /// hooks folder asks (an included file can be named anything, so this is by pattern).
+    #[tokio::test]
+    async fn without_gits_answer_config_like_names_ask() {
+        let (g, a) = gate();
+        let w = ws("w");
+        let known = allow_writes(None, false);
+        let unknown = allow_writes(None, true);
+        for path in [
+            "shared.gitconfig",
+            "config/.gitconfig",
+            ".githooks/pre-commit",
+            "tools/hooks/pre-commit",
+            ".gitmodules",
+        ] {
+            assert!(!asks(&g, &a, &w, &write_to(path), &known).await, "{path}");
+            assert!(asks(&g, &a, &w, &write_to(path), &unknown).await, "{path}");
+        }
+        assert!(!asks(&g, &a, &w, &write_to("src/main.rs"), &unknown).await);
     }
 }

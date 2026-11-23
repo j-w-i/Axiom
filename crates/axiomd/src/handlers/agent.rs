@@ -128,59 +128,59 @@ pub(crate) fn parse_workspace_policy(text: &str) -> Result<Option<Policy>, RpcEr
 }
 
 pub(crate) async fn policies(app: &App, id: &WorkspaceId) -> Result<Policies, RpcError> {
+    let ws = app.workspaces.get(id)?;
+    let (protected, git_unknown) = git_protected(ws.clone()).await;
     Ok(Policies {
         user: user_policy(app).await?,
         workspace: workspace_policy(app, id).await?,
-        protected: configured_hooks(app.workspaces.get(id)?.as_ref())
-            .await
-            .into_iter()
-            .collect(),
+        protected,
+        git_unknown,
+        root: Some(ws.root().to_path_buf()),
     })
 }
 
-/// The workspace's configured git hooks directory (`core.hooksPath` in its `.git/config`) as a
-/// workspace path, when it is inside the workspace: writes there always ask, as `.git/hooks`
-/// does (review rev3). Read through the workspace (nothing outside it is followed) from the
-/// workspace's own `.git/config` only: not an `[include]`d file, not the global or system
-/// configuration, and not a `.git` file's repository (a worktree's, a submodule's). A value
-/// naming the workspace root itself is not used (the whole workspace is not a hooks folder).
-async fn configured_hooks(ws: &axiom_workspace::Workspace) -> Option<WorkspacePath> {
-    use std::path::{Component, Path, PathBuf};
-    let config = ws
-        .read_text(&WorkspacePath(".git/config".into()))
-        .await
-        .ok()?
-        .text;
-    let value = axiom_agent::gate::hooks_path(&config)?;
-    // git expands a leading `~/`; a relative path is from the top of the work tree.
-    let path = match value.strip_prefix("~/") {
-        Some(rest) => PathBuf::from(std::env::var_os("HOME")?).join(rest),
-        None => PathBuf::from(&value),
-    };
-    let rel = if path.is_absolute() {
-        match path.strip_prefix(ws.root()) {
-            Ok(r) => r.to_path_buf(),
-            Err(_) => std::fs::canonicalize(&path)
-                .ok()?
-                .strip_prefix(ws.root())
-                .ok()?
-                .to_path_buf(),
+/// What git reads for the workspace's repository, where it is inside the workspace, as
+/// workspace paths through any symlink (review E2): writes there always ask. Asked of git
+/// itself, off the async thread ([`axiom_workspace::git::config_files`]): the hooks directory
+/// it uses (`core.hooksPath` from any file, or the git directory's own `hooks`; the hook names
+/// alone when that is the workspace root), the git directory and the common one (a `.git`
+/// file's repository), every configuration file it reads and every file one includes (an
+/// agent could otherwise set `core.hooksPath`, `core.fsmonitor` or `core.sshCommand` there).
+/// `true` when git could not be asked: the gate then protects what may be git configuration
+/// by name.
+async fn git_protected(ws: Arc<axiom_workspace::Workspace>) -> (Vec<WorkspacePath>, bool) {
+    tokio::task::spawn_blocking(move || {
+        let found = match axiom_workspace::git::config_files(ws.root()) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!("cannot ask git about the workspace's repository: {e}");
+                return (Vec::new(), true);
+            }
+        };
+        let mut out: Vec<WorkspacePath> = Vec::new();
+        let mut add = |p: WorkspacePath| {
+            if !out.contains(&p) {
+                out.push(p);
+            }
+        };
+        if let Some(hooks) = found.hooks.as_deref().and_then(|h| ws.workspace_path_of(h)) {
+            if hooks.0.is_empty() {
+                for n in axiom_agent::gate::HOOK_NAMES {
+                    add(WorkspacePath((*n).to_string()));
+                }
+            } else {
+                add(hooks);
+            }
         }
-    } else {
-        path
-    };
-    let mut parts = Vec::new();
-    for c in Path::new(&rel).components() {
-        match c {
-            Component::Normal(s) => parts.push(s.to_str()?.to_string()),
-            Component::CurDir => {}
-            _ => return None,
+        for p in found.git_dirs.iter().chain(&found.files) {
+            if let Some(p) = ws.workspace_path_of(p).filter(|p| !p.0.is_empty()) {
+                add(p);
+            }
         }
-    }
-    if parts.is_empty() {
-        return None;
-    }
-    ws.canonical_path(&WorkspacePath(parts.join("/"))).ok()
+        (out, false)
+    })
+    .await
+    .unwrap_or_else(|_| (Vec::new(), true))
 }
 
 pub(crate) fn audit_path(app: &App, root: &std::path::Path) -> std::path::PathBuf {

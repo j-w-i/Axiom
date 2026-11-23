@@ -273,6 +273,32 @@ pub(crate) fn create_file_blocking(
     }
 }
 
+/// Renames `from` in `a` to `to` in `b` by way of a fresh name in `a`, each step a
+/// [`crate::beneath::rename_noreplace`]: if `to` is still taken once `from` has moved away
+/// (another entry), the entry is put back and the rename refused with `AlreadyExists`.
+#[cfg(unix)]
+fn rename_through_fresh_name(
+    a: &crate::beneath::Dir,
+    from: &std::ffi::OsStr,
+    b: &crate::beneath::Dir,
+    to: &std::ffi::OsStr,
+) -> std::io::Result<()> {
+    use crate::beneath::rename_noreplace;
+    for n in 0..100u32 {
+        let tmp = std::ffi::OsString::from(format!(".axiom-rename-{}-{n}", std::process::id()));
+        match rename_noreplace(a, from, a, &tmp) {
+            Ok(()) => {
+                return rename_noreplace(a, &tmp, b, to).inspect_err(|_| {
+                    let _ = rename_noreplace(a, &tmp, a, from);
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::ErrorKind::AlreadyExists.into())
+}
+
 /// [`Workspace::rename`]'s move. On Unix between the two directories opened without following
 /// symlinks (review N14).
 pub(crate) fn rename_blocking(
@@ -284,7 +310,7 @@ pub(crate) fn rename_blocking(
 ) -> Result<(), WsError> {
     #[cfg(unix)]
     {
-        use crate::beneath::{rename, rename_noreplace, Dir};
+        use crate::beneath::{rename_noreplace, Dir};
         let (sp, sn) = crate::workspace::split(src, rf)?;
         let (dp, dn) = crate::workspace::split(dst, rt)?;
         let a = Dir::open_beneath(root, sp, rf)?;
@@ -295,10 +321,14 @@ pub(crate) fn rename_blocking(
         match rename_noreplace(&a, sn, &b, dn) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                // A case-only rename of the same entry on a case-insensitive volume.
+                // The target names the source's own entry: a case-only rename on a
+                // case-insensitive volume whose no-replace rename refuses it. Through a fresh
+                // name, each step never replacing anything (review E6): another entry that has
+                // the name (a hard link to the same file, one created meanwhile) is never
+                // replaced, and the rename is refused.
                 match b.kind_of(dn, rt)? {
                     Some(to) if to.dev == from.dev && to.ino == from.ino => {
-                        rename(&a, sn, &b, dn).map_err(|e| WsError::from_io(e, rf))
+                        rename_through_fresh_name(&a, sn, &b, dn).map_err(|e| io_err(e, rt))
                     }
                     _ => Err(io_err(e, rt)),
                 }

@@ -2,7 +2,9 @@
 //! v2, parsed), a file's text at HEAD or in the index, and a watch on the repository's own files.
 //! Read-only. Every run is isolated: the inherited `GIT_*` variables are removed, no pager, no
 //! hooks, no fsmonitor, `GIT_OPTIONAL_LOCKS=0` (status never takes the index lock), `LC_ALL=C`.
-//! The person's own configuration (ignore files, `safe.directory`) still applies.
+//! No program the repository's configuration names runs (review E2): `core.fsmonitor` is off,
+//! `show` reads with `--no-ext-diff --no-textconv`. The person's own configuration (ignore files,
+//! `safe.directory`) still applies.
 
 use axiom_protocol::git::{GitFile, GitFileState, GitStatus};
 use axiom_protocol::WorkspacePath;
@@ -62,7 +64,9 @@ pub fn find_git() -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-fn command(git: &Path, root: &Path) -> Command {
+/// git in `root`, isolated from the daemon's own `GIT_*` variables, with no pager and no
+/// fsmonitor (a program the repository's configuration names, run on reading the index).
+fn isolated(git: &Path, root: &Path) -> Command {
     let mut cmd = Command::new(git);
     for (k, _) in std::env::vars_os() {
         if k.to_string_lossy().starts_with("GIT_") {
@@ -74,28 +78,36 @@ fn command(git: &Path, root: &Path) -> Command {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_PAGER", "cat")
         .env("LC_ALL", "C")
-        .args([
-            "--no-pager",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.fsmonitor=false",
-            "-c",
-            "core.quotePath=false",
-            "-c",
-            "status.relativePaths=false",
-            "-c",
-            "color.ui=false",
-        ])
+        .args(["--no-pager", "-c", "core.fsmonitor=false"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     cmd
 }
 
+fn command(git: &Path, root: &Path) -> Command {
+    let mut cmd = isolated(git, root);
+    cmd.args([
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.quotePath=false",
+        "-c",
+        "status.relativePaths=false",
+        "-c",
+        "color.ui=false",
+    ]);
+    cmd
+}
+
 /// Runs git, bounded by [`GIT_TIMEOUT`]; stdout on success, the stderr text on failure.
 fn run(git: &Path, root: &Path, args: &[&str]) -> Result<Result<Vec<u8>, String>, GitError> {
-    let mut child = command(git, root).args(args).spawn()?;
+    run_command(command(git, root), args)
+}
+
+/// [`run`] with a prepared command.
+fn run_command(mut cmd: Command, args: &[&str]) -> Result<Result<Vec<u8>, String>, GitError> {
+    let mut child = cmd.args(args).spawn()?;
     // Read both pipes on threads (a full pipe would block the child).
     let mut out = child
         .stdout
@@ -168,6 +180,174 @@ pub fn discover(root: &Path) -> Result<Repo, GitError> {
         git_dir,
         prefix,
     })
+}
+
+/// What the configuration of the repository a folder is in can make git run, as git itself
+/// reads it (review E2): what the agent gate protects beside `.git`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfigFiles {
+    /// The hooks directory git uses: `core.hooksPath` from wherever it is set (an included file,
+    /// the global configuration), else the git directory's own `hooks`. `None` when nothing
+    /// sets one (outside a repository).
+    pub hooks: Option<PathBuf>,
+    /// The repository's git directory and its common directory: not `.git` for a worktree, a
+    /// submodule or a repository made with `--separate-git-dir` (a `.git` file points there).
+    pub git_dirs: Vec<PathBuf>,
+    /// Every file git reads configuration from, and every file an `include.path` or
+    /// `includeIf.<condition>.path` names, whether it exists yet or not (an agent could create
+    /// it). Absolute, as git names them (not resolved through symlinks).
+    pub files: Vec<PathBuf>,
+}
+
+/// [`ConfigFiles`] for `root`, from git's own answers (`rev-parse --git-path hooks`,
+/// `config --list --show-origin`): no configuration file is parsed here. Outside a repository,
+/// what `<root>/.git/config` sets if there is one (a `.git` directory that is not a repository
+/// yet: `git init` keeps its configuration); else nothing. An error when git is missing or does
+/// not answer as expected: the caller then protects more, not less.
+pub fn config_files(root: &Path) -> Result<ConfigFiles, GitError> {
+    let git = find_git().ok_or(GitError::NoGit)?;
+    let rev = run_command(
+        isolated(&git, root),
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+            "--git-path",
+            "hooks",
+            "--is-inside-work-tree",
+        ],
+    )?;
+    match rev {
+        Ok(out) => {
+            let lines: Vec<&[u8]> = out.split(|b| *b == b'\n').collect();
+            let (git_dir, common, hooks, inside) = match lines.as_slice() {
+                [a, b, c, d, rest @ ..] if rest.iter().all(|l| l.is_empty()) => {
+                    (path_of(a), path_of(b), path_of(c), *d == b"true")
+                }
+                _ => return Err(GitError::Failed("unexpected `git rev-parse` output".into())),
+            };
+            if ![&git_dir, &common, &hooks].iter().all(|p| p.is_absolute()) {
+                // An older git without `--path-format`: not answered as asked.
+                return Err(GitError::Failed("unexpected `git rev-parse` output".into()));
+            }
+            // A relative origin is relative to where git runs: the top of the work tree, or
+            // the git directory.
+            let base = if inside {
+                let top = run_command(
+                    isolated(&git, root),
+                    &["rev-parse", "--path-format=absolute", "--show-toplevel"],
+                )?
+                .map_err(GitError::Failed)?;
+                let top = path_of(top.strip_suffix(b"\n").unwrap_or(&top));
+                if !top.is_absolute() {
+                    return Err(GitError::Failed("unexpected `git rev-parse` output".into()));
+                }
+                top
+            } else {
+                git_dir.clone()
+            };
+            let list = run_command(
+                isolated(&git, root),
+                &["config", "--list", "--show-origin", "-z"],
+            )?
+            .map_err(GitError::Failed)?;
+            let (files, _) = config_origins(&list, &base);
+            Ok(ConfigFiles {
+                hooks: Some(hooks),
+                git_dirs: vec![git_dir, common],
+                files,
+            })
+        }
+        Err(e) if e.contains("not a git repository") => {
+            let config = root.join(".git").join("config");
+            if std::fs::symlink_metadata(&config).is_err() {
+                return Ok(ConfigFiles::default());
+            }
+            let mut cmd = isolated(&git, root);
+            cmd.args(["config", "--file"]).arg(&config);
+            let list = run_command(cmd, &["--includes", "--list", "--show-origin", "-z"])?
+                .map_err(GitError::Failed)?;
+            let (mut files, hooks) = config_origins(&list, root);
+            if !files.contains(&config) {
+                files.push(config);
+            }
+            Ok(ConfigFiles {
+                // Hooks run from the top of the work tree that `git init` would make here.
+                hooks: hooks.and_then(|h| expand_path(&h, root)),
+                git_dirs: Vec::new(),
+                files,
+            })
+        }
+        Err(e) => Err(GitError::Failed(e)),
+    }
+}
+
+/// From `git config --list --show-origin -z`: every file it read (relative ones from `base`)
+/// and every file an include names, and the last `core.hooksPath` value.
+fn config_origins(list: &[u8], base: &Path) -> (Vec<PathBuf>, Option<Vec<u8>>) {
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut hooks = None;
+    fn push(files: &mut Vec<PathBuf>, p: PathBuf) {
+        if !files.contains(&p) {
+            files.push(p);
+        }
+    }
+    let mut parts = list.split(|b| *b == 0);
+    while let (Some(origin), Some(entry)) = (parts.next(), parts.next()) {
+        let Some(file) = origin.strip_prefix(b"file:") else {
+            continue; // the command line, a blob, standard input
+        };
+        let file = base.join(path_of(file));
+        push(&mut files, file.clone());
+        let (key, value) = match entry.iter().position(|b| *b == b'\n') {
+            Some(i) => (&entry[..i], Some(&entry[i + 1..])),
+            None => (entry, None),
+        };
+        let key = String::from_utf8_lossy(key).to_ascii_lowercase();
+        let Some(value) = value else { continue };
+        let include =
+            key == "include.path" || (key.starts_with("includeif.") && key.ends_with(".path"));
+        if include {
+            // Relative to the directory of the file that includes it.
+            let dir = file.parent().unwrap_or(base);
+            if let Some(p) = expand_path(value, dir) {
+                push(&mut files, p);
+            }
+        } else if key == "core.hookspath" {
+            hooks = Some(value.to_vec());
+        }
+    }
+    (files, hooks)
+}
+
+/// A path value from git's configuration: `~/` is the home directory, a relative path is from
+/// `dir`. `None` for what cannot be placed here (`~user/`, `%(prefix)/`, empty).
+fn expand_path(value: &[u8], dir: &Path) -> Option<PathBuf> {
+    if value.is_empty() || value.starts_with(b"%(") {
+        return None;
+    }
+    if let Some(rest) = value.strip_prefix(b"~/") {
+        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+        return Some(PathBuf::from(home).join(path_of(rest)));
+    }
+    if value.starts_with(b"~") {
+        return None;
+    }
+    Some(dir.join(path_of(value)))
+}
+
+/// A path from git's output, byte for byte where the platform allows.
+fn path_of(bytes: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
 fn state(c: u8) -> GitFileState {
@@ -314,7 +494,12 @@ fn no_repo(reason: String) -> GitStatus {
 pub fn show(root: &Path, path: &str, head: bool) -> Result<(Option<String>, bool), GitError> {
     let repo = discover(root)?;
     let spec = format!("{}:{}{}", if head { "HEAD" } else { "" }, repo.prefix, path);
-    let bytes = run(&repo.git, root, &["show", &spec])?.map_err(|e| {
+    let bytes = run(
+        &repo.git,
+        root,
+        &["show", "--no-ext-diff", "--no-textconv", &spec],
+    )?
+    .map_err(|e| {
         GitError::NotFound(if e.is_empty() {
             format!(
                 "{path} is not in {}.",

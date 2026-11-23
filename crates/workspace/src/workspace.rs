@@ -144,6 +144,45 @@ impl Workspace {
         Ok(WorkspacePath(parts.join("/")))
     }
 
+    /// A host path as the workspace path it is, through any symlink, when it is inside the
+    /// workspace (the root itself is the empty path); `None` outside it, or not valid Unicode.
+    /// What exists is resolved as the disk does, a part that does not exist yet is taken as
+    /// written. For paths git names (the agent gate, review E2). Blocking.
+    pub fn workspace_path_of(&self, abs: &Path) -> Option<WorkspacePath> {
+        let mut real = PathBuf::new();
+        let mut exists = true;
+        for c in abs.components() {
+            match c {
+                Component::Prefix(_) | Component::RootDir => real.push(c),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    real.pop();
+                }
+                Component::Normal(n) => {
+                    real.push(n);
+                    if exists {
+                        match dunce::canonicalize(&real) {
+                            Ok(r) => real = r,
+                            Err(_) => exists = false,
+                        }
+                    }
+                }
+            }
+        }
+        let rel = real.strip_prefix(&self.inner.root).ok()?;
+        let mut parts = Vec::new();
+        for c in rel.components() {
+            match c {
+                Component::Normal(s) => parts.push(s.to_str()?.to_string()),
+                _ => return None,
+            }
+        }
+        if parts.is_empty() {
+            return Some(WorkspacePath(String::new()));
+        }
+        self.canonical_path(&WorkspacePath(parts.join("/"))).ok()
+    }
+
     /// Right before an operation, under its lock: `path` must still resolve to `abs`, the host
     /// path it had when the operation started (`entry`: resolved as an entry, its own name not
     /// followed), and, with `judged`, be the workspace path the agent gate judged when the call

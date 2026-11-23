@@ -209,3 +209,37 @@ async fn a_fifo_is_refused_not_read() {
     .expect("must not block");
     assert!(r.is_err());
 }
+
+/// Review E6: a rename onto another name of the same file (a hard link) is refused like any
+/// existing target, and both names are kept; it is not taken for a case-only rename. A
+/// case-only rename still works, on a case-insensitive volume as on a case-sensitive one.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_rename_onto_a_hard_link_is_refused_and_a_case_only_rename_works() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("a.txt"), "a").unwrap();
+    std::fs::hard_link(d.path().join("a.txt"), d.path().join("b.txt")).unwrap();
+    std::fs::write(d.path().join("Case.txt"), "c").unwrap();
+    let w = open(d.path()).await;
+    assert!(matches!(
+        w.rename(&wp("a.txt"), &wp("b.txt")).await.unwrap_err(),
+        WsError::AlreadyExists(_)
+    ));
+    let mut names: Vec<String> = std::fs::read_dir(d.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["Case.txt", "a.txt", "b.txt"]);
+    w.rename(&wp("Case.txt"), &wp("case.txt")).await.unwrap();
+    let names: Vec<String> = std::fs::read_dir(d.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.contains(&"case.txt".to_string()), "{names:?}");
+    assert!(!names.contains(&"Case.txt".to_string()), "{names:?}");
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("case.txt")).unwrap(),
+        "c"
+    );
+}

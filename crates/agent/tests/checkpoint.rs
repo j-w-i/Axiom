@@ -361,10 +361,12 @@ async fn checkpoint_restore_puts_back_a_directory_the_agent_made_a_symlink() {
 
 /// Review D4, decided: a restore never writes into a git directory, a bare repository's
 /// (`<name>.git/hooks` run on a push to it) included; hooks there change only through the gate.
-/// The refusal comes before anything changes. The workspace's own configuration (`.axiom/`) is
-/// restored like any file: the restore is the person's undo of what the agent left.
+/// Review E3: those paths are skipped, and the rest of the restore goes ahead; an ordinary name
+/// that ends in `.git` (a file, a folder that is no repository) is restored like any other. The
+/// workspace's own configuration (`.axiom/`) is restored like any file: the restore is the
+/// person's undo of what the agent left.
 #[tokio::test]
-async fn checkpoint_restore_refuses_git_directories_and_restores_axiom_configuration() {
+async fn checkpoint_restore_skips_git_directories_and_restores_the_rest() {
     let data = tempfile::tempdir().unwrap();
     let ws = tempfile::tempdir().unwrap();
     let r = ws.path();
@@ -388,25 +390,33 @@ async fn checkpoint_restore_refuses_git_directories_and_restores_axiom_configura
         "[agent.policy]\ndefault = \"ask\"\n"
     );
 
+    // A hooks folder in a `<name>.git` (by its name), a bare repository's own file (found on
+    // disk: it has a HEAD), and ordinary names ending in `.git`.
     write(r, "mirror.git/hooks/post-update", "orig\n");
+    git(r, &["init", "-q", "--bare", "bare.git"]);
+    write(r, "bare.git/description", "orig\n");
+    write(r, "deps.git", "orig\n");
+    write(r, "vendor/lib.git/notes.txt", "orig\n");
     let n = s.create("s", "with the mirror", 1).await.unwrap().number;
     write(r, "mirror.git/hooks/post-update", "changed\n");
+    write(r, "bare.git/description", "changed\n");
+    write(r, "deps.git", "changed\n");
+    write(r, "vendor/lib.git/notes.txt", "changed\n");
     write(r, "a.txt", "agent\n");
     s.record_post("s").await.unwrap();
-    let e = s.restore("s", n, 1, false).await.unwrap_err();
-    assert!(
-        matches!(&e, CheckpointError::Io(m) if m.contains("git directory")),
-        "{e:?}"
-    );
+    let res = s.restore("s", n, 1, false).await.unwrap();
     assert_eq!(
         read(r, "mirror.git/hooks/post-update").unwrap(),
-        "changed\n"
+        "changed\n",
+        "a restore wrote a hook"
     );
-    assert_eq!(
-        read(r, "a.txt").unwrap(),
-        "agent\n",
-        "a refused restore changed a file"
-    );
+    assert_eq!(read(r, "bare.git/description").unwrap(), "changed\n");
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    assert_eq!(read(r, "deps.git").unwrap(), "orig\n");
+    assert_eq!(read(r, "vendor/lib.git/notes.txt").unwrap(), "orig\n");
+    let mut restored: Vec<&str> = res.restored.iter().map(|p| p.0.as_str()).collect();
+    restored.sort();
+    assert_eq!(restored, ["a.txt", "deps.git", "vendor/lib.git/notes.txt"]);
 }
 
 /// Review D4: the restored file gets the permission bits of the file it replaces, never its

@@ -893,3 +893,310 @@ async fn an_approver_that_attaches_during_a_slow_delivery_is_asked_and_answers_a
         assert!(t < Duration::from_secs(5), "{what} after {t:?}");
     }
 }
+
+// ---- Review E2, E3: what git reads, as git itself answers ----
+
+fn git_in(dir: &std::path::Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "init.defaultBranch=main"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+async fn allow_every_write(d: &Daemon) {
+    let allow = |effect| PolicyRule {
+        effect: Some(effect),
+        tool: None,
+        path: None,
+        argv_prefix: None,
+        decision: Decision::Allow,
+    };
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Ask,
+            rules: vec![allow(Effect::WriteWorkspace), allow(Effect::Delete)],
+        })
+        .await
+        .unwrap();
+}
+
+/// The write asks (the test denies it) as a protected path, under a policy that allows every
+/// write, and nothing changes.
+async fn write_asks(d: &Daemon, f: &common::Fixture, input: Value) {
+    let path = input["path"].as_str().unwrap().to_string();
+    let existed = f.root.join(&path).exists();
+    let (r, req) = call_answering(
+        d,
+        call(&f.id, "fs.applyPatch", input),
+        ApprovalDecision::Deny,
+    )
+    .await;
+    assert_eq!(kind(&r.unwrap_err()), ErrorKind::ApprovalDenied, "{path}");
+    assert!(!req.can_remember, "{path}");
+    assert!(
+        req.rule
+            .as_deref()
+            .unwrap_or_default()
+            .contains("protected"),
+        "{path}: {req:?}"
+    );
+    assert_eq!(f.root.join(&path).exists(), existed, "{path}");
+}
+
+/// The write runs without asking.
+async fn write_unasked(d: &Daemon, f: &common::Fixture, path: &str) {
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        d.client.request::<ToolCall>(call(
+            &f.id,
+            "fs.applyPatch",
+            json!({"path": path, "create": "x\n"}),
+        )),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("{path}: the write asked"))
+    .unwrap();
+    assert!(!r.is_error, "{path}: {}", r.text);
+}
+
+fn create(path: &str) -> Value {
+    json!({"path": path, "create": "#!/bin/sh\necho owned\n"})
+}
+
+/// Review E2 (a), the reviewer's probe: a file in the workspace that `.git/config` includes
+/// (`include.path`, `includeIf`) can set `core.hooksPath`, `core.fsmonitor` or
+/// `core.sshCommand`. Writing it always asks, whether it exists yet or not, and so does what
+/// it includes in turn and the hooks directory it names. An ordinary file, or a file named
+/// like a bare repository that is not one, does not ask.
+#[tokio::test]
+async fn files_git_configuration_includes_always_ask() {
+    let d = approving_daemon().await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    git_in(&f.root, &["config", "include.path", "../shared.gitconfig"]);
+    git_in(
+        &f.root,
+        &[
+            "config",
+            "includeIf.onbranch:main.path",
+            "../branch.gitconfig",
+        ],
+    );
+    std::fs::create_dir_all(f.root.join("tools/hooks")).unwrap();
+    std::fs::create_dir_all(f.root.join("vendor/lib.git")).unwrap();
+    allow_every_write(&d).await;
+    write_asks(
+        &d,
+        &f,
+        json!({"path": "shared.gitconfig", "create": "[core]\n\thooksPath = tools/hooks\n"}),
+    )
+    .await;
+    write_asks(&d, &f, create("branch.gitconfig")).await;
+    // Once the person has written it, what it names is protected too.
+    std::fs::write(
+        f.root.join("shared.gitconfig"),
+        "[core]\n\thooksPath = tools/hooks\n[include]\n\tpath = nested/more.gitconfig\n",
+    )
+    .unwrap();
+    write_asks(&d, &f, create("tools/hooks/pre-commit")).await;
+    write_asks(&d, &f, create("nested/more.gitconfig")).await;
+    write_asks(&d, &f, json!({"path": "shared.gitconfig", "delete": true})).await;
+    write_unasked(&d, &f, "tools/other.txt").await;
+    write_unasked(&d, &f, "deps.git").await;
+    write_unasked(&d, &f, "vendor/lib.git/README.md").await;
+}
+
+/// Review E2 (b), the reviewer's probe: a `.git` file (a worktree, a submodule, a separate git
+/// directory). The hooks directory its repository's configuration names asks; so does the
+/// repository itself when it is inside the workspace.
+#[tokio::test]
+async fn a_git_file_repository_is_protected_too() {
+    let d = approving_daemon().await;
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    let outside = tempfile::tempdir().unwrap();
+    let gd = outside.path().join("repo.git");
+    git_in(
+        &f.root,
+        &[
+            "init",
+            "-q",
+            "--separate-git-dir",
+            gd.to_str().unwrap(),
+            f.root.to_str().unwrap(),
+        ],
+    );
+    git_in(&f.root, &["config", "core.hooksPath", "tools/hooks"]);
+    write_asks(&d, &f, create("tools/hooks/pre-commit")).await;
+    write_unasked(&d, &f, "other.txt").await;
+
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    let meta = f.root.join("meta");
+    git_in(
+        &f.root,
+        &[
+            "init",
+            "-q",
+            "--separate-git-dir",
+            meta.to_str().unwrap(),
+            f.root.to_str().unwrap(),
+        ],
+    );
+    write_asks(&d, &f, create("meta/hooks/pre-commit")).await;
+    write_asks(&d, &f, create("meta/info/attributes")).await;
+    write_asks(&d, &f, json!({"path": "meta/config", "delete": true})).await;
+    write_unasked(&d, &f, "src.txt").await;
+}
+
+/// Review E3: the hooks directory is git's own reading of the configuration, so what the old
+/// parser missed is protected: a value continued with a backslash, a configuration with bytes
+/// that are not UTF-8 or larger than a file the workspace reads as text, quotes and comments,
+/// and `hooksPath = .` (the hooks are then the hook names at the workspace root, not every
+/// file).
+#[tokio::test]
+async fn the_hooks_directory_is_the_one_git_uses() {
+    let d = approving_daemon().await;
+    allow_every_write(&d).await;
+    let cases: Vec<(Vec<u8>, &str)> = vec![
+        (
+            b"[core]\n\thooksPath = \\\n\ttools/hooks\n".to_vec(),
+            "tools/hooks/pre-commit",
+        ),
+        (
+            b"# \xff\xfe not UTF-8\n[core]\n\thooksPath = \"tools/my hooks\" ; a comment\n"
+                .to_vec(),
+            "tools/my hooks/pre-push",
+        ),
+        (
+            {
+                let mut v = b"[core]\n\thooksPath = tools/hooks\n".to_vec();
+                let pad = format!("# {}\n", "x".repeat(1022));
+                while v.len() <= 17 * 1024 * 1024 {
+                    v.extend_from_slice(pad.as_bytes());
+                }
+                v
+            },
+            "tools/hooks/post-checkout",
+        ),
+        (b"[core]\n\thooksPath = .\n".to_vec(), "pre-commit"),
+    ];
+    for (config, hook) in cases {
+        let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+        git_in(&f.root, &["init", "-q"]);
+        let mut c = std::fs::read(f.root.join(".git/config")).unwrap();
+        c.extend_from_slice(&config);
+        std::fs::write(f.root.join(".git/config"), c).unwrap();
+        write_asks(&d, &f, create(hook)).await;
+        write_unasked(&d, &f, "notes.txt").await;
+    }
+}
+
+/// Review E2: where git cannot answer (here a configuration it refuses to read), the gate does
+/// not fall back to nothing: names that may be git configuration or hooks ask.
+#[tokio::test]
+async fn without_an_answer_from_git_config_like_names_ask() {
+    let d = approving_daemon().await;
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    let mut c = std::fs::read_to_string(f.root.join(".git/config")).unwrap();
+    c.push_str("[core\n");
+    std::fs::write(f.root.join(".git/config"), c).unwrap();
+    write_asks(&d, &f, create("shared.gitconfig")).await;
+    write_asks(&d, &f, create(".githooks/pre-commit")).await;
+    write_unasked(&d, &f, "src.txt").await;
+}
+
+/// Review E5: where the policy allows a command, no card is shown, so the result itself says
+/// which variables the process did not get, and for `SSH_AUTH_SOCK` what that breaks and how
+/// to pass it. `preview.start` (a dev server the agent starts) says so too, on the card and in
+/// its result.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_allowed_command_says_in_its_result_what_it_did_not_get() {
+    use axiom_protocol::preview::{PreviewInfo, PreviewRef, Stop};
+    let data = tempfile::tempdir().unwrap();
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("SSH_AUTH_SOCK", "/nonexistent/agent.sock")
+            .env("FOO_TOKEN", "s3cret-token");
+    })
+    .await;
+    let mut info = client_info();
+    info.protocol_version = "0.3".into();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Ask,
+            rules: vec![PolicyRule {
+                effect: Some(Effect::Execute),
+                tool: Some("task.run".into()),
+                path: None,
+                argv_prefix: None,
+                decision: Decision::Allow,
+            }],
+        })
+        .await
+        .unwrap();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        d.client
+            .request::<ToolCall>(call(&f.id, "task.run", json!({"argv": ["env"]}))),
+    )
+    .await
+    .expect("task.run asked")
+    .unwrap();
+    assert!(!r.is_error, "{}", r.text);
+    assert!(
+        !r.text.contains("s3cret") && !r.text.contains("/nonexistent/"),
+        "{}",
+        r.text
+    );
+    let last = r.text.lines().last().unwrap_or_default();
+    assert!(
+        last.contains("SSH_AUTH_SOCK")
+            && last.contains("FOO_TOKEN")
+            && last.contains("git over SSH")
+            && last.contains("agent.passEnv"),
+        "{}",
+        r.text
+    );
+
+    // The dev server: asked (no rule allows it), and the card and the result both say it.
+    let server = json!({"argv": ["sh", "-c",
+        "echo '  Local:   http://127.0.0.1:5998/'; exec sleep 60"]});
+    let (r, req) = call_answering(
+        &d,
+        call(&f.id, "preview.start", server),
+        ApprovalDecision::Once,
+    )
+    .await;
+    let r = r.unwrap();
+    assert!(!r.is_error, "{}", r.text);
+    let preview = req.preview.unwrap_or_default();
+    assert!(
+        preview.contains("withheld") && preview.contains("SSH_AUTH_SOCK"),
+        "{preview}"
+    );
+    assert!(
+        r.text.contains("withheld") && r.text.contains("SSH_AUTH_SOCK"),
+        "{}",
+        r.text
+    );
+    let started: PreviewInfo = serde_json::from_value(r.output).unwrap();
+    d.client
+        .request::<Stop>(PreviewRef {
+            preview_id: started.preview_id,
+        })
+        .await
+        .unwrap();
+}

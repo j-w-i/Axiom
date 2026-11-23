@@ -247,3 +247,122 @@ fn status_of_this_repository_is_fast() {
         "{ms} ms (median of {times:?}), limit {limit} ms"
     );
 }
+
+/// Review E2: the daemon's own `git status` and `git show` run no program the repository's
+/// configuration names, even from a file in the work tree that `.git/config` includes (an
+/// agent could have written it): not `core.fsmonitor` (run on reading the index), not an
+/// external diff, not a textconv filter.
+#[cfg(unix)]
+#[test]
+fn status_and_show_run_no_program_the_repository_configures() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = repo();
+    let p = d.path();
+    let outside = tempfile::tempdir().unwrap();
+    let marker = outside.path().join("ran");
+    let script = outside.path().join("prog.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"$0 $*\" >> '{}'\nexit 1\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let s = script.display();
+    std::fs::write(
+        p.join("shared.gitconfig"),
+        format!(
+            "[core]\n\tfsmonitor = {s}\n[diff]\n\texternal = {s}\n[diff \"x\"]\n\ttextconv = {s}\n"
+        ),
+    )
+    .unwrap();
+    g(p, &["config", "include.path", "../shared.gitconfig"]);
+    std::fs::write(p.join(".gitattributes"), "*.txt diff=x\n").unwrap();
+    std::fs::write(p.join("mod.txt"), "two\n").unwrap();
+    let st = git::status(p).unwrap();
+    assert!(st.repo);
+    git::show(p, "mod.txt", true).unwrap();
+    git::show(p, "mod.txt", false).unwrap();
+    assert!(
+        !marker.exists(),
+        "a configured program ran: {}",
+        std::fs::read_to_string(&marker).unwrap_or_default()
+    );
+}
+
+/// Review E2: what the agent gate protects is git's own answer. The configuration files in
+/// play and every file an include names (whether it exists yet or not, `includeIf` too), the
+/// hooks directory however it is set (here in an included file), and for a `.git` file the
+/// repository it points to.
+#[test]
+fn config_files_are_what_git_reads() {
+    let d = repo();
+    let p = &dunce::canonicalize(d.path()).unwrap();
+    g(p, &["config", "include.path", "../shared.gitconfig"]);
+    g(
+        p,
+        &[
+            "config",
+            "includeIf.onbranch:main.path",
+            "../branch.gitconfig",
+        ],
+    );
+    std::fs::write(
+        p.join("shared.gitconfig"),
+        "[core]\n\thooksPath = tools/hooks\n[include]\n\tpath = nested/more.gitconfig\n",
+    )
+    .unwrap();
+    let c = git::config_files(p).unwrap();
+    assert_eq!(c.hooks.as_deref(), Some(p.join("tools/hooks").as_path()));
+    let norm = |f: &Path| {
+        let s = f.to_string_lossy().replace(".git/../", "");
+        std::path::PathBuf::from(s)
+    };
+    let files: Vec<_> = c.files.iter().map(|f| norm(f)).collect();
+    for want in [
+        p.join(".git/config"),
+        p.join("shared.gitconfig"),
+        p.join("branch.gitconfig"),
+        p.join("nested/more.gitconfig"),
+    ] {
+        assert!(files.contains(&want), "{want:?} not in {files:?}");
+    }
+    assert!(c.git_dirs.contains(&p.join(".git")), "{:?}", c.git_dirs);
+
+    // A `.git` file: the repository is elsewhere.
+    let w = tempfile::tempdir().unwrap();
+    let w = &dunce::canonicalize(w.path()).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let gd = dunce::canonicalize(outside.path())
+        .unwrap()
+        .join("repo.git");
+    g(
+        w,
+        &[
+            "init",
+            "-q",
+            "--separate-git-dir",
+            gd.to_str().unwrap(),
+            w.to_str().unwrap(),
+        ],
+    );
+    g(w, &["config", "core.hooksPath", "tools/hooks"]);
+    let c = git::config_files(w).unwrap();
+    assert_eq!(c.hooks.as_deref(), Some(w.join("tools/hooks").as_path()));
+    assert!(c.git_dirs.contains(&gd), "{:?}", c.git_dirs);
+    assert!(c.files.contains(&gd.join("config")), "{:?}", c.files);
+
+    // Outside a repository: nothing, unless a `.git/config` is waiting for `git init`.
+    let n = tempfile::tempdir().unwrap();
+    assert_eq!(
+        git::config_files(n.path()).unwrap(),
+        git::ConfigFiles::default()
+    );
+    std::fs::create_dir(n.path().join(".git")).unwrap();
+    std::fs::write(n.path().join(".git/config"), "[core]\n\thooksPath = .\n").unwrap();
+    let c = git::config_files(n.path()).unwrap();
+    assert_eq!(c.hooks.as_deref(), Some(n.path()));
+    assert_eq!(c.files, [n.path().join(".git/config")]);
+}

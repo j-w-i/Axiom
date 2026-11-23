@@ -750,19 +750,33 @@ fn withhold(env: &mut std::collections::BTreeMap<String, String>, names: &[Strin
 }
 
 /// The environment of a process an agent starts: the project's over the daemon's, without the
-/// withheld variables.
+/// withheld variables; and their names.
 async fn spawn_env(
     app: &App,
     ctx: &ToolCtx,
-) -> Result<std::collections::BTreeMap<String, String>, ToolError> {
+) -> Result<(std::collections::BTreeMap<String, String>, Vec<String>), ToolError> {
     let wsinfo = workspace(app, &ctx.workspace_id).await.map_err(rpc)?;
     let r = env_registry(app, Some(wsinfo)).await.map_err(rpc)?;
     let environment = project_environment(app, &ctx.workspace_id, &r)
         .await
         .map_err(rpc)?;
     let mut env = axiom_env::project::process_env(&environment, std::env::var_os("PATH"));
-    withhold(&mut env, &withheld(app).await?);
-    Ok(env)
+    let hidden = withheld(app).await?;
+    withhold(&mut env, &hidden);
+    Ok((env, hidden))
+}
+
+/// A tool's result text with the line that says which variables the process it started did
+/// not get, when any were withheld (review E5): a call the policy allows shows no card, so a
+/// `git push` that fails for want of `SSH_AUTH_SOCK` is explained here, with how to pass it.
+fn with_env_note(mut text: String, hidden: &[String]) -> String {
+    if let Some(line) = axiom_agent::secrets::describe(hidden) {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&line);
+    }
+    text
 }
 
 async fn task_run(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOutput, ToolError> {
@@ -772,10 +786,11 @@ async fn task_run(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOut
         .unwrap_or(DEFAULT_TIMEOUT)
         .clamp(1, MAX_TIMEOUT);
     let w = ws(app, ctx)?;
+    let (env, hidden) = spawn_env(app, ctx).await?;
     let spec = SpawnSpec {
         command: Command::Argv(t.argv.clone()),
         cwd: w.root().to_path_buf(),
-        env: spawn_env(app, ctx).await?,
+        env,
         label: Some(format!("agent: {}", t.argv.join(" "))),
     };
     let (v, _, cut) = run_to_end(app, ctx, spec, Duration::from_secs(timeout), |_| {}).await?;
@@ -800,7 +815,7 @@ async fn task_run(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<ToolOut
     );
     Ok(ToolOutput {
         output: v,
-        text,
+        text: with_env_note(text, &hidden),
         summary,
         truncated: cut,
     })
@@ -918,7 +933,8 @@ async fn build_run(
         )
         .hint("Call build.run again: the person approves the command as it is now."));
     }
-    withhold(&mut built.spec.env, &withheld(app).await?);
+    let hidden = withheld(app).await?;
+    withhold(&mut built.spec.env, &hidden);
     let provider = built.provider;
     let root = built.root;
     let started = Instant::now();
@@ -998,7 +1014,7 @@ async fn build_run(
             started.elapsed().as_secs_f64()
         ),
         output: v,
-        text,
+        text: with_env_note(text, &hidden),
         truncated: cut || diags.len() > MAX_DIAGNOSTICS,
     })
 }
@@ -1234,6 +1250,8 @@ async fn prepare_preview(
     let w = ws(app, ctx)?;
     Ok(Targets {
         argv: Some(preview_argv(w.root(), p.argv)),
+        // The dev server does not get them either (review E5).
+        preview: axiom_agent::secrets::describe(&withheld(app).await?),
         ..Default::default()
     })
 }
@@ -1275,7 +1293,7 @@ async fn preview_start(
     .map_err(rpc)?;
     Ok(ToolOutput {
         output: serde_json::to_value(&info).unwrap_or_default(),
-        text: preview_text(&info),
+        text: with_env_note(preview_text(&info), &hidden),
         summary: info.url.clone().unwrap_or_else(|| "preview".into()),
         truncated: false,
     })
@@ -1798,6 +1816,22 @@ fn acp_env_conditions(env: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
+/// One line per variable the agent sets, for the card: a name or value with a line break,
+/// whitespace, quotes or control characters is quoted with `\` escapes (as an argv is), so a
+/// value cannot add lines that pass for the card's own or a terminal prompt's (review E6).
+fn acp_env_lines(env: &[(String, String)]) -> Vec<String> {
+    use axiom_agent::tools::display_argv;
+    env.iter()
+        .map(|(n, v)| {
+            format!(
+                "  {}={}",
+                display_argv(std::slice::from_ref(n)),
+                display_argv(std::slice::from_ref(v))
+            )
+        })
+        .collect()
+}
+
 /// Everything that decides what the terminal runs is on the card: the argv, the variables the
 /// agent sets and a working directory other than the root. Either of the latter makes it ask
 /// even where a rule allows the argv (AUD-039).
@@ -1816,7 +1850,7 @@ async fn acp_prepare_terminal(
     let mut preview: Vec<String> = Vec::new();
     if !env.is_empty() {
         preview.push("The agent sets these variables:".into());
-        preview.extend(env.iter().map(|(n, v)| format!("  {n}={v}")));
+        preview.extend(acp_env_lines(&env));
     }
     if let Some(c) = &cwd {
         preview.push(format!("in the folder {}", c.0));
@@ -1842,7 +1876,7 @@ async fn acp_terminal(
         Some(c) => w.resolve(&c).map_err(ws_err)?,
         None => w.root().to_path_buf(),
     };
-    let mut env = spawn_env(app, ctx).await?;
+    let (mut env, _) = spawn_env(app, ctx).await?;
     for (n, v) in acp_env(&input)? {
         env.insert(n, v);
     }
@@ -1894,6 +1928,30 @@ mod tests {
         let mut small = Tail::default();
         small.push("a\nb\n");
         assert_eq!(small.tail(), ("a\nb".to_string(), false));
+    }
+
+    /// Review E6: a variable's value with line breaks stays on its own line on the card, so it
+    /// cannot add lines above a prompt that look like the prompt's.
+    #[test]
+    fn acp_env_values_stay_on_one_line() {
+        let env = vec![
+            (
+                "X".to_string(),
+                "1\nAllow fs.read (read) on:\n  notes.txt\r".to_string(),
+            ),
+            ("PLAIN".to_string(), "--flag=a".to_string()),
+            ("A\nB".to_string(), String::new()),
+        ];
+        let lines = acp_env_lines(&env);
+        assert_eq!(
+            lines,
+            [
+                "  X=\"1\\nAllow fs.read (read) on:\\n  notes.txt\\u{d}\"",
+                "  PLAIN=--flag=a",
+                "  \"A\\nB\"=\"\"",
+            ]
+        );
+        assert!(lines.iter().all(|l| !l.contains(['\n', '\r'])));
     }
 
     /// Two long values that share their first characters are two conditions, so an "allow

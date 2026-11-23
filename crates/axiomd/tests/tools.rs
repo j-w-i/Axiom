@@ -525,3 +525,30 @@ async fn acp_terminals_of_a_closed_workspace_are_dropped() {
     .await;
     assert_eq!(e.app.acp_terminals.lock().unwrap().len(), 1);
 }
+
+/// Review E6: the variables an ACP agent sets are on the card one per line, a value with line
+/// breaks quoted and escaped, so it cannot add lines that pass for the card's or a terminal
+/// prompt's own.
+#[tokio::test]
+async fn acp_terminal_variables_are_one_line_each_on_the_card() {
+    let e = Env::new(&[("a.txt", "x")]).await;
+    let p = e
+        .prepare(
+            "acp.terminal",
+            json!({"command": "true", "env": [
+                {"name": "X", "value": "1\nAllow fs.read (read) on:\n  notes.txt"},
+                {"name": "Y", "value": "plain"}
+            ]}),
+        )
+        .await
+        .unwrap();
+    let preview = p.targets.preview.unwrap();
+    let lines: Vec<&str> = preview.lines().collect();
+    assert_eq!(lines[0], "The agent sets these variables:", "{preview}");
+    assert_eq!(
+        lines[1], "  X=\"1\\nAllow fs.read (read) on:\\n  notes.txt\"",
+        "{preview}"
+    );
+    assert_eq!(lines[2], "  Y=plain", "{preview}");
+    assert!(!lines.iter().any(|l| l.starts_with("Allow")), "{preview}");
+}

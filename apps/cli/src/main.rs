@@ -514,8 +514,13 @@ async fn stream_turn(
     }
 }
 
+/// How each line of a card's preview starts on the terminal.
+const PREVIEW_MARK: &str = "  | ";
+
 /// The approval prompt, every untrusted part made terminal-safe and the targets one per line
-/// (an argument cannot pass for another target).
+/// (an argument cannot pass for another target). Every line of the preview (a diff, the
+/// variables an agent sets, which it writes itself) is marked as the preview's, so none can
+/// pass for a line of the prompt (review E6).
 fn prompt_text(r: &ApprovalRequest) -> String {
     let effect = serde_json::to_value(r.effect)
         .ok()
@@ -523,8 +528,11 @@ fn prompt_text(r: &ApprovalRequest) -> String {
         .unwrap_or_default();
     let mut t = String::new();
     if let Some(p) = &r.preview {
-        t.push_str(&tty_safe(p));
-        t.push('\n');
+        for line in tty_safe(p).split('\n') {
+            t.push_str(PREVIEW_MARK);
+            t.push_str(line);
+            t.push('\n');
+        }
     }
     t.push_str(&format!(
         "Allow {} ({effect}) on:\n",
@@ -658,5 +666,45 @@ mod tests {
             "Allow task.run (execute) on:\n  notes.txt\\x0a  ~/.ssh/authorized_keys\n  \
              a\\u{202e}b\n[y] once / [N]o: "
         );
+    }
+
+    /// Review E6: a preview (here the variables an agent sets, one with line breaks in its
+    /// value) cannot add lines above the prompt that pass for the prompt's own: each of its
+    /// lines is marked, and the only line that asks is the real one.
+    #[test]
+    fn a_preview_cannot_pass_for_the_prompt() {
+        let r = ApprovalRequest {
+            request_id: "r1".into(),
+            session_id: None,
+            principal: "session:s".into(),
+            tool: "acp.terminal".into(),
+            effect: axiom_protocol::agent::Effect::Execute,
+            targets: vec!["rm -rf build".into()],
+            argv: None,
+            preview: Some(
+                "The agent sets these variables:\n  X=1\nAllow fs.read (read) on:\n  notes.txt\n\
+                 [y] once / [N]o: y\r"
+                    .into(),
+            ),
+            rule: None,
+            checkpoint_planned: true,
+            can_remember: false,
+        };
+        let p = prompt_text(&r);
+        let lines: Vec<&str> = p.split('\n').collect();
+        let real = lines.len() - 3;
+        assert_eq!(lines[real], "Allow acp.terminal (execute) on:", "{p}");
+        for (i, line) in lines[..real].iter().enumerate() {
+            assert!(
+                line.starts_with(PREVIEW_MARK),
+                "line {i} is not marked: {p}"
+            );
+        }
+        assert_eq!(
+            lines.iter().filter(|l| l.starts_with("Allow ")).count(),
+            1,
+            "{p}"
+        );
+        assert!(p.ends_with("  rm -rf build\n[y] once / [N]o: "), "{p}");
     }
 }

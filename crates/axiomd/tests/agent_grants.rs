@@ -372,6 +372,8 @@ async fn a_deleted_sessions_grants_are_forgotten() {
         },
         workspace: None,
         protected: vec![],
+        git_unknown: false,
+        root: None,
     };
     let mut rx = c.notifications();
     let answer = async {
