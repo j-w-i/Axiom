@@ -722,3 +722,309 @@ async fn checkpoint_runs_no_program_the_workspace_configures() {
     // The checkpoint holds the bytes on disk, not a filter's output.
     assert_eq!(read(r, "a.txt").unwrap(), "plain\n");
 }
+
+/// Review H1: a file the person wrote where the snapshot now has no entry, because it is ignored
+/// now, is not written over by a restore: no checkpoint has its content. It is reported as not
+/// captured, and the rest is restored.
+#[tokio::test]
+async fn checkpoint_restore_never_writes_over_a_file_ignored_now() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, ".env", "OLD=1\n");
+    write(r, "a.txt", "a\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    // The agent deletes `.env` and edits a file…
+    std::fs::remove_file(r.join(".env")).unwrap();
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    // …then the person ignores `.env` and writes a new one.
+    write(r, ".gitignore", ".env\n");
+    write(r, ".env", "SECRET=new\n");
+    let out = s.restore("s", 1, 1, true).await.unwrap();
+    assert_eq!(read(r, ".env").unwrap(), "SECRET=new\n", "written over");
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    assert_eq!(read(r, ".gitignore").unwrap(), ".env\n");
+    let restored: Vec<&str> = out.result.restored.iter().map(|p| p.0.as_str()).collect();
+    assert_eq!(restored, ["a.txt"]);
+    let conflicts: Vec<_> = out
+        .result
+        .conflicts
+        .iter()
+        .map(|c| (c.path.0.as_str(), c.reason))
+        .collect();
+    assert_eq!(
+        conflicts,
+        [(".gitignore", ConflictReason::CreatedSinceAgent)]
+    );
+    assert_eq!(out.not_restored, [(wp(".env"), NotRestored::NotCaptured)]);
+    assert!(out.notice().unwrap().contains("ignored"));
+}
+
+/// Review H1, the agent's variant and the undo: the agent ignores `.env` and the person writes
+/// one. The restore leaves it (it removes the ignore rule), and its undo checkpoint, which does
+/// not capture `.env` either (ignored when it was taken), leaves it too: undoing the restore does
+/// not delete a file the restore never touched.
+#[tokio::test]
+async fn checkpoint_restore_and_its_undo_leave_a_file_ignored_when_they_ran() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, ".env", "OLD=1\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_file(r.join(".env")).unwrap();
+    write(r, ".gitignore", ".env\n");
+    s.record_post("s").await.unwrap();
+    write(r, ".env", "SECRET=new\n");
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(r, ".env").unwrap(), "SECRET=new\n", "written over");
+    assert_eq!(read(r, ".gitignore"), None);
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        [".gitignore"]
+    );
+    assert_eq!(out.not_restored, [(wp(".env"), NotRestored::NotCaptured)]);
+    // Undo the restore: the ignore rule comes back, and `.env` stays.
+    let undo = s
+        .restore("s", out.result.undo_checkpoint, 1, false)
+        .await
+        .unwrap();
+    assert_eq!(read(r, ".gitignore").unwrap(), ".env\n");
+    assert_eq!(
+        read(r, ".env").as_deref(),
+        Some("SECRET=new\n"),
+        "the undo deleted it"
+    );
+    assert_eq!(undo.not_restored, [(wp(".env"), NotRestored::NotCaptured)]);
+}
+
+/// The check for a file on disk the snapshot lacks does not stop a restore of a name whose case
+/// the agent changed (on a case-insensitive file system both names are the same file, captured
+/// under the new name once the old one left the store's index).
+#[tokio::test]
+async fn checkpoint_restore_puts_back_a_name_whose_case_the_agent_changed() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "Readme.md", "old\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_file(r.join("Readme.md")).unwrap();
+    s.record_post("s").await.unwrap();
+    write(r, "README.md", "new\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert!(out.not_restored.is_empty(), "{:?}", out.not_restored);
+    assert_eq!(read(r, "Readme.md").as_deref(), Some("old\n"));
+}
+
+/// Review H2: a restore writes nothing inside a nested repository, a path under one included. The
+/// agent replaced `sub` with a clone and the person edited a file in it (uncommitted there, so in
+/// no checkpoint); the restore leaves it and names the repository once.
+#[tokio::test]
+async fn checkpoint_restore_writes_nothing_under_a_nested_repository() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "a.txt", "a\n");
+    write(r, "sub/f.txt", "v1\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    // The agent removes `sub`, then makes it a clone, and edits a file.
+    std::fs::remove_dir_all(r.join("sub")).unwrap();
+    s.record_post("s").await.unwrap();
+    let sub = r.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    git(&sub, &["init", "-q"]);
+    write(&sub, "f.txt", "cloned\n");
+    git(&sub, &["add", "."]);
+    git(&sub, &["commit", "-q", "-m", "c"]);
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    // The person edits a file in it.
+    write(&sub, "f.txt", "PRECIOUS\n");
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(&sub, "f.txt").unwrap(), "PRECIOUS\n", "written over");
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        ["a.txt"]
+    );
+    assert_eq!(
+        out.not_restored,
+        [(wp("sub"), NotRestored::NestedRepository)]
+    );
+}
+
+/// Review H8: the gate's `makes_git_dir` rule holds in a restore. It does not write one of git's
+/// own entries into a folder that already holds what makes a git directory (`pkg/refs/`), nor
+/// two of those into one folder (`src/HEAD` with `src/commondir`). One alone in an ordinary
+/// folder (`docs/HEAD`) is restored, as the gate does not ask for it, and so is a file in a
+/// folder whose name is one of them (`lib/refs/a.ts` beside `lib/refs/b.ts`), which adds none.
+#[tokio::test]
+async fn checkpoint_restore_does_not_make_a_git_directory() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "a.txt", "a\n");
+    write(r, "src/HEAD", "ref: refs/heads/main\n");
+    write(r, "src/commondir", "../elsewhere\n");
+    write(r, "pkg/refs/README", "refs\n");
+    write(r, "pkg/config", "[core]\n");
+    write(r, "docs/HEAD", "a heading\n");
+    write(r, "lib/refs/a.ts", "a\n");
+    write(r, "lib/refs/b.ts", "b\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    for f in [
+        "src/HEAD",
+        "src/commondir",
+        "pkg/config",
+        "docs/HEAD",
+        "lib/refs/a.ts",
+    ] {
+        std::fs::remove_file(r.join(f)).unwrap();
+    }
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    for f in ["src/HEAD", "src/commondir", "pkg/config"] {
+        assert!(!r.join(f).exists(), "{f} was restored");
+    }
+    assert_eq!(read(r, "docs/HEAD").unwrap(), "a heading\n");
+    assert_eq!(read(r, "lib/refs/a.ts").unwrap(), "a\n");
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    let mut restored: Vec<&str> = out.result.restored.iter().map(|p| p.0.as_str()).collect();
+    restored.sort();
+    assert_eq!(restored, ["a.txt", "docs/HEAD", "lib/refs/a.ts"]);
+    assert_eq!(
+        out.not_restored,
+        [
+            (wp("pkg/config"), NotRestored::GitDirectory),
+            (wp("src/HEAD"), NotRestored::GitDirectory),
+            (wp("src/commondir"), NotRestored::GitDirectory),
+        ]
+    );
+}
+
+/// Review H3: a `git` killed at its bound leaves no lock behind (git's own lock on the store's
+/// index, or on the ref it was writing), so the next checkpoint succeeds. The stand-in takes the
+/// lock as the real git does, then hangs.
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_git_killed_at_its_bound_leaves_no_lock() {
+    use std::os::unix::fs::PermissionsExt;
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    write(ws.path(), "a.txt", "a\n");
+    let hang = bin.path().join("hang");
+    let stand_in = bin.path().join("git");
+    std::fs::write(
+        &stand_in,
+        format!(
+            "#!/bin/sh\nmode=$(cat '{}' 2>/dev/null)\nprev=\nfor a in \"$@\"; do\n  \
+             if [ \"$a\" = add ] && [ \"$mode\" = add ]; then : > \"$GIT_INDEX_FILE.lock\"; exec sleep 300; fi\n  \
+             if [ \"$prev\" = update-ref ] && [ \"$mode\" = update-ref ]; then mkdir -p \"$(dirname \"$GIT_DIR/$a\")\"; : > \"$GIT_DIR/$a.lock\"; exec sleep 300; fi\n  \
+             prev=$a\ndone\nexec git \"$@\"\n",
+            hang.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let bound = Duration::from_secs(3);
+    let s = Shadow::with_git(data.path(), ws.path(), stand_in).with_timeouts(bound, bound);
+    let shadow = data
+        .path()
+        .join("checkpoints")
+        .join(axiom_agent::workspace_key(ws.path()));
+    let index_lock = shadow.join("axiom-index.lock");
+    let ref_lock = shadow.join("refs/axiom/s/0001.lock");
+
+    std::fs::write(&hang, "add").unwrap();
+    let e = s.create("s", "start", 1).await.unwrap_err();
+    assert!(
+        matches!(&e, CheckpointError::TimedOut { command, .. } if command == "add"),
+        "{e:?}"
+    );
+    assert!(!index_lock.exists(), "the index lock is left");
+
+    std::fs::write(&hang, "update-ref").unwrap();
+    let e = s.create("s", "start", 1).await.unwrap_err();
+    assert!(
+        matches!(&e, CheckpointError::TimedOut { command, .. } if command == "update-ref"),
+        "{e:?}"
+    );
+    assert!(!ref_lock.exists(), "the ref lock is left");
+
+    std::fs::remove_file(&hang).unwrap();
+    assert_eq!(s.create("s", "start", 1).await.unwrap().number, 1);
+    write(ws.path(), "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(ws.path(), "a.txt").unwrap(), "a\n");
+}
+
+/// Review H3: an index lock a killed git left in the store (killed with its daemon, say) is
+/// stale: no git of ours runs while the store's lock is held. The next checkpoint, after a
+/// restart, removes it and succeeds.
+#[tokio::test]
+async fn checkpoint_removes_a_stale_index_lock() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    write(ws.path(), "a.txt", "a\n");
+    Shadow::new(data.path(), ws.path())
+        .create("s", "start", 1)
+        .await
+        .unwrap();
+    let lock = data
+        .path()
+        .join("checkpoints")
+        .join(axiom_agent::workspace_key(ws.path()))
+        .join("axiom-index.lock");
+    std::fs::write(&lock, "").unwrap();
+    write(ws.path(), "a.txt", "agent\n");
+    let s = Shadow::new(data.path(), ws.path());
+    assert_eq!(s.create("s", "next", 1).await.unwrap().number, 2);
+    assert!(!lock.exists());
+}
+
+/// Review H2, on disk: a folder that became a repository while the store's index held its files
+/// (the agent replaced `sub` with a clone within one tool) is still held as plain files by the
+/// snapshots. A restore does not write into it either: it is a repository on disk.
+#[tokio::test]
+async fn checkpoint_restore_writes_nothing_in_a_folder_that_became_a_repository() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "a.txt", "a\n");
+    write(r, "sub/f.txt", "v1\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_dir_all(r.join("sub")).unwrap();
+    let sub = r.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    git(&sub, &["init", "-q"]);
+    write(&sub, "f.txt", "cloned\n");
+    git(&sub, &["add", "."]);
+    git(&sub, &["commit", "-q", "-m", "c"]);
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(&sub, "f.txt").unwrap(), "cloned\n", "written into it");
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    assert_eq!(
+        out.not_restored,
+        [(wp("sub"), NotRestored::NestedRepository)]
+    );
+}

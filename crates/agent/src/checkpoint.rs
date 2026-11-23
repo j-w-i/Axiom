@@ -20,13 +20,17 @@
 //! - **Restore** to checkpoint C restores each file that differs between C and the workspace now
 //!   only if its content is what the agent last left; anything else is a conflict and is left
 //!   alone. A restore is preceded by a checkpoint, so it can be undone. Paths inside a git
-//!   directory, nested repositories and what a snapshot could not capture (then or now) are
-//!   never restored; they are reported ([`RestoreOutcome::not_restored`]).
+//!   directory (or that would make one), anything at or under a nested repository, and what a
+//!   snapshot could not capture (then or now, an ignored file on disk included) are never
+//!   restored; they are reported ([`RestoreOutcome::not_restored`]).
+//! - **Locked.** An operation that changes the store holds its lock: within the process, and a
+//!   lock file in the shadow directory across processes. Held, a git index lock found there is
+//!   stale (a git killed at its bound, or with its daemon) and is removed.
 
 use axiom_protocol::agent::{CheckpointInfo, ConflictReason, RestoreConflict, RestoreResult};
 use axiom_protocol::WorkspacePath;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -40,6 +44,16 @@ pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 pub const TREE_TIMEOUT: Duration = Duration::from_secs(600);
 /// The bound on any other `git` (one object or ref: milliseconds normally).
 pub const OBJECT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The store's private index, in the shadow directory.
+const INDEX: &str = "axiom-index";
+/// The file the store's operations lock, across processes (two daemons on one data dir), in the
+/// shadow directory.
+const STORE_LOCK: &str = "axiom.lock";
+
+/// What makes a folder a git directory (the gate's own list, `gate::makes_git_dir`): a restore
+/// that writes two of them into one folder could make it one (review H8).
+const GIT_DIR_MARKERS: &[&str] = &["HEAD", "commondir", "objects", "refs"];
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CheckpointError {
@@ -90,17 +104,27 @@ pub struct Shadow {
     lock: tokio::sync::Mutex<()>,
 }
 
+/// The store's lock, held for one operation ([`Shadow::hold`]); released on drop.
+struct Held<'a> {
+    _mutex: tokio::sync::MutexGuard<'a, ()>,
+    _file: Option<std::fs::File>,
+}
+
 /// Why a path that differs from the checkpoint was left as it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotRestored {
-    /// Inside a git directory (`.git`, or a `<name>.git` that is a repository): hooks run from
-    /// there, so it changes only through the gate, with the person's approval.
+    /// Inside a git directory (`.git`, or a `<name>.git` that is a repository), or one of git's
+    /// own entries written into a folder that holds or would get what makes a git directory
+    /// (the gate's `makes_git_dir` rule): hooks run from there, so it changes only through the
+    /// gate, with the person's approval.
     GitDirectory,
-    /// A nested repository (a git link): its content was never captured, and a restore never
-    /// touches it.
+    /// A nested repository (a git link in the checkpoint, now, or as the agent left the
+    /// workspace), reported by its path: its content was never captured, and a restore never
+    /// touches it or anything under it.
     NestedRepository,
     /// The checkpoint, or the snapshot of the workspace now, could not capture it (over
-    /// 16 MiB, unreadable, inside a nested repository with no commit): what it held is unknown.
+    /// 16 MiB, unreadable, inside a nested repository with no commit, or on disk but ignored
+    /// now): what it held is unknown.
     NotCaptured,
 }
 
@@ -156,8 +180,8 @@ impl RestoreOutcome {
         }
         if let Some(s) = list(NotRestored::NotCaptured) {
             text.push_str(&format!(
-                " Not captured by the checkpoint or now (too large, unreadable, or in a \
-                 repository with no commit), so their content is unknown: {s}."
+                " Not captured by the checkpoint or now (too large, unreadable, ignored, or in \
+                 a repository with no commit), so their content is unknown: {s}."
             ));
         }
         Some(text)
@@ -213,6 +237,42 @@ impl Shadow {
         self
     }
 
+    /// The store's lock, for an operation that changes it: this `Shadow`'s, then the shadow
+    /// directory's lock file, which a second daemon on the same data dir (one not listening
+    /// serves its own client over stdio) takes too. Held, no other git of ours runs in the store,
+    /// so an index lock found there was left by a git that was killed (at its bound, or with its
+    /// daemon), and is removed (review H3). Where the file system has no file locks, the store
+    /// is serialised within this process only, and an index lock is left.
+    async fn hold(&self) -> Result<Held<'_>, CheckpointError> {
+        let mutex = self.lock.lock().await;
+        let dir = self.git_dir.clone();
+        let file = tokio::task::spawn_blocking(move || {
+            let io = |e: std::io::Error| CheckpointError::Io(format!("{}: {e}", dir.display()));
+            std::fs::create_dir_all(&dir).map_err(io)?;
+            let f = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(dir.join(STORE_LOCK))
+                .map_err(io)?;
+            if let Err(e) = f.lock() {
+                tracing::warn!("checkpoint: cannot lock {}: {e}", dir.display());
+                return Ok(None);
+            }
+            let stale = dir.join(format!("{INDEX}.lock"));
+            if std::fs::remove_file(&stale).is_ok() {
+                tracing::warn!("checkpoint: removed a stale {}", stale.display());
+            }
+            Ok::<_, CheckpointError>(Some(f))
+        })
+        .await
+        .map_err(|e| CheckpointError::Io(e.to_string()))??;
+        Ok(Held {
+            _mutex: mutex,
+            _file: file,
+        })
+    }
+
     async fn git(&self, args: &[&str], stdin: Option<&[u8]>) -> Result<Vec<u8>, CheckpointError> {
         let out = self.run(args, stdin).await?;
         if !out.status.success() {
@@ -240,7 +300,7 @@ impl Shadow {
         }
         cmd.env("GIT_DIR", &self.git_dir)
             .env("GIT_WORK_TREE", &self.root)
-            .env("GIT_INDEX_FILE", self.git_dir.join("axiom-index"))
+            .env("GIT_INDEX_FILE", self.git_dir.join(INDEX))
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env(
                 "GIT_CONFIG_GLOBAL",
@@ -329,6 +389,23 @@ impl Shadow {
                 let _ = child.start_kill();
                 let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
                 tracing::warn!("checkpoint: git {command} ran past {limit:?}; stopped");
+                // A killed git leaves its lock behind, and then every later checkpoint (and so
+                // every agent write) fails, even after a restart (review H3). The lock is this
+                // git's: the shadow directory is private, and the store's lock lets no other git
+                // run in it meanwhile.
+                let mut locks = vec![self.git_dir.join(format!("{INDEX}.lock"))];
+                if let ("update-ref", Some(name)) = (command, args.get(1)) {
+                    if name.starts_with("refs/axiom/") && !name.split('/').any(|s| s == "..") {
+                        let mut p = self.git_dir.clone();
+                        p.extend(format!("{name}.lock").split('/'));
+                        locks.push(p);
+                    }
+                }
+                for l in locks {
+                    if std::fs::remove_file(&l).is_ok() {
+                        tracing::warn!("checkpoint: removed {} left by it", l.display());
+                    }
+                }
                 Err(CheckpointError::TimedOut {
                     command: command.to_string(),
                     after: limit,
@@ -477,15 +554,19 @@ impl Shadow {
         label: &str,
         turn: u32,
     ) -> Result<CheckpointInfo, CheckpointError> {
-        let _g = self.lock.lock().await;
-        self.create_locked(session, label, turn).await
+        let _g = self.hold().await?;
+        self.create_locked(session, label, turn, &[]).await
     }
 
+    /// `not_captured`: paths on disk the snapshot has no entry for besides what `git add` reports
+    /// (a restore's files that are ignored now, review H1), recorded with its `left_out` so that
+    /// restoring this checkpoint leaves them alone too.
     async fn create_locked(
         &self,
         session: &str,
         label: &str,
         turn: u32,
+        not_captured: &[String],
     ) -> Result<CheckpointInfo, CheckpointError> {
         if !valid_session(session) {
             return Err(CheckpointError::Git(format!(
@@ -500,7 +581,13 @@ impl Shadow {
             turn,
             created_ms: now_ms(),
             skipped: snap.skipped.clone(),
-            left_out: snap.left_out.clone(),
+            left_out: {
+                let mut v: Vec<String> =
+                    snap.left_out.iter().chain(not_captured).cloned().collect();
+                v.sort();
+                v.dedup();
+                v
+            },
         };
         let subject =
             serde_json::to_string(&meta).map_err(|e| CheckpointError::Io(e.to_string()))?;
@@ -520,7 +607,7 @@ impl Shadow {
 
     /// Records the workspace as the agent left it (after a writing tool).
     pub async fn record_post(&self, session: &str) -> Result<(), CheckpointError> {
-        let _g = self.lock.lock().await;
+        let _g = self.hold().await?;
         self.record_post_locked(session).await
     }
 
@@ -577,7 +664,7 @@ impl Shadow {
         turn: u32,
         skip_conflicts: bool,
     ) -> Result<RestoreOutcome, CheckpointError> {
-        let _g = self.lock.lock().await;
+        let _g = self.hold().await?;
         let refs = self.refs(session).await?;
         let (_, target_id, target_subject) = refs
             .iter()
@@ -608,25 +695,61 @@ impl Shadow {
                 || p.match_indices('/')
                     .any(|(i, _)| uncaptured.contains(&p[..i]))
         };
+        // Nested repositories (git links) in the checkpoint, now, or as the agent left the
+        // workspace: their content was never captured, and a restore never writes, removes or
+        // replaces anything at or under one (a person's uncommitted edit in a clone the agent made
+        // is in no checkpoint; review H2). Reported by the repository's path.
+        let nested: std::collections::BTreeSet<&str> = [&target, &now, &agent]
+            .into_iter()
+            .flat_map(|l| l.iter())
+            .filter(|(_, (mode, _))| mode == "160000")
+            .map(|(p, _)| p.as_str())
+            .collect();
+        let nested_repository = |p: &str| -> Option<String> {
+            p.match_indices('/')
+                .map(|(i, _)| &p[..i])
+                .chain([p])
+                .find(|d| nested.contains(d))
+                .map(str::to_string)
+        };
+        // The snapshot's paths by case, to tell a name on disk that is a captured file under
+        // another case (a case-insensitive file system) from one no snapshot captured.
+        let mut by_case: std::collections::HashMap<String, Vec<&String>> = Default::default();
         let mut paths: Vec<&String> = target.keys().chain(now.keys()).collect();
         paths.sort();
         paths.dedup();
         let mut restore = Vec::new();
         let mut conflicts = Vec::new();
         let mut not_restored = Vec::new();
-        let gitlink = |e: Option<&(String, String)>| e.is_some_and(|(mode, _)| mode == "160000");
+        // Paths the restore would create (absent from the snapshot now), with the snapshot's
+        // paths of the same name in another case.
+        let mut absent: std::collections::BTreeMap<String, Vec<String>> = Default::default();
         for p in paths {
             let (t, n, a) = (target.get(p), now.get(p), agent.get(p));
             if t == n {
                 continue;
             }
-            if gitlink(t) || gitlink(n) {
-                // A nested repository then or now: its content was never captured, and removing
-                // or replacing its directory would lose it.
-                not_restored.push((WorkspacePath(p.clone()), NotRestored::NestedRepository));
+            if let Some(repo) = nested_repository(p) {
+                not_restored.push((WorkspacePath(repo), NotRestored::NestedRepository));
             } else if is_uncaptured(p) {
                 not_restored.push((WorkspacePath(p.clone()), NotRestored::NotCaptured));
             } else if n == a {
+                // Absent now, and no captured file under it either (a folder the agent made of a
+                // file is not unknown).
+                let below = format!("{p}/");
+                let captured_below = now
+                    .range(below.clone()..)
+                    .next()
+                    .is_some_and(|(q, _)| q.starts_with(&below));
+                if n.is_none() && !captured_below {
+                    if by_case.is_empty() {
+                        for q in now.keys() {
+                            by_case.entry(q.to_lowercase()).or_default().push(q);
+                        }
+                    }
+                    let same = by_case.get(&p.to_lowercase()).into_iter().flatten();
+                    absent.insert(p.clone(), same.map(|q| (*q).clone()).collect());
+                }
                 restore.push((p.clone(), t.cloned()));
             } else {
                 let reason = match (n, a) {
@@ -643,38 +766,81 @@ impl Shadow {
         if !conflicts.is_empty() && !skip_conflicts {
             return Err(CheckpointError::Conflicts(conflicts));
         }
-        // Every path is checked before anything changes, off the async thread (review E3). A
-        // path inside a git directory (`.git`, or a `<name>.git` that is a bare repository or is
-        // being made one: `gate::git_dir_of`) is skipped, not restored: hooks run from there, so
-        // they change only through the gate, with the person's approval each time; it is
-        // reported in `not_restored`, and the rest is restored. A restore that would write through a symlinked directory changes nothing
-        // (review D4). A symlink the restore itself removes or replaces first (it sorts before
-        // what is under it) is no obstacle; the write checks again once it is gone.
+        // Every path is checked before anything changes, off the async thread (review E3).
+        // - A path inside a git directory (`.git`, or a `<name>.git` that is a bare repository or
+        //   is being made one: `gate::git_dir_of`), or a write of one of git's own entries into
+        //   a folder that holds, or that the restore also writes, what makes a git directory (the
+        //   gate's `makes_git_dir` rule, review H8), is skipped, not restored: hooks run from
+        //   there, so they change only through the gate, with the person's approval each time.
+        // - A path the snapshot now has no entry for, where something is on disk, was not
+        //   captured (ignored now, review H1): what it holds is unknown, so it is never written
+        //   over. A name that is a captured file under another case is not such a path.
+        // - Both are reported in `not_restored`, and the rest is restored. A restore that would
+        //   write through a symlinked directory changes nothing (review D4). A symlink the
+        //   restore itself removes or replaces first (it sorts before what is under it) is no
+        //   obstacle; the write checks again once it is gone.
         let root = self.root.clone();
-        let (restore, skipped) = tokio::task::spawn_blocking(move || {
-            let (skipped, kept): (Vec<_>, Vec<_>) = restore
-                .into_iter()
-                .partition(|(p, _)| crate::gate::git_dir_of(&root, p).is_some());
-            for (p, _) in &skipped {
-                tracing::warn!("restore: `{p}` is inside a git directory; not restored");
+        let (restore, left, on_disk) = tokio::task::spawn_blocking(move || {
+            let mut markers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for (p, _) in restore.iter().filter(|(_, e)| e.is_some()) {
+                for (d, e) in git_entries(p) {
+                    if GIT_DIR_MARKERS.iter().any(|m| m.eq_ignore_ascii_case(&e)) {
+                        markers.entry(d.to_ascii_lowercase()).or_default().insert(e);
+                    }
+                }
+            }
+            let (mut kept, mut left, mut on_disk) = (Vec::new(), Vec::new(), Vec::new());
+            for (p, e) in restore {
+                if crate::gate::git_dir_of(&root, &p).is_some()
+                    || (e.is_some() && makes_git_dir(&root, &p, &markers))
+                {
+                    tracing::warn!("restore: `{p}` is inside a git directory; not restored");
+                    left.push((p, NotRestored::GitDirectory, None));
+                } else if let Some(repo) = repository_on_disk(&root, &p) {
+                    // A folder on the way is a repository the snapshots hold as plain files (the
+                    // store's index had them before it became one): it is left all the same.
+                    tracing::warn!("restore: `{p}` is in the repository `{repo}`; not restored");
+                    left.push((p, NotRestored::NestedRepository, Some(repo)));
+                } else if absent
+                    .get(&p)
+                    .is_some_and(|same| uncaptured_on_disk(&root, &p, same))
+                {
+                    tracing::warn!("restore: `{p}` is on disk but was not captured; not restored");
+                    on_disk.push(p.clone());
+                    left.push((p, NotRestored::NotCaptured, None));
+                } else {
+                    kept.push((p, e));
+                }
             }
             let replaced: std::collections::BTreeSet<&str> =
                 kept.iter().map(|(p, _)| p.as_str()).collect();
-            for (p, _) in &kept {
+            // What it leaves for what is on disk (not in a git directory) is checked too: a
+            // symlinked directory on the way refuses the whole restore all the same.
+            let on_the_way = left
+                .iter()
+                .filter(|(_, why, _)| *why != NotRestored::GitDirectory)
+                .map(|(p, _, _)| p);
+            for p in kept.iter().map(|(p, _)| p).chain(on_the_way) {
                 writable(&root, p, |dir| replaced.contains(dir))?;
             }
-            Ok::<_, CheckpointError>((kept, skipped))
+            Ok::<_, CheckpointError>((kept, left, on_disk))
         })
         .await
         .map_err(|e| CheckpointError::Io(e.to_string()))??;
         not_restored.extend(
-            skipped
-                .into_iter()
-                .map(|(p, _)| (WorkspacePath(p), NotRestored::GitDirectory)),
+            left.into_iter()
+                .map(|(p, why, repo)| (WorkspacePath(repo.unwrap_or(p)), why)),
         );
         not_restored.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+        not_restored.dedup();
+        // The undo checkpoint does not capture those either: restoring it leaves them too.
         let undo = self
-            .create_locked(session, &format!("before restore to {number}"), turn)
+            .create_locked(
+                session,
+                &format!("before restore to {number}"),
+                turn,
+                &on_disk,
+            )
             .await?;
         let mut restored = Vec::new();
         for (p, entry) in restore {
@@ -808,6 +974,94 @@ fn info(number: u32, m: &Meta) -> CheckpointInfo {
         turn: m.turn,
         skipped: m.skipped.iter().map(|s| WorkspacePath(s.clone())).collect(),
     }
+}
+
+/// Where `rel` puts one of git's own entries (`gate::GIT_DIR_ENTRIES`) directly into a folder:
+/// (the folder, the root as `""`; the entry, lowercased).
+fn git_entries(rel: &str) -> Vec<(String, String)> {
+    let parts: Vec<&str> = rel.split('/').collect();
+    (0..parts.len())
+        .filter(|&i| {
+            crate::gate::GIT_DIR_ENTRIES
+                .iter()
+                .any(|e| e.eq_ignore_ascii_case(parts[i]))
+        })
+        .map(|i| (parts[..i].join("/"), parts[i].to_ascii_lowercase()))
+        .collect()
+}
+
+/// The gate's rule for writing one of git's own entries (`gate::makes_git_dir`, review G5),
+/// applied to a restore's write of `rel` (review H8): it puts one into a folder that holds on
+/// disk, or into which another of the restore's writes puts (`markers`: by folder, lowercased),
+/// one of what makes a git directory ([`GIT_DIR_MARKERS`]), as `HEAD` and `commondir` together
+/// would. The entry `rel` itself puts there does not count: one alone makes no git directory
+/// (so `src/refs/a.ts` is restored beside `src/refs/b.ts`). Blocking.
+fn makes_git_dir(root: &Path, rel: &str, markers: &BTreeMap<String, BTreeSet<String>>) -> bool {
+    git_entries(rel).iter().any(|(d, e)| {
+        let mut dir = root.to_path_buf();
+        if !d.is_empty() {
+            dir.extend(d.split('/'));
+        }
+        let other = |m: &str| !m.eq_ignore_ascii_case(e);
+        GIT_DIR_MARKERS
+            .iter()
+            .any(|m| other(m) && std::fs::symlink_metadata(dir.join(m)).is_ok())
+            || markers
+                .get(&d.to_ascii_lowercase())
+                .is_some_and(|written| written.iter().any(|m| other(m)))
+    })
+}
+
+/// The outermost folder on the way to `rel` (not the workspace root) that is a repository on
+/// disk: it has its own `.git`. Blocking.
+fn repository_on_disk(root: &Path, rel: &str) -> Option<String> {
+    rel.match_indices('/')
+        .map(|(i, _)| &rel[..i])
+        .find_map(|d| {
+            let mut p = root.to_path_buf();
+            p.extend(d.split('/'));
+            std::fs::symlink_metadata(p.join(".git"))
+                .is_ok()
+                .then(|| d.to_string())
+        })
+}
+
+/// Whether something is on disk at `rel`, a path the snapshot now has no entry for (review H1),
+/// that is not one of the snapshot's files named in another case (`same`: on a case-insensitive
+/// file system, the same file). Only what is at `rel` itself counts: through a symlinked
+/// directory on the way it is elsewhere, and [`writable`] decides (the restore replaces that
+/// symlink, or refuses). Blocking.
+fn uncaptured_on_disk(root: &Path, rel: &str, same: &[String]) -> bool {
+    let at = |r: &str| {
+        let mut p = root.to_path_buf();
+        p.extend(r.split('/'));
+        std::fs::symlink_metadata(p)
+    };
+    let through_symlink = rel
+        .match_indices('/')
+        .any(|(i, _)| at(&rel[..i]).map_or(true, |m| m.file_type().is_symlink()));
+    if through_symlink {
+        return false;
+    }
+    let Ok(here) = at(rel) else {
+        return false;
+    };
+    !same
+        .iter()
+        .any(|q| at(q).is_ok_and(|m| same_file(&here, &m)))
+}
+
+#[cfg(unix)]
+fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+/// No file identity to compare (stable std has none on Windows): names that differ only by case
+/// are the same file on Windows's case-insensitive file systems.
+#[cfg(not(unix))]
+fn same_file(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// A gitignore pattern matching exactly `path`.
