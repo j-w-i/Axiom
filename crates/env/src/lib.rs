@@ -56,6 +56,16 @@ pub fn work_dir() -> std::io::Result<std::path::PathBuf> {
             .filter(|p| p.is_absolute())
             .map(|h| h.join(".cache").join("axiom-work")),
     );
+    // Windows has neither of those: the per-user local application data folder, which only
+    // its user (and administrators) can reach by default. Windows is deferred: `private_dir`
+    // checks no ACL there.
+    #[cfg(windows)]
+    candidates.extend(
+        std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .map(|p| p.join("axiom").join("work")),
+    );
     first_private(&candidates)
 }
 

@@ -232,12 +232,18 @@ fn status_of_this_repository_is_fast() {
         return;
     }
     // GitHub's macOS runners are virtual machines: medians of 310, 368, 423 and 465 ms seen
-    // there, against 36 ms on a real Mac (Apple Silicon, 2026-11-23). There the time is reported,
-    // not held to the budget, as with the terminal echo budget (owner, 2026-11-23); Linux CI and
-    // real machines hold it.
-    if cfg!(target_os = "macos") && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
-        eprintln!("NOT HELD on the GitHub macOS runner: the 300 ms budget; measured {ms} ms");
-        return;
-    }
-    assert!(ms < 300, "{ms} ms (median of {times:?})");
+    // there, against 36 ms on a real Mac (Apple Silicon, 2026-11-23). There the runner, not the
+    // code, sets the time, so it is held to a ceiling of 1.5 s instead (review C2): still a
+    // failure for a gross regression (something quadratic, a scan of ignored trees). Linux CI
+    // and real machines hold the 300 ms budget.
+    let limit =
+        if cfg!(target_os = "macos") && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
+            1500
+        } else {
+            300
+        };
+    assert!(
+        ms < limit,
+        "{ms} ms (median of {times:?}), limit {limit} ms"
+    );
 }
