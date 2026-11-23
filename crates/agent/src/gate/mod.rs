@@ -25,8 +25,11 @@ use tokio_util::sync::CancellationToken;
 
 /// Where approval requests go: the connections that declared `capabilities.approvals`.
 pub trait Approvers: Send + Sync {
-    /// Sends the request to every approving connection; returns how many received it.
+    /// Sends the request to every approving connection; returns how many received it. The gate
+    /// listens for the answer while this runs, and may drop it once the request is answered.
     fn request<'a>(&'a self, req: &'a ApprovalRequest) -> BoxFuture<'a, usize>;
+    /// Tells every approving connection the request is settled. Must not wait on a connection
+    /// that is not reading: the reply to `agent/approve` and the gated call wait for it.
     fn resolved<'a>(&'a self, res: &'a ApprovalResolution) -> BoxFuture<'a, ()>;
 }
 
@@ -36,6 +39,28 @@ pub struct Policies {
     pub user: Policy,
     /// `.axiom/project.toml` `[agent.policy]`: stricter only.
     pub workspace: Option<Policy>,
+    /// More directories that are protected as [`protected_path`]s are: the workspace's
+    /// configured git hooks directory (`core.hooksPath`, [`hooks_path`]) when it is inside the
+    /// workspace. Workspace paths, through any symlink.
+    pub protected: Vec<WorkspacePath>,
+}
+
+impl Policies {
+    /// Whether writing `p` always asks: a [`protected_path`], or under [`Self::protected`].
+    pub fn protects(&self, p: &WorkspacePath) -> bool {
+        protected_path(p) || self.protected.iter().any(|d| within(p, d))
+    }
+}
+
+/// `p` is `dir` or under it, each segment compared without regard to ASCII case (a
+/// case-insensitive disk takes either spelling).
+fn within(p: &WorkspacePath, dir: &WorkspacePath) -> bool {
+    let mut ps = p.0.split('/');
+    !dir.0.is_empty()
+        && dir
+            .0
+            .split('/')
+            .all(|d| ps.next().is_some_and(|s| s.eq_ignore_ascii_case(d)))
 }
 
 struct Pending {
@@ -88,26 +113,104 @@ pub struct Gate {
 
 /// Paths an agent may write only with the person's explicit approval each time, whatever the
 /// policy or a grant says: the workspace's own Axiom configuration (`.axiom/project.toml` holds
-/// the workspace policy, `.axiom/providers/` defines tasks and language servers) and git's
-/// directory (hooks run on the person's next commit), at any depth (a nested repository or a
-/// submodule has its own). AUD-104. The callers pass the path through any symlink
-/// (`Workspace::canonical_path`, review B4).
+/// the workspace policy, `.axiom/providers/` defines tasks and language servers), git's
+/// directory (hooks run on the person's next commit) at any depth (a nested repository or a
+/// submodule has its own), a bare repository's directory (`<name>.git`, whose `hooks/` git runs
+/// for pushes to it), and husky's `.husky/` (the hooks directory `core.hooksPath` names in a
+/// repository that uses it). AUD-104, review rev3. The callers pass the path through any
+/// symlink (`Workspace::canonical_path`, review B4). A hooks directory configured elsewhere is
+/// added per workspace ([`Policies::protected`]).
 pub fn protected_path(p: &WorkspacePath) -> bool {
     let mut parts = p.0.split('/');
     let first = parts.next().unwrap_or("");
     first.eq_ignore_ascii_case(".axiom")
-        || first.eq_ignore_ascii_case(".git")
-        || parts.any(|s| s.eq_ignore_ascii_case(".git"))
+        || p.0
+            .split('/')
+            .any(|s| git_dir_name(s) || s.eq_ignore_ascii_case(".husky"))
+}
+
+/// A path segment that names a git directory: `.git`, or a bare repository's `<name>.git`.
+pub(crate) fn git_dir_name(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 4 && b[b.len() - 4..].eq_ignore_ascii_case(b".git")
+}
+
+/// `core.hooksPath` from the text of a repository's `.git/config`, as written (the last one
+/// wins, as in git). Only that file: an `[include]`d file, the global and system configuration
+/// and `git -c` are not read. `None` if it is not set.
+pub fn hooks_path(config: &str) -> Option<String> {
+    let mut in_core = false;
+    let mut found = None;
+    for line in config.lines() {
+        let mut rest = line.trim_start();
+        if let Some(after) = rest.strip_prefix('[') {
+            let Some(end) = after.find(']') else {
+                in_core = false;
+                continue;
+            };
+            in_core = after[..end].trim().eq_ignore_ascii_case("core");
+            // A variable may follow the header on the same line.
+            rest = after[end + 1..].trim_start();
+        }
+        if !in_core || rest.is_empty() || rest.starts_with(['#', ';']) {
+            continue;
+        }
+        let (key, value) = match rest.split_once('=') {
+            Some((k, v)) => (k.trim(), v),
+            None => (rest.trim(), ""),
+        };
+        if key.eq_ignore_ascii_case("hookspath") {
+            found = Some(config_value(value));
+        }
+    }
+    found.filter(|v| !v.is_empty())
+}
+
+/// A git config value: quotes removed, `\"`, `\\`, `\n` and `\t` unescaped, an unquoted `#` or
+/// `;` starting a comment, unquoted surrounding blanks dropped.
+fn config_value(raw: &str) -> String {
+    let mut out = String::new();
+    let mut quoted = false;
+    // Length of `out` up to its last character that is not unquoted trailing blank.
+    let mut keep = 0;
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => quoted = !quoted,
+            '\\' => {
+                match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some('t') => out.push('\t'),
+                    Some(c) => out.push(c),
+                    None => {}
+                }
+                keep = out.len();
+                continue;
+            }
+            '#' | ';' if !quoted => break,
+            c if c.is_whitespace() && !quoted => {
+                if !out.is_empty() {
+                    out.push(c);
+                }
+                continue;
+            }
+            c => out.push(c),
+        }
+        keep = out.len();
+    }
+    out.truncate(keep);
+    out
 }
 
 fn writes(effect: Effect) -> bool {
     !matches!(effect, Effect::Read)
 }
 
-/// Why a call that the policy allows still asks, if it does.
-fn must_ask(effect: Effect, paths: &[WorkspacePath], escalate: bool) -> Option<String> {
-    if writes(effect) && paths.iter().any(protected_path) {
-        return Some("protected: Axiom configuration and .git always ask".into());
+/// Why a call that the policy allows still asks, if it does. `protected`: it writes a
+/// protected path ([`Policies::protects`]).
+fn must_ask(protected: bool, escalate: bool) -> Option<String> {
+    if protected {
+        return Some("protected: Axiom configuration, .git and git hooks always ask".into());
     }
     escalate.then(|| "the call sets its environment or working directory".into())
 }
@@ -224,7 +327,7 @@ impl Gate {
             argv: prepared.targets.argv.as_deref(),
         };
         let protected =
-            writes(prepared.effect) && prepared.targets.paths.iter().any(protected_path);
+            writes(prepared.effect) && prepared.targets.paths.iter().any(|p| policies.protects(p));
         let (mut decision, mut rule) = {
             let mut rules = granted;
             if !protected && !prepared.targets.escalate {
@@ -233,11 +336,7 @@ impl Gate {
             policy::decide(&policies.user, &rules, policies.workspace.as_ref(), &call)
         };
         if decision == Decision::Allow {
-            let why = must_ask(
-                prepared.effect,
-                &prepared.targets.paths,
-                prepared.targets.escalate,
-            );
+            let why = must_ask(protected, prepared.targets.escalate);
             // A protected path asks every time; a call with its own environment asks unless
             // the person approved exactly it for the session.
             if let Some(why) = why.filter(|_| protected || !exact) {
@@ -313,35 +412,46 @@ impl Gate {
                 request: request.clone(),
             },
         );
-        let sent = self.approvers.request(&request).await;
-        if sent == 0 {
-            lock(&self.pending).remove(&id);
-            return Err(Refusal {
-                kind: ErrorKind::ApprovalRequired,
-                message: format!(
-                    "`{}` needs approval and no one is attached to give it.",
-                    request.tool
-                ),
-                rule: request.rule,
-            });
-        }
-        tokio::select! {
-            d = rx => d.map_err(|_| Refusal {
-                kind: ErrorKind::Cancelled,
-                message: "The approval was withdrawn.".into(),
-                rule: None,
-            }),
-            _ = cancel.cancelled() => {
-                if lock(&self.pending).remove(&id).is_some() {
-                    self.approvers
-                        .resolved(&ApprovalResolution { request_id: id, decision: None })
-                        .await;
+        // The answer and the cancel are listened for while the prompt is still being delivered:
+        // an approver that stopped reading (its delivery waits up to its bound) holds up no
+        // call another approver answers (review D1). Refused only once every delivery has
+        // ended and none reached anyone, unless an answer came meanwhile (a client that
+        // attached late and found the request in [`Gate::pending`]).
+        let mut delivery = self.approvers.request(&request);
+        let mut delivering = true;
+        let mut rx = rx;
+        loop {
+            tokio::select! {
+                sent = &mut delivery, if delivering => {
+                    delivering = false;
+                    if sent == 0 && lock(&self.pending).remove(&id).is_some() {
+                        return Err(Refusal {
+                            kind: ErrorKind::ApprovalRequired,
+                            message: format!(
+                                "`{}` needs approval and no one is attached to give it.",
+                                request.tool
+                            ),
+                            rule: request.rule.clone(),
+                        });
+                    }
                 }
-                Err(Refusal {
+                d = &mut rx => return d.map_err(|_| Refusal {
                     kind: ErrorKind::Cancelled,
-                    message: "Cancelled while waiting for approval.".into(),
+                    message: "The approval was withdrawn.".into(),
                     rule: None,
-                })
+                }),
+                _ = cancel.cancelled() => {
+                    if lock(&self.pending).remove(&id).is_some() {
+                        self.approvers
+                            .resolved(&ApprovalResolution { request_id: id, decision: None })
+                            .await;
+                    }
+                    return Err(Refusal {
+                        kind: ErrorKind::Cancelled,
+                        message: "Cancelled while waiting for approval.".into(),
+                        rule: None,
+                    });
+                }
             }
         }
     }
@@ -407,8 +517,9 @@ impl Gate {
         // No session grant covers a permission request (none is ever made for one).
         let (mut decision, mut rule) =
             policy::decide(&policies.user, &[], policies.workspace.as_ref(), call);
+        let protected = writes(call.effect) && call.paths.iter().any(|p| policies.protects(p));
         if decision == Decision::Allow {
-            if let Some(why) = must_ask(call.effect, call.paths, false) {
+            if let Some(why) = must_ask(protected, false) {
                 decision = Decision::Ask;
                 rule = Some(why);
             }
@@ -425,8 +536,8 @@ impl Gate {
                 rule,
             }),
             Decision::Ask => {
-                let can_remember = !matches!(call.effect, Effect::Credentials | Effect::Deploy)
-                    && !(writes(call.effect) && call.paths.iter().any(protected_path));
+                let can_remember =
+                    !matches!(call.effect, Effect::Credentials | Effect::Deploy) && !protected;
                 let request = ApprovalRequest {
                     request_id: format!("r{}", self.next.fetch_add(1, Ordering::Relaxed)),
                     session_id: session.cloned(),
@@ -840,6 +951,7 @@ mod tests {
         Policies {
             user: policy::default_policy(),
             workspace: None,
+            protected: vec![],
         }
     }
 
@@ -929,6 +1041,7 @@ mod tests {
                 }],
             },
             workspace: None,
+            protected: vec![],
         };
         let plain = prepared("acp.terminal", Effect::Execute, argv(&["npm", "test"]));
         assert!(!asks(&g, &a, &w, &plain, &pol).await);
@@ -971,6 +1084,79 @@ mod tests {
         assert_eq!(lock(&a.asked).len(), before + 1);
     }
 
+    /// Delivers to one approver at once and to a stuck one only after a long time: the delivery
+    /// as a whole ends late, as `ConnApprovers::request` does with a full connection queue.
+    struct OneStuck;
+
+    impl Approvers for OneStuck {
+        fn request<'a>(&'a self, _req: &'a ApprovalRequest) -> BoxFuture<'a, usize> {
+            Box::pin(async {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                1
+            })
+        }
+        fn resolved<'a>(&'a self, _res: &'a ApprovalResolution) -> BoxFuture<'a, ()> {
+            Box::pin(std::future::ready(()))
+        }
+    }
+
+    /// Review D1: an approver that answers at once is not held up by another approver whose
+    /// delivery is stuck, and neither is a cancel.
+    #[tokio::test]
+    async fn an_answer_is_taken_while_another_approver_is_still_being_delivered_to() {
+        let g = Arc::new(Gate::new(Arc::new(OneStuck)));
+        for cancel_it in [false, true] {
+            let cancel = CancellationToken::new();
+            let call = {
+                let p = prepared("t.run", Effect::Execute, argv(&["make"]));
+                let (g, cancel) = (g.clone(), cancel.clone());
+                tokio::spawn(async move {
+                    g.check("session:s", &ws("w"), None, &p, &ask_all(), true, &cancel)
+                        .await
+                        .map(|(_, via, _)| via)
+                })
+            };
+            let id = loop {
+                if let Some(r) = g.pending(None).pop() {
+                    break r.request_id;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            };
+            if cancel_it {
+                cancel.cancel();
+            } else {
+                g.approve(&id, ApprovalDecision::Once).await.unwrap();
+            }
+            let r = tokio::time::timeout(std::time::Duration::from_secs(5), call)
+                .await
+                .expect("the call waited for the stuck delivery")
+                .unwrap();
+            if cancel_it {
+                assert_eq!(r.unwrap_err().kind, ErrorKind::Cancelled);
+            } else {
+                assert_eq!(r.unwrap(), Via::Approved(ApprovalDecision::Once));
+            }
+        }
+    }
+
+    #[test]
+    fn hooks_path_is_read_from_a_git_config() {
+        let cfg = "[core]\n\trepositoryformatversion = 0\n\thooksPath = .husky/_\n";
+        assert_eq!(hooks_path(cfg).as_deref(), Some(".husky/_"));
+        // Case-insensitive names, the last value wins, quotes, comments, a value after the
+        // header, other sections ignored.
+        let cfg = "[remote \"origin\"]\n\thooksPath = no\n[CORE] HooksPath = first\n\
+                   [core]\n  hookspath = \"tools/my hooks\" ; a comment\n[user]\nhooksPath = x\n";
+        assert_eq!(hooks_path(cfg).as_deref(), Some("tools/my hooks"));
+        assert_eq!(
+            hooks_path("[core]\nhooksPath = a\\\\b # c\n").as_deref(),
+            Some("a\\b")
+        );
+        assert_eq!(hooks_path("[core]\n\tbare = false\n"), None);
+        assert_eq!(hooks_path("[core]\nhooksPath =\n"), None);
+        assert_eq!(hooks_path("hooksPath = outside-a-section\n"), None);
+    }
+
     #[tokio::test]
     async fn protected_paths_always_ask_and_are_never_remembered() {
         let (g, a) = gate();
@@ -987,11 +1173,18 @@ mod tests {
                 }],
             },
             workspace: None,
+            protected: vec![],
         };
         for path in [
             ".axiom/project.toml",
             ".axiom/providers/x/provider.toml",
             ".git/hooks/pre-commit",
+            // Hooks git runs from outside `.git` (review rev3): husky's directory, at any
+            // depth, and a bare repository in the workspace.
+            ".husky/pre-commit",
+            "web/.Husky/_/pre-push",
+            "mirror.git/hooks/post-update",
+            "vendor/Upstream.GIT/config",
         ] {
             let p = prepared(
                 "fs.applyPatch",
@@ -1014,6 +1207,47 @@ mod tests {
             },
         );
         assert!(!asks(&g, &a, &w, &ordinary, &pol).await);
+        for path in [
+            ".gitignore",
+            ".github/workflows/ci.yml",
+            "src/git.rs",
+            "husky.md",
+        ] {
+            let p = prepared(
+                "fs.applyPatch",
+                Effect::WriteWorkspace,
+                Targets {
+                    paths: vec![WorkspacePath(path.into())],
+                    ..Default::default()
+                },
+            );
+            assert!(!asks(&g, &a, &w, &p, &pol).await, "{path}");
+        }
+        // The workspace's configured hooks directory (`core.hooksPath`) is protected too.
+        let hooks = prepared(
+            "fs.applyPatch",
+            Effect::WriteWorkspace,
+            Targets {
+                paths: vec![WorkspacePath("tools/Hooks/pre-commit".into())],
+                ..Default::default()
+            },
+        );
+        assert!(!asks(&g, &a, &w, &hooks, &pol).await);
+        let with_hooks = Policies {
+            protected: vec![WorkspacePath("tools/hooks".into())],
+            ..pol.clone()
+        };
+        assert!(asks(&g, &a, &w, &hooks, &with_hooks).await);
+        assert!(!lock(&a.asked).last().unwrap().can_remember);
+        let beside = prepared(
+            "fs.applyPatch",
+            Effect::WriteWorkspace,
+            Targets {
+                paths: vec![WorkspacePath("tools/hooks-docs.md".into())],
+                ..Default::default()
+            },
+        );
+        assert!(!asks(&g, &a, &w, &beside, &with_hooks).await);
         // Reading them is not protected.
         let read = prepared(
             "fs.read",

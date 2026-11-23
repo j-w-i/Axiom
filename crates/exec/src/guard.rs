@@ -15,7 +15,7 @@
 //! Registering never blocks the caller (async code): the lines go through a channel to a thread
 //! of their own, which does the writes, in order (review N13).
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::{mpsc, Mutex, OnceLock};
 
 struct Guard {
@@ -24,8 +24,10 @@ struct Guard {
     _child: std::process::Child,
 }
 
-/// The groups registered and not yet ended, as the watchdog sees them.
-static WATCHED: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
+/// The groups registered and not yet ended, as the watchdog sees them, each with how many
+/// owners registered it: a number reused while an earlier owner had not yet unregistered it
+/// (theoretical: it is unregistered once reaped) stays watched until both have (review D5).
+static WATCHED: Mutex<BTreeMap<u32, usize>> = Mutex::new(BTreeMap::new());
 
 static GUARD: OnceLock<Guard> = OnceLock::new();
 
@@ -87,21 +89,30 @@ fn send(line: String) {
 }
 
 /// Registers a process group (its leader's pid) to end if the daemon dies. Call it while the
-/// leader has not been reaped (its number cannot have been reused yet).
+/// leader has not been reaped (its number cannot have been reused yet). Each call needs its own
+/// [`unwatch_group`].
 pub fn watch_group(pgid: u32) {
     if pgid > 1 {
         let mut w = WATCHED.lock().unwrap_or_else(|e| e.into_inner());
-        w.insert(pgid);
-        send(format!("+{pgid}\n"));
+        let owners = w.entry(pgid).or_insert(0);
+        *owners += 1;
+        if *owners == 1 {
+            send(format!("+{pgid}\n"));
+        }
     }
 }
 
-/// The group ended normally: forget it.
+/// The group ended normally: one owner forgets it, and the watchdog once the last one has.
 pub fn unwatch_group(pgid: u32) {
     if pgid > 1 {
         let mut w = WATCHED.lock().unwrap_or_else(|e| e.into_inner());
-        w.remove(&pgid);
-        send(format!("-{pgid}\n"));
+        if let Some(owners) = w.get_mut(&pgid) {
+            *owners -= 1;
+            if *owners == 0 {
+                w.remove(&pgid);
+                send(format!("-{pgid}\n"));
+            }
+        }
     }
 }
 
@@ -111,7 +122,7 @@ pub fn is_watched(pgid: u32) -> bool {
     WATCHED
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .contains(&pgid)
+        .contains_key(&pgid)
 }
 
 /// The watchdog's main: reads registrations from stdin until end of file, then ends every group
@@ -158,3 +169,27 @@ pub fn run_watchdog() {
 /// No watchdog off Unix.
 #[cfg(not(unix))]
 pub fn run_watchdog() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review D5: two owners of one group number (a number reused before the first owner
+    /// unregistered it): one owner's unregister leaves it watched for the other.
+    #[test]
+    fn a_group_stays_watched_until_every_owner_has_unregistered_it() {
+        let g = 3_999_999;
+        watch_group(g);
+        watch_group(g);
+        unwatch_group(g);
+        assert!(is_watched(g), "one owner's unregister dropped the other's");
+        unwatch_group(g);
+        assert!(!is_watched(g));
+        // An unregister with no owner left changes nothing.
+        unwatch_group(g);
+        watch_group(g);
+        assert!(is_watched(g));
+        unwatch_group(g);
+        assert!(!is_watched(g));
+    }
+}

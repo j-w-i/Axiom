@@ -389,6 +389,73 @@ async fn protected_paths_through_a_symlink_or_nested_still_ask() {
     assert!(!f.root.join("sub/.git/config").exists());
 }
 
+/// Hooks git runs from outside `.git` are protected too (review rev3): the directory the
+/// workspace's `.git/config` names in `core.hooksPath`, husky's `.husky/`, and a bare
+/// repository's `<name>.git/` in the workspace. Writes there always ask, under a policy that
+/// allows every write; the folder beside the configured one does not.
+#[tokio::test]
+async fn hook_directories_outside_git_always_ask() {
+    let d = approving_daemon().await;
+    let f = d.open_fixture().await;
+    std::fs::create_dir_all(f.root.join(".git")).unwrap();
+    std::fs::write(
+        f.root.join(".git/config"),
+        "[core]\n\trepositoryformatversion = 0\n\thooksPath = ./tools/hooks/\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(f.root.join("tools/other")).unwrap();
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Ask,
+            rules: vec![PolicyRule {
+                effect: Some(Effect::WriteWorkspace),
+                tool: None,
+                path: None,
+                argv_prefix: None,
+                decision: Decision::Allow,
+            }],
+        })
+        .await
+        .unwrap();
+    for path in [
+        "tools/hooks/pre-commit",
+        ".husky/pre-commit",
+        "mirror.git/hooks/post-update",
+    ] {
+        let (r, req) = call_answering(
+            &d,
+            call(
+                &f.id,
+                "fs.applyPatch",
+                json!({"path": path, "create": "#!/bin/sh\necho hook\n"}),
+            ),
+            ApprovalDecision::Deny,
+        )
+        .await;
+        assert_eq!(kind(&r.unwrap_err()), ErrorKind::ApprovalDenied, "{path}");
+        assert!(!req.can_remember, "{path}");
+        assert!(
+            req.rule
+                .as_deref()
+                .unwrap_or_default()
+                .contains("protected"),
+            "{path}: {:?}",
+            req.rule
+        );
+        assert!(!f.root.join(path).exists(), "{path}");
+    }
+    let r = d
+        .client
+        .request::<ToolCall>(call(
+            &f.id,
+            "fs.applyPatch",
+            json!({"path": "tools/other/x.txt", "create": "x"}),
+        ))
+        .await
+        .unwrap();
+    assert!(!r.is_error, "{}", r.text);
+}
+
 /// A process an agent starts does not get the daemon's secrets (`security.md` §Processes;
 /// AUD-010): variables that look like secrets and the providers' `apiKeyEnv` variables are
 /// withheld (the card says so), unless settings `agent.passEnv` names them. The person's own
@@ -648,4 +715,181 @@ async fn a_path_swapped_after_the_card_was_shown_is_not_written() {
         !f.root.join(".git/hooks/pre-commit").exists(),
         "a hook was planted"
     );
+}
+
+/// A socket connection that declared `capabilities.approvals` and opened `root`, for the tests
+/// with more than one approver.
+#[cfg(unix)]
+mod approver {
+    use serde_json::{json, Value};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+
+    pub struct Approver {
+        pub r: BufReader<OwnedReadHalf>,
+        pub w: OwnedWriteHalf,
+    }
+
+    impl Approver {
+        pub async fn attach(d: &super::Daemon, root: &std::path::Path) -> Approver {
+            let run = d.data_dir().join("run");
+            let token = std::fs::read_to_string(run.join("axiomd.token")).unwrap();
+            let stream = tokio::net::UnixStream::connect(run.join("axiomd.sock"))
+                .await
+                .unwrap();
+            let (r, w) = stream.into_split();
+            let mut a = Approver {
+                r: BufReader::new(r),
+                w,
+            };
+            a.request(
+                1,
+                "initialize",
+                json!({"protocolVersion": "0.6", "client": {"name": "approver", "version": "0"},
+                       "authToken": token, "capabilities": {"approvals": true}}),
+            )
+            .await;
+            a.request(2, "workspace/open", json!({"path": root})).await;
+            a
+        }
+
+        pub async fn send(&mut self, id: u64, method: &str, params: Value) {
+            let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+            self.w
+                .write_all(format!("{msg}\n").as_bytes())
+                .await
+                .unwrap();
+        }
+
+        pub async fn line(&mut self) -> Value {
+            let mut l = String::new();
+            self.r.read_line(&mut l).await.unwrap();
+            serde_json::from_str(&l).unwrap()
+        }
+
+        /// Sends a request and reads until its reply, which must not be an error.
+        pub async fn request(&mut self, id: u64, method: &str, params: Value) {
+            self.send(id, method, params).await;
+            loop {
+                let v = self.line().await;
+                if v["id"] == id {
+                    assert!(v.get("error").is_none(), "{method}: {v}");
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Review C3 and D1, with one approver that stopped reading (its queue full of terminal output):
+/// - an approver that attaches while a prompt is being delivered to the stuck one is kept as an
+///   approver (the list used to be replaced by the connections that delivery was sent to);
+/// - its answer settles the call at once, and the reply to its `agent/approve` comes at once,
+///   instead of each waiting out the stuck delivery (up to ten seconds).
+#[cfg(unix)]
+#[tokio::test]
+async fn an_approver_that_attaches_during_a_slow_delivery_is_asked_and_answers_at_once() {
+    use approver::Approver;
+    use axiom_protocol::terminal::{Close as CloseTerminal, Create, CreateParams, TerminalRef};
+    use std::time::{Duration, Instant};
+    let d = Daemon::ready().await;
+    let f = d.open_fixture().await;
+    // A: an approver that never reads again.
+    let _a = Approver::attach(&d, &f.root).await;
+    let mut terminals = Vec::new();
+    for _ in 0..12 {
+        let t = d
+            .client
+            .request::<Create>(CreateParams {
+                workspace_id: f.id.clone(),
+                argv: Some(vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "yes 0123456789012345678901234567890123456789".into(),
+                ]),
+                cols: 80,
+                rows: 24,
+            })
+            .await
+            .unwrap();
+        terminals.push(t.terminal_id);
+    }
+    let mut n = 0usize;
+    let flood_end = tokio::time::Instant::now() + Duration::from_secs(30);
+    while n < 1500 && tokio::time::Instant::now() < flood_end {
+        if !d
+            .no_notification("terminal/output", Duration::from_millis(100))
+            .await
+        {
+            n += 1;
+        }
+    }
+    assert!(
+        n >= 1500,
+        "only {n} terminal outputs: the stuck approver's queue may not be full"
+    );
+    for terminal_id in terminals {
+        d.client
+            .request::<CloseTerminal>(TerminalRef { terminal_id })
+            .await
+            .unwrap();
+    }
+    d.drain_until_quiet(Duration::from_millis(500)).await;
+
+    // Call 1: its prompt waits on A. Meanwhile B attaches.
+    let patch = |path: &str| {
+        call(
+            &f.id,
+            "fs.applyPatch",
+            json!({"path": path, "create": "x\n"}),
+        )
+    };
+    let first = d.client.request::<ToolCall>(patch("one.txt"));
+    let attach = async {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        Approver::attach(&d, &f.root).await
+    };
+    let (_, mut b) = tokio::join!(first, attach);
+
+    // Call 2: B is attached and reading. It is asked, and its answer settles the call well
+    // within the stuck delivery's bound.
+    let t0 = Instant::now();
+    let second = d.client.request::<ToolCall>(patch("two.txt"));
+    let answer = async {
+        let id = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                let v = b.line().await;
+                if v["method"] == "agent/approvalRequested"
+                    && v["params"].to_string().contains("two.txt")
+                {
+                    break v["params"]["requestId"].as_str().unwrap().to_string();
+                }
+            }
+        })
+        .await
+        .expect("B, attached and reading, was never asked");
+        let asked = t0.elapsed();
+        b.request(
+            9,
+            "agent/approve",
+            json!({"requestId": id, "decision": "once"}),
+        )
+        .await;
+        (asked, t0.elapsed())
+    };
+    let (r2, (asked, replied)) = tokio::join!(second, answer);
+    let took = t0.elapsed();
+    let r2 = r2.unwrap();
+    assert!(!r2.is_error, "{}", r2.text);
+    assert_eq!(
+        std::fs::read_to_string(f.root.join("two.txt")).unwrap(),
+        "x\n"
+    );
+    for (what, t) in [
+        ("asked", asked),
+        ("approve replied", replied),
+        ("call", took),
+    ] {
+        assert!(t < Duration::from_secs(5), "{what} after {t:?}");
+    }
 }

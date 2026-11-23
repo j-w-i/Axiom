@@ -85,7 +85,8 @@ pub const SLOW_CLIENT: std::time::Duration = std::time::Duration::from_millis(50
 /// than [`SLOW_CLIENT`]: a prompt is for the person, and a connection that is busy but reading
 /// (the shell during an output flood) catches up well within it, where giving up would answer
 /// "no approver" (review R4). The other approvers are not held up: each send is separate, and
-/// an answer that arrives meanwhile is kept (the gate registers the request first).
+/// the gate listens for the answer and a cancel while the prompt is still being delivered
+/// (review D1), so the bound only decides when a call nobody received is refused.
 pub const APPROVAL_DELIVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// TEST ONLY: a script file for the scripted model provider (ADR-0015 §4). When set, the daemon
@@ -130,11 +131,12 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
             });
             let results = futures_util::future::join_all(sends).await;
             let sent = results.iter().filter(|(ok, _)| *ok).count();
-            *self.0.lock().unwrap_or_else(|p| p.into_inner()) = results
-                .into_iter()
-                .filter(|(ok, n)| *ok || !n.is_closed())
-                .map(|(_, n)| n)
-                .collect();
+            // The list is kept, not replaced by the ones just sent to: a connection that
+            // attached while this delivery waited is an approver too (review C3).
+            self.0
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .retain(|n| !n.is_closed());
             sent
         })
     }
@@ -143,14 +145,23 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
         res: &'a axiom_protocol::agent::ApprovalResolution,
     ) -> futures_util::future::BoxFuture<'a, ()> {
         Box::pin(async move {
-            let sends = self.all().into_iter().map(|n| async move {
-                let _ = tokio::time::timeout(
-                    APPROVAL_DELIVERY,
-                    n.notify::<axiom_protocol::agent::ApprovalResolved>(res.clone()),
-                )
-                .await;
-            });
-            futures_util::future::join_all(sends).await;
+            // Queued at once where there is room, so a connection that is reading has the
+            // resolution before the reply to its own `agent/approve`. One whose queue is full
+            // gets it from a task of its own: a stuck approver holds up neither that reply nor
+            // the call that waited for the answer (review D1).
+            for n in self.all() {
+                use axiom_protocol::agent::ApprovalResolved;
+                if let Ok(false) = n.try_notify::<ApprovalResolved>(res.clone()) {
+                    let res = res.clone();
+                    tokio::spawn(async move {
+                        let _ = tokio::time::timeout(
+                            APPROVAL_DELIVERY,
+                            n.notify::<ApprovalResolved>(res),
+                        )
+                        .await;
+                    });
+                }
+            }
         })
     }
 }

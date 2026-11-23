@@ -765,6 +765,86 @@ async fn acp_an_agent_reaches_only_its_own_terminals() {
     assert!(tasks.tasks.iter().any(|t| t.exit.is_none()), "{tasks:?}");
 }
 
+/// [`SH_AGENT`] that can resume (`loadSession`) and logs each start to `$STARTS`. On a prompt
+/// it starts a terminal running `sleep 30` if `$OUT` has none yet; otherwise it asks for that
+/// terminal's output, then kills, waits for and releases it.
+const SH_RESUMING_AGENT: &str = r#"
+read -r l
+echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[]}}'
+read -r l
+echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sh-1"}}'
+echo started >> "$STARTS"
+ask() {
+  echo "$1"
+  read -r r
+  printf '%s\n' "$r" >> "$OUT"
+}
+while read -r l; do
+  case "$l" in
+    *'"session/prompt"'*)
+      id=$(printf '%s' "$l" | grep -o '"id":[0-9]*' | head -n 1 | cut -d: -f2)
+      t=$(sed -n 's/.*"terminalId":"\([^"]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n 1)
+      if [ -z "$t" ]; then
+        ask '{"jsonrpc":"2.0","id":100,"method":"terminal/create","params":{"sessionId":"sh-1","command":"sleep","args":["30"]}}'
+      else
+        for m in output kill wait_for_exit release; do
+          ask '{"jsonrpc":"2.0","id":101,"method":"terminal/'"$m"'","params":{"sessionId":"sh-1","terminalId":"'"$t"'"}}'
+        done
+      fi
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn"}}'
+      ;;
+  esac
+done
+"#;
+
+/// Review D5: a terminal belongs to the session, not to the agent process. After the idle reaper
+/// stopped the agent and the next turn started it again (resumed), the agent still reaches the
+/// terminal it started before: output, kill, wait and release all answer.
+#[tokio::test]
+async fn acp_a_resumed_agent_still_reaches_its_terminals() {
+    let tmp = tempfile::tempdir().unwrap();
+    let script = tmp.path().join("agent.sh");
+    std::fs::write(&script, SH_RESUMING_AGENT).unwrap();
+    let (out, starts) = (tmp.path().join("out"), tmp.path().join("starts"));
+    let d = Daemon::spawn_configured(&tmp.path().join("data"), |c| {
+        c.env("AXIOM_TEST_AGENT_IDLE_MS", "400");
+    })
+    .await;
+    let (d, f, _) = setup_with(&tmp.path().join("acp.log"), d, None).await;
+    let env = [("OUT", &out), ("STARTS", &starts)]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string_lossy().into_owned()))
+        .collect();
+    let sh = vec!["sh".to_string(), script.to_string_lossy().into_owned()];
+    configure_agent(&d, "sh-resume", sh, env).await;
+    let s = create_session(&d, &f.id, "sh-resume").await;
+    let (evs, asked) = turn(&d, &f.id, &s, "go", Some(ApprovalDecision::Once)).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    let created = std::fs::read_to_string(&out).unwrap();
+    assert!(created.contains("\"terminalId\""), "{created}");
+
+    // Idle: the agent is stopped; the next turn starts it again, resumed.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let (evs, _) = turn(&d, &f.id, &s, "go", None).await;
+    assert_eq!(end(&evs), TurnEndReason::EndTurn, "{evs:#?}");
+    let started = std::fs::read_to_string(&starts).unwrap();
+    assert_eq!(started.lines().count(), 2, "not restarted: {started}");
+    let answers: Vec<Value> = std::fs::read_to_string(&out)
+        .unwrap()
+        .lines()
+        .skip(1)
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(answers.len(), 4, "{answers:?}");
+    for a in &answers {
+        assert!(
+            a.get("result").is_some(),
+            "the resumed agent lost its terminal: {answers:?}"
+        );
+    }
+}
+
 /// AUD-032: an external agent that never answers its handshake holds up only its own session.
 /// Another session's turn runs meanwhile, with the idle reaper running too (the session that is
 /// starting is mid-turn, so it is not reaped).

@@ -461,6 +461,67 @@ mod tests {
         );
     }
 
+    /// `sub/f.txt` resolved while `sub` was a directory, then `sub` swapped for a symlink out
+    /// of the workspace: what an operation that already passed its re-check meets.
+    fn resolved_then_swapped(s: &Setup) -> PathBuf {
+        let abs = s.ws.resolve_entry(&wp("sub/f.txt")).unwrap();
+        assert_eq!(abs, s.root.join("sub/f.txt"));
+        swap(&s.root.join("sub"), &s.outside);
+        abs
+    }
+
+    /// Review D4: each operation with the re-check out of the way (called past it, on a path
+    /// resolved before the swap). Only the directory opened without following symlinks stands
+    /// between it and the file outside: the race tests above are caught by the re-check first.
+    #[test]
+    fn past_the_recheck_a_write_or_create_is_not_redirected() {
+        let s = setup();
+        let abs = resolved_then_swapped(&s);
+        let r = crate::workspace::write_blocking(&s.root, &abs, "sub/f.txt", b"x", None, true);
+        assert!(matches!(r, Err(WsError::Changed(_))), "write: {r:?}");
+        let r = crate::fileops::create_file_blocking(&s.root, &abs, "sub/f.txt", b"x");
+        assert!(matches!(r, Err(WsError::Changed(_))), "create: {r:?}");
+        assert!(
+            !s.outside.join("f.txt").exists(),
+            "written outside the workspace"
+        );
+    }
+
+    #[test]
+    fn past_the_recheck_a_read_or_removal_is_not_redirected() {
+        let s = setup();
+        std::fs::write(s.outside.join("f.txt"), "outside").unwrap();
+        let abs = resolved_then_swapped(&s);
+        let r = s.ws.read_resolved(&abs, "sub/f.txt", 1024);
+        assert!(matches!(r, Err(WsError::Changed(_))), "read: {r:?}");
+        let v = crate::workspace::version_of(b"outside");
+        let r = crate::workspace::remove_blocking(&s.root, &abs, "sub/f.txt", &v);
+        assert!(matches!(r, Err(WsError::Changed(_))), "remove: {r:?}");
+        assert!(
+            s.outside.join("f.txt").exists(),
+            "removed outside the workspace"
+        );
+    }
+
+    #[test]
+    fn past_the_recheck_a_rename_is_not_redirected() {
+        let s = setup();
+        std::fs::write(s.root.join("a.txt"), "a").unwrap();
+        std::fs::write(s.outside.join("f.txt"), "outside").unwrap();
+        let (a, inside) = (s.root.join("a.txt"), resolved_then_swapped(&s));
+        // Into the swapped directory, and out of it.
+        let r = crate::fileops::rename_blocking(&s.root, &a, &inside, "a.txt", "sub/f.txt");
+        assert!(matches!(r, Err(WsError::Changed(_))), "into: {r:?}");
+        let b = s.root.join("b.txt");
+        let r = crate::fileops::rename_blocking(&s.root, &inside, &b, "sub/f.txt", "b.txt");
+        assert!(matches!(r, Err(WsError::Changed(_))), "out of: {r:?}");
+        assert!(s.root.join("a.txt").exists() && !b.exists());
+        assert_eq!(
+            std::fs::read_to_string(s.outside.join("f.txt")).unwrap(),
+            "outside"
+        );
+    }
+
     /// The directory is opened without following a symlink on the way, whatever checked it
     /// before: what makes the moment between the last check and the operation safe.
     #[test]

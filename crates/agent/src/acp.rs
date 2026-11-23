@@ -343,10 +343,6 @@ pub struct AcpSession {
     pub conn: Connection,
     pub agent_session: String,
     pub caps: AgentCaps,
-    /// The terminals this agent created: the only ones its `terminal/*` requests reach. The
-    /// daemon's ids are sequential, so another session's agent could otherwise read, wait for,
-    /// kill or release this one's (review N5).
-    terminals: Mutex<std::collections::HashSet<String>>,
 }
 
 impl AcpSession {
@@ -355,16 +351,6 @@ impl AcpSession {
             conn,
             agent_session,
             caps,
-            terminals: Mutex::default(),
-        }
-    }
-
-    /// `id` if this agent created that terminal (and has not released it).
-    fn own<'a>(&self, id: &'a str) -> Result<&'a str, (i64, String)> {
-        if lock(&self.terminals).contains(id) {
-            Ok(id)
-        } else {
-            Err((INVALID, format!("no terminal `{id}`")))
         }
     }
 
@@ -494,6 +480,8 @@ pub type ExitStatus = (Option<i32>, Option<String>);
 pub type TerminalOutput = (String, bool, Option<ExitStatus>);
 
 pub trait Terminals: Send + Sync {
+    /// The principal whose call created the terminal (its session's), while it is not released.
+    fn owner(&self, id: &str) -> Option<String>;
     fn output<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<TerminalOutput, String>>;
     fn wait<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<ExitStatus, String>>;
     fn kill<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<(), String>>;
@@ -930,13 +918,10 @@ async fn handle_request(
                 }),
             )
             .await?;
-            if let Some(id) = out["terminalId"].as_str() {
-                lock(&t.session.terminals).insert(id.to_string());
-            }
             Ok(json!({"terminalId": out["terminalId"]}))
         }
         "terminal/output" => {
-            let id = t.session.own(p["terminalId"].as_str().unwrap_or(""))?;
+            let id = own(t, p["terminalId"].as_str().unwrap_or(""))?;
             let (output, truncated, exit) =
                 t.terminals.output(id).await.map_err(|e| (INVALID, e))?;
             let mut v = json!({"output": output, "truncated": truncated});
@@ -946,7 +931,7 @@ async fn handle_request(
             Ok(v)
         }
         "terminal/wait_for_exit" => {
-            let id = t.session.own(p["terminalId"].as_str().unwrap_or(""))?;
+            let id = own(t, p["terminalId"].as_str().unwrap_or(""))?;
             let (code, signal) = tokio::select! {
                 r = t.terminals.wait(id) => r.map_err(|e| (INVALID, e))?,
                 _ = t.cancel.cancelled() => {
@@ -958,18 +943,30 @@ async fn handle_request(
             Ok(json!({"exitCode": code, "signal": signal}))
         }
         "terminal/kill" => {
-            let id = t.session.own(p["terminalId"].as_str().unwrap_or(""))?;
+            let id = own(t, p["terminalId"].as_str().unwrap_or(""))?;
             t.terminals.kill(id).await.map_err(|e| (INVALID, e))?;
             Ok(json!({}))
         }
         "terminal/release" => {
-            let id = t.session.own(p["terminalId"].as_str().unwrap_or(""))?;
+            let id = own(t, p["terminalId"].as_str().unwrap_or(""))?;
             t.terminals.release(id).await.map_err(|e| (INVALID, e))?;
-            lock(&t.session.terminals).remove(id);
             Ok(json!({}))
         }
         "session/request_permission" => Ok(permission(t, grants, p).await),
         other => Err((-32601, format!("Axiom does not offer `{other}`"))),
+    }
+}
+
+/// `id` if the turn's session created that terminal (and has not released it): the only ones
+/// its agent's `terminal/*` requests reach. The daemon's ids are sequential, so another
+/// session's agent could otherwise read, wait for, kill or release this one's (review N5).
+/// By session, not by agent process: an agent stopped while idle and started again for the
+/// same session (resumed) still reaches the terminals it started before (review D5).
+fn own<'a>(t: &AcpTurn<'_>, id: &'a str) -> Result<&'a str, (i64, String)> {
+    if t.terminals.owner(id).as_deref() == Some(t.ctx.principal.as_str()) {
+        Ok(id)
+    } else {
+        Err((INVALID, format!("no terminal `{id}`")))
     }
 }
 

@@ -227,7 +227,7 @@ impl Workspace {
 
 /// [`Workspace::create_file`]'s write: a temp file in the directory, renamed onto the name
 /// without replacing. On Unix in the directory opened without following symlinks (review N14).
-fn create_file_blocking(
+pub(crate) fn create_file_blocking(
     root: &Path,
     abs: &Path,
     rel: &str,
@@ -275,7 +275,13 @@ fn create_file_blocking(
 
 /// [`Workspace::rename`]'s move. On Unix between the two directories opened without following
 /// symlinks (review N14).
-fn rename_blocking(root: &Path, src: &Path, dst: &Path, rf: &str, rt: &str) -> Result<(), WsError> {
+pub(crate) fn rename_blocking(
+    root: &Path,
+    src: &Path,
+    dst: &Path,
+    rf: &str,
+    rt: &str,
+) -> Result<(), WsError> {
     #[cfg(unix)]
     {
         use crate::beneath::{rename, rename_noreplace, Dir};

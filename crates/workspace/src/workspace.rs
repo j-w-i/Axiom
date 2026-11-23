@@ -510,7 +510,7 @@ pub(crate) fn split<'a>(
 /// redirect them. The rename replaces the entry, so a hard link to the file elsewhere keeps its
 /// old content (review R5).
 #[cfg(unix)]
-fn write_blocking(
+pub(crate) fn write_blocking(
     root: &Path,
     abs: &Path,
     rel: &str,
@@ -553,7 +553,7 @@ fn write_blocking(
 /// [`Workspace::remove_file`]'s check and removal, in the file's directory opened without
 /// following symlinks (review N14).
 #[cfg(unix)]
-fn remove_blocking(
+pub(crate) fn remove_blocking(
     root: &Path,
     abs: &Path,
     rel: &str,
@@ -577,7 +577,7 @@ fn remove_blocking(
 }
 
 #[cfg(not(unix))]
-fn remove_blocking(
+pub(crate) fn remove_blocking(
     _root: &Path,
     abs: &Path,
     rel: &str,
@@ -598,7 +598,7 @@ fn remove_blocking(
 }
 
 #[cfg(not(unix))]
-fn write_blocking(
+pub(crate) fn write_blocking(
     _root: &Path,
     abs: &Path,
     rel: &str,

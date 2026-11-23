@@ -151,8 +151,27 @@ fn escape_for_tty(text: &str, multiline: bool) -> String {
 }
 
 fn fail(e: impl std::fmt::Display) -> ExitCode {
-    eprintln!("axiom: {e}");
+    eprintln!("{}", error_text(e));
     ExitCode::from(1)
+}
+
+/// An error as shown: the daemon's text (which can quote a file name, a provider's id, an
+/// agent's words) made terminal-safe (review D5).
+fn error_text(e: impl std::fmt::Display) -> String {
+    format!("axiom: {}", tty_safe(&e.to_string()))
+}
+
+/// One line of `agent sessions`: every field the daemon sent (a title is the model's or an
+/// agent's words) made terminal-safe, each on this one line (review D5).
+fn session_line(s: &axiom_protocol::agent::SessionInfo) -> String {
+    format!(
+        "{}\t{}\t{}/{}\t{}",
+        tty_safe_line(&s.session_id.0),
+        s.updated_ms,
+        tty_safe_line(&s.provider_id),
+        tty_safe_line(&s.model),
+        tty_safe_line(&s.title)
+    )
 }
 
 fn rpc(e: RpcError) -> String {
@@ -332,10 +351,7 @@ async fn agent(c: &Client, what: AgentCmd, approvals: bool) -> Result<ExitCode, 
                 .await
                 .map_err(rpc)?;
             for s in list.sessions {
-                println!(
-                    "{}\t{}\t{}/{}\t{}",
-                    s.session_id.0, s.updated_ms, s.provider_id, s.model, s.title
-                );
+                println!("{}", session_line(&s));
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -378,7 +394,7 @@ async fn agent(c: &Client, what: AgentCmd, approvals: bool) -> Result<ExitCode, 
             })
             .await
             .map_err(rpc)?;
-            eprintln!("session {}", sid.0);
+            eprintln!("session {}", tty_safe_line(&sid.0));
             stream_turn(c, &mut rx, &sid, ws, approvals).await
         }
     }
@@ -549,6 +565,29 @@ async fn ask(r: &ApprovalRequest) -> ApprovalDecision {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review D5: what the daemon sends back is shown, not sent, in errors and session lists.
+    #[test]
+    fn daemon_errors_and_session_titles_are_terminal_safe() {
+        assert_eq!(
+            error_text("no file `a\x1b[2Kb`\nsecond line"),
+            "axiom: no file `a\\x1b[2Kb`\nsecond line"
+        );
+        let s = axiom_protocol::agent::SessionInfo {
+            session_id: SessionId("s\x1b1".into()),
+            title: "Fix\x1b]0;owned\x07 it\nnext\u{202e}".into(),
+            provider_id: "p\r".into(),
+            model: "m\u{200b}".into(),
+            created_ms: 1,
+            updated_ms: 2,
+            running: false,
+            pending_approvals: 0,
+        };
+        assert_eq!(
+            session_line(&s),
+            "s\\x1b1\t2\tp\\x0d/m\\u{200b}\tFix\\x1b]0;owned\\x07 it\\x0anext\\u{202e}"
+        );
+    }
 
     #[test]
     fn control_sequences_are_shown_not_sent() {

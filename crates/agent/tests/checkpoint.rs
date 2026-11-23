@@ -298,3 +298,150 @@ async fn checkpoint_restore_does_not_write_through_a_hard_link() {
         .collect();
     assert_eq!(names, vec!["a.txt".to_string()], "{names:?}");
 }
+
+/// Review D4: a restore does not write through a directory that became a symlink after the
+/// agent last wrote (a conflict the person chose to skip), even one into the workspace's own
+/// `.git/hooks`; nothing changes at all.
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_restore_does_not_write_through_a_symlinked_directory() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    std::fs::create_dir_all(r.join(".git/hooks")).unwrap();
+    write(r, "a.txt", "a\n");
+    write(r, "sub/pre-commit", "#!/bin/sh\necho restored\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    write(r, "a.txt", "agent\n");
+    std::fs::remove_dir_all(r.join("sub")).unwrap();
+    s.record_post("s").await.unwrap();
+    // Since the agent's last write: `sub` is a symlink into the hooks.
+    std::os::unix::fs::symlink(".git/hooks", r.join("sub")).unwrap();
+    let e = s.restore("s", 1, 1, true).await.unwrap_err();
+    assert!(
+        matches!(&e, CheckpointError::Io(m) if m.contains("symlink")),
+        "{e:?}"
+    );
+    assert!(
+        !r.join(".git/hooks/pre-commit").exists(),
+        "a hook was planted"
+    );
+    assert_eq!(
+        read(r, "a.txt").unwrap(),
+        "agent\n",
+        "a refused restore changed a file"
+    );
+}
+
+/// A directory the agent replaced with a symlink is put back: the restore removes the symlink
+/// before it writes what was under the directory, so the check does not stand in its way, and
+/// what the symlink pointed to is left alone.
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_restore_puts_back_a_directory_the_agent_made_a_symlink() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "sub/f.txt", "f\n");
+    write(r, "other/f.txt", "other\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_dir_all(r.join("sub")).unwrap();
+    std::os::unix::fs::symlink("other", r.join("sub")).unwrap();
+    s.record_post("s").await.unwrap();
+    s.restore("s", 1, 1, false).await.unwrap();
+    assert!(!std::fs::symlink_metadata(r.join("sub"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(read(r, "sub/f.txt").unwrap(), "f\n");
+    assert_eq!(read(r, "other/f.txt").unwrap(), "other\n");
+}
+
+/// Review D4, decided: a restore never writes into a git directory, a bare repository's
+/// (`<name>.git/hooks` run on a push to it) included; hooks there change only through the gate.
+/// The refusal comes before anything changes. The workspace's own configuration (`.axiom/`) is
+/// restored like any file: the restore is the person's undo of what the agent left.
+#[tokio::test]
+async fn checkpoint_restore_refuses_git_directories_and_restores_axiom_configuration() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(
+        r,
+        ".axiom/project.toml",
+        "[agent.policy]\ndefault = \"ask\"\n",
+    );
+    write(r, "a.txt", "a\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    write(
+        r,
+        ".axiom/project.toml",
+        "[agent.policy]\ndefault = \"allow\"\n",
+    );
+    s.record_post("s").await.unwrap();
+    s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(
+        read(r, ".axiom/project.toml").unwrap(),
+        "[agent.policy]\ndefault = \"ask\"\n"
+    );
+
+    write(r, "mirror.git/hooks/post-update", "orig\n");
+    let n = s.create("s", "with the mirror", 1).await.unwrap().number;
+    write(r, "mirror.git/hooks/post-update", "changed\n");
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    let e = s.restore("s", n, 1, false).await.unwrap_err();
+    assert!(
+        matches!(&e, CheckpointError::Io(m) if m.contains("git directory")),
+        "{e:?}"
+    );
+    assert_eq!(
+        read(r, "mirror.git/hooks/post-update").unwrap(),
+        "changed\n"
+    );
+    assert_eq!(
+        read(r, "a.txt").unwrap(),
+        "agent\n",
+        "a refused restore changed a file"
+    );
+}
+
+/// Review D4: the restored file gets the permission bits of the file it replaces, never its
+/// setuid, setgid or sticky bit.
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_restore_never_carries_a_setuid_bit() {
+    use std::os::unix::fs::PermissionsExt;
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "run.sh", "#!/bin/sh\necho one\n");
+    std::fs::set_permissions(r.join("run.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    write(r, "run.sh", "#!/bin/sh\necho two\n");
+    s.record_post("s").await.unwrap();
+    // Still `100755` to git: the change is not a conflict.
+    std::fs::set_permissions(r.join("run.sh"), std::fs::Permissions::from_mode(0o7755)).unwrap();
+    let set = std::fs::metadata(r.join("run.sh"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o7777;
+    assert_ne!(
+        set & 0o7000,
+        0,
+        "this file system keeps no setuid bit: {set:o}"
+    );
+    s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(r, "run.sh").unwrap(), "#!/bin/sh\necho one\n");
+    let mode = std::fs::metadata(r.join("run.sh"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o7777;
+    assert_eq!(mode, 0o755, "{mode:o}");
+}

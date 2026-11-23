@@ -427,6 +427,15 @@ impl Shadow {
         if !conflicts.is_empty() && !skip_conflicts {
             return Err(CheckpointError::Conflicts(conflicts));
         }
+        // Every path is checked before anything changes: a restore that would write through a
+        // symlinked directory, or into a git directory, changes nothing (review D4).
+        // A symlink the restore itself removes or replaces first (it sorts before what is under
+        // it) is no obstacle; the write checks again once it is gone.
+        let replaced: std::collections::BTreeSet<&str> =
+            restore.iter().map(|(p, _)| p.as_str()).collect();
+        for (p, _) in &restore {
+            writable(&self.root, p, |dir| replaced.contains(dir))?;
+        }
         let undo = self
             .create_locked(session, &format!("before restore to {number}"), turn)
             .await?;
@@ -451,7 +460,7 @@ impl Shadow {
         rel: &str,
         entry: Option<&(String, String)>,
     ) -> Result<(), CheckpointError> {
-        let path = contained(&self.root, rel)?;
+        let path = writable(&self.root, rel, |_| false)?;
         let io = |e: std::io::Error| CheckpointError::Io(format!("{rel}: {e}"));
         match entry {
             None => match std::fs::remove_file(&path) {
@@ -513,11 +522,12 @@ impl Shadow {
                 {
                     use std::os::unix::fs::PermissionsExt;
                     let exec = mode == "100755";
-                    // The file's own mode (it is new), or the default for new files.
-                    let m = std::fs::metadata(&path)
+                    // The permission bits of the file it replaces (never through a symlink), or
+                    // the default for new files. Never setuid, setgid or sticky (review D4).
+                    let m = std::fs::symlink_metadata(&path)
                         .ok()
                         .filter(|m| m.is_file())
-                        .map_or(0o644, |m| m.permissions().mode() & 0o7777);
+                        .map_or(0o644, |m| m.permissions().mode() & 0o777);
                     let m = if exec { m | 0o111 } else { m & !0o111 };
                     if let Err(e) =
                         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(m))
@@ -526,9 +536,9 @@ impl Shadow {
                         return Err(io(e));
                     }
                 }
-                // Still inside the workspace right before it lands (a parent swapped for a
-                // symlink since `contained` is refused, not followed).
-                if let Err(e) = contained(&self.root, rel) {
+                // Still inside the workspace, through no symlink, right before it lands (a parent
+                // swapped for a symlink since the first check is refused, not followed).
+                if let Err(e) = writable(&self.root, rel, |_| false) {
                     let _ = std::fs::remove_file(&tmp);
                     return Err(e);
                 }
@@ -562,6 +572,44 @@ fn escape_pattern(path: &str) -> String {
         out.push(c);
     }
     out
+}
+
+/// The host path a restore may write or remove for a tree path (review D4): [`contained`], no
+/// directory on the way a symlink (a symlinked directory inside the workspace, such as one into
+/// `.git/hooks`, would take the write somewhere the checkpoint never named), and not inside a
+/// git directory (`.git`, or a bare repository's `*.git`: hooks run from there, so they change
+/// only through the gate, with the person's approval each time). The workspace's own
+/// configuration (`.axiom/`) and hooks kept in the tree (`.husky/`) are restored like any file:
+/// a restore is the person's own undo, and touches only what the agent last left.
+/// `replaced`: directories on the way that the restore removes before it gets to `rel`.
+fn writable(
+    root: &Path,
+    rel: &str,
+    replaced: impl Fn(&str) -> bool,
+) -> Result<PathBuf, CheckpointError> {
+    let path = contained(root, rel)?;
+    let parts: Vec<&str> = rel.split('/').collect();
+    if let Some(dir) = parts.iter().find(|s| crate::gate::git_dir_name(s)) {
+        return Err(CheckpointError::Io(format!(
+            "`{rel}` is inside a git directory (`{dir}`): a restore never writes there"
+        )));
+    }
+    let mut dir = root.to_path_buf();
+    for (i, name) in parts[..parts.len() - 1].iter().enumerate() {
+        dir.push(name);
+        match std::fs::symlink_metadata(&dir) {
+            Ok(m) if m.file_type().is_symlink() && !replaced(&parts[..=i].join("/")) => {
+                return Err(CheckpointError::Io(format!(
+                    "`{rel}` is under a symlink (`{}`): a restore does not write through one",
+                    parts[..=i].join("/")
+                )))
+            }
+            Ok(_) => {}
+            // Missing from here on: the restore creates real directories.
+            Err(_) => break,
+        }
+    }
+    Ok(path)
 }
 
 /// The host path for a tree path, refusing anything that leaves the root (a `..`, an absolute

@@ -1,7 +1,9 @@
 //! The processes the agent runtime starts (external agents over ACP, MCP servers). Each leads a
 //! process group of its own (Unix), registered with the daemon's exit watchdog from its start
-//! until it has been reaped (AUD-027, review N13): a daemon killed with SIGKILL, or one that
-//! crashed, does not leave them, or what they started, behind.
+//! until the group is empty or has been killed (AUD-027, review N13): a daemon killed with
+//! SIGKILL, or one that crashed, does not leave them, or what they started, behind. Killing one
+//! (session delete, idle reap, an MCP restart, dropping its handle) kills its whole group
+//! (review D2).
 //!
 //! This crate does not depend on `exec`: the daemon passes the watchdog's functions in
 //! ([`set_group_hooks`]), as it does for language servers.
@@ -48,22 +50,42 @@ pub(crate) fn spawn(cmd: &mut Command) -> std::io::Result<(Supervised, Pipes)> {
     if let (Some(h), Some(g)) = (HOOKS.get(), group) {
         (h.0)(g);
     }
-    let (kill_tx, kill_rx) = oneshot::channel::<()>();
+    let (kill_tx, mut kill_rx) = oneshot::channel::<()>();
     let (exit_tx, exited) = watch::channel(false);
     tokio::spawn(async move {
         // Killed when asked, or when the handle is dropped (the sender goes with it).
         let killed = tokio::select! {
             _ = child.wait() => false,
-            _ = kill_rx => true,
+            _ = &mut kill_rx => true,
         };
         if killed {
+            // The whole group, not the leader alone: what the agent or server started goes too
+            // (review D2). Sent while the leader is not reaped yet, so the number is still the
+            // group's.
+            if let Some(g) = group {
+                kill_group(g);
+            }
             let _ = child.kill().await;
         }
-        // Reaped: the number may be reused from now on, so the watchdog forgets it now.
+        let _ = exit_tx.send(true);
+        if let (false, Some(g)) = (killed, group) {
+            // The leader exited by itself, and what it started in its group may still run. The
+            // group stays registered with the watchdog until it is empty (its number is not
+            // reused while it has a member), and is killed with the handle.
+            while group_alive(g) {
+                tokio::select! {
+                    _ = tokio::time::sleep(GROUP_POLL) => {}
+                    _ = &mut kill_rx => {
+                        kill_group(g);
+                        break;
+                    }
+                }
+            }
+        }
+        // Empty, or after a final kill of the whole group: the watchdog forgets it now.
         if let (Some(h), Some(g)) = (HOOKS.get(), group) {
             (h.1)(g);
         }
-        let _ = exit_tx.send(true);
     });
     Ok((
         Supervised {
@@ -74,8 +96,33 @@ pub(crate) fn spawn(cmd: &mut Command) -> std::io::Result<(Supervised, Pipes)> {
     ))
 }
 
+/// How often a group whose leader exited is checked for remaining members.
+const GROUP_POLL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// SIGKILL to every process of the group (one already gone is fine).
+#[cfg(unix)]
+fn kill_group(g: u32) {
+    use nix::sys::signal::{killpg, Signal};
+    let _ = killpg(nix::unistd::Pid::from_raw(g as i32), Signal::SIGKILL);
+}
+
+#[cfg(not(unix))]
+fn kill_group(_g: u32) {}
+
+/// Whether the group still has a member.
+#[cfg(unix)]
+fn group_alive(g: u32) -> bool {
+    nix::sys::signal::killpg(nix::unistd::Pid::from_raw(g as i32), None).is_ok()
+}
+
+#[cfg(not(unix))]
+fn group_alive(_g: u32) -> bool {
+    false
+}
+
 impl Supervised {
-    /// Kills the process (if it still runs) and waits until it has been reaped.
+    /// Kills the process (if it still runs) and its process group, and waits until the process
+    /// has been reaped.
     pub(crate) async fn kill(&self) {
         let tx = self.kill.lock().unwrap_or_else(|p| p.into_inner()).take();
         if let Some(tx) = tx {

@@ -111,6 +111,10 @@ impl Terminals {
 }
 
 impl axiom_agent::acp::Terminals for Terminals {
+    fn owner(&self, id: &str) -> Option<String> {
+        self.get(id).ok().map(|t| t.principal.clone())
+    }
+
     fn output<'a>(
         &'a self,
         id: &'a str,

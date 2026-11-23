@@ -22,7 +22,7 @@ pub fn looks_secret(name: &str) -> bool {
         || n.ends_with("_PAT")
         || n.ends_with("_AUTH")
         || n.ends_with("DATABASE_URL")
-        || n == "SSH_AUTH_SOCK"
+        || n == SSH_AGENT_VAR
         || n.contains("PASSWORD")
         || n.contains("PASSWD")
 }
@@ -53,22 +53,41 @@ pub fn daemon_names() -> Vec<String> {
         .collect()
 }
 
-/// A short line for an approval card: how many variables are withheld, and which.
+/// A short line for an approval card: how many variables are withheld, and which. A withheld
+/// `SSH_AUTH_SOCK` is always named, first, with what it breaks and how to pass it: a `git push`
+/// over SSH that fails for want of it is explained on the card (review rev3).
 pub fn describe(withheld: &[String]) -> Option<String> {
     if withheld.is_empty() {
         return None;
     }
-    let mut names: Vec<&str> = withheld.iter().map(String::as_str).take(8).collect();
+    let is_ssh = |n: &str| n.eq_ignore_ascii_case(SSH_AGENT_VAR);
+    let ssh = withheld.iter().find(|n| is_ssh(n));
+    let mut names: Vec<&str> = ssh
+        .into_iter()
+        .chain(withheld.iter().filter(|n| !is_ssh(n)))
+        .map(String::as_str)
+        .take(8)
+        .collect();
     if withheld.len() > 8 {
         names.push("…");
     }
-    Some(format!(
+    let mut line = format!(
         "environment: {} secret variable{} withheld ({})",
         withheld.len(),
         if withheld.len() == 1 { "" } else { "s" },
         names.join(", ")
-    ))
+    );
+    if let Some(name) = ssh {
+        line.push_str(&format!(
+            "; without {name}, git over SSH (push, fetch, signing) cannot use your SSH agent: \
+             add it to settings agent.passEnv to pass it"
+        ));
+    }
+    Some(line)
 }
+
+/// The SSH agent's socket: withheld by default ([`looks_secret`]).
+const SSH_AGENT_VAR: &str = "SSH_AUTH_SOCK";
 
 #[cfg(test)]
 mod tests {
@@ -124,5 +143,28 @@ mod tests {
             "environment: 2 secret variables withheld (GITHUB_TOKEN, MY_LLM)"
         );
         assert_eq!(describe(&[]), None);
+    }
+
+    /// Review rev3: a withheld SSH agent socket is named on the card, however many other names
+    /// are withheld, with the setting that passes it.
+    #[test]
+    fn a_withheld_ssh_agent_is_named_with_how_to_pass_it() {
+        let mut env: Vec<String> = (0..10).map(|i| format!("A{i}_TOKEN")).collect();
+        env.push("SSH_AUTH_SOCK".into());
+        let w = withheld(env.iter().map(String::as_str), &[], &[]);
+        let line = describe(&w).unwrap();
+        assert!(
+            line.starts_with("environment: 11 secret variables withheld (SSH_AUTH_SOCK, A0_TOKEN"),
+            "{line}"
+        );
+        assert!(line.contains("git over SSH"), "{line}");
+        assert!(line.contains("agent.passEnv"), "{line}");
+        // Passed: neither withheld nor mentioned.
+        let w = withheld(
+            env.iter().map(String::as_str),
+            &[],
+            &["ssh_auth_sock".into()],
+        );
+        assert!(!describe(&w).unwrap().contains("SSH"));
     }
 }
