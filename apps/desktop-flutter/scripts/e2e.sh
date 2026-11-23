@@ -55,9 +55,14 @@ for s in "${suites[@]}"; do
   status=${PIPESTATUS[0]}
   set -e
   [[ $status -eq 0 ]] || fail=1
-  # Skipped cases are reported, not counted as passes (audit AUD-060).
-  last="$(grep -Eo '[+][0-9]+( ~[0-9]+)?( -[0-9]+)?: (All tests (passed|skipped)|Some tests failed)' "$log" | tail -1)"
+  # Skipped cases are reported, not counted as passes (audit AUD-060). Two reporters: the
+  # terminal's "+3 ~1: All tests passed!" and, under GitHub Actions, "3 tests passed, 1 skipped."
+  # A summary line that is not found is no skip (grep must not end the run under set -e).
+  last="$(grep -Eo '[+][0-9]+( ~[0-9]+)?( -[0-9]+)?: (All tests (passed|skipped)|Some tests failed)' "$log" | tail -1 || true)"
   skipped="$(sed -nE 's/.* ~([0-9]+).*/\1/p' <<<"$last")"
+  if [[ -z "$skipped" ]]; then
+    skipped="$(grep -Eo '[0-9]+ skipped' "$log" | tail -1 | grep -Eo '^[0-9]+' || true)"
+  fi
   [[ -n "$skipped" ]] && summary+=("$s: $skipped skipped")
   rm -f "$log"
 done

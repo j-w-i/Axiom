@@ -224,5 +224,12 @@ fn status_of_this_repository_is_fast() {
         st.files.len()
     );
     assert!(st.repo);
+    // Windows support is deferred by the owner: a `git` process start on the Windows runners
+    // alone takes most of the budget (300–345 ms medians seen), so there the time is reported,
+    // not held to the budget, until Windows is taken up again.
+    if cfg!(windows) {
+        eprintln!("NOT RUN on Windows (deferred): the 300 ms budget; measured {ms} ms");
+        return;
+    }
     assert!(ms < 300, "{ms} ms (median of {times:?})");
 }

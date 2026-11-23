@@ -21,10 +21,24 @@ async fn daemon_with_trash(xdg: &Path) -> (Daemon, tempfile::TempDir) {
     let xdg = xdg.to_path_buf();
     let d = Daemon::spawn_configured(data.path(), move |c| {
         c.env("XDG_DATA_HOME", &xdg);
+        // macOS trashes into `$HOME/.Trash`: never the developer's own trash.
+        if cfg!(target_vendor = "apple") {
+            c.env("HOME", &xdg);
+        }
     })
     .await;
     d.initialize().await;
     (d, data)
+}
+
+/// Where `name`, trashed, lands under the test's trash home: `Trash/files/` (freedesktop.org,
+/// Linux) or `.Trash/` (macOS).
+fn trashed(home: &Path, name: &str) -> std::path::PathBuf {
+    if cfg!(target_vendor = "apple") {
+        home.join(".Trash").join(name)
+    } else {
+        home.join("Trash/files").join(name)
+    }
 }
 
 async fn create(f: &Fixture, path: &str, text: &str) -> Result<(), axiom_protocol::RpcError> {
@@ -135,24 +149,27 @@ async fn create_rename_and_trash_with_change_notifications() {
     assert!(removed && created);
     d.drain_until_quiet(Duration::from_millis(300)).await;
 
-    // trash: into $XDG_DATA_HOME/Trash with its .trashinfo; notified as removed.
+    // trash: into $XDG_DATA_HOME/Trash with its .trashinfo (Linux), ~/.Trash (macOS); notified
+    // as removed.
     trash(&f, "src/deep/moved.txt").await.unwrap();
     assert!(!f.path("src/deep/moved.txt").exists());
-    let t = xdg.path().join("Trash");
     assert_eq!(
-        std::fs::read_to_string(t.join("files/moved.txt")).unwrap(),
+        std::fs::read_to_string(trashed(xdg.path(), "moved.txt")).unwrap(),
         "hello\n"
     );
-    let info = std::fs::read_to_string(t.join("info/moved.txt.trashinfo")).unwrap();
-    assert!(info.starts_with("[Trash Info]\nPath=/"), "{info}");
-    assert!(
-        info.contains(&format!(
-            "Path={}\n",
-            f.path("src/deep/moved.txt").to_string_lossy()
-        )),
-        "{info}"
-    );
-    assert!(info.contains("\nDeletionDate="), "{info}");
+    if !cfg!(target_vendor = "apple") {
+        let info =
+            std::fs::read_to_string(xdg.path().join("Trash/info/moved.txt.trashinfo")).unwrap();
+        assert!(info.starts_with("[Trash Info]\nPath=/"), "{info}");
+        assert!(
+            info.contains(&format!(
+                "Path={}\n",
+                f.path("src/deep/moved.txt").to_string_lossy()
+            )),
+            "{info}"
+        );
+        assert!(info.contains("\nDeletionDate="), "{info}");
+    }
     let n: DidChangeParams =
         serde_json::from_value(d.next_notification("fs/didChange", WAIT).await).unwrap();
     assert!(n
@@ -162,7 +179,7 @@ async fn create_rename_and_trash_with_change_notifications() {
 
     // A directory goes to the trash whole.
     trash(&f, "src").await.unwrap();
-    assert!(t.join("files/src/deep/er").is_dir());
+    assert!(trashed(xdg.path(), "src/deep/er").is_dir());
     assert!(!f.path("src").exists());
 }
 
@@ -242,7 +259,7 @@ async fn nothing_leaves_the_workspace() {
     assert_eq!(left, vec![std::ffi::OsString::from("secret")]);
     // Trashing a link moves the link, never what it points to.
     trash(&f, "link").await.unwrap();
-    let in_trash = xdg.path().join("Trash/files/link");
+    let in_trash = trashed(xdg.path(), "link");
     assert!(std::fs::symlink_metadata(&in_trash)
         .unwrap()
         .file_type()

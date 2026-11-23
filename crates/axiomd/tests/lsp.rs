@@ -9,6 +9,7 @@
 
 mod common;
 
+use axiom_protocol::env::{Trust, TrustParams};
 use axiom_protocol::fs::{ReadFile, ReadFileParams};
 use axiom_protocol::lsp::{
     Notify, NotifyParams, Request, RequestParams, ServerState, Servers, ServersResult,
@@ -307,6 +308,15 @@ async fn real_rust_analyzer_definition_and_diagnostics() {
     )
     .unwrap();
     let f = d.open_dir(dir).await;
+    // rust-analyzer builds build scripts and macros, so it waits for the folder to be trusted
+    // (AUD-008); this fixture is ours.
+    d.client
+        .request::<Trust>(TrustParams {
+            workspace_id: f.id.clone(),
+            trusted: true,
+        })
+        .await
+        .unwrap();
     let s: ServersResult = d
         .client
         .request::<Servers>(WorkspaceRef {
