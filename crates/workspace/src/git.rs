@@ -205,6 +205,43 @@ pub struct ConfigFiles {
 /// yet: `git init` keeps its configuration); else nothing. An error when git is missing or does
 /// not answer as expected: the caller then protects more, not less.
 pub fn config_files(root: &Path) -> Result<ConfigFiles, GitError> {
+    // git names paths its own way (on Windows `C:/x\\.git\\../shared.gitconfig`): each is
+    // normalised as text, so it compares with the workspace's paths (still not resolved through
+    // symlinks; the gate does that).
+    let mut c = config_files_as_named(root)?;
+    c.hooks = c.hooks.map(|h| normal(&h));
+    for p in c.git_dirs.iter_mut().chain(c.files.iter_mut()) {
+        *p = normal(p);
+    }
+    let mut seen = Vec::new();
+    c.files.retain(|p| {
+        let new = !seen.contains(p);
+        seen.push(p.clone());
+        new
+    });
+    Ok(c)
+}
+
+/// `path` with its separators the platform's own, `.` dropped and `..` folded into its parent,
+/// as text (a `..` at the root stays at the root).
+fn normal(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push(c);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn config_files_as_named(root: &Path) -> Result<ConfigFiles, GitError> {
     let git = find_git().ok_or(GitError::NoGit)?;
     let rev = run_command(
         isolated(&git, root),
@@ -557,6 +594,22 @@ pub fn watch_git_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// git's paths compare with the workspace's once normalised (Windows CI on 000d4e8: an
+    /// include named `C:/…\.git\../shared.gitconfig` was not found under the workspace).
+    #[test]
+    fn gits_paths_are_normalised_as_text() {
+        #[cfg(unix)]
+        assert_eq!(
+            normal(Path::new("/w/./a/.git/../shared.gitconfig")),
+            PathBuf::from("/w/a/shared.gitconfig")
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            normal(Path::new(r"C:/Users/x/ws\.git\../shared.gitconfig")),
+            PathBuf::from(r"C:\Users\x\ws\shared.gitconfig")
+        );
+    }
 
     #[test]
     fn porcelain_v2_records() {

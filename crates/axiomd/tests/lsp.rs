@@ -481,7 +481,9 @@ async fn a_connection_that_stopped_reading_does_not_stop_diagnostics() {
     }
     // The stuck connection got each of these too, until its queue was full.
     let mut n = 0usize;
-    let flood_end = tokio::time::Instant::now() + Duration::from_secs(30);
+    // The cap only matters on a slow runner: a run ends at 1500 outputs (CI 000d4e8: Ubuntu
+    // reached about 1430 in 30 s with these floods running side by side).
+    let flood_end = tokio::time::Instant::now() + Duration::from_secs(120);
     while n < 1500 && tokio::time::Instant::now() < flood_end {
         if !d
             .no_notification("terminal/output", Duration::from_millis(100))
