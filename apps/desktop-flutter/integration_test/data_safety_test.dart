@@ -123,7 +123,9 @@ void main() {
     await until(tester, () => app.documents.doc('README.md') != null, what: 'A README');
     expect(app.documents.doc('README.md')!.text, '# A\n');
     app.documents.requestOpenFolder(b.path);
-    await until(tester, () => app.workspace.root == b.path && app.workspace.rootLoaded, what: 'B');
+    // Canonical, as the daemon's root is (macOS temp folders: /var is /private/var).
+    final bRoot = b.resolveSymbolicLinksSync();
+    await until(tester, () => app.workspace.root == bRoot && app.workspace.rootLoaded, what: 'B');
     await tester.pump(const Duration(milliseconds: 300));
     expect(app.documents.docs.map((d) => d.path), isNot(contains('src/main.rs')));
     expect(app.documents.doc('README.md'), isNull);

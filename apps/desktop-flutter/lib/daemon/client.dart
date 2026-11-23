@@ -137,7 +137,12 @@ class _Pending {
 }
 
 class _Connection {
-  _Connection(this.process, this.generation);
+  _Connection(this.process, this.generation) {
+    // A write to a daemon that has died fails later, on this future, not in add() (a broken
+    // pipe). The exit is what reports the daemon gone and fails what is pending (_exited), so
+    // here the pipe is only marked closed: unobserved, the error would be uncaught.
+    process.stdin.done.then<void>((_) {}, onError: (Object _) => stdinClosed = true);
+  }
   final Process process;
   final int generation;
   final pending = <int, _Pending>{};
@@ -151,7 +156,12 @@ class _Connection {
 
   void send(Map<String, Object?> message) {
     if (stdinClosed) return;
-    process.stdin.add(utf8.encode('${jsonEncode(message)}\n'));
+    try {
+      process.stdin.add(utf8.encode('${jsonEncode(message)}\n'));
+    } on StateError {
+      // The sink is already closed: the daemon is going; the exit fails the request.
+      stdinClosed = true;
+    }
   }
 
   Future<void> closeStdin() async {

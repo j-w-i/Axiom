@@ -190,6 +190,26 @@ void main() {
     },
   );
 
+  test(
+    'a request written to a daemon that just died fails; the broken pipe is not uncaught',
+    () async {
+      await client.start();
+      final pid = client.pid!;
+      Process.killPid(pid, ProcessSignal.sigkill);
+      // Synchronously, so the client has not seen the exit yet and still writes to the pipe.
+      final end = DateTime.now().add(const Duration(seconds: 5));
+      while (processAlive(pid) && DateTime.now().isBefore(end)) {}
+      expect(processAlive(pid), isFalse);
+      final calls = [for (var i = 0; i < 20; i++) open()];
+      for (final c in calls) {
+        await expectLater(c, throwsA(isA<DaemonException>()));
+      }
+      await eventually(() => client.state.value is DaemonFailed);
+      // Time for a late write error to surface as an uncaught one (it fails the test if it does).
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    },
+  );
+
   test('shutdown ends the process within its bound and leaves the client stopped', () async {
     await client.start();
     final pid = client.pid!;
