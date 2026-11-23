@@ -1,6 +1,6 @@
 # CR-AUD-SEC: what an approval covers, untrusted folders, supply chain
 
-_Status: **approved by the owner** (2026-11-23, remediation of the comprehensive audit: "fix
+_Status: **Resolved — accepted by ADR-0023 (2026-11-23).** Approved by the owner (2026-11-23, remediation of the comprehensive audit: "fix
 every issue"). Raised by AUD-008, AUD-009, AUD-010, AUD-039, AUD-040, AUD-041, AUD-103,
 AUD-104, AUD-105, AUD-107, AUD-109 (`audits/comprehensive-audit/ISSUES.md`). Implemented in
 `crates/{agent,env,lsp,inspect}`, `crates/axiomd/src/{tools,acp}.rs`, the agent, session and

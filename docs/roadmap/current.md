@@ -2,15 +2,20 @@
 
 _Last updated: 2026-11-23._
 
-## Audit remediation: in progress (2026-11-23)
+## Audit remediation: implemented and reviewed, awaiting CI and merge (2026-11-23)
 
 A comprehensive audit of `main` at `751ffc2` (2026-11-22) found 112 issues: 1 P0, 12 P1, 49 P2,
 50 P3 (`audits/comprehensive-audit/`). The owner authorised fixing all of them; the work is on
 branch `task/audit-remediation` (task AUD-REM-001), committed in the batches of
 `audits/comprehensive-audit/REMEDIATION_PLAN.md`. Issue statuses are in
-`audits/comprehensive-audit/ISSUES.md`.
+`audits/comprehensive-audit/ISSUES.md`. All 112 are fixed (task status `implemented`, PR
+j-w-i/Axiom#13). An independent review requested changes (blocking B1–B6); they were fixed and
+the re-review passed, conditional on CI's Flutter jobs. Its non-blocking findings (R1–R5,
+N1–N18) were then fixed or documented as well; the two change requests became ADR-0022 and
+ADR-0023.
 
-**Next: finish the remediation batches, CI green, merge to main; then M6.**
+**Next: CI green on the PR, the review's sign-off on the follow-ups, then the task to `verified`
+and the merge to main; then M6.**
 
 ## M5.5 — Every language: complete (2026-11-22)
 

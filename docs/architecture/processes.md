@@ -45,11 +45,22 @@ daemon exit by design: they are killed.
   hang-up → SIGKILL escalation (2 s) before the process exits.
 - **A killed or crashed daemon** (SIGKILL, OOM): `axiomd` starts a small watchdog, `axiomd
   --watchdog`, in its own process group with a pipe from the daemon as its stdin, and registers
-  the process group of every task and terminal it starts. When the pipe reaches end of file
-  (the daemon is gone, however it ended) the watchdog sends SIGHUP and SIGTERM to every group
-  still registered, SIGKILL a second later, and exits. Unix; Windows tasks are in
-  kill-on-close job objects. Language servers, ACP agents and MCP servers are not registered
-  yet (they are started by other crates).
+  the process group of every task, terminal, language server, external agent (ACP) and MCP
+  server it starts: each is started as the leader of a group of its own. When the pipe reaches
+  end of file (the daemon is gone, however it ended) the watchdog sends SIGHUP and SIGTERM to
+  every group still registered, SIGKILL a second later, and exits. Unix; Windows tasks are in
+  kill-on-close job objects.
+  - `axiom-lsp` and `axiom-agent` do not depend on `axiom-exec`: the daemon passes them the
+    watchdog's register and unregister functions at startup.
+  - A group is unregistered when its leader has ended, so the watchdog does not signal a
+    number that a later process may have reused. A terminal's group is unregistered once its
+    process has been reaped, also when the `terminal/exited` relay lagged and dropped the
+    event; an external agent's or MCP server's once its leader has been reaped (review N13).
+  - Registering never blocks the daemon: the lines go through a channel to a thread of their
+    own, which writes the pipe.
+  - Stopping an external agent or an MCP server (session deleted, idle, daemon shutdown)
+    signals its leader only, and its group is unregistered once the leader has been reaped:
+    a process the agent started and left running after that is not covered.
 
 ## Threads and async
 

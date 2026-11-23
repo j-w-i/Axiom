@@ -25,9 +25,35 @@
 Consequences: `..` never reaches the filesystem; a symlink inside the
 workspace that points outside it cannot be read or written through the
 protocol; `fs/list` reports symlinks as `symlink` and does not follow them.
-There is a time-of-check/time-of-use window between step 3 and the file
-operation; closing it needs `openat2`/`O_NOFOLLOW`-style APIs and is tracked
-as a hardening item, not an M1 requirement.
+
+**Between resolving and acting** (a local process that swaps a directory for a symlink; review
+N14 and R5, as built in `axiom-workspace`):
+- Every file operation (`write_text`, `remove_file`, `create_file`, `create_dir`, `rename`,
+  `trash`) resolves its path again inside its per-path lock, right before acting
+  (`Workspace::recheck`). A path that now leads elsewhere is refused (`permission_denied` when
+  outside the workspace, else `conflict` with no `currentVersion`), never redirected.
+- On Unix the operation's directory is then opened from the root one component at a time with
+  `O_NOFOLLOW` (`beneath.rs`), and the operation acts relative to it: the version check reads
+  with `openat`, the new text goes to an exclusively created temporary file renamed into place
+  (`renameat`). A symlink swapped in after the re-check makes the operation fail. Writes
+  replace the entry, so a hard link (to a git hook, say) is never written through.
+- The agent's writes (`fs.applyPatch`, `acp.writeFile`) also refuse unless the path still
+  resolves to the one the gate judged and the card showed (`write_text_checked`,
+  `remove_file_checked`), so a swap while the person reads the card cannot turn an approved
+  ordinary path into `.git/hooks/…`.
+- Checkpoint restores (`axiom_agent::checkpoint`, outside `Workspace`) write a new file beside
+  the entry and rename it over, after re-checking containment: no hard link is written through.
+
+What remains (defence in depth against redirection, not a sandbox; a process that can already
+write the workspace can usually write `.git/hooks` itself):
+- Windows: only the re-check applies, so a swap between the re-check and the operation is not
+  caught.
+- Unix, still by path: `create_dir` with `parents` creates the intermediate directories by
+  path (the last one no-follow); `trash` moves by path after its re-check; `fs/list` and the
+  LSP's reads of files outside the workspace (`read_regular_file`) read by path; checkpoint
+  restores re-check containment, then rename by path.
+- The root itself is opened by its canonical path: swapping the root or an ancestor is out of
+  scope.
 
 ## Managed installs (M2, enforced in `axiom-env`; as built by M2-ENV-002)
 
@@ -174,17 +200,29 @@ The Tauri shell's controls, kept as the record of how it was built:
   additions. The person's own tasks, builds and terminals get it whole.
 - **Agent-started processes do not get the daemon's secrets** (as built by AUD-010;
   `axiom_agent::secrets`). `task.run`, `build.run` and `acp.terminal` withhold every variable
-  whose name ends in `_TOKEN`, `_KEY`, `_SECRET` or `_CREDENTIALS` or contains `PASSWORD` or
-  `PASSWD` (any case), and every model provider's `apiKeyEnv` variable, unless settings
+  whose name ends in `_TOKEN`, `_KEY`, `_SECRET`, `_CREDENTIALS`, `_PAT`, `_AUTH` or
+  `DATABASE_URL`, contains `PASSWORD` or `PASSWD`, or is `SSH_AUTH_SOCK` (any case; review N7),
+  and every model provider's `apiKeyEnv` variable, unless settings
   `agent.passEnv` (a list of names, set by the person, never by a workspace) names it. The
   approval card says so ("environment: 3 secret variables withheld (GITHUB_TOKEN, …)"). The
-  removal is done by the executor (`SpawnSpec::remove_key`). An ACP terminal's own `env` entries
+  removal is done by the executor (`SpawnSpec::remove_key`). Withholding `SSH_AUTH_SOCK` means
+  an agent's `git push` over SSH needs `agent.passEnv: ["SSH_AUTH_SOCK"]`: the SSH agent signs
+  for any process that can reach its socket. An ACP terminal's own `env` entries
   are set as the agent asks, and are on the card (§External agents).
 - External agents and MCP servers keep the daemon's environment (they sign in with it), except
   the `apiKeyEnv` variables: Axiom's model keys never reach a process it did not start for that
   provider. A provider or server that needs one names it in its own `env`.
 - The agent's `preview.start` runs the dev server without the withheld variables too (a preview
   the person starts from the Inspector keeps the full environment).
+- Toolchain installer commands (`env.install`, from the Environment view or an agent's call;
+  `axiom_env::install::run_program`) get the daemon's full environment: nothing is withheld.
+  What they run is the plan shown on the card (§Agent permissions).
+- **The filter is hygiene, not a boundary.** It keeps secrets out of the obvious place (an
+  agent's command printing its environment), and matches names only: a secret under a name it
+  does not match passes. A process the agent starts runs as the same user as the daemon and can
+  read the daemon's environment directly (`/proc/<daemon pid>/environ` on Linux,
+  `ps eww <pid>` on macOS). Secrets an agent must not reach belong outside the daemon's
+  environment (the credential store, §Model credentials); isolation is ADR-0010's (M6).
 - Every started task is recorded (command, cwd, time, initiator) in the audit
   log from M3.
 
@@ -222,6 +260,10 @@ The Tauri shell's controls, kept as the record of how it was built:
   *opaque* calls (an MCP tool, whose arguments decide what it does; an install). Grants end
   when the session is deleted, rewound (edit/regenerate) or restored to a checkpoint, when the
   connection of an external principal closes, and with the daemon.
+  - Connection close is handled lazily: a closed connection's grants are dropped at the start
+    of the next `agent/toolCall` (from any connection), before that call's principal is
+    numbered, so a reused `#c<n>` never inherits them. Until then they stay in the daemon's
+    memory, unusable, since no open connection has that principal.
 - **Principals.** `agent/toolCall` accepts only `cli` and `mcp:<name>`, so an external client
   can never use a session's grants. The daemon makes the declared name the connection's own
   (`mcp:<name>#c<n>`, shown on cards and in the audit log): two clients that both call
@@ -301,7 +343,12 @@ The Tauri shell's controls, kept as the record of how it was built:
   - as configured, when it only reads and parses: bash, clangd, docker, marksman, taplo, the
     HTML/CSS/JSON servers, yaml;
   - **restricted**: jdtls without Gradle or Maven import (`java.import.gradle.enabled`,
-    `java.import.maven.enabled` false, in its initialization options and its settings);
+    `java.import.maven.enabled` false, in its initialization options and its settings). It does
+    not turn annotation processing off, which jdtls has no setting for (its only one,
+    `java.import.gradle.annotationProcessing.enabled`, is for the Gradle import that is already
+    off): an Eclipse-format project (`.project`, `.classpath`) whose
+    `.settings/org.eclipse.jdt.apt.core.prefs` enables APT can still run the processor JARs its
+    `.factorypath` names, when jdtls builds or reconciles. This is a known residual;
     typescript-language-server with the TypeScript it was installed with (`tsserver.path`), never
     the folder's `node_modules/typescript`, and no plugins (refused if its own is not found);
     gopls with `GOTOOLCHAIN=local` (the `go.mod` `toolchain` line cannot fetch and run another
@@ -400,7 +447,7 @@ must never reach a user:
 ## Known gaps (tracked, not hidden)
 
 - M1 has no isolation at all for tasks: equivalent to a terminal.
-- TOCTOU on path containment (above).
+- TOCTOU on path containment: narrowed, not closed (§Paths, "What remains").
 - The shell's UI code runs with the person's full rights and no sandbox (above); the
   no-files, no-processes rule is enforced by review, not by a capability boundary.
 - Unsaved text is kept across a crash of the shell or the daemon (the recovery folder under

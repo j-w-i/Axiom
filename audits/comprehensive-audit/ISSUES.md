@@ -2,8 +2,8 @@
 
 Audit of `main` at `751ffc2` (2026-11-22). Every issue has a stable id. Implementation was
 authorised by the owner on 2026-11-23 for every issue (task AUD-REM-001, branch
-`task/audit-remediation`); the current status of each issue is in **Remediation status** below,
-which supersedes the "Status: Not started" lines in the entries.
+`task/audit-remediation`); the current status of each issue is in **Remediation status** below
+(each entry's Status line repeats it).
 
 **Confidence**
 - **Confirmed (runtime)** — reproduced in the running app or daemon during this audit; the
@@ -158,7 +158,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-002 (same open/close plumbing), AUD-025 and AUD-086 (other state that must survive a restart).
 - **Risk:** Medium: document identity is keyed by workspace-relative path; re-attach must handle the folder having disappeared (AUD-066) and LSP re-sync (`LspSync`) for every surviving doc.
 - **Verification:** New e2e step (extend `integration_test/editor_test.dart`): type into a file, SIGKILL the daemon (`app.client.pid`), restart, assert the buffer text and dirty flag are unchanged and Save writes it. Same for palette "Restart the Backend".
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ---
 
@@ -177,7 +177,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-001 (same plumbing; fix together), AUD-092 (Chat scope flip on switch has the same transient state).
 - **Risk:** Low–medium: tab restore for the new folder must not race the clear.
 - **Verification:** e2e: open A + file, switch to B, assert `documents.docs` is empty or B's, Problems empty, LSP `didClose` sent for A's docs.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-003 — Git gutter marks are drawn half an editor-height below the lines they describe
 - **Category:** GUI / Visual (functional indicator wrong)
@@ -192,7 +192,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** None.
 - **Risk:** Low.
 - **Verification:** Widget or e2e test that reads the strip's `RenderBox` global rect and asserts its top equals the editor viewport's top and its height equals the viewport's; screenshot comparison of a known diff (mark rects align with line rects from `CodeIndicatorValueNotifier.paragraphs`). The existing `git_test.dart` only checks mark values, which is why this shipped.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-004 — Splitting the editor throws during build when the editor column is narrower than 480 px
 - **Category:** GUI / Functional
@@ -207,7 +207,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-014 (panel sizes not bounded by the window) shares the root cause "layout bounds ignore available space"; fix in one batch.
 - **Risk:** Low.
 - **Verification:** Widget test pumping `EditorArea` with a split at widths 300, 479, 480, 900 asserts no exception; e2e at 900×560 with dock + split.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-005 — Typing near the top of a very large file freezes the UI for seconds and multiplies memory
 - **Category:** Performance
@@ -222,7 +222,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-015 (open latency of the same file).
 - **Risk:** Medium: re_editor is vendored with a patch (`third_party/re_editor/PATCHES.md`); undo changes touch editing correctness.
 - **Verification:** `audit_perf_test.dart` scenario as a committed frame benchmark: typing at line 1 of a 100k-line file, budget p99 build ≤ 16.7 ms and PSS growth ≤ 50 MiB over 50 keystrokes; compare before/after with interleaved runs.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-006 — Workspace search is quadratic in line length; one minified file stalls search for minutes
 - **Category:** Performance / Reliability
@@ -237,7 +237,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** None.
 - **Risk:** Low.
 - **Verification:** Rust test: a 2 MiB single-line file searched with a 1-char query completes in < 1 s and respects `limit`; cancel test with a slow file.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-007 — A task stays "running" until every background grandchild exits; cancel cannot interrupt the wait
 - **Category:** Functional / Reliability
@@ -252,7 +252,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-027 (orphaned children) — same process-group policy.
 - **Risk:** Low–medium: output from a lingering grandchild after the drain is lost (document it).
 - **Verification:** Rust test in `crates/exec`: `sh -c 'sleep 30 & echo x'` completes in < 3 s with exit 0; cancel of a task blocked on a grandchild returns in < 2 s.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-008 — Language servers start in untrusted workspaces and execute the workspace's code
 - **Category:** Security
@@ -267,7 +267,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** none; touches the M5.5 auto-start flow (`lsp.autoInstall`).
 - **Risk:** Medium: UX change to first-open; needs owner decision on the default.
 - **Verification:** Daemon test: untrusted workspace → `lsp` start refused or started with restricted init options (assert the options sent to fake-lsp); trusted → normal.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-009 — "Allow for session" grants are wider than what the person approved
 - **Category:** Security (agent permission gate)
@@ -282,7 +282,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-040 (ACP answers → grants), AUD-104 (policy file writable by the agent).
 - **Risk:** Medium: more prompts; the owner should confirm the intended UX.
 - **Verification:** Gate unit tests for each widening case; e2e approval flow in `agent_test.dart`.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-010 — Processes started by agents inherit the daemon's full environment; the secret stripping `security.md` describes is not implemented
 - **Category:** Security
@@ -297,7 +297,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-039 (agent-set env in ACP terminals).
 - **Risk:** Low–medium: some builds legitimately need tokens; the allow-list covers them.
 - **Verification:** Daemon test: agent `task.run ["env"]` with `FOO_TOKEN` set → absent from output; GUI-initiated task → present.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-011 — `agent/send` leaves a session stuck "running" when it fails after `live.begin()`
 - **Category:** Reliability (agent)
@@ -312,7 +312,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-025 (shell side stays "writing").
 - **Risk:** Low.
 - **Verification:** Daemon test with a malformed policy: first send errors, second send is accepted.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-012 — Git change watch busy-loops when the `.git` watch cannot be created
 - **Category:** Performance / Reliability
@@ -327,7 +327,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-031 (blocking watch setup on async threads).
 - **Risk:** Low.
 - **Verification:** Unit test with an injected watcher factory that fails: no more than one `didChange` per poll interval; CPU-time assertion.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-013 — Menus and pickers always open downward/rightward with no flip or clamp, so they run off the window
 - **Category:** GUI
@@ -342,7 +342,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 - **Dependencies:** AUD-051, AUD-052 (one positioning helper).
 - **Risk:** Low.
 - **Verification:** Widget tests placing an anchor near each edge assert the menu rect is inside the window; screenshot check at 900×560.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ---
 ## P2 — Medium
@@ -361,7 +361,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** AUD-004 (same root cause).
 - **Risk:** Low.
 - **Verification:** Widget test over a grid of window sizes × stored sizes asserting no overflow and editor width ≥ minimum.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-015 — Opening a 100 000-line file blocks the UI thread for about a second
 - **Category:** Performance · **Priority:** P2 · **Confidence:** Confirmed (runtime, measured twice)
@@ -374,7 +374,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** AUD-005.
 - **Risk:** Low.
 - **Verification:** Frame benchmark: open 100k-line file, max build ≤ 50 ms, no frame > 100 ms.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-016 — Deeply nested folders overflow explorer rows; the leaf row renders blank
 - **Category:** GUI / Layout · **Priority:** P2 · **Confidence:** Confirmed (runtime)
@@ -387,7 +387,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** None.
 - **Risk:** Low.
 - **Verification:** Widget test with depth 30 at width 180: no overflow, name visible.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-017 — The active editor tab is not scrolled into view; the tab strip cannot be scrolled with a mouse wheel
 - **Category:** GUI / Usability · **Priority:** P2 · **Confidence:** Confirmed (runtime)
@@ -400,7 +400,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** AUD-059 (`AxTabs` is the same pattern elsewhere).
 - **Risk:** Low.
 - **Verification:** e2e: open 20 files, assert active tab rect within the strip; wheel test.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-018 — The "changed on disk" dialog focuses the destructive "Overwrite" by default
 - **Category:** Usability / Data safety · **Priority:** P2 · **Confidence:** Confirmed (runtime)
@@ -413,7 +413,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** AUD-019.
 - **Risk:** Low.
 - **Verification:** Widget test: dialog opens with focus on Cancel; Enter resolves `cancel`.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-019 — A file deleted on disk is presented as "changed on disk"; Save does not recreate it and "Reload" would discard the buffer
 - **Category:** Functional / Usability · **Priority:** P2 · **Confidence:** Confirmed (runtime)
@@ -426,7 +426,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** AUD-018.
 - **Risk:** Low.
 - **Verification:** e2e R8 scenario asserts the dialog text and that Save recreates the file with the buffer.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-020 — System text scaling clips text in fixed-height rows
 - **Category:** Accessibility / Layout · **Priority:** P2 · **Confidence:** Confirmed (runtime)
@@ -439,7 +439,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** None.
 - **Risk:** Low–medium (many surfaces).
 - **Verification:** Golden/screenshot tests at text scale 1.0/1.3/1.5 for explorer, diff, tabs, menus with no clipping (assert text painter height ≤ row height).
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-021 — Every list row is its own Tab stop (no roving focus); keyboard users cannot Tab past a long tree
 - **Category:** Accessibility · **Priority:** P2 · **Confidence:** Confirmed (runtime) for the explorer; Confirmed (code) for other lists
@@ -452,7 +452,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** AUD-048 (palette focus trap).
 - **Risk:** Low.
 - **Verification:** `a11y_test.dart`: from the explorer, one Tab reaches the next region.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-022 — No way to create, rename or delete files or folders, no Save As, and no Edit menu
 - **Category:** Usability / Functional gap · **Priority:** P2 · **Confidence:** Confirmed (runtime + code)
@@ -465,7 +465,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Dependencies:** governance change request for the protocol.
 - **Risk:** Medium (contract change).
 - **Verification:** e2e: create, rename, delete (to trash) from the explorer; Save As writes a new path.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-023 — A file with mixed line breaks is marked modified without an edit, and saving rewrites its line breaks
 - **Category:** Functional / Data integrity · **Priority:** P2 · **Confidence:** Confirmed (code). (Pure CRLF is fine at runtime: exploratory step "CRLF file not dirty" passed.)
@@ -475,7 +475,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Proposed fix:** Keep per-line terminators (or the original text) and compare against it; on save preserve existing terminators and use the dominant style only for new lines.
 - **Dependencies:** AUD-005 (same dirty-check path). **Risk:** Low.
 - **Verification:** Extend `test/state/doc_line_break_test.dart` with mixed and stray-CR files.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-024 — Two saves of one document in flight race on `expectedVersion`, producing a false conflict for your own save
 - **Category:** Functional · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -483,7 +483,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Ctrl+S twice quickly (or format-on-save) sends two writes with the same expected version; the second is rejected as "changed on disk", and Reload drops text typed in between. FS-F4.
 - **Proposed fix:** Serialise saves per document (queue; coalesce a pending save) and update the expected version from the first write's result before the second.
 - **Risk:** Low. **Verification:** Unit test with a fake client delaying the first write.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-025 — After a daemon crash or restart mid-reply, the conversation stays "writing" forever
 - **Category:** Functional (chat) · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -492,7 +492,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Proposed fix:** On daemon loss end every running turn locally with an "interrupted" marker; resync session state after reconnect.
 - **Dependencies:** AUD-001, AUD-011. **Risk:** Low.
 - **Verification:** `test/state/agent_test.dart`: running turn + daemon state change → not running, error shown.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-026 — Task output without newlines grows one string without bound and is re-split per chunk (quadratic on the UI isolate)
 - **Category:** Performance / Memory · **Priority:** P2 · **Confidence:** Confirmed (code); impact Suspected
@@ -500,7 +500,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description / repro:** Run `head -c 30000000 /dev/zero | tr '\0' a` in Output. FS-F6. (Line-oriented floods are fine: 200 000-line `seq` measured with no frame over budget, `console_flood` in perf JSON.)
 - **Proposed fix:** Keep the pending partial line in a `StringBuffer`, split only the new chunk, and cap a single line's length (truncate with a marker).
 - **Risk:** Low. **Verification:** Unit test feeding 30 MB without newline: bounded memory, linear time.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-027 — Child processes outlive a daemon that is killed or crashes
 - **Category:** Reliability / Resource lifetime · **Priority:** P2 · **Confidence:** Confirmed (terminal) / Suspected (others)
@@ -509,7 +509,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Proposed fix:** Set `PR_SET_PDEATHSIG(SIGKILL)` in children on Linux (and a parent-pipe watchdog on macOS); at shutdown stop MCP/ACP explicitly and finish escalation before exit.
 - **Dependencies:** AUD-007. **Risk:** Low.
 - **Verification:** Test: start a task and a terminal, SIGKILL the daemon, assert the children are gone within 2 s.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-028 — `fs/watch` keeps one forwarder per workspace bound to the first connection
 - **Category:** Reliability (multi-client) · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -517,7 +517,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** A second client (CLI, MCP, a second window) gets OK but no events; the entry goes stale when the first connection ends; concurrent enables leak a forwarder. RC-7.
 - **Proposed fix:** Subscribe per connection over a shared broadcast per workspace; remove on connection close.
 - **Risk:** Low. **Verification:** Two-connection daemon test.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-029 — `workspace/close` is not reference-counted across connections
 - **Category:** Reliability (multi-client) · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -525,7 +525,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** One client's close cancels every client's tasks, servers and terminals. RC-8.
 - **Proposed fix:** Count opens per connection; tear down when the count reaches zero or the last connection drops.
 - **Risk:** Low. **Verification:** Two-connection test: A closes, B's task survives.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-030 — `App.clients` is never de-duplicated or pruned; daemon-wide forwarders await each client in turn
 - **Category:** Reliability / Performance · **Priority:** P2 · **Confidence:** Confirmed (code) / Suspected (impact)
@@ -533,7 +533,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Dead clients accumulate; one full queue blocks terminal and LSP traffic for all. RC-9.
 - **Proposed fix:** Prune on disconnect; use `try_send` with per-client drop/lag policy.
 - **Risk:** Low. **Verification:** Test with a stalled client: another client's terminal output keeps flowing.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-031 — Blocking work runs on async worker threads under std mutexes
 - **Category:** Performance / Concurrency · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -541,7 +541,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** These stall Tokio workers and every request queued behind them. RC-10.
 - **Proposed fix:** Move into `spawn_blocking`; never hold a std mutex across them.
 - **Risk:** Low. **Verification:** Test with a slow `git` shim: `fs/list` latency stays < 50 ms meanwhile.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-032 — ACP agents and MCP servers are started and handshaken under daemon-wide locks and never evicted
 - **Category:** Reliability / Concurrency · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -549,7 +549,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** The global ACP/MCP map locks are held during process start and handshake (up to 2 × 60 s), blocking other sessions; a crashed agent stays cached so the session fails every later turn until deleted. RC-11, RS-F12.
 - **Proposed fix:** Insert a "starting" placeholder and release the lock while starting; evict on process exit; stop idle agents after a timeout.
 - **Risk:** Low–medium. **Verification:** Test with a fake ACP that hangs on handshake: another session's turn proceeds; killing the agent lets the next turn restart it.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-033 — Session attach is recorded before the request succeeds
 - **Category:** Reliability (agent) · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -557,7 +557,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** A failed or cancelled send/open leaves the connection marked attached with no forwarder; later events are lost for that client. RC-12. Related shell side: FS-F10 (AUD-088).
 - **Proposed fix:** Record attachment only after success; on failure roll back.
 - **Risk:** Low. **Verification:** Test: failing open, then a successful open receives events.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-034 — A cancelled or timed-out `preview/start` leaves the preview stuck in `Starting`
 - **Category:** Reliability (M5 inspector) · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -565,7 +565,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Every later start returns the stuck preview; a double-click can launch two dev servers. RC-13.
 - **Proposed fix:** Guard the start with a cancellation-safe state transition (reset to `Stopped` and kill the child on drop); de-duplicate concurrent starts.
 - **Risk:** Low. **Verification:** Test: cancel during start → state `Stopped`, no child left.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-035 — Agent `task.run`/`build.run` keep all output in memory; `build.run` has no timeout
 - **Category:** Reliability / Memory · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -573,7 +573,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Only a 16 KiB tail is used, but the whole output is buffered; a noisy or endless command can exhaust the daemon's memory. RC-14, RS-F7.
 - **Proposed fix:** Ring buffer of the tail; default timeout for `build.run` with an explicit override.
 - **Risk:** Low. **Verification:** Test with `yes | head -c 500M`: daemon RSS stays bounded.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-036 — Terminal output buffering is bounded by count, not bytes
 - **Category:** Memory · **Priority:** P2 · **Confidence:** Suspected
@@ -581,7 +581,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** `yes` or a large `cat` with a slow consumer can grow memory to gigabytes. RC-15.
 - **Proposed fix:** Byte budget with backpressure (pause reading the PTY) or drop-oldest with a "output skipped" marker.
 - **Risk:** Low. **Verification:** Stress test with `yes` for 10 s and a stalled client: bounded RSS.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-037 — `std::env::vars()` panics on a non-UTF-8 environment
 - **Category:** Reliability · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -589,7 +589,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** A single non-UTF-8 variable breaks terminals, LSP launches and previews. RC-16.
 - **Proposed fix:** Use `vars_os()` and pass `OsString`s through.
 - **Risk:** Low. **Verification:** Test launching the daemon with `X=$'\xff'`.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-038 — `ui/verify` keeps the first 500 build-error lines and drops new ones, so verification can pass on a broken page
 - **Category:** Functional (M5 verification) · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -597,7 +597,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Once the buffer fills, fresh errors after a patch are not recorded and the "build and runtime clean" check sees none. RC-17. This undermines requirement R13 ("verified, not 'it compiled'").
 - **Proposed fix:** Keep the newest lines (ring buffer) and a per-verification error counter reset at patch time.
 - **Risk:** Low. **Verification:** Test: 600 old errors, then one new error after patch → verdict `failed`.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-039 — ACP terminal approval shows argv only; the agent sets env (`LD_PRELOAD`, `PATH`, `NODE_OPTIONS`) and cwd unseen, and `outputByteLimit` is uncapped
 - **Category:** Security · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -606,7 +606,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Proposed fix:** Show env overrides and cwd on the card; deny dangerous variables unless approved explicitly; cap `outputByteLimit`.
 - **Dependencies:** AUD-010. **Risk:** Low.
 - **Verification:** Gate test: env with `LD_PRELOAD` requires approval listing it.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-040 — ACP permission answers become grants that do not match what was approved
 - **Category:** Security · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -614,7 +614,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** A "read"-kind request auto-allowed by policy grants writes to the same paths; an approved execute lets the next terminal run any argv. RS-F3.
 - **Proposed fix:** Derive the grant from the exact approved operation kind and target.
 - **Dependencies:** AUD-009. **Risk:** Low. **Verification:** Gate tests per kind.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-041 — `env.install` is approved blind
 - **Category:** Security · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -622,7 +622,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** The approval card has no provider, version, steps or commands; any plan id from the daemon-wide table can be used. RS-F5. (Requirement N5: installs never silent.)
 - **Proposed fix:** Render the plan (provider, version, sources, commands, elevation) on the card; bind plan ids to the requesting session.
 - **Risk:** Low. **Verification:** Gate test asserting the card content; foreign plan id rejected.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-042 — Inspector runs a blocking workspace text search on Tokio workers for every hover event
 - **Category:** Performance · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -630,7 +630,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Up to 2 000 files scanned per hover in inspect mode. RS-F8.
 - **Proposed fix:** Resolve source on click (or debounce hover), cache per element stamp, run in `spawn_blocking`.
 - **Risk:** Low. **Verification:** Benchmark hovering 50 elements: daemon CPU and request latency bounded.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-043 — Inspection WebSocket: no Origin check; the "one-time" token is reusable, inlined in the served module, and a new connection replaces the live session
 - **Category:** Security · **Priority:** P2 · **Confidence:** Confirmed (code); cross-site exploitation Suspected (depends on the project's Vite CORS)
@@ -638,7 +638,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** RS-F9.
 - **Proposed fix:** Check `Origin` against the preview origin; make the token single-use per page session; reject a second connection rather than replacing silently.
 - **Risk:** Low. **Verification:** Test: connection with a foreign Origin rejected; replayed token rejected.
-- **Status:** Not started
+- **Status:** Fixed with a deviation (see Remediation status, 2026-11-23)
 
 ### AUD-044 — Version probes and system installs run with the shared temp directory as cwd
 - **Category:** Security · **Priority:** P2 · **Confidence:** Suspected
@@ -646,7 +646,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** A planted `/tmp/rust-toolchain.toml` (`path=`) or `global.json` could make the probe run another local user's binary. RS-F10.
 - **Proposed fix:** Use a private, freshly created directory (0700) under the data dir as cwd.
 - **Risk:** Low. **Verification:** Test: planted `rust-toolchain.toml` in the probe cwd has no effect.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-045 — The CLI approval prompt prints untrusted text without neutralising terminal control sequences
 - **Category:** Security · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -654,7 +654,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Model text and previews can rewrite the prompt visually (ANSI/OSC). RS-F11.
 - **Proposed fix:** Escape C0/C1 controls (show `\x1b` etc.) before printing.
 - **Risk:** Low. **Verification:** Unit test on the formatter.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-046 — Dialogs freeze the theme captured when they opened; Settings does not follow its own Theme/Motion change
 - **Category:** Visual · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -662,7 +662,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description / repro:** Settings → Appearance → switch Dark/Light: the window changes, the Settings sheet does not. FUI-03.
 - **Proposed fix:** Read the theme inside the dialog route from an inherited listenable instead of capturing it.
 - **Risk:** Low. **Verification:** Widget test toggling theme with the dialog open.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-047 — Settings is a fixed 820×600 dialog, taller than the 900×560 minimum window
 - **Category:** GUI / Layout · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -670,7 +670,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** At the minimum window the dialog clips (Close at the bottom is unreachable). FUI-04.
 - **Proposed fix:** Size to `min(820, w - 48) × min(600, h - 48)`; scroll the content.
 - **Dependencies:** AUD-014 batch. **Risk:** Low. **Verification:** Screenshot at 900×560.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-048 — The command palette does not trap focus; Tab and screen readers reach the window behind it
 - **Category:** Accessibility · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -678,7 +678,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** FUI-06. Also the active row is never announced (FUI-35).
 - **Proposed fix:** Wrap in `FocusScope` + `BlockSemantics`/`ModalBarrier`; announce the active row via `liveRegion` or semantics `selected`.
 - **Risk:** Low. **Verification:** `a11y_test.dart`: Tab inside the palette stays in it.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-049 — The palette re-ranks every item on every rebuild, including each arrow key
 - **Category:** Performance · **Priority:** P2 · **Confidence:** Confirmed (code); impact partly measured
@@ -686,7 +686,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Go to File loads up to 20 000 paths; ranking runs in `build`. FUI-07. Measured: `frames.sh` "palette open/close" had 6 of 48 frames over 16.7 ms (raster p99 24.6 ms) at load average 4.7 (see AUD-062).
 - **Proposed fix:** Memoise ranking per query; move selection into its own notifier; rank on an isolate above a size threshold.
 - **Risk:** Low. **Verification:** Frame benchmark: Go to File over 20 000 files, ArrowDown ×20, no frame over budget.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-050 — Search results and Source Control changes are built eagerly, not lazily
 - **Category:** Performance · **Priority:** P2 · **Confidence:** Confirmed (code); impact not reproduced (2 000 hits rendered within budget, `search_render` in perf JSON, 1 frame over)
@@ -694,26 +694,26 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** A Column per group. FUI-08. Becomes visible with large change sets (thousands of modified files after a formatter run) or longer previews.
 - **Proposed fix:** Flatten to a `ListView.builder` over (group header | row) items.
 - **Risk:** Low. **Verification:** Frame benchmark with 10 000 changed files.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-051 — Tooltips are centred under their control with no edge handling; rail and right-edge tooltips are clipped
 - **Category:** GUI · **Priority:** P2 · **Confidence:** Confirmed (code)
 - **Affected components:** `app/lib/ui/overlays.dart` (tooltip)
 - **Description:** FUI-09. **Proposed fix:** Shared overlay positioner (AUD-013). **Risk:** Low. **Verification:** Widget test near window edges.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-052 — The LSP hover card is clipped at the editor's right and bottom; the completion popup is clipped in narrow groups
 - **Category:** GUI · **Priority:** P2 · **Confidence:** Confirmed (code)
 - **Affected components:** `app/lib/editor/lsp/lsp_view.dart`
 - **Description:** FUI-10 (hover card has no flip; completion has a 320 px minimum). **Proposed fix:** Shared positioner (AUD-013) with flip above the line; clamp width to the group. **Risk:** Low. **Verification:** e2e hover at the last visible line and rightmost column.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-053 — The find bar is a fixed-width Row that overflows in split or narrow groups
 - **Category:** GUI / Layout · **Priority:** P2 · **Confidence:** Confirmed (code)
 - **Affected components:** find bar in `app/lib/editor/editor_area.dart`
 - **Description:** Needs ~700 px; in a split group the count, Next and Close are hidden. FUI-12.
 - **Proposed fix:** Flexible query field, collapse toggles into a menu below a width threshold. **Risk:** Low. **Verification:** Widget test at 400 px.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-054 — Reduced motion is incomplete and the OS reduced-motion preference is ignored
 - **Category:** Accessibility / Motion · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -721,7 +721,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** At "Reduced", springs, the spinner and dialog scale still animate (contrary to `docs/design/motion-system.md` §2, §6); `MediaQuery.disableAnimations` is not read. FUI-13.
 - **Proposed fix:** Default the Motion setting to "System" honouring `disableAnimations`; route all animations through `AxiomMotion`.
 - **Risk:** Low. **Verification:** Widget test with `disableAnimations: true` asserting zero-duration transitions.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-055 — Semantic-token colours keep the old theme after a theme switch until the next edit
 - **Category:** Visual · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -729,7 +729,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Token styles are stored as concrete colours. FUI-14.
 - **Proposed fix:** Store token roles; resolve colours at paint time from the current theme.
 - **Risk:** Low. **Verification:** Unit test: switch theme → spans use new colours without an edit.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-056 — Controls that look interactive but do nothing (requirement N6)
 - **Category:** GUI / Usability · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -737,7 +737,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** FUI-15. N6: "Every visible control does something".
 - **Proposed fix:** Rows select/scroll to the toolchain's card; the server segment opens a server menu (restart, show log). Or render them non-interactive.
 - **Risk:** Low. **Verification:** Test that every `Pressable` in these surfaces has an effect (or is not a button in semantics).
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-057 — The floating approvals stack can grow beyond the window and is covered by toasts
 - **Category:** GUI · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -745,7 +745,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Up to 3 cards of ~400 px with no height limit; toasts occupy the same corner. FUI-16.
 - **Proposed fix:** Cap height with a scrolling stack and "N more"; move toasts or offset them.
 - **Risk:** Low. **Verification:** Widget test with 3 approvals at 900×560.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-058 — Long output and diff lines are cut off, with no wrap and no horizontal scroll
 - **Category:** GUI / Usability · **Priority:** P2 · **Confidence:** Confirmed (code); diff truncation visible in `40-size-800x600.png`
@@ -753,7 +753,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** FUI-17. Output is where compiler errors appear; clipped lines lose the error text.
 - **Proposed fix:** Soft-wrap output lines (toggle) and a horizontal scroll for the diff.
 - **Risk:** Low. **Verification:** Widget test with a 300-char line: full text reachable.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-059 — `AxTabs` is a non-scrolling Row; many terminals or a long folder name overflow it
 - **Category:** GUI · **Priority:** P2 · **Confidence:** Confirmed (code)
@@ -761,7 +761,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** FUI-18 (console terminals, Chat scope tabs with long folder names).
 - **Proposed fix:** Scrollable tab row with ellipsised labels (share with AUD-017).
 - **Risk:** Low. **Verification:** Widget test with 20 tabs.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-060 — Test suites report skipped scenarios as passes, and visual geometry is untested
 - **Category:** Testing gap · **Priority:** P2 · **Confidence:** Confirmed (runtime)
@@ -770,7 +770,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Evidence:** `evidence/logs/e2e.log`; `evidence/logs/check-rust.log`.
 - **Proposed fix:** Use `skip:` so runners report skips; print a summary of skipped suites from `e2e.sh`; add a layout-sanity e2e (window sizes 900×560, 1180×760, 1920×1080; text scale 1.3) that fails on any `FlutterError` (overflow) and checks a few geometry invariants (gutter marks align with lines; active tab visible).
 - **Risk:** Low. **Verification:** The new suite fails on the current `main` for AUD-003/004/014/016/017 and passes after their fixes.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-061 — The performance budgets cannot be re-measured from the repository: the startup/idle/memory harness was retired with the Tauri shell
 - **Category:** Testing gap / Process · **Priority:** P2 · **Confidence:** Confirmed
@@ -778,7 +778,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Description:** Only frame timings (`frames.sh`) are reproducible. Startup (P2), idle CPU (P7–P9) and memory (P10) budgets have no committed harness for the Flutter shell, so regressions in them will not be caught.
 - **Proposed fix:** Commit a Flutter-era harness (the audit's `evidence/harness/startup.sh` and `audit_perf_test.dart` are a starting point: external timing of exec → first frame → ready → folder listed, `/proc` CPU and PSS sampling, interleaved A/B runs) and update `performance.md`.
 - **Risk:** Low. **Verification:** `scripts/check.sh perf` (opt-in) produces a JSON comparable across commits.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-062 — `frames.sh` no longer meets its own gate: "palette open/close" had 6 frames over 16.7 ms
 - **Category:** Performance · **Priority:** P2 · **Confidence:** Confirmed (runtime, one run, load average 4.7)
@@ -787,7 +787,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 - **Evidence:** `evidence/logs/frames-sh.log`.
 - **Proposed fix:** Re-run on an idle machine to separate load; if it reproduces, profile the palette's first frame (shadow/blur layers, ranking in build — AUD-049).
 - **Risk:** Low. **Verification:** `frames.sh` with `AXIOM_FRAMES_ASSERT=1` passes 3 consecutive runs.
-- **Status:** Not started
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ---
 

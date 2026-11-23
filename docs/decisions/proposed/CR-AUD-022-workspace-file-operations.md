@@ -1,6 +1,6 @@
 # CR-AUD-022: workspace file operations (protocol 0.6)
 
-_Status: **approved by the owner** (2026-11-23, remediation of the comprehensive audit: "fix
+_Status: **Resolved — accepted by ADR-0022 (2026-11-23).** Approved by the owner (2026-11-23, remediation of the comprehensive audit: "fix
 every issue"). Raised by audit issue AUD-022 (`audits/comprehensive-audit/ISSUES.md`).
 Implemented in the daemon (`crates/protocol`, `crates/workspace`, `crates/axiomd`); the Flutter
 shell regenerates its wire types and builds the explorer's context menu and File → New File on
