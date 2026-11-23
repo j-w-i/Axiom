@@ -191,23 +191,27 @@ typedef Interruption = ({int seq, int turn, String text});
 const interruptedMessage =
     'Interrupted: the backend stopped while this reply was being written. Send again to continue.';
 
-/// The transcript of a session's events (rewinds applied), with the turn [interrupted] by the
-/// daemon's loss marked where it stopped. Pure.
-List<Item> transcript(List<AgentEvent> events, {Interruption? interrupted}) {
+/// The transcript of a session's events (rewinds applied), with each turn [interrupted] by the
+/// daemon's loss marked where it stopped (oldest first). Pure.
+List<Item> transcript(List<AgentEvent> events, {List<Interruption> interrupted = const []}) {
   var items = <Item>[];
   final tools = <String, int>{}; // callId → index in items
-  var marked = interrupted == null;
+  var next = 0; // the first interruption not marked yet
   void mark() {
-    final m = interrupted!;
+    final m = interrupted[next];
+    // Keyed by its place in the list too: two losses after the same event stay two marks.
+    final key = '$next-${m.seq}';
     if (m.text.isNotEmpty) {
-      items.add(AssistantItem('interrupted-text-${m.seq}', m.turn, m.text, null));
+      items.add(AssistantItem('interrupted-text-$key', m.turn, m.text, null));
     }
-    items.add(NoticeItem('interrupted-${m.seq}', m.turn, interruptedMessage, notice: false));
-    marked = true;
+    items.add(NoticeItem('interrupted-$key', m.turn, interruptedMessage, notice: false));
+    next++;
   }
 
   for (final e in events) {
-    if (!marked && e.seq > interrupted!.seq) mark();
+    while (next < interrupted.length && e.seq > interrupted[next].seq) {
+      mark();
+    }
     final key = '${e.seq}';
     switch (e.event) {
       case EventBodyUser(:final text, :final images):
@@ -276,7 +280,9 @@ List<Item> transcript(List<AgentEvent> events, {Interruption? interrupted}) {
         break; // usage, turnEnd, compaction, approvals: not items
     }
   }
-  if (!marked) mark();
+  while (next < interrupted.length) {
+    mark();
+  }
   return items;
 }
 
@@ -294,7 +300,7 @@ class Conversation {
     List<AgentEvent>? events,
     this.streaming = '',
     this.running = false,
-    this.interrupted,
+    this.interrupted = const [],
   }) : events = events ?? [];
   final List<AgentEvent> events;
 
@@ -302,8 +308,10 @@ class Conversation {
   String streaming;
   bool running;
 
-  /// Where a turn was cut off by the daemon going away, in this window (AUD-025).
-  Interruption? interrupted;
+  /// Where turns were cut off by the daemon going away, in this window, oldest first (AUD-025):
+  /// a later loss adds its mark and keeps the earlier ones (review D6). Replaced, not changed in
+  /// place, so the transcript's memo sees the change.
+  List<Interruption> interrupted;
 }
 
 String describeAgentError(Object e) {
@@ -346,11 +354,14 @@ class AgentStore extends ChangeNotifier {
       for (final MapEntry(key: id, value: c) in _cache.entries) {
         if (c.running) {
           final last = c.events.lastOrNull;
-          c.interrupted = (
-            seq: last?.seq ?? 0,
-            turn: last?.turn ?? 0,
-            text: c.streaming + (_pendingDelta[id] ?? ''),
-          );
+          c.interrupted = [
+            ...c.interrupted,
+            (
+              seq: last?.seq ?? 0,
+              turn: last?.turn ?? 0,
+              text: c.streaming + (_pendingDelta[id] ?? ''),
+            ),
+          ];
         }
         c.running = false;
         c.streaming = '';
@@ -575,7 +586,7 @@ class AgentStore extends ChangeNotifier {
         events: [...r.events, ...extra],
         streaming: prev?.streaming ?? '',
         running: r.session.running,
-        interrupted: prev?.interrupted,
+        interrupted: prev?.interrupted ?? const [],
       );
       _cache[id] = conv;
       approvals = [...approvals.where((a) => a.sessionId != id), ...?r.pending];
@@ -911,7 +922,7 @@ class AgentStore extends ChangeNotifier {
     if (memo != null &&
         identical(memo.$1, c) &&
         memo.$2 == c.events.length &&
-        memo.$3 == c.interrupted) {
+        identical(memo.$3, c.interrupted)) {
       return memo.$4;
     }
     final items = transcript(c.events, interrupted: c.interrupted);
@@ -919,7 +930,7 @@ class AgentStore extends ChangeNotifier {
     return items;
   }
 
-  (Conversation, int, Interruption?, List<Item>)? _itemsMemo;
+  (Conversation, int, List<Interruption>, List<Item>)? _itemsMemo;
 
   void _patch(String id, {List<AgentEvent>? events, String? streaming, bool? running}) {
     final c = _cache.putIfAbsent(id, Conversation.new);

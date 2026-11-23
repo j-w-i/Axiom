@@ -596,15 +596,35 @@ class DocumentsStore extends ChangeNotifier {
       notifyListeners();
     } on DaemonException catch (e) {
       if (gen != _generation || silent) return;
-      final reason = switch (e.kind) {
-        ErrorKind.unsupportedEncoding => 'it is not a UTF-8 text file',
-        ErrorKind.tooLarge => 'it is too large (over 16 MiB)',
-        _ => e.message,
-      };
-      banner = 'Cannot open ${titleOf(path)}: $reason';
+      banner = 'Cannot open ${titleOf(path)}: ${_cannotOpenReason(e)}';
       notifyListeners();
     } finally {
       _opening.remove(path);
+    }
+  }
+
+  static String _cannotOpenReason(DaemonException e) => switch (e.kind) {
+    ErrorKind.unsupportedEncoding => 'it is not a UTF-8 text file',
+    ErrorKind.tooLarge => 'it is too large (over 16 MiB)',
+    _ => e.message,
+  };
+
+  /// Failures that say nothing about the file (the backend stopped or did not answer).
+  static const _transient = {
+    ErrorKind.internal,
+    ErrorKind.timeout,
+    ErrorKind.cancelled,
+    ErrorKind.notInitialized,
+    ErrorKind.workspaceNotOpen,
+  };
+
+  /// Why [path] does not open; null when it does.
+  Future<DaemonException?> _readFailure(String path) async {
+    try {
+      await client.call(Methods.fsReadFile, ReadFileParams(workspaceId: workspace.id, path: path));
+      return null;
+    } on DaemonException catch (e) {
+      return e;
     }
   }
 
@@ -906,6 +926,7 @@ class DocumentsStore extends ChangeNotifier {
     final gen = _generation;
     var n = 0;
     final gone = <String>[];
+    final unreadable = <({String path, String reason})>[];
     for (final e in entries) {
       if (gen != _generation) return;
       var d = doc(e.path);
@@ -915,20 +936,38 @@ class DocumentsStore extends ChangeNotifier {
         d = doc(e.path);
       }
       if (d == null) {
-        // The file is gone (deleted, or moved while the shell was not running): the text opens as
-        // an unsaved document of that name, which Save creates again; closing it asks first
-        // (review N10). A file that is there but cannot be opened keeps its entry.
-        if (e.text.isEmpty || await _existsOnDisk(e.path) || gen != _generation) continue;
+        // Empty text whose file does not open: nothing to give back, and the entry would stay
+        // for ever (review D6).
+        if (e.text.isEmpty) {
+          recovery.forget(workspace.root, e.path);
+          continue;
+        }
+        final failure = await _readFailure(e.path);
+        if (gen != _generation) return;
         if (doc(e.path) != null) continue; // opened meanwhile
+        // The backend stopped (or the file opens now): the entry is kept and offered on the next
+        // open of the folder.
+        if (failure == null || _transient.contains(failure.kind)) continue;
+        // The file is gone (deleted, or moved while the shell was not running): the text opens as
+        // an unsaved document of that name, which Save creates again, with its folder; closing it
+        // asks first (review N10, D3). A file that is there but cannot be opened (no longer
+        // UTF-8, too large, not readable) is not left in the recovery folder unseen: the text
+        // opens the same way, and as nothing was read of the file, Save asks before it replaces
+        // it ("changed on disk"); closing it without saving forgets the text (review D6).
+        final deleted = failure.kind == ErrorKind.notFound;
         // Made from the text (its line breaks are kept), with nothing saved: every line unsaved.
         d = Doc(path: e.path, text: e.text, savedVersion: '')
           ..markSaved('', '')
-          ..deletedOnDisk = true;
+          ..deletedOnDisk = deleted;
         _watch(d);
         docs.add(d);
         if (activePath.isEmpty) _setActive(d.path);
         _scheduleTabSave();
-        gone.add(e.path);
+        if (deleted) {
+          gone.add(e.path);
+        } else {
+          unreadable.add((path: e.path, reason: _cannotOpenReason(failure)));
+        }
         continue;
       }
       if (d.dirty || d.text == e.text) {
@@ -944,13 +983,17 @@ class DocumentsStore extends ChangeNotifier {
       d.restoreUnsaved(e.text);
       n++;
     }
-    if (n > 0 || gone.isNotEmpty) {
+    if (n > 0 || gone.isNotEmpty || unreadable.isNotEmpty) {
       final missing = gone.isEmpty
           ? ''
           : ' ${gone.length == 1 ? '${titleOf(gone.first)} is no longer on disk' : '${gone.length} of them are no longer on disk'}: Save creates ${gone.length == 1 ? 'it' : 'them'} again.';
-      final total = n + gone.length;
+      final u = unreadable.length;
+      final cannot = u == 0
+          ? ''
+          : ' ${u == 1 ? '${titleOf(unreadable.first.path)} cannot be opened (${unreadable.first.reason})' : '$u of them cannot be opened'}: Save asks before it replaces ${u == 1 ? 'the file' : 'them'}.';
+      final total = n + gone.length + u;
       banner =
-          'Recovered unsaved changes to ${total == 1 ? '1 file' : '$total files'} from the last session.$missing';
+          'Recovered unsaved changes to ${total == 1 ? '1 file' : '$total files'} from the last session.$missing$cannot';
       notifyListeners();
     }
   }
@@ -1064,6 +1107,12 @@ class DocumentsStore extends ChangeNotifier {
       return false;
     }
     final disk = d.diskText(text);
+    // A file deleted on disk is created again, and so is its folder when that is gone too: the
+    // write alone fails with "not found" and the question would come back (review D3).
+    if (d.deletedOnDisk) {
+      await _createParent(workspaceId, d.path);
+      if (gen != _generation || !identical(doc(d.path), d)) return false;
+    }
     try {
       final r = await client.call(
         Methods.fsWriteFile,
@@ -1084,8 +1133,10 @@ class DocumentsStore extends ChangeNotifier {
     } on DaemonException catch (e) {
       if (gen != _generation) return false;
       if (e.kind == ErrorKind.conflict) {
-        // A file deleted on disk is not "changed": its own question (AUD-019).
-        if (!await _existsOnDisk(d.path)) d.deletedOnDisk = true;
+        // A file deleted on disk is not "changed": its own question (AUD-019). Asked of the disk
+        // each time: a document marked deleted whose file another program has created since is
+        // "changed", or the "deleted" question's Save would replace that file (review C4).
+        d.deletedOnDisk = !await _existsOnDisk(d.path);
         if (gen != _generation) return false;
         _conflicts.add((path: d.path, text: text));
       } else if (e.kind == ErrorKind.notFound) {
@@ -1102,6 +1153,21 @@ class DocumentsStore extends ChangeNotifier {
   /// Whether the first conflict is a file deleted on disk (the dialog asks differently).
   bool get conflictIsDeleted =>
       _conflicts.isNotEmpty && (doc(_conflicts.first.path)?.deletedOnDisk ?? false);
+
+  /// Creates the folders above [path] that are missing (none for a file at the root). A failure
+  /// is left to the write that follows, which says why it could not save.
+  Future<void> _createParent(String workspaceId, String path) async {
+    final parent = parentPath(path);
+    if (parent.isEmpty) return;
+    try {
+      await client.call(
+        Methods.fsCreateDirectory,
+        CreateDirectoryParams(workspaceId: workspaceId, path: parent, parents: true),
+      );
+    } on DaemonException {
+      // Already there (the usual case), or the write reports the reason.
+    }
+  }
 
   Future<bool> _existsOnDisk(String path) async {
     try {
@@ -1140,7 +1206,11 @@ class DocumentsStore extends ChangeNotifier {
         Methods.fsReadFile,
         ReadFileParams(workspaceId: workspace.id, path: path),
       );
-    } on DaemonException {
+    } on DaemonException catch (e) {
+      // E.g. a recovered text over a file that cannot be opened (review D6): the text stays.
+      if (gen != _generation || doc(path) == null) return;
+      banner = 'Cannot open ${titleOf(path)}: ${_cannotOpenReason(e)}';
+      notifyListeners();
       return;
     }
     final d = doc(path);
