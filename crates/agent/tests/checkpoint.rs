@@ -1028,3 +1028,313 @@ async fn checkpoint_restore_writes_nothing_in_a_folder_that_became_a_repository(
         [(wp("sub"), NotRestored::NestedRepository)]
     );
 }
+
+/// Whether `dir`'s file system tells names apart only by case (`a` and `A` are one file), as the
+/// default macOS and Windows file systems do. The tests of case variants need one.
+fn case_insensitive(dir: &Path) -> bool {
+    let probe = tempfile::tempdir_in(dir).unwrap();
+    std::fs::write(probe.path().join("case"), "").unwrap();
+    probe.path().join("CASE").exists()
+}
+
+fn names(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+/// Review I1: on a case-insensitive file system a name the restore writes and one it removes can
+/// be one file. The checkpoint has `README.md`; the agent deleted it and wrote `readme.md`. The
+/// restore removes `readme.md` before it writes `README.md`, so the file it reports restored is
+/// there afterwards (written first, the removal took it).
+#[tokio::test]
+async fn checkpoint_restore_of_a_case_rename_leaves_the_restored_file() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    if !case_insensitive(r) {
+        eprintln!("a case-sensitive file system: the names are two files, nothing to check");
+        return;
+    }
+    write(r, "README.md", "old\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_file(r.join("README.md")).unwrap();
+    s.record_post("s").await.unwrap();
+    write(r, "readme.md", "agent\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        ["README.md", "readme.md"]
+    );
+    assert!(out.not_restored.is_empty(), "{:?}", out.not_restored);
+    assert_eq!(names(r), ["README.md"], "the restored file is gone");
+    assert_eq!(read(r, "README.md").as_deref(), Some("old\n"));
+    // The undo gives the agent's content back (under the name the file system keeps).
+    s.restore("s", out.result.undo_checkpoint, 1, false)
+        .await
+        .unwrap();
+    assert_eq!(names(r).len(), 1, "{:?}", names(r));
+    assert_eq!(read(r, "readme.md").as_deref(), Some("agent\n"));
+}
+
+/// Review I2: a case variant of a captured file is restored over it only when this restore
+/// removes or replaces that file too. The checkpoint has `readme.md`, the agent deleted it, and
+/// the person wrote `README.md` (a conflict, left as it is). Writing `readme.md` would write over
+/// it: it is a conflict too, and the person's file is kept.
+#[tokio::test]
+async fn checkpoint_restore_never_writes_over_a_conflict_through_another_case() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    if !case_insensitive(r) {
+        eprintln!("a case-sensitive file system: the names are two files, nothing to check");
+        return;
+    }
+    write(r, "readme.md", "old\n");
+    write(r, "a.txt", "a\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_file(r.join("readme.md")).unwrap();
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    write(r, "README.md", "MINE\n");
+    let conflicts = |c: &[axiom_protocol::agent::RestoreConflict]| {
+        c.iter()
+            .map(|c| (c.path.0.clone(), c.reason))
+            .collect::<Vec<_>>()
+    };
+    let both = [
+        ("README.md".to_string(), ConflictReason::CreatedSinceAgent),
+        ("readme.md".to_string(), ConflictReason::CreatedSinceAgent),
+    ];
+    let e = s.restore("s", 1, 1, false).await.unwrap_err();
+    let CheckpointError::Conflicts(c) = e else {
+        panic!("{e:?}")
+    };
+    assert_eq!(conflicts(&c), both);
+    let out = s.restore("s", 1, 1, true).await.unwrap();
+    assert_eq!(names(r), ["README.md", "a.txt"]);
+    assert_eq!(
+        read(r, "README.md").as_deref(),
+        Some("MINE\n"),
+        "written over"
+    );
+    assert_eq!(read(r, "a.txt").as_deref(), Some("a\n"));
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        ["a.txt"]
+    );
+    assert_eq!(conflicts(&out.result.conflicts), both);
+    assert!(out.not_restored.is_empty(), "{:?}", out.not_restored);
+}
+
+/// Review I3: a git killed inside `update-ref` with its daemon (SIGKILL, power loss) leaves a
+/// ref's lock in the store, which made every later checkpoint, and so every agent write, fail,
+/// even after a restart. With the store's lock held they are stale, and are removed, as the
+/// index's is.
+#[tokio::test]
+async fn checkpoint_removes_stale_ref_locks() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    write(ws.path(), "a.txt", "a\n");
+    let s = Shadow::new(data.path(), ws.path());
+    s.create("s", "start", 1).await.unwrap();
+    s.record_post("s").await.unwrap();
+    let shadow = data
+        .path()
+        .join("checkpoints")
+        .join(axiom_agent::workspace_key(ws.path()));
+    let locks = [
+        "refs/axiom/s/post.lock",
+        "refs/axiom/s/0002.lock",
+        "HEAD.lock",
+        "packed-refs.lock",
+    ]
+    .map(|l| shadow.join(l));
+    for l in &locks {
+        std::fs::write(l, "").unwrap();
+    }
+    // A restart: a new `Shadow` on the same store.
+    let s = Shadow::new(data.path(), ws.path());
+    write(ws.path(), "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    assert_eq!(s.create("s", "next", 1).await.unwrap().number, 2);
+    for l in &locks {
+        assert!(!l.exists(), "{} is left", l.display());
+    }
+    write(ws.path(), "a.txt", "agent, again\n");
+    s.record_post("s").await.unwrap();
+    s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(ws.path(), "a.txt").unwrap(), "a\n");
+}
+
+/// Review I4: a file the agent made a folder of is restored: the restore removes what the agent
+/// put in the folder (unchanged since), then the folders it emptied, then writes the file back.
+#[tokio::test]
+async fn checkpoint_restore_puts_back_a_file_the_agent_made_a_folder() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "dir", "file\n");
+    write(r, "z.txt", "z\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_file(r.join("dir")).unwrap();
+    write(r, "dir/a.rs", "agent\n");
+    write(r, "dir/sub/b.rs", "agent\n");
+    write(r, "z.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(r, "dir").as_deref(), Some("file\n"));
+    assert_eq!(read(r, "z.txt").as_deref(), Some("z\n"));
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        ["dir", "dir/a.rs", "dir/sub/b.rs", "z.txt"]
+    );
+    assert!(out.result.conflicts.is_empty());
+    // And back: the undo makes it the agent's folder again.
+    s.restore("s", out.result.undo_checkpoint, 1, false)
+        .await
+        .unwrap();
+    assert_eq!(read(r, "dir/a.rs").as_deref(), Some("agent\n"));
+    assert_eq!(read(r, "dir/sub/b.rs").as_deref(), Some("agent\n"));
+}
+
+/// Review I4: a folder the agent made of a file, in which the person has since put a file, is not
+/// replaced: it is a conflict (nothing changes, and no undo checkpoint is taken, unless the person
+/// restores the rest), the person's file is kept, and the restore does not fail half-way.
+#[tokio::test]
+async fn checkpoint_restore_keeps_a_folder_holding_the_persons_file() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "dir", "file\n");
+    write(r, "z.txt", "z\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_file(r.join("dir")).unwrap();
+    write(r, "dir/a.rs", "agent\n");
+    write(r, "z.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    // The person's files there: one the snapshots see, one ignored.
+    write(r, ".gitignore", "*.log\n");
+    write(r, "dir/notes.txt", "MINE\n");
+    write(r, "dir/x.log", "MINE too\n");
+    let got = |c: &[axiom_protocol::agent::RestoreConflict]| {
+        c.iter()
+            .map(|c| (c.path.0.clone(), c.reason))
+            .collect::<Vec<_>>()
+    };
+    let expected = [
+        (".gitignore".to_string(), ConflictReason::CreatedSinceAgent),
+        ("dir".to_string(), ConflictReason::ModifiedSinceAgent),
+        (
+            "dir/notes.txt".to_string(),
+            ConflictReason::CreatedSinceAgent,
+        ),
+    ];
+    let e = s.restore("s", 1, 1, false).await.unwrap_err();
+    let CheckpointError::Conflicts(c) = e else {
+        panic!("{e:?}")
+    };
+    assert_eq!(got(&c), expected);
+    assert_eq!(read(r, "z.txt").as_deref(), Some("agent\n"));
+    assert_eq!(s.list("s").await.unwrap().len(), 1, "an undo checkpoint");
+    let out = s.restore("s", 1, 1, true).await.unwrap();
+    assert_eq!(got(&out.result.conflicts), expected);
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        ["dir/a.rs", "z.txt"]
+    );
+    assert_eq!(read(r, "dir/notes.txt").as_deref(), Some("MINE\n"));
+    assert_eq!(read(r, "dir/x.log").as_deref(), Some("MINE too\n"));
+    assert_eq!(read(r, "dir/a.rs"), None);
+    assert_eq!(read(r, "z.txt").as_deref(), Some("z\n"));
+
+    // Only an ignored file of the person's left there, and the agent's file back: the folder is
+    // still kept, and what the agent made in it is removed.
+    std::fs::remove_file(r.join("dir/notes.txt")).unwrap();
+    write(r, "dir/a.rs", "agent\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, true).await.unwrap();
+    assert_eq!(
+        got(&out.result.conflicts),
+        [("dir".to_string(), ConflictReason::ModifiedSinceAgent)]
+    );
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        [".gitignore", "dir/a.rs"]
+    );
+    assert_eq!(read(r, "dir/x.log").as_deref(), Some("MINE too\n"));
+    assert_eq!(read(r, "dir/a.rs"), None);
+}
+
+/// Review I5: a restore writes nothing at or under a git link in the checkpoint, the workspace now
+/// or as the agent left it, even with no repository on disk there. The agent replaced `sub` with
+/// a clone; the person then turned the clone into plain files (removed its `.git`) and deleted
+/// one. The store's index keeps the git link (git does not look inside it again), so `sub` is a
+/// git link now and in the agent's tree, and `sub/g.txt`, missing on disk, is not written back
+/// into it.
+#[tokio::test]
+async fn checkpoint_restore_writes_nothing_under_a_git_link_without_a_repository() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "a.txt", "a\n");
+    write(r, "sub/f.txt", "v1\n");
+    write(r, "sub/g.txt", "g\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_dir_all(r.join("sub")).unwrap();
+    s.record_post("s").await.unwrap();
+    let sub = r.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    git(&sub, &["init", "-q"]);
+    write(&sub, "f.txt", "cloned\n");
+    git(&sub, &["add", "."]);
+    git(&sub, &["commit", "-q", "-m", "c"]);
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    std::fs::remove_dir_all(sub.join(".git")).unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(&sub, "g.txt"), None, "written under the git link");
+    assert_eq!(read(&sub, "f.txt").as_deref(), Some("cloned\n"));
+    assert_eq!(read(r, "a.txt").as_deref(), Some("a\n"));
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        ["a.txt"]
+    );
+    assert_eq!(
+        out.not_restored,
+        [(wp("sub"), NotRestored::NestedRepository)]
+    );
+}

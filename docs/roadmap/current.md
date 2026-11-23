@@ -15,10 +15,11 @@ changes (blocking B1–B6); they were fixed and the re-review passed. Its follow
 (R1–R5, N1–N18) were fixed or documented, and the two change requests became ADR-0022 and
 ADR-0023; a review of that round requested changes again (C1–C4, D1–D7), fixed and reviewed;
 the next (E1–E6) was fixed and reviewed; the one after (G1–G8 and three checkpoint gaps) was
-fixed and reviewed; the next (H1–H2, blocking restore data loss, and H3, H5–H8) is fixed and
-awaiting its review.
+fixed and reviewed; the next (H1–H2, blocking restore data loss, and H3, H5–H8) was fixed and
+reviewed with no blocking findings; its follow-ups (I1–I5, restore edge cases) are fixed and
+awaiting review.
 
-**Next: the review's sign-off on H1–H8, CI green on the PR, then the task to `verified` and
+**Next: the review's sign-off on I1–I5, CI green on the PR, then the task to `verified` and
 the merge to main; then M6.** The owner accepted, as documented, that what an agent writes can
 be run later by tools outside the gate (ADR-0023, Consequences; 2026-11-23). Still open for the
 owner: confirm ADR-0022 and ADR-0023; jdtls in untrusted folders (ADR-0023, Consequences).

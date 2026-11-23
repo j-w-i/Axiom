@@ -234,9 +234,26 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
 - The store's operations that change it hold its lock: within the process, and `axiom.lock` in
   the shadow directory across processes (a second daemon on one data dir). While it is held no
   git of ours runs there, so a stale `axiom-index.lock` (left by a git killed at its bound or
-  with its daemon) is removed; a git killed at its bound also has its index lock, and for
-  `update-ref` its ref lock, removed at once (review H3). On a file system without file locks,
-  the store is serialised only within one daemon and a stale lock is left.
+  with its daemon) is removed, and so are `HEAD.lock`, `packed-refs.lock` and any `*.lock`
+  under `refs/axiom/` (left by a SIGKILL or power loss inside `update-ref`); a git killed at its
+  bound also has its index lock, and for `update-ref` its ref lock, removed at once (reviews H3,
+  I3). On a file system without file locks, the store is serialised only within one daemon and
+  a stale lock is left.
+- A restore removes files first and writes afterwards: on a case-insensitive file system a
+  name it writes can be the same file as one it removes (the agent renamed `README.md` to
+  `readme.md`), and in that order the restored file stays (review I1).
+- A name the restore would create, where the disk holds a captured file under another case
+  (the same file, on a case-insensitive file system), is written only if this restore also
+  removes or replaces that file; otherwise that file is someone else's, and the name is a
+  conflict too (with that file's reason, or `createdSinceAgent`) and is not written (review
+  I2).
+- A file the agent turned into a folder is restored when the folder holds only what the agent
+  made, unchanged since: the restore removes those files, then the folders they leave empty,
+  then writes the file. If the folder holds anything else (a person's file, an ignored file, a
+  repository), the path is a `modifiedSinceAgent` conflict and the folder is kept (review I4).
+- Conflicts found on disk (the two cases above) are known before anything changes: like the
+  others, they make a restore without `skipConflicts` change nothing, and are listed with
+  them.
 - Every `git` the shadow store runs is bounded and killed on expiry: 10 minutes for the commands
   that walk the workspace (`ls-files`, `add`, `rm`, `write-tree`, `ls-tree`), 60 s for the
   others. The checkpoint then fails: `timeout` from `agent/restore`, a failed tool ("the

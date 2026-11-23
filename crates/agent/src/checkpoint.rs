@@ -24,8 +24,9 @@
 //!   snapshot could not capture (then or now, an ignored file on disk included) are never
 //!   restored; they are reported ([`RestoreOutcome::not_restored`]).
 //! - **Locked.** An operation that changes the store holds its lock: within the process, and a
-//!   lock file in the shadow directory across processes. Held, a git index lock found there is
-//!   stale (a git killed at its bound, or with its daemon) and is removed.
+//!   lock file in the shadow directory across processes. Held, a lock of git's found there (the
+//!   index's, `HEAD`'s, `packed-refs`', or a ref's under `refs/axiom/`) is stale (a git killed at
+//!   its bound, or with its daemon) and is removed.
 
 use axiom_protocol::agent::{CheckpointInfo, ConflictReason, RestoreConflict, RestoreResult};
 use axiom_protocol::WorkspacePath;
@@ -240,9 +241,10 @@ impl Shadow {
     /// The store's lock, for an operation that changes it: this `Shadow`'s, then the shadow
     /// directory's lock file, which a second daemon on the same data dir (one not listening
     /// serves its own client over stdio) takes too. Held, no other git of ours runs in the store,
-    /// so an index lock found there was left by a git that was killed (at its bound, or with its
-    /// daemon), and is removed (review H3). Where the file system has no file locks, the store
-    /// is serialised within this process only, and an index lock is left.
+    /// so a lock of git's found there (the index's, review H3, or a ref's, review I3) was left
+    /// by a git that was killed (at its bound, or with its daemon), and is removed
+    /// ([`remove_stale_locks`]). Where the file system has no file locks, the store is
+    /// serialised within this process only, and those locks are left.
     async fn hold(&self) -> Result<Held<'_>, CheckpointError> {
         let mutex = self.lock.lock().await;
         let dir = self.git_dir.clone();
@@ -259,10 +261,7 @@ impl Shadow {
                 tracing::warn!("checkpoint: cannot lock {}: {e}", dir.display());
                 return Ok(None);
             }
-            let stale = dir.join(format!("{INDEX}.lock"));
-            if std::fs::remove_file(&stale).is_ok() {
-                tracing::warn!("checkpoint: removed a stale {}", stale.display());
-            }
+            remove_stale_locks(&dir);
             Ok::<_, CheckpointError>(Some(f))
         })
         .await
@@ -763,9 +762,10 @@ impl Shadow {
                 });
             }
         }
-        if !conflicts.is_empty() && !skip_conflicts {
-            return Err(CheckpointError::Conflicts(conflicts));
-        }
+        let conflicted: BTreeMap<String, ConflictReason> = conflicts
+            .iter()
+            .map(|c| (c.path.0.clone(), c.reason))
+            .collect();
         // Every path is checked before anything changes, off the async thread (review E3).
         // - A path inside a git directory (`.git`, or a `<name>.git` that is a bare repository or
         //   is being made one: `gate::git_dir_of`), or a write of one of git's own entries into
@@ -774,13 +774,19 @@ impl Shadow {
         //   there, so they change only through the gate, with the person's approval each time.
         // - A path the snapshot now has no entry for, where something is on disk, was not
         //   captured (ignored now, review H1): what it holds is unknown, so it is never written
-        //   over. A name that is a captured file under another case is not such a path.
+        //   over. A name that is a captured file under another case (on a case-insensitive file
+        //   system, the same file) is not such a path when this restore removes or replaces that
+        //   file too (review I1); otherwise the file there is the person's, and the path is a
+        //   conflict (review I2).
+        // - A file the agent made a folder of is written back only when that folder holds nothing
+        //   but files this restore removes (what the agent made, unchanged since); otherwise the
+        //   path is a conflict, and the rest goes ahead (review I4).
         // - Both are reported in `not_restored`, and the rest is restored. A restore that would
         //   write through a symlinked directory changes nothing (review D4). A symlink the
-        //   restore itself removes or replaces first (it sorts before what is under it) is no
-        //   obstacle; the write checks again once it is gone.
+        //   restore itself removes first (removals go before writes) is no obstacle; the write
+        //   checks again once it is gone.
         let root = self.root.clone();
-        let (restore, left, on_disk) = tokio::task::spawn_blocking(move || {
+        let (restore, left, on_disk, late, refused) = tokio::task::spawn_blocking(move || {
             let mut markers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
             for (p, _) in restore.iter().filter(|(_, e)| e.is_some()) {
                 for (d, e) in git_entries(p) {
@@ -789,7 +795,7 @@ impl Shadow {
                     }
                 }
             }
-            let (mut kept, mut left, mut on_disk) = (Vec::new(), Vec::new(), Vec::new());
+            let (mut planned, mut left) = (Vec::new(), Vec::new());
             for (p, e) in restore {
                 if crate::gate::git_dir_of(&root, &p).is_some()
                     || (e.is_some() && makes_git_dir(&root, &p, &markers))
@@ -801,16 +807,61 @@ impl Shadow {
                     // store's index had them before it became one): it is left all the same.
                     tracing::warn!("restore: `{p}` is in the repository `{repo}`; not restored");
                     left.push((p, NotRestored::NestedRepository, Some(repo)));
-                } else if absent
-                    .get(&p)
-                    .is_some_and(|same| uncaptured_on_disk(&root, &p, same))
-                {
-                    tracing::warn!("restore: `{p}` is on disk but was not captured; not restored");
-                    on_disk.push(p.clone());
-                    left.push((p, NotRestored::NotCaptured, None));
                 } else {
-                    kept.push((p, e));
+                    planned.push((p, e));
                 }
+            }
+            // What this restore changes (removes or replaces), and what it removes. A path absent
+            // from the snapshot now never depends on another such path (a case variant of it is
+            // in the snapshot now), so these are final.
+            let changes: BTreeSet<String> = planned.iter().map(|(p, _)| p.clone()).collect();
+            let removes: BTreeSet<String> = planned
+                .iter()
+                .filter(|(_, e)| e.is_none())
+                .map(|(p, _)| p.clone())
+                .collect();
+            let (mut kept, mut on_disk, mut late) = (Vec::new(), Vec::new(), Vec::new());
+            for (p, e) in planned {
+                match absent.get(&p).map(|same| on_disk_at(&root, &p, same)) {
+                    None | Some(OnDisk::Nothing) => {}
+                    Some(OnDisk::Uncaptured) => {
+                        tracing::warn!(
+                            "restore: `{p}` is on disk but was not captured; not restored"
+                        );
+                        on_disk.push(p.clone());
+                        left.push((p, NotRestored::NotCaptured, None));
+                        continue;
+                    }
+                    Some(OnDisk::Captured(variants)) => {
+                        if !variants.iter().any(|q| changes.contains(q)) {
+                            // The file there is one the restore leaves (a person's, a conflict):
+                            // writing this name would write over it.
+                            let reason = variants
+                                .iter()
+                                .find_map(|q| conflicted.get(q))
+                                .copied()
+                                .unwrap_or(ConflictReason::CreatedSinceAgent);
+                            tracing::warn!(
+                                "restore: `{p}` is `{}` on disk, which it leaves; a conflict",
+                                variants.join("`, `")
+                            );
+                            late.push(RestoreConflict {
+                                path: WorkspacePath(p),
+                                reason,
+                            });
+                            continue;
+                        }
+                    }
+                }
+                if e.is_some() && !holds_only(&root, &p, &removes) {
+                    tracing::warn!("restore: `{p}` is a folder holding more than the agent made");
+                    late.push(RestoreConflict {
+                        path: WorkspacePath(p),
+                        reason: ConflictReason::ModifiedSinceAgent,
+                    });
+                    continue;
+                }
+                kept.push((p, e));
             }
             let replaced: std::collections::BTreeSet<&str> =
                 kept.iter().map(|(p, _)| p.as_str()).collect();
@@ -820,13 +871,25 @@ impl Shadow {
                 .iter()
                 .filter(|(_, why, _)| *why != NotRestored::GitDirectory)
                 .map(|(p, _, _)| p);
-            for p in kept.iter().map(|(p, _)| p).chain(on_the_way) {
-                writable(&root, p, |dir| replaced.contains(dir))?;
-            }
-            Ok::<_, CheckpointError>((kept, left, on_disk))
+            let refused = kept
+                .iter()
+                .map(|(p, _)| p)
+                .chain(on_the_way)
+                .find_map(|p| writable(&root, p, |dir| replaced.contains(dir)).err());
+            (kept, left, on_disk, late, refused)
         })
         .await
-        .map_err(|e| CheckpointError::Io(e.to_string()))??;
+        .map_err(|e| CheckpointError::Io(e.to_string()))?;
+        // With conflicts (from the snapshots, or found on disk) nothing changes unless the person
+        // chose to restore the rest; they are reported first, as the whole list.
+        conflicts.extend(late);
+        conflicts.sort_by(|a, b| a.path.0.cmp(&b.path.0));
+        if !conflicts.is_empty() && !skip_conflicts {
+            return Err(CheckpointError::Conflicts(conflicts));
+        }
+        if let Some(e) = refused {
+            return Err(e);
+        }
         not_restored.extend(
             left.into_iter()
                 .map(|(p, why, repo)| (WorkspacePath(repo.unwrap_or(p)), why)),
@@ -842,11 +905,18 @@ impl Shadow {
                 &on_disk,
             )
             .await?;
+        // Removals first: on a case-insensitive file system a name the restore writes can be the
+        // same file as one it removes, which removed afterwards would take the restored file with
+        // it (review I1); and a file it writes can replace a folder its removals empty (review
+        // I4).
+        let (removals, writes): (Vec<_>, Vec<_>) =
+            restore.into_iter().partition(|(_, e)| e.is_none());
         let mut restored = Vec::new();
-        for (p, entry) in restore {
+        for (p, entry) in removals.into_iter().chain(writes) {
             self.write_entry(&p, entry.as_ref()).await?;
             restored.push(WorkspacePath(p));
         }
+        restored.sort_by(|a, b| a.0.cmp(&b.0));
         // The restored state is now what the agent left.
         self.record_post_locked(session).await?;
         Ok(RestoreOutcome {
@@ -882,8 +952,15 @@ impl Shadow {
                 if let Some(dir) = path.parent() {
                     std::fs::create_dir_all(dir).map_err(io)?;
                 }
-                if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
-                    std::fs::remove_file(&path).map_err(io)?;
+                match std::fs::symlink_metadata(&path) {
+                    Ok(m) if m.file_type().is_symlink() => {
+                        std::fs::remove_file(&path).map_err(io)?
+                    }
+                    // A folder the agent made of this file, which the removals before emptied (it
+                    // held only those, checked before anything changed; review I4). Only empty
+                    // folders are removed: anything that appeared since stops the restore here.
+                    Ok(m) if m.is_dir() => remove_empty_folders(&path).map_err(io)?,
+                    _ => {}
                 }
                 if mode == "120000" {
                     #[cfg(unix)]
@@ -976,6 +1053,42 @@ fn info(number: u32, m: &Meta) -> CheckpointInfo {
     }
 }
 
+/// Removes the locks a git killed inside the store (with its daemon: SIGKILL, power loss) leaves
+/// behind, which make every later checkpoint, and so every agent write, fail even after a restart:
+/// the store's index lock (review H3), `HEAD.lock`, `packed-refs.lock`, and any `*.lock` under
+/// `refs/axiom/` (an `update-ref` killed mid-way, review I3). Called only with the store's lock
+/// held, when no git of ours runs in it, so each one found is stale. Nothing is followed through
+/// a symlink. Blocking.
+fn remove_stale_locks(dir: &Path) {
+    let mut stale = vec![
+        dir.join(format!("{INDEX}.lock")),
+        dir.join("HEAD.lock"),
+        dir.join("packed-refs.lock"),
+    ];
+    // A ref's name never ends in `.lock` (git refuses one), so every such file is a lock.
+    let mut folders = vec![dir.join("refs").join("axiom")];
+    while let Some(d) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let Ok(t) = e.file_type() else {
+                continue;
+            };
+            if t.is_dir() {
+                folders.push(e.path());
+            } else if t.is_file() && e.file_name().to_string_lossy().ends_with(".lock") {
+                stale.push(e.path());
+            }
+        }
+    }
+    for l in stale {
+        if std::fs::remove_file(&l).is_ok() {
+            tracing::warn!("checkpoint: removed a stale {}", l.display());
+        }
+    }
+}
+
 /// Where `rel` puts one of git's own entries (`gate::GIT_DIR_ENTRIES`) directly into a folder:
 /// (the folder, the root as `""`; the entry, lowercased).
 fn git_entries(rel: &str) -> Vec<(String, String)> {
@@ -1026,29 +1139,102 @@ fn repository_on_disk(root: &Path, rel: &str) -> Option<String> {
         })
 }
 
-/// Whether something is on disk at `rel`, a path the snapshot now has no entry for (review H1),
-/// that is not one of the snapshot's files named in another case (`same`: on a case-insensitive
-/// file system, the same file). Only what is at `rel` itself counts: through a symlinked
-/// directory on the way it is elsewhere, and [`writable`] decides (the restore replaces that
-/// symlink, or refuses). Blocking.
-fn uncaptured_on_disk(root: &Path, rel: &str, same: &[String]) -> bool {
-    let at = |r: &str| {
-        let mut p = root.to_path_buf();
-        p.extend(r.split('/'));
-        std::fs::symlink_metadata(p)
-    };
-    let through_symlink = rel
-        .match_indices('/')
-        .any(|(i, _)| at(&rel[..i]).map_or(true, |m| m.file_type().is_symlink()));
-    if through_symlink {
-        return false;
+/// What is on disk at a path the snapshot now has no entry for (review H1).
+enum OnDisk {
+    /// Nothing, or only through a symlinked directory on the way: it is elsewhere, and
+    /// [`writable`] decides (the restore removes that symlink, or refuses).
+    Nothing,
+    /// Something no snapshot captured (ignored now): its content is unknown.
+    Uncaptured,
+    /// The same file as these of the snapshot's paths, named in another case (a case-insensitive
+    /// file system).
+    Captured(Vec<String>),
+}
+
+fn host_path(root: &Path, rel: &str) -> PathBuf {
+    let mut p = root.to_path_buf();
+    p.extend(rel.split('/'));
+    p
+}
+
+/// Whether a folder on the way to `rel` is a symlink, or missing (then so is `rel`). Blocking.
+fn through_symlink(root: &Path, rel: &str) -> bool {
+    rel.match_indices('/').any(|(i, _)| {
+        std::fs::symlink_metadata(host_path(root, &rel[..i]))
+            .map_or(true, |m| m.file_type().is_symlink())
+    })
+}
+
+/// What is on disk at `rel`, a path the snapshot now has no entry for, given the snapshot's paths
+/// of the same name in another case (`same`). Only what is at `rel` itself counts. Blocking.
+fn on_disk_at(root: &Path, rel: &str, same: &[String]) -> OnDisk {
+    if through_symlink(root, rel) {
+        return OnDisk::Nothing;
     }
-    let Ok(here) = at(rel) else {
-        return false;
+    let Ok(here) = std::fs::symlink_metadata(host_path(root, rel)) else {
+        return OnDisk::Nothing;
     };
-    !same
+    let variants: Vec<String> = same
         .iter()
-        .any(|q| at(q).is_ok_and(|m| same_file(&here, &m)))
+        .filter(|q| {
+            std::fs::symlink_metadata(host_path(root, q)).is_ok_and(|m| same_file(&here, &m))
+        })
+        .cloned()
+        .collect();
+    if variants.is_empty() {
+        OnDisk::Uncaptured
+    } else {
+        OnDisk::Captured(variants)
+    }
+}
+
+/// Whether the file a restore writes at `rel` may replace what is there (review I4): it is no
+/// folder, or a folder (not a symlink) holding, at any depth, only files this restore removes
+/// (`removes`: what the agent made, unchanged since) and folders. Anything else in it (a person's
+/// file, an ignored file, a repository's `.git`) keeps it. Through a symlinked folder on the way
+/// it is elsewhere, and [`writable`] decides. Blocking.
+fn holds_only(root: &Path, rel: &str, removes: &BTreeSet<String>) -> bool {
+    if through_symlink(root, rel) {
+        return true;
+    }
+    let path = host_path(root, rel);
+    if !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+        return true;
+    }
+    let mut folders = vec![(path, rel.to_string())];
+    while let Some((dir, under)) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return false;
+        };
+        for e in entries {
+            let Ok(e) = e else {
+                return false;
+            };
+            let (Ok(t), Some(name)) = (e.file_type(), e.file_name().to_str().map(str::to_string))
+            else {
+                return false;
+            };
+            let q = format!("{under}/{name}");
+            if t.is_dir() {
+                folders.push((e.path(), q));
+            } else if !removes.contains(&q) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Removes the folder `path` and the folders in it, all of which must be empty of anything else
+/// (a file found fails it, and is left). Nothing is followed through a symlink. Blocking.
+fn remove_empty_folders(path: &Path) -> std::io::Result<()> {
+    for e in std::fs::read_dir(path)? {
+        let e = e?;
+        if e.file_type()?.is_dir() {
+            remove_empty_folders(&e.path())?;
+        }
+    }
+    std::fs::remove_dir(path)
 }
 
 #[cfg(unix)]
