@@ -1465,6 +1465,228 @@ async fn a_configuration_changed_mid_turn_counts_from_the_next_call() {
     }
 }
 
+/// Review rev6 (H5), the reviewer's `probe_r6_g6_new_repository_mid_turn`: in one turn the
+/// agent writes an ordinary file (the workspace's repositories are walked), a command it runs
+/// makes a repository in a new folder with a `core.hooksPath`, and the next write of a hook
+/// there asks: the walk is not reused after a command.
+#[tokio::test]
+async fn a_repository_a_command_made_is_asked_about_at_the_next_write() {
+    use axiom_protocol::agent::{
+        AgentEvent, EventBody, Send, SendParams, SessionCreate, SessionCreateParams,
+    };
+    let data = tempfile::tempdir().unwrap();
+    let script = data.path().join("script.json");
+    let call = |id: &str, name: &str, input: Value| json!({"events": [{"type": "toolCall", "id": id, "name": name, "input": input}]});
+    std::fs::write(
+        &script,
+        json!({"turns": [
+            call("w0", "fs.applyPatch", json!({"path": "notes.txt", "create": "n\n"})),
+            call("t1", "task.run", json!({"argv": ["git", "init", "-q", "sub"]})),
+            call("t2", "task.run", json!({"argv": ["git", "-C", "sub", "config", "core.hooksPath", "gh"]})),
+            call("w3", "fs.applyPatch", create("sub/gh/pre-commit")),
+            {"events": [{"type": "text", "text": "done"}]}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("AXIOM_TEST_SCRIPTED_MODEL", &script);
+    })
+    .await;
+    let mut info = client_info();
+    info.protocol_version = "0.3".into();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Allow,
+            rules: vec![],
+        })
+        .await
+        .unwrap();
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    let sid = d
+        .client
+        .request::<SessionCreate>(SessionCreateParams {
+            workspace_id: Some(f.id.clone()),
+            provider_id: "scripted".into(),
+            model: "scripted".into(),
+            title: None,
+        })
+        .await
+        .unwrap()
+        .session_id;
+    // The approver denies everything; what was asked is kept.
+    let mut rx = d.client.notifications();
+    let client = d.client.clone();
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = asked.clone();
+    let approver = tokio::spawn(async move {
+        while let Ok((m, v)) = rx.recv().await {
+            if m != "agent/approvalRequested" {
+                continue;
+            }
+            let r: ApprovalRequest = serde_json::from_value(v).unwrap();
+            seen.lock().unwrap().push(r.targets.join(" "));
+            client
+                .request::<Approve>(ApproveParams {
+                    request_id: r.request_id,
+                    decision: ApprovalDecision::Deny,
+                })
+                .await
+                .unwrap();
+        }
+    });
+    d.client
+        .request::<Send>(SendParams {
+            workspace_id: Some(f.id.clone()),
+            session_id: sid.clone(),
+            text: "go".into(),
+            attachments: vec![],
+            images: vec![],
+            from_turn: None,
+        })
+        .await
+        .unwrap();
+    loop {
+        let v = d
+            .next_notification("agent/event", std::time::Duration::from_secs(120))
+            .await;
+        let e: AgentEvent = serde_json::from_value(v).unwrap();
+        if e.session_id == sid && matches!(e.event, EventBody::TurnEnd { .. }) {
+            break;
+        }
+    }
+    approver.abort();
+    let asked = asked.lock().unwrap().clone();
+    assert!(f.root.join("notes.txt").exists(), "{asked:?}");
+    let config = std::fs::read_to_string(f.root.join("sub/.git/config")).unwrap();
+    assert!(config.contains("hooksPath = gh"), "{config}");
+    let hook = "sub/gh/pre-commit";
+    assert!(!f.root.join(hook).exists(), "{hook} was written: {asked:?}");
+    assert!(asked.iter().any(|t| t.contains(hook)), "{asked:?}");
+}
+
+/// Review rev6 (H7): calls from outside a session share the workspace's git answer, so an
+/// ordinary write does not ask git again (about 50 ms per repository) while nothing changed.
+/// git is counted through a `git` on the daemon's `PATH` that records each listing of the
+/// configuration and runs the real one. A command one of them runs still makes the next write
+/// ask git afresh, and what the command made counts (a repository with a `core.hooksPath`).
+#[cfg(unix)]
+#[tokio::test]
+async fn calls_from_outside_a_session_share_gits_answer() {
+    use std::os::unix::fs::PermissionsExt;
+    let real = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|d| d.join("git"))
+        .find(|p| p.is_file())
+        .expect("git on PATH");
+    let bin = tempfile::tempdir().unwrap();
+    let count = bin.path().join("count");
+    std::fs::write(
+        bin.path().join("git"),
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *--show-origin*) echo x >> '{}';; esac\nexec '{}' \"$@\"\n",
+            count.display(),
+            real.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        bin.path().join("git"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let asked = || {
+        std::fs::read_to_string(&count)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let path = std::env::join_paths(
+        std::iter::once(bin.path().to_path_buf())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("PATH", &path);
+    })
+    .await;
+    let mut info = client_info();
+    info.protocol_version = "0.3".into();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    let app = f.root.join("app");
+    std::fs::create_dir(&app).unwrap();
+    git_in(&app, &["init", "-q"]);
+    git_commit(&app);
+    write_unasked(&d, &f, "a.txt").await;
+    let first = asked();
+    assert!(first >= 2, "the root and app/ were asked: {first}");
+    write_unasked(&d, &f, "b.txt").await;
+    write_unasked(&d, &f, "app/c.txt").await;
+    assert_eq!(
+        asked(),
+        first,
+        "git was asked again for an unchanged workspace"
+    );
+    // A command (from outside a session too) makes a repository with a hooks folder.
+    let (r, _) = call_answering(
+        &d,
+        call(
+            &f.id,
+            "task.run",
+            json!({"argv": ["sh", "-c", "git init -q sub && git -C sub config core.hooksPath gh"]}),
+        ),
+        ApprovalDecision::Once,
+    )
+    .await;
+    assert!(!r.unwrap().is_error);
+    write_asks(&d, &f, create("sub/gh/pre-commit")).await;
+    assert!(asked() > first);
+}
+
+/// Review rev6 (G3's follow-up): a program value git's configuration names that cannot be
+/// placed with confidence (`cd tools && ./fsmon.sh`) is not guessed into words: every write
+/// asks, and the card says why. A plain value protects its program alone, before and after.
+#[tokio::test]
+async fn a_program_value_that_cannot_be_placed_makes_every_write_ask() {
+    let d = approving_daemon().await;
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    std::fs::create_dir(f.root.join("tools")).unwrap();
+    git_in(&f.root, &["config", "core.fsmonitor", "tools/fsmon.sh"]);
+    write_asks(&d, &f, create("tools/fsmon.sh")).await;
+    write_unasked(&d, &f, "notes.txt").await;
+    git_in(
+        &f.root,
+        &["config", "core.fsmonitor", "cd tools && ./fsmon.sh"],
+    );
+    let (r, req) = call_answering(
+        &d,
+        call(&f.id, "fs.applyPatch", create("src.txt")),
+        ApprovalDecision::Deny,
+    )
+    .await;
+    assert_eq!(kind(&r.unwrap_err()), ErrorKind::ApprovalDenied);
+    assert!(
+        req.rule
+            .as_deref()
+            .unwrap_or_default()
+            .contains("every write asks"),
+        "{req:?}"
+    );
+    assert!(!f.root.join("src.txt").exists());
+    git_in(&f.root, &["config", "core.fsmonitor", "tools/fsmon.sh"]);
+    write_unasked(&d, &f, "src.txt").await;
+    write_asks(&d, &f, create("tools/fsmon.sh")).await;
+}
+
 /// Review E5: where the policy allows a command, no card is shown, so the result itself says
 /// which variables the process did not get, and for `SSH_AUTH_SOCK` what that breaks and how
 /// to pass it. `preview.start` (a dev server the agent starts) says so too, on the card and in

@@ -7,8 +7,9 @@
 //! (its `clean`, `smudge` and `process` empty, not `required`), so a `.gitattributes` cannot
 //! route a file through one; `status` does not look inside submodules (`--ignore-submodules=dirty`:
 //! that would run git there, under the submodule's own configuration); `show` reads with
-//! `--no-ext-diff --no-textconv`. The rest (`rev-parse`, `config`) runs no program. The person's
-//! own configuration (ignore files, `safe.directory`) still applies.
+//! `--no-ext-diff --no-textconv`. The rest (`rev-parse`, `config`) runs no program. Nothing is
+//! fetched (review H6): a partial clone's missing object stays missing, so no transport program
+//! runs. The person's own configuration (ignore files, `safe.directory`) still applies.
 
 use axiom_protocol::git::{GitFile, GitFileState, GitStatus};
 use axiom_protocol::WorkspacePath;
@@ -69,7 +70,13 @@ pub fn find_git() -> Option<PathBuf> {
 }
 
 /// git in `root`, isolated from the daemon's own `GIT_*` variables, with no pager and no
-/// fsmonitor (a program the repository's configuration names, run on reading the index).
+/// fsmonitor (a program the repository's configuration names, run on reading the index), and
+/// no network (review H6): in a partial clone (`--filter=blob:none`) a `show` or a `status`
+/// that needs an object the clone left out would fetch it from the promisor remote, running
+/// the transport the configuration names (`remote.<name>.uploadpack`, `core.sshCommand`, a
+/// credential helper). `GIT_NO_LAZY_FETCH` (git 2.44) refuses that fetch; `protocol.allow =
+/// never` (passed on to the `git fetch` an older git starts for it) refuses every transport
+/// as well. The object is then missing, which `show` reports and `status` does not need.
 fn isolated(git: &Path, root: &Path) -> Command {
     let mut cmd = Command::new(git);
     for (k, _) in std::env::vars_os() {
@@ -80,9 +87,16 @@ fn isolated(git: &Path, root: &Path) -> Command {
     cmd.current_dir(root)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_NO_LAZY_FETCH", "1")
         .env("GIT_PAGER", "cat")
         .env("LC_ALL", "C")
-        .args(["--no-pager", "-c", "core.fsmonitor=false"])
+        .args([
+            "--no-pager",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "protocol.allow=never",
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -271,6 +285,15 @@ pub struct ConfigFiles {
     /// ([`PROGRAM_KEYS`]): each word of the value that may be a path, from the top of the work
     /// tree (the git directory for a bare repository), whether it exists yet or not.
     pub programs: Vec<PathBuf>,
+    /// The program-valued keys whose value could not be placed with confidence (review G3's
+    /// follow-up): shell syntax the splitter does not read (`$`, backquotes, a background `&`,
+    /// a subshell, braces or a function, a glob, a here-document, a quote left open; commands
+    /// joined by `;`, `&&`, `||` or `|` are read), a command that changes its folder or nests a
+    /// script (`cd`, `-C`, `-c`), or a `!`-less
+    /// alias that hands git options which change its configuration or folder (`-c`, `-C`,
+    /// `--exec-path`, …). Its words are not guessed: the caller treats the repository as one
+    /// git cannot answer for, so every write asks.
+    pub unplaced: Vec<String>,
 }
 
 /// The most configuration files read for one repository (its own, the global and system ones,
@@ -412,6 +435,7 @@ fn config_files_as_named(root: &Path) -> Result<ConfigFiles, GitError> {
                 git_dirs: vec![git_dir, common],
                 files: found.files,
                 programs: found.programs,
+                unplaced: found.unplaced,
             })
         }
         Err(e) if e.contains("not a git repository") => {
@@ -436,6 +460,7 @@ fn config_files_as_named(root: &Path) -> Result<ConfigFiles, GitError> {
                 git_dirs: Vec::new(),
                 files: found.files,
                 programs: found.programs,
+                unplaced: found.unplaced,
             })
         }
         Err(e) => Err(GitError::Failed(e)),
@@ -452,6 +477,7 @@ struct Found {
     includes: Vec<PathBuf>,
     hooks: Vec<PathBuf>,
     programs: Vec<PathBuf>,
+    unplaced: Vec<String>,
 }
 
 fn push(v: &mut Vec<PathBuf>, p: PathBuf) {
@@ -463,7 +489,8 @@ fn push(v: &mut Vec<PathBuf>, p: PathBuf) {
 impl Found {
     /// From `git config --list --show-origin -z`: the files it read (relative ones from
     /// `base`), every file an include names (relative to the file that includes it), every
-    /// `core.hooksPath` and every path a program-valued key names (relative to `base`).
+    /// `core.hooksPath` and every path a program-valued key names (relative to `base`), or the
+    /// key when its value cannot be placed.
     fn read(&mut self, list: &[u8], base: &Path) {
         let mut parts = list.split(|b| *b == 0);
         while let (Some(origin), Some(entry)) = (parts.next(), parts.next()) {
@@ -491,9 +518,24 @@ impl Found {
                 if let Some(p) = expand_path(value, base) {
                     push(&mut self.hooks, p);
                 }
-            } else if let Some(shell) = program_key(&key, value) {
-                for p in program_paths(value, base, shell) {
-                    push(&mut self.programs, p);
+            } else {
+                let placed = match program_key(&key, value) {
+                    ProgramValue::No => Some(Vec::new()),
+                    ProgramValue::Shell => program_paths(value, base, true),
+                    ProgramValue::Path => program_paths(value, base, false),
+                    ProgramValue::Unplaced => None,
+                };
+                match placed {
+                    Some(paths) => {
+                        for p in paths {
+                            push(&mut self.programs, p);
+                        }
+                    }
+                    None => {
+                        if !self.unplaced.contains(&key) {
+                            self.unplaced.push(key);
+                        }
+                    }
                 }
             }
         }
@@ -535,17 +577,27 @@ impl Found {
 }
 
 /// Configuration keys whose value is a program git runs (or a file that routes files through
-/// one), by section and variable, `*` for any subsection (review G3):
+/// one), by section and variable, `*` for any subsection or variable (reviews G3, rev6):
 /// `core.fsmonitor`, `core.sshCommand`, `core.editor`, `core.pager`, `core.askPass`,
 /// `core.gitProxy`, `core.alternateRefsCommand`, `core.attributesFile`, `sequence.editor`,
 /// `diff.external`, `diff.*.textconv`, `diff.*.command`, `filter.*.clean`, `filter.*.smudge`,
 /// `filter.*.process`, `merge.*.driver`, `credential.helper`, `credential.*.helper`,
-/// `gpg.program`, `gpg.*.program`, `gpg.ssh.defaultKeyCommand`, `pager.*`, `alias.*` (a `!`
-/// alias), `interactive.diffFilter`, `difftool.*.cmd`, `difftool.*.path`, `mergetool.*.cmd`,
-/// `mergetool.*.path`, `sendemail.*` commands, `trailer.*.command`, `trailer.*.cmd`,
+/// `gpg.program`, `gpg.*.program`, `gpg.ssh.defaultKeyCommand`, `pager.*`, `alias.*` and every
+/// key under an `[alias "<name>"]` (`alias.*.command`; a `!` alias is a shell command, one
+/// without `!` is git's own arguments), `interactive.diffFilter`, `difftool.*.cmd`,
+/// `difftool.*.path`, `mergetool.*.cmd`, `mergetool.*.path`, `sendemail[.*].sendmailCmd`,
+/// `toCmd`, `ccCmd`, `headerCmd` and `smtpServer`, `trailer.*.command`, `trailer.*.cmd`,
 /// `tar.*.command`, `browser.*.cmd`, `browser.*.path`, `man.*.cmd`, `man.*.path`,
+/// `guitool.*.cmd`, `instaweb.httpd`, `imap.tunnel`, `gc.recentObjectsHook`,
 /// `remote.*.uploadpack`, `remote.*.receivepack`, `submodule.*.update` (a `!` command),
 /// `uploadpack.packObjectsHook`.
+///
+/// **This list is not a boundary.** git adds program-valued keys in new versions (hooks set
+/// in configuration, for one), a protected program may run files nothing names, and the
+/// person's own tools run files in the work tree too. Content that something on the person's
+/// machine executes later is closed only by isolating the agent's processes (ADR-0010) and by
+/// the policy that asks for writes; this list is defence in depth. Do not extend it key by key:
+/// a value that cannot be placed already makes every write ask ([`ConfigFiles::unplaced`]).
 pub const PROGRAM_KEYS: &[(&str, Option<&str>, &str)] = &[
     ("core", None, "fsmonitor"),
     ("core", None, "sshcommand"),
@@ -570,6 +622,7 @@ pub const PROGRAM_KEYS: &[(&str, Option<&str>, &str)] = &[
     ("gpg", Some("ssh"), "defaultkeycommand"),
     ("pager", None, "*"),
     ("alias", None, "*"),
+    ("alias", Some("*"), "*"),
     ("interactive", None, "difffilter"),
     ("difftool", Some("*"), "cmd"),
     ("difftool", Some("*"), "path"),
@@ -578,9 +631,13 @@ pub const PROGRAM_KEYS: &[(&str, Option<&str>, &str)] = &[
     ("sendemail", None, "sendmailcmd"),
     ("sendemail", None, "tocmd"),
     ("sendemail", None, "cccmd"),
+    ("sendemail", None, "headercmd"),
+    ("sendemail", None, "smtpserver"),
     ("sendemail", Some("*"), "sendmailcmd"),
     ("sendemail", Some("*"), "tocmd"),
     ("sendemail", Some("*"), "cccmd"),
+    ("sendemail", Some("*"), "headercmd"),
+    ("sendemail", Some("*"), "smtpserver"),
     ("trailer", Some("*"), "command"),
     ("trailer", Some("*"), "cmd"),
     ("tar", Some("*"), "command"),
@@ -588,18 +645,58 @@ pub const PROGRAM_KEYS: &[(&str, Option<&str>, &str)] = &[
     ("browser", Some("*"), "path"),
     ("man", Some("*"), "cmd"),
     ("man", Some("*"), "path"),
+    ("guitool", Some("*"), "cmd"),
+    ("instaweb", None, "httpd"),
+    ("imap", None, "tunnel"),
+    ("gc", None, "recentobjectshook"),
     ("remote", Some("*"), "uploadpack"),
     ("remote", Some("*"), "receivepack"),
     ("submodule", Some("*"), "update"),
     ("uploadpack", None, "packobjectshook"),
 ];
 
-/// Whether the (lower-cased) `key` names a program ([`PROGRAM_KEYS`]) with this value, and if
-/// so whether git may hand the value to a shell. A boolean (`core.fsmonitor = true` is git's
-/// own daemon, `pager.log = false`) names none; an alias or a submodule's `update` only with
-/// `!`.
-fn program_key(key: &str, value: &[u8]) -> Option<bool> {
-    let (section, rest) = key.split_once('.')?;
+/// How a configuration value names a program ([`program_key`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProgramValue {
+    /// None (not a program-valued key, a boolean, a `!`-less alias with plain arguments).
+    No,
+    /// A command git may hand to a shell.
+    Shell,
+    /// One path git runs or reads as it is, without a shell (`core.attributesFile`,
+    /// `gpg.program`, `sendemail.smtpServer`).
+    Path,
+    /// A value that cannot be placed: a `!`-less alias that gives git options changing its
+    /// configuration or folder.
+    Unplaced,
+}
+
+/// git's options before an alias's command that change neither its configuration nor where it
+/// runs or finds programs: any other (`-c`, `--config-env`, `-C`, `--exec-path`, `--git-dir`,
+/// `--work-tree`, …) makes a `!`-less alias's value unplaced.
+const PLAIN_GIT_OPTIONS: &[&str] = &[
+    "-p",
+    "--paginate",
+    "-P",
+    "--no-pager",
+    "--no-replace-objects",
+    "--no-lazy-fetch",
+    "--no-optional-locks",
+    "--no-advice",
+    "--literal-pathspecs",
+    "--glob-pathspecs",
+    "--noglob-pathspecs",
+    "--icase-pathspecs",
+];
+
+/// Whether the (lower-cased) `key` names a program ([`PROGRAM_KEYS`]) with this value, and how.
+/// A boolean (`core.fsmonitor = true` is git's own daemon, `pager.log = false`) names none; an
+/// alias or a submodule's `update` is a shell command only with `!`. An alias without `!` is
+/// git's own arguments: unplaced when an option before its command can change git's
+/// configuration or folder (`-c core.fsmonitor=tools/x.sh status`), else no program.
+fn program_key(key: &str, value: &[u8]) -> ProgramValue {
+    let Some((section, rest)) = key.split_once('.') else {
+        return ProgramValue::No;
+    };
     let (sub, var) = match rest.rsplit_once('.') {
         Some((s, v)) => (Some(s), v),
         None => (None, rest),
@@ -615,7 +712,7 @@ fn program_key(key: &str, value: &[u8]) -> Option<bool> {
             }
     });
     if !listed {
-        return None;
+        return ProgramValue::No;
     }
     let text = String::from_utf8_lossy(value);
     let t = text.trim().to_ascii_lowercase();
@@ -623,31 +720,60 @@ fn program_key(key: &str, value: &[u8]) -> Option<bool> {
         t.as_str(),
         "" | "true" | "false" | "yes" | "no" | "on" | "off" | "1" | "0"
     ) {
-        return None;
+        return ProgramValue::No;
     }
     let bang = text.trim_start().starts_with('!');
-    if (section == "alias" || section == "submodule") && !bang {
-        return None;
+    if section == "alias" && !bang {
+        // `alias.<name>` or `alias.<name>.command`: git's arguments, split by git itself.
+        if sub.is_some() && var != "command" {
+            return ProgramValue::No;
+        }
+        let Some(words) = git_words(&text) else {
+            return ProgramValue::Unplaced;
+        };
+        let changes_git = words
+            .iter()
+            .take_while(|w| w.starts_with('-'))
+            .any(|w| !PLAIN_GIT_OPTIONS.contains(&w.as_str()));
+        return if changes_git {
+            ProgramValue::Unplaced
+        } else {
+            ProgramValue::No
+        };
     }
-    Some(section != "core" || var != "attributesfile")
+    if section == "submodule" && !bang {
+        return ProgramValue::No;
+    }
+    let one_path = (section == "core" && var == "attributesfile")
+        || (section == "gpg" && var == "program")
+        || (section == "sendemail" && var == "smtpserver");
+    if one_path {
+        ProgramValue::Path
+    } else {
+        ProgramValue::Shell
+    }
 }
 
-/// The paths a program-valued configuration value may name, from `base`: its words (split as a
-/// shell would, roughly: blanks, `;|&()<>` and backquotes; quotes kept together), each that is
-/// not an option, a placeholder (`%f`) or a variable (`$X`): a word with a path separator, or
-/// a bare word that is not a folder at `base` (`sh clean.sh` runs `base/clean.sh`; `less` is
-/// harmless to protect). The part after `=` of an option or an assignment. Not `shell`: the
-/// value is one path.
-fn program_paths(value: &[u8], base: &Path, shell: bool) -> Vec<PathBuf> {
+/// The paths a program-valued configuration value may name, from `base`; `None` when a shell
+/// value cannot be placed with confidence ([`shell_words`], and a word that changes the folder
+/// or hands a script to a shell: `cd`, `pushd`, `popd`, `-C`, `-c`). Its words (each that is
+/// not an option or a placeholder such as `%f`): a word with a path separator, or a bare word
+/// that is not a folder at `base` (`sh clean.sh` runs `base/clean.sh`; `less` is harmless to
+/// protect). The part after `=` of an option or an assignment. Not `shell`: the value is one
+/// path.
+fn program_paths(value: &[u8], base: &Path, shell: bool) -> Option<Vec<PathBuf>> {
     let text = String::from_utf8_lossy(value);
     let text = text.trim().trim_start_matches('!');
     let words: Vec<String> = if shell {
-        shell_words(text)
+        shell_words(text)?
     } else {
         vec![text.to_string()]
     };
     let mut out = Vec::new();
     for w in words {
+        if shell && moves_or_nests(&w) {
+            return None;
+        }
         // `--file=x` and `VAR=x`: the value.
         let w = match w.split_once('=') {
             Some((before, after))
@@ -661,8 +787,12 @@ fn program_paths(value: &[u8], base: &Path, shell: bool) -> Vec<PathBuf> {
             }
             _ => w,
         };
-        if w.is_empty() || w.starts_with(['-', '%', '$']) {
+        if w.is_empty() || w.starts_with(['-', '%']) {
             continue;
+        }
+        // `~user/x`: someone's home, which this cannot place.
+        if shell && w.starts_with('~') && !w.starts_with("~/") {
+            return None;
         }
         let separator = w.contains('/') || (cfg!(windows) && w.contains('\\'));
         let Some(p) = expand_path(w.as_bytes(), base) else {
@@ -673,27 +803,81 @@ fn program_paths(value: &[u8], base: &Path, shell: bool) -> Vec<PathBuf> {
         }
         out.push(p);
     }
-    out
+    Some(out)
 }
 
-/// `text` split into words roughly as `sh` does: blanks and `;|&()<>` and backquotes separate,
-/// quotes group (and are dropped), a backslash takes the next character as it is.
-fn shell_words(text: &str) -> Vec<String> {
+/// A shell word after which the words that follow are not run from where they would seem to
+/// be: the folder changes (`cd`, `pushd`, `popd`, `-C` as in `git -C` and `make -C`,
+/// `--chdir`), or a string is a script for a shell or git's configuration (`-c` and a bundle
+/// ending in it, `sh -ec '…'`; `git -c key=program`).
+fn moves_or_nests(w: &str) -> bool {
+    matches!(w, "cd" | "pushd" | "popd" | "-C")
+        || w.starts_with("--chdir")
+        || (w.len() >= 2
+            && w.starts_with('-')
+            && !w.starts_with("--")
+            && w.ends_with('c')
+            && w[1..].chars().all(|c| c.is_ascii_alphabetic()))
+}
+
+/// `text` split into words as `sh` does for simple commands, the words of every command in
+/// one list (each is placed alike): blanks separate, quotes group (and are dropped), a
+/// backslash takes the next character as it is (inside double quotes, only before `$`, a
+/// backquote, `"` or `\`), `<` and `>` separate (a redirection's target is a word, placed as
+/// a path), and so do the operators between simple commands, `;`, `&&`, `||` and `|`
+/// (`diff-so-fancy | less`, `git fetch && git rebase`). `None` for what this does not read, so
+/// cannot place: an expansion (`$`, a backquote, outside single quotes), a background `&` (and
+/// `>&`, `|&`), a newline, a subshell, braces or a function (`(`, `)`, `{`, `}`), a glob (`*`,
+/// `?`, `[`), a here-document or process substitution (`<<`, `<(`, `>(`), a comment (`#`
+/// starting a word), or a quote left open.
+fn shell_words(text: &str) -> Option<Vec<String>> {
     let mut words = Vec::new();
     let mut cur = String::new();
     let mut quote: Option<char> = None;
-    let mut chars = text.chars();
+    let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), c) => cur.push(c),
-            (None, '\'' | '"') => quote = Some(c),
-            (None, '\\') => {
-                if let Some(n) = chars.next() {
+            (Some('\''), '\'') => quote = None,
+            (Some('\''), c) => cur.push(c),
+            (Some(_), '"') => quote = None,
+            (Some(_), '$' | '`') => return None,
+            (Some(_), '\\') => match chars.next()? {
+                n @ ('$' | '`' | '"' | '\\') => cur.push(n),
+                '\n' => {}
+                n => {
+                    cur.push('\\');
                     cur.push(n);
                 }
+            },
+            (Some(_), c) => cur.push(c),
+            (None, '\'' | '"') => quote = Some(c),
+            (None, '\\') => match chars.next()? {
+                '\n' => {}
+                n => cur.push(n),
+            },
+            (None, '<' | '>') => {
+                if matches!(chars.peek(), Some('<' | '(')) {
+                    return None;
+                }
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
             }
-            (None, c) if c.is_whitespace() || ";|&()<>`".contains(c) => {
+            (None, '#') if cur.is_empty() => return None,
+            // Between simple commands: `;`, `|`, `||`, `&&` (a lone `&` is a background job).
+            (None, ';' | '|' | '&') => {
+                if c == '&' && chars.next_if_eq(&'&').is_none() {
+                    return None;
+                }
+                if c == '|' {
+                    chars.next_if_eq(&'|');
+                }
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+            }
+            (None, c) if "$`(){}*?[\n".contains(c) => return None,
+            (None, c) if c.is_whitespace() => {
                 if !cur.is_empty() {
                     words.push(std::mem::take(&mut cur));
                 }
@@ -701,10 +885,43 @@ fn shell_words(text: &str) -> Vec<String> {
             (None, c) => cur.push(c),
         }
     }
+    if quote.is_some() {
+        return None;
+    }
     if !cur.is_empty() {
         words.push(cur);
     }
-    words
+    Some(words)
+}
+
+/// A `!`-less alias's value split as git splits it (`split_cmdline`: blanks separate, quotes
+/// group, a backslash takes the next character); `None` for a quote left open.
+fn git_words(text: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (_, '\\') => cur.push(chars.next()?),
+            (Some(_), c) => cur.push(c),
+            (None, '\'' | '"') => quote = Some(c),
+            (None, c) if c.is_whitespace() => {
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+            }
+            (None, c) => cur.push(c),
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    Some(words)
 }
 
 /// The most folders [`repositories`] looks at, and how deep: past either, what it found is

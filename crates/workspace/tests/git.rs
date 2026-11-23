@@ -486,6 +486,9 @@ fn status_runs_no_filter_driver_and_nothing_else_the_configuration_names() {
 /// (`core.fsmonitor`, a filter, `core.sshCommand`, a `!` alias's paths, `core.attributesFile`;
 /// not a boolean, not a placeholder or an option), and so is what an include git does not open
 /// today (`includeIf.onbranch:release`) would set, and what that file includes in turn.
+/// (Review rev6: the alias was `!cd sub && ./run.sh`, listed as `run.sh` where git runs
+/// `sub/run.sh`; such a value is now unplaced, in
+/// `program_values_that_cannot_be_placed_are_unplaced_not_guessed`.)
 #[test]
 fn config_files_list_programs_and_what_a_false_include_would_set() {
     let d = repo();
@@ -495,7 +498,7 @@ fn config_files_list_programs_and_what_a_false_include_would_set() {
         "[core]\n\tfsmonitor = tools/fsmon.sh\n\tsshCommand = \"sh scripts/ssh.sh\" -v\n\
          \tattributesFile = conf/attrs\n\tpager = false\n\
          [filter \"strip\"]\n\tclean = tools/clean.sh %f --flag\n\
-         [alias]\n\tx = !cd sub && ./run.sh --out=build/log\n\tlg = log --oneline\n\
+         [alias]\n\tx = !sh scripts/run.sh --out=build/log sub\n\tlg = log --oneline\n\
          [includeIf \"onbranch:release\"]\n\tpath = ../release.cfg\n",
     );
     std::fs::write(p.join(".git/config"), c).unwrap();
@@ -514,7 +517,7 @@ fn config_files_list_programs_and_what_a_false_include_would_set() {
         "scripts/ssh.sh",
         "conf/attrs",
         "tools/clean.sh",
-        "run.sh",
+        "scripts/run.sh",
         "build/log",
         "tools/ed.sh",
         "tools/ask.sh",
@@ -532,6 +535,7 @@ fn config_files_list_programs_and_what_a_false_include_would_set() {
             c.programs
         );
     }
+    assert!(c.unplaced.is_empty(), "{:?}", c.unplaced);
     assert!(c.hooks.contains(&p.join("tools/relhooks")), "{:?}", c.hooks);
     // The live hooks directory is still git's own.
     assert_eq!(c.hooks.first(), Some(&p.join(".git/hooks")));
@@ -591,4 +595,241 @@ fn an_include_through_a_symlinked_git_directory_is_the_file_git_opens() {
         c.files
     );
     assert!(!c.files.contains(&p.join("x.gitconfig")), "{:?}", c.files);
+}
+
+/// Review rev6 (H6): the daemon's own git fetches nothing. In a partial clone
+/// (`--filter=blob:none`, so no file's content is in it) whose remote's `uploadpack` names a
+/// program, `show` of a file at HEAD needs a blob the clone left out: git would fetch it, and
+/// run that program. It is not fetched (the file is reported missing), and `status` and
+/// `config_files` run nothing either.
+#[cfg(unix)]
+#[test]
+fn a_partial_clone_fetches_nothing_and_runs_no_transport() {
+    let src = repo();
+    g(src.path(), &["config", "uploadpack.allowFilter", "true"]);
+    let outside = tempfile::tempdir().unwrap();
+    let marker = outside.path().join("ran");
+    // Records its run and fails (a transport that waited for input would hang the probe).
+    let prog = outside.path().join("upload-pack.sh");
+    std::fs::write(
+        &prog,
+        format!(
+            "#!/bin/sh\necho \"$0 $*\" >> '{}'\nexit 1\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let w = tempfile::tempdir().unwrap();
+    let dst = w.path().join("dst");
+    let url = format!("file://{}", src.path().display());
+    g(
+        w.path(),
+        &[
+            "clone",
+            "-q",
+            "--filter=blob:none",
+            "--no-checkout",
+            &url,
+            dst.to_str().unwrap(),
+        ],
+    );
+    g(
+        &dst,
+        &[
+            "config",
+            "remote.origin.uploadpack",
+            &prog.to_string_lossy(),
+        ],
+    );
+    // The probe is live: plain git, asked for the same blob, runs the program.
+    let plain = Command::new("git")
+        .current_dir(&dst)
+        .args(["cat-file", "-p", "HEAD:mod.txt"])
+        .output()
+        .unwrap();
+    assert!(!plain.status.success());
+    assert!(marker.exists(), "the probe's lazy fetch did not run");
+    std::fs::remove_file(&marker).unwrap();
+
+    let shown = git::show(&dst, "keep.txt", true);
+    let st = git::status(&dst);
+    let c = git::config_files(&dst);
+    assert!(
+        !marker.exists(),
+        "the daemon's git fetched: {}",
+        std::fs::read_to_string(&marker).unwrap_or_default()
+    );
+    assert!(
+        matches!(shown, Err(git::GitError::NotFound(_))),
+        "{shown:?}"
+    );
+    assert!(st.unwrap().repo);
+    c.unwrap();
+}
+
+/// Review rev6 (G3's follow-up): a program value the splitter cannot place with confidence is
+/// not guessed into words: its key is listed as unplaced (the gate then asks for every write).
+/// Shell syntax (an open quote, `$`, `$(…)`, a backquote, a background `&`, a here-document,
+/// a glob, braces, a function, a subshell), a command that changes its folder or nests a
+/// script (`cd`, `git -C`, `sh -c '…'`, `git -c`), also when joined to others by `&&` or `;`,
+/// and a `!`-less alias that gives git `-c` or `-C` (also under the `[alias "<name>"]` form). A plain value beside them is still placed
+/// as its program alone, and a `!`-less alias with harmless options names nothing.
+#[test]
+fn program_values_that_cannot_be_placed_are_unplaced_not_guessed() {
+    let d = repo();
+    let p = &dunce::canonicalize(d.path()).unwrap();
+    let unplaced = [
+        ("core.fsmonitor", "tools/fs.sh \"open"),
+        ("alias.dollar", "!$PWD/tools/c.sh"),
+        (
+            "alias.subst",
+            "!tools/x.sh $(git rev-parse --show-toplevel)",
+        ),
+        ("alias.tick", "!tools/x.sh `pwd`"),
+        ("alias.and", "!cd sub && ./run.sh"),
+        ("alias.gitchdir", "!git -C sub status"),
+        ("alias.chained", "!tools/a.sh; git -C sub status"),
+        ("alias.background", "!tools/x.sh & tools/y.sh"),
+        ("alias.both", "!tools/x.sh |& less"),
+        ("alias.heredoc", "!cat <<EOF"),
+        ("alias.glob", "!sh tools/*.sh"),
+        ("alias.func", "!f() { git x; }; f"),
+        ("alias.subshell", "!(tools/x.sh)"),
+        ("alias.shc", "!sh -c 'cd tools && ./k.sh'"),
+        ("alias.gitc", "!git -c core.fsmonitor=tools/b.sh status"),
+        ("alias.config", "-c core.fsmonitor=tools/b.sh status"),
+        ("alias.chdir", "-C sub status"),
+        ("alias.x y.command", "--exec-path=tools status"),
+    ];
+    for (k, v) in unplaced {
+        g(p, &["config", k, v]);
+    }
+    g(p, &["config", "core.pager", "tools/pager.sh -R"]);
+    g(p, &["config", "alias.lg", "--no-pager log -p --oneline"]);
+    let c = git::config_files(p).unwrap();
+    let mut got = c.unplaced.clone();
+    got.sort();
+    let mut want: Vec<String> = unplaced.iter().map(|(k, _)| k.to_lowercase()).collect();
+    want.sort();
+    assert_eq!(got, want);
+    assert!(
+        c.programs.contains(&p.join("tools/pager.sh")),
+        "{:?}",
+        c.programs
+    );
+    // Nothing from an unplaced value is guessed.
+    for not in [
+        "run.sh",
+        "tools/c.sh",
+        "tools/b.sh",
+        "tools/k.sh",
+        "tools/a.sh",
+        "tools/y.sh",
+        "-R",
+        "log",
+    ] {
+        assert!(
+            !c.programs.contains(&p.join(not)),
+            "{not}: {:?}",
+            c.programs
+        );
+    }
+}
+
+/// Review rev6 (G3): the keys the review found that name programs are read: every key under
+/// `[alias "<name>"]` with `!`, `gc.recentObjectsHook`, `imap.tunnel`, `sendemail.headerCmd`
+/// and `sendemail.smtpServer`, `guitool.<name>.cmd`, `instaweb.httpd`. `gpg.program` is run
+/// without a shell, so a space is part of its one path.
+#[test]
+fn the_program_keys_the_review_found_are_read() {
+    let d = repo();
+    let p = &dunce::canonicalize(d.path()).unwrap();
+    for (k, v) in [
+        ("alias.x y.command", "!tools/a.sh"),
+        ("gc.recentObjectsHook", "tools/d.sh"),
+        ("imap.tunnel", "tools/tunnel.sh --host x"),
+        ("sendemail.headerCmd", "tools/hdr.sh"),
+        ("sendemail.smtpServer", "tools/sendmail"),
+        ("guitool.lint.cmd", "tools/lint.sh"),
+        ("instaweb.httpd", "tools/httpd.sh"),
+        ("gpg.program", "tools/my gpg"),
+    ] {
+        g(p, &["config", k, v]);
+    }
+    let c = git::config_files(p).unwrap();
+    assert!(c.unplaced.is_empty(), "{:?}", c.unplaced);
+    for want in [
+        "tools/a.sh",
+        "tools/d.sh",
+        "tools/tunnel.sh",
+        "tools/hdr.sh",
+        "tools/sendmail",
+        "tools/lint.sh",
+        "tools/httpd.sh",
+        "tools/my gpg",
+    ] {
+        assert!(
+            c.programs.contains(&p.join(want)),
+            "{want}: {:?}",
+            c.programs
+        );
+    }
+    assert!(
+        !c.programs.contains(&p.join("tools/my")),
+        "{:?}",
+        c.programs
+    );
+}
+
+/// Review rev6: simple commands joined by `;`, `&&`, `||` or `|` are read one by one, each
+/// placed as a single command is: its program and every word that may be a path
+/// (`diff-so-fancy | less`, `!git fetch && git rebase`). Nothing is unplaced.
+#[test]
+fn commands_joined_by_separators_are_placed_word_by_word() {
+    let d = repo();
+    let p = &dunce::canonicalize(d.path()).unwrap();
+    std::fs::create_dir(p.join("sub")).unwrap();
+    for (k, v) in [
+        ("core.pager", "diff-so-fancy | less --tabs=4 -RFX"),
+        ("alias.up", "!git fetch && git rebase"),
+        ("alias.both", "!tools/a.sh; tools/b.sh --out=build/log"),
+        ("alias.either", "!tools/c.sh||tools/d.sh sub"),
+        ("alias.redirect", "!tools/e.sh > logs/e.txt 2>/dev/null"),
+    ] {
+        g(p, &["config", k, v]);
+    }
+    let c = git::config_files(p).unwrap();
+    assert!(c.unplaced.is_empty(), "{:?}", c.unplaced);
+    for want in [
+        "diff-so-fancy",
+        "less",
+        "4",
+        "git",
+        "fetch",
+        "rebase",
+        "tools/a.sh",
+        "tools/b.sh",
+        "build/log",
+        "tools/c.sh",
+        "tools/d.sh",
+        "tools/e.sh",
+        "logs/e.txt",
+    ] {
+        assert!(
+            c.programs.contains(&p.join(want)),
+            "{want}: {:?}",
+            c.programs
+        );
+    }
+    for not in ["|", "&&", ";", "||", ">", "-RFX", "--tabs", "sub"] {
+        assert!(
+            !c.programs.contains(&p.join(not)),
+            "{not}: {:?}",
+            c.programs
+        );
+    }
 }

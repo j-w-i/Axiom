@@ -98,17 +98,21 @@ pub enum GitUnknown {
     /// ([`git_config_like`]).
     Names,
     /// git could not answer for a repository that exists here (no `git`, too old, a
-    /// configuration it refuses, a timeout): any file may be an include or a hooks folder, so
-    /// every write asks.
+    /// configuration it refuses, a timeout), or its configuration names a program in a way
+    /// that cannot be placed (shell syntax, `git -c` in an alias; review rev6): any file may be
+    /// an include, a hooks folder or a program, so every write asks.
     Everything,
 }
 
 /// Why a write that the policy allows asks: a protected path.
 const PROTECTED: &str = "protected: Axiom configuration, git's directories, configuration, \
 attributes and hooks, and the programs git's configuration names, always ask";
-/// Why every write asks while git cannot say what it reads (review G7).
-const GIT_UNKNOWN: &str = "protected: git could not say what its configuration runs in this \
-workspace (is git 2.31 or later installed, and its configuration valid?), so every write asks";
+/// Why every write asks while git cannot say what it reads (review G7), or names a program in
+/// a way that cannot be placed (review rev6).
+const GIT_UNKNOWN: &str = "protected: Axiom cannot tell what git's configuration runs in this \
+workspace (git 2.31 or later is needed, its configuration must be valid, and a program it \
+names must be plain commands: no `$`, backquote, subshell, function, glob, `cd`, `-C` or `-c`), \
+so every write asks";
 
 impl Policies {
     /// Whether writing `p` always asks, by its name alone: a [`protected_path`], under

@@ -18,8 +18,8 @@ use axiom_rpc::{Notifier, RequestCtx};
 use futures_util::future::BoxFuture;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
 pub(crate) const PROVIDERS_KEY: &str = "agent.providers";
@@ -133,56 +133,75 @@ pub(crate) fn parse_workspace_policy(text: &str) -> Result<Option<Policy>, RpcEr
 
 pub(crate) async fn policies(app: &App, id: &WorkspaceId) -> Result<Policies, RpcError> {
     let ws = app.workspaces.get(id)?;
+    let watch = git_watch(&ws);
     Ok(Policies {
         user: user_policy(app).await?,
         workspace: workspace_policy(app, id).await?,
         protected: Vec::new(),
         git_unknown: false,
         root: Some(ws.root().to_path_buf()),
-        git: Some(GitSource(Arc::new(GitWatch::new(ws)))),
+        git: Some(GitSource(Arc::new(WorkspaceGit { ws, watch }))),
     })
 }
 
-/// How long a walk for a workspace's repositories is reused, by every turn and call in it: a
-/// repository made since (a clone by a command, or by the person) is seen within this time.
-/// A walk looks at every folder (`git::repositories`), which takes long in a large workspace.
+/// How long a walk for a workspace's repositories, and git's answer made with it, is reused:
+/// a repository made since by the person (a clone) is seen within this time; one made by a
+/// command the gate ran, at once ([`GitProtection::changed`]). A walk looks at every folder
+/// (`git::repositories`), which takes long in a large workspace.
 const WALK_FRESH: Duration = Duration::from_secs(30);
 
-/// The last walk of each workspace root.
-static WALKS: Mutex<Vec<(PathBuf, Instant, axiom_workspace::git::Repositories)>> =
+/// The [`GitWatch`] of each open workspace (review H7): one per workspace, shared by every
+/// session's turns and every call from outside a session, so git is asked once for all of
+/// them, and a command any of them runs makes all of them ask again. An entry goes with its
+/// workspace (a workspace opened again gets a new one).
+static GIT_WATCHES: Mutex<Vec<(Weak<axiom_workspace::Workspace>, Arc<GitWatch>)>> =
     Mutex::new(Vec::new());
 
-/// The repositories in `root`, walked at most once per [`WALK_FRESH`], and when. Blocking.
-fn walk(root: &Path) -> (Instant, axiom_workspace::git::Repositories) {
+/// The [`GitWatch`] of `ws`.
+fn git_watch(ws: &Arc<axiom_workspace::Workspace>) -> Arc<GitWatch> {
+    let mut w = GIT_WATCHES.lock().unwrap_or_else(|p| p.into_inner());
+    w.retain(|(k, _)| k.strong_count() > 0);
+    if let Some((_, g)) = w
+        .iter()
+        .find(|(k, _)| std::ptr::eq(k.as_ptr(), Arc::as_ptr(ws)))
     {
-        let w = WALKS.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some((_, at, r)) = w
-            .iter()
-            .find(|(p, at, _)| p == root && at.elapsed() < WALK_FRESH)
-        {
-            return (*at, r.clone());
-        }
+        return g.clone();
     }
-    let at = Instant::now();
-    let r = axiom_workspace::git::repositories(root);
-    let mut w = WALKS.lock().unwrap_or_else(|p| p.into_inner());
-    w.retain(|(p, at, _)| p != root && at.elapsed() < WALK_FRESH);
-    w.push((root.to_path_buf(), at, r.clone()));
-    (at, r)
+    let g = Arc::new(GitWatch::default());
+    w.push((Arc::downgrade(ws), g.clone()));
+    g
 }
 
-/// git's answer for a workspace (reviews E2, G2–G4, G6, G7), asked for every write the gate
-/// judges: reused only while every file it came from (each configuration file git reads or an
-/// include names, each repository's `HEAD` and `.git`) has the same size and time, no command
-/// ran since ([`GitProtection::changed`]: git's global configuration may be new) and it is
-/// younger than [`WALK_FRESH`]. An answer with unknowns is not reused.
-struct GitWatch {
+/// The [`GitProtection`] a call's [`Policies`] hold: the workspace and its shared watch.
+struct WorkspaceGit {
     ws: Arc<axiom_workspace::Workspace>,
-    cache: Arc<Mutex<Option<Cached>>>,
-    stale: AtomicBool,
+    watch: Arc<GitWatch>,
+}
+
+/// git's answer for a workspace (reviews E2, G2–G4, G6, G7, H5, H7), asked for every write the
+/// gate judges: reused only while every file it came from (each configuration file git reads
+/// or an include names, each repository's `HEAD` and `.git`, the person's global configuration
+/// files) has the same size and time, no command ran since in any session or call
+/// ([`GitProtection::changed`] moves [`Self::generation`]: git's global configuration may be
+/// new, a repository may have been made) and it is younger than [`WALK_FRESH`]. The walk for
+/// the workspace's repositories is reused under the same two last conditions. An answer with
+/// unknowns is not reused, unless it is that a value cannot be placed (which the files say).
+#[derive(Default)]
+struct GitWatch {
+    /// Moved by every command that ran: an answer or a walk made before it is not used.
+    generation: AtomicU64,
+    walk: Mutex<Option<Walk>>,
+    cache: Mutex<Option<Cached>>,
+}
+
+struct Walk {
+    generation: u64,
+    at: Instant,
+    found: axiom_workspace::git::Repositories,
 }
 
 struct Cached {
+    generation: u64,
     answer: GitAnswer,
     stamps: Vec<(PathBuf, Option<Stamp>)>,
     /// When the walk it used was made.
@@ -198,74 +217,114 @@ fn stamp(p: &Path) -> Option<Stamp> {
 }
 
 impl GitWatch {
-    fn new(ws: Arc<axiom_workspace::Workspace>) -> Self {
-        GitWatch {
-            ws,
-            cache: Arc::default(),
-            stale: AtomicBool::new(false),
+    /// git's answer for `ws` now. Blocking; one at a time per workspace (a second waits and
+    /// then reuses the first's answer).
+    fn answer(&self, ws: &axiom_workspace::Workspace) -> GitAnswer {
+        let mut c = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+        let generation = self.generation.load(Ordering::SeqCst);
+        if let Some(k) = c.as_ref() {
+            if k.generation == generation
+                && k.walked.elapsed() < WALK_FRESH
+                && k.stamps.iter().all(|(p, s)| stamp(p) == *s)
+            {
+                return k.answer.clone();
+            }
         }
+        let (walked, found) = self.walk(ws.root(), generation);
+        let (answer, files, keep) = git_answer(ws, found);
+        // What git could not answer is asked again at the next call (it may be fixed).
+        *c = keep.then(|| Cached {
+            generation,
+            answer: answer.clone(),
+            stamps: files
+                .into_iter()
+                .map(|p| {
+                    let s = stamp(&p);
+                    (p, s)
+                })
+                .collect(),
+            walked,
+        });
+        answer
+    }
+
+    /// The repositories in `root`, walked again when the last walk is older than
+    /// [`WALK_FRESH`] or a command ran since (review H5: a clone or `git init` an approved
+    /// command made is asked about at the next write). Blocking.
+    fn walk(&self, root: &Path, generation: u64) -> (Instant, axiom_workspace::git::Repositories) {
+        let mut w = self.walk.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(k) = w
+            .as_ref()
+            .filter(|k| k.generation == generation && k.at.elapsed() < WALK_FRESH)
+        {
+            return (k.at, k.found.clone());
+        }
+        let at = Instant::now();
+        let found = axiom_workspace::git::repositories(root);
+        *w = Some(Walk {
+            generation,
+            at,
+            found: found.clone(),
+        });
+        (at, found)
     }
 }
 
-impl GitProtection for GitWatch {
+impl GitProtection for WorkspaceGit {
     fn current(&self) -> BoxFuture<'_, GitAnswer> {
         let ws = self.ws.clone();
-        let cache = self.cache.clone();
-        let stale = self.stale.swap(false, Ordering::SeqCst);
+        let watch = self.watch.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || {
-                let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
-                if let Some(k) = c.as_ref().filter(|_| !stale) {
-                    if k.walked.elapsed() < WALK_FRESH
-                        && k.stamps.iter().all(|(p, s)| stamp(p) == *s)
-                    {
-                        return k.answer.clone();
-                    }
-                }
-                let (answer, files, walked) = git_answer(&ws);
-                // What git could not answer is asked again at the next call (it may be fixed).
-                *c = (answer.unknown == GitUnknown::No).then(|| Cached {
-                    answer: answer.clone(),
-                    stamps: files
-                        .into_iter()
-                        .map(|p| {
-                            let s = stamp(&p);
-                            (p, s)
-                        })
-                        .collect(),
-                    walked,
-                });
-                answer
-            })
-            .await
-            .unwrap_or(GitAnswer {
-                protected: Vec::new(),
-                unknown: GitUnknown::Everything,
-            })
+            tokio::task::spawn_blocking(move || watch.answer(&ws))
+                .await
+                .unwrap_or(GitAnswer {
+                    protected: Vec::new(),
+                    unknown: GitUnknown::Everything,
+                })
         })
     }
 
     fn changed(&self) {
-        self.stale.store(true, Ordering::SeqCst);
+        self.watch.generation.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+/// The files git reads the person's global configuration from, whether they exist or not
+/// (`$XDG_CONFIG_HOME/git/config` or `~/.config/git/config`, and `~/.gitconfig`): one made
+/// since an answer was computed changes it.
+fn global_config_files() -> Vec<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    let xdg = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|x| !x.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|h| h.join(".config")));
+    xdg.map(|x| x.join("git").join("config"))
+        .into_iter()
+        .chain(home.map(|h| h.join(".gitconfig")))
+        .collect()
 }
 
 /// What git reads for every repository in the workspace, where it is inside the workspace, as
 /// workspace paths through any symlink (reviews E2, G2–G4): writes there always ask. Asked of
 /// git itself ([`axiom_workspace::git::config_files`]) for the root and for each repository
-/// found inside it ([`axiom_workspace::git::repositories`]: nested clones, submodules, bare
+/// `found` inside it ([`axiom_workspace::git::repositories`]: nested clones, submodules, bare
 /// repositories, a root that is no repository but holds some): the hooks directories (the
 /// hook names alone where one is a repository's top, `core.hooksPath = .`), the git directory
 /// and the common one, every configuration file git reads or an include names, and every
 /// program the configuration names (`core.fsmonitor`, filters, `core.sshCommand`, …). With the
-/// files the answer came from, to tell when it changes, and when the walk was made. Where git cannot answer for a
-/// repository that exists, every write asks ([`GitUnknown::Everything`]); where it cannot
-/// answer outside any repository, or the walk was cut short, names that may be git's ask
-/// ([`GitUnknown::Names`]). Blocking.
-fn git_answer(ws: &axiom_workspace::Workspace) -> (GitAnswer, Vec<PathBuf>, Instant) {
+/// files the answer came from, to tell when it changes, and whether it may be reused. Where
+/// git cannot answer for a repository that exists, or a program value there cannot be placed
+/// (review rev6: shell syntax, `git -c` in an alias), every write asks
+/// ([`GitUnknown::Everything`]); where it cannot answer outside any repository, or the walk was
+/// cut short, names that may be git's ask ([`GitUnknown::Names`]). Blocking.
+fn git_answer(
+    ws: &axiom_workspace::Workspace,
+    found: axiom_workspace::git::Repositories,
+) -> (GitAnswer, Vec<PathBuf>, bool) {
     use axiom_workspace::git;
     let root = ws.root();
-    let (walked, found) = walk(root);
     let mut unknown = if found.complete {
         GitUnknown::No
     } else {
@@ -288,11 +347,15 @@ fn git_answer(ws: &axiom_workspace::Workspace) -> (GitAnswer, Vec<PathBuf>, Inst
         .filter_map(|d| ws.workspace_path_of(d))
         .collect();
     let mut out: Vec<WorkspacePath> = Vec::new();
-    let mut files: Vec<PathBuf> = Vec::new();
+    let mut files: Vec<PathBuf> = global_config_files();
     let mut add = |p: WorkspacePath| {
         if !out.contains(&p) {
             out.push(p);
         }
+    };
+    let everything = GitAnswer {
+        protected: Vec::new(),
+        unknown: GitUnknown::Everything,
     };
     for (i, dir) in dirs.iter().enumerate() {
         files.push(dir.join(".git"));
@@ -301,16 +364,24 @@ fn git_answer(ws: &axiom_workspace::Workspace) -> (GitAnswer, Vec<PathBuf>, Inst
             Err(e) => {
                 tracing::warn!("cannot ask git about {}: {e}", dir.display());
                 if i > 0 || in_a_repository {
-                    let answer = GitAnswer {
-                        protected: Vec::new(),
-                        unknown: GitUnknown::Everything,
-                    };
-                    return (answer, files, walked);
+                    return (everything, files, false);
                 }
                 unknown = GitUnknown::Names;
                 continue;
             }
         };
+        files.extend(c.git_dirs.iter().map(|g| g.join("HEAD")));
+        if !c.unplaced.is_empty() {
+            // Its files say when it changes: kept until one does.
+            tracing::warn!(
+                "git's configuration for {} names programs that cannot be placed ({}): every \
+                 write asks",
+                dir.display(),
+                c.unplaced.join(", ")
+            );
+            files.extend(c.files);
+            return (everything, files, true);
+        }
         for h in &c.hooks {
             let Some(hooks) = ws.workspace_path_of(h) else {
                 continue;
@@ -338,16 +409,16 @@ fn git_answer(ws: &axiom_workspace::Workspace) -> (GitAnswer, Vec<PathBuf>, Inst
                 add(p);
             }
         }
-        files.extend(c.git_dirs.iter().map(|g| g.join("HEAD")));
         files.extend(c.files);
     }
+    let keep = unknown == GitUnknown::No;
     (
         GitAnswer {
             protected: out,
             unknown,
         },
         files,
-        walked,
+        keep,
     )
 }
 
