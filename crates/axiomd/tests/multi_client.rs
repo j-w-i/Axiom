@@ -71,6 +71,23 @@ async fn next(
     }
 }
 
+/// The next `fs/didChange` that names `file`. Batches for other paths are skipped: on macOS,
+/// FSEvents can report the fixture's own files (written just before the watch) late.
+async fn next_change_for(
+    rx: &mut tokio::sync::broadcast::Receiver<(String, Value)>,
+    file: &str,
+    t: Duration,
+) -> Option<Value> {
+    let end = tokio::time::Instant::now() + t;
+    loop {
+        let left = end.saturating_duration_since(tokio::time::Instant::now());
+        let n = next(rx, "fs/didChange", left).await?;
+        if n.to_string().contains(file) {
+            return Some(n);
+        }
+    }
+}
+
 async fn enable_watch(c: &Client, ws: &WorkspaceId) {
     c.request::<Watch>(WatchParams {
         workspace_id: ws.clone(),
@@ -97,16 +114,12 @@ async fn every_watching_connection_gets_the_changes() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     std::fs::write(f.path("one.txt"), "1").unwrap();
     for rx in [&mut arx, &mut brx] {
-        let n = next(rx, "fs/didChange", WAIT).await.expect("a change");
-        assert!(n.to_string().contains("one.txt"), "{n}");
+        next_change_for(rx, "one.txt", WAIT)
+            .await
+            .expect("a change for one.txt");
         // Exactly one batch for the write, not two.
-        let again = next(rx, "fs/didChange", Duration::from_millis(400)).await;
-        assert!(
-            again
-                .as_ref()
-                .is_none_or(|v| !v.to_string().contains("one.txt")),
-            "a duplicate: {again:?}"
-        );
+        let again = next_change_for(rx, "one.txt", Duration::from_millis(400)).await;
+        assert!(again.is_none(), "a duplicate: {again:?}");
     }
     // A goes away; B still gets events, and a new connection C can watch.
     drop((a, arx));
@@ -117,8 +130,9 @@ async fn every_watching_connection_gets_the_changes() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     std::fs::write(f.path("two.txt"), "2").unwrap();
     for rx in [&mut brx, &mut crx] {
-        let n = next(rx, "fs/didChange", WAIT).await.expect("a change");
-        assert!(n.to_string().contains("two.txt"), "{n}");
+        next_change_for(rx, "two.txt", WAIT)
+            .await
+            .expect("a change for two.txt");
     }
 }
 

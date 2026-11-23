@@ -122,7 +122,9 @@ void main() {
     final root = Directory('${data.path}/toolchains/rust/$version');
     expect(root.existsSync(), isTrue);
     bool notToolchain(String p) =>
-        !p.startsWith('cache') && !RegExp(r'^shell-local\.json(\.tmp)?$').hasMatch(p);
+        // The shell's own prefs: shell-local.json, its backup and its temporary files
+        // (lib/app/local_prefs.dart).
+        !p.startsWith('cache') && !RegExp(r'^shell-local\.json(\.bak|(\.\d+)*\.tmp)?$').hasMatch(p);
     final afterInstall = snapshot(data).where(notToolchain).toList();
 
     // 4. Build: cargo build from the palette runs inside it and fails on the type error.

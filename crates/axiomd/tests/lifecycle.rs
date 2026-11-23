@@ -201,7 +201,9 @@ async fn a_data_dir_that_is_a_file_fails_with_one_stderr_line() {
 }
 
 /// A daemon killed from outside (a crash) leaves its data dir usable: the next daemon starts on
-/// it, answers, and takes over the local socket.
+/// it, answers, and takes over the local socket. Unix only: the local socket and its token are
+/// (on Windows, deferred, every client starts its own daemon over stdio; `socket.rs`).
+#[cfg(unix)]
 #[tokio::test]
 async fn a_killed_daemon_can_be_restarted_on_the_same_data_dir() {
     let data = tempfile::tempdir().unwrap();
