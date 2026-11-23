@@ -82,9 +82,15 @@ every finding to be resolved, this ADR included (review N15).
 - jdtls in restricted mode disables Gradle and Maven import; an Eclipse-format project with
   annotation processing enabled can still run its processor JARs (no jdtls setting turns that
   off; turning off autobuild would also drop whole-project diagnostics). Recorded in
-  `security.md`. **Open for the owner:** refusing jdtls entirely in untrusted folders (as other
-  editors fall back to a syntax-only server there) would close it, at the cost of Java
-  language features until the folder is trusted.
+  `security.md`.
+- The protected paths are defence in depth under a policy that allows workspace writes, not a
+  boundary: what an agent writes can be run later by the person's own tools or by programs git
+  configuration names, in ways no list of names covers (`security.md` §Known gaps). **Owner's
+  decision (2026-11-23): accepted as documented.** It is not taken up as isolation work now;
+  ADR-0010's isolation tiers remain where it would be closed.
+- **Open for the owner:** refusing jdtls entirely in untrusted folders (as other editors fall
+  back to a syntax-only server there) would close jdtls's annotation-processing gap above, at
+  the cost of Java language features until the folder is trusted.
 
 ## Alternatives rejected
 

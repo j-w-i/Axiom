@@ -215,15 +215,28 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
   through), never writes through a directory that is a symlink (unless the restore itself
   removes that symlink first). `.axiom/` is restored like any file (a restore is the person's
   own undo).
-- A restore leaves alone, and does not count as a conflict: a path inside a git directory
-  (`.git`, or a `<name>.git` that is a repository, or one of git's own entries in it; review
-  E3); a nested repository, whether it is a git link in the checkpoint or now (its directory is
-  never removed or replaced); and a path whose content the checkpoint or the workspace's
-  snapshot now could not capture (over 16 MiB, unreadable, or a nested repository with no
-  commit), so such a file is never removed as "created since". The rest is restored.
+- A restore leaves alone, and does not count as a conflict (the rest is restored):
+  - a path inside a git directory (`.git`, or a `<name>.git` that is a repository, or one of
+    git's own entries in it; review E3), and a write of one of git's own entries into a folder
+    that holds, or that the same restore also writes, `HEAD`, `commondir`, `objects` or `refs`
+    (the gate's rule; the entry the path itself names does not count; review H8);
+  - anything at or under a nested repository: a git link in the checkpoint, now or in the
+    agent's last state, or a folder with its own `.git` on disk (reported once, by the
+    repository's path; review H2);
+  - a path whose content the checkpoint or the snapshot now could not capture: over 16 MiB,
+    unreadable, a nested repository with no commit, or a file on disk the snapshot lacks
+    because it is ignored now (review H1). The undo checkpoint records those, so undoing the
+    restore leaves them too. A name that is a captured file under another case (on a
+    case-insensitive file system) is restored.
   `agent/restore`'s result has no field for them (IPC frozen), so right after the `restored`
   event the session gets an `error` event with `kind: "notice"` naming them, grouped by reason
   (at most 20 per group, then "and N more"); it is journalled with the transcript.
+- The store's operations that change it hold its lock: within the process, and `axiom.lock` in
+  the shadow directory across processes (a second daemon on one data dir). While it is held no
+  git of ours runs there, so a stale `axiom-index.lock` (left by a git killed at its bound or
+  with its daemon) is removed; a git killed at its bound also has its index lock, and for
+  `update-ref` its ref lock, removed at once (review H3). On a file system without file locks,
+  the store is serialised only within one daemon and a stale lock is left.
 - Every `git` the shadow store runs is bounded and killed on expiry: 10 minutes for the commands
   that walk the workspace (`ls-files`, `add`, `rm`, `write-tree`, `ls-tree`), 60 s for the
   others. The checkpoint then fails: `timeout` from `agent/restore`, a failed tool ("the
@@ -236,7 +249,7 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
   repository's `.git/config`, hooks and fsmonitor off), so no filter, fsmonitor or hook the
   workspace or a nested repository configures runs, whatever its `.gitattributes` say. A restored file keeps the permission bits of the file it
   replaces, without setuid, setgid or sticky (review R5, D4).
-- As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir; the agent's
+- As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir, its cross-process lock `axiom.lock`; the agent's
   latest state is `refs/axiom/<session>/post`, taken after each writing tool; a restore with
   conflicts changes nothing (not even the undo checkpoint) unless `skipConflicts`. Nested
   repositories with a commit are recorded as git links and never restored. First checkpoint of

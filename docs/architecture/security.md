@@ -251,8 +251,10 @@ The Tauri shell's controls, kept as the record of how it was built:
   `.axiom/project.toml` `[agent.policy]` can only make a decision stricter (the stricter of
   the two wins). Path globs are matched in `O(pattern × path)` (AUD-106: the recursive matcher
   was exponential in the number of `*`, and the workspace's patterns are untrusted).
-- **Protected paths** (AUD-104; reviews B4, D-round, E2–E3, G2–G8). A write or delete always
-  asks, whatever a policy rule, a session grant or an ACP permission says, and cannot be allowed
+- **Protected paths** (AUD-104; reviews B4, D-round, E2–E3, G2–G8). Under a policy that allows
+  workspace writes, this is defence in depth, not a boundary: it stops the known ways one
+  approved write turns into code that runs later, and §Known gaps lists what it cannot stop.
+  A write or delete always asks, whatever a policy rule, a session grant or an ACP permission says, and cannot be allowed
   for the session, under:
   - `.axiom/` (the workspace policy, its providers' tasks and language servers), `.husky/` and
     `.gitattributes` at any depth, and a `.git` directory at any depth;
@@ -271,9 +273,19 @@ The Tauri shell's controls, kept as the record of how it was built:
     filters, diff and merge drivers, `core.sshCommand`, credential helpers, `gpg` programs,
     editors, pagers, `core.askPass`, `!` aliases, `core.attributesFile`, and the other
     program-valued keys).
-  - The answer is asked again whenever a file it came from changes (the mtime and size of each
-    configuration file and include target, each repository's `HEAD` and `.git`), after any
-    command, and at least every 30 s; a repository made by other means is seen within 30 s.
+  - The answer is shared by every session and outside call in a workspace, and asked again
+    whenever a file it came from changes (the mtime and size of each configuration file and
+    include target, the global configuration files even before they exist, each repository's
+    `HEAD` and `.git`), after any command (the next write walks again, so a repository a command
+    made is seen at once), and at least every 30 s; a repository made by other means is seen
+    within 30 s (reviews H5, H7).
+  - A program value that cannot be read with confidence makes every write ask instead of
+    guessing: a command that changes directory (`cd`, `pushd`, `popd`, `-C`, `--chdir`) or
+    passes `-c`, anything that expands (`$`, a backquote, a glob, `~user`), a background `&`, a
+    subshell, braces or a function definition, a here-document or process substitution, an open
+    quote, or a `!`-less alias that gives git `-c`, `-C` or `--exec-path`. `;`, `&&`, `||` and `|` separate simple commands, each read on its own
+    (so `diff-so-fancy | less` and `!git fetch && git rebase` are read). The list of
+    program-valued keys is not a boundary (§Known gaps).
   - When git cannot answer for a repository that exists (git missing or older than 2.31, an
     invalid or refused configuration, dubious ownership, a timeout), every write asks ("git
     could not say what its configuration runs in this workspace"): an include or hooks folder
@@ -300,7 +312,10 @@ The Tauri shell's controls, kept as the record of how it was built:
   as changed only when its commit changes, and a file a filter would normalise (Git LFS, say)
   may show as modified until git next refreshes the index. An empty attribute source
   (`--attr-source`) is not used: it needs git 2.40+, differs for SHA-256 repositories, and
-  would drop `text`/`eol` attributes.
+  would drop `text`/`eol` attributes. The daemon's git fetches nothing: `GIT_NO_LAZY_FETCH=1`
+  (git 2.44+) and `-c protocol.allow=never` stop a partial clone's `show` or `status` from
+  fetching a missing object, which would run `remote.<name>.uploadpack`, `core.sshCommand` or a
+  credential helper; the missing object is reported as not found (review H6).
 - **What the card shows is what is approved.** The targets are the paths, the argv (arguments
   with spaces or control characters quoted) and the call's *conditions*: an environment
   variable an ACP agent sets, a working directory other than the root, `build.run`'s provider
@@ -511,6 +526,16 @@ must never reach a user:
 
 ## Known gaps (tracked, not hidden)
 
+- **What an agent writes can run later, outside the gate** (reviews G1–G8, H; accepted as
+  documented by the owner, 2026-11-23; ADR-0023, Consequences). The protected paths cover the known places git configuration runs a program
+  from, but not the class: programs git configuration names keep appearing (more keys, values
+  in shell syntax), the code those programs load, files the person's own tools run
+  (`package.json` scripts, Makefiles, `build.rs`, `.envrc`, pre-commit and lefthook
+  configurations, test files), anything a command the person allowed writes, and workspaces
+  larger than the walk's bounds. Under a policy that allows workspace writes, an agent can
+  change what such a tool later runs. Closing that is isolation (running the agent's work
+  where it cannot reach the person's tools or account; ADR-0010), not more names at the gate.
+  The owner accepted this as documented rather than taking it up as isolation work now.
 - M1 has no isolation at all for tasks: equivalent to a terminal.
 - TOCTOU on path containment: narrowed, not closed (§Paths, "What remains").
 - The shell's UI code runs with the person's full rights and no sandbox (above); the
