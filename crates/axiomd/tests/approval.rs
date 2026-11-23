@@ -356,7 +356,8 @@ async fn protected_paths_through_a_symlink_or_nested_still_ask() {
     for (path, real) in [
         ("link/hooks/pre-commit", ".git/hooks/pre-commit"),
         ("sub/.git/config", "sub/.git/config"),
-        (".GIT/hooks/post-merge", "/hooks/post-merge"),
+        // A case-insensitive disk may report either spelling; both are protected.
+        (".GIT/hooks/post-merge", ".git/hooks/post-merge"),
     ] {
         let (r, req) = call_answering(
             &d,
@@ -379,7 +380,7 @@ async fn protected_paths_through_a_symlink_or_nested_still_ask() {
             req.rule
         );
         assert!(
-            req.targets.iter().any(|t| t.ends_with(real)),
+            req.targets.iter().any(|t| t.eq_ignore_ascii_case(real)),
             "{path}: the card shows {:?}",
             req.targets
         );
@@ -474,4 +475,177 @@ async fn agent_started_processes_do_not_get_the_daemons_secrets() {
     let (out, _) = d.task_events(&started.task_id.0).await;
     let all: String = out.iter().map(|o| o.data.as_str()).collect();
     assert!(all.contains("FOO_TOKEN=s3cret-token"), "{all}");
+}
+
+/// Review R4: an approval prompt waits for an approving connection that is busy (its queue full
+/// of terminal output) but reading again within seconds, rather than answering "no approver"
+/// after the half second other relays allow a slow connection.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_approver_that_is_slow_to_read_still_gets_the_prompt() {
+    use axiom_protocol::terminal::{Close as CloseTerminal, Create, CreateParams, TerminalRef};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    // The stdio client cannot approve: the socket connection below is the only approver.
+    let d = Daemon::ready().await;
+    let f = d.open_fixture().await;
+    let run = d.data_dir().join("run");
+    let token = std::fs::read_to_string(run.join("axiomd.token")).unwrap();
+    let stream = tokio::net::UnixStream::connect(run.join("axiomd.sock"))
+        .await
+        .unwrap();
+    let (r, mut w) = stream.into_split();
+    let mut r = BufReader::new(r);
+    async fn send(w: &mut tokio::net::unix::OwnedWriteHalf, id: u64, method: &str, params: Value) {
+        let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        w.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+    }
+    async fn line(r: &mut BufReader<tokio::net::unix::OwnedReadHalf>) -> Value {
+        let mut l = String::new();
+        r.read_line(&mut l).await.unwrap();
+        serde_json::from_str(&l).unwrap()
+    }
+    for (id, method, params) in [
+        (
+            1,
+            "initialize",
+            json!({"protocolVersion": "0.6", "client": {"name": "approver", "version": "0"},
+                   "authToken": token, "capabilities": {"approvals": true}}),
+        ),
+        (2, "workspace/open", json!({"path": f.root})),
+    ] {
+        send(&mut w, id, method, params).await;
+        loop {
+            let v = line(&mut r).await;
+            if v["id"] == id {
+                assert!(v.get("error").is_none(), "{method}: {v}");
+                break;
+            }
+        }
+    }
+
+    // Its queue fills with terminal output (to every connection of the workspace) while it
+    // does not read; then the output stops, and this client drains its own.
+    let mut terminals = Vec::new();
+    for _ in 0..12 {
+        let t = d
+            .client
+            .request::<Create>(CreateParams {
+                workspace_id: f.id.clone(),
+                argv: Some(vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "yes 0123456789012345678901234567890123456789".into(),
+                ]),
+                cols: 80,
+                rows: 24,
+            })
+            .await
+            .unwrap();
+        terminals.push(t.terminal_id);
+    }
+    let mut n = 0usize;
+    let flood_end = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    while n < 1500 && tokio::time::Instant::now() < flood_end {
+        if !d
+            .no_notification("terminal/output", std::time::Duration::from_millis(100))
+            .await
+        {
+            n += 1;
+        }
+    }
+    assert!(
+        n >= 1500,
+        "only {n} terminal outputs: the approver's queue may not be full"
+    );
+    for terminal_id in terminals {
+        d.client
+            .request::<CloseTerminal>(TerminalRef { terminal_id })
+            .await
+            .unwrap();
+    }
+    d.drain_until_quiet(std::time::Duration::from_millis(500))
+        .await;
+
+    // A write needs approval; the approver reads again two seconds later and approves it.
+    let tool = d.client.request::<ToolCall>(call(
+        &f.id,
+        "fs.applyPatch",
+        json!({"path": "approved.txt", "create": "yes\n"}),
+    ));
+    let approver = async {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // Bounded: a prompt that was given up on never comes, and the test must fail, not hang.
+        let request_id = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                let v = line(&mut r).await;
+                if v["method"] == "agent/approvalRequested" {
+                    break v["params"]["requestId"].as_str().unwrap().to_string();
+                }
+            }
+        })
+        .await
+        .expect("the approval prompt never reached the approver");
+        send(
+            &mut w,
+            3,
+            "agent/approve",
+            json!({"requestId": request_id, "decision": "once"}),
+        )
+        .await;
+        loop {
+            let v = line(&mut r).await;
+            if v["id"] == 3 {
+                assert!(v.get("error").is_none(), "approve: {v}");
+                break;
+            }
+        }
+    };
+    let (result, ()) = tokio::join!(tool, approver);
+    let result = result.unwrap();
+    assert!(!result.is_error, "{}", result.text);
+    assert_eq!(
+        std::fs::read_to_string(f.root.join("approved.txt")).unwrap(),
+        "yes\n"
+    );
+}
+
+/// Review R5: what is written is what was approved. A directory swapped for a symlink into
+/// `.git/hooks` while the person looks at the card makes the approved write fail, rather than
+/// plant a hook the card never showed.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_path_swapped_after_the_card_was_shown_is_not_written() {
+    let d = approving_daemon().await;
+    let f = d.open_fixture().await;
+    std::fs::create_dir_all(f.root.join(".git/hooks")).unwrap();
+    std::fs::create_dir_all(f.root.join("sub")).unwrap();
+    let req = d.client.request::<ToolCall>(call(
+        &f.id,
+        "fs.applyPatch",
+        json!({"path": "sub/pre-commit", "create": "#!/bin/sh\necho planted\n"}),
+    ));
+    let answer = async {
+        let n = d.next_notification("agent/approvalRequested", WAIT).await;
+        let r: ApprovalRequest = serde_json::from_value(n).unwrap();
+        assert_eq!(r.targets, vec!["sub/pre-commit".to_string()]);
+        // The swap, while the card is open.
+        std::fs::remove_dir(f.root.join("sub")).unwrap();
+        std::os::unix::fs::symlink(".git/hooks", f.root.join("sub")).unwrap();
+        d.client
+            .request::<Approve>(ApproveParams {
+                request_id: r.request_id,
+                decision: ApprovalDecision::Once,
+            })
+            .await
+            .unwrap();
+    };
+    let (r, ()) = tokio::join!(req, answer);
+    match r {
+        Ok(r) => assert!(r.is_error, "the swapped write went through: {}", r.text),
+        Err(e) => assert_eq!(kind(&e), ErrorKind::Conflict, "{e:?}"),
+    }
+    assert!(
+        !f.root.join(".git/hooks/pre-commit").exists(),
+        "a hook was planted"
+    );
 }

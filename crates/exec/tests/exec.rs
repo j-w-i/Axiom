@@ -651,7 +651,8 @@ async fn exit_with_a_background_pipe_holder_still_reports_exited() {
         e => panic!("{e:?}"),
     };
     let c = collect(rx).await;
-    assert!(t.elapsed() < Duration::from_secs(4), "{:?}", t.elapsed());
+    // The audit's bound (AUD-007 verification): < 3 s, with a 2 s drain window.
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
     assert_eq!(c.exited().status.outcome, Outcome::Succeeded);
     assert_eq!(c.exited().status.exit_code, Some(0));
     assert!(wait_until_dead(pid).await, "the pipe holder {pid} survived");

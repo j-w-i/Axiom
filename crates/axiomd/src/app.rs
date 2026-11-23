@@ -81,6 +81,13 @@ pub struct AgentServices {
 /// How long a connection whose queue is full may hold up a daemon-wide relay (AUD-030).
 pub const SLOW_CLIENT: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// How long an approval prompt waits for room on a connection whose queue is full. Much longer
+/// than [`SLOW_CLIENT`]: a prompt is for the person, and a connection that is busy but reading
+/// (the shell during an output flood) catches up well within it, where giving up would answer
+/// "no approver" (review R4). The other approvers are not held up: each send is separate, and
+/// an answer that arrives meanwhile is kept (the gate registers the request first).
+pub const APPROVAL_DELIVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// TEST ONLY: a script file for the scripted model provider (ADR-0015 §4). When set, the daemon
 /// offers the provider `scripted` that replays it.
 pub const SCRIPTED_MODEL_ENV: &str = "AXIOM_TEST_SCRIPTED_MODEL";
@@ -110,12 +117,12 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
         req: &'a axiom_protocol::agent::ApprovalRequest,
     ) -> futures_util::future::BoxFuture<'a, usize> {
         Box::pin(async move {
-            // To every approving connection at once, none waited on past SLOW_CLIENT: one that
-            // stopped reading does not hold the prompt back from the others (review B6b). One
-            // that is slow but open stays an approver; only closed ones are dropped.
+            // To every approving connection at once, none waited on past APPROVAL_DELIVERY: one
+            // that stopped reading does not hold the prompt back from the others (review B6b,
+            // R4). One that is slow but open stays an approver; only closed ones are dropped.
             let sends = self.all().into_iter().map(|n| async move {
                 let r = tokio::time::timeout(
-                    SLOW_CLIENT,
+                    APPROVAL_DELIVERY,
                     n.notify::<axiom_protocol::agent::ApprovalRequested>(req.clone()),
                 )
                 .await;
@@ -138,7 +145,7 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
         Box::pin(async move {
             let sends = self.all().into_iter().map(|n| async move {
                 let _ = tokio::time::timeout(
-                    SLOW_CLIENT,
+                    APPROVAL_DELIVERY,
                     n.notify::<axiom_protocol::agent::ApprovalResolved>(res.clone()),
                 )
                 .await;

@@ -266,3 +266,35 @@ async fn checkpoint_timing_on_this_repository() {
     let second = t.elapsed();
     eprintln!("checkpoint of this repository: first {first:?}, second {second:?}");
 }
+
+/// A restore replaces the entry rather than writing through it: a workspace file the agent made
+/// a hard link to a file elsewhere (a git hook, a file outside the workspace) gets its own
+/// content back, and the other file is left alone (review N14/R5).
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_restore_does_not_write_through_a_hard_link() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir_in(ws.path().parent().unwrap()).unwrap();
+    let r = ws.path();
+    write(r, "a.txt", "a\n");
+    write(outside.path(), "secret", "s\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    std::fs::remove_file(r.join("a.txt")).unwrap();
+    std::fs::hard_link(outside.path().join("secret"), r.join("a.txt")).unwrap();
+    s.record_post("s").await.unwrap();
+    s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    assert_eq!(
+        read(outside.path(), "secret").unwrap(),
+        "s\n",
+        "written through the link"
+    );
+    // No temporary file is left behind.
+    let names: Vec<_> = std::fs::read_dir(r)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec!["a.txt".to_string()], "{names:?}");
+}

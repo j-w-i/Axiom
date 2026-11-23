@@ -306,6 +306,9 @@ fn ws_err(e: WsError) -> ToolError {
             Some("Use a workspace-relative path with `/` separators, no `..`.")
         }
         WsError::IsADirectory(_) => Some("Use fs.list for directories."),
+        WsError::Changed(_) => {
+            Some("The path changed after it was approved; read it again and retry.")
+        }
         _ => None,
     };
     let mut t = rpc(e.into());
@@ -675,14 +678,19 @@ async fn apply_patch(
         )
         .hint("Read the file again and make the edit against its current content."));
     }
+    // Written only where the gate judged it: a swap of a directory for a symlink since the call
+    // was prepared is refused, not followed into, for example, `.git/hooks` (review R5).
+    let judged = targets.paths.first().unwrap_or(&p.path);
     let new_version = match (&new, &version) {
         (Some(text), v) => Some(
-            w.write_text(&p.path, text, v.as_ref(), false)
+            w.write_text_checked(&p.path, judged, text, v.as_ref(), false)
                 .await
                 .map_err(ws_err)?,
         ),
         (None, Some(v)) => {
-            w.remove_file(&p.path, v).await.map_err(ws_err)?;
+            w.remove_file_checked(&p.path, judged, v)
+                .await
+                .map_err(ws_err)?;
             None
         }
         (None, None) => unreachable!("plan_patch refuses deleting a missing file"),
@@ -1706,8 +1714,10 @@ async fn acp_write(
         .find(|(q, _)| *q == p)
         .and_then(|(_, v)| v.clone());
     let w = ws(app, ctx)?;
+    // Only where the gate judged it (review R5).
+    let judged = targets.paths.first().unwrap_or(&p);
     let v = w
-        .write_text(&p, new, expected.as_ref(), false)
+        .write_text_checked(&p, judged, new, expected.as_ref(), false)
         .await
         .map_err(ws_err)?;
     Ok(ToolOutput::json(
@@ -1766,6 +1776,28 @@ fn acp_cwd(app: &App, ctx: &ToolCtx, input: &Value) -> Result<Option<WorkspacePa
     }
 }
 
+/// How many characters of a variable's value its condition line shows.
+const ACP_ENV_SHOWN: usize = 300;
+
+/// One condition line per variable the agent sets. A long value is shown cut, followed by the
+/// SHA-256 of the whole value: the line is what a session grant compares, so two values that
+/// share their first characters are two different calls (review N1). The card's preview shows
+/// every value in full.
+fn acp_env_conditions(env: &[(String, String)]) -> Vec<String> {
+    use sha2::Digest;
+    env.iter()
+        .map(|(n, v)| {
+            if v.chars().count() <= ACP_ENV_SHOWN {
+                format!("env {n}={v}")
+            } else {
+                let shown: String = v.chars().take(ACP_ENV_SHOWN).collect();
+                let hash = hex::encode(sha2::Sha256::digest(v.as_bytes()));
+                format!("env {n}={shown}… (sha256 {hash})")
+            }
+        })
+        .collect()
+}
+
 /// Everything that decides what the terminal runs is on the card: the argv, the variables the
 /// agent sets and a working directory other than the root. Either of the latter makes it ask
 /// even where a rule allows the argv (AUD-039).
@@ -1777,14 +1809,7 @@ async fn acp_prepare_terminal(
     let argv = acp_argv(input)?;
     let env = acp_env(input)?;
     let cwd = acp_cwd(app, ctx, input)?;
-    let mut conditions: Vec<String> = env
-        .iter()
-        .map(|(n, v)| {
-            let shown: String = v.chars().take(300).collect();
-            let more = if v.chars().count() > 300 { "…" } else { "" };
-            format!("env {n}={shown}{more}")
-        })
-        .collect();
+    let mut conditions = acp_env_conditions(&env);
     if let Some(c) = &cwd {
         conditions.push(format!("cwd {}", c.0));
     }
@@ -1869,6 +1894,28 @@ mod tests {
         let mut small = Tail::default();
         small.push("a\nb\n");
         assert_eq!(small.tail(), ("a\nb".to_string(), false));
+    }
+
+    /// Two long values that share their first characters are two conditions, so an "allow
+    /// for session" grant for one does not cover the other (review N1); a short value is shown
+    /// whole and a long one cut.
+    #[test]
+    fn acp_env_conditions_tell_long_values_apart() {
+        let base = "x".repeat(ACP_ENV_SHOWN);
+        let env = |v: &str| vec![("NODE_OPTIONS".to_string(), v.to_string())];
+        let a = acp_env_conditions(&env(&format!("{base}--require=/tmp/a.js")));
+        let b = acp_env_conditions(&env(&format!("{base}--require=/tmp/b.js")));
+        assert_ne!(a, b);
+        assert!(a[0].starts_with(&format!("env NODE_OPTIONS={base}… (sha256 ")));
+        assert!(!a[0].contains("/tmp/a.js"), "{}", a[0]);
+        assert_eq!(
+            acp_env_conditions(&env(&base)),
+            [format!("env NODE_OPTIONS={base}")]
+        );
+        assert_eq!(
+            acp_env_conditions(&env("/tmp/evil.so")),
+            ["env NODE_OPTIONS=/tmp/evil.so"]
+        );
     }
 
     #[test]

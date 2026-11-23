@@ -461,6 +461,15 @@ impl Gate {
     pub fn retain_grants(&self, keep: impl Fn(&str) -> bool) {
         lock(&self.grants).retain(|p, _| keep(p));
     }
+
+    /// TEST ONLY (feature `test-support`): whether `principal` holds any grant, for tests that
+    /// a grant is forgotten where nothing else can observe it (a deleted session, review N6).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn has_grants(&self, principal: &str) -> bool {
+        lock(&self.grants)
+            .get(principal)
+            .is_some_and(|g| !g.is_empty())
+    }
 }
 
 /// Called after the gate allowed a call and before it runs (the checkpoint). An error stops

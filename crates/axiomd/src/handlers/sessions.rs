@@ -710,7 +710,14 @@ pub const IDLE: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 /// Stops what idle sessions keep running (AUD-032): their MCP servers (started again on the next
 /// turn: they keep no conversation), and their external agent when it can resume the
 /// conversation (`loadSession`); one that cannot is kept, or the conversation would be lost.
+///
+/// Also registers, from now on, every external agent's and MCP server's process group with the
+/// exit watchdog, so a killed daemon does not leave them behind (AUD-027, review N13).
 pub fn spawn_idle_reaper(app: &Arc<App>) {
+    axiom_agent::process::set_group_hooks(
+        axiom_exec::guard::watch_group,
+        axiom_exec::guard::unwatch_group,
+    );
     let weak = Arc::downgrade(app);
     // TEST ONLY: `AXIOM_TEST_AGENT_IDLE_MS` shortens the idle time (and the check's interval).
     let idle = std::env::var("AXIOM_TEST_AGENT_IDLE_MS")
@@ -730,6 +737,10 @@ pub fn spawn_idle_reaper(app: &Arc<App>) {
 }
 
 /// One pass of [`spawn_idle_reaper`]: sessions unused for `idle` and not mid-turn.
+///
+/// A send marks its session running, then touches it, then takes the agent or MCP map's lock to
+/// find what is running. So whether a session is still idle is decided again under each map's
+/// lock: a send that started after the first look keeps its agent and its servers (review N14).
 pub async fn reap_idle(app: &App, idle: std::time::Duration) {
     let now = std::time::Instant::now();
     let stale: Vec<SessionId> = app
@@ -742,30 +753,56 @@ pub async fn reap_idle(app: &App, idle: std::time::Duration) {
         .map(|(id, _)| id.clone())
         .collect();
     for id in stale {
-        if app.agent.sessions.get(&id).is_some_and(|l| l.running()) {
-            continue;
+        {
+            let mut m = app.agent.mcp.lock().await;
+            if !still_idle(app, &id, idle) {
+                continue;
+            }
+            // Dropping a running MCP client stops its server.
+            m.remove(&id);
         }
-        // Dropping a running MCP client stops its server.
-        app.agent.mcp.lock().await.remove(&id);
-        let acp = {
+        let (acp, keep) = {
             let mut m = app.agent.acp.lock().await;
-            match m.get(&id) {
+            if !still_idle(app, &id, idle) {
+                continue;
+            }
+            let acp = match m.get(&id) {
                 Some(s) if s.caps.load_session => m.remove(&id),
                 _ => None,
-            }
+            };
+            (acp, m.contains_key(&id))
         };
         if let Some(s) = acp {
             s.conn.kill().await;
         }
-        let keep = app.agent.acp.lock().await.contains_key(&id);
         if !keep {
-            app.agent
+            // Forgotten only if still unused: a send since keeps its time.
+            let mut used = app
+                .agent
                 .last_used
                 .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .remove(&id);
+                .unwrap_or_else(|p| p.into_inner());
+            if used
+                .get(&id)
+                .is_some_and(|t| std::time::Instant::now().duration_since(*t) >= idle)
+            {
+                used.remove(&id);
+            }
         }
     }
+}
+
+/// Unused for `idle` and not mid-turn, now.
+fn still_idle(app: &App, id: &SessionId, idle: std::time::Duration) -> bool {
+    let used = app
+        .agent
+        .last_used
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(id)
+        .copied();
+    !app.agent.sessions.get(id).is_some_and(|l| l.running())
+        && used.is_some_and(|t| std::time::Instant::now().duration_since(t) >= idle)
 }
 
 /// The scratch folder of a conversation without a folder: `<data dir>/scratch/<session>`,
@@ -922,4 +959,61 @@ pub async fn restore(app: Arc<App>, p: RestoreParams) -> Result<RestoreResult, R
     // holds (AUD-009).
     app.agent.gate.clear_grants(&principal_of(&p.session_id));
     Ok(r)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// The idle reaper's narrow race with a starting send (review N14): the reaper found the
+    /// session idle and is about to stop its agent when a send starts (the session is marked
+    /// running and touched, then the send looks for its agent). The agent is kept.
+    #[tokio::test]
+    async fn a_send_that_starts_while_the_reaper_runs_keeps_its_agent() {
+        let data = tempfile::tempdir().unwrap();
+        let app = App::with_data_dir(
+            axiom_store::Store::open_in_memory().unwrap(),
+            data.path().into(),
+        );
+        let id = SessionId("s-reap".into());
+        let live = app.agent.sessions.open(&id, None).unwrap();
+        let conn = axiom_agent::acp::Connection::spawn(
+            &["cat".to_string()],
+            &std::collections::BTreeMap::new(),
+            &[],
+            data.path(),
+        )
+        .unwrap();
+        let caps = axiom_agent::acp::AgentCaps {
+            load_session: true,
+            ..Default::default()
+        };
+        app.agent.acp.lock().await.insert(
+            id.clone(),
+            Arc::new(axiom_agent::acp::AcpSession::new(conn, "a".into(), caps)),
+        );
+        let idle = Duration::from_millis(50);
+        touch(&app, &id);
+        tokio::time::sleep(idle * 2).await;
+
+        // The reaper finds the session idle and waits for the agents' map...
+        let held = app.agent.acp.lock().await;
+        let reaper = tokio::spawn({
+            let app = app.clone();
+            async move { reap_idle(&app, idle).await }
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        // ...while a send starts: what `send_acp` and `acp_session` do before they look.
+        let _cancel = live.begin().unwrap();
+        touch(&app, &id);
+        drop(held);
+        reaper.await.unwrap();
+
+        let m = app.agent.acp.lock().await;
+        let s = m.get(&id).expect("the starting send's agent was stopped");
+        assert!(!s.conn.is_ended());
+        drop(m);
+        live.end();
+    }
 }

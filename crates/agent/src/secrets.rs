@@ -9,14 +9,20 @@
 //!   `apiKeyEnv` variables: Axiom's own model keys never reach a child it did not start for
 //!   that provider. A provider or server that needs one gets it through its own `env`.
 
-/// `*_TOKEN`, `*_KEY`, `*_SECRET`, `*PASSWORD*` (and `PASSWD`), `*_CREDENTIALS`, compared
-/// without regard to case.
+/// `*_TOKEN`, `*_KEY`, `*_SECRET`, `*_CREDENTIALS`, `*_PAT` (a personal access token),
+/// `*_AUTH`, `*PASSWORD*` (and `PASSWD`), `*DATABASE_URL` (it carries the password) and
+/// `SSH_AUTH_SOCK` (the SSH agent signs for whoever can reach it), compared without regard to
+/// case. Names only: this is hygiene, not a boundary (`security.md` §Processes; review N7).
 pub fn looks_secret(name: &str) -> bool {
     let n = name.to_ascii_uppercase();
     n.ends_with("_TOKEN")
         || n.ends_with("_KEY")
         || n.ends_with("_SECRET")
         || n.ends_with("_CREDENTIALS")
+        || n.ends_with("_PAT")
+        || n.ends_with("_AUTH")
+        || n.ends_with("DATABASE_URL")
+        || n == "SSH_AUTH_SOCK"
         || n.contains("PASSWORD")
         || n.contains("PASSWD")
 }
@@ -80,6 +86,14 @@ mod tests {
             "MYSQL_PWD_PASSWD",
             "CLIENT_SECRET",
             "GOOGLE_APPLICATION_CREDENTIALS",
+            "GITHUB_PAT",
+            "gitlab_pat",
+            "NPM_CONFIG__AUTH",
+            "DOCKER_AUTH",
+            "DATABASE_URL",
+            "database_url",
+            "TEST_DATABASE_URL",
+            "SSH_AUTH_SOCK",
         ] {
             assert!(looks_secret(n), "{n}");
         }
@@ -90,6 +104,11 @@ mod tests {
             "TOKENIZERS_PARALLELISM",
             "KEYMAP",
             "RUSTUP_HOME",
+            "XAUTHORITY",
+            "PATH_PATTERN",
+            "AUTHOR",
+            "DATABASE_URL_TIMEOUT",
+            "SSH_AGENT_PID",
         ] {
             assert!(!looks_secret(n), "{n}");
         }

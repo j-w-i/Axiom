@@ -59,7 +59,9 @@ pub struct McpClient {
     stdin: tokio::sync::Mutex<tokio::process::ChildStdin>,
     waiters: Waiters,
     next: AtomicI64,
-    _child: tokio::process::Child,
+    /// The server's process, in a process group of its own registered with the daemon's exit
+    /// watchdog (AUD-027); killed when the client is dropped.
+    _process: crate::process::Supervised,
     /// The server's output ended: it exited or became unusable (AUD-032).
     ended: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -89,17 +91,15 @@ impl McpClient {
         for name in withhold {
             cmd.env_remove(name);
         }
-        let mut child = cmd
-            .args(&cfg.argv[1..])
+        cmd.args(&cfg.argv[1..])
             .envs(&cfg.env)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
+            .stderr(Stdio::null());
+        let (process, pipes) = crate::process::spawn(&mut cmd)
             .map_err(|e| format!("cannot start MCP server `{}`: {e}", cfg.name))?;
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let (Some(stdin), Some(stdout)) = (pipes.stdin, pipes.stdout) else {
             return Err("no stdio".into());
         };
         let waiters: Waiters = Arc::default();
@@ -137,7 +137,7 @@ impl McpClient {
             stdin: tokio::sync::Mutex::new(stdin),
             waiters,
             next: AtomicI64::new(1),
-            _child: child,
+            _process: process,
             ended,
         });
         let init = tokio::time::timeout(

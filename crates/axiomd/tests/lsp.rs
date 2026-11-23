@@ -423,9 +423,11 @@ async fn a_connection_that_stopped_reading_does_not_stop_diagnostics() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("fake.marker"), "").unwrap();
     std::fs::write(dir.path().join("a.fake"), "fine\nERROR here\n").unwrap();
-    let f = d.open_dir(dir).await;
+    let root = dunce::canonicalize(dir.path()).unwrap();
 
-    // The stuck connection: it opens the workspace, then never reads again.
+    // The stuck connection: it opens the workspace first (so a relay that sends to one
+    // connection after another reaches it before this client, review R1), then never reads
+    // again.
     let run = data.path().join("run");
     let token = std::fs::read_to_string(run.join("axiomd.token")).unwrap();
     let stream = tokio::net::UnixStream::connect(run.join("axiomd.sock"))
@@ -439,7 +441,7 @@ async fn a_connection_that_stopped_reading_does_not_stop_diagnostics() {
             "initialize",
             json!({"protocolVersion": "0.6", "client": {"name": "stuck", "version": "0"}, "authToken": token}),
         ),
-        (2, "workspace/open", json!({"path": f.root})),
+        (2, "workspace/open", json!({"path": root})),
     ] {
         let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         w.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
@@ -453,6 +455,8 @@ async fn a_connection_that_stopped_reading_does_not_stop_diagnostics() {
             }
         }
     }
+
+    let f = d.open_dir(dir).await;
 
     // Fill its queue: terminal output goes to every connection of the workspace. A terminal's
     // output comes in large chunks, so a dozen run until this client has seen 1500, well past

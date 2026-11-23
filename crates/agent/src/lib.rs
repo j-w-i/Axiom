@@ -12,6 +12,7 @@ pub mod lines;
 pub mod live;
 pub mod mcp_client;
 pub mod model;
+pub mod process;
 pub mod providers;
 pub mod secrets;
 pub mod session;

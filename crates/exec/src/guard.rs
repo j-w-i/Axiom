@@ -9,16 +9,23 @@
 //! still registered, SIGKILL to those still there a second later, and exits. Unix only; on
 //! other platforms [`install`] does nothing (Windows tasks are in kill-on-close job objects).
 //!
-//! Without [`install`] (tests that use an `Executor` directly) registration is a no-op.
+//! Without [`install`] (tests that use an `Executor` directly) nothing is sent; [`is_watched`]
+//! still answers.
+//!
+//! Registering never blocks the caller (async code): the lines go through a channel to a thread
+//! of their own, which does the writes, in order (review N13).
 
-use std::io::Write;
-use std::sync::{Mutex, OnceLock};
+use std::collections::BTreeSet;
+use std::sync::{mpsc, Mutex, OnceLock};
 
 struct Guard {
-    pipe: Mutex<std::process::ChildStdin>,
+    lines: Mutex<mpsc::Sender<String>>,
     /// Kept so the watchdog's handle lives as long as the daemon.
     _child: std::process::Child,
 }
+
+/// The groups registered and not yet ended, as the watchdog sees them.
+static WATCHED: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
 
 static GUARD: OnceLock<Guard> = OnceLock::new();
 
@@ -27,6 +34,7 @@ static GUARD: OnceLock<Guard> = OnceLock::new();
 /// channel. Called once; later calls do nothing.
 #[cfg(unix)]
 pub fn install(argv: &[std::ffi::OsString]) -> std::io::Result<()> {
+    use std::io::Write;
     use std::os::unix::process::CommandExt;
     if GUARD.get().is_some() {
         return Ok(());
@@ -42,12 +50,23 @@ pub fn install(argv: &[std::ffi::OsString]) -> std::io::Result<()> {
         // Its own group: a Ctrl-C to the daemon's foreground group must not take it too.
         .process_group(0)
         .spawn()?;
-    let pipe = child
+    let mut pipe = child
         .stdin
         .take()
         .ok_or_else(|| std::io::Error::other("no pipe to the watchdog"))?;
+    let (tx, rx) = mpsc::channel::<String>();
+    std::thread::Builder::new()
+        .name("axiom-watchdog-pipe".into())
+        .spawn(move || {
+            for line in rx {
+                // A watchdog that is gone cannot help; the daemon carries on.
+                if pipe.write_all(line.as_bytes()).is_err() {
+                    return;
+                }
+            }
+        })?;
     let _ = GUARD.set(Guard {
-        pipe: Mutex::new(pipe),
+        lines: Mutex::new(tx),
         _child: child,
     });
     Ok(())
@@ -59,17 +78,20 @@ pub fn install(_argv: &[std::ffi::OsString]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Queues a line for the watchdog: never waits for the pipe. Called with [`WATCHED`] held, so
+/// the lines are queued in the order the set changed.
 fn send(line: String) {
     if let Some(g) = GUARD.get() {
-        let mut p = g.pipe.lock().unwrap_or_else(|e| e.into_inner());
-        // A watchdog that is gone cannot help; the daemon carries on.
-        let _ = p.write_all(line.as_bytes());
+        let _ = g.lines.lock().unwrap_or_else(|e| e.into_inner()).send(line);
     }
 }
 
-/// Registers a process group (its leader's pid) to end if the daemon dies.
+/// Registers a process group (its leader's pid) to end if the daemon dies. Call it while the
+/// leader has not been reaped (its number cannot have been reused yet).
 pub fn watch_group(pgid: u32) {
     if pgid > 1 {
+        let mut w = WATCHED.lock().unwrap_or_else(|e| e.into_inner());
+        w.insert(pgid);
         send(format!("+{pgid}\n"));
     }
 }
@@ -77,8 +99,19 @@ pub fn watch_group(pgid: u32) {
 /// The group ended normally: forget it.
 pub fn unwatch_group(pgid: u32) {
     if pgid > 1 {
+        let mut w = WATCHED.lock().unwrap_or_else(|e| e.into_inner());
+        w.remove(&pgid);
         send(format!("-{pgid}\n"));
     }
+}
+
+/// Whether the group is registered (and not unregistered since): what the watchdog would
+/// signal if the daemon died now. For tests and diagnostics.
+pub fn is_watched(pgid: u32) -> bool {
+    WATCHED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(&pgid)
 }
 
 /// The watchdog's main: reads registrations from stdin until end of file, then ends every group

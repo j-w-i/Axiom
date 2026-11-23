@@ -478,16 +478,63 @@ impl Shadow {
                         return std::os::unix::fs::symlink(target, &path).map_err(io);
                     }
                 }
-                std::fs::write(&path, &bytes).map_err(io)?;
+                // A new file beside it, renamed over the entry: a hard link (to a git hook, or a
+                // file outside the workspace) is replaced, never written through, and nothing
+                // is followed (review N14/R5). The exclusive create refuses an existing name, a
+                // symlink included.
+                let dir = path
+                    .parent()
+                    .ok_or_else(|| io(std::io::ErrorKind::NotFound.into()))?;
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                let name = name.unwrap_or_default();
+                let mut tmp = None;
+                for n in 0..100u32 {
+                    let t = dir.join(format!(".{name}.axiom-restore-{}-{n}", std::process::id()));
+                    match std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&t)
+                    {
+                        Ok(mut f) => {
+                            use std::io::Write;
+                            if let Err(e) = f.write_all(&bytes).and_then(|()| f.sync_all()) {
+                                let _ = std::fs::remove_file(&t);
+                                return Err(io(e));
+                            }
+                            tmp = Some(t);
+                            break;
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                        Err(e) => return Err(io(e)),
+                    }
+                }
+                let tmp = tmp.ok_or_else(|| io(std::io::ErrorKind::AlreadyExists.into()))?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
                     let exec = mode == "100755";
-                    let md = std::fs::metadata(&path).map_err(io)?;
-                    let mut perm = md.permissions();
-                    let m = perm.mode();
-                    perm.set_mode(if exec { m | 0o111 } else { m & !0o111 });
-                    std::fs::set_permissions(&path, perm).map_err(io)?;
+                    // The file's own mode (it is new), or the default for new files.
+                    let m = std::fs::metadata(&path)
+                        .ok()
+                        .filter(|m| m.is_file())
+                        .map_or(0o644, |m| m.permissions().mode() & 0o7777);
+                    let m = if exec { m | 0o111 } else { m & !0o111 };
+                    if let Err(e) =
+                        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(m))
+                    {
+                        let _ = std::fs::remove_file(&tmp);
+                        return Err(io(e));
+                    }
+                }
+                // Still inside the workspace right before it lands (a parent swapped for a
+                // symlink since `contained` is refused, not followed).
+                if let Err(e) = contained(&self.root, rel) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(e);
+                }
+                if let Err(e) = std::fs::rename(&tmp, &path) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(io(e));
                 }
                 Ok(())
             }

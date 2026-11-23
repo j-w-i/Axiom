@@ -163,7 +163,9 @@ pub struct Connection {
     waiters: Waiters,
     next: AtomicI64,
     incoming: tokio::sync::Mutex<mpsc::Receiver<Incoming>>,
-    child: tokio::sync::Mutex<tokio::process::Child>,
+    /// The agent's process, in a process group of its own registered with the daemon's exit
+    /// watchdog (AUD-027); killed when the connection is dropped.
+    process: crate::process::Supervised,
     /// The reader saw the end of the agent's output: the process is gone or unusable.
     ended: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -183,17 +185,15 @@ impl Connection {
         for name in withhold {
             cmd.env_remove(name);
         }
-        let mut child = cmd
-            .args(&argv[1..])
+        cmd.args(&argv[1..])
             .envs(env)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
+            .stderr(Stdio::null());
+        let (process, pipes) = crate::process::spawn(&mut cmd)
             .map_err(|e| format!("cannot start `{program}`: {e}"))?;
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let (Some(stdin), Some(stdout)) = (pipes.stdin, pipes.stdout) else {
             return Err("no stdio".into());
         };
         let waiters: Waiters = Arc::default();
@@ -259,7 +259,7 @@ impl Connection {
             waiters,
             next: AtomicI64::new(1),
             incoming: tokio::sync::Mutex::new(rx),
-            child: tokio::sync::Mutex::new(child),
+            process,
             ended,
         })
     }
@@ -324,7 +324,7 @@ impl Connection {
 
     pub async fn kill(&self) {
         self.ended.store(true, Ordering::SeqCst);
-        let _ = self.child.lock().await.kill().await;
+        self.process.kill().await;
     }
 }
 
@@ -343,9 +343,31 @@ pub struct AcpSession {
     pub conn: Connection,
     pub agent_session: String,
     pub caps: AgentCaps,
+    /// The terminals this agent created: the only ones its `terminal/*` requests reach. The
+    /// daemon's ids are sequential, so another session's agent could otherwise read, wait for,
+    /// kill or release this one's (review N5).
+    terminals: Mutex<std::collections::HashSet<String>>,
 }
 
 impl AcpSession {
+    pub fn new(conn: Connection, agent_session: String, caps: AgentCaps) -> AcpSession {
+        AcpSession {
+            conn,
+            agent_session,
+            caps,
+            terminals: Mutex::default(),
+        }
+    }
+
+    /// `id` if this agent created that terminal (and has not released it).
+    fn own<'a>(&self, id: &'a str) -> Result<&'a str, (i64, String)> {
+        if lock(&self.terminals).contains(id) {
+            Ok(id)
+        } else {
+            Err((INVALID, format!("no terminal `{id}`")))
+        }
+    }
+
     /// Stops the agent's process (the session is deleted, or the daemon is stopping).
     pub async fn kill(&self) {
         self.conn.kill().await;
@@ -437,14 +459,7 @@ pub async fn connect(
             let mut rx = conn.incoming.lock().await;
             while rx.try_recv().is_ok() {}
             drop(rx);
-            return Ok((
-                AcpSession {
-                    conn,
-                    agent_session: id.into(),
-                    caps,
-                },
-                true,
-            ));
+            return Ok((AcpSession::new(conn, id.into(), caps), true));
         }
     }
     let r = tokio::time::timeout(
@@ -468,14 +483,7 @@ pub async fn connect(
         .as_str()
         .ok_or_else(|| format!("{} returned no session id.", config.name))?
         .to_string();
-    Ok((
-        AcpSession {
-            conn,
-            agent_session: id,
-            caps,
-        },
-        false,
-    ))
+    Ok((AcpSession::new(conn, id, caps), false))
 }
 
 /// Terminal operations after `terminal/create` (the create itself is the gated `acp.terminal`
@@ -585,11 +593,49 @@ fn tool_content(items: &Value, root: &Path) -> String {
 
 #[derive(Default)]
 struct Grants {
-    /// Allow rules from approved permission requests, for this turn.
-    rules: Vec<PolicyRule>,
+    /// The paths approved edit permissions named, for this turn. Compared literally: a policy
+    /// rule's path is a glob, so an approved file named `src/*` must not become a rule that
+    /// covers every file in `src` (review N2).
+    writes: Vec<axiom_protocol::WorkspacePath>,
     /// The command an approved `execute` permission showed (its `rawInput.command`): it covers
     /// the next terminal only if that terminal runs exactly this command (AUD-040).
     next_terminal: Option<Command>,
+}
+
+impl Grants {
+    /// The one-call allow rules for a hidden tool's call: a write to exactly the paths
+    /// approved edits named, or the terminal running exactly the command an approved execute
+    /// showed (used once).
+    fn extra(
+        &mut self,
+        name: &str,
+        input: &Value,
+        paths: &[axiom_protocol::WorkspacePath],
+    ) -> Vec<PolicyRule> {
+        let allow = |tool: &str, effect: Option<Effect>| PolicyRule {
+            effect,
+            tool: Some(tool.into()),
+            path: None,
+            argv_prefix: None,
+            decision: Decision::Allow,
+        };
+        match name {
+            "acp.writeFile"
+                if !paths.is_empty() && paths.iter().all(|p| self.writes.contains(p)) =>
+            {
+                vec![allow("acp.writeFile", None)]
+            }
+            "acp.terminal"
+                if self
+                    .next_terminal
+                    .take()
+                    .is_some_and(|c| c.runs(&terminal_argv(input))) =>
+            {
+                vec![allow("acp.terminal", Some(Effect::Execute))]
+            }
+            _ => Vec::new(),
+        }
+    }
 }
 
 /// The command a permission request describes.
@@ -884,10 +930,13 @@ async fn handle_request(
                 }),
             )
             .await?;
+            if let Some(id) = out["terminalId"].as_str() {
+                lock(&t.session.terminals).insert(id.to_string());
+            }
             Ok(json!({"terminalId": out["terminalId"]}))
         }
         "terminal/output" => {
-            let id = p["terminalId"].as_str().unwrap_or("");
+            let id = t.session.own(p["terminalId"].as_str().unwrap_or(""))?;
             let (output, truncated, exit) =
                 t.terminals.output(id).await.map_err(|e| (INVALID, e))?;
             let mut v = json!({"output": output, "truncated": truncated});
@@ -897,7 +946,7 @@ async fn handle_request(
             Ok(v)
         }
         "terminal/wait_for_exit" => {
-            let id = p["terminalId"].as_str().unwrap_or("");
+            let id = t.session.own(p["terminalId"].as_str().unwrap_or(""))?;
             let (code, signal) = tokio::select! {
                 r = t.terminals.wait(id) => r.map_err(|e| (INVALID, e))?,
                 _ = t.cancel.cancelled() => {
@@ -909,17 +958,14 @@ async fn handle_request(
             Ok(json!({"exitCode": code, "signal": signal}))
         }
         "terminal/kill" => {
-            t.terminals
-                .kill(p["terminalId"].as_str().unwrap_or(""))
-                .await
-                .map_err(|e| (INVALID, e))?;
+            let id = t.session.own(p["terminalId"].as_str().unwrap_or(""))?;
+            t.terminals.kill(id).await.map_err(|e| (INVALID, e))?;
             Ok(json!({}))
         }
         "terminal/release" => {
-            t.terminals
-                .release(p["terminalId"].as_str().unwrap_or(""))
-                .await
-                .map_err(|e| (INVALID, e))?;
+            let id = t.session.own(p["terminalId"].as_str().unwrap_or(""))?;
+            t.terminals.release(id).await.map_err(|e| (INVALID, e))?;
+            lock(&t.session.terminals).remove(id);
             Ok(json!({}))
         }
         "session/request_permission" => Ok(permission(t, grants, p).await),
@@ -940,21 +986,7 @@ async fn tool(
         .prepare(&t.ctx, name, input)
         .await
         .map_err(|e| (INVALID, e.message))?;
-    let mut extra = grants.rules.clone();
-    let covered = name == "acp.terminal"
-        && grants
-            .next_terminal
-            .take()
-            .is_some_and(|c| c.runs(&terminal_argv(&prepared.input)));
-    if covered {
-        extra.push(PolicyRule {
-            effect: Some(Effect::Execute),
-            tool: Some("acp.terminal".into()),
-            path: None,
-            argv_prefix: None,
-            decision: Decision::Allow,
-        });
-    }
+    let extra = grants.extra(name, &prepared.input, &prepared.targets.paths);
     let out = gate::run_prepared_with(
         t.registry,
         t.gate,
@@ -1060,15 +1092,7 @@ async fn permission(t: &AcpTurn<'_>, grants: &mut Grants, p: &Value) -> Value {
             // shown, for an execute (AUD-040).
             if matches!(via, Via::Approved(_)) {
                 if matches!(effect, Effect::WriteWorkspace | Effect::Delete) {
-                    for p in &paths {
-                        grants.rules.push(PolicyRule {
-                            effect: None,
-                            tool: Some("acp.writeFile".into()),
-                            path: Some(p.0.clone()),
-                            argv_prefix: None,
-                            decision: Decision::Allow,
-                        });
-                    }
+                    grants.writes.extend(paths.iter().cloned());
                 }
                 if effect == Effect::Execute {
                     grants.next_terminal = call.get("rawInput").and_then(Command::of);
@@ -1147,6 +1171,34 @@ mod tests {
             terminal_argv(&json!({"command": "ls", "args": ["-l"]})),
             ["ls", "-l"]
         );
+    }
+
+    /// An approved edit of a file literally named `src/*` covers a write to that file only,
+    /// not to every file the glob would match (review N2).
+    #[test]
+    fn an_approved_edit_path_is_compared_literally() {
+        let wp = |s: &str| axiom_protocol::WorkspacePath(s.into());
+        let mut g = Grants {
+            writes: vec![wp("src/*")],
+            ..Default::default()
+        };
+        let allows = |rules: &[PolicyRule], path: &str| {
+            let paths = [wp(path)];
+            let call = policy::Call {
+                tool: "acp.writeFile",
+                effect: Effect::WriteWorkspace,
+                paths: &paths,
+                argv: None,
+            };
+            rules.iter().any(|r| policy::matches(r, &call))
+        };
+        let input = json!({});
+        let other = g.extra("acp.writeFile", &input, &[wp("src/main.rs")]);
+        assert!(!allows(&other, "src/main.rs"), "{other:?}");
+        let same = g.extra("acp.writeFile", &input, &[wp("src/*")]);
+        assert!(allows(&same, "src/*"), "{same:?}");
+        assert!(g.extra("acp.writeFile", &input, &[]).is_empty());
+        assert!(g.extra("acp.readFile", &input, &[wp("src/*")]).is_empty());
     }
 
     #[test]
