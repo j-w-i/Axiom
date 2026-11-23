@@ -33,11 +33,16 @@ fn fake_lsp() -> PathBuf {
     });
     // Always built: a no-op when up to date, and a binary left from before a change to the
     // helper would not have it.
-    assert!(std::process::Command::new(env!("CARGO"))
-        .args(["build", "-q", "-p", "fake-lsp"])
-        .status()
-        .unwrap()
-        .success());
+    // Built once per test process (the tests run in parallel): a build per call could relink
+    // the binary while another test's server is (re)starting, which then finds no fake-lsp.
+    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| {
+        assert!(std::process::Command::new(env!("CARGO"))
+            .args(["build", "-q", "-p", "fake-lsp"])
+            .status()
+            .unwrap()
+            .success());
+    });
     p
 }
 
