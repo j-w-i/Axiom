@@ -13,11 +13,12 @@ qualification (a deviation, a residual risk, a contract limit, a kept owner bind
 hand-off). Task status `implemented`, PR j-w-i/Axiom#13. An independent review requested
 changes (blocking B1–B6); they were fixed and the re-review passed. Its follow-up findings
 (R1–R5, N1–N18) were fixed or documented, and the two change requests became ADR-0022 and
-ADR-0023; a review of that round requested changes again (C1–C4, D1–D7), which are being
-fixed.
+ADR-0023; a review of that round requested changes again (C1–C4, D1–D7), fixed and reviewed;
+the next review (E1, blocking, and E2–E6) is fixed and awaiting its review.
 
-**Next: fix C1–C4 and D1–D7, CI green on the PR, the review's sign-off, then the task to
-`verified` and the merge to main; then M6.**
+**Next: the review's sign-off on E1–E6, CI green on the PR, then the task to `verified` and
+the merge to main; then M6.** Open for the owner: confirm ADR-0022 and ADR-0023; jdtls in
+untrusted folders (ADR-0023, Consequences).
 
 ## M5.5 — Every language: complete (2026-11-22)
 

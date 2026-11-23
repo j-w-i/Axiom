@@ -145,7 +145,9 @@ secret-looking variables or the providers' `apiKeyEnv` variables, unless setting
 AUD-010). `SSH_AUTH_SOCK` is among them (review N7), so an agent's `git push` or `fetch` over
 SSH, SSH commit signing and `git+ssh` dependencies fail unless the person adds it to
 `agent.passEnv`; external ACP agents and MCP servers keep it. When it is withheld, the card
-names it first and says how to pass it. Output is kept as a bounded tail while a command
+names it first and says how to pass it. The result text of `task.run`, `build.run` and
+`preview.start` ends with the same line (review E5), so an auto-allowed command that shows no
+card still says what it did not get. Output is kept as a bounded tail while a command
 runs.
 
 ## Permission policy
@@ -201,9 +203,10 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
   restored unless `skipConflicts`. Restore takes a checkpoint first.
 - A restore writes a new file and renames it over the entry (a hard link is never written
   through), never writes through a directory that is a symlink (unless the restore itself
-  removes that symlink first), and never writes into a git directory (`.git`, `<name>.git`):
-  such a restore is refused before anything changes. `.axiom/` is restored like any file (a
-  restore is the person's own undo). A restored file keeps the permission bits of the file it
+  removes that symlink first), and never writes into a git directory: a path inside `.git`,
+  or inside a `<name>.git` that is a repository (or one of git's own entries in it), is skipped
+  and left out of `restored`, and the rest is restored (review E3). `.axiom/` is restored like
+  any file (a restore is the person's own undo). A restored file keeps the permission bits of the file it
   replaces, without setuid, setgid or sticky (review R5, D4).
 - As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir; the agent's
   latest state is `refs/axiom/<session>/post`, taken after each writing tool; a restore with
@@ -310,7 +313,10 @@ ADR-0015 §7.
     non-string `args` are refused. A deleted session's terminals, and a closed workspace's, are
     dropped (AUD-039, AUD-099). A terminal belongs to the session that created it (its
     principal), not to the agent process: after an idle reap and resume the agent still
-    reaches its terminals; another session's agent is refused (review N5, D5).
+    reaches its terminals; another session's agent is refused (review N5, D5). On the card, the
+    variables an agent sets are one per line, a name or value with whitespace, quotes or control
+    characters quoted with `\` escapes; the CLI shows each line of a card's preview after
+    `  | ` (review E6).
   - **Lifetime.** An agent whose process ended is started again on the next turn; agents and
     MCP servers start without holding the daemon-wide maps (AUD-032).
   - **Updates.** Message and thought chunks become `textDelta` + `assistantText` (thoughts with

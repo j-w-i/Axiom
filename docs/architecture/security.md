@@ -56,6 +56,11 @@ write the workspace can usually write `.git/hooks` itself):
   then rename by path.
 - Descendants of an external agent or MCP server that leave its process group (`setsid`, a
   daemonising launcher) are neither killed with it nor watched.
+- A rename that must not replace anything is atomic only where the file system supports
+  `renameat2(RENAME_NOREPLACE)` (Linux) or `renamex_np(RENAME_EXCL)` (macOS); elsewhere, and on
+  Windows, it checks right before renaming that the target does not exist, so a target created
+  in that moment can be replaced. A case-only rename goes through a fresh name, each step
+  without replacing (review E6).
 - The root itself is opened by its canonical path: swapping the root or an ancestor is out of
   scope.
 - Reads through hard links and bind mounts: containment is by path, so a hard link inside the
@@ -246,17 +251,38 @@ The Tauri shell's controls, kept as the record of how it was built:
   `.axiom/project.toml` `[agent.policy]` can only make a decision stricter (the stricter of
   the two wins). Path globs are matched in `O(pattern × path)` (AUD-106: the recursive matcher
   was exponential in the number of `*`, and the workspace's patterns are untrusted).
-- **Protected paths** (AUD-104, review B4 and D-round). A write or delete under `.axiom/` (the
-  workspace policy, its providers' tasks and language servers), a `.git` directory at any depth
-  (hooks run on the person's next commit), a bare repository's `<name>.git/` (its `hooks/` run
-  on a push to it), `.husky/` at any depth, or the directory the workspace's own `.git/config`
-  names in `core.hooksPath` (when inside the workspace) always asks, whatever a policy rule, a
-  session grant or an ACP permission says, and cannot be allowed for the session. The gate
-  judges the path through symlinks inside the workspace, and the write refuses if it no longer
-  resolves there (§Paths). Reading them is not restricted. Not covered: a `core.hooksPath` set
-  by an included file, the global or system configuration, `git -c`/`GIT_CONFIG_*` or
-  `config.worktree`; the configuration of a repository a `.git` file points to (worktrees,
-  submodules); and a `hooksPath` naming the workspace root itself.
+- **Protected paths** (AUD-104; review B4, D-round, E2, E3). A write or delete always asks,
+  whatever a policy rule, a session grant or an ACP permission says, and cannot be allowed for
+  the session, under:
+  - `.axiom/` (the workspace policy, its providers' tasks and language servers), `.husky/` at
+    any depth, and a `.git` directory at any depth;
+  - a `<name>.git` directory that is a bare repository (it has a `HEAD`), or a write of one of
+    git's own entries directly in one (`HEAD`, `config`, `hooks/`, `objects/`, `refs/`, …), so
+    one cannot be built a file at a time;
+  - what git itself reads for the workspace's repository, when it is inside the workspace,
+    asked of git for each call off the async thread (`git rev-parse --git-path hooks`,
+    `git config --list --show-origin`): the hooks directory however `core.hooksPath` is set
+    (an included file, the global configuration) or the git directory's own; the git directory
+    and the common directory when a `.git` file points elsewhere (worktree, submodule,
+    `--separate-git-dir`); every configuration file git reads, and every file an `include.path`
+    or `includeIf.*.path` names, whether it exists yet or not. With `core.hooksPath = .` the
+    git hook names at the root ask. A `.git/config` in a folder that is not yet a repository is
+    read with `git config --file`.
+  - When git cannot answer (not installed, a configuration it refuses, dubious ownership, a
+    timeout), every path with a segment starting `.git`, ending `gitconfig` or ending `hooks`
+    asks instead.
+
+  The gate judges the path through symlinks inside the workspace, and the write refuses if it
+  no longer resolves there (§Paths). Reading them is not restricted. Not covered: a nested
+  repository's own configuration (only its `.git` directory is protected, by name);
+  `~user/` and `%(prefix)/` include paths; a configuration change the person approves during an
+  agent turn protects what it names only from the next turn (sessions read the policies once per
+  turn; external tool calls per call); clean/smudge filters a configured driver names can run
+  when `git status` refreshes the index (the driver's configuration is in protected files or
+  the person's global configuration).
+- **The daemon's own git** runs no program the repository's configuration names: `git status`
+  and `git show` run with `core.fsmonitor=false` and `core.hooksPath=/dev/null`, and `show`
+  with `--no-ext-diff --no-textconv` (review E2).
 - **What the card shows is what is approved.** The targets are the paths, the argv (arguments
   with spaces or control characters quoted) and the call's *conditions*: an environment
   variable an ACP agent sets, a working directory other than the root, `build.run`'s provider

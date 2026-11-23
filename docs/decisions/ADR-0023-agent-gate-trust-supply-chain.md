@@ -28,7 +28,9 @@ every finding to be resolved, this ADR included (review N15).
    long value by its SHA-256).
 2. **Protected paths always ask.** A write under `.axiom/` (the workspace policy and providers),
    a `.git` directory at any depth (nested repositories, submodules), a bare repository's
-   `<name>.git/`, `.husky/`, or the workspace's own configured `core.hooksPath` asks every time,
+   `<name>.git/`, `.husky/`, and what git itself reads for the workspace's repository (the
+   effective hooks directory, the git and common directories, every configuration file and
+   include, asked of git; if git cannot answer, config-like names) asks every time,
    whatever a policy rule, a grant or an ACP permission says (what is not covered: `security.md`
    §Agent permissions). The gate judges the path the file really has,
    through symlinks inside the workspace (`Workspace::canonical_path`), and the write refuses
