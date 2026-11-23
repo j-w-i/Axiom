@@ -19,7 +19,12 @@ pub async fn status(app: Arc<App>, p: WorkspaceRef) -> Result<GitStatus, RpcErro
         .map_err(|_| internal())??;
     let mut st = st;
     if st.repo {
-        start_watch(&app, &p.workspace_id);
+        // The status that starts the watch waits (bounded) for its setup, so it already says
+        // whether the repository is polled (review N14); a status that does not wait long
+        // enough is followed by a `git/didChange` once polling is decided.
+        if let Some(set_up) = start_watch(&app, &p.workspace_id) {
+            let _ = tokio::time::timeout(FIRST_STATUS_WAIT, set_up).await;
+        }
         st.polling = app
             .git_polling
             .lock()
@@ -46,19 +51,27 @@ pub async fn show(app: Arc<App>, p: ShowParams) -> Result<ShowResult, RpcError> 
 /// repository is looked at this often instead (AUD-012).
 const POLL: Duration = Duration::from_secs(10);
 
+/// Longest the first `git/status` of a workspace waits for its change watch to be set up (a
+/// recursive watch of a large tree can take seconds; AUD-031).
+const FIRST_STATUS_WAIT: Duration = Duration::from_secs(2);
+
 /// Starts the workspace's change watch once: worktree changes (the workspace watcher) and the
 /// repository's own files, debounced, to every client of the workspace. The check and the
 /// insert happen under one lock; the setup (a recursive watch of the tree, `git rev-parse`, a
 /// watch of the git dir: seconds in a large repository) runs on a blocking thread, never under
 /// the lock or on an async worker (AUD-031).
-fn start_watch(app: &Arc<App>, ws: &WorkspaceId) {
+///
+/// Returns, when this call started the watch, a receiver that resolves once the setup is over
+/// and `git_polling` says whether the repository is polled.
+fn start_watch(app: &Arc<App>, ws: &WorkspaceId) -> Option<tokio::sync::oneshot::Receiver<()>> {
     let mut watches = app.git_watches.lock().unwrap_or_else(|p| p.into_inner());
     if watches.contains_key(ws) {
-        return;
+        return None;
     }
     let Ok(w) = app.workspaces.get(ws) else {
-        return;
+        return None;
     };
+    let (set_up, set_up_rx) = tokio::sync::oneshot::channel();
     let weak = Arc::downgrade(app);
     let id = ws.clone();
     let task = tokio::spawn(async move {
@@ -95,8 +108,18 @@ fn start_watch(app: &Arc<App>, ws: &WorkspaceId) {
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .insert(id.clone());
+                // A status read before this (one that stopped waiting, or a second one during
+                // the setup) said `polling: false`: the clients look again.
+                app.notify_clients::<DidChange>(
+                    &id,
+                    WorkspaceRef {
+                        workspace_id: id.clone(),
+                    },
+                )
+                .await;
             }
         }
+        let _ = set_up.send(());
         relay(tree, dir, poll, || {
             let weak = weak.clone();
             let id = id.clone();
@@ -117,6 +140,7 @@ fn start_watch(app: &Arc<App>, ws: &WorkspaceId) {
         .await;
     });
     watches.insert(ws.clone(), task.abort_handle());
+    Some(set_up_rx)
 }
 
 /// Waits for a change from either source, lets the burst settle ([`DEBOUNCE`]) and calls `emit`

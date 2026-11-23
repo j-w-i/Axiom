@@ -88,7 +88,7 @@ Why NDJSON rather than LSP's `Content-Length` framing: see ADR-0003.
 | `not_found` | file, directory, task or parent directory does not exist |
 | `already_exists` | a create, or a rename onto, a name that is taken (0.6 `fs/*`) |
 | `permission_denied` | OS permission, or path escapes the workspace |
-| `conflict` | `expectedVersion` mismatch, or creating an existing file |
+| `conflict` | `expectedVersion` mismatch, or `fs/writeFile` without `overwrite` onto a file that exists (§`fs/writeFile` decision table); `fs/createFile` onto a taken name is `already_exists`; or a directory on the path was replaced while the call ran (no details) |
 | `io` | any other OS I/O failure (details: `{ "osError": string }`) |
 | `unsupported_encoding` | file is not valid UTF-8 |
 | `too_large` | file > 16 MiB, state value > 1 MiB |
@@ -299,7 +299,13 @@ terminal,git}.rs` and `workspace.rs` (`workspace/search`).
   path outside the root stays `permission_denied`.
 - **Terminals** are not agent tools and pass no gate (the person's own shell). `terminal/output`
   carries UTF-8 text; `seq` increases by one per notification of a terminal, and `terminal/list`
-  returns the backlog up to a `seq`, so a client can redraw and continue without gaps.
+  returns the backlog up to a `seq`, so a client can redraw and continue without gaps. Memory:
+  a terminal stops reading its PTY (the program waits) while 4 MiB of its output is not yet
+  queued for every connection, and one event carries at most 256 KiB. A connection's outgoing
+  queue is bounded by count (1024 lines), not bytes, so one connection that stops reading can
+  hold up to about 256 MiB of terminal text (more once JSON-escaped) until it reads again or
+  ends. Once its queue is full and stays full for 500 ms it misses the notifications there is no
+  room for, and the next `seq` it gets shows the gap.
 - **Git** is read-only; status paths are workspace-relative and paths outside the workspace are
   omitted.
 - **Provider manifests** gain an optional `lsp` table (`LspServerSpec`: `id`, `languages`,
@@ -346,8 +352,10 @@ Additive only, under the same rules: the daemon reports `0.5`. Types:
 ## Protocol 0.6 (audit AUD-022)
 
 Additive only: four methods, no new notification, no new error kind; the daemon reports `0.6`,
-and a 0.5 client gets `0.5` and unchanged behaviour (it just does not see the methods in
-`initialize.methods`). Types: `crates/protocol/src/fs.rs`. Why: the change request
+and a 0.5 client gets `0.5` and unchanged behaviour for every method it already calls.
+`initialize.methods` lists every method the daemon serves whatever minor was negotiated, so a
+0.5 client sees the four there too, and the daemon answers them if it calls them; methods are
+not gated by the negotiated minor. Types: `crates/protocol/src/fs.rs`. Why: the change request
 `docs/decisions/proposed/CR-AUD-022-workspace-file-operations.md`.
 
 | Method | Params → Result | Errors (besides the generic ones) |
@@ -361,7 +369,11 @@ and a 0.5 client gets `0.5` and unchanged behaviour (it just does not see the me
   (lexical rules, then symlinks resolved, then inside the root, else `permission_denied`). The
   entry a path names is never followed itself: renaming or trashing a symlink moves the link,
   never what it points to (inside the workspace or not). The root itself cannot be created,
-  renamed or trashed.
+  renamed or trashed. A path whose directories change while the call runs (one replaced by a
+  symlink, say) is refused, never redirected: `permission_denied` when it now leads outside the
+  workspace, else `conflict` ("a directory on its path was replaced"); this holds for
+  `fs/writeFile` too. On Unix the change is made in the directory opened from the root without
+  following symlinks; on Windows the path is checked again right before the change.
 - **Never replaces.** `fs/createFile` and `fs/createDirectory` fail with `already_exists` when
   anything has the name (a file, a directory, a symlink, a dangling one too). `fs/rename` fails
   with `already_exists` when `to` exists, an empty directory included; the rename is atomic
@@ -378,9 +390,12 @@ and a 0.5 client gets `0.5` and unchanged behaviour (it just does not see the me
   `DeletionDate` written in UTC, as the daemon has no time-zone database); on another file
   system, `$topdir/.Trash/$uid` when `$topdir/.Trash` is a real directory with the sticky bit,
   else `$topdir/.Trash-$uid` (`Path` relative to `$topdir`). A name taken in the trash gets a
-  number (`a.2.txt`). macOS: renamed into `~/.Trash` when on the same volume. Anything else
-  (another volume on macOS, a file system where no trash folder can be made, Windows):
-  `unsupported`, and the entry stays where it was.
+  number (`a.2.txt`). macOS: renamed into `~/.Trash` when on the same volume as the home
+  folder. That is a plain rename, not the Finder's "Move to Trash": the Finder's "Put Back" does
+  not work for it, and an entry on another volume (an external disk, a second APFS volume)
+  cannot be trashed (`unsupported`, the message says so). Anything else (another volume on
+  macOS, a file system where no trash folder can be made, Windows): `unsupported`, and the entry
+  stays where it was.
 - **Notifications.** No new ones: a client watching the workspace (`fs/watch`) gets the usual
   `fs/didChange` (`created`; `removed` + `created` for a rename; `removed` for a trash).
 

@@ -2,6 +2,7 @@
 //! `fs/readFile`, `fs/writeFile`), and text search and file removal for the agent's tools
 //! (M3); creating, renaming and trashing entries (protocol 0.6). No persistence or RPC here.
 
+mod beneath;
 mod error;
 mod fileops;
 mod ignore_rules;

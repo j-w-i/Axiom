@@ -137,35 +137,41 @@ async fn every_watching_connection_gets_the_changes() {
 }
 
 /// AUD-029, review B5: a connection that opens the folder while the last holder's close is
-/// tearing it down (slowly: its task ignores SIGTERM) gets a workspace that stays open, not the
+/// tearing it down (slowly: its task survives SIGTERM) gets a workspace that stays open, not the
 /// id being closed under it.
 #[tokio::test]
 async fn an_open_during_the_last_close_gets_a_workspace_that_stays_open() {
     use axiom_protocol::fs::{List, ListParams};
     let d = Daemon::ready().await;
     let f = d.open_fixture().await;
+    // The task says when its trap is in place and when the teardown's SIGTERM reached it; it
+    // then keeps running until the kill grace ends in SIGKILL (review R2: no fixed sleeps).
+    let marks = tempfile::tempdir().unwrap();
+    let ready = marks.path().join("ready");
+    let termed = marks.path().join("termed");
+    let script = format!(
+        "trap 'echo > \"{t}\"' TERM; echo > \"{r}\"; while :; do sleep 1; done",
+        t = termed.display(),
+        r = ready.display(),
+    );
     d.client
         .request::<Start>(StartParams {
             workspace_id: f.id.clone(),
-            command: Command::Argv(vec![
-                "sh".into(),
-                "-c".into(),
-                "trap '' TERM; sleep 30".into(),
-            ]),
+            command: Command::Argv(vec!["sh".into(), "-c".into(), script]),
             cwd: None,
             env: Default::default(),
             label: None,
         })
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    wait_for_file(&ready).await;
     let (b, _brx) = socket_client(d.data_dir()).await;
-    // A, the only holder, closes; B opens half a second into the teardown.
+    // A, the only holder, closes; B opens once the teardown has signalled A's task.
     let close = d.client.request::<Close>(WorkspaceRef {
         workspace_id: f.id.clone(),
     });
     let late_open = async {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        wait_for_file(&termed).await;
         open(&b, &f.root).await
     };
     let (closed, id) = tokio::join!(close, late_open);
@@ -180,6 +186,19 @@ async fn an_open_during_the_last_close_gets_a_workspace_that_stays_open() {
         listed.is_ok(),
         "B's workspace {id:?} after A's close: {listed:?}"
     );
+}
+
+/// Waits (bounded by `WAIT`; fails closed) until `path` exists.
+async fn wait_for_file(path: &Path) {
+    let end = tokio::time::Instant::now() + WAIT;
+    while !path.exists() {
+        assert!(
+            tokio::time::Instant::now() < end,
+            "{} never appeared",
+            path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 /// AUD-029: one connection closing a shared workspace does not stop another's work; the last

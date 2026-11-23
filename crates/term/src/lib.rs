@@ -22,9 +22,18 @@ pub const COALESCE: Duration = Duration::from_millis(16);
 pub const CLOSE_GRACE: Duration = Duration::from_secs(2);
 /// Largest output event: a burst longer than this is sent in several (AUD-036).
 pub const EVENT_MAX_BYTES: usize = 256 * 1024;
-/// Output of one terminal sent but not yet delivered (held by the event relay and the
-/// connections' queues). Past this the terminal stops reading its PTY, so the program waits
-/// (backpressure), instead of the daemon buffering without limit (AUD-036).
+/// Output of one terminal sent as events and not yet queued for every connection: the daemon's
+/// event relay holds an event's permit until it has queued the notification on each connection
+/// of the workspace (or given up on a stuck one), then drops it. Past this the terminal stops
+/// reading its PTY, so the program waits (backpressure), instead of the relay buffering without
+/// limit (AUD-036).
+///
+/// Not counted here: notifications a connection has queued but not yet written. Each
+/// connection's outgoing queue is bounded by count, not bytes (`axiom_rpc`'s `QUEUE_CAPACITY`,
+/// 1024 lines of any kind), so a connection that stops reading can hold up to 1024 terminal
+/// events of at most [`EVENT_MAX_BYTES`] each: about 256 MiB of terminal text per slow
+/// connection, and up to six times that once JSON-escaped if the text is mostly control
+/// characters (`\u001b`). That memory is released when the connection reads again or ends.
 pub const OUTPUT_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 /// How long output waits for the budget. A relay that delivers nothing for this long (a stuck
 /// client) does not freeze the terminal: further output is not sent as events, the backlog keeps

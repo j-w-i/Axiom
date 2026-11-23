@@ -6,7 +6,12 @@
 //!   `$topdir/.Trash` is a real directory with the sticky bit) or `$topdir/.Trash-$uid`. The
 //!   entry is renamed into `files/` after its `info/<name>.trashinfo` has reserved the name, so
 //!   the file managers' "Restore" works. Nothing is ever copied across file systems.
-//! - macOS: renamed into `~/.Trash` when on the same volume.
+//! - macOS: renamed into `~/.Trash` when on the same volume. This is a plain rename, not the
+//!   Finder's own "move to trash" (`NSFileManager.trashItem`, which needs Objective-C and
+//!   `unsafe` code this crate does not have): the entry appears in the Trash, but the Finder's
+//!   "Put Back" does not know where it came from, and an entry on another volume (an external
+//!   disk, a second APFS volume) cannot be trashed at all (its per-volume `.Trashes` is the
+//!   Finder's own); that is `Unsupported` and the entry stays where it was.
 //! - Anywhere else, or when no trash can hold the entry: `Unsupported`. Never a permanent
 //!   delete.
 //!
@@ -261,9 +266,15 @@ pub(crate) fn trash(abs: &Path, places: &Places) -> Result<PathBuf, TrashError> 
         return Err(TrashError::Unsupported("There is no home folder.".into()));
     };
     if device_of(home) != Some(dev) {
-        return Err(TrashError::Unsupported(
-            "The entry is on another volume than the trash; it was not moved.".into(),
-        ));
+        let shown = abs.file_name().map_or_else(
+            || "The entry".to_string(),
+            |n| format!("`{}`", n.to_string_lossy()),
+        );
+        return Err(TrashError::Unsupported(format!(
+            "{shown} is on another volume than your home folder, and Axiom can only move items \
+             to the Trash of your home folder's volume. Nothing was moved; use the Finder's Move \
+             to Trash for it"
+        )));
     }
     create_private_dir(home)?;
     let name = abs
@@ -312,6 +323,28 @@ mod tests {
         // 2026-11-23T13:45:07Z
         assert_eq!(format_date(1_795_441_507), "2026-11-23T13:45:07");
         assert_eq!(format_date(951_782_400), "2000-02-29T00:00:00");
+    }
+
+    /// macOS: an entry on another volume than the home trash is refused with a message that
+    /// says so, and stays where it was (review N14).
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn another_volume_is_refused_clearly_and_nothing_moves() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("a.txt");
+        std::fs::write(&f, "a").unwrap();
+        // `/dev` is never the volume of a temp directory.
+        let places = Places {
+            home_trash: Some(PathBuf::from("/dev/axiom-no-such-trash")),
+        };
+        match trash(&f, &places) {
+            Err(TrashError::Unsupported(m)) => {
+                assert!(m.starts_with("`a.txt` is on another volume"), "{m}");
+                assert!(m.contains("Nothing was moved"), "{m}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(f.exists());
     }
 
     #[test]

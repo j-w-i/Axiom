@@ -8,7 +8,6 @@ use crate::error::{display_path, WsError};
 use crate::workspace::{join_err, version_of, Workspace};
 use axiom_protocol::fs::{FileVersion, MAX_TEXT_FILE_BYTES};
 use axiom_protocol::WorkspacePath;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Renames `from` to `to`, failing with `AlreadyExists` if `to` exists, atomically where the
@@ -30,23 +29,6 @@ pub(crate) fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
         return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
     }
     std::fs::rename(from, to)
-}
-
-/// Whether two paths name the same file (a case-only rename on a case-insensitive volume).
-fn same_file(a: &Path, b: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        match (std::fs::symlink_metadata(a), std::fs::symlink_metadata(b)) {
-            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
-            _ => false,
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (a, b);
-        false
-    }
 }
 
 fn io_err(e: std::io::Error, rel: &str) -> WsError {
@@ -107,38 +89,12 @@ impl Workspace {
         };
         let lock = self.lock_for(&abs);
         let _guard = lock.lock().await;
-        let rel = file.0.clone();
+        let ws = self.clone();
+        let file2 = file.clone();
         let bytes = text.as_bytes().to_vec();
         let version = tokio::task::spawn_blocking(move || -> Result<FileVersion, WsError> {
-            let parent = abs
-                .parent()
-                .ok_or_else(|| WsError::InvalidPath("No parent directory.".into()))?;
-            match std::fs::metadata(parent) {
-                Ok(m) if m.is_dir() => {}
-                Ok(_) => return Err(WsError::NotADirectory(display_path(&rel))),
-                Err(e) => return Err(WsError::from_io(e, &rel)),
-            }
-            if std::fs::symlink_metadata(&abs).is_ok() {
-                return Err(WsError::AlreadyExists(display_path(&rel)));
-            }
-            let mut builder = tempfile::Builder::new();
-            builder.prefix(".axiom-tmp-");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                builder.permissions(std::fs::Permissions::from_mode(0o644));
-            }
-            let mut tmp = builder
-                .tempfile_in(parent)
-                .map_err(|e| WsError::from_io(e, &rel))?;
-            tmp.write_all(&bytes)
-                .map_err(|e| WsError::from_io(e, &rel))?;
-            tmp.as_file()
-                .sync_all()
-                .map_err(|e| WsError::from_io(e, &rel))?;
-            tmp.persist_noclobber(&abs)
-                .map_err(|e| io_err(e.error, &rel))?;
-            Ok(version_of(&bytes))
+            ws.recheck(&file2, &abs, true, None)?;
+            create_file_blocking(ws.root(), &abs, &file2.0, &bytes)
         })
         .await
         .map_err(join_err)??;
@@ -155,6 +111,9 @@ impl Workspace {
         tokio::task::spawn_blocking(move || -> Result<(), WsError> {
             let abs = ws.resolve_entry(&dir)?;
             let rel = dir.0.as_str();
+            // Created by path: a directory above swapped for a symlink in between could still
+            // redirect the missing directories `parents` creates (empty ones; review N14). The
+            // last one is created in its parent opened without following symlinks (Unix).
             if parents {
                 if let Some(parent) = abs.parent() {
                     // `resolve` canonicalised every existing ancestor and checked containment, so
@@ -167,7 +126,18 @@ impl Workspace {
                     })?;
                 }
             }
-            std::fs::create_dir(&abs).map_err(|e| io_err(e, rel))
+            ws.recheck(&dir, &abs, true, None)?;
+            #[cfg(unix)]
+            {
+                let (parent, name) = crate::workspace::split(&abs, rel)?;
+                crate::beneath::Dir::open_beneath(ws.root(), parent, rel)?
+                    .mkdir(name)
+                    .map_err(|e| io_err(e, rel))
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::create_dir(&abs).map_err(|e| io_err(e, rel))
+            }
         })
         .await
         .map_err(join_err)?
@@ -208,23 +178,12 @@ impl Workspace {
         };
         let _g1 = first.lock().await;
         let _g2 = second.lock().await;
-        let (rf, rt) = (from.0.clone(), to.0.clone());
+        let ws = self.clone();
+        let (from2, to2) = (from.clone(), to.clone());
         tokio::task::spawn_blocking(move || -> Result<(), WsError> {
-            std::fs::symlink_metadata(&src).map_err(|e| WsError::from_io(e, &rf))?;
-            match std::fs::metadata(dst.parent().unwrap_or(&dst)) {
-                Ok(m) if m.is_dir() => {}
-                Ok(_) => return Err(WsError::NotADirectory(display_path(&rt))),
-                Err(e) => return Err(WsError::from_io(e, &rt)),
-            }
-            match rename_noreplace(&src, &dst) {
-                Ok(()) => Ok(()),
-                Err(e)
-                    if e.kind() == std::io::ErrorKind::AlreadyExists && same_file(&src, &dst) =>
-                {
-                    std::fs::rename(&src, &dst).map_err(|e| WsError::from_io(e, &rf))
-                }
-                Err(e) => Err(io_err(e, &rt)),
-            }
+            ws.recheck(&from2, &src, true, None)?;
+            ws.recheck(&to2, &dst, true, None)?;
+            rename_blocking(ws.root(), &src, &dst, &from2.0, &to2.0)
         })
         .await
         .map_err(join_err)??;
@@ -246,17 +205,111 @@ impl Workspace {
         };
         let lock = self.lock_for(&abs);
         let _guard = lock.lock().await;
-        let rel = path.0.clone();
+        let ws = self.clone();
+        let path2 = path.clone();
         tokio::task::spawn_blocking(move || {
-            std::fs::symlink_metadata(&abs).map_err(|e| WsError::from_io(e, &rel))?;
+            let rel = path2.0.as_str();
+            // Checked right before; the move itself is by path (the trash is outside the
+            // workspace), so a swap in the moment between is not caught (review N14).
+            ws.recheck(&path2, &abs, true, None)?;
+            std::fs::symlink_metadata(&abs).map_err(|e| WsError::from_io(e, rel))?;
             crate::trash::trash(&abs, &crate::trash::Places::from_env()).map_err(|e| match e {
                 crate::trash::TrashError::Unsupported(m) => WsError::Unsupported(m),
-                crate::trash::TrashError::Io(e) => WsError::from_io(e, &rel),
+                crate::trash::TrashError::Io(e) => WsError::from_io(e, rel),
             })
         })
         .await
         .map_err(join_err)??;
         self.inner.ignores.invalidate_for_write(&path.0);
         Ok(())
+    }
+}
+
+/// [`Workspace::create_file`]'s write: a temp file in the directory, renamed onto the name
+/// without replacing. On Unix in the directory opened without following symlinks (review N14).
+fn create_file_blocking(
+    root: &Path,
+    abs: &Path,
+    rel: &str,
+    bytes: &[u8],
+) -> Result<FileVersion, WsError> {
+    #[cfg(unix)]
+    {
+        let (parent, name) = crate::workspace::split(abs, rel)?;
+        let dir = crate::beneath::Dir::open_beneath(root, parent, rel)?;
+        if dir.kind_of(name, rel)?.is_some() {
+            return Err(WsError::AlreadyExists(display_path(rel)));
+        }
+        dir.temp_with(bytes, None, rel)?
+            .rename_to(name, false)
+            .map_err(|e| io_err(e, rel))?;
+        Ok(version_of(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = root;
+        let parent = abs
+            .parent()
+            .ok_or_else(|| WsError::InvalidPath("No parent directory.".into()))?;
+        match std::fs::metadata(parent) {
+            Ok(m) if m.is_dir() => {}
+            Ok(_) => return Err(WsError::NotADirectory(display_path(rel))),
+            Err(e) => return Err(WsError::from_io(e, rel)),
+        }
+        if std::fs::symlink_metadata(abs).is_ok() {
+            return Err(WsError::AlreadyExists(display_path(rel)));
+        }
+        let mut tmp = tempfile::Builder::new()
+            .prefix(".axiom-tmp-")
+            .tempfile_in(parent)
+            .map_err(|e| WsError::from_io(e, rel))?;
+        std::io::Write::write_all(&mut tmp, bytes).map_err(|e| WsError::from_io(e, rel))?;
+        tmp.as_file()
+            .sync_all()
+            .map_err(|e| WsError::from_io(e, rel))?;
+        tmp.persist_noclobber(abs)
+            .map_err(|e| io_err(e.error, rel))?;
+        Ok(version_of(bytes))
+    }
+}
+
+/// [`Workspace::rename`]'s move. On Unix between the two directories opened without following
+/// symlinks (review N14).
+fn rename_blocking(root: &Path, src: &Path, dst: &Path, rf: &str, rt: &str) -> Result<(), WsError> {
+    #[cfg(unix)]
+    {
+        use crate::beneath::{rename, rename_noreplace, Dir};
+        let (sp, sn) = crate::workspace::split(src, rf)?;
+        let (dp, dn) = crate::workspace::split(dst, rt)?;
+        let a = Dir::open_beneath(root, sp, rf)?;
+        let Some(from) = a.kind_of(sn, rf)? else {
+            return Err(WsError::NotFound(display_path(rf)));
+        };
+        let b = Dir::open_beneath(root, dp, rt)?;
+        match rename_noreplace(&a, sn, &b, dn) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // A case-only rename of the same entry on a case-insensitive volume.
+                match b.kind_of(dn, rt)? {
+                    Some(to) if to.dev == from.dev && to.ino == from.ino => {
+                        rename(&a, sn, &b, dn).map_err(|e| WsError::from_io(e, rf))
+                    }
+                    _ => Err(io_err(e, rt)),
+                }
+            }
+            Err(e) => Err(io_err(e, rt)),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = root;
+        std::fs::symlink_metadata(src).map_err(|e| WsError::from_io(e, rf))?;
+        match std::fs::metadata(dst.parent().unwrap_or(dst)) {
+            Ok(m) if m.is_dir() => {}
+            Ok(_) => return Err(WsError::NotADirectory(display_path(rt))),
+            Err(e) => return Err(WsError::from_io(e, rt)),
+        }
+        // (No case-only rename here: the platform has no way to tell the same entry.)
+        rename_noreplace(src, dst).map_err(|e| io_err(e, rt))
     }
 }

@@ -68,6 +68,44 @@ async fn negotiated_version_is_min_of_minors() {
     assert_eq!(r.protocol_version, axiom_protocol::PROTOCOL_VERSION);
 }
 
+/// ipc.md §Protocol 0.6: methods are not gated by the negotiated minor. A 0.5 client gets
+/// `0.5`, sees the 0.6 file operations in `initialize.methods`, and is answered if it calls one.
+#[tokio::test]
+async fn a_lower_minor_client_sees_and_can_call_the_newer_methods() {
+    let d = Daemon::spawn().await;
+    let r = d
+        .client
+        .request::<Initialize>(InitializeParams {
+            protocol_version: "0.5".into(),
+            ..client_info()
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.protocol_version, "0.5");
+    for m in [
+        "fs/createFile",
+        "fs/createDirectory",
+        "fs/rename",
+        "fs/trash",
+    ] {
+        assert!(
+            r.methods.iter().any(|x| x == m),
+            "{m} missing: {:?}",
+            r.methods
+        );
+    }
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    d.client
+        .request::<axiom_protocol::fs::CreateDirectory>(axiom_protocol::fs::CreateDirectoryParams {
+            workspace_id: f.id.clone(),
+            path: wp("made"),
+            parents: false,
+        })
+        .await
+        .unwrap();
+    assert!(f.path("made").is_dir());
+}
+
 #[tokio::test]
 async fn second_initialize_is_invalid_request() {
     let d = Daemon::ready().await;
@@ -201,11 +239,50 @@ async fn a_data_dir_that_is_a_file_fails_with_one_stderr_line() {
 }
 
 /// A daemon killed from outside (a crash) leaves its data dir usable: the next daemon starts on
-/// it, answers, and takes over the local socket. Unix only: the local socket and its token are
-/// (on Windows, deferred, every client starts its own daemon over stdio; `socket.rs`).
-#[cfg(unix)]
+/// it, finds what the first one recorded, and can open the same workspace again. Every OS; the
+/// local socket's takeover is the Unix-only test below.
 #[tokio::test]
 async fn a_killed_daemon_can_be_restarted_on_the_same_data_dir() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let open = || axiom_protocol::workspace::OpenParams {
+        path: ws.path().to_str().unwrap().to_string(),
+    };
+    let mut d = Daemon::ready_in(data.path()).await;
+    let first = d
+        .client
+        .request::<axiom_protocol::workspace::Open>(open())
+        .await
+        .unwrap();
+    d.child.start_kill().unwrap();
+    let _ = d.child.wait().await;
+
+    let d2 = Daemon::ready_in(data.path()).await;
+    let recent = d2
+        .client
+        .request::<axiom_protocol::workspace::Recent>(Empty {})
+        .await
+        .unwrap();
+    assert!(
+        recent.workspaces.iter().any(|w| w.root == first.root),
+        "the restarted daemon lost what the killed one recorded: {:?}",
+        recent.workspaces
+    );
+    let again = d2
+        .client
+        .request::<axiom_protocol::workspace::Open>(open())
+        .await
+        .unwrap();
+    assert_eq!(again.root, first.root);
+    assert_eq!(d2.shutdown().await.code(), Some(0));
+}
+
+/// A daemon started on the data dir of a killed one takes over its local socket (a new token).
+/// Unix only: the local socket and its token are (on Windows, deferred, every client starts its
+/// own daemon over stdio; `socket.rs`).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_restarted_daemon_takes_over_the_killed_ones_socket() {
     let data = tempfile::tempdir().unwrap();
     let mut d = Daemon::ready_in(data.path()).await;
     let token = data.path().join("run/axiomd.token");
@@ -234,4 +311,34 @@ async fn a_killed_daemon_can_be_restarted_on_the_same_data_dir() {
     }
     assert!(replaced, "the new daemon did not take over the socket");
     assert_eq!(d2.shutdown().await.code(), Some(0));
+}
+
+/// Tests that skip at the same time record whole lines in the skipped list (review N16: a
+/// `writeln!` with arguments is several writes, and two of them interleaved).
+#[test]
+fn skipped_tests_recorded_at_once_keep_their_lines_whole() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("skipped-tests.txt");
+    let threads: Vec<_> = (0..8)
+        .map(|t| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let what = format!("test-{t}");
+                let why = format!("missing tool {t}");
+                for _ in 0..400 {
+                    append_skip_line(&path, &what, &why);
+                }
+            })
+        })
+        .collect();
+    for t in threads {
+        t.join().unwrap();
+    }
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 8 * 400);
+    for l in lines {
+        let ok = (0..8).any(|t| l == format!("test-{t}: missing tool {t}"));
+        assert!(ok, "interleaved line: {l:?}");
+    }
 }

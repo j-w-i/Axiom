@@ -134,3 +134,45 @@ async fn a_folder_outside_a_repository() {
         .unwrap_err();
     assert_eq!(kind(&e), ErrorKind::GitUnavailable);
 }
+
+/// AUD-012, review N14: a repository whose change watch cannot be made is polled, and the very
+/// first `git/status` already says so. The `git` here is a stand-in whose repository directory
+/// does not exist, so the watch of it fails while `status` works.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_first_status_says_the_repository_is_polled() {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = tempfile::tempdir().unwrap();
+    let missing = bin.path().join("no-such-git-dir");
+    let git = bin.path().join("git");
+    std::fs::write(
+        &git,
+        format!(
+            "#!/bin/sh\n\
+             case \"$*\" in\n\
+             *rev-parse*) printf '%s\\n%s\\n\\n' \"$(pwd -P)\" '{}' ;;\n\
+             *status*) printf '# branch.oid (initial)\\000# branch.head main\\000' ;;\n\
+             *) exit 1 ;;\n\
+             esac\n",
+            missing.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("PATH", bin.path());
+    })
+    .await;
+    d.initialize().await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    let st = d
+        .client
+        .request::<Status>(WorkspaceRef {
+            workspace_id: f.id.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(st.repo, "{st:?}");
+    assert!(st.polling, "the first status: {st:?}");
+}

@@ -19,22 +19,55 @@ fn fake_server(delay: &str) -> Vec<String> {
     ]
 }
 
+/// A fake dev server that prints its address only once `go` exists, so a test decides when it
+/// becomes ready instead of racing a delay.
+fn gated_server(go: &std::path::Path) -> Vec<String> {
+    vec![
+        "sh".into(),
+        "-c".into(),
+        format!(
+            "while [ ! -e \"{}\" ]; do sleep 0.05; done; \
+             echo '  Local:   http://127.0.0.1:5999/'; exec sleep 60",
+            go.display()
+        ),
+    ]
+}
+
 #[tokio::test]
 async fn a_cancelled_start_still_becomes_ready() {
     let d = Daemon::ready().await;
     let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    let gate = tempfile::tempdir().unwrap();
+    let go = gate.path().join("go");
     let (id, fut) = d.client.request_with_id::<Start>(StartParams {
         workspace_id: f.id.clone(),
-        argv: Some(fake_server("1")),
+        argv: Some(gated_server(&go)),
     });
     let req = tokio::spawn(fut);
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Cancel once the preview exists and is still starting (its server waits for `go`).
+    let mut starting = false;
+    for _ in 0..100 {
+        let l = d
+            .client
+            .request::<List>(WorkspaceRef {
+                workspace_id: f.id.clone(),
+            })
+            .await
+            .unwrap();
+        if l.previews.iter().any(|p| p.state == PreviewState::Starting) {
+            starting = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(starting, "the preview never appeared");
     d.client
         .notify::<axiom_protocol::lifecycle::Cancel>(CancelParams { id })
         .await;
     let e = req.await.unwrap().unwrap_err();
     assert_eq!(kind(&e), axiom_protocol::ErrorKind::Cancelled);
     // The server prints its address after the request is gone: the preview is ready.
+    std::fs::write(&go, "").unwrap();
     let mut ready = None;
     for _ in 0..100 {
         tokio::time::sleep(Duration::from_millis(50)).await;
