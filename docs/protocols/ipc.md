@@ -351,7 +351,8 @@ Additive only, under the same rules: the daemon reports `0.5`. Types:
 
 ## Protocol 0.6 (audit AUD-022)
 
-Additive only: four methods, no new notification, no new error kind; the daemon reports `0.6`,
+Additive only: four methods, one optional field (`GitStatus.polling`, AUD-012: absent unless
+the repository is polled), no new notification, no new error kind; the daemon reports `0.6`,
 and a 0.5 client gets `0.5` and unchanged behaviour for every method it already calls.
 `initialize.methods` lists every method the daemon serves whatever minor was negotiated, so a
 0.5 client sees the four there too, and the daemon answers them if it calls them; methods are

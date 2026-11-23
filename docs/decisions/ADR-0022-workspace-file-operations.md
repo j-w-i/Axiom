@@ -17,7 +17,8 @@ ADR included (review N15).
 
 ## Decisions
 
-1. **Protocol 0.6, a MINOR change: four new methods, no existing type changed.**
+1. **Protocol 0.6, a MINOR change: four new methods; the only change to an existing type is
+   the optional `GitStatus.polling` (AUD-012, absent unless the repository is polled).**
 
    | Method | Params → Result |
    |--------|-----------------|

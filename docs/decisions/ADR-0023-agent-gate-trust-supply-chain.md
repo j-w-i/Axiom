@@ -26,9 +26,11 @@ every finding to be resolved, this ADR included (review N15).
    protected paths, opaque calls (MCP, managed installs) or target-less calls other than reads.
    An ACP terminal's environment is part of its conditions with every value compared whole (a
    long value by its SHA-256).
-2. **Protected paths always ask.** A write under `.axiom/` (the workspace policy and providers)
-   or `.git/` at any depth (nested repositories, submodules) asks every time, whatever a policy
-   rule, a grant or an ACP permission says. The gate judges the path the file really has,
+2. **Protected paths always ask.** A write under `.axiom/` (the workspace policy and providers),
+   a `.git` directory at any depth (nested repositories, submodules), a bare repository's
+   `<name>.git/`, `.husky/`, or the workspace's own configured `core.hooksPath` asks every time,
+   whatever a policy rule, a grant or an ACP permission says (what is not covered: `security.md`
+   §Agent permissions). The gate judges the path the file really has,
    through symlinks inside the workspace (`Workspace::canonical_path`), and the write refuses
    if the path no longer resolves there (`write_text_checked`).
 3. **Principals are per connection.** `agent/toolCall` accepts `cli` / `mcp:<name>`; the daemon
@@ -36,8 +38,9 @@ every finding to be resolved, this ADR included (review N15).
 4. **ACP permissions.** Only the person's approval of an edit covers the agent's writes, and the
    approved paths are compared literally (a file named `src/*` is not a glob). An approved
    execute covers the next terminal running the shown command; the terminal's env and cwd are
-   on the card and asked for even under an argv rule. A session reaches only the terminals its
-   own agent created.
+   on the card and asked for even under an argv rule; `outputByteLimit` is at most 16 MiB and
+   non-string `args` are refused. A terminal belongs to the session that created it: its agent
+   reaches it again after an idle reap and resume, and another session's agent is refused.
 5. **Agent tools.** `build.run` gains `timeoutSecs` (default 600, at most 3600) and refuses with
    `conflict` when the task changed after approval. `env.install` runs only the same
    principal's plan, never a system plan, and its card lists the plan; `env.planInstall`
@@ -45,16 +48,24 @@ every finding to be resolved, this ADR included (review N15).
 6. **Agent-started processes do not get the daemon's secrets**: variables whose names look
    secret (`_TOKEN`, `_KEY`, `_SECRET`, `_CREDENTIALS`, `_PAT`, `_AUTH`, `DATABASE_URL`,
    `PASSWORD`, `PASSWD`, `SSH_AUTH_SOCK`) and the model providers' `apiKeyEnv` variables, unless
-   settings `agent.passEnv` names them. This is hygiene, not a boundary (`security.md`
-   §Processes).
+   settings `agent.passEnv` names them; a withheld `SSH_AUTH_SOCK` is named first on the card,
+   with how to pass it. External ACP agents and MCP servers keep the daemon's environment
+   except the `apiKeyEnv` variables, and `env.install` programs get all of it. This is hygiene,
+   not a boundary (`security.md` §Processes).
 7. **Approval prompts are not held back by a stuck connection.** They go to every approving
-   connection at once; each send waits at most 10 s (`APPROVAL_DELIVERY`) for room on a full
-   queue, much longer than the 0.5 s other relays allow, because a prompt is for the person.
+   connection at once, while the gate already waits for the answer and the cancel; each send
+   waits at most 10 s (`APPROVAL_DELIVERY`) for room on a full queue, much longer than the
+   0.5 s other relays allow, because a prompt is for the person. A call fails
+   `approval_required` only when the delivery reached no approver; an approver that attaches
+   meanwhile is kept, and the resolution is never waited for on a connection that is not
+   reading.
 8. **Untrusted folders.** A built-in language server that would run the project's code runs
    restricted or not at all until the folder is trusted (`security.md` §Terminals and language
    servers). A refused one reports `state: "stopped"` with `detail` starting "Trust this folder
    to enable"; a restricted one starts "Restricted until you trust this folder".
-9. **Supply chain.** System package names are validated (a leading `-` is refused); built-in
+9. **External agents and MCP servers run in their own process groups**, registered with the
+   daemon's exit watchdog; stopping one kills its whole group (`nix` on Unix, as `exec` does).
+10. **Supply chain.** System package names are validated (a leading `-` is refused); built-in
    bootstraps name a release; checksum-file digests are pinned on first use.
 
 ## Consequences
@@ -69,7 +80,9 @@ every finding to be resolved, this ADR included (review N15).
 - jdtls in restricted mode disables Gradle and Maven import; an Eclipse-format project with
   annotation processing enabled can still run its processor JARs (no jdtls setting turns that
   off; turning off autobuild would also drop whole-project diagnostics). Recorded in
-  `security.md`.
+  `security.md`. **Open for the owner:** refusing jdtls entirely in untrusted folders (as other
+  editors fall back to a syntax-only server there) would close it, at the cost of Java
+  language features until the folder is trusted.
 
 ## Alternatives rejected
 

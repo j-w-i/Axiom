@@ -51,9 +51,18 @@ write the workspace can usually write `.git/hooks` itself):
 - Unix, still by path: `create_dir` with `parents` creates the intermediate directories by
   path (the last one no-follow); `trash` moves by path after its re-check; `fs/list` and the
   LSP's reads of files outside the workspace (`read_regular_file`) read by path; checkpoint
-  restores re-check containment, then rename by path.
+  restores check containment, that no directory on the way is a symlink and that the path is
+  not inside a git directory (before anything changes, and again right before the rename),
+  then rename by path.
+- Descendants of an external agent or MCP server that leave its process group (`setsid`, a
+  daemonising launcher) are neither killed with it nor watched.
 - The root itself is opened by its canonical path: swapping the root or an ancestor is out of
   scope.
+- Reads through hard links and bind mounts: containment is by path, so a hard link inside the
+  workspace to a file outside it (the person's credentials, say), or a bind mount, is read by
+  `fs/readFile` and the agent's read tools like any workspace file. Telling them apart needs
+  the file's identity (device, inode, link count) checked against the workspace, which is not
+  done; writes are not affected (they replace the entry).
 
 ## Managed installs (M2, enforced in `axiom-env`; as built by M2-ENV-002)
 
@@ -237,10 +246,17 @@ The Tauri shell's controls, kept as the record of how it was built:
   `.axiom/project.toml` `[agent.policy]` can only make a decision stricter (the stricter of
   the two wins). Path globs are matched in `O(pattern × path)` (AUD-106: the recursive matcher
   was exponential in the number of `*`, and the workspace's patterns are untrusted).
-- **Protected paths** (AUD-104). A write or delete under `.axiom/` (the workspace policy, its
-  providers' tasks and language servers) or `.git/` (hooks run on the person's next commit)
-  always asks, whatever a policy rule, a session grant or an ACP permission says, and cannot be
-  allowed for the session. Reading them is not restricted.
+- **Protected paths** (AUD-104, review B4 and D-round). A write or delete under `.axiom/` (the
+  workspace policy, its providers' tasks and language servers), a `.git` directory at any depth
+  (hooks run on the person's next commit), a bare repository's `<name>.git/` (its `hooks/` run
+  on a push to it), `.husky/` at any depth, or the directory the workspace's own `.git/config`
+  names in `core.hooksPath` (when inside the workspace) always asks, whatever a policy rule, a
+  session grant or an ACP permission says, and cannot be allowed for the session. The gate
+  judges the path through symlinks inside the workspace, and the write refuses if it no longer
+  resolves there (§Paths). Reading them is not restricted. Not covered: a `core.hooksPath` set
+  by an included file, the global or system configuration, `git -c`/`GIT_CONFIG_*` or
+  `config.worktree`; the configuration of a repository a `.git` file points to (worktrees,
+  submodules); and a `hooksPath` naming the workspace root itself.
 - **What the card shows is what is approved.** The targets are the paths, the argv (arguments
   with spaces or control characters quoted) and the call's *conditions*: an environment
   variable an ACP agent sets, a working directory other than the root, `build.run`'s provider
@@ -251,7 +267,12 @@ The Tauri shell's controls, kept as the record of how it was built:
   the plan (provider, version, every download and how it is verified, every command) and runs
   only a plan the same principal made with `env.planInstall`; never a system plan (AUD-041).
 - **Asking.** `ask` goes to connections that declared `capabilities.approvals`. With none, the
-  call fails `approval_required` and does not run. The first answer wins.
+  call fails `approval_required` and does not run. The first answer wins. The prompt is
+  delivered to every approver concurrently with waiting for the answer and the cancel; each
+  delivery waits at most `APPROVAL_DELIVERY` (10 s) for room on a full queue, and the call fails
+  `approval_required` only when the delivery reached no approver. An approver that attaches
+  meanwhile is kept, and the resolution is never waited for on a connection that is not reading
+  (review R4, C3, D1).
 - **"Allow for session"** (as built by AUD-009). It records exactly the approved call: the same
   tool, effect, paths, argv (not a prefix: `["rm", "x"]` never covers `["rm", "x", "-rf", "/"]`)
   and conditions, in the same workspace, for that principal only. It is not offered (and an

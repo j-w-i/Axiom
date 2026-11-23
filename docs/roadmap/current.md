@@ -8,14 +8,16 @@ A comprehensive audit of `main` at `751ffc2` (2026-11-22) found 112 issues: 1 P0
 50 P3 (`audits/comprehensive-audit/`). The owner authorised fixing all of them; the work is on
 branch `task/audit-remediation` (task AUD-REM-001), committed in the batches of
 `audits/comprehensive-audit/REMEDIATION_PLAN.md`. Issue statuses are in
-`audits/comprehensive-audit/ISSUES.md`. All 112 are fixed (task status `implemented`, PR
-j-w-i/Axiom#13). An independent review requested changes (blocking B1–B6); they were fixed and
-the re-review passed, conditional on CI's Flutter jobs. Its non-blocking findings (R1–R5,
-N1–N18) were then fixed or documented as well; the two change requests became ADR-0022 and
-ADR-0023.
+`audits/comprehensive-audit/ISSUES.md`: all 112 are marked fixed, five of them with a
+qualification (a deviation, a residual risk, a contract limit, a kept owner binding, a review
+hand-off). Task status `implemented`, PR j-w-i/Axiom#13. An independent review requested
+changes (blocking B1–B6); they were fixed and the re-review passed. Its follow-up findings
+(R1–R5, N1–N18) were fixed or documented, and the two change requests became ADR-0022 and
+ADR-0023; a review of that round requested changes again (C1–C4, D1–D7), which are being
+fixed.
 
-**Next: CI green on the PR, the review's sign-off on the follow-ups, then the task to `verified`
-and the merge to main; then M6.**
+**Next: fix C1–C4 and D1–D7, CI green on the PR, the review's sign-off, then the task to
+`verified` and the merge to main; then M6.**
 
 ## M5.5 — Every language: complete (2026-11-22)
 

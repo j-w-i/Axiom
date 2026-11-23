@@ -55,12 +55,16 @@ daemon exit by design: they are killed.
   - A group is unregistered when its leader has ended, so the watchdog does not signal a
     number that a later process may have reused. A terminal's group is unregistered once its
     process has been reaped, also when the `terminal/exited` relay lagged and dropped the
-    event; an external agent's or MCP server's once its leader has been reaped (review N13).
+    event. Registrations are counted per owner: one owner's unregister does not drop
+    another's (review D5).
   - Registering never blocks the daemon: the lines go through a channel to a thread of their
     own, which writes the pipe.
-  - Stopping an external agent or an MCP server (session deleted, idle, daemon shutdown)
-    signals its leader only, and its group is unregistered once the leader has been reaped:
-    a process the agent started and left running after that is not covered.
+  - Stopping an external agent or an MCP server (session deleted, idle reap, MCP restart,
+    daemon shutdown) SIGKILLs its whole process group while the leader is still unreaped, then
+    reaps the leader and unregisters the group. One whose leader exited by itself stays
+    registered while its group still has members, and the group is killed with its handle
+    (review N13, D2). A process that leaves the group (`setsid`, a daemonising launcher) is
+    not covered.
 
 ## Threads and async
 

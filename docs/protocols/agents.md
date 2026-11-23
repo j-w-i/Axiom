@@ -142,7 +142,11 @@ cards and the audit log show `mcp:<client name>#c<n>` / `cli#c<n>` (AUD-009).
 Processes an agent starts (`task.run`, `build.run`, `acp.terminal`) do not get the daemon's
 secret-looking variables or the providers' `apiKeyEnv` variables, unless settings
 `agent.passEnv` names them; the card says how many are withheld (`security.md` §Processes;
-AUD-010). Output is kept as a bounded tail while a command runs.
+AUD-010). `SSH_AUTH_SOCK` is among them (review N7), so an agent's `git push` or `fetch` over
+SSH, SSH commit signing and `git+ssh` dependencies fail unless the person adds it to
+`agent.passEnv`; external ACP agents and MCP servers keep it. When it is withheld, the card
+names it first and says how to pass it. Output is kept as a bounded tail while a command
+runs.
 
 ## Permission policy
 
@@ -171,8 +175,10 @@ decision = "deny"
   offered for `credentials`, `deploy`, protected paths, opaque calls (MCP tools, installs) or
   calls without targets other than reads; it ends when the session is deleted, rewound or
   restored, or the external principal's connection closes (AUD-009).
-- Protected paths: a write or delete under `.axiom/` or `.git/` always asks, whatever the
-  policy or a grant says (AUD-104).
+- Protected paths: a write or delete under `.axiom/`, a `.git` directory at any depth, a bare
+  repository's `<name>.git/`, `.husky/`, or the workspace's configured `core.hooksPath` (read
+  from its own `.git/config`) always asks, whatever the policy or a grant says; the path is
+  judged through symlinks (AUD-104, review B4 and D-round).
 - A call whose conditions change what an approved command does (an agent-set variable, a
   working directory other than the root) asks even where a rule allows its argv (AUD-039).
 - `path` globs are matched in linear time per candidate (AUD-106).
@@ -193,6 +199,12 @@ repositories. The workspace's `.gitignore` files apply; files over 16 MiB are sk
   if its content equals what the agent last left; otherwise it is a conflict
   (`modifiedSinceAgent`, `deletedSinceAgent`, `createdSinceAgent`). With conflicts nothing is
   restored unless `skipConflicts`. Restore takes a checkpoint first.
+- A restore writes a new file and renames it over the entry (a hard link is never written
+  through), never writes through a directory that is a symlink (unless the restore itself
+  removes that symlink first), and never writes into a git directory (`.git`, `<name>.git`):
+  such a restore is refused before anything changes. `.axiom/` is restored like any file (a
+  restore is the person's own undo). A restored file keeps the permission bits of the file it
+  replaces, without setuid, setgid or sticky (review R5, D4).
 - As built (M3-CKPT-001): the private index is `axiom-index` in the shadow dir; the agent's
   latest state is `refs/axiom/<session>/post`, taken after each writing tool; a restore with
   conflicts changes nothing (not even the undo checkpoint) unless `skipConflicts`. Nested
@@ -296,7 +308,9 @@ ADR-0015 §7.
   - **Terminals.** `acp.terminal` shows the variables the agent sets and its working directory
     on the card (they ask even under an argv rule); `outputByteLimit` is capped at 16 MiB;
     non-string `args` are refused. A deleted session's terminals, and a closed workspace's, are
-    dropped (AUD-039, AUD-099).
+    dropped (AUD-039, AUD-099). A terminal belongs to the session that created it (its
+    principal), not to the agent process: after an idle reap and resume the agent still
+    reaches its terminals; another session's agent is refused (review N5, D5).
   - **Lifetime.** An agent whose process ended is started again on the next turn; agents and
     MCP servers start without holding the daemon-wide maps (AUD-032).
   - **Updates.** Message and thought chunks become `textDelta` + `assistantText` (thoughts with

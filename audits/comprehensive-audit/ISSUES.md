@@ -793,7 +793,7 @@ in the referenced `evidence/static/` section, which is part of each entry's evid
 
 ## P3 — Low
 
-Compact entries. Fields not listed are: Dependencies none, Risk low, Status Not started.
+Compact entries. Fields not listed are: Dependencies none, Risk low.
 
 ### AUD-063 — The "Cannot open X: not UTF-8" banner stays on other documents
 - **Category:** GUI · **Confidence:** Confirmed (runtime)
@@ -803,6 +803,7 @@ Compact entries. Fields not listed are: Dependencies none, Risk low, Status Not 
 - **Root cause:** The banner is not tied to a document or cleared on successful open.
 - **Proposed fix:** Clear on the next successful open/activation, or show it as a toast.
 - **Verification:** Repro R7 asserts `banner == ''`.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-064 — The status bar's hint line keeps a stale hint when the hovered control disappears
 - **Category:** GUI · **Confidence:** Confirmed (runtime)
@@ -810,6 +811,7 @@ Compact entries. Fields not listed are: Dependencies none, Risk low, Status Not 
 - **Description / evidence:** `repro-R3-tabs-16.png` shows "Restart the Backend" in the hint line long after that button was removed. FUI-21 (Flutter does not call `onExit` on unmount).
 - **Proposed fix:** Clear the hint in `Pressable.dispose` when it owns the current hint.
 - **Verification:** Widget test: hover then unmount → hint null.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-065 — A failed language server logs one line per keystroke
 - **Category:** Reliability / Diagnostics · **Confidence:** Confirmed (runtime)
@@ -817,6 +819,7 @@ Compact entries. Fields not listed are: Dependencies none, Risk low, Status Not 
 - **Description / evidence:** With rustup's `rust-analyzer` stub missing, every edit prints `lsp textDocument/didChange: The language server exited while starting…` (55 lines in `perf-run-2.log`); each keystroke still issues a request to a failed server.
 - **Proposed fix:** Stop sending to a server in `failed` state; log the failure once.
 - **Verification:** Test with a failing fake-lsp: one log line, no requests after failure.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-066 — Folder-gone and other errors show internal wording; the Dismiss button is misaligned
 - **Category:** Usability / Visual · **Confidence:** Confirmed (runtime)
@@ -824,153 +827,200 @@ Compact entries. Fields not listed are: Dependencies none, Risk low, Status Not 
 - **Description / evidence:** `48-folder-deleted.png`: "Could not list the folder: \`the workspace root\` was not found." (Markdown backticks, internal noun) with "Dismiss" left-aligned under a centred title; the explorer still lists the deleted folder's files.
 - **Proposed fix:** Map `not_found` on the root to "The folder ‹name› was moved or deleted." with actions Close Folder / Locate…; centre actions; clear the tree.
 - **Verification:** e2e: delete the open folder → message and actions as specified.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-067 — Search's truncation message is unclear
 - **Category:** Usability · **Confidence:** Confirmed (runtime)
 - **Description / evidence:** `23-search-results.png`: "2000+ results in 2000 files (the first shown)" when 3 000 files matched; no way to see more or narrow automatically.
 - **Proposed fix:** "Showing the first 2 000 results. Refine the search or add an include filter." with a "Search all" action if limits allow.
 - **Verification:** Widget test on the summary text.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-068 — Environments offers "Install…" for a toolchain it already reports Ready
 - **Category:** Usability · **Confidence:** Confirmed (runtime)
 - **Description / evidence:** `27-environments.png`: Rust "Ready (system)" in the project table and "Install…" under All toolchains.
 - **Proposed fix:** Show "Installed (system) · Manage" in the catalogue for detected toolchains.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-069 — Status dots' cut-out ring does not match the surface (halo in dark mode)
 - **Category:** Visual · **Confidence:** Confirmed (code) · FUI-22. **Fix:** draw the ring in the parent's surface colour or drop it.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-070 — Some focusable controls have no visible focus ring
 - **Category:** Accessibility · **Confidence:** Confirmed (code) · FUI-23 (chat row "More" menu, language-server status segment). **Fix:** wrap in `FocusRing`. N7.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-071 — `Pressable` drops the focusable/focused semantics flags
 - **Category:** Accessibility · **Confidence:** Suspected · FUI-24. **Fix:** forward `focusable`/`focused` in the outer `Semantics`. **Verification:** semantics test.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-072 — Rebuild scope is too wide for shell-level state
 - **Category:** Performance / Architecture · **Confidence:** Confirmed (code); impact within budget in the measured scenarios
 - **Description:** Opening the palette and each splitter step rebuild the whole shell row including the editor; `AxTabs` builds twice per parent rebuild; LSP popups rebuild the code view; streaming chat rebuilds the whole Chat view; Problems is rebuilt and sorted three times per console rebuild (FUI-25, FS-F15). `frames.sh` splitter drag build p50 6.1 ms / max 17.5 ms is consistent with this.
 - **Fix:** Narrow `ListenableBuilder`s (selectors per field), lift the editor subtree out of the shell row's rebuild, memoise Problems.
 - **Verification:** Rebuild-count test (debug `debugOnRebuildDirtyWidget`) for palette open and splitter drag.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-073 — Text fields have no context menu (Cut/Copy/Paste) and rebuild on every keystroke
 - **Category:** Usability · **Confidence:** Confirmed (code) · FUI-26. **Fix:** add a widgets-layer context menu to `AxTextInput` (and the editor).
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-074 — Switching console views discards Output's prompt text, scroll and selection
 - **Category:** Usability · **Confidence:** Confirmed (code) · FUI-27. **Fix:** keep views alive with `IndexedStack`/`Offstage`.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-075 — The Environments page calls the store from `build`; it can loop if the daemon returns zero providers
 - **Category:** Reliability · **Confidence:** Confirmed (code) · FUI-28. **Fix:** load in `initState`/on folder change; guard empty results.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-076 — The chat composer changes its tree shape when attachments appear, which can drop focus
 - **Category:** Usability · **Confidence:** Suspected · FUI-29. **Fix:** stable keys / constant structure.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-077 — Hover documentation is pointer-only
 - **Category:** Accessibility · **Confidence:** Confirmed (code) · FUI-30. **Fix:** "Show Hover" command (Ctrl+K Ctrl+I as VS Code).
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-078 — Long branch names and roots overflow the status bar
 - **Category:** GUI · **Confidence:** Confirmed (code) · FUI-31. **Fix:** flexible, ellipsised segments with priorities.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-079 — The side-by-side diff runs its line alignment (up to 4 M cells) on the UI thread; its header path overflows
 - **Category:** Performance / GUI · **Confidence:** Confirmed (code); header overflow seen at 640 px (`scm_page.dart:308` error in `explore-results.json`) · FUI-32. **Fix:** compute on an isolate (as the gutter diff does); ellipsise the path.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-080 — Animation loops do not pause when the window is unfocused (performance budget P9)
 - **Category:** Performance · **Confidence:** Confirmed (code) · FUI-33. **Fix:** gate `TickerMode` on window focus; step the spinner; one spinner per tree.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-081 — Toasts stack without limit and have no motion
 - **Category:** GUI · **Confidence:** Confirmed (code) · FUI-34. **Fix:** cap at 3, collapse duplicates, fade/slide per motion spec.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-082 — Live regions are noisy, and the palette's active row is never announced
 - **Category:** Accessibility · **Confidence:** Confirmed (code) · FUI-35. **Fix:** remove `liveRegion` from hover/inspector text; announce palette selection.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-083 — Session-long shell caches never pruned (FocusNode maps, TextPainters created in build, agent/terminal/problem caches)
 - **Category:** Memory · **Confidence:** Confirmed (code); measured open/close of 20 files × 20 rounds grew shell PSS 198 → ~221 MB and then plateaued (`audit-perf-*.json`), so no unbounded leak was demonstrated in that workload · FUI-36, FS-F14. **Fix:** dispose per-path nodes on close; reuse painters; LRU for caches.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-084 — Visual inconsistencies between equivalent elements (Design opinion; values confirmed)
 - **Category:** Visual · FUI-37: three heading styles for equivalent side-panel sections (compare `04-nofolder-*.png`), different side-bar gutters, radii/spacings off the token scale, alpha tints not covered by the contrast test, a hard-coded About version, the explorer's brass marker shown only for keyboard focus; Search's include/exclude placeholders in the mono face while the query uses Sans (`23-search-results.png`); terminal background differs from its panel with an 8 px seam (`34-terminal.png`); gutter line numbers sit ~2 px above the code baseline (`08-editor-main-rs.png`). **Fix:** tokenise and align; see UI_UX_REPORT §Recommendations.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-085 — `_focusedDoc` relies on `FocusNode.debugLabel`, which is null in release builds
 - **Category:** Functional · **Confidence:** Confirmed (code) · FUI-20 (`app/lib/shell/shell.dart:227-231`; the right-group branch is dead in release; the e2e assertion only passes in debug). **Fix:** track focus by node identity.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-086 — After a restart the old daemon's notifications are still dispatched and ids are reused
 - **Category:** Reliability · **Confidence:** Confirmed (code), impact Suspected · FS-F8 (`app/lib/daemon/client.dart:420-440,525-543`). **Fix:** tag subscriptions with the connection generation; drop stale ones. **Dependencies:** AUD-001.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-087 — Terminal keystrokes are independent requests the daemon may apply out of order
 - **Category:** Reliability · **Confidence:** Suspected · FS-F9 (`app/lib/state/terminals.dart:154-158`, `crates/rpc/src/server.rs:359-360` spawns a task per request). **Fix:** sequence numbers or a per-terminal ordered queue on the daemon.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-088 — The first open of a conversation drops events that arrive before `agent/sessionOpen` answers
 - **Category:** Reliability · **Confidence:** Suspected · FS-F10. **Fix:** buffer events by session id until the open resolves. **Dependencies:** AUD-033.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-089 — Overlapping flushes of `shell-local.json` can corrupt it; a corrupt file silently resets the layout
 - **Category:** Data integrity · **Confidence:** Suspected · FS-F11 (`app/lib/app/local_prefs.dart:17-61`). **Fix:** serialise writes; write to temp + rename; keep a `.bak`.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-090 — "The backend exited unexpectedly" can lack the daemon's last stderr lines
 - **Category:** Diagnostics · **Confidence:** Suspected · FS-F12. **Fix:** await stderr EOF (bounded) before reporting. Seen: `49-backend-died.png` shows only "(code -9)".
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-091 — A result that fails to decode escapes as `TypeError`, leaving `opening`/`running` stuck
 - **Category:** Reliability · **Confidence:** Confirmed (code) · FS-F13 (`app/lib/daemon/client.dart:264-282`). **Fix:** wrap decode errors in `DaemonException(kind: protocol)`.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-092 — Switching folders flips Chat to the General scope
 - **Category:** Usability · **Confidence:** Confirmed (code) · FS-F16. **Dependencies:** AUD-002 (same transient state).
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-093 — Results of a cancelled search can be applied after the folder changed
 - **Category:** Reliability · **Confidence:** Suspected · FS-F17 (`app/lib/state/search.dart:252-264,323`). **Fix:** bump the sequence on folder change and cancel.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-094 — The socket accept loop spins on persistent `accept()` errors (EMFILE)
 - **Category:** Reliability · **Confidence:** Confirmed (code) · RC-19 (`crates/axiomd/src/socket.rs:199-203`). **Fix:** back off on error.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-095 — Two daemons starting at once can leave a token file that does not match the listener
 - **Category:** Reliability · **Confidence:** Confirmed (race in code) · RC-20. **Fix:** lock file; write token atomically after bind.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-096 — Invalid-Request errors answer `id: null` even when the id is readable
 - **Category:** Protocol · **Confidence:** Confirmed (code) · RC-21 (`crates/rpc/src/codec.rs:64-71`). **Fix:** echo a readable id per JSON-RPC 2.0 §5.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-097 — External `fs/readFile` reads the whole file before its size check; FIFOs block a thread
 - **Category:** Reliability · **Confidence:** Confirmed (code) · RC-22. **Fix:** check metadata (regular file, size) first; read with a limit.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-098 — A cancel racing a successful `task/start`/`build/run` leaves the process with no forwarder or history
 - **Category:** Reliability · **Confidence:** Confirmed (code) · RC-23. **Fix:** make start atomic w.r.t. cancel (cancel after success stops the task).
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-099 — Daemon-lifetime caches grow without bound or go stale (ignore cache, previews, ACP terminals, executor history)
 - **Category:** Memory · **Confidence:** Confirmed (code) · RC-24. Measured daemon PSS stayed 14–49 MB across the perf workload, so not urgent. **Fix:** LRU/eviction on workspace close; call `Previews::remove`.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-100 — Outgoing lines are not checked against the 64 MiB frame limit
 - **Category:** Protocol · **Confidence:** Suspected · RC-25. **Fix:** check size; return `too_large` errors instead of emitting.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-101 — Windows: Job Object assigned after spawn; terminal close kills only the shell
 - **Category:** Platform · **Confidence:** Confirmed (code; Windows deferred by the owner) · RC-26. **Fix:** create suspended, assign, resume.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-102 — `crates/desktop-bridge` is unused product code that must be kept in step with the Dart client
 - **Category:** Architecture / Dead code · **Confidence:** Confirmed · RC-27. **Fix:** owner decision: move its lifecycle tests to the Dart client's suite or to `axiomd` tests and remove the crate, or keep it as the documented reference client.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-103 — `build.run` re-resolves the task at execution and ignores the approved argv
 - **Category:** Security · **Confidence:** Confirmed (code) · RS-F6 (`crates/axiomd/src/tools.rs:725-806`). **Fix:** execute the exact approved argv.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-104 — One ordinary write lets the agent relax workspace policy or plant workspace providers
 - **Category:** Security (design) · **Confidence:** Confirmed (design) · RS-F13. **Fix:** treat `.axiom/project.toml` and `.axiom/providers/**` as protected paths requiring explicit approval.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-105 — System package names are not validated before an elevated package manager
 - **Category:** Security · **Confidence:** Confirmed (code); exposure limited to user-dir manifests · RS-F14 (`crates/env/src/system.rs:94-137`). **Fix:** validate names (`^[a-z0-9][a-z0-9+.-]*$`), insert `--`.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-106 — Policy glob matching is exponential in the number of `*`
 - **Category:** Security / DoS · **Confidence:** Confirmed (code) · RS-F15. **Fix:** linear-time glob (two-pointer) or `globset`.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-107 — Providers bootstrap from unpinned `releases/latest`; some checksums come from the artifact's own origin
 - **Category:** Supply chain · **Confidence:** Confirmed · RS-F16 (`providers/python/provider.toml:40-80`, `providers/rust/provider.toml:44-81`). **Fix:** pin versions and embed digests.
+- **Status:** Fixed with a residual risk (see Remediation status, 2026-11-23)
 
 ### AUD-108 — Archive extraction and downloads have no size or entry-count limit
 - **Category:** Security / Robustness · **Confidence:** Confirmed (code); path-escape checks are sound · RS-F17. **Fix:** byte and entry caps from the manifest.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-109 — Smaller daemon robustness items
 - **Category:** Reliability · **Confidence:** Confirmed (code) · RS-F18 (unbounded child stdout/SSE line buffers; test credential file written 0644; self-declared MCP principal; `env.planInstall` labelled read but does network). (Blocking audit-log writes are in AUD-031; `api_key_env` inheritance is in AUD-010.)
+- **Status:** Fixed (contract-limited) (see Remediation status, 2026-11-23)
 
 ### AUD-110 — First-run and empty states read as developer-facing (Design opinion)
 - **Category:** Usability / Visual · **Confidence:** Observed
 - **Description / evidence:** `02-welcome-dark.png`: the welcome copy explains the architecture ("Axiom opens folders through its backend, axiomd.") instead of offering next steps (recent folders, clone, docs); its block sits ~95 px left of centre because content is left-aligned in a centred 460 px column; the side bar repeats the same Open Folder button above a large empty panel. Chat setup (`04-nofolder-chat.png`) puts install buttons ~900 px from their labels at 1440 px and shows install commands as plain prose that cannot be copied.
 - **Proposed fix:** See UI_UX_REPORT §Recommendations R-3, R-4.
+- **Status:** Fixed (see Remediation status, 2026-11-23)
 
 ### AUD-111 — Shortcut and command conventions surprise IDE users (Design opinion)
 - **Category:** Usability · **Description:** Ctrl+N = New Chat (not New File); "Preferences" is a top-level menu while Edit is absent; the palette lists commands in an arbitrary order (Save, New Chat, Next Tab, Save All…, `19-palette.png`) rather than by category or recent use; Ctrl+L = AI dock (VS Code: select line). **Proposed fix:** owner decision; see UI_UX_REPORT.
+- **Status:** Fixed (owner binding kept) (see Remediation status, 2026-11-23)
 
 ### AUD-112 — Documentation and workspace hygiene drift
 - **Category:** Process · **Confidence:** Confirmed
 - **Description:** `docs/roadmap/current.md` still says "Next: CI green on `task/m5.5`, merge to main" (merged in `adc63c1`); `AGENTS.md` says M5.5 is "on branch `task/m5.5`"; `docs/design/performance.md` §4 documents the retired Tauri harness (AUD-061); 44 tasks are `implemented` but never reviewed (`scripts/tasks.py`: FL-*, M5-*, M5.5-*, all of the milestones marked complete), contrary to `agents/REVIEW_GUIDE.md`; `security.md` describes a control that does not exist (AUD-010). Local: `target/` is 119 GB (109 GB debug), and git-ignored Tauri/Monaco leftovers (`apps/desktop-tauri/`, `editor/`, 328 MB) remain in the checkout.
 - **Proposed fix:** Update the status docs; schedule reviews of the implemented tasks (this audit's findings are a head start); `cargo clean -p` old profiles or a periodic `cargo sweep`.
+- **Status:** Fixed (review hand-off) (see Remediation status, 2026-11-23)

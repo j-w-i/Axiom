@@ -235,7 +235,8 @@ Dart client (`apps/desktop-flutter/lib/daemon/client.dart`, tested by
   and result bounding, the permission gate and audit log, checkpoints (shadow git), the session
   journal and compaction, the loop, and the MCP codec (server and client halves).
 - **Depends on:** `protocol`, `store`; `reqwest` (rustls), `keyring`, `tokio`, `serde_json`,
-  `futures-util` (ADR-0015 §3). Runs the `git` program for checkpoints.
+  `futures-util` (ADR-0015 §3); `nix` on Unix (killing an external agent's or MCP server's
+  process group, as `exec` does; review D2). Runs the `git` program for checkpoints.
 - **Must not know:** the workspace, exec, env or build crates. Tools reach services only through
   the closures `axiomd` registers (`modules.md` rule "agent → none").
 - **Rule:** no tool executes without a gate decision; no write without a checkpoint.
