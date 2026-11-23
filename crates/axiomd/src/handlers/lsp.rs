@@ -387,18 +387,18 @@ pub fn spawn_forwarder(app: &Arc<App>) {
                         method,
                         params,
                     };
-                    for c in app.clients_of(&workspace_id) {
-                        let _ = c.notify::<LspNotification>(n.clone()).await;
-                    }
+                    // Not one connection after another: a stuck one would stop the relay for
+                    // every connection (AUD-030, review B6b).
+                    app.notify_clients::<LspNotification>(&workspace_id, n)
+                        .await;
                 }
                 axiom_lsp::Event::State { workspace_id, info } => {
                     let n = ServerStateParams {
                         workspace_id: workspace_id.clone(),
                         server: info,
                     };
-                    for c in app.clients_of(&workspace_id) {
-                        let _ = c.notify::<ServerStateChanged>(n.clone()).await;
-                    }
+                    app.notify_clients::<ServerStateChanged>(&workspace_id, n)
+                        .await;
                 }
             }
         }
@@ -417,19 +417,20 @@ async fn resync(app: &Arc<App>) {
         let diagnostics = s.diagnostics();
         let mut uris: std::collections::BTreeSet<String> = diagnostics.keys().cloned().collect();
         uris.extend(s.open_uris());
-        for c in app.clients_of(&ws) {
-            let _ = c.notify::<ServerStateChanged>(state.clone()).await;
-            for uri in &uris {
-                let list = diagnostics.get(uri).cloned().unwrap_or_else(|| json!([]));
-                let _ = c
-                    .notify::<LspNotification>(axiom_protocol::lsp::LspNotificationParams {
-                        workspace_id: ws.clone(),
-                        server_id: s.def.id.clone(),
-                        method: "textDocument/publishDiagnostics".into(),
-                        params: json!({"uri": uri, "diagnostics": list}),
-                    })
-                    .await;
-            }
+        // Each message to every connection at once (AUD-030, review B6b); in order per connection.
+        app.notify_clients::<ServerStateChanged>(&ws, state).await;
+        for uri in &uris {
+            let list = diagnostics.get(uri).cloned().unwrap_or_else(|| json!([]));
+            app.notify_clients::<LspNotification>(
+                &ws,
+                axiom_protocol::lsp::LspNotificationParams {
+                    workspace_id: ws.clone(),
+                    server_id: s.def.id.clone(),
+                    method: "textDocument/publishDiagnostics".into(),
+                    params: json!({"uri": uri, "diagnostics": list}),
+                },
+            )
+            .await;
         }
     }
 }

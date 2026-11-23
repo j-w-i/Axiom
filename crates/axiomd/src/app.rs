@@ -29,6 +29,10 @@ pub struct App {
     /// notifications. They also hold the workspace open: it is torn down when the last one
     /// closes it or disconnects (AUD-029). Closed connections are pruned on every read (AUD-030).
     pub clients: Mutex<HashMap<WorkspaceId, Vec<Notifier>>>,
+    /// Held by `workspace/open` and by a close's "last holder? then tear down": an open during a
+    /// teardown waits for it and opens the folder afresh, rather than getting the id that is
+    /// being closed (AUD-029, review B5).
+    pub workspace_lifecycle: tokio::sync::Mutex<()>,
     /// Connections that let a relay time out on their full queue (see `notify_clients`).
     lagging: Mutex<Vec<Notifier>>,
     /// Language servers (M4, ADR-0018 §2).
@@ -106,18 +110,24 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
         req: &'a axiom_protocol::agent::ApprovalRequest,
     ) -> futures_util::future::BoxFuture<'a, usize> {
         Box::pin(async move {
-            let mut sent = 0;
-            let mut live = Vec::new();
-            for n in self.all() {
-                if n.notify::<axiom_protocol::agent::ApprovalRequested>(req.clone())
-                    .await
-                    .is_ok()
-                {
-                    sent += 1;
-                    live.push(n);
-                }
-            }
-            *self.0.lock().unwrap_or_else(|p| p.into_inner()) = live;
+            // To every approving connection at once, none waited on past SLOW_CLIENT: one that
+            // stopped reading does not hold the prompt back from the others (review B6b). One
+            // that is slow but open stays an approver; only closed ones are dropped.
+            let sends = self.all().into_iter().map(|n| async move {
+                let r = tokio::time::timeout(
+                    SLOW_CLIENT,
+                    n.notify::<axiom_protocol::agent::ApprovalRequested>(req.clone()),
+                )
+                .await;
+                (matches!(r, Ok(Ok(()))), n)
+            });
+            let results = futures_util::future::join_all(sends).await;
+            let sent = results.iter().filter(|(ok, _)| *ok).count();
+            *self.0.lock().unwrap_or_else(|p| p.into_inner()) = results
+                .into_iter()
+                .filter(|(ok, n)| *ok || !n.is_closed())
+                .map(|(_, n)| n)
+                .collect();
             sent
         })
     }
@@ -126,11 +136,14 @@ impl axiom_agent::gate::Approvers for ConnApprovers {
         res: &'a axiom_protocol::agent::ApprovalResolution,
     ) -> futures_util::future::BoxFuture<'a, ()> {
         Box::pin(async move {
-            for n in self.all() {
-                let _ = n
-                    .notify::<axiom_protocol::agent::ApprovalResolved>(res.clone())
-                    .await;
-            }
+            let sends = self.all().into_iter().map(|n| async move {
+                let _ = tokio::time::timeout(
+                    SLOW_CLIENT,
+                    n.notify::<axiom_protocol::agent::ApprovalResolved>(res.clone()),
+                )
+                .await;
+            });
+            futures_util::future::join_all(sends).await;
         })
     }
 }
@@ -225,6 +238,7 @@ impl App {
             last_diagnostics: Mutex::default(),
             acp_terminals: Mutex::default(),
             clients: Mutex::default(),
+            workspace_lifecycle: tokio::sync::Mutex::default(),
             lagging: Mutex::default(),
             lsp: axiom_lsp::Manager::default(),
             external_reads: Mutex::default(),
@@ -296,8 +310,9 @@ impl App {
 
     /// Sends a notification to every live connection of `ws` at once, without letting a slow
     /// one hold up the others (AUD-030): a connection whose queue is full gets
-    /// [`SLOW_CLIENT`] to make room, then misses this notification.
-    pub async fn notify_clients<N>(&self, ws: &WorkspaceId, params: N::Params)
+    /// [`SLOW_CLIENT`] to make room, then misses this notification. Returns how many
+    /// connections got it.
+    pub async fn notify_clients<N>(&self, ws: &WorkspaceId, params: N::Params) -> usize
     where
         N: axiom_protocol::Notification,
         N::Params: Clone,
@@ -306,23 +321,29 @@ impl App {
             let p = params.clone();
             async move {
                 match c.try_notify::<N>(p.clone()) {
-                    Ok(true) => self.set_lagging(&c, false),
-                    Err(_) => {}
+                    Ok(true) => {
+                        self.set_lagging(&c, false);
+                        true
+                    }
+                    Err(_) => false,
                     // Already known to be stuck: no more waiting on it until it reads again.
-                    Ok(false) if self.is_lagging(&c) => {}
-                    Ok(false) => {
-                        if tokio::time::timeout(SLOW_CLIENT, c.notify::<N>(p))
-                            .await
-                            .is_err()
-                        {
+                    Ok(false) if self.is_lagging(&c) => false,
+                    Ok(false) => match tokio::time::timeout(SLOW_CLIENT, c.notify::<N>(p)).await {
+                        Ok(r) => r.is_ok(),
+                        Err(_) => {
                             tracing::warn!("a connection is not reading; it misses notifications");
                             self.set_lagging(&c, true);
+                            false
                         }
-                    }
+                    },
                 }
             }
         });
-        futures_util::future::join_all(sends).await;
+        futures_util::future::join_all(sends)
+            .await
+            .into_iter()
+            .filter(|sent| *sent)
+            .count()
     }
 
     fn is_lagging(&self, n: &Notifier) -> bool {

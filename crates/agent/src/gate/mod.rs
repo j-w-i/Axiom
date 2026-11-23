@@ -89,10 +89,15 @@ pub struct Gate {
 /// Paths an agent may write only with the person's explicit approval each time, whatever the
 /// policy or a grant says: the workspace's own Axiom configuration (`.axiom/project.toml` holds
 /// the workspace policy, `.axiom/providers/` defines tasks and language servers) and git's
-/// directory (hooks run on the person's next commit). AUD-104.
+/// directory (hooks run on the person's next commit), at any depth (a nested repository or a
+/// submodule has its own). AUD-104. The callers pass the path through any symlink
+/// (`Workspace::canonical_path`, review B4).
 pub fn protected_path(p: &WorkspacePath) -> bool {
-    let first = p.0.split('/').next().unwrap_or("");
-    first.eq_ignore_ascii_case(".axiom") || first.eq_ignore_ascii_case(".git")
+    let mut parts = p.0.split('/');
+    let first = parts.next().unwrap_or("");
+    first.eq_ignore_ascii_case(".axiom")
+        || first.eq_ignore_ascii_case(".git")
+        || parts.any(|s| s.eq_ignore_ascii_case(".git"))
 }
 
 fn writes(effect: Effect) -> bool {

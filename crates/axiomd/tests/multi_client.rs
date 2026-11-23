@@ -136,6 +136,52 @@ async fn every_watching_connection_gets_the_changes() {
     }
 }
 
+/// AUD-029, review B5: a connection that opens the folder while the last holder's close is
+/// tearing it down (slowly: its task ignores SIGTERM) gets a workspace that stays open, not the
+/// id being closed under it.
+#[tokio::test]
+async fn an_open_during_the_last_close_gets_a_workspace_that_stays_open() {
+    use axiom_protocol::fs::{List, ListParams};
+    let d = Daemon::ready().await;
+    let f = d.open_fixture().await;
+    d.client
+        .request::<Start>(StartParams {
+            workspace_id: f.id.clone(),
+            command: Command::Argv(vec![
+                "sh".into(),
+                "-c".into(),
+                "trap '' TERM; sleep 30".into(),
+            ]),
+            cwd: None,
+            env: Default::default(),
+            label: None,
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (b, _brx) = socket_client(d.data_dir()).await;
+    // A, the only holder, closes; B opens half a second into the teardown.
+    let close = d.client.request::<Close>(WorkspaceRef {
+        workspace_id: f.id.clone(),
+    });
+    let late_open = async {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        open(&b, &f.root).await
+    };
+    let (closed, id) = tokio::join!(close, late_open);
+    closed.unwrap();
+    let listed = b
+        .request::<List>(ListParams {
+            workspace_id: id.clone(),
+            path: axiom_protocol::WorkspacePath::root(),
+        })
+        .await;
+    assert!(
+        listed.is_ok(),
+        "B's workspace {id:?} after A's close: {listed:?}"
+    );
+}
+
 /// AUD-029: one connection closing a shared workspace does not stop another's work; the last
 /// one to close it tears it down.
 #[tokio::test]

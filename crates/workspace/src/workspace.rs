@@ -127,6 +127,24 @@ impl Workspace {
         Ok(result)
     }
 
+    /// [`Self::resolve`]d and made relative to the root again: the path a file really has in the
+    /// workspace, through any symlink inside it (`link/hooks/x` with `link -> .git` is
+    /// `.git/hooks/x`). What the agent gate judges (AUD-104, review B4).
+    pub fn canonical_path(&self, path: &WorkspacePath) -> Result<WorkspacePath, WsError> {
+        let abs = self.resolve(path)?;
+        let rel = abs
+            .strip_prefix(&self.inner.root)
+            .map_err(|_| WsError::Escapes(display_path(&path.0)))?;
+        let mut parts = Vec::new();
+        for c in rel.components() {
+            match c {
+                Component::Normal(s) => parts.push(s.to_string_lossy().into_owned()),
+                _ => return Err(WsError::Escapes(display_path(&path.0))),
+            }
+        }
+        Ok(WorkspacePath(parts.join("/")))
+    }
+
     pub async fn list(&self, dir: &WorkspacePath) -> Result<Vec<DirEntry>, WsError> {
         let ws = self.clone();
         let dir = dir.clone();

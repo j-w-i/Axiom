@@ -28,8 +28,8 @@ Verification for every issue: the test or measurement named in its entry, plus t
 
 | Issue | Status | Note |
 |-------|--------|------|
-| AUD-001 | Fixed | documents detach on daemon loss and re-attach on restart; recovery folder for shell crashes; data_safety_test.dart |
-| AUD-002 | Fixed | folder switch closes the old folder's documents; data_safety_test.dart step 6 |
+| AUD-001 | Fixed | documents detach on daemon loss and re-attach on restart; recovery folder for shell crashes; data_safety_test.dart; a reload of a clean document keeps no recovery copy, and recovered text over a newer file asks before Save (review B1, B2; test/state/documents_safety_test.dart) |
+| AUD-002 | Fixed | folder switch closes the old folder's documents; data_safety_test.dart step 6; a save held up by format-on-save, or queued behind another, is dropped when the folder changed (review B3, test/state/documents_safety_test.dart) |
 | AUD-003 | Fixed | gutter strip full height; layout_test.dart checks it |
 | AUD-004 | Fixed | split bounds never cross; layout_test.dart at 900×560 with dock and split |
 | AUD-005 | Fixed | quadratic line loops removed (re_editor and shell), no highlight round trip above the size limit, far backward jumps no longer lay out every line between (re_editor `_code_field.dart`); 100k-line file: typing at line 1 max build 3938 → 5.7 ms, PSS after editing ~940 → 284 MiB (`evidence/perf/after-remediation-probe.json`) |
@@ -44,20 +44,20 @@ Verification for every issue: the test or measurement named in its entry, plus t
 | AUD-014 | Fixed | fitPanels() bounds side bar, dock and console by the window; layout_test.dart |
 | AUD-015 | Fixed |  |
 | AUD-016 | Fixed |  |
-| AUD-017 | Fixed |  |
+| AUD-017 | Fixed | the active tab is shown again when the strip itself narrows (dock, split, side bar; review B6d); layout_test.dart fails when the tab or strip is missing or the tab is outside the strip |
 | AUD-018 | Fixed |  |
 | AUD-019 | Fixed |  |
 | AUD-020 | Fixed |  |
 | AUD-021 | Fixed |  |
 | AUD-022 | Fixed | protocol 0.6 fs/createFile, createDirectory, rename, trash (CR-AUD-022); explorer menu, F2, Delete, Shift+F10, right-click; File → New File…, New Folder…, Save As… |
-| AUD-023 | Fixed |  |
+| AUD-023 | Fixed | line breaks follow their lines when lines are added or removed (review B6a); test/state/doc_line_break_test.dart |
 | AUD-024 | Fixed |  |
 | AUD-025 | Fixed |  |
 | AUD-026 | Fixed |  |
 | AUD-027 | Fixed |  |
 | AUD-028 | Fixed |  |
-| AUD-029 | Fixed |  |
-| AUD-030 | Fixed |  |
+| AUD-029 | Fixed | an open during the last holder's teardown waits and opens afresh (review B5); multi_client.rs an_open_during_the_last_close_gets_a_workspace_that_stays_open |
+| AUD-030 | Fixed | the LSP relay, approval prompts and agent/reveal go to every connection at once, bounded (review B6b); lsp.rs a_connection_that_stopped_reading_does_not_stop_diagnostics |
 | AUD-031 | Fixed |  |
 | AUD-032 | Fixed | no daemon-wide lock across start; dead agents restarted; idle MCP servers and resumable agents stopped after 15 min (`acp_idle_agents_that_can_resume_are_stopped`, `…_cannot_resume_are_kept`) |
 | AUD-033 | Fixed |  |
@@ -131,7 +131,7 @@ Verification for every issue: the test or measurement named in its entry, plus t
 | AUD-101 | Fixed |  |
 | AUD-102 | Fixed | crates/desktop-bridge removed; its daemon-side coverage moved to crates/axiomd/tests/lifecycle.rs |
 | AUD-103 | Fixed |  |
-| AUD-104 | Fixed |  |
+| AUD-104 | Fixed | the gate judges the path through symlinks, and .git at any depth (review B4); approval.rs protected_paths_through_a_symlink_or_nested_still_ask |
 | AUD-105 | Fixed |  |
 | AUD-106 | Fixed |  |
 | AUD-107 | Fixed with a residual risk | Fixed with a residual risk: pinned uv 0.9.0 and rustup 1.28.2 (not verified online: confirm before release); the first install of a checksum URL trusts its origin, later changes are refused |

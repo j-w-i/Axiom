@@ -329,6 +329,65 @@ async fn writes_to_axiom_configuration_always_ask() {
     assert!(!f.root.join(".axiom/project.toml").exists());
 }
 
+/// A protected path reached through a symlink inside the workspace (`link -> .git`, which a
+/// cloned repository can ship) still always asks, and the card names the real path; so does
+/// a nested repository's `.git` and a case variant (AUD-104, review B4).
+#[cfg(unix)]
+#[tokio::test]
+async fn protected_paths_through_a_symlink_or_nested_still_ask() {
+    let d = approving_daemon().await;
+    let f = d.open_fixture().await;
+    std::fs::create_dir_all(f.root.join(".git/hooks")).unwrap();
+    std::fs::create_dir_all(f.root.join("sub/.git")).unwrap();
+    std::os::unix::fs::symlink(".git", f.root.join("link")).unwrap();
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Ask,
+            rules: vec![PolicyRule {
+                effect: Some(Effect::WriteWorkspace),
+                tool: None,
+                path: None,
+                argv_prefix: None,
+                decision: Decision::Allow,
+            }],
+        })
+        .await
+        .unwrap();
+    for (path, real) in [
+        ("link/hooks/pre-commit", ".git/hooks/pre-commit"),
+        ("sub/.git/config", "sub/.git/config"),
+        (".GIT/hooks/post-merge", "/hooks/post-merge"),
+    ] {
+        let (r, req) = call_answering(
+            &d,
+            call(
+                &f.id,
+                "fs.applyPatch",
+                json!({"path": path, "create": "#!/bin/sh\necho hook\n"}),
+            ),
+            ApprovalDecision::Deny,
+        )
+        .await;
+        assert_eq!(kind(&r.unwrap_err()), ErrorKind::ApprovalDenied, "{path}");
+        assert!(!req.can_remember, "{path}");
+        assert!(
+            req.rule
+                .as_deref()
+                .unwrap_or_default()
+                .contains("protected"),
+            "{path}: {:?}",
+            req.rule
+        );
+        assert!(
+            req.targets.iter().any(|t| t.ends_with(real)),
+            "{path}: the card shows {:?}",
+            req.targets
+        );
+    }
+    assert!(!f.root.join(".git/hooks/pre-commit").exists());
+    assert!(!f.root.join("sub/.git/config").exists());
+}
+
 /// A process an agent starts does not get the daemon's secrets (`security.md` §Processes;
 /// AUD-010): variables that look like secrets and the providers' `apiKeyEnv` variables are
 /// withheld (the card says so), unless settings `agent.passEnv` names them. The person's own

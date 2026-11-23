@@ -639,11 +639,13 @@ fn capitalise(s: &str) -> String {
 async fn prepare_patch(app: &Arc<App>, ctx: &ToolCtx, input: &Value) -> Result<Targets, ToolError> {
     let p: inputs::ApplyPatchInput = parse(input)?;
     let w = ws(app, ctx)?;
-    // Resolve first: a path outside the workspace never gets as far as the gate.
-    w.resolve(&p.path).map_err(ws_err)?;
+    // Resolve first: a path outside the workspace never gets as far as the gate. The gate (and
+    // the card) get the path the file really has, through any symlink: a protected path reached
+    // through one still always asks (AUD-104, review B4).
+    let real = w.canonical_path(&p.path).map_err(ws_err)?;
     let (version, new, diff, _, _) = plan_patch(&w, &p).await?;
     Ok(Targets {
-        paths: vec![p.path.clone()],
+        paths: vec![real],
         preview: Some(diff),
         versions: vec![(p.path, version)],
         effect: new.is_none().then_some(Effect::Delete),
@@ -1187,12 +1189,10 @@ async fn editor_open(app: &Arc<App>, ctx: &ToolCtx, input: Value) -> Result<Tool
         line: o.line.unwrap_or(1).max(1),
         column: o.column.unwrap_or(1).max(1),
     };
-    let mut shown = 0;
-    for n in app.clients_of(&ctx.workspace_id) {
-        if n.notify::<Reveal>(params.clone()).await.is_ok() {
-            shown += 1;
-        }
-    }
+    // Every connection at once; a stuck one is not waited on (AUD-030, review B6b).
+    let shown = app
+        .notify_clients::<Reveal>(&ctx.workspace_id, params.clone())
+        .await;
     Ok(ToolOutput::json(
         json!({"path": o.path, "line": params.line, "column": params.column, "clients": shown}),
         if shown > 0 {
@@ -1638,9 +1638,8 @@ fn acp_rel(app: &App, ctx: &ToolCtx, abs: &Value) -> Result<WorkspacePath, ToolE
             format!("`{abs}` is outside the workspace."),
         )
     })?;
-    let p = WorkspacePath(rel);
-    w.resolve(&p).map_err(ws_err)?;
-    Ok(p)
+    // The path the file really has, through any symlink: what the gate judges (review B4).
+    w.canonical_path(&WorkspacePath(rel)).map_err(ws_err)
 }
 
 async fn acp_target(app: &Arc<App>, ctx: &ToolCtx, input: &Value) -> Result<Targets, ToolError> {

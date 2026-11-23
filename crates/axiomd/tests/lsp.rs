@@ -402,3 +402,114 @@ async fn real_rust_analyzer_definition_and_diagnostics() {
         }
     }
 }
+
+/// AUD-030, review B6b: a connection that opened the workspace and stopped reading does not
+/// stop the language servers' notifications for the others. Its queue is filled with terminal
+/// output first; the relay then does not wait on it past a bound.
+#[tokio::test]
+async fn a_connection_that_stopped_reading_does_not_stop_diagnostics() {
+    use axiom_protocol::terminal::{Close as CloseTerminal, Create, CreateParams, TerminalRef};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let data = tempfile::tempdir().unwrap();
+    let pdir = data.path().join("providers").join("fakelang");
+    std::fs::create_dir_all(&pdir).unwrap();
+    std::fs::write(pdir.join("provider.toml"), MANIFEST).unwrap();
+    let bin = fake_lsp();
+    let d = Daemon::spawn_configured(data.path(), move |c| {
+        c.env("PATH", path_with(bin.parent().unwrap()));
+    })
+    .await;
+    d.initialize().await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("fake.marker"), "").unwrap();
+    std::fs::write(dir.path().join("a.fake"), "fine\nERROR here\n").unwrap();
+    let f = d.open_dir(dir).await;
+
+    // The stuck connection: it opens the workspace, then never reads again.
+    let run = data.path().join("run");
+    let token = std::fs::read_to_string(run.join("axiomd.token")).unwrap();
+    let stream = tokio::net::UnixStream::connect(run.join("axiomd.sock"))
+        .await
+        .unwrap();
+    let (r, mut w) = stream.into_split();
+    let mut r = BufReader::new(r);
+    for (id, method, params) in [
+        (
+            1,
+            "initialize",
+            json!({"protocolVersion": "0.6", "client": {"name": "stuck", "version": "0"}, "authToken": token}),
+        ),
+        (2, "workspace/open", json!({"path": f.root})),
+    ] {
+        let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        w.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        loop {
+            let mut line = String::new();
+            r.read_line(&mut line).await.unwrap();
+            let v: Value = serde_json::from_str(&line).unwrap();
+            if v["id"] == id {
+                assert!(v.get("error").is_none(), "{method}: {v}");
+                break;
+            }
+        }
+    }
+
+    // Fill its queue: terminal output goes to every connection of the workspace. A terminal's
+    // output comes in large chunks, so a dozen run until this client has seen 1500, well past
+    // the 1024 messages a queue holds; then they stop and this client drains its own.
+    let mut terminals = Vec::new();
+    for _ in 0..12 {
+        let t = d
+            .client
+            .request::<Create>(CreateParams {
+                workspace_id: f.id.clone(),
+                argv: Some(vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "yes 0123456789012345678901234567890123456789".into(),
+                ]),
+                cols: 80,
+                rows: 24,
+            })
+            .await
+            .unwrap();
+        terminals.push(t.terminal_id);
+    }
+    // The stuck connection got each of these too, until its queue was full.
+    let mut n = 0usize;
+    let flood_end = tokio::time::Instant::now() + Duration::from_secs(30);
+    while n < 1500 && tokio::time::Instant::now() < flood_end {
+        if !d
+            .no_notification("terminal/output", Duration::from_millis(100))
+            .await
+        {
+            n += 1;
+        }
+    }
+    assert!(
+        n >= 1500,
+        "only {n} terminal outputs: the stuck queue may not be full"
+    );
+    for terminal_id in terminals {
+        d.client
+            .request::<CloseTerminal>(TerminalRef { terminal_id })
+            .await
+            .unwrap();
+    }
+    d.drain_until_quiet(Duration::from_millis(500)).await;
+
+    // The diagnostics of a didOpen still reach this client.
+    let a = uri(&f.root.join("a.fake"));
+    d.client
+        .request::<Notify>(NotifyParams {
+            workspace_id: f.id.clone(),
+            server_id: "fake".into(),
+            method: "textDocument/didOpen".into(),
+            params: json!({"textDocument":{"uri":a,"languageId":"fakelang","version":1,"text":"fine\nERROR here\n"}}),
+        })
+        .await
+        .unwrap();
+    let diag = diagnostics_for(&d, &a).await;
+    assert_eq!(diag["serverId"], "fake");
+    drop((r, w));
+}

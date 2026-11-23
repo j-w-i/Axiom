@@ -14,8 +14,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const RECENT_LIMIT: usize = 20;
 
 pub async fn open(app: Arc<App>, p: OpenParams, ctx: RequestCtx) -> Result<OpenResult, RpcError> {
-    let opened = app.workspaces.open(&p.path).await?;
-    app.add_client(&opened.workspace_id, ctx.notifier.clone());
+    let opened = {
+        // Not while a teardown is deciding or running (review B5).
+        let _lifecycle = app.workspace_lifecycle.lock().await;
+        let opened = app.workspaces.open(&p.path).await?;
+        app.add_client(&opened.workspace_id, ctx.notifier.clone());
+        opened
+    };
     let (root, name) = (opened.root.clone(), opened.name.clone());
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -40,6 +45,8 @@ pub async fn open(app: Arc<App>, p: OpenParams, ctx: RequestCtx) -> Result<OpenR
 pub async fn close(app: Arc<App>, p: WorkspaceRef, ctx: RequestCtx) -> Result<Empty, RpcError> {
     app.workspaces.get(&p.workspace_id)?;
     app.stop_watcher_of(&p.workspace_id, &ctx.notifier);
+    // "The last holder" and the teardown are one step for `workspace/open` (review B5).
+    let _lifecycle = app.workspace_lifecycle.lock().await;
     if app.release_client(&p.workspace_id, &ctx.notifier) {
         teardown(&app, &p.workspace_id).await?;
     }
@@ -51,6 +58,7 @@ pub async fn close(app: Arc<App>, p: WorkspaceRef, ctx: RequestCtx) -> Result<Em
 pub async fn release_connection(app: Arc<App>, n: axiom_rpc::Notifier) {
     for ws in app.workspaces_of(&n) {
         app.stop_watcher_of(&ws, &n);
+        let _lifecycle = app.workspace_lifecycle.lock().await;
         if app.release_client(&ws, &n) {
             if let Err(e) = teardown(&app, &ws).await {
                 tracing::debug!("closing {ws:?} after its last connection: {e:?}");
