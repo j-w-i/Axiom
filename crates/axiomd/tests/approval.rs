@@ -979,40 +979,38 @@ fn create(path: &str) -> Value {
 /// (`include.path`, `includeIf`) can set `core.hooksPath`, `core.fsmonitor` or
 /// `core.sshCommand`. Writing it always asks, whether it exists yet or not, and so does what
 /// it includes in turn and the hooks directory it names. An ordinary file, or a file named
-/// like a bare repository that is not one, does not ask.
+/// like a bare repository that is not one, does not ask. Review G8: none of these names looks
+/// like git configuration (`team.cfg`, `tools/scripts/`), so only git's own answer protects
+/// them, not the fallback's name patterns.
 #[tokio::test]
 async fn files_git_configuration_includes_always_ask() {
     let d = approving_daemon().await;
     let f = d.open_dir(tempfile::tempdir().unwrap()).await;
     git_in(&f.root, &["init", "-q"]);
-    git_in(&f.root, &["config", "include.path", "../shared.gitconfig"]);
+    git_in(&f.root, &["config", "include.path", "../team.cfg"]);
     git_in(
         &f.root,
-        &[
-            "config",
-            "includeIf.onbranch:main.path",
-            "../branch.gitconfig",
-        ],
+        &["config", "includeIf.onbranch:main.path", "../branch.cfg"],
     );
-    std::fs::create_dir_all(f.root.join("tools/hooks")).unwrap();
+    std::fs::create_dir_all(f.root.join("tools/scripts")).unwrap();
     std::fs::create_dir_all(f.root.join("vendor/lib.git")).unwrap();
     allow_every_write(&d).await;
     write_asks(
         &d,
         &f,
-        json!({"path": "shared.gitconfig", "create": "[core]\n\thooksPath = tools/hooks\n"}),
+        json!({"path": "team.cfg", "create": "[core]\n\thooksPath = tools/scripts\n"}),
     )
     .await;
-    write_asks(&d, &f, create("branch.gitconfig")).await;
+    write_asks(&d, &f, create("branch.cfg")).await;
     // Once the person has written it, what it names is protected too.
     std::fs::write(
-        f.root.join("shared.gitconfig"),
-        "[core]\n\thooksPath = tools/hooks\n[include]\n\tpath = nested/more.gitconfig\n",
+        f.root.join("team.cfg"),
+        "[core]\n\thooksPath = tools/scripts\n[include]\n\tpath = nested/more.cfg\n",
     )
     .unwrap();
-    write_asks(&d, &f, create("tools/hooks/pre-commit")).await;
-    write_asks(&d, &f, create("nested/more.gitconfig")).await;
-    write_asks(&d, &f, json!({"path": "shared.gitconfig", "delete": true})).await;
+    write_asks(&d, &f, create("tools/scripts/pre-commit")).await;
+    write_asks(&d, &f, create("nested/more.cfg")).await;
+    write_asks(&d, &f, json!({"path": "team.cfg", "delete": true})).await;
     write_unasked(&d, &f, "tools/other.txt").await;
     write_unasked(&d, &f, "deps.git").await;
     write_unasked(&d, &f, "vendor/lib.git/README.md").await;
@@ -1103,20 +1101,368 @@ async fn the_hooks_directory_is_the_one_git_uses() {
     }
 }
 
-/// Review E2: where git cannot answer (here a configuration it refuses to read), the gate does
-/// not fall back to nothing: names that may be git configuration or hooks ask.
+/// Reviews E2, G7: where git cannot answer for a repository that is there (here a
+/// configuration it refuses to read), the gate does not fall back to nothing, nor to names
+/// alone (an include or a hooks folder can be named anything): every write asks, and the card
+/// says why. Once git can answer again, an ordinary write does not ask.
 #[tokio::test]
-async fn without_an_answer_from_git_config_like_names_ask() {
+async fn without_an_answer_from_git_every_write_asks() {
     let d = approving_daemon().await;
     allow_every_write(&d).await;
     let f = d.open_dir(tempfile::tempdir().unwrap()).await;
     git_in(&f.root, &["init", "-q"]);
-    let mut c = std::fs::read_to_string(f.root.join(".git/config")).unwrap();
-    c.push_str("[core\n");
-    std::fs::write(f.root.join(".git/config"), c).unwrap();
+    let good = std::fs::read_to_string(f.root.join(".git/config")).unwrap();
+    std::fs::write(f.root.join(".git/config"), format!("{good}[core\n")).unwrap();
     write_asks(&d, &f, create("shared.gitconfig")).await;
     write_asks(&d, &f, create(".githooks/pre-commit")).await;
+    write_asks(&d, &f, create("team.cfg")).await;
+    let (r, req) = call_answering(
+        &d,
+        call(&f.id, "fs.applyPatch", create("src.txt")),
+        ApprovalDecision::Deny,
+    )
+    .await;
+    assert_eq!(kind(&r.unwrap_err()), ErrorKind::ApprovalDenied);
+    assert!(
+        req.rule
+            .as_deref()
+            .unwrap_or_default()
+            .contains("every write asks"),
+        "{req:?}"
+    );
+    assert!(!f.root.join("src.txt").exists());
+    std::fs::write(f.root.join(".git/config"), good).unwrap();
     write_unasked(&d, &f, "src.txt").await;
+}
+
+/// Review G7: without git at all, a workspace with a repository asks for every write; one
+/// with none asks for what may be git's by name (configuration, attributes, hooks, a git
+/// directory's entries) and not for an ordinary file (which then fails only because
+/// checkpoints need git).
+#[tokio::test]
+async fn without_git_a_repository_asks_for_every_write_and_a_folder_for_gits_names() {
+    let data = tempfile::tempdir().unwrap();
+    let empty = tempfile::tempdir().unwrap();
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("PATH", empty.path());
+    })
+    .await;
+    let mut info = client_info();
+    info.protocol_version = "0.3".into();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    std::fs::create_dir(f.root.join("src")).unwrap();
+    for path in [
+        "shared.gitconfig",
+        ".githooks/pre-commit",
+        "tools/hooks/pre-commit",
+        "src/HEAD",
+        "src/config",
+        ".gitattributes",
+    ] {
+        write_asks(&d, &f, create(path)).await;
+    }
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        d.client
+            .request::<ToolCall>(call(&f.id, "fs.applyPatch", create("src/main.txt"))),
+    )
+    .await
+    .expect("an ordinary write asked")
+    .unwrap();
+    assert!(r.is_error && r.text.contains("git"), "{}", r.text);
+
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    std::fs::create_dir(f.root.join(".git")).unwrap();
+    std::fs::write(f.root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    write_asks(&d, &f, create("src.txt")).await;
+}
+
+/// A first commit (checkpoints need a nested repository to have one).
+fn git_commit(dir: &std::path::Path) {
+    git_in(
+        dir,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "first",
+        ],
+    );
+}
+
+/// Review G2, the reviewer's `probe_b`: every repository in the workspace is asked, not only
+/// the root's. A root that is no repository but holds a clone (`app/`, its `core.hooksPath`
+/// and an include); a clone nested in that one (`app/vendor/x`); a submodule's work tree,
+/// whose configuration is in the superproject's `.git/modules/`. Their hooks folders, includes
+/// and programs ask; an ordinary file beside them does not.
+#[tokio::test]
+async fn every_repository_in_the_workspace_is_asked() {
+    let d = approving_daemon().await;
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    let app = f.root.join("app");
+    std::fs::create_dir(&app).unwrap();
+    git_in(&app, &["init", "-q"]);
+    git_in(&app, &["config", "core.hooksPath", "tools/gh"]);
+    git_in(&app, &["config", "include.path", "../team.cfg"]);
+    git_in(&app, &["config", "core.fsmonitor", "tools/fsmon.sh"]);
+    git_commit(&app);
+    let x = app.join("vendor/x");
+    std::fs::create_dir_all(&x).unwrap();
+    git_in(&x, &["init", "-q"]);
+    git_in(&x, &["config", "core.hooksPath", "scripts/gh"]);
+    git_commit(&x);
+    write_asks(&d, &f, create("app/tools/gh/pre-commit")).await;
+    write_asks(&d, &f, create("app/team.cfg")).await;
+    write_asks(&d, &f, create("app/tools/fsmon.sh")).await;
+    write_asks(&d, &f, create("app/vendor/x/scripts/gh/post-checkout")).await;
+    write_unasked(&d, &f, "app/notes.txt").await;
+    write_unasked(&d, &f, "notes.txt").await;
+
+    // A submodule.
+    let src = tempfile::tempdir().unwrap();
+    git_in(src.path(), &["init", "-q"]);
+    git_commit(src.path());
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    git_in(
+        &f.root,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            src.path().to_str().unwrap(),
+            "sm",
+        ],
+    );
+    git_commit(&f.root);
+    git_in(&f.root.join("sm"), &["config", "core.hooksPath", "hk"]);
+    write_asks(&d, &f, create("sm/hk/pre-commit")).await;
+    write_unasked(&d, &f, "sm/notes.txt").await;
+}
+
+/// Review G3, the reviewer's `probe_c`: the programs git's configuration names, where they are
+/// in the workspace, ask: `core.fsmonitor`, a filter's `clean` (with its `%f`), `core.sshCommand`,
+/// a `!` alias's script (`sh scripts/x.sh`), `core.attributesFile`. So does every
+/// `.gitattributes`, which routes files through filters and diff drivers. A script nothing
+/// names does not ask.
+#[tokio::test]
+async fn programs_gits_configuration_names_always_ask() {
+    let d = approving_daemon().await;
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    for (k, v) in [
+        ("core.fsmonitor", "tools/fsmon.sh"),
+        ("filter.strip.clean", "tools/clean.sh %f"),
+        ("core.sshCommand", "tools/ssh.sh"),
+        ("alias.x", "!sh scripts/x.sh --fast"),
+        ("core.attributesFile", "conf/attrs"),
+    ] {
+        git_in(&f.root, &["config", k, v]);
+    }
+    std::fs::create_dir_all(f.root.join("tools")).unwrap();
+    for path in [
+        "tools/fsmon.sh",
+        "tools/clean.sh",
+        "tools/ssh.sh",
+        "scripts/x.sh",
+        "conf/attrs",
+        ".gitattributes",
+        "web/.gitattributes",
+    ] {
+        write_asks(&d, &f, create(path)).await;
+    }
+    write_unasked(&d, &f, "tools/other.sh").await;
+}
+
+/// Review G4, the reviewer's `probe_a`: a file included under a condition that is false today
+/// (`onbranch:release`) is read all the same: the hooks folder it would set and the file it
+/// would include ask before the condition becomes true.
+#[tokio::test]
+async fn what_a_false_include_would_set_always_asks() {
+    let d = approving_daemon().await;
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    git_in(
+        &f.root,
+        &[
+            "config",
+            "includeIf.onbranch:release.path",
+            "../release.cfg",
+        ],
+    );
+    std::fs::write(
+        f.root.join("release.cfg"),
+        "[core]\n\thooksPath = tools/relhooks\n[include]\n\tpath = nested.cfg\n",
+    )
+    .unwrap();
+    write_asks(&d, &f, create("tools/relhooks/pre-commit")).await;
+    write_asks(&d, &f, create("nested.cfg")).await;
+    std::fs::create_dir_all(f.root.join("tools")).unwrap();
+    write_unasked(&d, &f, "tools/other.txt").await;
+}
+
+/// Review G5, the reviewer's `probe_d`: an ordinary folder cannot be made a git directory one
+/// plain file at a time. `src/HEAD` alone in an ordinary folder does not ask; once it is there,
+/// `src/commondir` and `src/config.worktree` do. A folder that already has `objects/` and
+/// `refs/` asks for its `HEAD` and `config`. Other files there, and a `hooks/` folder in an
+/// ordinary one, do not ask.
+#[tokio::test]
+async fn an_ordinary_folder_is_not_made_a_git_directory_unasked() {
+    let d = approving_daemon().await;
+    allow_every_write(&d).await;
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    git_commit(&f.root);
+    std::fs::create_dir_all(f.root.join("src")).unwrap();
+    std::fs::create_dir_all(f.root.join("web/hooks")).unwrap();
+    write_unasked(&d, &f, "web/hooks/useAuth.ts").await;
+    write_unasked(&d, &f, "src/HEAD").await;
+    write_asks(
+        &d,
+        &f,
+        json!({"path": "src/commondir", "create": "../.git\n"}),
+    )
+    .await;
+    write_asks(&d, &f, create("src/config.worktree")).await;
+    write_asks(&d, &f, create("src/hooks/pre-commit")).await;
+    write_unasked(&d, &f, "src/main.rs").await;
+    std::fs::create_dir_all(f.root.join("objs/objects")).unwrap();
+    std::fs::create_dir_all(f.root.join("objs/refs")).unwrap();
+    write_asks(&d, &f, create("objs/HEAD")).await;
+    write_asks(&d, &f, create("objs/config")).await;
+    write_unasked(&d, &f, "objs/README.md").await;
+}
+
+/// Review G6: git's answer is not computed once per turn. In one turn of a session, the
+/// agent writes an ordinary file (the answer is computed), runs `git config core.hooksPath
+/// tools/gh` (allowed), and then writing `tools/gh/pre-commit` asks. The person then approves
+/// an edit of `.git/config` to `tools/gh2` (a write, not a command: the answer follows the
+/// file), and writing `tools/gh2/pre-commit` asks too.
+#[tokio::test]
+async fn a_configuration_changed_mid_turn_counts_from_the_next_call() {
+    use axiom_protocol::agent::{
+        AgentEvent, EventBody, Send, SendParams, SessionCreate, SessionCreateParams,
+    };
+    let data = tempfile::tempdir().unwrap();
+    let script = data.path().join("script.json");
+    let call = |id: &str, name: &str, input: Value| json!({"events": [{"type": "toolCall", "id": id, "name": name, "input": input}]});
+    std::fs::write(
+        &script,
+        json!({"turns": [
+            call("w0", "fs.applyPatch", json!({"path": "notes.txt", "create": "n\n"})),
+            call("t1", "task.run", json!({"argv": ["git", "config", "core.hooksPath", "tools/gh"]})),
+            call("w2", "fs.applyPatch", create("tools/gh/pre-commit")),
+            call("w3", "fs.applyPatch", json!({"path": ".git/config",
+                "edits": [{"search": "hooksPath = tools/gh", "replace": "hooksPath = tools/gh2"}]})),
+            call("w4", "fs.applyPatch", create("tools/gh2/pre-commit")),
+            {"events": [{"type": "text", "text": "done"}]}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let d = Daemon::spawn_configured(data.path(), |c| {
+        c.env("AXIOM_TEST_SCRIPTED_MODEL", &script);
+    })
+    .await;
+    let mut info = client_info();
+    info.protocol_version = "0.3".into();
+    info.capabilities = Some(ClientCapabilities { approvals: true });
+    d.client.request::<Initialize>(info).await.unwrap();
+    d.client
+        .request::<SetPolicy>(Policy {
+            default: Decision::Allow,
+            rules: vec![],
+        })
+        .await
+        .unwrap();
+    let f = d.open_dir(tempfile::tempdir().unwrap()).await;
+    git_in(&f.root, &["init", "-q"]);
+    std::fs::create_dir_all(f.root.join("tools/gh")).unwrap();
+    std::fs::create_dir_all(f.root.join("tools/gh2")).unwrap();
+    let sid = d
+        .client
+        .request::<SessionCreate>(SessionCreateParams {
+            workspace_id: Some(f.id.clone()),
+            provider_id: "scripted".into(),
+            model: "scripted".into(),
+            title: None,
+        })
+        .await
+        .unwrap()
+        .session_id;
+    // The approver: `.git/config` once, everything else denied; what was asked is kept.
+    let mut rx = d.client.notifications();
+    let client = d.client.clone();
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = asked.clone();
+    let approver = tokio::spawn(async move {
+        while let Ok((m, v)) = rx.recv().await {
+            if m != "agent/approvalRequested" {
+                continue;
+            }
+            let r: ApprovalRequest = serde_json::from_value(v).unwrap();
+            let target = r.targets.join(" ");
+            let decision = if target.contains(".git/config") {
+                ApprovalDecision::Once
+            } else {
+                ApprovalDecision::Deny
+            };
+            seen.lock().unwrap().push(target);
+            client
+                .request::<Approve>(ApproveParams {
+                    request_id: r.request_id,
+                    decision,
+                })
+                .await
+                .unwrap();
+        }
+    });
+    d.client
+        .request::<Send>(SendParams {
+            workspace_id: Some(f.id.clone()),
+            session_id: sid.clone(),
+            text: "go".into(),
+            attachments: vec![],
+            images: vec![],
+            from_turn: None,
+        })
+        .await
+        .unwrap();
+    loop {
+        let v = d
+            .next_notification("agent/event", std::time::Duration::from_secs(120))
+            .await;
+        let e: AgentEvent = serde_json::from_value(v).unwrap();
+        if e.session_id == sid && matches!(e.event, EventBody::TurnEnd { .. }) {
+            break;
+        }
+    }
+    approver.abort();
+    let asked = asked.lock().unwrap().clone();
+    assert!(f.root.join("notes.txt").exists(), "{asked:?}");
+    let config = std::fs::read_to_string(f.root.join(".git/config")).unwrap();
+    assert!(config.contains("hooksPath = tools/gh2"), "{config}");
+    for hook in ["tools/gh/pre-commit", "tools/gh2/pre-commit"] {
+        assert!(!f.root.join(hook).exists(), "{hook} was written: {asked:?}");
+        assert!(asked.iter().any(|t| t.contains(hook)), "{hook}: {asked:?}");
+    }
 }
 
 /// Review E5: where the policy allows a command, no card is shown, so the result itself says

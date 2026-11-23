@@ -2,9 +2,13 @@
 //! v2, parsed), a file's text at HEAD or in the index, and a watch on the repository's own files.
 //! Read-only. Every run is isolated: the inherited `GIT_*` variables are removed, no pager, no
 //! hooks, no fsmonitor, `GIT_OPTIONAL_LOCKS=0` (status never takes the index lock), `LC_ALL=C`.
-//! No program the repository's configuration names runs (review E2): `core.fsmonitor` is off,
-//! `show` reads with `--no-ext-diff --no-textconv`. The person's own configuration (ignore files,
-//! `safe.directory`) still applies.
+//! No program the repository's configuration or attributes name runs (reviews E2, G1):
+//! `core.fsmonitor` is off; every filter driver git has configured is switched off for the run
+//! (its `clean`, `smudge` and `process` empty, not `required`), so a `.gitattributes` cannot
+//! route a file through one; `status` does not look inside submodules (`--ignore-submodules=dirty`:
+//! that would run git there, under the submodule's own configuration); `show` reads with
+//! `--no-ext-diff --no-textconv`. The rest (`rev-parse`, `config`) runs no program. The person's
+//! own configuration (ignore files, `safe.directory`) still applies.
 
 use axiom_protocol::git::{GitFile, GitFileState, GitStatus};
 use axiom_protocol::WorkspacePath;
@@ -105,6 +109,70 @@ fn run(git: &Path, root: &Path, args: &[&str]) -> Result<Result<Vec<u8>, String>
     run_command(command(git, root), args)
 }
 
+/// The variable `--config-env` reads an empty value from (a filter name with `=` in it cannot
+/// be given to `-c`).
+const EMPTY_VALUE_VAR: &str = "AXIOM_GIT_EMPTY";
+
+/// [`command`] with every filter driver git has configured for `root` switched off (review G1):
+/// `git status` re-reads a changed file through the `clean` or `process` filter its attributes
+/// name, and `.gitattributes` is a file in the work tree. git is asked which filters it has
+/// (`config --get-regexp '^filter\.'`, the same files and conditions the run reads); each gets
+/// `clean`, `smudge` and `process` empty, which git takes as no filter, and `required=false`, so
+/// a file is read as it is. A configuration git cannot read is an error, not a run.
+fn guarded(git: &Path, root: &Path) -> Result<Command, GitError> {
+    let names = match run_command(
+        isolated(git, root),
+        &["config", "-z", "--name-only", "--get-regexp", r"^filter\."],
+    )? {
+        Ok(out) => filter_names(&out).ok_or_else(|| {
+            GitError::Failed("a filter's name in git's configuration is not UTF-8".into())
+        })?,
+        // No such key: exit 1, nothing said.
+        Err(e) if e.is_empty() => Vec::new(),
+        Err(e) => return Err(GitError::Failed(e)),
+    };
+    let mut cmd = command(git, root);
+    cmd.env(EMPTY_VALUE_VAR, "");
+    for name in names {
+        for var in ["clean", "smudge", "process"] {
+            let key = format!("filter.{name}.{var}");
+            if name.contains('=') {
+                // `-c` splits at the first `=`; `--config-env` (git 2.31) at the last. An older
+                // git refuses the option, so the run fails rather than runs a filter.
+                cmd.arg(format!("--config-env={key}={EMPTY_VALUE_VAR}"));
+            } else {
+                cmd.arg("-c").arg(format!("{key}="));
+            }
+        }
+        let key = format!("filter.{name}.required");
+        if name.contains('=') {
+            cmd.arg(format!("--config-env={key}={EMPTY_VALUE_VAR}"));
+        } else {
+            cmd.arg("-c").arg(format!("{key}=false"));
+        }
+    }
+    Ok(cmd)
+}
+
+/// The driver names in `git config -z --name-only --get-regexp '^filter\.'`: the subsection of
+/// each `filter.<name>.<variable>` key (a name may hold dots). `None` for a name that is not
+/// UTF-8 (it could not be switched off exactly).
+fn filter_names(out: &[u8]) -> Option<Vec<String>> {
+    let mut names: Vec<String> = Vec::new();
+    for key in out.split(|b| *b == 0 || *b == b'\n') {
+        let key = std::str::from_utf8(key).ok()?;
+        let Some(rest) = key.strip_prefix("filter.") else {
+            continue;
+        };
+        if let Some((name, _var)) = rest.rsplit_once('.') {
+            if !names.iter().any(|n| n == name) {
+                names.push(name.to_string());
+            }
+        }
+    }
+    Some(names)
+}
+
 /// [`run`] with a prepared command.
 fn run_command(mut cmd: Command, args: &[&str]) -> Result<Result<Vec<u8>, String>, GitError> {
     let mut child = cmd.args(args).spawn()?;
@@ -183,48 +251,93 @@ pub fn discover(root: &Path) -> Result<Repo, GitError> {
 }
 
 /// What the configuration of the repository a folder is in can make git run, as git itself
-/// reads it (review E2): what the agent gate protects beside `.git`.
+/// reads it (reviews E2, G3, G4): what the agent gate protects beside `.git`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConfigFiles {
-    /// The hooks directory git uses: `core.hooksPath` from wherever it is set (an included file,
-    /// the global configuration), else the git directory's own `hooks`. `None` when nothing
-    /// sets one (outside a repository).
-    pub hooks: Option<PathBuf>,
+    /// The hooks directories: first the one git uses (`core.hooksPath` from wherever it is set,
+    /// an included file or the global configuration, else the git directory's own `hooks`),
+    /// then every other `core.hooksPath` a configuration file sets, live or not (an include
+    /// whose condition is false today). Empty when nothing sets one (outside a repository).
+    pub hooks: Vec<PathBuf>,
     /// The repository's git directory and its common directory: not `.git` for a worktree, a
     /// submodule or a repository made with `--separate-git-dir` (a `.git` file points there).
     pub git_dirs: Vec<PathBuf>,
     /// Every file git reads configuration from, and every file an `include.path` or
-    /// `includeIf.<condition>.path` names, whether it exists yet or not (an agent could create
-    /// it). Absolute, as git names them (not resolved through symlinks).
+    /// `includeIf.<condition>.path` names, whatever its condition, whether it exists yet or not
+    /// (an agent could create it), followed through the includes of those that exist. Absolute,
+    /// as git names them (not resolved through symlinks).
     pub files: Vec<PathBuf>,
+    /// What the configuration names as a program git runs, or as attributes it reads
+    /// ([`PROGRAM_KEYS`]): each word of the value that may be a path, from the top of the work
+    /// tree (the git directory for a bare repository), whether it exists yet or not.
+    pub programs: Vec<PathBuf>,
 }
 
+/// The most configuration files read for one repository (its own, the global and system ones,
+/// and what they include): more is an error, so the caller protects more, not less.
+pub const MAX_CONFIG_FILES: usize = 64;
+
 /// [`ConfigFiles`] for `root`, from git's own answers (`rev-parse --git-path hooks`,
-/// `config --list --show-origin`): no configuration file is parsed here. Outside a repository,
-/// what `<root>/.git/config` sets if there is one (a `.git` directory that is not a repository
-/// yet: `git init` keeps its configuration); else nothing. An error when git is missing or does
-/// not answer as expected: the caller then protects more, not less.
+/// `config --list --show-origin`, `config --file <f> --list` for each included file git did not
+/// open): no configuration file is parsed here. Outside a repository, what `<root>/.git/config`
+/// sets if there is one (a `.git` directory that is not a repository yet: `git init` keeps its
+/// configuration); else nothing. An error when git is missing or does not answer as expected:
+/// the caller then protects more, not less.
 pub fn config_files(root: &Path) -> Result<ConfigFiles, GitError> {
     // git names paths its own way (on Windows `C:/x\\.git\\../shared.gitconfig`): each is
-    // normalised as text, so it compares with the workspace's paths (still not resolved through
-    // symlinks; the gate does that).
+    // normalised, so it compares with the workspace's paths (the gate resolves the rest).
     let mut c = config_files_as_named(root)?;
-    c.hooks = c.hooks.map(|h| normal(&h));
-    for p in c.git_dirs.iter_mut().chain(c.files.iter_mut()) {
+    for p in c
+        .hooks
+        .iter_mut()
+        .chain(c.git_dirs.iter_mut())
+        .chain(c.files.iter_mut())
+        .chain(c.programs.iter_mut())
+    {
         *p = normal(p);
     }
-    let mut seen = Vec::new();
-    c.files.retain(|p| {
-        let new = !seen.contains(p);
-        seen.push(p.clone());
-        new
-    });
+    for v in [&mut c.hooks, &mut c.files, &mut c.programs] {
+        let mut seen = Vec::new();
+        v.retain(|p| {
+            let new = !seen.contains(p);
+            seen.push(p.clone());
+            new
+        });
+    }
     Ok(c)
+}
+
+/// `path` as the disk resolves it: the longest part of it that exists, resolved through
+/// symlinks (`.git/../x` is `sub/x` when `.git` links to `sub/realgit`, as git opens it), then
+/// the rest with `.` dropped and `..` folded into its parent as text ([`fold`]).
+fn normal(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let parts: Vec<Component> = path.components().collect();
+    for k in (1..=parts.len()).rev() {
+        let head: PathBuf = parts[..k].iter().collect();
+        if !head.is_absolute() {
+            break;
+        }
+        let Ok(mut out) = dunce::canonicalize(&head) else {
+            continue;
+        };
+        for c in &parts[k..] {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    out.pop();
+                }
+                other => out.push(other),
+            }
+        }
+        return out;
+    }
+    fold(path)
 }
 
 /// `path` with its separators the platform's own, `.` dropped and `..` folded into its parent,
 /// as text (a `..` at the root stays at the root).
-fn normal(path: &Path) -> PathBuf {
+fn fold(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
     for c in path.components() {
@@ -269,7 +382,7 @@ fn config_files_as_named(root: &Path) -> Result<ConfigFiles, GitError> {
                 return Err(GitError::Failed("unexpected `git rev-parse` output".into()));
             }
             // A relative origin is relative to where git runs: the top of the work tree, or
-            // the git directory.
+            // the git directory. So are a relative `core.hooksPath` and a program's path.
             let base = if inside {
                 let top = run_command(
                     isolated(&git, root),
@@ -289,11 +402,16 @@ fn config_files_as_named(root: &Path) -> Result<ConfigFiles, GitError> {
                 &["config", "--list", "--show-origin", "-z"],
             )?
             .map_err(GitError::Failed)?;
-            let (files, _) = config_origins(&list, &base);
+            let mut found = Found::default();
+            found.read(&list, &base);
+            found.includes_not_opened(&git, root, &base)?;
+            let mut all_hooks = vec![hooks];
+            all_hooks.extend(found.hooks);
             Ok(ConfigFiles {
-                hooks: Some(hooks),
+                hooks: all_hooks,
                 git_dirs: vec![git_dir, common],
-                files,
+                files: found.files,
+                programs: found.programs,
             })
         }
         Err(e) if e.contains("not a git repository") => {
@@ -303,59 +421,381 @@ fn config_files_as_named(root: &Path) -> Result<ConfigFiles, GitError> {
             }
             let mut cmd = isolated(&git, root);
             cmd.args(["config", "--file"]).arg(&config);
-            let list = run_command(cmd, &["--includes", "--list", "--show-origin", "-z"])?
-                .map_err(GitError::Failed)?;
-            let (mut files, hooks) = config_origins(&list, root);
-            if !files.contains(&config) {
-                files.push(config);
+            let list =
+                run_command(cmd, &["--list", "--show-origin", "-z"])?.map_err(GitError::Failed)?;
+            // Hooks and programs run from the top of the work tree `git init` would make here.
+            let mut found = Found::default();
+            found.read(&list, root);
+            if !found.files.contains(&config) {
+                found.files.push(config.clone());
             }
+            found.opened.push(config);
+            found.includes_not_opened(&git, root, root)?;
             Ok(ConfigFiles {
-                // Hooks run from the top of the work tree that `git init` would make here.
-                hooks: hooks.and_then(|h| expand_path(&h, root)),
+                hooks: found.hooks,
                 git_dirs: Vec::new(),
-                files,
+                files: found.files,
+                programs: found.programs,
             })
         }
         Err(e) => Err(GitError::Failed(e)),
     }
 }
 
-/// From `git config --list --show-origin -z`: every file it read (relative ones from `base`)
-/// and every file an include names, and the last `core.hooksPath` value.
-fn config_origins(list: &[u8], base: &Path) -> (Vec<PathBuf>, Option<Vec<u8>>) {
-    let mut files: Vec<PathBuf> = Vec::new();
-    let mut hooks = None;
-    fn push(files: &mut Vec<PathBuf>, p: PathBuf) {
-        if !files.contains(&p) {
-            files.push(p);
-        }
+/// What configuration listings said, gathered.
+#[derive(Default)]
+struct Found {
+    /// The files read (`--show-origin`).
+    opened: Vec<PathBuf>,
+    /// Those and every include target.
+    files: Vec<PathBuf>,
+    includes: Vec<PathBuf>,
+    hooks: Vec<PathBuf>,
+    programs: Vec<PathBuf>,
+}
+
+fn push(v: &mut Vec<PathBuf>, p: PathBuf) {
+    if !v.contains(&p) {
+        v.push(p);
     }
-    let mut parts = list.split(|b| *b == 0);
-    while let (Some(origin), Some(entry)) = (parts.next(), parts.next()) {
-        let Some(file) = origin.strip_prefix(b"file:") else {
-            continue; // the command line, a blob, standard input
-        };
-        let file = base.join(path_of(file));
-        push(&mut files, file.clone());
-        let (key, value) = match entry.iter().position(|b| *b == b'\n') {
-            Some(i) => (&entry[..i], Some(&entry[i + 1..])),
-            None => (entry, None),
-        };
-        let key = String::from_utf8_lossy(key).to_ascii_lowercase();
-        let Some(value) = value else { continue };
-        let include =
-            key == "include.path" || (key.starts_with("includeif.") && key.ends_with(".path"));
-        if include {
-            // Relative to the directory of the file that includes it.
-            let dir = file.parent().unwrap_or(base);
-            if let Some(p) = expand_path(value, dir) {
-                push(&mut files, p);
+}
+
+impl Found {
+    /// From `git config --list --show-origin -z`: the files it read (relative ones from
+    /// `base`), every file an include names (relative to the file that includes it), every
+    /// `core.hooksPath` and every path a program-valued key names (relative to `base`).
+    fn read(&mut self, list: &[u8], base: &Path) {
+        let mut parts = list.split(|b| *b == 0);
+        while let (Some(origin), Some(entry)) = (parts.next(), parts.next()) {
+            let Some(file) = origin.strip_prefix(b"file:") else {
+                continue; // the command line, a blob, standard input
+            };
+            let file = base.join(path_of(file));
+            push(&mut self.opened, file.clone());
+            push(&mut self.files, file.clone());
+            let (key, value) = match entry.iter().position(|b| *b == b'\n') {
+                Some(i) => (&entry[..i], Some(&entry[i + 1..])),
+                None => (entry, None),
+            };
+            let key = String::from_utf8_lossy(key).to_ascii_lowercase();
+            let Some(value) = value else { continue };
+            let include =
+                key == "include.path" || (key.starts_with("includeif.") && key.ends_with(".path"));
+            if include {
+                let dir = file.parent().unwrap_or(base);
+                if let Some(p) = expand_path(value, dir) {
+                    push(&mut self.files, p.clone());
+                    push(&mut self.includes, p);
+                }
+            } else if key == "core.hookspath" {
+                if let Some(p) = expand_path(value, base) {
+                    push(&mut self.hooks, p);
+                }
+            } else if let Some(shell) = program_key(&key, value) {
+                for p in program_paths(value, base, shell) {
+                    push(&mut self.programs, p);
+                }
             }
-        } else if key == "core.hookspath" {
-            hooks = Some(value.to_vec());
         }
     }
-    (files, hooks)
+
+    /// Reads each include target that exists and that git did not open (an `includeIf` whose
+    /// condition is false today, a file included only from such a file) as git would once it
+    /// does: `git config --file <target> --list --show-origin`, each key as it is, its own
+    /// includes followed the same way (review G4).
+    fn includes_not_opened(
+        &mut self,
+        git: &Path,
+        root: &Path,
+        base: &Path,
+    ) -> Result<(), GitError> {
+        let mut i = 0;
+        while i < self.includes.len() {
+            let target = self.includes[i].clone();
+            i += 1;
+            if self.opened.iter().any(|o| fold(o) == fold(&target)) || !target.is_file() {
+                continue;
+            }
+            if self.opened.len() >= MAX_CONFIG_FILES {
+                return Err(GitError::Failed(format!(
+                    "more than {MAX_CONFIG_FILES} configuration files are included"
+                )));
+            }
+            self.opened.push(target.clone());
+            let mut cmd = isolated(git, root);
+            cmd.args(["config", "--file"]).arg(&target);
+            // One git cannot read is protected all the same (it is in `files`); it cannot make
+            // git run anything until it is valid, and making it valid is a write that asks.
+            if let Ok(list) = run_command(cmd, &["--list", "--show-origin", "-z"])? {
+                self.read(&list, base);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Configuration keys whose value is a program git runs (or a file that routes files through
+/// one), by section and variable, `*` for any subsection (review G3):
+/// `core.fsmonitor`, `core.sshCommand`, `core.editor`, `core.pager`, `core.askPass`,
+/// `core.gitProxy`, `core.alternateRefsCommand`, `core.attributesFile`, `sequence.editor`,
+/// `diff.external`, `diff.*.textconv`, `diff.*.command`, `filter.*.clean`, `filter.*.smudge`,
+/// `filter.*.process`, `merge.*.driver`, `credential.helper`, `credential.*.helper`,
+/// `gpg.program`, `gpg.*.program`, `gpg.ssh.defaultKeyCommand`, `pager.*`, `alias.*` (a `!`
+/// alias), `interactive.diffFilter`, `difftool.*.cmd`, `difftool.*.path`, `mergetool.*.cmd`,
+/// `mergetool.*.path`, `sendemail.*` commands, `trailer.*.command`, `trailer.*.cmd`,
+/// `tar.*.command`, `browser.*.cmd`, `browser.*.path`, `man.*.cmd`, `man.*.path`,
+/// `remote.*.uploadpack`, `remote.*.receivepack`, `submodule.*.update` (a `!` command),
+/// `uploadpack.packObjectsHook`.
+pub const PROGRAM_KEYS: &[(&str, Option<&str>, &str)] = &[
+    ("core", None, "fsmonitor"),
+    ("core", None, "sshcommand"),
+    ("core", None, "editor"),
+    ("core", None, "pager"),
+    ("core", None, "askpass"),
+    ("core", None, "gitproxy"),
+    ("core", None, "alternaterefscommand"),
+    ("core", None, "attributesfile"),
+    ("sequence", None, "editor"),
+    ("diff", None, "external"),
+    ("diff", Some("*"), "textconv"),
+    ("diff", Some("*"), "command"),
+    ("filter", Some("*"), "clean"),
+    ("filter", Some("*"), "smudge"),
+    ("filter", Some("*"), "process"),
+    ("merge", Some("*"), "driver"),
+    ("credential", None, "helper"),
+    ("credential", Some("*"), "helper"),
+    ("gpg", None, "program"),
+    ("gpg", Some("*"), "program"),
+    ("gpg", Some("ssh"), "defaultkeycommand"),
+    ("pager", None, "*"),
+    ("alias", None, "*"),
+    ("interactive", None, "difffilter"),
+    ("difftool", Some("*"), "cmd"),
+    ("difftool", Some("*"), "path"),
+    ("mergetool", Some("*"), "cmd"),
+    ("mergetool", Some("*"), "path"),
+    ("sendemail", None, "sendmailcmd"),
+    ("sendemail", None, "tocmd"),
+    ("sendemail", None, "cccmd"),
+    ("sendemail", Some("*"), "sendmailcmd"),
+    ("sendemail", Some("*"), "tocmd"),
+    ("sendemail", Some("*"), "cccmd"),
+    ("trailer", Some("*"), "command"),
+    ("trailer", Some("*"), "cmd"),
+    ("tar", Some("*"), "command"),
+    ("browser", Some("*"), "cmd"),
+    ("browser", Some("*"), "path"),
+    ("man", Some("*"), "cmd"),
+    ("man", Some("*"), "path"),
+    ("remote", Some("*"), "uploadpack"),
+    ("remote", Some("*"), "receivepack"),
+    ("submodule", Some("*"), "update"),
+    ("uploadpack", None, "packobjectshook"),
+];
+
+/// Whether the (lower-cased) `key` names a program ([`PROGRAM_KEYS`]) with this value, and if
+/// so whether git may hand the value to a shell. A boolean (`core.fsmonitor = true` is git's
+/// own daemon, `pager.log = false`) names none; an alias or a submodule's `update` only with
+/// `!`.
+fn program_key(key: &str, value: &[u8]) -> Option<bool> {
+    let (section, rest) = key.split_once('.')?;
+    let (sub, var) = match rest.rsplit_once('.') {
+        Some((s, v)) => (Some(s), v),
+        None => (None, rest),
+    };
+    let listed = PROGRAM_KEYS.iter().any(|(s, sb, v)| {
+        *s == section
+            && (*v == "*" || *v == var)
+            && match (sb, sub) {
+                (None, None) => true,
+                (Some("*"), Some(_)) => true,
+                (Some(x), Some(y)) => *x == y,
+                _ => false,
+            }
+    });
+    if !listed {
+        return None;
+    }
+    let text = String::from_utf8_lossy(value);
+    let t = text.trim().to_ascii_lowercase();
+    if matches!(
+        t.as_str(),
+        "" | "true" | "false" | "yes" | "no" | "on" | "off" | "1" | "0"
+    ) {
+        return None;
+    }
+    let bang = text.trim_start().starts_with('!');
+    if (section == "alias" || section == "submodule") && !bang {
+        return None;
+    }
+    Some(section != "core" || var != "attributesfile")
+}
+
+/// The paths a program-valued configuration value may name, from `base`: its words (split as a
+/// shell would, roughly: blanks, `;|&()<>` and backquotes; quotes kept together), each that is
+/// not an option, a placeholder (`%f`) or a variable (`$X`): a word with a path separator, or
+/// a bare word that is not a folder at `base` (`sh clean.sh` runs `base/clean.sh`; `less` is
+/// harmless to protect). The part after `=` of an option or an assignment. Not `shell`: the
+/// value is one path.
+fn program_paths(value: &[u8], base: &Path, shell: bool) -> Vec<PathBuf> {
+    let text = String::from_utf8_lossy(value);
+    let text = text.trim().trim_start_matches('!');
+    let words: Vec<String> = if shell {
+        shell_words(text)
+    } else {
+        vec![text.to_string()]
+    };
+    let mut out = Vec::new();
+    for w in words {
+        // `--file=x` and `VAR=x`: the value.
+        let w = match w.split_once('=') {
+            Some((before, after))
+                if shell
+                    && (before.starts_with('-')
+                        || before
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '_')) =>
+            {
+                after.to_string()
+            }
+            _ => w,
+        };
+        if w.is_empty() || w.starts_with(['-', '%', '$']) {
+            continue;
+        }
+        let separator = w.contains('/') || (cfg!(windows) && w.contains('\\'));
+        let Some(p) = expand_path(w.as_bytes(), base) else {
+            continue;
+        };
+        if !separator && p.is_dir() {
+            continue;
+        }
+        out.push(p);
+    }
+    out
+}
+
+/// `text` split into words roughly as `sh` does: blanks and `;|&()<>` and backquotes separate,
+/// quotes group (and are dropped), a backslash takes the next character as it is.
+fn shell_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => cur.push(c),
+            (None, '\'' | '"') => quote = Some(c),
+            (None, '\\') => {
+                if let Some(n) = chars.next() {
+                    cur.push(n);
+                }
+            }
+            (None, c) if c.is_whitespace() || ";|&()<>`".contains(c) => {
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+            }
+            (None, c) => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words
+}
+
+/// The most folders [`repositories`] looks at, and how deep: past either, what it found is
+/// incomplete and the caller protects by name as well.
+pub const MAX_WALK_DIRS: usize = 100_000;
+pub const MAX_WALK_DEPTH: usize = 32;
+/// The most repositories [`repositories`] lists (each is asked of git).
+pub const MAX_REPOSITORIES: usize = 64;
+
+/// What [`repositories`] found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Repositories {
+    pub dirs: Vec<PathBuf>,
+    /// False when a limit was reached or a folder could not be read.
+    pub complete: bool,
+}
+
+/// The git repositories inside `root` (review G2): each folder that holds a `.git` (a directory,
+/// or a file pointing elsewhere: a submodule, a worktree), and each folder that is itself a
+/// git directory (a `HEAD` with `objects/` and `refs/`, or with a `commondir`), `root` itself
+/// included. Git directories are not looked into; symlinks are not followed (what they point
+/// to inside the workspace is reached by its own path). Bounded by [`MAX_WALK_DIRS`],
+/// [`MAX_WALK_DEPTH`] and [`MAX_REPOSITORIES`]. Blocking.
+pub fn repositories(root: &Path) -> Repositories {
+    let mut out = Repositories {
+        dirs: Vec::new(),
+        complete: true,
+    };
+    let mut queue = std::collections::VecDeque::from([(root.to_path_buf(), 0usize)]);
+    let mut seen = 0usize;
+    while let Some((dir, depth)) = queue.pop_front() {
+        seen += 1;
+        if seen > MAX_WALK_DIRS {
+            out.complete = false;
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            out.complete = false;
+            continue;
+        };
+        let mut subdirs = Vec::new();
+        let (mut dot_git, mut head, mut objects, mut refs, mut commondir) =
+            (false, false, false, false, false);
+        for e in entries {
+            let Ok(e) = e else {
+                out.complete = false;
+                continue;
+            };
+            let Ok(ft) = e.file_type() else {
+                out.complete = false;
+                continue;
+            };
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            // Without regard to case: a case-insensitive disk opens `HEAD` as `head`.
+            let is = |n: &str| name.eq_ignore_ascii_case(n);
+            if is(".git") {
+                dot_git = true;
+            } else if is("HEAD") {
+                head = !ft.is_dir();
+            } else if is("objects") {
+                objects = ft.is_dir();
+            } else if is("refs") {
+                refs = ft.is_dir();
+            } else if is("commondir") {
+                commondir = !ft.is_dir();
+            }
+            if ft.is_dir() && !name.eq_ignore_ascii_case(".git") {
+                subdirs.push(e.path());
+            }
+        }
+        let git_dir = head && ((objects && refs) || commondir);
+        if dot_git || git_dir {
+            if out.dirs.len() >= MAX_REPOSITORIES {
+                out.complete = false;
+                break;
+            }
+            out.dirs.push(dir.clone());
+        }
+        if git_dir {
+            continue;
+        }
+        if depth >= MAX_WALK_DEPTH {
+            if !subdirs.is_empty() {
+                out.complete = false;
+            }
+            continue;
+        }
+        queue.extend(subdirs.into_iter().map(|d| (d, depth + 1)));
+    }
+    out
 }
 
 /// A path value from git's configuration: `~/` is the home directory, a relative path is from
@@ -496,15 +936,17 @@ pub fn status(root: &Path) -> Result<GitStatus, GitError> {
         Err(GitError::NotARepository(m)) => return Ok(no_repo(m)),
         Err(e) => return Err(e),
     };
-    let out = run(
-        &repo.git,
-        root,
+    let out = run_command(
+        guarded(&repo.git, root)?,
         &[
             "status",
             "--porcelain=v2",
             "-z",
             "--branch",
             "--untracked-files=all",
+            // Not git in each submodule (its own configuration and filters): a submodule shows
+            // as changed when its commit does, not for edits inside it.
+            "--ignore-submodules=dirty",
             "--",
             ".",
         ],
@@ -531,9 +973,8 @@ fn no_repo(reason: String) -> GitStatus {
 pub fn show(root: &Path, path: &str, head: bool) -> Result<(Option<String>, bool), GitError> {
     let repo = discover(root)?;
     let spec = format!("{}:{}{}", if head { "HEAD" } else { "" }, repo.prefix, path);
-    let bytes = run(
-        &repo.git,
-        root,
+    let bytes = run_command(
+        guarded(&repo.git, root)?,
         &["show", "--no-ext-diff", "--no-textconv", &spec],
     )?
     .map_err(|e| {

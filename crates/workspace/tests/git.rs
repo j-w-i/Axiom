@@ -315,7 +315,7 @@ fn config_files_are_what_git_reads() {
     )
     .unwrap();
     let c = git::config_files(p).unwrap();
-    assert_eq!(c.hooks.as_deref(), Some(p.join("tools/hooks").as_path()));
+    assert_eq!(c.hooks.first(), Some(&p.join("tools/hooks")));
     let norm = |f: &Path| {
         let s = f.to_string_lossy().replace(".git/../", "");
         std::path::PathBuf::from(s)
@@ -350,19 +350,245 @@ fn config_files_are_what_git_reads() {
     );
     g(w, &["config", "core.hooksPath", "tools/hooks"]);
     let c = git::config_files(w).unwrap();
-    assert_eq!(c.hooks.as_deref(), Some(w.join("tools/hooks").as_path()));
+    assert_eq!(c.hooks.first(), Some(&w.join("tools/hooks")));
     assert!(c.git_dirs.contains(&gd), "{:?}", c.git_dirs);
     assert!(c.files.contains(&gd.join("config")), "{:?}", c.files);
 
-    // Outside a repository: nothing, unless a `.git/config` is waiting for `git init`.
+    // Outside a repository: nothing, unless a `.git/config` is waiting for `git init`. (Paths
+    // that exist come back resolved through symlinks, review G-normal: the temporary folder's
+    // own path is one on macOS.)
     let n = tempfile::tempdir().unwrap();
-    assert_eq!(
-        git::config_files(n.path()).unwrap(),
-        git::ConfigFiles::default()
+    let n = &dunce::canonicalize(n.path()).unwrap();
+    assert_eq!(git::config_files(n).unwrap(), git::ConfigFiles::default());
+    std::fs::create_dir(n.join(".git")).unwrap();
+    std::fs::write(n.join(".git/config"), "[core]\n\thooksPath = .\n").unwrap();
+    let c = git::config_files(n).unwrap();
+    assert_eq!(c.hooks, std::slice::from_ref(n));
+    assert_eq!(c.files, [n.join(".git/config")]);
+}
+
+/// A script outside the repository that records each run in `marker` (and passes its input
+/// through, as a filter would), for the configuration to name.
+#[cfg(unix)]
+fn marker_script(dir: &Path, name: &str, marker: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let script = dir.join(name);
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\necho \"$0 $*\" >> '{}'\ncat\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
+/// Review G1, the reviewer's `probe_e`: the daemon's own `git status` runs no filter driver.
+/// The configuration defines filters (a `clean` script in the work tree, a `process` one, one
+/// that is `required`, one whose name has `=` and dots in it), an agent-written
+/// `.gitattributes` routes every file through them, and a same-size edit makes `status` read
+/// the file again. A submodule with its own filter and attributes, edited too, is not looked
+/// into. Every other program-valued key is set as well: none runs on `status`, `show`,
+/// `config_files` or `repositories`. The status is still right.
+#[cfg(unix)]
+#[test]
+fn status_runs_no_filter_driver_and_nothing_else_the_configuration_names() {
+    let d = repo();
+    let p = d.path();
+    let outside = tempfile::tempdir().unwrap();
+    let marker = outside.path().join("ran");
+    let prog = marker_script(outside.path(), "prog.sh", &marker);
+    let prog = prog.display();
+    // A submodule (set up first: git's own setup here would run the filters below): its own
+    // filter, its own attributes, an edit inside it.
+    let src = repo();
+    g(
+        p,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            src.path().to_str().unwrap(),
+            "sm",
+        ],
     );
-    std::fs::create_dir(n.path().join(".git")).unwrap();
-    std::fs::write(n.path().join(".git/config"), "[core]\n\thooksPath = .\n").unwrap();
-    let c = git::config_files(n.path()).unwrap();
-    assert_eq!(c.hooks.as_deref(), Some(n.path()));
-    assert_eq!(c.files, [n.path().join(".git/config")]);
+    g(p, &["commit", "-qm", "sm"]);
+    let sm = p.join("sm");
+    g(&sm, &["config", "filter.sub.clean", &prog.to_string()]);
+    std::fs::write(sm.join(".gitattributes"), "*.txt filter=sub\n").unwrap();
+    // The in-tree filter script, as the review's probe has it.
+    std::fs::create_dir(p.join("tools")).unwrap();
+    marker_script(&p.join("tools"), "clean.sh", &marker);
+    let config = format!(
+        "[filter \"strip\"]\n\tclean = tools/clean.sh %f\n\tsmudge = tools/clean.sh %f\n\
+         [filter \"proc\"]\n\tprocess = {prog}\n\trequired = true\n\
+         [filter \"odd=name.x\"]\n\tclean = {prog}\n\trequired = true\n\
+         [core]\n\tsshCommand = {prog}\n\teditor = {prog}\n\tpager = {prog}\n\taskPass = {prog}\n\
+         [credential]\n\thelper = !{prog}\n[gpg]\n\tprogram = {prog}\n\
+         [sequence]\n\teditor = {prog}\n[alias]\n\tst = !{prog}\n\
+         [diff \"x\"]\n\ttextconv = {prog}\n\tcommand = {prog}\n[merge \"x\"]\n\tdriver = {prog}\n"
+    );
+    let mut c = std::fs::read_to_string(p.join(".git/config")).unwrap();
+    c.push_str(&config);
+    std::fs::write(p.join(".git/config"), c).unwrap();
+    std::fs::write(
+        p.join(".gitattributes"),
+        "*.txt filter=strip diff=x merge=x\nmod.txt filter=proc\ndel.txt filter=odd=name.x\n",
+    )
+    .unwrap();
+    // Same-size edits: git must read the files again to know.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(p.join("keep.txt"), "kepp\n").unwrap();
+    std::fs::write(p.join("mod.txt"), "two\n").unwrap();
+    std::fs::write(p.join("del.txt"), "gonE\n").unwrap();
+    std::fs::write(sm.join("keep.txt"), "kepp\n").unwrap();
+    // Checked before any result is: a filter that ran may also have failed the run.
+    let st = git::status(p);
+    let head = git::show(p, "keep.txt", true);
+    let index = git::show(p, "keep.txt", false);
+    let config = git::config_files(p);
+    git::repositories(p);
+    assert!(
+        !marker.exists(),
+        "a configured program ran: {}",
+        std::fs::read_to_string(&marker).unwrap_or_default()
+    );
+    let st = st.unwrap();
+    assert_eq!(head.unwrap(), (Some("keep\n".into()), false));
+    assert_eq!(index.unwrap(), (Some("keep\n".into()), false));
+    config.unwrap();
+    let mut got = states(&st);
+    got.retain(|(path, _, _)| !path.starts_with(".gitattributes") && path != "tools/clean.sh");
+    assert_eq!(
+        got,
+        vec![
+            ("del.txt".into(), S::Unmodified, S::Modified),
+            ("keep.txt".into(), S::Unmodified, S::Modified),
+            ("mod.txt".into(), S::Unmodified, S::Modified),
+        ]
+    );
+    // The probe itself: the same `status` without the switch runs the script (the setup is
+    // live, so the assertion above means something).
+    Command::new("git")
+        .current_dir(p)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .args(["-c", "core.fsmonitor=false", "status", "--porcelain=v2"])
+        .output()
+        .unwrap();
+    assert!(
+        marker.exists(),
+        "the probe's filter did not run without the switch"
+    );
+}
+
+/// Reviews G3, G4: what git's configuration names as a program, in the work tree, is listed
+/// (`core.fsmonitor`, a filter, `core.sshCommand`, a `!` alias's paths, `core.attributesFile`;
+/// not a boolean, not a placeholder or an option), and so is what an include git does not open
+/// today (`includeIf.onbranch:release`) would set, and what that file includes in turn.
+#[test]
+fn config_files_list_programs_and_what_a_false_include_would_set() {
+    let d = repo();
+    let p = &dunce::canonicalize(d.path()).unwrap();
+    let mut c = std::fs::read_to_string(p.join(".git/config")).unwrap();
+    c.push_str(
+        "[core]\n\tfsmonitor = tools/fsmon.sh\n\tsshCommand = \"sh scripts/ssh.sh\" -v\n\
+         \tattributesFile = conf/attrs\n\tpager = false\n\
+         [filter \"strip\"]\n\tclean = tools/clean.sh %f --flag\n\
+         [alias]\n\tx = !cd sub && ./run.sh --out=build/log\n\tlg = log --oneline\n\
+         [includeIf \"onbranch:release\"]\n\tpath = ../release.cfg\n",
+    );
+    std::fs::write(p.join(".git/config"), c).unwrap();
+    std::fs::write(
+        p.join("release.cfg"),
+        "[core]\n\thooksPath = tools/relhooks\n\teditor = tools/ed.sh\n\
+         [include]\n\tpath = nested.cfg\n",
+    )
+    .unwrap();
+    std::fs::write(p.join("nested.cfg"), "[core]\n\taskPass = tools/ask.sh\n").unwrap();
+    // A folder named alone is not a program (`cd sub`).
+    std::fs::create_dir(p.join("sub")).unwrap();
+    let c = git::config_files(p).unwrap();
+    for want in [
+        "tools/fsmon.sh",
+        "scripts/ssh.sh",
+        "conf/attrs",
+        "tools/clean.sh",
+        "run.sh",
+        "build/log",
+        "tools/ed.sh",
+        "tools/ask.sh",
+    ] {
+        assert!(
+            c.programs.contains(&p.join(want)),
+            "{want}: {:?}",
+            c.programs
+        );
+    }
+    for not in ["false", "%f", "--flag", "log", "--oneline", "sub"] {
+        assert!(
+            !c.programs.contains(&p.join(not)),
+            "{not}: {:?}",
+            c.programs
+        );
+    }
+    assert!(c.hooks.contains(&p.join("tools/relhooks")), "{:?}", c.hooks);
+    // The live hooks directory is still git's own.
+    assert_eq!(c.hooks.first(), Some(&p.join(".git/hooks")));
+    for f in ["release.cfg", "nested.cfg"] {
+        assert!(c.files.contains(&p.join(f)), "{f}: {:?}", c.files);
+    }
+}
+
+/// Review G2: every repository inside a folder is found, the folder itself not being one: a
+/// clone, a clone nested in it, a submodule's work tree (a `.git` file), a bare repository,
+/// none inside a git directory, none through a symlink.
+#[test]
+fn repositories_inside_a_folder_are_found() {
+    let w = tempfile::tempdir().unwrap();
+    let w = &dunce::canonicalize(w.path()).unwrap();
+    for r in ["app", "app/vendor/x"] {
+        std::fs::create_dir_all(w.join(r)).unwrap();
+        g(&w.join(r), &["init", "-q"]);
+    }
+    std::fs::create_dir_all(w.join("libs/wt")).unwrap();
+    std::fs::write(w.join("libs/wt/.git"), "gitdir: ../../app/.git\n").unwrap();
+    g(w, &["init", "-q", "--bare", "mirror.git"]);
+    std::fs::create_dir_all(w.join("plain/deep")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(w.join("app"), w.join("plain/link")).unwrap();
+    let found = git::repositories(w);
+    assert!(found.complete);
+    let mut dirs = found.dirs.clone();
+    dirs.sort();
+    let mut want = vec![
+        w.join("app"),
+        w.join("app/vendor/x"),
+        w.join("libs/wt"),
+        w.join("mirror.git"),
+    ];
+    want.sort();
+    assert_eq!(dirs, want);
+}
+
+/// The reviewer's follow-up on `normal()`: where `.git` is a symlink (to `sub/realgit`), git
+/// opens an include `../x.gitconfig` as `sub/x.gitconfig`, so that is the file listed, not the
+/// `x.gitconfig` that `..` folded as text would give.
+#[cfg(unix)]
+#[test]
+fn an_include_through_a_symlinked_git_directory_is_the_file_git_opens() {
+    let d = repo();
+    let p = &dunce::canonicalize(d.path()).unwrap();
+    std::fs::create_dir(p.join("sub")).unwrap();
+    std::fs::rename(p.join(".git"), p.join("sub/realgit")).unwrap();
+    std::os::unix::fs::symlink("sub/realgit", p.join(".git")).unwrap();
+    g(p, &["config", "include.path", "../x.gitconfig"]);
+    std::fs::write(p.join("sub/x.gitconfig"), "[core]\n\thooksPath = h\n").unwrap();
+    let c = git::config_files(p).unwrap();
+    assert!(
+        c.files.contains(&p.join("sub/x.gitconfig")),
+        "{:?}",
+        c.files
+    );
+    assert!(!c.files.contains(&p.join("x.gitconfig")), "{:?}", c.files);
 }

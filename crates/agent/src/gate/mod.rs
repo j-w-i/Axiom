@@ -49,10 +49,66 @@ pub struct Policies {
     /// may be git's configuration or hooks is protected instead ([`git_config_like`]).
     pub git_unknown: bool,
     /// The workspace root, to tell whether a `<name>.git` directory on a written path is a
-    /// bare repository ([`Policies::protects_any`]). `None`: every such directory is taken to
-    /// be one.
+    /// bare repository, or a written git entry would make a folder a git directory
+    /// ([`Policies::protects_any`]). `None`: every such `<name>.git` directory is taken to be a
+    /// repository; other folders are not looked at.
     pub root: Option<PathBuf>,
+    /// git's answer, asked again for each call (review G6), beside [`Self::protected`] and
+    /// [`Self::git_unknown`]: the daemon's, which follows configuration changed mid-turn.
+    pub git: Option<GitSource>,
 }
+
+/// What git's configuration makes protected in a workspace now (reviews E2, G2–G4, G6, G7):
+/// asked by the gate for every write, so a change made mid-turn (an approved command, the
+/// person's own edit) counts from the next call.
+pub trait GitProtection: Send + Sync {
+    /// The answer for now (cheap when nothing changed).
+    fn current(&self) -> BoxFuture<'_, GitAnswer>;
+    /// A call ran that may have changed git's configuration or added a repository unseen (a
+    /// command): the next answer is computed afresh.
+    fn changed(&self);
+}
+
+/// A [`GitProtection`], shareable in [`Policies`].
+#[derive(Clone)]
+pub struct GitSource(pub Arc<dyn GitProtection>);
+
+impl std::fmt::Debug for GitSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GitSource")
+    }
+}
+
+/// What git's configuration protects, as workspace paths (each protects itself and what is
+/// under it), and how much git could not say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitAnswer {
+    pub protected: Vec<WorkspacePath>,
+    pub unknown: GitUnknown,
+}
+
+/// How much of git's configuration is unknown (review G7).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GitUnknown {
+    /// git answered for every repository in the workspace.
+    #[default]
+    No,
+    /// Not every repository could be found (a limit on the walk): what was found is protected
+    /// as git answered, and every name that may be git's is protected too
+    /// ([`git_config_like`]).
+    Names,
+    /// git could not answer for a repository that exists here (no `git`, too old, a
+    /// configuration it refuses, a timeout): any file may be an include or a hooks folder, so
+    /// every write asks.
+    Everything,
+}
+
+/// Why a write that the policy allows asks: a protected path.
+const PROTECTED: &str = "protected: Axiom configuration, git's directories, configuration, \
+attributes and hooks, and the programs git's configuration names, always ask";
+/// Why every write asks while git cannot say what it reads (review G7).
+const GIT_UNKNOWN: &str = "protected: git could not say what its configuration runs in this \
+workspace (is git 2.31 or later installed, and its configuration valid?), so every write asks";
 
 impl Policies {
     /// Whether writing `p` always asks, by its name alone: a [`protected_path`], under
@@ -63,23 +119,57 @@ impl Policies {
             || (self.git_unknown && git_config_like(p))
     }
 
-    /// Whether writing any of `paths` always asks: [`Self::protects`], or a path inside a
-    /// `<name>.git` directory that is a bare repository on disk ([`bare_repository`]; checked
-    /// off the async thread, and only for paths with such a name).
+    /// Whether writing any of `paths` always asks ([`Self::protection`]).
     pub async fn protects_any(&self, paths: &[WorkspacePath]) -> bool {
-        if paths.iter().any(|p| self.protects(p)) {
-            return true;
+        self.protection(paths).await.is_some()
+    }
+
+    /// Why writing any of `paths` always asks, if it does: [`Self::protects`]; git's answer
+    /// now ([`Self::git`]); a path inside a `<name>.git` directory that is a bare repository
+    /// on disk ([`bare_repository`]); or one of git's own entries written into a folder that
+    /// already holds one that makes a git directory ([`makes_git_dir`], review G5). The disk
+    /// is looked at off the async thread, only for paths with such names.
+    pub async fn protection(&self, paths: &[WorkspacePath]) -> Option<&'static str> {
+        if paths.is_empty() {
+            return None;
+        }
+        let answer = match &self.git {
+            Some(g) => g.0.current().await,
+            None => GitAnswer::default(),
+        };
+        if answer.unknown == GitUnknown::Everything {
+            return Some(GIT_UNKNOWN);
+        }
+        let names = self.git_unknown || answer.unknown == GitUnknown::Names;
+        if paths.iter().any(|p| {
+            self.protects(p)
+                || answer.protected.iter().any(|d| within(p, d))
+                || (names && git_config_like(p))
+        }) {
+            return Some(PROTECTED);
         }
         let dirs: Vec<String> = paths.iter().flat_map(|p| bare_candidates(&p.0)).collect();
-        if dirs.is_empty() {
-            return false;
+        let entries: Vec<String> = paths.iter().flat_map(|p| entry_folders(&p.0)).collect();
+        if dirs.is_empty() && entries.is_empty() {
+            return None;
         }
         let Some(root) = self.root.clone() else {
-            return true;
+            return (!dirs.is_empty()).then_some(PROTECTED);
         };
-        tokio::task::spawn_blocking(move || dirs.iter().any(|d| bare_repository(&root, d)))
-            .await
-            .unwrap_or(true)
+        tokio::task::spawn_blocking(move || {
+            dirs.iter().any(|d| bare_repository(&root, d))
+                || entries.iter().any(|d| makes_git_dir(&root, d))
+        })
+        .await
+        .unwrap_or(true)
+        .then_some(PROTECTED)
+    }
+
+    /// A call ran that may have changed git's configuration ([`GitProtection::changed`]).
+    fn changed(&self) {
+        if let Some(g) = &self.git {
+            g.0.changed();
+        }
     }
 }
 
@@ -157,7 +247,11 @@ pub fn protected_path(p: &WorkspacePath) -> bool {
     let mut parts = p.0.split('/');
     let first = parts.next().unwrap_or("");
     first.eq_ignore_ascii_case(".axiom")
-        || p.0.split('/').any(|s| s.eq_ignore_ascii_case(".husky"))
+        || p.0.split('/').any(|s| {
+            s.eq_ignore_ascii_case(".husky")
+                // Which filter and diff driver each file goes through (review G3).
+                || s.eq_ignore_ascii_case(".gitattributes")
+        })
         || git_dir_by_name(&p.0).is_some()
 }
 
@@ -230,14 +324,52 @@ pub fn git_dir_of(root: &Path, rel: &str) -> Option<String> {
     })
 }
 
-/// While git cannot be asked what it reads (review E2): a path with a segment that may be git's
-/// configuration (`.git*`, `*gitconfig`) or a hooks directory (`*hooks`), compared without
-/// regard to ASCII case.
+/// While git cannot say all it reads (reviews E2, G7): a path with a segment that may be git's
+/// configuration or attributes (`.git*`, `*gitconfig`), a hooks directory (`*hooks`) or one of
+/// git's own entries in a git directory ([`GIT_DIR_ENTRIES`]), compared without regard to ASCII
+/// case.
 pub fn git_config_like(p: &WorkspacePath) -> bool {
     p.0.split('/').any(|s| {
-        let s = s.to_ascii_lowercase();
-        s.starts_with(".git") || s.ends_with("gitconfig") || s.ends_with("hooks")
+        let l = s.to_ascii_lowercase();
+        l.starts_with(".git")
+            || l.ends_with("gitconfig")
+            || l.ends_with("hooks")
+            || GIT_DIR_ENTRIES.iter().any(|e| e.eq_ignore_ascii_case(s))
     })
+}
+
+/// What makes a folder a git directory, beside `HEAD`: `objects/` and `refs/`, or a
+/// `commondir` naming a folder that has them (git's `is_git_directory`).
+const GIT_DIR_MARKERS: &[&str] = &["HEAD", "commondir", "objects", "refs"];
+
+/// The folders (workspace paths, the root as `""`) into which `rel` writes one of git's own
+/// entries ([`GIT_DIR_ENTRIES`]) directly: [`makes_git_dir`] tells whether that may make one a
+/// git directory.
+pub(crate) fn entry_folders(rel: &str) -> Vec<String> {
+    let parts: Vec<&str> = rel.split('/').collect();
+    (0..parts.len())
+        .filter(|&i| {
+            GIT_DIR_ENTRIES
+                .iter()
+                .any(|e| e.eq_ignore_ascii_case(parts[i]))
+        })
+        .map(|i| parts[..i].join("/"))
+        .collect()
+}
+
+/// Whether the workspace folder `dir` under `root` already holds one of what makes a git
+/// directory ([`GIT_DIR_MARKERS`]): then writing another of git's entries there could make it
+/// one, its `config` or `config.worktree` then read by git, its `hooks/` run (review G5: an
+/// agent's `src/HEAD`, then `src/commondir` naming `../.git`, then `src/config.worktree` with
+/// `core.sshCommand`). The first of them alone, in an ordinary folder, does not ask. Blocking.
+pub fn makes_git_dir(root: &Path, dir: &str) -> bool {
+    let mut p = root.to_path_buf();
+    if !dir.is_empty() {
+        p.extend(dir.split('/'));
+    }
+    GIT_DIR_MARKERS
+        .iter()
+        .any(|m| std::fs::symlink_metadata(p.join(m)).is_ok())
 }
 
 /// The hooks git runs, by name (`githooks(5)`): where the hooks directory is the workspace root
@@ -277,14 +409,11 @@ fn writes(effect: Effect) -> bool {
     !matches!(effect, Effect::Read)
 }
 
-/// Why a call that the policy allows still asks, if it does. `protected`: it writes a
-/// protected path ([`Policies::protects`]).
-fn must_ask(protected: bool, escalate: bool) -> Option<String> {
-    if protected {
-        return Some(
-            "protected: Axiom configuration, git's directories, configuration and hooks always ask"
-                .into(),
-        );
+/// Why a call that the policy allows still asks, if it does. `protected`: why it writes a
+/// protected path ([`Policies::protection`]).
+fn must_ask(protected: Option<&str>, escalate: bool) -> Option<String> {
+    if let Some(why) = protected {
+        return Some(why.into());
     }
     escalate.then(|| "the call sets its environment or working directory".into())
 }
@@ -400,8 +529,12 @@ impl Gate {
             paths: &prepared.targets.paths,
             argv: prepared.targets.argv.as_deref(),
         };
-        let protected =
-            writes(prepared.effect) && policies.protects_any(&prepared.targets.paths).await;
+        let protection = if writes(prepared.effect) {
+            policies.protection(&prepared.targets.paths).await
+        } else {
+            None
+        };
+        let protected = protection.is_some();
         let (mut decision, mut rule) = {
             let mut rules = granted;
             if !protected && !prepared.targets.escalate {
@@ -410,7 +543,7 @@ impl Gate {
             policy::decide(&policies.user, &rules, policies.workspace.as_ref(), &call)
         };
         if decision == Decision::Allow {
-            let why = must_ask(protected, prepared.targets.escalate);
+            let why = must_ask(protection, prepared.targets.escalate);
             // A protected path asks every time; a call with its own environment asks unless
             // the person approved exactly it for the session.
             if let Some(why) = why.filter(|_| protected || !exact) {
@@ -588,12 +721,25 @@ impl Gate {
         policies: &Policies,
         cancel: &CancellationToken,
     ) -> Result<(Via, Option<String>), Refusal> {
+        // A command the agent runs itself, once allowed, may change git's configuration: the
+        // next write asks git again (review G6).
+        if !matches!(
+            call.effect,
+            Effect::Read | Effect::WriteWorkspace | Effect::Delete
+        ) {
+            policies.changed();
+        }
         // No session grant covers a permission request (none is ever made for one).
         let (mut decision, mut rule) =
             policy::decide(&policies.user, &[], policies.workspace.as_ref(), call);
-        let protected = writes(call.effect) && policies.protects_any(call.paths).await;
+        let protection = if writes(call.effect) {
+            policies.protection(call.paths).await
+        } else {
+            None
+        };
+        let protected = protection.is_some();
         if decision == Decision::Allow {
-            if let Some(why) = must_ask(protected, false) {
+            if let Some(why) = must_ask(protection, false) {
                 decision = Decision::Ask;
                 rule = Some(why);
             }
@@ -851,6 +997,14 @@ pub async fn run_prepared_with(
         .with_rule(rule);
     }
     let result = registry.execute(ctx, prepared, allowed).await;
+    // A command (or anything else that is not a write the gate saw path by path) may have
+    // changed git's configuration or made a repository: git is asked again (review G6).
+    if !matches!(
+        effect,
+        Effect::Read | Effect::WriteWorkspace | Effect::Delete
+    ) {
+        policies.changed();
+    }
     finish(
         ctx,
         audit,
@@ -1028,6 +1182,7 @@ mod tests {
             protected: vec![],
             git_unknown: false,
             root: None,
+            git: None,
         }
     }
 
@@ -1120,6 +1275,7 @@ mod tests {
             protected: vec![],
             git_unknown: false,
             root: None,
+            git: None,
         };
         let plain = prepared("acp.terminal", Effect::Execute, argv(&["npm", "test"]));
         assert!(!asks(&g, &a, &w, &plain, &pol).await);
@@ -1236,6 +1392,7 @@ mod tests {
             protected: vec![],
             git_unknown: false,
             root: None,
+            git: None,
         };
         for path in [
             ".axiom/project.toml",
@@ -1247,6 +1404,9 @@ mod tests {
             "web/.Husky/_/pre-push",
             "mirror.git/hooks/post-update",
             "vendor/Upstream.GIT/config",
+            // Which filters and diff drivers files go through (review G3), at any depth.
+            ".gitattributes",
+            "web/.GitAttributes",
         ] {
             let p = prepared(
                 "fs.applyPatch",
@@ -1332,6 +1492,7 @@ mod tests {
             protected: vec![],
             git_unknown,
             root,
+            git: None,
         }
     }
 
@@ -1406,5 +1567,75 @@ mod tests {
             assert!(asks(&g, &a, &w, &write_to(path), &unknown).await, "{path}");
         }
         assert!(!asks(&g, &a, &w, &write_to("src/main.rs"), &unknown).await);
+    }
+    /// A [`GitProtection`] whose answer the test sets; counts the times it is asked.
+    struct Fixed {
+        answer: Mutex<GitAnswer>,
+        asked: AtomicU64,
+    }
+
+    impl GitProtection for Fixed {
+        fn current(&self) -> BoxFuture<'_, GitAnswer> {
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            let a = lock(&self.answer).clone();
+            Box::pin(async move { a })
+        }
+        fn changed(&self) {}
+    }
+
+    /// Reviews G6, G7: git's answer is asked for every write (a change between two calls counts
+    /// at the second), not for a read; while git cannot find every repository, names that may
+    /// be git's ask as well; while it cannot answer for a repository that is there, every write
+    /// asks, and the card says why.
+    #[tokio::test]
+    async fn gits_answer_is_asked_for_each_write_and_what_it_cannot_say_asks() {
+        let (g, a) = gate();
+        let w = ws("w");
+        let fixed = Arc::new(Fixed {
+            answer: Mutex::new(GitAnswer {
+                protected: vec![WorkspacePath("tools/gh".into())],
+                unknown: GitUnknown::No,
+            }),
+            asked: AtomicU64::new(0),
+        });
+        let pol = Policies {
+            git: Some(GitSource(fixed.clone())),
+            ..allow_writes(None, false)
+        };
+        assert!(asks(&g, &a, &w, &write_to("tools/gh/pre-commit"), &pol).await);
+        assert!(!asks(&g, &a, &w, &write_to("tools/gh2/pre-commit"), &pol).await);
+        assert!(!asks(&g, &a, &w, &write_to("shared.gitconfig"), &pol).await);
+        lock(&fixed.answer).protected = vec![WorkspacePath("tools/gh2".into())];
+        assert!(asks(&g, &a, &w, &write_to("tools/gh2/pre-commit"), &pol).await);
+        assert!(!asks(&g, &a, &w, &write_to("tools/gh/pre-commit"), &pol).await);
+        assert_eq!(fixed.asked.load(Ordering::SeqCst), 5);
+        let read = prepared(
+            "fs.read",
+            Effect::Read,
+            Targets {
+                paths: vec![WorkspacePath("tools/gh2/pre-commit".into())],
+                ..Default::default()
+            },
+        );
+        assert!(!asks(&g, &a, &w, &read, &pol).await);
+        assert_eq!(fixed.asked.load(Ordering::SeqCst), 5);
+
+        lock(&fixed.answer).unknown = GitUnknown::Names;
+        for path in ["shared.gitconfig", "x/HEAD", "x/config", ".gitmodules"] {
+            assert!(asks(&g, &a, &w, &write_to(path), &pol).await, "{path}");
+        }
+        assert!(!asks(&g, &a, &w, &write_to("src/main.rs"), &pol).await);
+
+        lock(&fixed.answer).unknown = GitUnknown::Everything;
+        assert!(asks(&g, &a, &w, &write_to("src/main.rs"), &pol).await);
+        let req = lock(&a.asked).last().cloned().unwrap();
+        assert!(!req.can_remember);
+        assert!(
+            req.rule
+                .as_deref()
+                .unwrap_or_default()
+                .contains("every write asks"),
+            "{req:?}"
+        );
     }
 }
