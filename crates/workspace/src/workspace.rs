@@ -491,7 +491,9 @@ fn persist_with_retry(tmp: tempfile::NamedTempFile, abs: &Path, rel: &str) -> Re
     }
 }
 
-/// The directory and the name of a resolved path (never the root: it has no parent).
+/// The directory and the name of a resolved path (never the root: it has no parent). Used by
+/// the operations that act in a directory opened without following symlinks (Unix only).
+#[cfg(unix)]
 pub(crate) fn split<'a>(
     abs: &'a Path,
     rel: &str,
