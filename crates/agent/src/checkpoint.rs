@@ -4,16 +4,24 @@
 //! - **Isolation.** The repository is `<data dir>/checkpoints/<workspace key>/`, with its own
 //!   index and `GIT_WORK_TREE` = the workspace root. Every `GIT_*` variable is removed and
 //!   there is no system/global config, no hooks, no fsmonitor and no autocrlf. The user's
-//!   `.git` (index, refs, stash, config) is never read or written.
+//!   `.git` (index, refs, stash, config) is never read or written, so no filter driver, hook or
+//!   fsmonitor the workspace's repositories configure ever runs (a `.gitattributes` naming one
+//!   finds no driver in the only configuration read).
+//! - **Bounded.** Every `git` is stopped (killed) when it runs past its bound:
+//!   [`TREE_TIMEOUT`] for the commands that walk the workspace, [`OBJECT_TIMEOUT`] for the
+//!   others; the checkpoint then fails with [`CheckpointError::TimedOut`].
 //! - **What a snapshot captures.** Everything `git add -A` would, under the workspace's own
 //!   ignore files, minus files over 16 MiB (listed as skipped). Nested repositories are
-//!   recorded as git links, not their content.
+//!   recorded as git links, not their content; one with no commit yet (nothing to link) and an
+//!   unreadable file are left out, and the checkpoint is taken without them.
 //! - **Refs.** A checkpoint is a commit at `refs/axiom/<session>/<nnnn>`; its subject is a JSON
 //!   line with its metadata. `refs/axiom/<session>/post` is the newest state the agent left
 //!   (taken after each writing tool).
 //! - **Restore** to checkpoint C restores each file that differs between C and the workspace now
 //!   only if its content is what the agent last left; anything else is a conflict and is left
-//!   alone. A restore is preceded by a checkpoint, so it can be undone.
+//!   alone. A restore is preceded by a checkpoint, so it can be undone. Paths inside a git
+//!   directory, nested repositories and what a snapshot could not capture (then or now) are
+//!   never restored; they are reported ([`RestoreOutcome::not_restored`]).
 
 use axiom_protocol::agent::{CheckpointInfo, ConflictReason, RestoreConflict, RestoreResult};
 use axiom_protocol::WorkspacePath;
@@ -21,10 +29,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::AsyncWriteExt;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The bound on one `git` that walks the workspace (`ls-files`, `add`, `rm`, `write-tree`,
+/// `ls-tree`). This repository's first checkpoint takes about 1.5 s (`add` hashes every file),
+/// later ones under 0.1 s; ten minutes leaves room for a workspace hundreds of times larger.
+pub const TREE_TIMEOUT: Duration = Duration::from_secs(600);
+/// The bound on any other `git` (one object or ref: milliseconds normally).
+pub const OBJECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CheckpointError {
@@ -32,6 +47,10 @@ pub enum CheckpointError {
     GitMissing,
     #[error("git failed: {0}")]
     Git(String),
+    /// A `git` ran past its bound (a lock, a stuck file system, a huge workspace) and was
+    /// killed.
+    #[error("git {command} did not finish within {} s and was stopped", .after.as_secs())]
+    TimedOut { command: String, after: Duration },
     #[error("no checkpoint {0} in this session")]
     NotFound(u32),
     #[error("{} files changed since the agent last wrote them", .0.len())]
@@ -48,6 +67,17 @@ struct Meta {
     created_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     skipped: Vec<String>,
+    /// What `git add` could not capture (unreadable, a nested repository with no commit).
+    /// Not on the wire: `CheckpointInfo::skipped` is the files over 16 MiB.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    left_out: Vec<String>,
+}
+
+impl Meta {
+    /// Everything this checkpoint did not capture.
+    fn uncaptured(&self) -> impl Iterator<Item = &String> {
+        self.skipped.iter().chain(&self.left_out)
+    }
 }
 
 /// One workspace's shadow repository. Calls are serialised (one private index).
@@ -55,12 +85,89 @@ pub struct Shadow {
     git: PathBuf,
     git_dir: PathBuf,
     root: PathBuf,
+    tree_timeout: Duration,
+    object_timeout: Duration,
     lock: tokio::sync::Mutex<()>,
+}
+
+/// Why a path that differs from the checkpoint was left as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotRestored {
+    /// Inside a git directory (`.git`, or a `<name>.git` that is a repository): hooks run from
+    /// there, so it changes only through the gate, with the person's approval.
+    GitDirectory,
+    /// A nested repository (a git link): its content was never captured, and a restore never
+    /// touches it.
+    NestedRepository,
+    /// The checkpoint, or the snapshot of the workspace now, could not capture it (over
+    /// 16 MiB, unreadable, inside a nested repository with no commit): what it held is unknown.
+    NotCaptured,
+}
+
+/// A restore's result, with what it left out: the wire result ([`RestoreResult`]) has no field
+/// for those, so the caller tells the person through [`RestoreOutcome::notice`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct RestoreOutcome {
+    pub result: RestoreResult,
+    /// Paths that differ from the checkpoint and were not restored (and are not conflicts).
+    pub not_restored: Vec<(WorkspacePath, NotRestored)>,
+}
+
+impl RestoreOutcome {
+    /// A sentence for the person naming what was left as it is, or `None` when nothing was.
+    pub fn notice(&self) -> Option<String> {
+        if self.not_restored.is_empty() {
+            return None;
+        }
+        let list = |why: NotRestored| -> Option<String> {
+            let paths: Vec<&str> = self
+                .not_restored
+                .iter()
+                .filter(|(_, w)| *w == why)
+                .map(|(p, _)| p.0.as_str())
+                .collect();
+            if paths.is_empty() {
+                return None;
+            }
+            const SHOWN: usize = 20;
+            let mut s = paths[..paths.len().min(SHOWN)].join(", ");
+            if paths.len() > SHOWN {
+                s.push_str(&format!(" and {} more", paths.len() - SHOWN));
+            }
+            Some(s)
+        };
+        let n = self.not_restored.len();
+        let mut text = format!(
+            "Restoring checkpoint {} left {n} path{} as {} {}.",
+            self.result.checkpoint,
+            if n == 1 { "" } else { "s" },
+            if n == 1 { "it" } else { "they" },
+            if n == 1 { "is" } else { "are" },
+        );
+        if let Some(s) = list(NotRestored::GitDirectory) {
+            text.push_str(&format!(
+                " Inside a git directory, which changes only with your approval: {s}."
+            ));
+        }
+        if let Some(s) = list(NotRestored::NestedRepository) {
+            text.push_str(&format!(
+                " Nested repositories, which a restore never changes: {s}."
+            ));
+        }
+        if let Some(s) = list(NotRestored::NotCaptured) {
+            text.push_str(&format!(
+                " Not captured by the checkpoint or now (too large, unreadable, or in a \
+                 repository with no commit), so their content is unknown: {s}."
+            ));
+        }
+        Some(text)
+    }
 }
 
 struct Snapshot {
     tree: String,
     skipped: Vec<String>,
+    left_out: Vec<String>,
 }
 
 /// `path → (mode, blob id)` of a tree.
@@ -93,11 +200,38 @@ impl Shadow {
                 .join("checkpoints")
                 .join(crate::workspace_key(root)),
             root: root.to_path_buf(),
+            tree_timeout: TREE_TIMEOUT,
+            object_timeout: OBJECT_TIMEOUT,
             lock: tokio::sync::Mutex::new(()),
         }
     }
 
+    /// Other bounds than [`TREE_TIMEOUT`] and [`OBJECT_TIMEOUT`] (tests).
+    pub fn with_timeouts(mut self, tree: Duration, object: Duration) -> Self {
+        self.tree_timeout = tree;
+        self.object_timeout = object;
+        self
+    }
+
     async fn git(&self, args: &[&str], stdin: Option<&[u8]>) -> Result<Vec<u8>, CheckpointError> {
+        let out = self.run(args, stdin).await?;
+        if !out.status.success() {
+            return Err(failed(args, &out.stderr));
+        }
+        Ok(out.stdout)
+    }
+
+    /// Runs one `git` in the isolated environment, killed if it runs past its bound.
+    async fn run(
+        &self,
+        args: &[&str],
+        stdin: Option<&[u8]>,
+    ) -> Result<std::process::Output, CheckpointError> {
+        let command = args.first().copied().unwrap_or("");
+        let limit = match command {
+            "ls-files" | "add" | "rm" | "write-tree" | "ls-tree" => self.tree_timeout,
+            _ => self.object_timeout,
+        };
         let mut cmd = tokio::process::Command::new(&self.git);
         for (k, _) in std::env::vars_os() {
             if k.to_string_lossy().starts_with("GIT_") {
@@ -154,23 +288,53 @@ impl Shadow {
             std::io::ErrorKind::NotFound => CheckpointError::GitMissing,
             _ => CheckpointError::Git(e.to_string()),
         })?;
-        if let (Some(data), Some(mut si)) = (stdin, child.stdin.take()) {
-            si.write_all(data)
-                .await
-                .map_err(|e| CheckpointError::Io(e.to_string()))?;
+        let input = child.stdin.take();
+        let mut stdout = child.stdout.take();
+        let mut stderr = child.stderr.take();
+        let work = async {
+            let feed = async {
+                if let (Some(data), Some(mut si)) = (stdin, input) {
+                    si.write_all(data).await?;
+                }
+                Ok::<_, std::io::Error>(())
+            };
+            let read_out = async {
+                let mut buf = Vec::new();
+                if let Some(p) = stdout.as_mut() {
+                    p.read_to_end(&mut buf).await?;
+                }
+                Ok::<_, std::io::Error>(buf)
+            };
+            let read_err = async {
+                let mut buf = Vec::new();
+                if let Some(p) = stderr.as_mut() {
+                    p.read_to_end(&mut buf).await?;
+                }
+                Ok::<_, std::io::Error>(buf)
+            };
+            let ((), out, err) = tokio::try_join!(feed, read_out, read_err)?;
+            let status = child.wait().await?;
+            Ok::<_, std::io::Error>(std::process::Output {
+                status,
+                stdout: out,
+                stderr: err,
+            })
+        };
+        let done = tokio::time::timeout(limit, work).await;
+        match done {
+            Ok(r) => r.map_err(|e| CheckpointError::Git(format!("git {command}: {e}"))),
+            Err(_) => {
+                // Killed, and reaped if it goes within a few seconds (a process stuck in the
+                // kernel may not; `kill_on_drop` covers it then).
+                let _ = child.start_kill();
+                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                tracing::warn!("checkpoint: git {command} ran past {limit:?}; stopped");
+                Err(CheckpointError::TimedOut {
+                    command: command.to_string(),
+                    after: limit,
+                })
+            }
         }
-        let out = child
-            .wait_with_output()
-            .await
-            .map_err(|e| CheckpointError::Git(e.to_string()))?;
-        if !out.status.success() {
-            return Err(CheckpointError::Git(format!(
-                "git {}: {}",
-                args.first().copied().unwrap_or(""),
-                String::from_utf8_lossy(&out.stderr).trim()
-            )));
-        }
-        Ok(out.stdout)
     }
 
     async fn text(&self, args: &[&str]) -> Result<String, CheckpointError> {
@@ -222,20 +386,46 @@ impl Shadow {
         std::fs::create_dir_all(&info).map_err(|e| CheckpointError::Io(e.to_string()))?;
         std::fs::write(info.join("exclude"), exclude)
             .map_err(|e| CheckpointError::Io(e.to_string()))?;
-        self.git(&["add", "-A", "--ignore-errors", "--", "."], None)
-            .await
-            .or_else(|e| match e {
-                // `--ignore-errors` still exits 1 after skipping unreadable files.
-                CheckpointError::Git(m) if m.contains("adding files failed") => Ok(vec![]),
-                other => Err(other),
-            })?;
-        if !skipped.is_empty() {
-            let mut args = vec!["rm", "-q", "--cached", "--ignore-unmatch", "--"];
-            args.extend(skipped.iter().map(String::as_str));
+        let add = ["add", "-A", "--ignore-errors", "--", "."];
+        let out = self.run(&add, None).await?;
+        let mut left_out = Vec::new();
+        if !out.status.success() {
+            // With `--ignore-errors`, git indexes everything it can and exits 1 for what it
+            // could not: an unreadable file, or a nested repository with no commit yet (no
+            // HEAD to record as a git link; review E round). Those are left out of the
+            // checkpoint (an entry an earlier snapshot indexed too: its content is unknown
+            // now), recorded, and never restored. Anything fatal fails.
+            let err = String::from_utf8_lossy(&out.stderr);
+            if out.status.code() != Some(1) || err.lines().any(|l| l.starts_with("fatal:")) {
+                return Err(failed(&add, &out.stderr));
+            }
+            tracing::warn!("checkpoint: left out of the snapshot: {}", err.trim());
+            left_out = err
+                .lines()
+                .filter_map(|l| l.strip_prefix("error: unable to index file '"))
+                .filter_map(|l| l.strip_suffix('\''))
+                .map(|p| p.trim_end_matches('/').to_string())
+                .filter(|p| !p.is_empty())
+                .collect();
+            left_out.sort();
+            left_out.dedup();
+        }
+        if !skipped.is_empty() || !left_out.is_empty() {
+            let mut args = vec!["rm", "-q", "-r", "--cached", "--ignore-unmatch", "--"];
+            let literal: Vec<String> = skipped
+                .iter()
+                .chain(&left_out)
+                .map(|p| format!(":(literal){p}"))
+                .collect();
+            args.extend(literal.iter().map(String::as_str));
             self.git(&args, None).await?;
         }
         let tree = self.text(&["write-tree"]).await?;
-        Ok(Snapshot { tree, skipped })
+        Ok(Snapshot {
+            tree,
+            skipped,
+            left_out,
+        })
     }
 
     async fn commit(
@@ -310,6 +500,7 @@ impl Shadow {
             turn,
             created_ms: now_ms(),
             skipped: snap.skipped.clone(),
+            left_out: snap.left_out.clone(),
         };
         let subject =
             serde_json::to_string(&meta).map_err(|e| CheckpointError::Io(e.to_string()))?;
@@ -378,16 +569,17 @@ impl Shadow {
     }
 
     /// Restores checkpoint `number`. With conflicts and not `skip_conflicts`, nothing changes.
+    /// What it leaves as it is besides conflicts is in [`RestoreOutcome::not_restored`].
     pub async fn restore(
         &self,
         session: &str,
         number: u32,
         turn: u32,
         skip_conflicts: bool,
-    ) -> Result<RestoreResult, CheckpointError> {
+    ) -> Result<RestoreOutcome, CheckpointError> {
         let _g = self.lock.lock().await;
         let refs = self.refs(session).await?;
-        let (_, target_id, _) = refs
+        let (_, target_id, target_subject) = refs
             .iter()
             .find(|(n, _, _)| *n == number)
             .cloned()
@@ -400,17 +592,41 @@ impl Shadow {
             Ok(id) if !id.is_empty() => self.listing(&format!("{id}^{{tree}}")).await?,
             _ => target.clone(),
         };
+        // What the checkpoint or the workspace now could not capture: its content then or now is
+        // unknown, so it is never restored (removed, or written over).
+        let mut uncaptured: std::collections::BTreeSet<String> = now_snap
+            .skipped
+            .iter()
+            .chain(&now_snap.left_out)
+            .cloned()
+            .collect();
+        if let Ok(m) = serde_json::from_str::<Meta>(&target_subject) {
+            uncaptured.extend(m.uncaptured().cloned());
+        }
+        let is_uncaptured = |p: &str| {
+            uncaptured.contains(p)
+                || p.match_indices('/')
+                    .any(|(i, _)| uncaptured.contains(&p[..i]))
+        };
         let mut paths: Vec<&String> = target.keys().chain(now.keys()).collect();
         paths.sort();
         paths.dedup();
         let mut restore = Vec::new();
         let mut conflicts = Vec::new();
+        let mut not_restored = Vec::new();
+        let gitlink = |e: Option<&(String, String)>| e.is_some_and(|(mode, _)| mode == "160000");
         for p in paths {
             let (t, n, a) = (target.get(p), now.get(p), agent.get(p));
             if t == n {
                 continue;
             }
-            if n == a {
+            if gitlink(t) || gitlink(n) {
+                // A nested repository then or now: its content was never captured, and removing
+                // or replacing its directory would lose it.
+                not_restored.push((WorkspacePath(p.clone()), NotRestored::NestedRepository));
+            } else if is_uncaptured(p) {
+                not_restored.push((WorkspacePath(p.clone()), NotRestored::NotCaptured));
+            } else if n == a {
                 restore.push((p.clone(), t.cloned()));
             } else {
                 let reason = match (n, a) {
@@ -430,12 +646,12 @@ impl Shadow {
         // Every path is checked before anything changes, off the async thread (review E3). A
         // path inside a git directory (`.git`, or a `<name>.git` that is a bare repository or is
         // being made one: `gate::git_dir_of`) is skipped, not restored: hooks run from there, so
-        // they change only through the gate, with the person's approval each time; the rest is
-        // restored. A restore that would write through a symlinked directory changes nothing
+        // they change only through the gate, with the person's approval each time; it is
+        // reported in `not_restored`, and the rest is restored. A restore that would write through a symlinked directory changes nothing
         // (review D4). A symlink the restore itself removes or replaces first (it sorts before
         // what is under it) is no obstacle; the write checks again once it is gone.
         let root = self.root.clone();
-        let restore = tokio::task::spawn_blocking(move || {
+        let (restore, skipped) = tokio::task::spawn_blocking(move || {
             let (skipped, kept): (Vec<_>, Vec<_>) = restore
                 .into_iter()
                 .partition(|(p, _)| crate::gate::git_dir_of(&root, p).is_some());
@@ -447,10 +663,16 @@ impl Shadow {
             for (p, _) in &kept {
                 writable(&root, p, |dir| replaced.contains(dir))?;
             }
-            Ok::<_, CheckpointError>(kept)
+            Ok::<_, CheckpointError>((kept, skipped))
         })
         .await
         .map_err(|e| CheckpointError::Io(e.to_string()))??;
+        not_restored.extend(
+            skipped
+                .into_iter()
+                .map(|(p, _)| (WorkspacePath(p), NotRestored::GitDirectory)),
+        );
+        not_restored.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
         let undo = self
             .create_locked(session, &format!("before restore to {number}"), turn)
             .await?;
@@ -461,11 +683,14 @@ impl Shadow {
         }
         // The restored state is now what the agent left.
         self.record_post_locked(session).await?;
-        Ok(RestoreResult {
-            checkpoint: number,
-            undo_checkpoint: undo.number,
-            restored,
-            conflicts,
+        Ok(RestoreOutcome {
+            result: RestoreResult {
+                checkpoint: number,
+                undo_checkpoint: undo.number,
+                restored,
+                conflicts,
+            },
+            not_restored,
         })
     }
 
@@ -565,6 +790,14 @@ impl Shadow {
             }
         }
     }
+}
+
+fn failed(args: &[&str], stderr: &[u8]) -> CheckpointError {
+    CheckpointError::Git(format!(
+        "git {}: {}",
+        args.first().copied().unwrap_or(""),
+        String::from_utf8_lossy(stderr).trim()
+    ))
 }
 
 fn info(number: u32, m: &Meta) -> CheckpointInfo {

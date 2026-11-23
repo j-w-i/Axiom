@@ -1,9 +1,15 @@
 //! Checkpoints against the real `git` (M3-CKPT-001).
 
-use axiom_agent::checkpoint::{CheckpointError, Shadow};
+use axiom_agent::checkpoint::{CheckpointError, NotRestored, Shadow};
 use axiom_protocol::agent::ConflictReason;
+use axiom_protocol::WorkspacePath;
 use std::path::Path;
 use std::process::Command;
+use std::time::{Duration, Instant};
+
+fn wp(s: &str) -> WorkspacePath {
+    WorkspacePath(s.into())
+}
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -109,7 +115,7 @@ async fn checkpoint_never_changes_the_users_repository() {
     write(r, "src/new.rs", "new\n");
     std::fs::remove_file(r.join("untracked.txt")).unwrap();
     s.record_post("s1").await.unwrap();
-    let res = s.restore("s1", 1, 2, false).await.unwrap();
+    let res = s.restore("s1", 1, 2, false).await.unwrap().result;
     let mut restored: Vec<_> = res.restored.iter().map(|p| p.0.as_str()).collect();
     restored.sort();
     assert_eq!(restored, ["src/a.rs", "src/new.rs", "untracked.txt"]);
@@ -199,7 +205,7 @@ async fn checkpoint_conflicts_leave_the_users_changes_alone() {
     assert_eq!(read(r, "b.txt").unwrap(), "agent b\n");
     assert_eq!(s.list("s").await.unwrap().len(), 1);
     // Skipping conflicts restores the rest.
-    let res = s.restore("s", 1, 1, true).await.unwrap();
+    let res = s.restore("s", 1, 1, true).await.unwrap().result;
     assert_eq!(
         res.restored
             .iter()
@@ -229,7 +235,7 @@ async fn checkpoint_ignores_ignored_and_large_files() {
     );
     write(r, "target/out.o", "new\n");
     s.record_post("s").await.unwrap();
-    let res = s.restore("s", 1, 1, false).await.unwrap();
+    let res = s.restore("s", 1, 1, false).await.unwrap().result;
     assert!(res.restored.is_empty(), "{:?}", res.restored);
     assert_eq!(read(r, "target/out.o").unwrap(), "new\n");
     assert!(r.join("big.bin").exists());
@@ -404,7 +410,8 @@ async fn checkpoint_restore_skips_git_directories_and_restores_the_rest() {
     write(r, "vendor/lib.git/notes.txt", "changed\n");
     write(r, "a.txt", "agent\n");
     s.record_post("s").await.unwrap();
-    let res = s.restore("s", n, 1, false).await.unwrap();
+    let out = s.restore("s", n, 1, false).await.unwrap();
+    let res = &out.result;
     assert_eq!(
         read(r, "mirror.git/hooks/post-update").unwrap(),
         "changed\n",
@@ -417,6 +424,23 @@ async fn checkpoint_restore_skips_git_directories_and_restores_the_rest() {
     let mut restored: Vec<&str> = res.restored.iter().map(|p| p.0.as_str()).collect();
     restored.sort();
     assert_eq!(restored, ["a.txt", "deps.git", "vendor/lib.git/notes.txt"]);
+    // The skipped paths are reported, so the person can be told (review E round).
+    assert_eq!(
+        out.not_restored,
+        [
+            (wp("bare.git/description"), NotRestored::GitDirectory),
+            (
+                wp("mirror.git/hooks/post-update"),
+                NotRestored::GitDirectory
+            ),
+        ]
+    );
+    let notice = out.notice().expect("a notice");
+    assert!(
+        notice.contains("left 2 paths")
+            && notice.contains("bare.git/description, mirror.git/hooks/post-update"),
+        "{notice}"
+    );
 }
 
 /// Review D4: the restored file gets the permission bits of the file it replaces, never its
@@ -454,4 +478,246 @@ async fn checkpoint_restore_never_carries_a_setuid_bit() {
         .mode()
         & 0o7777;
     assert_eq!(mode, 0o755, "{mode:o}");
+}
+
+/// Review E round (shadow git): a nested repository with no commit yet has no HEAD for `git add`
+/// to record as a git link, which made every checkpoint (and so every write) fail. The
+/// checkpoint is taken without it, like a nested repository's content, and a restore leaves it
+/// alone.
+#[tokio::test]
+async fn checkpoint_of_a_workspace_with_a_nested_repository_without_a_commit() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "a.txt", "a\n");
+    git(r, &["init", "-q", "sub"]);
+    write(r, "sub/f.txt", "nested\n");
+    let s = Shadow::new(data.path(), r);
+    let c = s.create("s", "start", 1).await.unwrap();
+    assert!(c.skipped.is_empty(), "{:?}", c.skipped);
+    write(r, "a.txt", "agent\n");
+    write(r, "sub/f.txt", "nested, changed\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        ["a.txt"]
+    );
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    assert_eq!(read(r, "sub/f.txt").unwrap(), "nested, changed\n");
+    assert!(out.not_restored.is_empty(), "{:?}", out.not_restored);
+}
+
+/// An unreadable file is left out of the checkpoint, which is still taken (`--ignore-errors`).
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_of_a_workspace_with_an_unreadable_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "a.txt", "a\n");
+    write(r, "secret.txt", "s\n");
+    let secret = r.join("secret.txt");
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&secret).is_ok() {
+        eprintln!("running as a user who reads any file: nothing to check");
+        return;
+    }
+    let s = Shadow::new(data.path(), r);
+    let made = s.create("s", "start", 1).await;
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+    made.unwrap();
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    // The checkpoint never saw it: a restore does not remove it as "created since".
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    assert_eq!(read(r, "secret.txt").unwrap(), "s\n");
+    assert_eq!(
+        out.not_restored,
+        [(wp("secret.txt"), NotRestored::NotCaptured)]
+    );
+}
+
+/// A file over 16 MiB the checkpoint skipped, which the agent then shrank, is not removed by a
+/// restore as if it were new: the checkpoint never had its content.
+#[tokio::test]
+async fn checkpoint_restore_never_removes_a_file_it_skipped() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    let big = vec![b'x'; (axiom_agent::checkpoint::MAX_FILE_BYTES + 1) as usize];
+    std::fs::write(r.join("big.bin"), &big).unwrap();
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    write(r, "big.bin", "small\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(r, "big.bin").unwrap(), "small\n");
+    assert!(out.result.restored.is_empty(), "{:?}", out.result.restored);
+    assert_eq!(
+        out.not_restored,
+        [(wp("big.bin"), NotRestored::NotCaptured)]
+    );
+    assert!(out.notice().unwrap().contains("big.bin"));
+}
+
+/// A nested repository is never removed or replaced by a restore, even one made after the
+/// checkpoint (removing its directory would lose it, and failed half-way through the restore);
+/// it is reported instead, and the rest is restored.
+#[tokio::test]
+async fn checkpoint_restore_leaves_nested_repositories_and_reports_them() {
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    write(r, "a.txt", "a\n");
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    // The agent clones something, and edits a file.
+    let x = r.join("vendor/x");
+    std::fs::create_dir_all(&x).unwrap();
+    git(&x, &["init", "-q"]);
+    write(&x, "lib.rs", "lib\n");
+    git(&x, &["add", "."]);
+    git(&x, &["commit", "-q", "-m", "x"]);
+    write(r, "a.txt", "agent\n");
+    s.record_post("s").await.unwrap();
+    let out = s.restore("s", 1, 1, false).await.unwrap();
+    assert_eq!(read(r, "a.txt").unwrap(), "a\n");
+    assert_eq!(read(&x, "lib.rs").unwrap(), "lib\n");
+    assert!(x.join(".git/HEAD").exists());
+    assert_eq!(
+        out.result
+            .restored
+            .iter()
+            .map(|p| p.0.as_str())
+            .collect::<Vec<_>>(),
+        ["a.txt"]
+    );
+    assert_eq!(
+        out.not_restored,
+        [(wp("vendor/x"), NotRestored::NestedRepository)]
+    );
+    let notice = out.notice().unwrap();
+    assert!(
+        notice.contains("left 1 path")
+            && notice.contains("Nested repositories")
+            && notice.contains("vendor/x"),
+        "{notice}"
+    );
+}
+
+/// Review E round (shadow git): every `git` the store runs is bounded. A `git` that hangs (here a
+/// stand-in whose `add` never finishes) is killed at its bound, the checkpoint fails with
+/// `TimedOut`, and the store is usable again.
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_git_that_hangs_is_stopped() {
+    use std::os::unix::fs::PermissionsExt;
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    write(ws.path(), "a.txt", "a\n");
+    let pid_file = bin.path().join("pid");
+    let stand_in = bin.path().join("git");
+    std::fs::write(
+        &stand_in,
+        format!(
+            "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = add ]; then echo $$ > '{}'; exec sleep 300; fi\ndone\nexec git \"$@\"\n",
+            pid_file.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let bound = Duration::from_secs(2);
+    let s = Shadow::with_git(data.path(), ws.path(), stand_in)
+        .with_timeouts(bound, Duration::from_secs(60));
+    let t = Instant::now();
+    let e = tokio::time::timeout(Duration::from_secs(60), s.create("s", "start", 1))
+        .await
+        .expect("the hanging git was not stopped")
+        .unwrap_err();
+    assert_eq!(
+        e,
+        CheckpointError::TimedOut {
+            command: "add".into(),
+            after: bound
+        }
+    );
+    assert!(t.elapsed() < Duration::from_secs(30), "{:?}", t.elapsed());
+    assert!(e.to_string().contains("did not finish within 2 s"), "{e}");
+    // The stand-in was killed (and reaped), not left running.
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    let alive = Command::new("kill")
+        .args(["-0", pid.trim()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap()
+        .success();
+    assert!(!alive, "git {} still runs", pid.trim());
+    // The store's lock was released.
+    assert!(s.list("s").await.unwrap().is_empty());
+}
+
+/// Review E round (G1, for the shadow git): a filter driver, fsmonitor or hook the workspace's
+/// repositories configure never runs when a checkpoint is taken, even with a `.gitattributes`
+/// that routes every file through the filter: the shadow git reads only its own configuration.
+/// A nested repository's own configuration is not read either.
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_runs_no_program_the_workspace_configures() {
+    use std::os::unix::fs::PermissionsExt;
+    let data = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let r = ws.path();
+    let marker = data.path().join("ran");
+    let script = format!(
+        "#!/bin/sh\necho ran >> '{}'\ntr a-z A-Z\n",
+        marker.display()
+    );
+    let program = |dir: &Path| {
+        write(dir, "tools/upper.sh", &script);
+        let p = dir.join("tools/upper.sh");
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p.display().to_string()
+    };
+    git(r, &["init", "-q"]);
+    let up = program(r);
+    git(r, &["config", "filter.up.clean", &up]);
+    git(r, &["config", "filter.up.process", &up]);
+    git(r, &["config", "filter.up.required", "true"]);
+    git(r, &["config", "core.fsmonitor", &up]);
+    write(r, ".gitattributes", "* filter=up\n");
+    write(r, "a.txt", "plain\n");
+    // A nested repository with a commit, configured the same way.
+    let x = r.join("vendor/x");
+    std::fs::create_dir_all(&x).unwrap();
+    git(&x, &["init", "-q"]);
+    write(&x, "lib.txt", "lib\n");
+    git(&x, &["add", "lib.txt"]);
+    git(&x, &["commit", "-q", "-m", "x"]);
+    let up_x = program(&x);
+    git(&x, &["config", "filter.up.clean", &up_x]);
+    git(&x, &["config", "core.fsmonitor", &up_x]);
+    write(&x, ".gitattributes", "* filter=up\n");
+
+    let s = Shadow::new(data.path(), r);
+    s.create("s", "start", 1).await.unwrap();
+    // Changed files, so a second snapshot hashes them again.
+    write(r, "a.txt", "agent\n");
+    write(&x, "lib.txt", "lib, changed\n");
+    s.record_post("s").await.unwrap();
+    s.restore("s", 1, 1, false).await.unwrap();
+    assert!(
+        !marker.exists(),
+        "a configured program ran: {:?}",
+        std::fs::read_to_string(&marker)
+    );
+    // The checkpoint holds the bytes on disk, not a filter's output.
+    assert_eq!(read(r, "a.txt").unwrap(), "plain\n");
 }

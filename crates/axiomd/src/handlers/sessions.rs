@@ -913,6 +913,13 @@ fn checkpoint_rpc(e: CheckpointError) -> RpcError {
             ),
         )
         .with_details(serde_json::json!({ "conflicts": c })),
+        e @ CheckpointError::TimedOut { .. } => {
+            tracing::error!("checkpoint: {e}");
+            RpcError::new(
+                ErrorKind::Timeout,
+                format!("The checkpoint took too long: {e}."),
+            )
+        }
         other => {
             tracing::error!("checkpoint: {other}");
             RpcError::new(ErrorKind::Io, "The checkpoint operation failed.")
@@ -950,11 +957,21 @@ pub async fn restore(app: Arc<App>, p: RestoreParams) -> Result<RestoreResult, R
             "Stop the running turn before restoring.",
         ));
     }
-    let r = shadow(&app, &root)
+    let outcome = shadow(&app, &root)
         .restore(&p.session_id.0, p.checkpoint, live.turn(), p.skip_conflicts)
         .await
         .map_err(checkpoint_rpc)?;
+    let r = outcome.result.clone();
     let _ = live.emit(EventBody::Restored { result: r.clone() });
+    // What the restore left as it is (paths inside a git directory, nested repositories): the
+    // result has no field for them, so the transcript says so, as a notice.
+    if let Some(message) = outcome.notice() {
+        let _ = live.emit(EventBody::Error {
+            kind: "notice".into(),
+            model_kind: None,
+            message,
+        });
+    }
     // The files are back to an earlier state: what was allowed for the session no longer
     // holds (AUD-009).
     app.agent.gate.clear_grants(&principal_of(&p.session_id));
