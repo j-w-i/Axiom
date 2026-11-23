@@ -260,7 +260,15 @@ void main() {
     final p95 = lat[(lat.length * 0.95).floor() - 1];
     // ignore: avoid_print
     print('terminal echo latency ms: p50 ${lat[lat.length ~/ 2]} p95 $p95 max ${lat.last}');
-    expect(p95, lessThanOrEqualTo(50));
+    // GitHub's macOS runners are virtual machines without a GPU: p95 62–109 ms there, against
+    // 24–25 ms on a real Mac (M-series, 2026-11-23, window shown or hidden) and 34 ms on the
+    // Linux runner. There the time is reported, not held to the budget (owner, 2026-11-23).
+    if (Platform.isMacOS && Platform.environment['GITHUB_ACTIONS'] == 'true') {
+      // ignore: avoid_print
+      print('NOT HELD on the GitHub macOS runner: the 50 ms echo budget (p95 $p95 ms)');
+    } else {
+      expect(p95, lessThanOrEqualTo(50));
+    }
     await key(tester, LogicalKeyboardKey.keyC, ctrl: true);
 
     // 4. A second terminal is a tab; Mod+` focuses the shown terminal.
