@@ -7,7 +7,6 @@
 import 'dart:io';
 
 import 'package:axiom_desktop/editor/code_view.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -101,18 +100,32 @@ void main() {
               (el.renderObject! as RenderBox).hasSize &&
               (el.renderObject! as RenderBox).attached,
         );
+        // Missing is a failure, not a skip: a check behind "if found" passed in exactly the
+        // layouts it exists to catch (review B6d).
         final strip = shown(find.byType(GitMarkStrip));
         final editor = shown(find.byType(CodeEditor));
-        if (strip.evaluate().isNotEmpty && editor.evaluate().isNotEmpty) {
+        final hasStrip = strip.evaluate().isNotEmpty, hasEditor = editor.evaluate().isNotEmpty;
+        want(
+          hasStrip && hasEditor,
+          '$where: gutter strip shown $hasStrip, editor shown $hasEditor',
+        );
+        if (hasStrip && hasEditor) {
           final s = tester.getRect(strip.first), e = tester.getRect(editor.first);
           want((s.top - e.top).abs() < 2, '$where: gutter strip top ${s.top} vs editor ${e.top}');
           want(s.height > e.height * 0.9, '$where: gutter strip height ${s.height} of ${e.height}');
         }
-        // The active tab is inside the window (AUD-017).
-        final active = find.bySemanticsLabel(RegExp(r'^lib\.rs')).hitTestable();
+        // The active tab is inside the tab strip's visible part and the window (AUD-017).
+        final active = shown(find.bySemanticsLabel(RegExp(r'^lib\.rs')));
+        want(active.evaluate().isNotEmpty, '$where: the active tab is not laid out');
         if (active.evaluate().isNotEmpty) {
           final r = tester.getRect(active.first);
-          want(r.right <= tester.view.physicalSize.width + 1 && r.left >= 0, '$where: tab at $r');
+          final window = Offset.zero & (tester.view.physicalSize / tester.view.devicePixelRatio);
+          final viewport = tester.getRect(
+            find.ancestor(of: active.first, matching: find.byType(Scrollable)).first,
+          );
+          bool inside(Rect outer) => r.left >= outer.left - 1 && r.right <= outer.right + 1;
+          want(inside(window), '$where: tab at $r, window $window');
+          want(inside(viewport), '$where: tab at $r, outside the tab strip $viewport');
         }
       }
 

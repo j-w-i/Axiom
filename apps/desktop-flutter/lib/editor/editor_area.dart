@@ -182,6 +182,7 @@ class _TabStripState extends State<_TabStrip> {
   final _activeKey = GlobalKey();
   bool _overflows = false;
   (Size, double)? _view;
+  double? _viewport;
 
   @override
   void initState() {
@@ -260,52 +261,64 @@ class _TabStripState extends State<_TabStrip> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: Listener(
-                onPointerSignal: _wheel,
-                // The tab bar's role sits inside the scroll view, so its children are the tabs.
-                child: SingleChildScrollView(
-                  controller: _scroll,
-                  scrollDirection: Axis.horizontal,
-                  child: Semantics(
-                    role: SemanticsRole.tabBar,
-                    label: group == 1 ? 'Open documents' : 'Right editor group',
-                    container: true,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (final (i, p) in paths.indexed)
-                          // A tab is dragged onto another to take its place (the left group's order;
-                          // Ctrl+Shift+PgUp/PgDn by keyboard).
-                          DragTarget<String>(
-                            onWillAcceptWithDetails: (d) => group == 1 && d.data != p,
-                            onAcceptWithDetails: (d) => docs.moveTab(d.data, i),
-                            builder: (context, over, _) {
-                              final tab = _Tab(
-                                key: p == active ? _activeKey : null,
-                                doc: docs.doc(p)!,
-                                selected: p == active,
-                                dropTarget: over.isNotEmpty,
-                                onSelect: () =>
-                                    group == 1 ? docs.activate(p) : docs.activateSplit(p),
-                                onClose: () => group == 1 ? docs.close(p) : docs.closeInSplit(p),
-                                closeLabel: group == 1
-                                    ? 'Close ${titleOf(p)}'
-                                    : 'Close ${titleOf(p)} in the right group',
-                              );
-                              if (group != 1) return tab;
-                              return Draggable<String>(
-                                data: p,
-                                axis: Axis.horizontal,
-                                feedback: Opacity(
-                                  opacity: 0.85,
-                                  child: SizedBox(height: 32, child: tab),
-                                ),
-                                childWhenDragging: Opacity(opacity: 0.4, child: tab),
-                                child: tab,
-                              );
-                            },
-                          ),
-                      ],
+              child: NotificationListener<ScrollMetricsNotification>(
+                // The strip itself narrows without the window changing (the dock, a split, the
+                // side bar): the active tab is shown again then too (AUD-017, review B6d).
+                onNotification: (n) {
+                  final width = n.metrics.viewportDimension;
+                  if (width != _viewport) {
+                    _viewport = width;
+                    WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
+                  }
+                  return false;
+                },
+                child: Listener(
+                  onPointerSignal: _wheel,
+                  // The tab bar's role sits inside the scroll view, so its children are the tabs.
+                  child: SingleChildScrollView(
+                    controller: _scroll,
+                    scrollDirection: Axis.horizontal,
+                    child: Semantics(
+                      role: SemanticsRole.tabBar,
+                      label: group == 1 ? 'Open documents' : 'Right editor group',
+                      container: true,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final (i, p) in paths.indexed)
+                            // A tab is dragged onto another to take its place (the left group's order;
+                            // Ctrl+Shift+PgUp/PgDn by keyboard).
+                            DragTarget<String>(
+                              onWillAcceptWithDetails: (d) => group == 1 && d.data != p,
+                              onAcceptWithDetails: (d) => docs.moveTab(d.data, i),
+                              builder: (context, over, _) {
+                                final tab = _Tab(
+                                  key: p == active ? _activeKey : null,
+                                  doc: docs.doc(p)!,
+                                  selected: p == active,
+                                  dropTarget: over.isNotEmpty,
+                                  onSelect: () =>
+                                      group == 1 ? docs.activate(p) : docs.activateSplit(p),
+                                  onClose: () => group == 1 ? docs.close(p) : docs.closeInSplit(p),
+                                  closeLabel: group == 1
+                                      ? 'Close ${titleOf(p)}'
+                                      : 'Close ${titleOf(p)} in the right group',
+                                );
+                                if (group != 1) return tab;
+                                return Draggable<String>(
+                                  data: p,
+                                  axis: Axis.horizontal,
+                                  feedback: Opacity(
+                                    opacity: 0.85,
+                                    child: SizedBox(height: 32, child: tab),
+                                  ),
+                                  childWhenDragging: Opacity(opacity: 0.4, child: tab),
+                                  child: tab,
+                                );
+                              },
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

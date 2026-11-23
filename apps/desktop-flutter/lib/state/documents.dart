@@ -163,18 +163,42 @@ class Doc {
   List<String>? _breaks;
 
   /// [text] (as the editor joins it) as it is written to disk: a file with mixed line breaks keeps
-  /// each line's own break while the number of lines is unchanged; lines added or removed take the
-  /// first break of the file (AUD-023).
+  /// each line's own break (AUD-023). The lines are matched with the saved ones from the start
+  /// and from the end, so the lines around an edit keep theirs when lines are added or removed;
+  /// a line changed in place keeps the break at its place, and a line added takes the break of
+  /// the line above the edit (review B6a).
   String diskText(String text) {
     final breaks = _breaks;
     if (breaks == null) return text;
     final lb = controller.options.lineBreak.value;
     final lines = text.split(lb);
-    if (lines.length != breaks.length + 1) return text;
+    final saved = _savedText.split(lb);
+    if (saved.length != breaks.length + 1) return text; // not the text the breaks belong to
+    final most = lines.length < saved.length ? lines.length : saved.length;
+    var head = 0;
+    while (head < most && lines[head] == saved[head]) {
+      head++;
+    }
+    var tail = 0;
+    while (tail < most - head && lines[lines.length - 1 - tail] == saved[saved.length - 1 - tail]) {
+      tail++;
+    }
+    final shift = lines.length - saved.length;
+    // The saved line j's own break (the last saved line has none).
+    String? at(int j) => j >= 0 && j < breaks.length ? breaks[j] : null;
     final out = StringBuffer();
+    String? above;
     for (var i = 0; i < lines.length; i++) {
       out.write(lines[i]);
-      if (i < breaks.length) out.write(breaks[i]);
+      if (i == lines.length - 1) break;
+      final b =
+          (i < head ? at(i) : null) ?? // unchanged, above the edit
+          (i >= lines.length - tail ? at(i - shift) : null) ?? // unchanged, below it
+          (i < saved.length - tail ? at(i) : null) ?? // changed in place
+          above ?? // added: the break of the line above
+          breaks.first;
+      out.write(b);
+      above = b;
     }
     return out.toString();
   }
@@ -421,12 +445,15 @@ class Doc {
 
   void replaceText(String text, String version) {
     final shown = editorText(text);
-    controller.text = shown;
+    // The saved state first: the controller's listeners run during the assignment below and
+    // must see a clean document, or the recovery copy keeps the reloaded text and the next start
+    // offers it back over a later change on disk (review B1).
     savedVersion = version;
     _savedText = shown;
     dirty = false;
     changedOnDisk = false;
     deletedOnDisk = false;
+    controller.text = shown;
     _dirtyLines = controller.codeLines;
   }
 
@@ -889,7 +916,12 @@ class DocumentsStore extends ChangeNotifier {
         if (!d.dirty) recovery.forget(workspace.root, e.path);
         continue;
       }
-      if (e.savedVersion.isNotEmpty && d.savedVersion != e.savedVersion) d.changedOnDisk = true;
+      if (e.savedVersion.isNotEmpty && d.savedVersion != e.savedVersion) {
+        // The file changed since the text was kept: the save is checked against the version the
+        // text was based on, so it asks rather than overwrite the newer file (review B2).
+        d.changedOnDisk = true;
+        d.savedVersion = e.savedVersion;
+      }
       d.restoreUnsaved(e.text);
       n++;
     }
@@ -954,11 +986,15 @@ class DocumentsStore extends ChangeNotifier {
   Future<void> save(String path) async {
     final d = doc(path);
     if (d == null || d.readOnly) return;
+    final gen = _generation;
     try {
       await beforeSave?.call(d);
     } on Object {
       // The text is saved as it is.
     }
+    // The folder may have changed while the formatter ran: this document's text is not written
+    // into the next folder's file of the same name (AUD-002, review B3).
+    if (gen != _generation || !identical(doc(path), d)) return;
     await _write(d, d.text, overwrite: false);
   }
 
@@ -974,9 +1010,13 @@ class DocumentsStore extends ChangeNotifier {
 
   /// True when the save succeeded.
   Future<bool> _write(Doc d, String text, {required bool overwrite}) {
+    // The folder and generation of the request, not of the moment a queued save runs: a save
+    // waiting behind another must not land in a folder opened meanwhile (review B3).
+    final gen = _generation;
+    final workspaceId = workspace.id;
     final before = _saving[d.path];
     final next = (before == null ? Future<bool>.value(true) : before.then((_) => true)).then(
-      (_) => _writeNow(d, text, overwrite: overwrite),
+      (_) => _writeNow(d, text, overwrite: overwrite, gen: gen, workspaceId: workspaceId),
     );
     _saving[d.path] = next;
     next.whenComplete(() {
@@ -985,15 +1025,20 @@ class DocumentsStore extends ChangeNotifier {
     return next;
   }
 
-  Future<bool> _writeNow(Doc d, String text, {required bool overwrite}) async {
-    final gen = _generation;
-    if (d.detached) return false;
+  Future<bool> _writeNow(
+    Doc d,
+    String text, {
+    required bool overwrite,
+    required int gen,
+    required String workspaceId,
+  }) async {
+    if (gen != _generation || !identical(doc(d.path), d) || d.detached) return false;
     final disk = d.diskText(text);
     try {
       final r = await client.call(
         Methods.fsWriteFile,
         WriteFileParams(
-          workspaceId: workspace.id,
+          workspaceId: workspaceId,
           path: d.path,
           text: disk,
           overwrite: overwrite ? true : null,
