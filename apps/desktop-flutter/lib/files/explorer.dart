@@ -333,7 +333,7 @@ class ExplorerRow extends StatelessWidget {
                   : null,
             ),
             const SizedBox(width: Metrics.s2),
-            // Tauri's tree: folders in the folder tone, files as their type's chip.
+            // Folders in the folder tone, files by the shape of what they are.
             SizedBox(
               width: 16,
               child: Center(
@@ -376,21 +376,21 @@ class ExplorerRow extends StatelessWidget {
               ),
           ],
         );
-        // Tauri's selected row: the selected tint and a 2 px marker, brass while the tree has
-        // focus; full width, no rounding.
+        // Selected is a fill, full width and square; the brass edge says the tree has focus.
         if (selected) {
           row = DecoratedBox(
             decoration: BoxDecoration(color: c.selected),
             child: Stack(
               children: [
                 row,
-                Positioned(
-                  left: 0,
-                  top: 3,
-                  bottom: 3,
-                  width: 2,
-                  child: ColoredBox(color: treeFocused || s.focused ? c.accent : c.ink3),
-                ),
+                if (treeFocused || s.focused)
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 2,
+                    child: ColoredBox(color: c.accent),
+                  ),
               ],
             ),
           );

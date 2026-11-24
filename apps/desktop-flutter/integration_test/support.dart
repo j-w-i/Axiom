@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:axiom_desktop/app/app_state.dart';
 import 'package:axiom_desktop/app/args.dart';
 import 'package:axiom_desktop/main.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -114,7 +115,10 @@ Future<void> key(
   bool ctrl = false,
   bool alt = false,
 }) async {
-  final modKey = Platform.isMacOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
+  // The app's own test of the platform (a headless `flutter-tester` run on a Mac is not macOS).
+  final modKey = defaultTargetPlatform == TargetPlatform.macOS
+      ? LogicalKeyboardKey.metaLeft
+      : LogicalKeyboardKey.controlLeft;
   if (ctrl && !(mod && modKey == LogicalKeyboardKey.controlLeft)) {
     await _down(tester, LogicalKeyboardKey.controlLeft);
   }

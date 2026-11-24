@@ -128,7 +128,7 @@ class OutputViewState extends State<OutputView> {
                         placeholder: app.workspace.isOpen
                             ? 'A command to run in ${app.workspace.name} (Enter; ↑ for history)'
                             : 'Open a folder to run commands',
-                        leading: Text('›', style: t.type.code.copyWith(color: c.accentText)),
+                        leading: Text('›', style: t.type.code.copyWith(color: c.ink3)),
                       ),
                     ),
                   ),
@@ -411,7 +411,7 @@ class TransportState extends State<Transport> {
                         child: SizedBox(
                           width: 2,
                           height: 2 + 12 * r / top,
-                          child: ColoredBox(color: c.accent),
+                          child: ColoredBox(color: c.info),
                         ),
                       ),
                   ],

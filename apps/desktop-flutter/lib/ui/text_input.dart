@@ -224,8 +224,8 @@ class _AxTextInputState extends State<AxTextInput>
       },
       child: child,
     );
-    // Tauri's field: a recessed well bordered by the input line; focus turns the border brass
-    // and adds a soft 2 px brass ring. The composer (bezel) is the same field, roomier.
+    // A recessed well bordered by the input line; focus turns the border brass and adds a soft 2 px
+    // brass ring. The composer (bezel) is the same field, roomier.
     final padding = widget.bezel
         ? const EdgeInsets.fromLTRB(Metrics.s4 + Metrics.s1, Metrics.s4, Metrics.s3, Metrics.s3)
         : EdgeInsets.symmetric(

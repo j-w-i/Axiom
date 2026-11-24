@@ -1,5 +1,5 @@
-// Axiom's icon set: 16 px stroke icons (1.4 px, round caps and joins), drawn in-house.
-// Ported from the Tauri shell's ui/icons.tsx (the same paths); this file is now their source.
+// Axiom's icon set: 16 px icons (1.4 px strokes, round caps and joins, filled where a fill tells two
+// apart), drawn in-house; this file is their source.
 
 import 'icon_data.dart';
 
@@ -44,20 +44,34 @@ abstract final class AxiomIcons {
   ]);
   static const search = IconData16([IconCircle(7, 7, 4), IconPath('M10 10l3.5 3.5')]);
   static const refresh = IconData16([IconPath('M13 4v3h-3'), IconPath('M12.6 7A5 5 0 103 9')]);
+
+  /// The rail's destinations: each its own silhouette, so none is read as another.
   static const files = IconData16([
-    IconPath('M5 4.5V2.8a.8.8 0 01.8-.8h4.2l3 3v7.2a.8.8 0 01-.8.8H11'),
-    IconPath('M3 5.3a.8.8 0 01.8-.8H8l3 3v6.7a.8.8 0 01-.8.8H3.8a.8.8 0 01-.8-.8z'),
+    IconPath(
+      'M1.8 4.3A1.3 1.3 0 013.1 3h2.7l1.6 1.6h5.5a1.3 1.3 0 011.3 1.3v5.8a1.3 1.3 0 01-1.3 1.3H3.1a1.3 1.3 0 01-1.3-1.3z',
+    ),
+    IconPath('M2.5 8h11v3.6a.9.9 0 01-.9.9H3.4a.9.9 0 01-.9-.9z', fill: true),
   ]);
+
+  /// Environments: a stack of installed parts.
   static const layers = IconData16([
-    IconPath('M8 2l6 3-6 3-6-3z'),
-    IconPath('M2 8l6 3 6-3'),
-    IconPath('M2 11l6 3 6-3'),
+    IconPath('M8 2l5.4 3L8 8 2.6 5z', fill: true),
+    IconPath('M2.6 8L8 11l5.4-3'),
+    IconPath('M2.6 11L8 14l5.4-3'),
   ]);
 
   /// The Inspector: a pointer over a frame.
   static const inspect = IconData16([
-    IconPath('M6.5 13.5H3.5a1 1 0 01-1-1v-9a1 1 0 011-1h9a1 1 0 011 1v3'),
-    IconPath('M8 8l6 2.2-2.6 1-1 2.6z'),
+    IconPath('M6 13.5H3.5a1 1 0 01-1-1v-9a1 1 0 011-1h9a1 1 0 011 1V6'),
+    IconPath('M8 8l5.6 2.2-2.4 1-1 2.4z', fill: true),
+  ]);
+
+  /// The agent: a spark.
+  static const agent = IconData16([
+    IconPath(
+      'M8 2.2C8.4 5.7 10.3 7.6 13.8 8 10.3 8.4 8.4 10.3 8 13.8 7.6 10.3 5.7 8.4 2.2 8 5.7 7.6 7.6 5.7 8 2.2z',
+      fill: true,
+    ),
   ]);
   static const check = IconData16([IconPath('M3.5 8.5l3 3 6-7')]);
   static const download = IconData16([

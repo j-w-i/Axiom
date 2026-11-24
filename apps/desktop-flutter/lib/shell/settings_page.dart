@@ -134,14 +134,6 @@ class _SettingsPageState extends State<SettingsPage> {
                                               ),
                                             ),
                                           ),
-                                          if (on)
-                                            Positioned(
-                                              left: 0,
-                                              top: 0,
-                                              bottom: 0,
-                                              width: 2,
-                                              child: ColoredBox(color: c.accent),
-                                            ),
                                         ],
                                       ),
                                     );
@@ -228,11 +220,10 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// Tauri's segmented control: a recessed track, the choice raised.
+  /// A segmented control: a recessed track, the choice filled.
   Widget _choice<T>(String group, List<(T, String)> options, T value, ValueChanged<T> onChoose) =>
       Well(
         radius: Metrics.radiusRaised,
-        border: context.colors.lineInput,
         child: Padding(
           padding: const EdgeInsets.all(2),
           child: Row(

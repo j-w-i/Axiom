@@ -1,7 +1,8 @@
-// Tabs with the brass underline (ADR-0020 §4): the selected tab's underline glides to its new
-// place (critically damped, Standard motion only). Arrow keys move between tabs; a strip with
+// Tabs (ADR-0024): the selected tab sits on a fill that glides to its new place (critically damped,
+// Standard motion only). Arrow keys move between tabs; a strip with
 // more tabs than room scrolls (wheel too) and keeps the selected tab in view.
 
+import 'dart:math' as math;
 import 'dart:ui' show SemanticsRole;
 
 import 'package:flutter/gestures.dart';
@@ -74,8 +75,8 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) => _place(animate: false));
   }
 
-  /// Moves the underline under the selected tab and scrolls that tab into view. Only the first
-  /// placement rebuilds (the underline appears); later ones drive the animation controllers, so
+  /// Moves the fill under the selected tab and scrolls that tab into view. Only the first
+  /// placement rebuilds (the fill appears); later ones drive the animation controllers, so
   /// a parent's rebuild builds the tabs once, not twice (AUD-072).
   void _place({required bool animate}) {
     if (!mounted || widget.selected == null) return;
@@ -83,7 +84,6 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
     final row = _rowKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || row == null || !box.attached || !box.hasSize) return;
     final x = box.localToGlobal(Offset.zero, ancestor: row).dx;
-    // Tauri's view tabs: the underline spans the whole selected tab.
     final w = box.size.width;
     final m = context.axiom.motion;
     if (!animate || !m.glides || !_placed) {
@@ -151,6 +151,14 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
       child: Stack(
         key: _rowKey,
         children: [
+          // The fill under the selected tab: repainted as it glides, never laid out
+          // (motion-system.md §3 rule 1).
+          if (_placed && widget.selected != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(painter: _TabFill(_x, _w, c.selected, Metrics.radiusControl)),
+              ),
+            ),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -169,7 +177,7 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
                       child: SizedBox(
                         height: height,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: Metrics.s4),
+                          padding: const EdgeInsets.symmetric(horizontal: Metrics.s4 + Metrics.s1),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -181,7 +189,7 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
                                   overflow: TextOverflow.ellipsis,
                                   style: t.type.small.copyWith(
                                     color: on || s.hovered ? c.ink : c.ink2,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ),
@@ -198,25 +206,6 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
                 ),
             ],
           ),
-          if (_placed && widget.selected != null)
-            Positioned(
-              left: 0,
-              bottom: 0,
-              width: 1,
-              height: Metrics.underlineHeight,
-              // Moves and stretches by a transform only (motion-system.md §3 rule 1).
-              child: IgnorePointer(
-                child: AnimatedBuilder(
-                  animation: Listenable.merge([_x, _w]),
-                  builder: (context, child) => Transform(
-                    transform: Matrix4.diagonal3Values(_w.value.clamp(0, double.infinity), 1, 1)
-                      ..setTranslationRaw(_x.value, 0, 0),
-                    child: child,
-                  ),
-                  child: ColoredBox(color: c.accent),
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -247,6 +236,29 @@ class _AxTabsState extends State<AxTabs> with TickerProviderStateMixin {
       ),
     );
   }
+}
+
+class _TabFill extends CustomPainter {
+  _TabFill(this.x, this.w, this.color, this.radius) : super(repaint: Listenable.merge([x, w]));
+  final Animation<double> x, w;
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // At most 24 px tall, so a tall strip keeps the same key as a short one.
+    final h = math.min(size.height - 6, 24.0);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x.value + 1, (size.height - h) / 2, math.max(0, w.value - 2), h),
+        Radius.circular(radius),
+      ),
+      Paint()..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_TabFill o) => o.color != color || o.x != x || o.w != w;
 }
 
 class _StepIntent extends Intent {

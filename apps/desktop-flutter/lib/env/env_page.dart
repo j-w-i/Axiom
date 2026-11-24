@@ -635,7 +635,7 @@ class Meter extends StatelessWidget {
             widthFactor: value.clamp(0, 1),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: c.accent,
+                color: c.info,
                 borderRadius: BorderRadius.circular(Metrics.radiusControl),
               ),
             ),

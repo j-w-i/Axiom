@@ -1,11 +1,13 @@
-// Design tokens: the Tauri shell's design (FL-DS-002; ADR-0013's M1.6 design as the Tauri shell
-// shipped it, apps/desktop-tauri/src/styles/tokens.css at the tag `tauri-shell-final`). Every
-// colour, size and duration the shell uses comes from here; widgets never write a literal colour
-// (a test greps).
+// Design tokens (UI-001, ADR-0024: graphite and brass in three clear surface steps, the editor the
+// lightest, flat controls, one job per hue). Every colour, size and duration the shell uses comes
+// from here; widgets never write a literal colour (a test greps).
 
 import 'package:flutter/widgets.dart';
 
-/// The palette of one theme: the Tauri shell's semantic tokens (tokens.css at `tauri-shell-final`).
+/// The palette of one theme. Surfaces step up towards the work: [bar] (the frame), [panel], then
+/// [ground] (the editor), in both themes. Each hue has one job: brass ([accent]) is focus, the
+/// primary action and what waits for the person; [info] is change and progress; [agent] is what an
+/// agent does; [ok], [warn] and [danger] are outcomes.
 @immutable
 final class AxiomColors {
   const AxiomColors({
@@ -16,7 +18,6 @@ final class AxiomColors {
     required this.bar,
     required this.panel,
     required this.raised,
-    required this.raisedTop,
     required this.sheet,
     required this.ink,
     required this.ink2,
@@ -26,9 +27,6 @@ final class AxiomColors {
     required this.groove,
     required this.lineInput,
     required this.litEdge,
-    required this.contactShade,
-    required this.wellShadow,
-    required this.lift,
     required this.sheetShadow,
     required this.scrim,
     required this.hover,
@@ -36,13 +34,16 @@ final class AxiomColors {
     required this.selected,
     required this.selection,
     required this.accent,
-    required this.accentHi,
-    required this.accentLo,
-    required this.primaryBorder,
     required this.accentText,
     required this.accentSoft,
     required this.focus,
     required this.onAccent,
+    required this.info,
+    required this.infoText,
+    required this.infoSoft,
+    required this.agent,
+    required this.agentText,
+    required this.agentSoft,
     required this.ok,
     required this.okText,
     required this.warn,
@@ -55,8 +56,6 @@ final class AxiomColors {
     required this.approvalBorder,
     required this.folder,
     required this.treeGuide,
-    required this.thumbTop,
-    required this.thumbBottom,
     required this.syntax,
     required this.glyphs,
   });
@@ -66,23 +65,20 @@ final class AxiomColors {
   /// The window behind every region (the seams show it).
   final Color canvas;
 
-  /// −1: wells (fields, the console, the command field, keycap sockets).
+  /// Wells: fields, code blocks, the terminal.
   final Color recessed;
 
-  /// 0: the editor and page backgrounds.
+  /// The work: the editor and page backgrounds (the lightest step).
   final Color ground;
 
-  /// Chrome: the title row, rail, tab strip, status bar.
+  /// The frame: the title row, rail, tab strip and status bar (the darkest step).
   final Color bar;
 
-  /// Flat regions: the side bar, the console, the AI dock.
+  /// The middle step: the side bar, the console, the right panel.
   final Color panel;
 
-  /// +1: the lower stop of the raised gradient (buttons, keycaps, chips).
+  /// A pressable's fill (buttons, chips).
   final Color raised;
-
-  /// The upper stop of the raised gradient.
-  final Color raisedTop;
 
   /// +2: menus, dialogs, the palette, tooltips.
   final Color sheet;
@@ -102,17 +98,8 @@ final class AxiomColors {
   /// A field's border.
   final Color lineInput;
 
-  /// 1 px at the top inside edge of a raised surface.
+  /// 1 px along the top of the primary action and of a sheet.
   final Color litEdge;
-
-  /// 1 px under a raised surface.
-  final Color contactShade;
-
-  /// The inner shadow along a well's top.
-  final Color wellShadow;
-
-  /// White, which hovered keys are mixed toward (Tauri's `color-mix(…, white)`).
-  final Color lift;
 
   /// The sheet's soft shadow.
   final Color sheetShadow;
@@ -128,19 +115,23 @@ final class AxiomColors {
   /// Selected text.
   final Color selection;
 
-  /// Brass: focus, the running state, the primary action, the region in focus.
+  /// Brass: focus, the primary action, and what waits for the person.
   final Color accent;
 
-  /// The primary gradient's upper stop.
-  final Color accentHi;
-
-  /// The primary gradient's lower stop.
-  final Color accentLo;
-  final Color primaryBorder;
   final Color accentText;
   final Color accentSoft;
   final Color focus;
   final Color onAccent;
+
+  /// Change and progress: modified files, running tasks, links, hints.
+  final Color info;
+  final Color infoText;
+  final Color infoSoft;
+
+  /// Verdigris: what an agent does or says.
+  final Color agent;
+  final Color agentText;
+  final Color agentSoft;
   final Color ok;
   final Color okText;
   final Color warn;
@@ -165,143 +156,131 @@ final class AxiomColors {
   /// Indent guides in the tree.
   final Color treeGuide;
 
-  /// The switch thumb's gradient.
-  final Color thumbTop;
-  final Color thumbBottom;
-
   /// Code colours (checked against the editor's ground).
   final SyntaxColors syntax;
 
-  /// File-type chips (explorer rows, editor tabs).
+  /// File glyphs (explorer rows, editor tabs).
   final GlyphColors glyphs;
 
   bool get isDark => brightness == Brightness.dark;
 
   static const dark = AxiomColors(
     brightness: Brightness.dark,
-    canvas: Color(0xFF0B0C0D),
-    recessed: Color(0xFF111213),
-    ground: Color(0xFF17181A),
-    bar: Color(0xFF141517),
-    panel: Color(0xFF1E1F22),
-    raised: Color(0xFF28292C),
-    raisedTop: Color(0xFF303135),
-    sheet: Color(0xFF26272A),
-    ink: Color(0xFFE6E3DC),
-    ink2: Color(0xFFA3A097),
-    ink3: Color(0xFFA19D94),
-    onInk: Color(0xFF17181A),
-    hairline: Color(0xFF2B2C30),
-    groove: Color(0xFF0A0A0B),
-    lineInput: Color(0xFF6C6962),
-    litEdge: Color(0x16FFFFFF),
-    contactShade: Color(0x38000000),
-    wellShadow: Color(0x47000000),
-    lift: Color(0xFFFFFFFF),
+    canvas: Color(0xFF121211),
+    recessed: Color(0xFF161614),
+    ground: Color(0xFF2B2A28),
+    bar: Color(0xFF1A1A18),
+    panel: Color(0xFF222120),
+    raised: Color(0xFF373633),
+    sheet: Color(0xFF32312E),
+    ink: Color(0xFFEFECE5),
+    ink2: Color(0xFFC8C5BD),
+    ink3: Color(0xFFB2AFA6),
+    onInk: Color(0xFF1B1A18),
+    hairline: Color(0xFF393835),
+    groove: Color(0xFF131311),
+    lineInput: Color(0xFF78756D),
+    litEdge: Color(0x38FFFFFF),
     sheetShadow: Color(0x8C000000),
-    scrim: Color(0x80060607),
-    hover: Color(0x0BFFFFFF),
-    pressed: Color(0x47000000),
-    selected: Color(0x13FFFFFF),
-    selection: Color(0x33C9A35B),
-    accent: Color(0xFFC9A35B),
-    accentHi: Color(0xFFDDB96F),
-    accentLo: Color(0xFFA8853F),
-    primaryBorder: Color(0xFF654F26),
-    accentText: Color(0xFFD9B672),
-    accentSoft: Color(0x21C9A35B),
-    focus: Color(0xFFD2AC63),
-    onAccent: Color(0xFF1A1307),
-    ok: Color(0xFF8FBF7F),
-    okText: Color(0xFF9FCA90),
-    warn: Color(0xFFE8904F),
-    warnText: Color(0xFFEFA673),
-    danger: Color(0xFFE5645D),
-    dangerText: Color(0xFFF27C74),
-    dangerSoft: Color(0x1FE5645D),
-    diffAdd: Color(0x1F8FBF7F),
-    diffDel: Color(0x1FE5645D),
-    approvalBorder: Color(0x80C9A35B),
-    folder: Color(0xFF8E8A82),
-    treeGuide: Color(0x0DFFFFFF),
-    thumbTop: Color(0xFFE2DED6),
-    thumbBottom: Color(0xFFB7B2A8),
+    scrim: Color(0x8C0A0A09),
+    hover: Color(0x0EFFFFFF),
+    pressed: Color(0x1CFFFFFF),
+    selected: Color(0x17FFFFFF),
+    selection: Color(0x3DD3AB5E),
+    accent: Color(0xFFD3AB5E),
+    accentText: Color(0xFFE0BC77),
+    accentSoft: Color(0x1FD3AB5E),
+    focus: Color(0xFFDDB76C),
+    onAccent: Color(0xFF1C1404),
+    info: Color(0xFF7FAEE3),
+    infoText: Color(0xFF9BC1EE),
+    infoSoft: Color(0x1F7FAEE3),
+    agent: Color(0xFF6FBFA7),
+    agentText: Color(0xFF86D0BA),
+    agentSoft: Color(0x1A6FBFA7),
+    ok: Color(0xFF93C47D),
+    okText: Color(0xFFA6D293),
+    warn: Color(0xFFEC9455),
+    warnText: Color(0xFFF4AF80),
+    danger: Color(0xFFEB6F68),
+    dangerText: Color(0xFFFA978F),
+    dangerSoft: Color(0x1FEB6F68),
+    diffAdd: Color(0x2493C47D),
+    diffDel: Color(0x24EB6F68),
+    approvalBorder: Color(0x80D3AB5E),
+    folder: Color(0xFFB5B1A8),
+    treeGuide: Color(0x14FFFFFF),
     syntax: SyntaxColors(
-      text: Color(0xFFDCD8D0),
-      comment: Color(0xFF8A867E),
-      keyword: Color(0xFFD18E6E),
+      text: Color(0xFFE6E2DA),
+      comment: Color(0xFFA19D94),
+      keyword: Color(0xFFDF9C7B),
       type: Color(0xFF8EC2B2),
       string: Color(0xFFA9C47F),
       number: Color(0xFFC4A7DE),
-      punct: Color(0xFF9D998F),
+      punct: Color(0xFFB0ACA2),
       macro: Color(0xFFD9A0C4),
       function: Color(0xFFDDC783),
       variable: Color(0xFF9EC6E4),
-      lineNumber: Color(0xFF6C6962),
-      lineNumberActive: Color(0xFFA3A097),
-      currentLine: Color(0x07FFFFFF),
+      lineNumber: Color(0xFF7F7C74),
+      lineNumberActive: Color(0xFFC8C5BD),
+      currentLine: Color(0x0AFFFFFF),
     ),
     glyphs: GlyphColors(
-      rs: Color(0xFFDD9E80),
-      rsBg: Color(0x2BD18E6E),
-      md: Color(0xFFA9C1DF),
-      mdBg: Color(0x299FB8D8),
-      toml: Color(0xFF95C6B6),
-      tomlBg: Color(0x268EC2B2),
-      other: Color(0xFFA3A097),
-      otherBg: Color(0x12FFFFFF),
+      orange: Color(0xFFE0A07F),
+      blue: Color(0xFF9BC1EE),
+      teal: Color(0xFF8CC9B8),
+      green: Color(0xFFA6D293),
+      violet: Color(0xFFC9ADE3),
+      neutral: Color(0xFFAFACA3),
     ),
   );
 
   static const light = AxiomColors(
     brightness: Brightness.light,
-    canvas: Color(0xFFC4C1BB),
+    canvas: Color(0xFFC9C6BF),
     recessed: Color(0xFFFFFFFF),
-    ground: Color(0xFFFCFBF9),
-    bar: Color(0xFFE6E4DF),
-    panel: Color(0xFFEFEDE9),
-    raised: Color(0xFFF1EFEB),
-    raisedTop: Color(0xFFFFFFFF),
-    sheet: Color(0xFFFCFBF9),
-    ink: Color(0xFF1D1D1B),
-    ink2: Color(0xFF5A5852),
-    ink3: Color(0xFF5D5A54),
-    onInk: Color(0xFFFCFBF9),
-    hairline: Color(0xFFDCD9D3),
-    groove: Color(0xFFC3C0BA),
-    lineInput: Color(0xFF86827C),
-    litEdge: Color(0xE6FFFFFF),
-    contactShade: Color(0x38000000),
-    wellShadow: Color(0x24000000),
-    lift: Color(0xFFFFFFFF),
+    ground: Color(0xFFFCFBF8),
+    bar: Color(0xFFDEDBD4),
+    panel: Color(0xFFECE9E3),
+    raised: Color(0xFFE3E0D9),
+    sheet: Color(0xFFFBFAF7),
+    ink: Color(0xFF1B1A18),
+    ink2: Color(0xFF45433E),
+    ink3: Color(0xFF5B5852),
+    onInk: Color(0xFFFCFBF8),
+    hairline: Color(0xFFD9D5CD),
+    groove: Color(0xFFCBC7BF),
+    lineInput: Color(0xFF86827B),
+    litEdge: Color(0x66FFFFFF),
     sheetShadow: Color(0x2E281E16),
-    scrim: Color(0x2E3C372D),
-    hover: Color(0x0D281E0A),
-    pressed: Color(0x1A281E0A),
-    selected: Color(0x14281E0A),
-    selection: Color(0x38B88A3A),
-    accent: Color(0xFFB88A3A),
-    accentHi: Color(0xFFC99A49),
-    accentLo: Color(0xFF9A722C),
-    primaryBorder: Color(0xFF5C441A),
-    accentText: Color(0xFF785616),
-    accentSoft: Color(0x24B88A3A),
-    focus: Color(0xFF9A722C),
+    scrim: Color(0x3D3C372D),
+    hover: Color(0x0F281E0A),
+    pressed: Color(0x1F281E0A),
+    selected: Color(0x17281E0A),
+    selection: Color(0x42BE8E3A),
+    accent: Color(0xFFBE8E3A),
+    accentText: Color(0xFF6E4E10),
+    accentSoft: Color(0x24BE8E3A),
+    focus: Color(0xFF946C27),
     onAccent: Color(0xFF1D1505),
+    info: Color(0xFF2F6FB5),
+    infoText: Color(0xFF22588F),
+    infoSoft: Color(0x1F2F6FB5),
+    agent: Color(0xFF1F8068),
+    agentText: Color(0xFF14614E),
+    agentSoft: Color(0x1A1F8068),
     ok: Color(0xFF4F8F45),
-    okText: Color(0xFF33682B),
+    okText: Color(0xFF2F6128),
     warn: Color(0xFFA44E07),
-    warnText: Color(0xFF8F4406),
+    warnText: Color(0xFF864004),
     danger: Color(0xFFBC342E),
-    dangerText: Color(0xFFB02C26),
+    dangerText: Color(0xFFA62822),
     dangerSoft: Color(0x1ABC342E),
-    diffAdd: Color(0x1F4F8F45),
+    diffAdd: Color(0x244F8F45),
     diffDel: Color(0x1FBC342E),
-    approvalBorder: Color(0x80B88A3A),
-    folder: Color(0xFF7A766E),
-    treeGuide: Color(0x12000000),
-    thumbTop: Color(0xFFE2DED6),
-    thumbBottom: Color(0xFFB7B2A8),
+    approvalBorder: Color(0x99946C27),
+    folder: Color(0xFF6F6B63),
+    treeGuide: Color(0x1A281E0A),
     syntax: SyntaxColors(
       text: Color(0xFF2B2925),
       comment: Color(0xFF6B675F),
@@ -318,32 +297,28 @@ final class AxiomColors {
       currentLine: Color(0x093C2D14),
     ),
     glyphs: GlyphColors(
-      rs: Color(0xFFA8502E),
-      rsBg: Color(0x1FA8502E),
-      md: Color(0xFF3B6A9E),
-      mdBg: Color(0x1F3B6A9E),
-      toml: Color(0xFF2F7A68),
-      tomlBg: Color(0x1F2F7A68),
-      other: Color(0xFF5B5852),
-      otherBg: Color(0x0F000000),
+      orange: Color(0xFFA8502E),
+      blue: Color(0xFF2F6FB5),
+      teal: Color(0xFF2F7A68),
+      green: Color(0xFF4F8F45),
+      violet: Color(0xFF7A4EA8),
+      neutral: Color(0xFF6F6B63),
     ),
   );
 }
 
-/// File-type chip colours: a two-letter mono label on a tint of a syntax hue.
+/// File glyph tints, one per family of files (glyph.dart).
 @immutable
 final class GlyphColors {
   const GlyphColors({
-    required this.rs,
-    required this.rsBg,
-    required this.md,
-    required this.mdBg,
-    required this.toml,
-    required this.tomlBg,
-    required this.other,
-    required this.otherBg,
+    required this.orange,
+    required this.blue,
+    required this.teal,
+    required this.green,
+    required this.violet,
+    required this.neutral,
   });
-  final Color rs, rsBg, md, mdBg, toml, tomlBg, other, otherBg;
+  final Color orange, blue, teal, green, violet, neutral;
 }
 
 /// The editor's code colours.
@@ -372,27 +347,29 @@ final class SyntaxColors {
   final Color lineNumber, lineNumberActive, currentLine;
 }
 
-/// Sizes, spacing and shape (the Tauri shell's tokens.css: a 4 px grid, small radii).
+/// Sizes, spacing and shape (a 4 px grid; controls 5 px, sheets 8 px, rows and regions square).
 abstract final class Metrics {
   static const s1 = 2.0, s2 = 4.0, s3 = 6.0, s4 = 8.0, s5 = 12.0, s6 = 16.0, s7 = 24.0;
-  static const radiusControl = 3.0;
-  static const radiusRaised = 4.0;
-  static const radiusSheet = 6.0;
+
+  /// Marks inside a control (a checkbox, a keycap, a tag).
+  static const radiusMark = 3.0;
+  static const radiusControl = 5.0;
+  static const radiusRaised = 6.0;
+  static const radiusSheet = 8.0;
 
   /// Fully rounded ends (badges, the switch's track).
   static const radiusPill = 999.0;
 
   /// The soft focus halo around a field: the control's radius plus the ring's width.
   static const radiusHalo = radiusControl + focusWidth;
-  static const rowHeight = 22.0;
-  static const controlHeight = 26.0;
-  static const controlHeightSmall = 22.0;
-  static const tabHeight = 32.0;
-  static const titleRowHeight = 38.0;
-  static const headHeight = 30.0;
-  static const crumbHeight = 24.0;
-  static const statusBarHeight = 24.0;
-  static const railWidth = 44.0;
+  static const rowHeight = 24.0;
+  static const controlHeight = 28.0;
+  static const controlHeightSmall = 24.0;
+  static const tabHeight = 36.0;
+  static const titleRowHeight = 42.0;
+  static const headHeight = 36.0;
+  static const statusBarHeight = 26.0;
+  static const railWidth = 48.0;
 
   /// The inset of a side panel's content from its edges: text, fields and buttons sit 12 px in;
   /// a list is inset [sideListInset] and its rows pad their content by [rowInset], which lands
@@ -400,10 +377,13 @@ abstract final class Metrics {
   static const sideGutter = s5;
   static const sideListInset = s2;
   static const rowInset = s4;
+
+  /// The widest a page of reading gets (a conversation), and a page of rows (Environments,
+  /// Settings): wider windows add margin, not line length.
+  static const readingWidth = 760.0;
+  static const pageWidth = 880.0;
   static const focusWidth = 2.0;
   static const iconSize = 16.0;
-  static const underlineWidth = 16.0;
-  static const underlineHeight = 2.0;
 }
 
 /// Type: IBM Plex Sans and Mono (ADR-0013), no tracking, tabular figures for numbers.
@@ -447,11 +427,11 @@ final class AxiomType {
     color: colors.ink2,
   );
 
-  /// A page's heading line (the Tauri welcome's title: 15 px, strong).
+  /// A page's heading line: the one large size in the shell.
   TextStyle get answer => TextStyle(
     fontFamily: sans,
-    fontSize: 15,
-    height: 20 / 15,
+    fontSize: 20,
+    height: 26 / 20,
     fontWeight: FontWeight.w600,
     color: colors.ink,
   );

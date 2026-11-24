@@ -41,7 +41,7 @@ final class GitMark {
 Color? gitInk(AxiomColors c, GitKind? k) => switch (k) {
   null => null,
   GitKind.untracked || GitKind.added => c.okText,
-  GitKind.modified || GitKind.renamed => c.accentText,
+  GitKind.modified || GitKind.renamed => c.infoText,
   GitKind.deleted || GitKind.conflicted => c.dangerText,
 };
 

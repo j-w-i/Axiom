@@ -716,7 +716,7 @@ Widget _bannerLine(
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
           );
-          final lead = [AxiomIcon(icon, size: 14, color: c.accentText), const SizedBox(width: 8)];
+          final lead = [AxiomIcon(icon, size: 14, color: c.infoText), const SizedBox(width: 8)];
           if (box.maxWidth >= 480 || actions.isEmpty) {
             return Row(
               children: [
@@ -943,12 +943,12 @@ class _DocViewState extends State<_DocView> {
   Widget build(BuildContext context) {
     final s = app.settings;
     final c = context.colors;
-    widget.doc.highlightColor = c.accentSoft;
+    widget.doc.highlightColor = c.infoSoft;
     widget.doc.syntax = c.syntax;
     widget.doc.underlineColor = (severity) => switch (severity) {
       1 => c.danger,
       2 => c.warn,
-      _ => c.accent,
+      _ => c.info,
     };
     return ListenableBuilder(
       listenable: s,

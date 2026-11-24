@@ -354,9 +354,9 @@ TextSpan _inline(BuildContext context, _Links links, List<md.Node>? nodes, TextS
         'em' => s.copyWith(fontStyle: FontStyle.italic),
         'del' => s.copyWith(decoration: TextDecoration.lineThrough),
         'a' => s.copyWith(
-          color: c.accentText,
+          color: c.infoText,
           decoration: TextDecoration.underline,
-          decorationColor: c.accentText,
+          decorationColor: c.infoText,
         ),
         _ => s,
       };

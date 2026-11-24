@@ -1,14 +1,16 @@
-// Surfaces by depth, as the Tauri shell drew them (FL-DS-002; its tokens.css materials): recessed
-// wells, raised keys with a gradient, a lit edge and a contact shade, overlay sheets. Edges are painted directly, not stacked box-shadows:
-// on the owner's 125 % display the Tauri shell lost 6–10 fps to box-shadows alone.
+// Surfaces (UI-001, ADR-0024): flat fills. Depth comes from the tone steps of the regions; the one
+// raised thing on a surface is its primary action, and the one thing that floats is a sheet.
+// Edges are painted directly, not stacked box-shadows: on the owner's 125 % display the Tauri
+// shell lost 6–10 fps to box-shadows alone.
 
 import 'package:flutter/widgets.dart';
 
 import 'theme.dart';
 import 'tokens.dart';
 
-/// −1: a recessed well (fields, the command field, the console's prompt): the well tone, a 1 px
-/// border, an inner shadow along the top and a lit edge under it (Tauri's `--recessed-*`).
+/// A well (a field, a code block): the recessed tone, with a 1 px [border] only where the box is a
+/// control whose edge must be seen (fields pass the input line or the focus colour; ≥ 3:1,
+/// CR-M1.6-SYSTEM-001).
 class Well extends StatelessWidget {
   const Well({
     super.key,
@@ -20,179 +22,53 @@ class Well extends StatelessWidget {
   final Widget child;
   final double radius;
   final EdgeInsetsGeometry? padding;
-
-  /// The border (defaults to the groove); fields pass their input line or the focus colour.
   final Color? border;
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return CustomPaint(
-      painter: _WellPainter(
-        fill: c.recessed,
-        border: border ?? c.groove,
-        inner: c.wellShadow,
-        edge: c.litEdge,
-        radius: radius,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: context.colors.recessed,
+        borderRadius: BorderRadius.circular(radius),
+        border: border == null ? null : Border.all(color: border!),
       ),
       child: padding == null ? child : Padding(padding: padding!, child: child),
     );
   }
 }
 
-class _WellPainter extends CustomPainter {
-  _WellPainter({
-    required this.fill,
-    required this.border,
-    required this.inner,
-    required this.edge,
-    required this.radius,
-  });
-  final Color fill, border, inner, edge;
-  final double radius;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final rr = RRect.fromRectAndRadius(rect, Radius.circular(radius));
-    // The lit edge below the well (0 1px 0 var(--edge)).
-    canvas.drawRRect(rr.shift(const Offset(0, 1)), Paint()..color = edge);
-    canvas.drawRRect(rr, Paint()..color = fill);
-    // The inner shadow along the top (inset 0 1px 2px).
-    canvas.save();
-    canvas.clipRRect(rr);
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, 3),
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [inner, inner.withValues(alpha: 0)],
-        ).createShader(Rect.fromLTWH(0, 0, size.width, 3)),
-    );
-    canvas.restore();
-    canvas.drawRRect(
-      rr.deflate(0.5),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..color = border,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_WellPainter o) =>
-      o.fill != fill ||
-      o.border != border ||
-      o.inner != inner ||
-      o.edge != edge ||
-      o.radius != radius;
-}
-
-/// +1: a raised key (buttons, keycaps): the raised gradient, a 1 px border, a lit edge inside
-/// the top and a 1 px contact shade below (Tauri's `--raised-*`).
+/// A pressable's fill (a button, a chip); [lit] adds the 1 px top edge that marks the one primary
+/// action of a surface.
 class Raised extends StatelessWidget {
   const Raised({
     super.key,
     required this.child,
     this.color,
-    this.top,
-    this.border,
     this.radius = Metrics.radiusControl,
-    this.topOnly = false,
-    this.lit = true,
+    this.lit = false,
   });
   final Widget child;
-
-  /// The fill (the gradient's lower stop); [top] its upper stop.
   final Color? color;
-  final Color? top;
-  final Color? border;
   final double radius;
-
-  /// Only the top corners rounded, no border below (tabs).
-  final bool topOnly;
-
-  /// The lit edge inside the top (off for the pressed state).
   final bool lit;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return CustomPaint(
-      painter: RaisedPainter(
-        top: top ?? (color == null ? c.raisedTop : color!),
-        bottom: color ?? c.raised,
-        border: border ?? c.groove,
-        lit: lit ? c.litEdge : null,
-        shade: c.contactShade,
-        radius: radius,
-        topOnly: topOnly,
+    final box = DecoratedBox(
+      decoration: BoxDecoration(
+        color: color ?? c.raised,
+        borderRadius: BorderRadius.circular(radius),
       ),
       child: child,
     );
+    if (!lit) return box;
+    return CustomPaint(foregroundPainter: _LitEdge(c.litEdge, radius), child: box);
   }
 }
 
-/// Paints a raised key.
-class RaisedPainter extends CustomPainter {
-  RaisedPainter({
-    required this.top,
-    required this.bottom,
-    required this.border,
-    required this.lit,
-    required this.shade,
-    required this.radius,
-    this.topOnly = false,
-  });
-  final Color top, bottom, border, shade;
-  final Color? lit;
-  final double radius;
-  final bool topOnly;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final r = Radius.circular(radius);
-    final rect = Offset.zero & size;
-    final rr = topOnly
-        ? RRect.fromRectAndCorners(rect, topLeft: r, topRight: r)
-        : RRect.fromRectAndRadius(rect, r);
-    if (!topOnly) canvas.drawRRect(rr.shift(const Offset(0, 1)), Paint()..color = shade);
-    canvas.drawRRect(
-      rr,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [top, bottom],
-        ).createShader(rect),
-    );
-    if (lit != null) {
-      canvas.save();
-      canvas.clipRRect(rr.deflate(1));
-      canvas.drawRect(Rect.fromLTWH(0, 1, size.width, 1), Paint()..color = lit!);
-      canvas.restore();
-    }
-    canvas.drawRRect(
-      rr.deflate(0.5),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..color = border,
-    );
-  }
-
-  @override
-  bool shouldRepaint(RaisedPainter o) =>
-      o.top != top ||
-      o.bottom != bottom ||
-      o.border != border ||
-      o.lit != lit ||
-      o.shade != shade ||
-      o.radius != radius ||
-      o.topOnly != topOnly;
-}
-
-/// +2: a sheet (menus, dialogs, the palette, tooltips): the overlay tone, a 1 px border, a lit
-/// edge inside the top and Tauri's two-layer overlay shadow.
+/// A sheet (menus, dialogs, the palette, tooltips): the overlay tone, a 1 px border and a
+/// two-layer shadow.
 class Sheet extends StatelessWidget {
   const Sheet({super.key, required this.child, this.radius = Metrics.radiusSheet, this.padding});
   final Widget child;
@@ -206,7 +82,7 @@ class Sheet extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.sheet,
         borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: c.groove),
+        border: Border.all(color: c.hairline),
         boxShadow: [
           BoxShadow(color: c.sheetShadow, blurRadius: 32, offset: const Offset(0, 12)),
           BoxShadow(
@@ -216,10 +92,7 @@ class Sheet extends StatelessWidget {
           ),
         ],
       ),
-      child: CustomPaint(
-        foregroundPainter: _LitEdge(c.litEdge, radius),
-        child: padding == null ? child : Padding(padding: padding!, child: child),
-      ),
+      child: padding == null ? child : Padding(padding: padding!, child: child),
     );
   }
 }
@@ -244,7 +117,7 @@ class _LitEdge extends CustomPainter {
   bool shouldRepaint(_LitEdge o) => o.color != color || o.radius != radius;
 }
 
-/// A 1 px dark groove between rows or regions.
+/// The 1 px seam between regions.
 class Groove extends StatelessWidget {
   const Groove({super.key, this.vertical = false});
   final bool vertical;

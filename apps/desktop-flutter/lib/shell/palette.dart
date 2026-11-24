@@ -281,7 +281,7 @@ class _PaletteRow extends StatelessWidget {
       spans.add(
         TextSpan(
           text: command.title.substring(s, e),
-          style: TextStyle(color: c.accentText, fontWeight: FontWeight.w600),
+          style: TextStyle(color: c.ink, fontWeight: FontWeight.w600),
         ),
       );
       at = e;

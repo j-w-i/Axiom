@@ -1665,7 +1665,7 @@ class _CompletionPopup extends StatelessWidget {
                             excludeSemantics: true,
                             child: DecoratedBox(
                               decoration: BoxDecoration(
-                                color: on ? c.accentSoft : null,
+                                color: on ? c.selected : null,
                                 borderRadius: BorderRadius.circular(Metrics.radiusRaised),
                               ),
                               child: Padding(
@@ -1771,7 +1771,7 @@ class _KindBadge extends StatelessWidget {
     final k = kind;
     final colour = switch (k) {
       7 || 8 || 9 || 13 || 22 || 25 => y.type,
-      2 || 3 || 4 || 23 || 24 => c.accentText,
+      2 || 3 || 4 || 23 || 24 => y.function,
       5 || 6 || 10 || 11 || 12 || 20 || 21 => y.number,
       14 || 15 => y.keyword,
       _ => c.ink3,

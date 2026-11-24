@@ -196,7 +196,7 @@ class CodeView extends StatelessWidget {
         textColor: y.text,
         backgroundColor: c.ground,
         selectionColor: c.selection,
-        highlightColor: c.accentSoft,
+        highlightColor: c.infoSoft,
         cursorColor: c.accent,
         cursorWidth: 2,
         cursorLineColor: y.currentLine,
@@ -266,13 +266,7 @@ class GitMarkStrip extends StatelessWidget {
         height: double.infinity,
         // Repainted, not rebuilt: the editor updates [notifier] during its layout.
         child: CustomPaint(
-          painter: _MarksPainter(
-            notifier,
-            marks,
-            added: c.ok,
-            modified: c.accent,
-            deleted: c.danger,
-          ),
+          painter: _MarksPainter(notifier, marks, added: c.ok, modified: c.info, deleted: c.danger),
         ),
       ),
     );

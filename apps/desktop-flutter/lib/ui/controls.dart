@@ -14,8 +14,8 @@ import 'surfaces.dart';
 import 'theme.dart';
 import 'tokens.dart';
 
-/// A button's look (the Tauri shell's `.btn` variants): a raised key, the brass primary, quiet
-/// (no fill until hovered), danger (a raised key with red text).
+/// A button's look: a flat fill, the brass primary (one per surface), quiet (no fill until
+/// hovered), danger (a flat fill with red text).
 enum ButtonKind { standard, primary, quiet, danger }
 
 /// A text button (optionally with a leading icon).
@@ -91,16 +91,16 @@ class AxButton extends StatelessWidget {
             child: body,
           ),
           ButtonKind.primary => Raised(
-            top: down ? c.accentLo : (over ? Color.lerp(c.accentHi, c.lift, 0.15) : c.accentHi),
-            color: down ? c.accent : (c.isDark ? c.accentLo : c.accent),
-            border: c.primaryBorder,
+            color: down
+                ? Color.lerp(c.accent, c.ground, 0.16)
+                : (over ? Color.lerp(c.accent, c.ink, c.isDark ? 0.16 : 0.10) : c.accent),
             lit: !down,
             child: body,
           ),
           _ => Raised(
-            top: down ? c.raised : (over ? Color.lerp(c.raisedTop, c.lift, 0.12) : c.raisedTop),
-            color: down ? c.raisedTop : (over ? Color.lerp(c.raised, c.lift, 0.10) : c.raised),
-            lit: !down,
+            color: down
+                ? Color.alphaBlend(c.pressed, c.raised)
+                : (over ? Color.alphaBlend(c.hover, c.raised) : c.raised),
             child: body,
           ),
         };
@@ -133,8 +133,8 @@ class AxIconButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
 
-  /// Selected shows pressed into a well (a toggle that is on); the rail marks its selection
-  /// itself and passes false.
+  /// Selected shows the selected fill (a toggle that is on); the rail fills its own and passes
+  /// false.
   final bool engaged;
 
   /// Shown in the tooltip and the hint line, written with `Mod` (e.g. `Mod+B`).
@@ -174,16 +174,17 @@ class AxIconButton extends StatelessWidget {
             visible: s.focused,
             child: Opacity(
               opacity: s.enabled ? 1 : 0.42,
-              // Engaged (a toggle that is on): pressed into a well, as Tauri's aria-pressed.
-              child: (selected ?? false) && engaged
-                  ? Well(child: square)
-                  : DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: s.pressed ? c.pressed : (s.hovered ? c.hover : null),
-                        borderRadius: BorderRadius.circular(Metrics.radiusControl),
-                      ),
-                      child: square,
-                    ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: s.pressed
+                      ? c.pressed
+                      : (selected ?? false) && engaged
+                      ? c.selected
+                      : (s.hovered ? c.hover : null),
+                  borderRadius: BorderRadius.circular(Metrics.radiusControl),
+                ),
+                child: square,
+              ),
             ),
           );
         },
@@ -192,8 +193,8 @@ class AxIconButton extends StatelessWidget {
   }
 }
 
-/// The one high-contrast action of a surface (Send): an ink circle. It answers a press with a
-/// small spring (about 4 % overshoot).
+/// The one high-contrast action of a surface (Send): a filled brass square while it can act, quiet
+/// when it cannot. It answers a press with a small spring.
 class InkCircleButton extends StatefulWidget {
   const InkCircleButton({
     super.key,
@@ -247,22 +248,22 @@ class _InkCircleButtonState extends State<InkCircleButton> with SingleTickerProv
           hint: widget.shortcut == null ? widget.label : '${widget.label} — ${widget.shortcut}',
           onPressed: widget.onPressed,
           builder: (context, s) {
-            // Tauri's composer send: an icon button in the brass text colour, faint when idle.
             final circle = DecoratedBox(
               decoration: BoxDecoration(
-                color: s.pressed ? c.pressed : (s.hovered && s.enabled ? c.hover : null),
+                color: !s.enabled
+                    ? c.raised
+                    : (s.hovered ? Color.lerp(c.accent, c.ink, c.isDark ? 0.16 : 0.10) : c.accent),
                 borderRadius: BorderRadius.circular(Metrics.radiusControl),
               ),
               child: SizedBox.square(
                 dimension: widget.diameter,
                 child: Center(
-                  child: AxiomIcon(widget.icon, color: s.enabled ? c.accentText : c.ink3),
+                  child: AxiomIcon(widget.icon, color: s.enabled ? c.onAccent : c.ink3),
                 ),
               ),
             );
             return FocusRing(
               visible: s.focused,
-              radius: widget.diameter,
               child: AnimatedBuilder(
                 animation: _scale,
                 builder: (_, child) => Transform.scale(scale: _scale.value, child: child),
@@ -303,7 +304,11 @@ class Keycaps extends StatelessWidget {
           for (final k in keys(shortcut, mac: isMac))
             Padding(
               padding: const EdgeInsets.only(left: Metrics.s1),
-              child: Raised(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: t.colors.hover,
+                  borderRadius: BorderRadius.circular(Metrics.radiusMark),
+                ),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minWidth: 16),
                   child: Padding(
@@ -381,7 +386,7 @@ class StatusDot extends StatelessWidget {
     final fill = switch (state) {
       DotState.off => c.ink3,
       DotState.ok => c.ok,
-      DotState.running => c.accent,
+      DotState.running => c.info,
       DotState.warn => c.warn,
       DotState.error => c.danger,
     };
@@ -431,12 +436,15 @@ class AxCheckbox extends StatelessWidget {
                     ? DecoratedBox(
                         decoration: BoxDecoration(
                           color: c.accent,
-                          borderRadius: BorderRadius.circular(Metrics.radiusControl),
-                          border: Border.all(color: c.primaryBorder),
+                          borderRadius: BorderRadius.circular(Metrics.radiusMark),
                         ),
                         child: AxiomIcon(_check, size: 14, color: c.onAccent),
                       )
-                    : Well(border: c.lineInput, child: const SizedBox.expand()),
+                    : Well(
+                        radius: Metrics.radiusMark,
+                        border: c.lineInput,
+                        child: const SizedBox.expand(),
+                      ),
               ),
               const SizedBox(width: Metrics.s3),
               Text(label, style: t.type.body.copyWith(color: s.enabled ? c.ink : c.ink3)),
@@ -474,9 +482,9 @@ class AxToggle extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Tauri's switch: a recessed track with the input border; on, brass with the
-              // primary border; a light gradient thumb. The thumb glides by a transform
-              // (Standard only); the track's colour changes in step.
+              // A recessed track with the input border; on, filled with ink (a setting that is on
+              // is not a call to act: no brass). The thumb glides by a transform (Standard only);
+              // the track's colour changes in step.
               AnimatedContainer(
                 duration: t.motion.medium,
                 curve: t.motion.curve,
@@ -484,9 +492,9 @@ class AxToggle extends StatelessWidget {
                 height: 17,
                 padding: const EdgeInsets.all(1),
                 decoration: BoxDecoration(
-                  color: value ? c.accent : c.recessed,
+                  color: value ? c.ink : c.recessed,
                   borderRadius: BorderRadius.circular(Metrics.radiusPill),
-                  border: Border.all(color: value ? c.primaryBorder : c.lineInput),
+                  border: Border.all(color: value ? c.ink : c.lineInput),
                 ),
                 alignment: Alignment.centerLeft,
                 child: TweenAnimationBuilder<double>(
@@ -500,14 +508,7 @@ class AxToggle extends StatelessWidget {
                     height: 13,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [c.thumbTop, c.thumbBottom],
-                      ),
-                      boxShadow: [
-                        BoxShadow(color: c.contactShade, blurRadius: 2, offset: const Offset(0, 1)),
-                      ],
+                      color: value ? c.ground : c.ink2,
                     ),
                   ),
                 ),
@@ -522,7 +523,8 @@ class AxToggle extends StatelessWidget {
   }
 }
 
-/// A list row: hover, a raised look when selected, an optional groove under it.
+/// A list row: hover, a fill when selected (with a brass edge while the list has focus), an
+/// optional groove under it.
 class AxListRow extends StatelessWidget {
   const AxListRow({
     super.key,
@@ -569,20 +571,20 @@ class AxListRow extends StatelessWidget {
       builder: (context, s) {
         Widget row = SizedBox(height: h, child: child);
         if (selected) {
-          // Tauri's selected tree row: the selected tint and a 2 px marker on the left edge,
-          // brass while the list has focus.
+          // Selected is a fill; the brass edge says the list has keyboard focus.
           row = DecoratedBox(
             decoration: BoxDecoration(color: c.selected),
             child: Stack(
               children: [
                 row,
-                Positioned(
-                  left: 0,
-                  top: 3,
-                  bottom: 3,
-                  width: 2,
-                  child: ColoredBox(color: (listFocused ?? s.focused) ? c.accent : c.ink3),
-                ),
+                if (listFocused ?? s.focused)
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 2,
+                    child: ColoredBox(color: c.accent),
+                  ),
               ],
             ),
           );
@@ -672,7 +674,7 @@ class _SpinnerState extends State<Spinner> with SingleTickerProviderStateMixin {
       child: SizedBox.square(
         dimension: widget.size,
         child: CustomPaint(
-          painter: _ArcPainter(c.accent, c.hairline, _step * 2 * math.pi / Spinner.steps),
+          painter: _ArcPainter(c.info, c.hairline, _step * 2 * math.pi / Spinner.steps),
         ),
       ),
     );

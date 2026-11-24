@@ -41,8 +41,8 @@ TerminalTheme terminalTheme(AxiomColors c) {
     brightMagenta: a[13],
     brightCyan: a[14],
     brightWhite: a[15],
-    searchHitBackground: c.accentSoft,
-    searchHitBackgroundCurrent: c.accent,
+    searchHitBackground: c.infoSoft,
+    searchHitBackgroundCurrent: c.info,
     searchHitForeground: c.ink,
   );
 }

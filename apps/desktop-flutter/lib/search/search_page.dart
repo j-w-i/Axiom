@@ -94,11 +94,10 @@ class SearchSideState extends State<SearchSide> {
           height: Metrics.controlHeightSmall,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: on ? c.accentSoft : (st.hovered ? c.hover : null),
+            color: on ? c.selected : (st.hovered ? c.hover : null),
             borderRadius: BorderRadius.circular(Metrics.radiusControl),
-            border: Border.all(color: on ? c.accent : c.hairline),
           ),
-          child: Text(text, style: t.type.codeSmall.copyWith(color: on ? c.accentText : c.ink2)),
+          child: Text(text, style: t.type.codeSmall.copyWith(color: on ? c.ink : c.ink3)),
         ),
       ),
     );
@@ -440,7 +439,7 @@ class SearchResultsState extends State<SearchResults> {
                       text: m.preview.substring(a, b),
                       style: style.copyWith(
                         color: c.ink,
-                        backgroundColor: c.accentSoft,
+                        backgroundColor: c.infoSoft,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
