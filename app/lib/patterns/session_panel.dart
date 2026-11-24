@@ -332,7 +332,7 @@ class TaskRow extends StatelessWidget {
     final t = Ax.of(context), c = t.colors;
     final (mark, word) = switch (task.state) {
       TaskState.done => (AxGlyph(AxIcon.check, size: 12, color: c.doneText), 'done'),
-      TaskState.active => (const AxLamp(AgentState.running, breathe: false), 'active'),
+      TaskState.active => (const AxLamp(AgentState.running, turns: false), 'active'),
       TaskState.asking => (const AxLamp(AgentState.asking), 'asking'),
       TaskState.todo => (const AxLamp(AgentState.waiting), 'to do'),
       TaskState.blocked => (AxGlyph(AxIcon.warn, size: 12, color: c.attentionText), 'blocked'),

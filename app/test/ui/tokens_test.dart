@@ -154,10 +154,12 @@ void main() {
         }
       });
 
-      test('cobalt is not sky: the accent is deep and blue, not cyan', () {
+      // The owner's sample runs from hue 210 to 223; below it is sky, above it is violet. Both
+      // were rejected.
+      test('the blue is neither sky nor violet', () {
         for (final k in [c.live, c.primary.top, c.primary.bottom]) {
           final h = HSLColor.fromColor(k);
-          expect(h.hue, inInclusiveRange(222, 232));
+          expect(h.hue, inInclusiveRange(210, 223));
           expect(h.lightness, lessThan(.67));
         }
       });

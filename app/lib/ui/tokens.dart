@@ -1,7 +1,7 @@
 /// Every visual constant in Axiom. Nothing outside this file names a colour, a duration or a spring
 /// (test/ui/tokens_test.dart enforces it and checks contrast in both themes).
 ///
-/// The language: graphite structure, navy displays, cobalt only for what is live. Depth comes from
+/// The language: graphite structure, charcoal displays, blue only for what is live. Depth comes from
 /// one light above: raised parts carry a faint lit top edge, displays sit slightly below the surface.
 library;
 
@@ -101,11 +101,6 @@ class AxColors {
     required this.codeType,
     required this.codeNumber,
     required this.codeComment,
-    required this.clipWrite,
-    required this.clipRead,
-    required this.clipThink,
-    required this.clipFault,
-    required this.clipAsk,
     required this.scrim,
     required this.kindRead,
     required this.kindEdit,
@@ -143,7 +138,6 @@ class AxColors {
   final SurfaceSpec overlay;
   final Color diffAdd, diffRemove;
   final Color codePlain, codeKeyword, codeString, codeCall, codeType, codeNumber, codeComment;
-  final Color clipWrite, clipRead, clipThink, clipFault, clipAsk;
   final Color scrim;
 
   /// What kind of work: reading, changing, searching, running, the web, thinking or delegating.
@@ -170,8 +164,8 @@ class AxColors {
     ink4: Color(0xFFA2ACBE),
     voice: Color(0xFFB2BCD0),
     onPrimary: Color(0xFFFFFFFF),
-    live: Color(0xFF5B80F2),
-    liveText: Color(0xFF9DB3FA),
+    live: Color(0xFF4A97FF),
+    liveText: Color(0xFF8CBDFF),
     attention: Color(0xFFE3A947),
     attentionText: Color(0xFFEBB965),
     fault: Color(0xFFE8635A),
@@ -179,8 +173,8 @@ class AxColors {
     done: Color(0xFF52BC88),
     doneText: Color(0xFF7ED3A6),
     idle: Color(0xFF7D889C),
-    focus: Color(0xFF7697F7),
-    selection: Color(0x663F62C8),
+    focus: Color(0xFF5AA2FF),
+    selection: Color(0x663B8BEF),
     rule: Color(0xFF121317),
     ruleLight: Color(0x0DFFFFFF),
     bayRule: Color(0xFF292C32),
@@ -256,23 +250,23 @@ class AxColors {
       lip: Color(0x0AFFFFFF),
     ),
     primary: SurfaceSpec(
-      top: Color(0xFF3A60DC),
-      bottom: Color(0xFF3257D0),
-      border: Color(0xFF1B2F7C),
+      top: Color(0xFF2470EE),
+      bottom: Color(0xFF1E69E8),
+      border: Color(0xFF0E3C92),
       edge: Color(0x29FFFFFF),
       shadows: [BoxShadow(color: Color(0x38000000), blurRadius: 2, offset: Offset(0, 1))],
     ),
     primaryHover: SurfaceSpec(
-      top: Color(0xFF4168E0),
-      bottom: Color(0xFF3A60DA),
-      border: Color(0xFF1B2F7C),
-      edge: Color(0x33FFFFFF),
+      top: Color(0xFF2470EE),
+      bottom: Color(0xFF2470EE),
+      border: Color(0xFF0E3C92),
+      edge: Color(0x4DFFFFFF),
       shadows: [BoxShadow(color: Color(0x40000000), blurRadius: 3, offset: Offset(0, 1))],
     ),
     primaryDown: SurfaceSpec(
-      top: Color(0xFF2A49B4),
-      bottom: Color(0xFF2E4FBF),
-      border: Color(0xFF17275C),
+      top: Color(0xFF1857C6),
+      bottom: Color(0xFF1B5DD0),
+      border: Color(0xFF0B2F74),
       inset: Color(0x3D000000),
       lip: Color(0x14FFFFFF),
     ),
@@ -289,25 +283,20 @@ class AxColors {
     diffAdd: Color(0x2B4DB585),
     diffRemove: Color(0x30E5645B),
     codePlain: Color(0xFFB4BFD2),
-    codeKeyword: Color(0xFFA3B2FF),
+    codeKeyword: Color(0xFF8CBEFF),
     codeString: Color(0xFF9FD08E),
     codeCall: Color(0xFFE6EBF5),
     codeType: Color(0xFFD9AEE6),
     codeNumber: Color(0xFFEBBC72),
     codeComment: Color(0xFF99A2B4),
-    clipWrite: Color(0xFF2E4590),
-    clipRead: Color(0xFF26344E),
-    clipThink: Color(0xFF3A3C5A),
-    clipFault: Color(0xFF73393A),
-    clipAsk: Color(0xFF70552A),
     scrim: Color(0x8A05080E),
     kindRead: Color(0xFF8EA5CE),
-    kindEdit: Color(0xFF93A5FF),
+    kindEdit: Color(0xFF6FB2FF),
     kindSearch: Color(0xFF5FBFA8),
     kindRun: Color(0xFFDDAE62),
     kindWeb: Color(0xFF7FB58A),
     kindThink: Color(0xFFBCA3DE),
-    codeInline: Color(0xFFB9C5FF),
+    codeInline: Color(0xFFA6D0FF),
     services: {
       ServiceMark.anthropic: Color(0xFFE08A66),
       ServiceMark.claude: Color(0xFFE08A66),
@@ -348,8 +337,8 @@ class AxColors {
     ink4: Color(0xFF4A5260),
     voice: Color(0xFF45506A),
     onPrimary: Color(0xFFFFFFFF),
-    live: Color(0xFF3355C4),
-    liveText: Color(0xFF2545AE),
+    live: Color(0xFF1A66DC),
+    liveText: Color(0xFF124FA8),
     attention: Color(0xFF966612),
     attentionText: Color(0xFF6E4A07),
     fault: Color(0xFFBE4038),
@@ -357,8 +346,8 @@ class AxColors {
     done: Color(0xFF357A59),
     doneText: Color(0xFF1B5A3D),
     idle: Color(0xFF6B7380),
-    focus: Color(0xFF3B61DC),
-    selection: Color(0x4D5B7EEB),
+    focus: Color(0xFF1F6CEC),
+    selection: Color(0x4D4B97F2),
     rule: Color(0xFFAAB6C9),
     ruleLight: Color(0x8CFFFFFF),
     bayRule: Color(0xFFD6DEEC),
@@ -434,23 +423,23 @@ class AxColors {
       lip: Color(0x80FFFFFF),
     ),
     primary: SurfaceSpec(
-      top: Color(0xFF3E62D2),
-      bottom: Color(0xFF385BC8),
-      border: Color(0xFF23409C),
+      top: Color(0xFF2470EE),
+      bottom: Color(0xFF1E69E8),
+      border: Color(0xFF1551B8),
       edge: Color(0x47FFFFFF),
       shadows: [BoxShadow(color: Color(0x3324408F), blurRadius: 2, offset: Offset(0, 1))],
     ),
     primaryHover: SurfaceSpec(
-      top: Color(0xFF476BDC),
-      bottom: Color(0xFF3D60CE),
-      border: Color(0xFF23409C),
+      top: Color(0xFF2470EE),
+      bottom: Color(0xFF2470EE),
+      border: Color(0xFF1551B8),
       edge: Color(0x52FFFFFF),
       shadows: [BoxShadow(color: Color(0x4024408F), blurRadius: 3, offset: Offset(0, 1))],
     ),
     primaryDown: SurfaceSpec(
-      top: Color(0xFF2B489F),
-      bottom: Color(0xFF2F4DAB),
-      border: Color(0xFF1F3886),
+      top: Color(0xFF1857C6),
+      bottom: Color(0xFF1B5DD0),
+      border: Color(0xFF1048A6),
       inset: Color(0x3D000000),
       lip: Color(0x66FFFFFF),
     ),
@@ -467,25 +456,20 @@ class AxColors {
     diffAdd: Color(0x2E2F8A5C),
     diffRemove: Color(0x2ECB453D),
     codePlain: Color(0xFF39414F),
-    codeKeyword: Color(0xFF3244B4),
+    codeKeyword: Color(0xFF1650A6),
     codeString: Color(0xFF2F6A2A),
     codeCall: Color(0xFF171B23),
     codeType: Color(0xFF7B3A94),
     codeNumber: Color(0xFF7F4F08),
     codeComment: Color(0xFF4F5A6E),
-    clipWrite: Color(0xFFA9B9EC),
-    clipRead: Color(0xFFD0D6E0),
-    clipThink: Color(0xFFC4CAD5),
-    clipFault: Color(0xFFE8B3AF),
-    clipAsk: Color(0xFFEBCB8E),
     scrim: Color(0x66202A3C),
     kindRead: Color(0xFF45608F),
-    kindEdit: Color(0xFF3448B8),
+    kindEdit: Color(0xFF1757B4),
     kindSearch: Color(0xFF14725F),
     kindRun: Color(0xFF85590B),
     kindWeb: Color(0xFF2E6B3B),
     kindThink: Color(0xFF6A4A98),
-    codeInline: Color(0xFF3044A8),
+    codeInline: Color(0xFF1650A6),
     services: {
       ServiceMark.anthropic: Color(0xFFAD4F2B),
       ServiceMark.claude: Color(0xFFAD4F2B),
@@ -602,7 +586,7 @@ abstract final class AxMotion {
     ratio: .86,
   );
   static const Duration hoverDelay = Duration(milliseconds: 450);
-  static const Duration breath = Duration(milliseconds: 1800);
+  static const Duration turn = Duration(milliseconds: 1400);
   static const Duration blink = Duration(milliseconds: 1060);
 }
 

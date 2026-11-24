@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 
 import 'press.dart';
@@ -29,22 +31,22 @@ enum AgentState {
   };
 }
 
-/// A state lamp. Each state has its own shape, so colour is never alone: running is a capsule that
-/// breathes slowly, asking a bar with a notch, waiting a hollow capsule, paused two bars, done a
-/// check, failed a cross. The word is always in the semantics.
+/// A state lamp. Each state has its own shape, so colour is never alone: running is a ring with an
+/// arc that goes round, asking a diamond, waiting a ring, paused two bars, done a check, failed a
+/// cross. The word is always in the semantics.
 class AxLamp extends StatefulWidget {
-  const AxLamp(this.state, {super.key, this.breathe = true});
+  const AxLamp(this.state, {super.key, this.turns = true});
   final AgentState state;
-  final bool breathe;
+  final bool turns;
   @override
   State<AxLamp> createState() => _AxLampState();
 }
 
 class _AxLampState extends State<AxLamp> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: AxMotion.breath);
+  late final _c = AnimationController(vsync: this, duration: AxMotion.turn);
   void _sync() {
-    final run = widget.breathe && widget.state == AgentState.running && !reducedMotion(context);
-    if (run && !_c.isAnimating) _c.repeat(reverse: true);
+    final run = widget.turns && widget.state == AgentState.running && !reducedMotion(context);
+    if (run && !_c.isAnimating) _c.repeat();
     if (!run) {
       _c.stop();
       _c.value = 0;
@@ -74,7 +76,7 @@ class _AxLampState extends State<AxLamp> with SingleTickerProviderStateMixin {
     label: widget.state.word,
     child: RepaintBoundary(
       child: CustomPaint(
-        size: const Size(12, 8),
+        size: const Size(12, 10),
         painter: _LampPainter(widget.state, widget.state.mark(Ax.of(context).colors), _c),
       ),
     ),
@@ -88,56 +90,49 @@ class _LampPainter extends CustomPainter {
   final Animation<double> t;
   @override
   void paint(Canvas c, Size s) {
-    final p = Paint()
-      ..color = color.withValues(alpha: color.a * (1 - .45 * Curves.easeInOut.transform(t.value)));
-    final bar = Rect.fromLTWH(0, s.height / 2 - 2.5, s.width, 5);
-    final r = RRect.fromRectAndRadius(bar, const Radius.circular(2.5));
+    final p = Paint()..color = color;
     final line = Paint()
-      ..color = p.color
+      ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.6
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
+    final at = s.center(Offset.zero);
+    final ring = Rect.fromCircle(center: at, radius: 3.9);
     switch (state) {
       case AgentState.running:
-        c.drawRRect(r, p);
+        c.drawCircle(at, 3.9, line..color = color.withValues(alpha: .3));
+        c.drawArc(ring, (t.value * 2 - .5) * math.pi, math.pi * .75, false, line..color = color);
       case AgentState.asking:
-        // Two parts: something is missing between them.
-        const gap = 3.0, dot = 3.0;
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(0, bar.top, s.width - gap - dot, 5),
-            const Radius.circular(2.5),
-          ),
-          p,
-        );
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(s.width - dot, bar.top, dot, 5),
-            const Radius.circular(1.5),
-          ),
-          p,
+        c.drawPath(
+          Path()..addPolygon([
+            at.translate(0, -4.4),
+            at.translate(4.4, 0),
+            at.translate(0, 4.4),
+            at.translate(-4.4, 0),
+          ], true),
+          p..strokeJoin = StrokeJoin.round,
         );
       case AgentState.waiting:
-        c.drawRRect(r.deflate(.65), line..strokeWidth = 1.3);
+        c.drawCircle(at, 3.6, line..strokeWidth = 1.3);
       case AgentState.paused:
         for (final x in [2.5, 7.0]) {
           c.drawRRect(
-            RRect.fromRectAndRadius(Rect.fromLTWH(x, 0, 2.5, 8), const Radius.circular(1)),
+            RRect.fromRectAndRadius(Rect.fromLTWH(x, 1, 2.5, 8), const Radius.circular(1)),
             p,
           );
         }
       case AgentState.done:
         c.drawPath(
           Path()
-            ..moveTo(1.6, 4.4)
-            ..lineTo(4.6, 7.2)
-            ..lineTo(10.2, 1),
+            ..moveTo(1.6, 5.4)
+            ..lineTo(4.6, 8.2)
+            ..lineTo(10.2, 2),
           line,
         );
       case AgentState.failed:
-        c.drawLine(const Offset(2.6, .8), const Offset(9.2, 7.2), line);
-        c.drawLine(const Offset(9.2, .8), const Offset(2.6, 7.2), line);
+        c.drawLine(const Offset(2.8, 1.8), const Offset(9.2, 8.2), line);
+        c.drawLine(const Offset(9.2, 1.8), const Offset(2.8, 8.2), line);
     }
   }
 
