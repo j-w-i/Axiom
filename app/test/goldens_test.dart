@@ -17,10 +17,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'shot.dart';
 
 /// Machines rasterise glyph edges with rounding differences of a few levels in 255. Those are not
-/// counted; everything larger is, and at most 0.1 % of the pixels may differ by that much.
+/// counted; everything larger is. At most 0.1 % of the pixels may differ by that much, and at most
+/// [most] in any one place: a missing lamp or a word cut short is small in a whole window.
 class Tolerant extends LocalFileComparator {
   Tolerant(super.testFile);
-  static const level = 8, share = .001;
+  static const level = 8, share = .001, tile = 32, most = 24;
 
   static Future<(int, int, ByteData)> _pixels(List<int> png) async {
     final codec = await ui.instantiateImageCodec(Uint8List.fromList(png));
@@ -31,27 +32,36 @@ class Tolerant extends LocalFileComparator {
     return r;
   }
 
-  static Future<double> difference(List<int> a, List<int> b) async {
+  /// The share of the pixels that differ, and how many do in the tile where most do.
+  static Future<(double, int)> difference(List<int> a, List<int> b) async {
     final (w, h, x) = await _pixels(a);
     final (w2, h2, y) = await _pixels(b);
-    if (w != w2 || h != h2) return 1;
+    if (w != w2 || h != h2) return (1.0, w * h);
     var n = 0;
+    final across = (w / tile).ceil();
+    final tiles = List.filled(across * (h / tile).ceil(), 0);
     for (var i = 0; i < x.lengthInBytes; i += 4) {
       if ((x.getUint8(i) - y.getUint8(i)).abs() > level ||
           (x.getUint8(i + 1) - y.getUint8(i + 1)).abs() > level ||
           (x.getUint8(i + 2) - y.getUint8(i + 2)).abs() > level) {
         n++;
+        final p = i ~/ 4;
+        tiles[p ~/ w ~/ tile * across + p % w ~/ tile]++;
       }
     }
-    return n / (w * h);
+    return (n / (w * h), tiles.reduce((a, b) => a > b ? a : b));
   }
 
   @override
   Future<bool> compare(Uint8List image, Uri golden) async {
     final master = await getGoldenBytes(golden);
-    if (await difference(image, master) <= share) return true;
+    final (all, here) = await difference(image, master);
+    if (all <= share && here <= most) return true;
     final r = await GoldenFileComparator.compareLists(image, master);
-    throw FlutterError(await generateFailureOutput(r, golden, basedir));
+    throw FlutterError(
+      '${await generateFailureOutput(r, golden, basedir)}\n'
+      'More than $level levels: $all of all pixels, $here in one tile of $tile.',
+    );
   }
 }
 
@@ -115,7 +125,7 @@ void main() {
     ]) {
       await t.tap(f);
       await t.pump(const Duration(milliseconds: 50));
-      await t.pump(const Duration(milliseconds: 300));
+      await t.pump(const Duration(milliseconds: 600));
     }
     await expectLater(find.byKey(stage), matchesGoldenFile('goldens/execution-dark.png'));
   });
@@ -139,8 +149,10 @@ void main() {
 
     final (a, b, c) = (await shot(0), await shot(0), await shot(1));
     await t.runAsync(() async {
-      expect(await Tolerant.difference(a, b), 0);
-      expect(await Tolerant.difference(a, c), greaterThan(Tolerant.share * 10));
+      expect(await Tolerant.difference(a, b), (0.0, 0));
+      final (all, here) = await Tolerant.difference(a, c);
+      expect(all, greaterThan(Tolerant.share * 10));
+      expect(here, greaterThan(Tolerant.most * 4));
     });
   });
 

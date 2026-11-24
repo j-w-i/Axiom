@@ -42,7 +42,15 @@ enum HostPhase { starting, connected, unreachable }
 /// Starts the host if none runs, connects, follows, and reconnects. The client's only process
 /// (SI-14), and the only place that talks to the host.
 class HostStore extends ChangeNotifier {
-  HostStore({required this.paths, required this.binary, this.spawn = true});
+  HostStore({
+    required this.paths,
+    required this.binary,
+    this.spawn = true,
+    this.listEvery = const Duration(seconds: 20),
+  });
+
+  /// Other windows and the command line make sessions too, and ages go on.
+  final Duration listEvery;
   final HostPaths paths;
 
   /// The `axiom-host` executable, or null if there is none beside the application.
@@ -139,9 +147,8 @@ class HostStore extends ChangeNotifier {
     if (_disposed) return link.close();
     _link = link;
     _sub = link.messages.listen(_message);
-    // Other windows and the command line make sessions too, and ages go on.
     _list?.cancel();
-    _list = Timer.periodic(const Duration(seconds: 20), (_) {
+    _list = Timer.periodic(listEvery, (_) {
       if (_link != null && SchedulerBinding.instance.framesEnabled) {
         unawaited(refresh().catchError((_) {}));
       }
@@ -177,9 +184,22 @@ class HostStore extends ChangeNotifier {
     final r = await link.call('session.list', {'limit': listed});
     sessions = [for (final j in r! as List<Object?>) SessionInfo.decode(j! as Json)];
     older = sessions.length >= listed;
-    // The journal is checked in the background after the host starts, so this is asked again.
-    final s = await link.call('host.status');
-    damaged = s is Json ? s['damaged'] as String? : null;
+    notifyListeners();
+    // Nothing depends on it, and it may be slow.
+    unawaited(_status(link));
+  }
+
+  /// The journal is checked in the background after the host starts, so this is asked again.
+  Future<void> _status(HostLink link) async {
+    Object? s;
+    try {
+      s = await link.call('host.status');
+    } on Object {
+      return;
+    }
+    if (_disposed || !identical(link, _link)) return;
+    final d = s is Json ? s['damaged'] : null;
+    damaged = d is String ? d : null;
     notifyListeners();
   }
 

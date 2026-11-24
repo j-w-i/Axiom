@@ -3,6 +3,7 @@ import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/ui/tokens.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -11,12 +12,12 @@ import 'shot.dart';
 const x = Execution(harness: 'replay', model: 'Opus 5.5');
 
 /// A session as the host would send it; the real host drives test/host/e2e_test.dart.
-SessionModel recorded() {
+SessionModel recorded({String agent = 'Builder'}) {
   var n = 0;
   Event e(Body b) => Event(++n, n, b);
   return SessionModel('s')..apply([
     e(const SessionCreated('Double token rotation', null)),
-    e(const AgentAdded('a', 'Builder', x, null)),
+    e(AgentAdded('a', agent, x, null)),
     e(const AgentStateChanged('a', AgentPhase.running)),
     e(const ItemStarted('p', 'r', 'a', ItemKind.prompt, '', null)),
     e(const ItemEnded('p', Outcome.completed, 'Make rotation single-flight.', null)),
@@ -120,12 +121,76 @@ void main() {
     s.dispose();
   });
 
+  List<Event> busy(int from) => [
+    Event(from, 1, UsageReported('a', Usage.decode({'context': .82}), Known.reported)),
+    Event(
+      from + 1,
+      1,
+      const RequestOpened('q', 'a', 'asks to run', 'rm -r build', 'in the worktree', Answerable.no),
+    ),
+  ];
+
+  testWidgets('shows how full the context is and what was asked', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = (recorded()..apply(busy(12)));
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    for (final w in [
+      '82%',
+      'Builder asks to run (no longer waiting)',
+      'rm -r build',
+      'in the worktree',
+    ]) {
+      expect(find.text(w), findsOneWidget);
+    }
+    s.dispose();
+  });
+
+  testWidgets('the keyboard goes through one pane and then the other', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = (recorded()
+        ..apply([
+          for (var k = 0; k < 3; k++) Event(12 + k, 1, AgentAdded('b$k', 'Agent $k', x, null)),
+        ]))
+      ..sessions = [
+        for (var k = 0; k < 9; k++)
+          SessionInfo.decode({
+            'id': 'o$k',
+            'title': 'Other $k',
+            'created': 1,
+            'updated': 1,
+            'last_seq': 1,
+            'running': false,
+          }),
+      ];
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    final xs = <double>[];
+    for (var k = 0; k < 40; k++) {
+      await t.sendKeyEvent(LogicalKeyboardKey.tab);
+      await t.pump();
+      final box = FocusManager.instance.primaryFocus!.context!.findRenderObject()! as RenderBox;
+      xs.add(box.localToGlobal(Offset.zero).dx);
+    }
+    // Once round: in the left pane until it is left, and back in it only at the end.
+    final changes = [
+      for (var k = 1; k < xs.length; k++)
+        if ((xs[k] < 264) != (xs[k - 1] < 264)) k,
+    ];
+    expect(changes.length, lessThanOrEqualTo(40 ~/ 14 * 2));
+    expect(changes.first, greaterThan(10), reason: '$xs');
+    s.dispose();
+  });
+
   testWidgets('nothing overflows from 760 px, in both themes, at large text', (t) async {
-    for (final c in [AxColors.dark, AxColors.light]) {
-      for (final scale in [1.0, 1.5]) {
+    for (final (c, agent) in [
+      (AxColors.dark, 'Builder'),
+      (AxColors.light, 'An agent with a long name that goes on'),
+    ]) {
+      for (final scale in [1.0, 1.5, 2.0]) {
         final s = store()
           ..phase = HostPhase.unreachable
-          ..current = recorded();
+          ..current = (recorded(agent: agent)..apply(busy(12)));
         await mount(
           t,
           Shell(s, titleInset: 58),

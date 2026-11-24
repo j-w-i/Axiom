@@ -14,7 +14,7 @@ void main() {
     await snap(t, 'workbench-dark');
     await t.tap(find.byType(UsageKey).first);
     await t.pump(const Duration(milliseconds: 50));
-    await t.pump(const Duration(milliseconds: 300));
+    await t.pump(const Duration(milliseconds: 600));
     await snap(t, 'workbench-usage');
   });
   testWidgets('workbench, what the agent runs on', (t) async {
@@ -22,7 +22,7 @@ void main() {
     Future<void> tap(Finder f) async {
       await t.tap(f);
       await t.pump(const Duration(milliseconds: 50));
-      await t.pump(const Duration(milliseconds: 300));
+      await t.pump(const Duration(milliseconds: 600));
     }
 
     await tap(find.byType(ExecutionKey));

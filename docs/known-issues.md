@@ -14,7 +14,7 @@
 | K10 | Keycaps use ⌘, which Archivo lacks: the system font supplies it on macOS, unverified elsewhere | M1 exit |
 | K12 | Markdown: quotes do not nest blocks; HTML is shown as text; a link is styled but nothing opens it yet (it will ask first) | M2 |
 | K13 | The transcript's ends are reached by moving its origin; there is no scroll bar, because a lazy list cannot know its length | M2: measured extents |
-| K14 | Selecting text across rows that are not built copies only what is built | M2 |
+| K14 | Selecting text across rows that are not built copies only what is built; a selection in the block being written is lost when that block closes | M2 |
 | K15 | A code block over 120 lines scrolls sideways in parts of 120 lines | M2 |
 | K16 | Sessions are keyed by session id only; the workspace is a label until workspaces have ids (SI-21) | M2 policy |
 | K17 | A journal restored from a backup whose numbers have caught up is not noticed: the journal has no identity on the wire | M2 |
@@ -24,3 +24,6 @@
 | K21 | An approval subject over 64 KiB is cut with a note; M2 policy must refuse such a request (SI-15) | M2 policy |
 | K22 | Schema 2 is one-way; a host from before it must be stopped before this one starts on the same data | accepted before 1.0 |
 | K23 | The client lists the last 1 000 sessions | M4 |
+| K24 | Running lamps turn, so a frame is drawn on every refresh while an agent runs (6 paints of 12 × 10 px, nothing rebuilt); one scrolled just out of sight still counts. Reduced motion stops it | M2: measure power |
+| K25 | A table being written costs up to 20 ms per frame in a debug build near its cut at 4 000 characters | M2 |
+| K26 | Icons and lamps do not grow with the text | M2 accessibility |

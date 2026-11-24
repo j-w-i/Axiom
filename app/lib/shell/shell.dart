@@ -54,84 +54,88 @@ class _ShellState extends State<Shell> {
             children: [
               SizedBox(
                 width: 264,
-                child: _Side(
-                  store: s,
-                  inset: widget.titleInset,
-                  agent: _agent,
-                  onAgent: (id) => setState(() => _agent = id),
+                child: FocusTraversalGroup(
+                  child: _Side(
+                    store: s,
+                    inset: widget.titleInset,
+                    agent: _agent,
+                    onAgent: (id) => setState(() => _agent = id),
+                  ),
                 ),
               ),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      height: 44,
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 12, right: 20),
-                        child: Row(
-                          children: [
-                            if (stale && s.phase != HostPhase.starting) ...[
-                              const AxLamp(AgentState.failed),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  s.binary == null && s.current == null
-                                      ? 'axiom-host was not found beside the application'
-                                      : 'The host is not answering. Trying again.',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: t.type.label.ink(c.faultText),
+                child: FocusTraversalGroup(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        height: 44,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 12, right: 20),
+                          child: Row(
+                            children: [
+                              if (stale && s.phase != HostPhase.starting) ...[
+                                const AxLamp(AgentState.failed),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    s.binary == null && s.current == null
+                                        ? 'axiom-host was not found beside the application'
+                                        : 'The host is not answering. Trying again.',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: t.type.label.ink(c.faultText),
+                                  ),
                                 ),
-                              ),
-                            ] else if (s.damaged case final d?) ...[
-                              const AxLamp(AgentState.failed),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'The journal is damaged: ${oneLine(d, 200)}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: t.type.label.ink(c.faultText),
+                              ] else if (s.damaged case final d?) ...[
+                                const AxLamp(AgentState.failed),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'The journal is damaged: ${oneLine(d, 200)}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: t.type.label.ink(c.faultText),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8, bottom: 8),
-                        child: Surface(
-                          c.bay,
-                          radius: AxRadius.bay,
-                          child: switch (s) {
-                            HostStore(phase: HostPhase.starting, current: null) => const _Word(
-                              'Starting the host',
-                            ),
-                            HostStore(phase: HostPhase.unreachable, current: null) => _Word(
-                              'The host is not answering',
-                              detail: s.problem,
-                            ),
-                            HostStore(current: final m?) => _Display(
-                              m,
-                              agent: _agent,
-                              stale: stale,
-                              onAgain: () => unawaited(s.open(m.id).catchError((_) {})),
-                            ),
-                            _ => _Word(
-                              s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
-                              detail: s.sessions.isEmpty
-                                  ? 'This build replays recorded sessions: axiom replay SESSION '
-                                        'SCRIPT. Running agents comes with the native engine.'
-                                  : null,
-                            ),
-                          },
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8, bottom: 8),
+                          child: Surface(
+                            c.bay,
+                            radius: AxRadius.bay,
+                            child: switch (s) {
+                              HostStore(phase: HostPhase.starting, current: null) => const _Word(
+                                'Starting the host',
+                              ),
+                              HostStore(phase: HostPhase.unreachable, current: null) => _Word(
+                                'The host is not answering',
+                                detail: s.problem,
+                              ),
+                              HostStore(current: final m?) => _Display(
+                                m,
+                                agent: _agent,
+                                stale: stale,
+                                onAgain: () => unawaited(s.open(m.id).catchError((_) {})),
+                              ),
+                              _ => _Word(
+                                s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
+                                detail: s.sessions.isEmpty
+                                    ? 'This build replays recorded sessions: axiom replay SESSION '
+                                          'SCRIPT. Running agents comes with the native engine.'
+                                    : null,
+                              ),
+                            },
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -331,14 +335,23 @@ class _Display extends StatelessWidget {
                 ),
                 if (a.context != null) ...[
                   const SizedBox(width: 10),
-                  ContextGauge(
-                    ContextView(share: a.context, provenance: provenanceOf(a.contextKnown)),
-                    hue: ServiceMark.of(x.model)?.color(c),
+                  Flexible(
+                    child: ContextGauge(
+                      ContextView(share: a.context, provenance: provenanceOf(a.contextKnown)),
+                      hue: ServiceMark.of(x.model)?.color(c),
+                    ),
                   ),
                 ],
                 if (stale) ...[
                   const SizedBox(width: 10),
-                  Text('not live', style: t.type.label.ink(c.attentionText)),
+                  Flexible(
+                    child: Text(
+                      'not live',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.label.ink(c.attentionText),
+                    ),
+                  ),
                 ],
               ],
             ),

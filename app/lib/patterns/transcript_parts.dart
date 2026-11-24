@@ -331,36 +331,39 @@ class _RequestBarState extends State<RequestBar> {
       liveRegion: true,
       label: 'Permission request from $agent',
       explicitChildNodes: true,
-      child: Surface(
-        c.plate,
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
-              child: LayoutBuilder(
-                builder: (context, box) => box.maxWidth < 620
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          body,
-                          const SizedBox(height: 8),
-                          Align(alignment: Alignment.centerRight, child: keys),
-                        ],
-                      )
-                    : Row(
-                        children: [
-                          Expanded(child: body),
-                          const SizedBox(width: 16),
-                          ConstrainedBox(
-                            constraints: BoxConstraints(maxWidth: box.maxWidth * .5),
-                            child: keys,
-                          ),
-                        ],
-                      ),
+      child: Settle(
+        stamp: r,
+        child: Surface(
+          c.plate,
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+                child: LayoutBuilder(
+                  builder: (context, box) => box.maxWidth < 620
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            body,
+                            const SizedBox(height: 8),
+                            Align(alignment: Alignment.centerRight, child: keys),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(child: body),
+                            const SizedBox(width: 16),
+                            ConstrainedBox(
+                              constraints: BoxConstraints(maxWidth: box.maxWidth * .5),
+                              child: keys,
+                            ),
+                          ],
+                        ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -28,8 +30,11 @@ class ExecutionChoice {
 /// The agent's execution as one key: what it runs on, and everything about it when opened. [choices]
 /// begin with the model and the harness, which the key names.
 class ExecutionKey extends StatelessWidget {
-  const ExecutionKey(this.choices, {super.key});
+  const ExecutionKey(this.choices, {required this.of, super.key});
   final List<ExecutionChoice> choices;
+
+  /// Whose execution it is. The panel of one agent closes when the key becomes another's.
+  final Object of;
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +42,7 @@ class ExecutionKey extends StatelessWidget {
     final hue = choices.first.item?.mark?.color(c);
     final words = [for (final ch in choices.take(2)) ?ch.item?.label];
     return AxPopover(
+      key: ValueKey(of),
       width: 372,
       anchor: (context, open, toggle) => Pressable(
         label: 'Runs on ${words.join(', ')}. Change',
@@ -94,6 +100,12 @@ class ExecutionKey extends StatelessWidget {
   }
 }
 
+/// A change that costs something, while it is asked about.
+class _Question {
+  const _Question(this.label, this.from, this.to, this.keep, this.change, this.cost);
+  final String label, from, to, keep, change, cost;
+}
+
 /// Every part of the execution, one open at a time. A change that costs something is explained and
 /// confirmed here.
 class ExecutionPanel extends StatefulWidget {
@@ -105,13 +117,15 @@ class ExecutionPanel extends StatefulWidget {
 
 class _ExecutionPanelState extends State<ExecutionPanel> {
   String? _open;
-
-  ({ExecutionChoice choice, AxMenuItem<String> item, String cost})? _asked;
+  _Question? _asked;
 
   /// The keyboard stays in the panel: on a question when one is asked, and on the part it was
   /// about once it is answered.
   final _keep = FocusNode();
-  late final _heads = {for (final c in widget.choices) c.label: FocusNode()};
+  final _heads = <String, FocusNode>{};
+  final _question = GlobalKey();
+
+  FocusNode _head(String label) => _heads.putIfAbsent(label, FocusNode.new);
 
   @override
   void dispose() {
@@ -122,12 +136,52 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
     super.dispose();
   }
 
+  ExecutionChoice? _choice(String label) =>
+      widget.choices.where((c) => c.label == label).firstOrNull;
+
+  /// A question is about one change, from what is to what would be, at one cost. If any of it is
+  /// not so any more, it is not asked any more.
+  bool _stands(_Question q) {
+    final c = _choice(q.label);
+    final to = c?.items.where((i) => i.value == q.to).firstOrNull;
+    return c != null &&
+        to != null &&
+        to.enabled &&
+        c.value == q.from &&
+        _name(c) == q.keep &&
+        to.label == q.change &&
+        c.cost?.call(q.to) == q.cost;
+  }
+
+  static String _name(ExecutionChoice c) => c.item?.label ?? 'as it is';
+
+  @override
+  void didUpdateWidget(ExecutionPanel old) {
+    super.didUpdateWidget(old);
+    if (_asked case final q? when !_stands(q)) _asked = null;
+    if (_open case final o? when _choice(o) == null) _open = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _heads.removeWhere((label, node) {
+        if (_choice(label) != null) return false;
+        node.dispose();
+        return true;
+      });
+      final scope = FocusScope.of(context);
+      // What had the focus has gone, and an open panel keeps it.
+      if (scope.focusedChild == null && widget.choices.isNotEmpty) {
+        _head((_open == null ? null : _choice(_open!)?.label) ?? widget.choices.first.label)
+            .requestFocus();
+      }
+    });
+  }
+
   void _close(ExecutionChoice c) {
     setState(() {
       _open = null;
       _asked = null;
     });
-    _heads[c.label]?.requestFocus();
+    _head(c.label).requestFocus();
   }
 
   void _apply(ExecutionChoice c, String v) {
@@ -139,14 +193,31 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
     if (i.value == c.value) return _close(c);
     final cost = c.cost?.call(i.value);
     if (cost == null) return _apply(c, i.value);
-    setState(() => _asked = (choice: c, item: i, cost: cost));
-    WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? _keep.requestFocus() : null);
+    setState(() => _asked = _Question(c.label, c.value, i.value, _name(c), i.label, cost));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _asked == null) return;
+      _keep.requestFocus();
+      if (_question.currentContext case final q?) {
+        unawaited(
+          Scrollable.ensureVisible(
+            q,
+            alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+          ),
+        );
+      }
+    });
+  }
+
+  void _answer(_Question q) {
+    final c = _choice(q.label);
+    if (c == null || !_stands(q)) return setState(() => _asked = null);
+    _apply(c, q.to);
   }
 
   @override
-  Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
-    return CallbackShortcuts(
+  Widget build(BuildContext context) => Settle(
+    stamp: (_open, _asked),
+    child: CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
             FocusScope.of(context).nextFocus(),
@@ -157,99 +228,123 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final ch in widget.choices) ...[
-            _row(
-              context,
-              label: '${ch.label}: ${ch.item?.label ?? 'none'}',
-              expanded: _open == ch.label,
-              node: _heads[ch.label],
-              hue: ch.item?.mark?.color(c),
-              onPressed: () => setState(() {
-                _open = _open == ch.label ? null : ch.label;
-                _asked = null;
-              }),
-              children: [
-                SizedBox(width: 82, child: Text(ch.label, style: t.type.label.ink(c.ink3))),
-                if (ch.item?.mark case final m?) ...[AxServiceMark(m), const SizedBox(width: 8)],
-                Expanded(
-                  child: Text(
-                    ch.item?.label ?? 'None',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.type.ui,
-                  ),
-                ),
-                SpringTo(
-                  target: _open == ch.label ? 1 : 0,
-                  spring: AxMotion.snap,
-                  builder: (_, v, child) => Transform.rotate(angle: v * 1.5708, child: child),
-                  child: AxGlyph(AxIcon.right, size: 9, color: c.ink4),
-                ),
-              ],
-            ),
-            if (_open == ch.label)
-              Padding(
-                padding: const EdgeInsets.only(left: 82, bottom: 5),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final i in ch.items)
-                      _row(
-                        context,
-                        label: i.label,
-                        hint: i.enabled ? i.detail : i.why,
-                        selected: i.value == ch.value,
-                        held: _asked?.choice.label == ch.label && _asked?.item.value == i.value,
-                        hue: i.mark?.color(c),
-                        onPressed: i.enabled ? () => _choose(ch, i) : null,
-                        children: [
-                          SizedBox(
-                            width: 18,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: i.value == ch.value
-                                  ? AxGlyph(
-                                      AxIcon.check,
-                                      size: 12,
-                                      color: i.mark?.color(c) ?? c.liveText,
-                                    )
-                                  : null,
-                            ),
-                          ),
-                          if (i.mark case final m?) ...[
-                            AxServiceMark(m, color: i.enabled ? null : c.idle),
-                            const SizedBox(width: 8),
-                          ],
-                          Expanded(
-                            child: Text(
-                              i.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: t.type.ui.ink(i.enabled ? c.ink1 : c.idle),
-                            ),
-                          ),
-                          if ((i.enabled ? i.detail : i.why) case final d?) ...[
-                            const SizedBox(width: 12),
-                            Text(d, style: t.type.small.ink(c.ink3)),
-                          ],
-                        ],
-                      ),
-                    if (_asked case final a? when a.choice.label == ch.label)
-                      _Cost(
-                        words: a.cost,
-                        keep: 'Keep ${ch.item?.label ?? 'as it is'}',
-                        change: 'Change to ${a.item.label}',
-                        node: _keep,
-                        onKeep: () => _close(ch),
-                        onChange: () => _apply(ch, a.item.value),
-                      ),
-                  ],
-                ),
+          for (final ch in widget.choices)
+            KeyedSubtree(key: ValueKey(ch.label), child: _part(context, ch)),
+        ],
+      ),
+    ),
+  );
+
+  Widget _part(BuildContext context, ExecutionChoice ch) {
+    final t = Ax.of(context), c = t.colors;
+    final open = _open == ch.label;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _row(
+          context,
+          label: '${ch.label}: ${ch.item?.label ?? 'none'}',
+          expanded: open,
+          node: _head(ch.label),
+          hue: ch.item?.mark?.color(c),
+          onPressed: () => setState(() {
+            _open = open ? null : ch.label;
+            _asked = null;
+          }),
+          children: [
+            SizedBox(width: 82, child: Text(ch.label, style: t.type.label.ink(c.ink3))),
+            if (ch.item?.mark case final m?) ...[AxServiceMark(m), const SizedBox(width: 8)],
+            Expanded(
+              child: Text(
+                ch.item?.label ?? 'None',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.ui,
               ),
+            ),
+            SpringTo(
+              target: open ? 1 : 0,
+              spring: AxMotion.snap,
+              builder: (_, v, child) => Transform.rotate(angle: v * 1.5708, child: child),
+              child: AxGlyph(AxIcon.right, size: 9, color: c.ink4),
+            ),
+          ],
+        ),
+        if (open)
+          Padding(
+            padding: const EdgeInsets.only(left: 82, bottom: 5),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [for (final i in ch.items) ..._item(context, ch, i)],
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<Widget> _item(BuildContext context, ExecutionChoice ch, AxMenuItem<String> i) {
+    final t = Ax.of(context), c = t.colors;
+    final q = _asked != null && _asked!.label == ch.label && _asked!.to == i.value ? _asked : null;
+    final detail = i.enabled ? i.detail : i.why;
+    return [
+      _row(
+        context,
+        label: i.label,
+        hint: detail,
+        selected: i.value == ch.value,
+        held: q != null,
+        hue: i.mark?.color(c),
+        onPressed: i.enabled ? () => _choose(ch, i) : null,
+        children: [
+          SizedBox(
+            width: 18,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: i.value == ch.value
+                  ? AxGlyph(AxIcon.check, size: 12, color: i.mark?.color(c) ?? c.liveText)
+                  : null,
+            ),
+          ),
+          if (i.mark case final m?) ...[
+            AxServiceMark(m, color: i.enabled ? null : c.idle),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            flex: 3,
+            child: Text(
+              i.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: t.type.ui.ink(i.enabled ? c.ink1 : c.idle),
+            ),
+          ),
+          if (detail != null) ...[
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: Text(
+                detail,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: t.type.small.ink(c.ink3),
+              ),
+            ),
           ],
         ],
       ),
-    );
+      if (q != null)
+        _Cost(
+          key: _question,
+          words: q.cost,
+          keep: 'Keep ${q.keep}',
+          change: 'Change to ${q.change}',
+          node: _keep,
+          onKeep: () => _close(ch),
+          onChange: () => _answer(q),
+        ),
+    ];
   }
 
   Widget _row(
@@ -292,6 +387,7 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
 /// What a change costs, and the two answers.
 class _Cost extends StatelessWidget {
   const _Cost({
+    super.key,
     required this.words,
     required this.keep,
     required this.change,
@@ -309,6 +405,7 @@ class _Cost extends StatelessWidget {
       container: true,
       liveRegion: true,
       explicitChildNodes: true,
+      label: words,
       child: Padding(
         padding: const EdgeInsets.only(top: 5),
         child: DecoratedBox(
@@ -326,10 +423,12 @@ class _Cost extends StatelessWidget {
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(top: 5),
-                      child: const AxLamp(AgentState.asking),
+                      child: const ExcludeSemantics(child: AxLamp(AgentState.asking)),
                     ),
                     const SizedBox(width: 9),
-                    Expanded(child: Text(words, style: t.type.label.ink(c.ink1))),
+                    Expanded(
+                      child: ExcludeSemantics(child: Text(words, style: t.type.label.ink(c.ink1))),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),

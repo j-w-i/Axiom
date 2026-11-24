@@ -15,7 +15,8 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 5. **Grid of 4.** Text starts on a shared left edge per surface (display 24, panel 12). Icons are 12–14 in a fixed column; text uses even leading so glyphs and words share a centre.
 6. **Two voices.** Archivo for words; Spline Sans Mono only for literals: code, paths, commands.
 7. **Numbers say where they come from.** Solid meter = reported or measured; dashed = estimated; empty track and words = unknown.
-8. **Controls appear where the hand is.** A row shows its keys when hovered; state is always shown.
+8. **Nothing new can be pressed by a click meant for something else.** What has just come or changed under a pointer takes no click until the pointer moves or half a second passes (`Settle`): execution panel, requests. A question falls the moment anything it was about changes.
+8a. **Controls appear where the hand is.** A row shows its keys when hovered; state is always shown.
 9. **Things sit inside what owns them.** Agents and plan in their session; an agent's views beside its name, which has its own section of the bar; model, harness, account, effort and access behind one key where the agent is spoken to, next to how full its context is. Choosing a model or a harness says what that costs (the context is read again) and waits for a yes; the keyboard lands on the answer that changes nothing.
 10. **Motion** is springs (`snap`, `glide`) that can be interrupted; nothing waits for them; reduced motion jumps. Only a running lamp moves by itself.
 

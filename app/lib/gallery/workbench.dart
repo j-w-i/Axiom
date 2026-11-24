@@ -86,104 +86,122 @@ class _WorkbenchState extends State<Workbench> {
               if (wide)
                 SizedBox(
                   width: box.maxWidth >= 1080 ? 264 : 224,
-                  child: _Side(
-                    inset: widget.titleInset,
-                    selected: _agent,
-                    onSelect: (id) => setState(() => _agent = id),
+                  child: FocusTraversalGroup(
+                    child: _Side(
+                      inset: widget.titleInset,
+                      selected: _agent,
+                      onSelect: (id) => setState(() => _agent = id),
+                    ),
                   ),
                 ),
               Expanded(
-                child: Column(
-                  children: [
-                    SizedBox(
-                      height: 44,
-                      child: Row(
-                        children: [
-                          SizedBox(width: wide ? 10 : widget.titleInset),
-                          Expanded(
-                            child: Row(
+                child: FocusTraversalGroup(
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        height: 44,
+                        child: Row(
+                          children: [
+                            SizedBox(width: wide ? 10 : widget.titleInset),
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      '3 running',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.type.label.ink(c.ink3),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  const AxLamp(AgentState.asking),
+                                  const SizedBox(width: 7),
+                                  Flexible(
+                                    child: Text(
+                                      '1 asking',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.type.label.ink(c.attentionText),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (box.maxWidth >= 1000)
+                              for (final v in s.services)
+                                UsageKey(
+                                  s.ServiceViewX(v).withActive(_active[v.name]!),
+                                  onUse: (id) => setState(() => _active[v.name] = id),
+                                  onLink: () {},
+                                ),
+                            const SizedBox(width: 4),
+                            AxButton.icon(
+                              AxIcon.search,
+                              label: 'Find or run',
+                              shortcut: '⌘K',
+                              tone: AxTone.quiet,
+                              onPressed: () {},
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(wide ? 0 : 8, 0, 8, 8),
+                          child: Surface(
+                            c.bay,
+                            radius: AxRadius.bay,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Text('3 running', style: t.type.label.ink(c.ink3)),
-                                const SizedBox(width: 14),
-                                const AxLamp(AgentState.asking),
-                                const SizedBox(width: 7),
-                                Text('1 asking', style: t.type.label.ink(c.attentionText)),
+                                AgentBar(
+                                  name: agent.name,
+                                  state: agent.state,
+                                  mark: mark,
+                                  tabs: const [
+                                    ('Conversation', null),
+                                    ('Changes', '3'),
+                                    ('Terminal', null),
+                                  ],
+                                  index: _tab,
+                                  onTab: (i) => setState(() => _tab = i),
+                                ),
+                                ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
+                                Expanded(
+                                  child: TranscriptView(
+                                    _transcript.agents[_agent] ?? _transcript.agents['builder']!,
+                                  ),
+                                ),
+                                if (_request)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                                    child: RequestBar(
+                                      s.request,
+                                      onOnce: () => setState(() => _request = false),
+                                      onAlways: () => setState(() => _request = false),
+                                      onDeny: () => setState(() => _request = false),
+                                    ),
+                                  ),
+                                Composer(
+                                  placeholder:
+                                      'Steer ${agent.name}. It reads this after the current tool call.',
+                                  action: 'Queue',
+                                  leading: [
+                                    ExecutionKey(choices, of: agent.id),
+                                    ContextGauge(s.contextView, hue: mark?.color(c)),
+                                  ],
+                                  onAttach: () {},
+                                  onSubmit: (_) {},
+                                ),
                               ],
                             ),
                           ),
-                          if (box.maxWidth >= 1000)
-                            for (final v in s.services)
-                              UsageKey(
-                                s.ServiceViewX(v).withActive(_active[v.name]!),
-                                onUse: (id) => setState(() => _active[v.name] = id),
-                                onLink: () {},
-                              ),
-                          const SizedBox(width: 4),
-                          AxButton.icon(
-                            AxIcon.search,
-                            label: 'Find or run',
-                            shortcut: '⌘K',
-                            tone: AxTone.quiet,
-                            onPressed: () {},
-                          ),
-                          const SizedBox(width: 8),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(wide ? 0 : 8, 0, 8, 8),
-                        child: Surface(
-                          c.bay,
-                          radius: AxRadius.bay,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              AgentBar(
-                                name: agent.name,
-                                state: agent.state,
-                                mark: mark,
-                                tabs: const [
-                                  ('Conversation', null),
-                                  ('Changes', '3'),
-                                  ('Terminal', null),
-                                ],
-                                index: _tab,
-                                onTab: (i) => setState(() => _tab = i),
-                              ),
-                              ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
-                              Expanded(
-                                child: TranscriptView(
-                                  _transcript.agents[_agent] ?? _transcript.agents['builder']!,
-                                ),
-                              ),
-                              if (_request)
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                                  child: RequestBar(
-                                    s.request,
-                                    onOnce: () => setState(() => _request = false),
-                                    onAlways: () => setState(() => _request = false),
-                                    onDeny: () => setState(() => _request = false),
-                                  ),
-                                ),
-                              Composer(
-                                placeholder:
-                                    'Steer ${agent.name}. It reads this after the current tool call.',
-                                action: 'Queue',
-                                leading: [
-                                  ExecutionKey(choices),
-                                  ContextGauge(s.contextView, hue: mark?.color(c)),
-                                ],
-                                onAttach: () {},
-                                onSubmit: (_) {},
-                              ),
-                            ],
-                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -213,11 +231,15 @@ class _Side extends StatelessWidget {
               children: [
                 const AxMark(size: 17),
                 const SizedBox(width: 9),
-                Text('Axiom', style: t.type.uiStrong),
-                const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    'web-store',
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(text: 'Axiom', style: t.type.uiStrong),
+                        const WidgetSpan(child: SizedBox(width: 10)),
+                        const TextSpan(text: 'web-store'),
+                      ],
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: t.type.ui.ink(c.ink3),

@@ -41,6 +41,12 @@ void main() {
             ('$n hovered', Color.alphaBlend(c.hover, s)),
       ];
 
+      final chosen = [
+        for (final h in c.services.entries)
+          for (final k in [c.rowSelectedTop, c.rowSelectedBottom])
+            ('${h.key.name} selected', c.selected(k, h.value)),
+      ];
+
       test('text reads on every surface it may sit on', () {
         final bad = <String>[];
         void check(String n, Color fg, Iterable<(String, Color)> on, [double need = 4.5]) {
@@ -69,11 +75,6 @@ void main() {
         ];
         check('ink1', c.ink1, tints);
         check('ink3', c.ink3, tints);
-        final chosen = [
-          for (final h in c.services.entries)
-            for (final k in [c.rowSelectedTop, c.rowSelectedBottom])
-              ('${h.key.name} selected', c.selected(k, h.value)),
-        ];
         for (final (n, k) in [
           ('ink1', c.ink1),
           ('ink2', c.ink2),
@@ -126,7 +127,10 @@ void main() {
           'think': c.kindThink,
         }.entries) {
           final tint = Color.alphaBlend(c.tinted(e.value), c.overlay.top);
-          for (final (s, bg) in [...general, ('its tint', tint)]) {
+          final track = [
+            for (final (s, bg) in general) ('track on $s', Color.alphaBlend(c.meterTrack, bg)),
+          ];
+          for (final (s, bg) in [...general, ...track, ('its tint', tint)]) {
             final r = ratio(e.value, bg);
             if (r < 3) bad.add('${e.key} on $s: ${r.toStringAsFixed(2)}');
           }
@@ -139,7 +143,7 @@ void main() {
           ('idle', c.idle),
           ('focus', c.focus),
         ]) {
-          for (final (s, bg) in general) {
+          for (final (s, bg) in [...general, ...chosen]) {
             final r = ratio(k, bg);
             if (r < 3) bad.add('$n on $s: ${r.toStringAsFixed(2)}');
           }

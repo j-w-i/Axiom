@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:axiom/host/host_store.dart';
 import 'package:axiom/host/link.dart';
 import 'package:axiom/host/proto.dart';
+import 'package:axiom/host/session_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A host that misbehaves on purpose. The real one drives e2e_test.dart.
@@ -14,8 +15,13 @@ class FakeHost {
   final ServerSocket server;
   int follows = 0;
   List<Object> sessions = [];
-  Json status = {};
+  int created = 0, connections = 0;
+
+  /// The answer to `host.status`; null answers nothing at all.
+  Json? status = {'result': <String, Object?>{}};
   final listed = <Object?>[];
+  final asked = <String>[];
+  Socket? last;
 
   /// What to write when a session is followed, after its answer; null answers nothing at all.
   Iterable<Object>? Function(String session) onFollow = (_) => const [];
@@ -32,10 +38,13 @@ class FakeHost {
     File('${dir.path}/run/token').writeAsStringSync('t');
     final h = FakeHost._(dir, server);
     server.listen((s) {
+      h.connections++;
+      h.last = s;
       s.done.ignore();
       s.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen((l) {
         final m = json.decode(l) as Json;
         final id = m['id'];
+        h.asked.add(m['method']! as String);
         void say(Object o) => s.write('${json.encode(o)}\n');
         switch (m['method']) {
           case 'session.follow':
@@ -48,7 +57,13 @@ class FakeHost {
             h.listed.add(m['params']);
             say({'id': id, 'result': h.sessions});
           case 'host.status':
-            say({'id': id, 'result': h.status});
+            if (h.status case final s?) say({'id': id, ...s});
+          case 'session.create':
+            h.created++;
+            say({
+              'id': id,
+              'result': {'session': 'new'},
+            });
           case _:
             say({'id': id, 'result': <String, Object?>{}});
         }
@@ -63,12 +78,26 @@ class FakeHost {
   }
 }
 
+class Counted extends SessionModel {
+  Counted(super.id);
+  int applied = 0;
+  @override
+  void apply(List<Event> events) {
+    applied++;
+    super.apply(events);
+  }
+}
+
 void main() {
   late FakeHost h;
   setUp(() async => h = await FakeHost.start());
   tearDown(() => h.stop());
 
-  HostStore store() => HostStore(paths: HostPaths(h.dir.path), binary: null, spawn: false);
+  HostStore store({Duration every = const Duration(seconds: 20)}) =>
+      HostStore(paths: HostPaths(h.dir.path), binary: null, spawn: false, listEvery: every);
+
+  Json event(int seq, Json body) => {'seq': seq, 'at': 1, 'body': body};
+  Json events(List<Json> e) => {'session': 'x', 'events': e};
 
   Future<HostStore> follow(WidgetTester t, int last, Duration d) async {
     h.onFollow = (s) => [
@@ -132,10 +161,125 @@ void main() {
       await s.start();
       expect([s.older, s.damaged, s.phase], [false, null, HostPhase.connected]);
       h.sessions = [for (var i = 0; i < HostStore.listed; i++) session(i)];
-      h.status = {'damaged': 'row 3 is missing'};
+      h.status = {
+        'result': {'damaged': 'row 3 is missing'},
+      };
       await s.refresh();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
       expect([s.older, s.damaged], [true, 'row 3 is missing']);
       expect(h.listed.last, {'limit': HostStore.listed});
+      s.dispose();
+    });
+  });
+
+  for (final (what, answer) in <(String, Json?)>[
+    (
+      'an error',
+      {
+        'error': {'code': 'internal', 'message': 'status broke'},
+      },
+    ),
+    ('nothing', null),
+    ('something else', {'result': 3}),
+    (
+      'a number for words',
+      {
+        'result': {'damaged': 3},
+      },
+    ),
+  ]) {
+    testWidgets('a host whose status is $what is still a host', (t) async {
+      await t.runAsync(() async {
+        h.status = answer;
+        final s = store();
+        await s.start();
+        expect([s.phase, s.problem, s.damaged], [HostPhase.connected, null, null]);
+        expect(await s.create('T').timeout(const Duration(seconds: 1)), 'new');
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        expect([h.created, h.connections, s.phase], [1, 1, HostPhase.connected]);
+        s.dispose();
+      });
+    });
+  }
+
+  testWidgets('the list is asked for again by itself', (t) async {
+    await t.runAsync(() async {
+      final s = store(every: const Duration(milliseconds: 60));
+      await s.start();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(h.listed.length, greaterThan(2));
+      s.dispose();
+    });
+  });
+
+  testWidgets('what arrived is kept when the connection is lost', (t) async {
+    await t.runAsync(() async {
+      h.onFollow = (_) => [
+        events([
+          event(1, {'type': 'session.created', 'title': 'Kept', 'workspace': null}),
+        ]),
+      ];
+      final s = store();
+      await s.start();
+      await s.open('x');
+      // Nothing is drawn, so nothing has been applied by a frame.
+      while (s.waiting == 0 && s.current!.seq == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(s.current!.seq, 0);
+      h.last!.destroy();
+      while (s.phase == HostPhase.connected) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect([s.current!.title, s.current!.seq], ['Kept', 1]);
+      s.dispose();
+    });
+  });
+
+  testWidgets('trying a failed session again begins it anew', (t) async {
+    await t.runAsync(() async {
+      h.onFollow = (s) => [
+        events([
+          event(1, {'type': 'session.created', 'title': 'T', 'workspace': null}),
+        ]),
+        {'session': s, 'fault': 'journal: damaged'},
+      ];
+      final s = store();
+      await s.start();
+      await s.open('x');
+      while (s.current!.fault == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(s.waiting, 1, reason: 'the event still waits');
+      h.onFollow = (_) => const [];
+      h.asked.clear();
+      await s.open('x');
+      expect([s.waiting, s.current!.fault, s.current!.seq], [0, null, 0]);
+      expect(h.asked, ['session.unfollow', 'session.follow']);
+      s.dispose();
+    });
+  });
+
+  testWidgets('much text is applied in slices', (t) async {
+    await t.runAsync(() async {
+      final m = Counted('x');
+      h.onFollow = (_) => [
+        events([
+          event(1, {'type': 'session.created', 'title': 'T', 'workspace': null}),
+          for (var i = 2; i < 34; i++)
+            event(i, {'type': 'item.delta', 'item': 'none', 'text': 'x' * 48000}),
+        ]),
+      ];
+      final s = store();
+      await s.start();
+      s.current = m;
+      await s.open('x');
+      final end = DateTime.now().add(const Duration(seconds: 5));
+      while (m.seq < 33 && DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(m.seq, 33);
+      expect(m.applied, greaterThan(12));
       s.dispose();
     });
   });

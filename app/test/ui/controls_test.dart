@@ -350,6 +350,7 @@ void main() {
       await show(t, req('make', scope: 'One file.'));
       final got = await show(t, req('make', scope: 'Full network. ${'Every host. ' * 400}'));
       expect(t.takeException(), isNull);
+      await t.pump(const Duration(milliseconds: 600));
       await t.tap(find.text('Allow once'));
       expect(got, isEmpty);
     });
@@ -398,8 +399,90 @@ void main() {
     testWidgets('a new request is not already seen', (t) async {
       await show(t, req('short'));
       final got = await show(t, req([for (var i = 0; i < 80; i++) 'line $i'].join('\n')));
+      await t.pump(const Duration(milliseconds: 600));
       await t.tap(find.text('Allow once'));
       expect(got, isEmpty);
+    });
+
+    testWidgets('cannot be allowed before it has been laid out', (t) async {
+      await t.pumpWidget(const SizedBox());
+      final got = <String>[];
+      final long = req([for (var i = 0; i < 80; i++) 'line $i'].join('\n'));
+      Widget bar(RequestView r) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: MediaQuery(
+          data: const MediaQueryData(),
+          child: Overlay.wrap(
+            child: Ax(
+              theme: const AxTheme(),
+              child: RequestBar(
+                r,
+                onOnce: () => got.add('once'),
+                onAlways: () => got.add('always'),
+                onDeny: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      for (final r in [long, req('short'), long]) {
+        await t.pumpWidget(bar(r));
+        // The first frame of it: nobody has seen anything.
+        expect(t.widget<AxButton>(find.widgetWithText(AxButton, 'Allow once')).onPressed, isNull);
+        await t.pump();
+        await t.pump(const Duration(milliseconds: 600));
+      }
+    });
+
+    testWidgets('differs if anything in it does', (t) async {
+      final a = req('make');
+      RequestView other({
+        String? agent,
+        String? what,
+        String? subject,
+        String? scope,
+        String? always,
+      }) => RequestView(
+        agent: agent ?? a.agent,
+        what: what ?? a.what,
+        subject: subject ?? a.subject,
+        scope: scope ?? a.scope,
+        always: always ?? a.always,
+      );
+      expect(other(), a);
+      for (final o in [
+        other(agent: 'x'),
+        other(what: 'x'),
+        other(subject: 'x'),
+        other(scope: 'x'),
+        other(always: 'x'),
+      ]) {
+        expect(o == a, isFalse);
+      }
+    });
+
+    testWidgets('that takes the place of another is not answered by a click on that one', (
+      t,
+    ) async {
+      await show(t, req('make'));
+      final at = t.getCenter(find.text('Allow once'));
+      final got = await show(t, req('rm -r /'));
+      await t.tapAt(at);
+      expect(got, isEmpty);
+      await t.pump(const Duration(milliseconds: 600));
+      await t.tapAt(t.getCenter(find.text('Allow once')));
+      expect(got, ['once']);
+    });
+
+    testWidgets('End goes to its end', (t) async {
+      final got = await show(t, req([for (var i = 0; i < 80; i++) 'line $i'].join('\n')));
+      await t.sendKeyEvent(LogicalKeyboardKey.tab);
+      await t.pump();
+      await t.sendKeyEvent(LogicalKeyboardKey.end);
+      await t.pump();
+      await t.pump();
+      await t.tap(find.text('Allow once'));
+      expect(got, ['once']);
     });
   });
 

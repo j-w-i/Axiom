@@ -4,6 +4,7 @@ import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/transcript/safe_text.dart';
 import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/surface.dart';
+import 'package:axiom/ui/press.dart';
 import 'package:axiom/ui/tokens.dart';
 
 import 'dart:io';
@@ -251,6 +252,210 @@ void main() {
     }
   });
 
+  for (final up in [true, false]) {
+    testWidgets('a fling ${up ? 'up' : 'down'} goes as far while text arrives as without', (
+      t,
+    ) async {
+      Future<List<int>> fling({required bool stream}) async {
+        final f = Feed()..open('i');
+        f.text('i', [for (var i = 0; i < 400; i++) 'Paragraph $i.'].join('\n\n'));
+        await mount(
+          t,
+          TranscriptView(f.agent, key: UniqueKey()),
+          size: const Size(800, 600),
+          dpr: 1,
+        );
+        if (!up) {
+          t.state<TranscriptViewState>(find.byType(TranscriptView)).toStart();
+          await t.pump();
+          await t.pump();
+        }
+        await t.fling(find.byType(CustomScrollView), Offset(0, up ? 300 : -300), 3000);
+        final seen = <int>[];
+        for (var k = 0; k < 40; k++) {
+          await t.pump(const Duration(milliseconds: 16));
+          if (stream && k % 4 == 0) f.text('i', '\n\nNew block $k');
+          seen.add(
+            t
+                .widgetList<RichText>(find.byType(RichText))
+                .map((r) => RegExp(r'^Paragraph (\d+)').firstMatch(r.text.toPlainText())?.group(1))
+                .whereType<String>()
+                .map(int.parse)
+                .reduce((a, b) => a < b ? a : b),
+          );
+        }
+        return seen;
+      }
+
+      final quiet = await fling(stream: false);
+      expect(await fling(stream: true), quiet);
+      expect(quiet.first, isNot(quiet.last));
+    });
+  }
+
+  testWidgets('a hand on the view is not overruled at the end', (t) async {
+    final f = Feed()..open('i');
+    f.text('i', [for (var i = 0; i < 200; i++) 'Paragraph $i.'].join('\n\n'));
+    await mount(t, TranscriptView(f.agent), size: const Size(800, 600), dpr: 1);
+    await t.pump();
+    final s = t.state<TranscriptViewState>(find.byType(TranscriptView)).scroll;
+    final g = await t.startGesture(t.getCenter(find.byType(CustomScrollView)));
+    await g.moveBy(const Offset(0, 24));
+    await g.moveBy(const Offset(0, 1));
+    await t.pump();
+    final gap = s.position.maxScrollExtent - s.offset;
+    expect(gap, greaterThan(0));
+    for (var k = 0; k < 5; k++) {
+      final at = s.offset;
+      f.text('i', ' more words to make it longer and longer' * 9);
+      await t.pump();
+      expect(s.offset, at);
+    }
+    await g.up();
+    await t.pumpAndSettle();
+  });
+
+  testWidgets('opening output leaves what was pressed where it was', (t) async {
+    final f = Feed();
+    for (var k = 0; k < 30; k++) {
+      f
+        ..open('p$k')
+        ..end('p$k', 'Passage $k.')
+        ..open('t$k', ItemKind.tool, 'read', {'path': 'file$k'})
+        ..end('t$k', 'out\n' * 300, {'summary': 's'});
+    }
+    await mount(t, TranscriptView(f.agent), size: const Size(800, 600), dpr: 1);
+    await t.pump();
+    for (final k in [29, 27]) {
+      final y = t.getTopLeft(find.text('file$k')).dy;
+      await t.tap(find.text('file$k'));
+      await t.pump();
+      await t.pump();
+      expect(t.getTopLeft(find.text('file$k')).dy, closeTo(y, .01));
+      expect(find.textContaining('out\nout', findRichText: true), findsWidgets);
+      await t.tap(find.text('file$k'));
+      await t.pump();
+      await t.pump();
+      expect(find.textContaining('out\nout', findRichText: true), findsNothing);
+    }
+    // Back at the end, it is followed again.
+    await t.sendKeyEvent(LogicalKeyboardKey.tab);
+    t.state<TranscriptViewState>(find.byType(TranscriptView)).toEnd();
+    await t.pumpAndSettle();
+    expect(find.text('Latest'), findsNothing);
+  });
+
+  testWidgets('output opened for one agent is not open for another', (t) async {
+    final f = Feed()..open('t', ItemKind.tool, 'shell', {'command': 'make'});
+    f.end('t', 'line one', {'summary': 'ok'});
+    Future<void> show(AgentModel a) => mount(t, TranscriptView(a), dpr: 1);
+    await show(f.agent);
+    await t.tap(find.text('make'));
+    await t.pump();
+    final g = Feed()..open('u', ItemKind.tool, 'shell', {'command': 'test'});
+    g.end('u', 'x', {'summary': 'ok'});
+    await show(g.agent);
+    await show(f.agent);
+    expect(find.textContaining('line one', findRichText: true), findsNothing);
+  });
+
+  testWidgets('beside work that goes on, what is written does not build again', (t) async {
+    final f = Feed()..open('p');
+    f
+      ..text('p', [for (var i = 0; i < 5; i++) '```js\nlet a$i;\n```'].join('\n\n'))
+      ..text('p', '\n\nand now')
+      ..open('t', ItemKind.tool, 'shell', {'command': 'make'});
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    Set<Widget> blocks() => t.elementList(find.byType(BlockView)).map((e) => e.widget).toSet();
+    final before = blocks();
+    expect(before.length, 6);
+    f.text('t', 'out');
+    await t.pump();
+    expect(blocks().difference(before), isEmpty);
+    f.text('p', ' more');
+    await t.pump();
+    expect(blocks().difference(before).length, 1);
+  });
+
+  testWidgets('a request has the same shape while it is written and after', (t) async {
+    final f = Feed()..open('q', ItemKind.prompt);
+    f.text('q', 'First.\n\n');
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    f.text('q', 'Second.\n\n');
+    await t.pump();
+    f.text('q', 'Third.');
+    await t.pump();
+    double gap(String a, String b) =>
+        t.getTopLeft(find.text(b, findRichText: true)).dy -
+        t.getBottomLeft(find.text(a, findRichText: true)).dy;
+    // Its tile is round where it begins and ends, and nowhere else.
+    List<(bool, bool)> tiles() => [
+      for (final b in t.widgetList<DecoratedBox>(
+        find.descendant(of: find.byType(BlockView), matching: find.byType(DecoratedBox)),
+      ))
+        if ((b.decoration as BoxDecoration).borderRadius case final BorderRadius r?)
+          (r.topLeft.x > 0, r.bottomLeft.x > 0),
+    ];
+    const want = [(true, false), (false, false), (false, true)];
+    expect(tiles(), want);
+    final open = [gap('First.', 'Second.'), gap('Second.', 'Third.')];
+    expect(open.first, closeTo(open.last, .01));
+    f.end('q', 'First.\n\nSecond.\n\nThird.');
+    await t.pump();
+    expect([gap('First.', 'Second.'), gap('Second.', 'Third.')], open);
+    expect(tiles(), want);
+  });
+
+  testWidgets('work stands on the first line of the words it stands beside', (t) async {
+    for (final (words, first) in [
+      ('A paragraph.', 'A paragraph.'),
+      ([for (var i = 0; i < 9; i++) '- Item $i'].join('\n'), 'Item 3'),
+      ('Before.\n\n${[for (var i = 0; i < 6; i++) '## Head $i'].join('\n\n')}', 'Head 0'),
+    ]) {
+      final f = Feed()..open('p');
+      f
+        ..end('p', words)
+        ..open('t', ItemKind.tool, 'read', {'path': 'a.dart'})
+        ..end('t', '');
+      await mount(t, TranscriptView(f.agent, key: UniqueKey()), dpr: 1);
+      final a = t.getCenter(find.text(first, findRichText: true)).dy;
+      final b = t.getCenter(find.text('a.dart')).dy;
+      expect((a - b).abs(), lessThan(1.2), reason: first);
+    }
+  });
+
+  testWidgets('a number stands clear of the words after it', (t) async {
+    final f = Feed()..open('p');
+    f.end('p', '1. Step one\n2. Step two\n\n10. Ten');
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    for (final (mark, words) in [('1.', 'Step one'), ('2.', 'Step two')]) {
+      final m = t.getRect(find.text(mark)), w = t.getRect(find.text(words, findRichText: true));
+      expect(w.left - m.right, inInclusiveRange(6, 10));
+    }
+  });
+
+  testWidgets('line ends of another system are line ends', (t) async {
+    final f = Feed()..open('t', ItemKind.tool, 'shell', {'command': 'dir'});
+    f.end('t', 'one\r\ntwo\r\n', {'summary': 'ok'});
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    await t.tap(find.text('dir'));
+    await t.pump();
+    expect(find.textContaining('one\ntwo', findRichText: true), findsOneWidget);
+    expect(find.textContaining(r'\u{D}', findRichText: true), findsNothing);
+  });
+
+  testWidgets('a command of any length costs what is shown of it', (t) async {
+    final f = Feed()
+      ..open('t', ItemKind.tool, 'shell', {'command': '${String.fromCharCode(0xE9)}x' * 500000});
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    final line = t.widget<WorkLine>(find.byType(WorkLine));
+    expect(line.detail.length, lessThan(420));
+    f.text('t', 'out');
+    await t.pump();
+    final labels = t.widgetList<Pressable>(find.byType(Pressable)).map((p) => p.label);
+    expect(labels.every((l) => l.length < 500), isTrue);
+  });
+
   testWidgets('both ends are a key away, however far', (t) async {
     final f = Feed()..open('i');
     f.text('i', [for (var i = 0; i < 20000; i++) 'Paragraph $i.'].join('\n\n'));
@@ -345,8 +550,10 @@ void main() {
           return r.bottom > 0 && r.top < 700;
         });
     final before = first();
-    await at(520);
-    expect(first(), before);
+    for (final w in [520.0, 700.0, 420.0, 900.0]) {
+      await at(w);
+      expect(first(), before, reason: '$w');
+    }
   });
 
   testWidgets('the first frame is already at the end', (t) async {
@@ -371,18 +578,18 @@ void main() {
   });
 
   testWidgets('many short rows fill a tall window from its top', (t) async {
-    final f = Feed();
-    for (var i = 0; i < 88; i++) {
-      f
-        ..open('t$i', ItemKind.tool, 'read', {'path': 'file$i.dart'})
-        ..end('t$i', '', {'summary': 'ok'});
-    }
-    await mount(t, TranscriptView(f.agent), size: const Size(900, 2400), dpr: 1);
+    final f = Feed()..open('i');
+    f.text('i', [for (var i = 0; i < 400; i++) '- $i'].join('\n'));
+    await mount(t, TranscriptView(f.agent), size: const Size(900, 3600), dpr: 1);
     final st = t.state<TranscriptViewState>(find.byType(TranscriptView));
-    expect(st.scroll.position.minScrollExtent, 0);
-    expect(st.scroll.position.maxScrollExtent, lessThan(120));
-    expect(find.text('file87.dart'), findsOneWidget);
-    expect(t.getRect(find.text('file87.dart')).bottom, lessThan(2400));
+    expect(st.scroll.position.minScrollExtent, lessThan(0), reason: 'there are more than fit');
+    final shown = [
+      for (var i = 0; i < 400; i++)
+        if (find.text('$i', findRichText: true).evaluate().isNotEmpty)
+          t.getRect(find.text('$i', findRichText: true)),
+    ].where((r) => r.bottom > 0 && r.top < 3600).toList();
+    expect(shown.first.top, lessThan(40));
+    expect(shown.last.bottom, greaterThan(3500));
   });
 
   testWidgets('Home is the very beginning', (t) async {

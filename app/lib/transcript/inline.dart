@@ -237,10 +237,12 @@ List<InlineRun> inlineRuns(String source) {
           when (s.startsWith('https://', i) || s.startsWith('http://', i)) &&
               (i == 0 || !_word.hasMatch(s[i - 1])):
         var n = i;
-        var paren = 0;
+        var paren = 0, square = 0;
         while (n < s.length && n - i < _maxUrl && !_space(s[n]) && !'<>"`'.contains(s[n])) {
           if (s[n] == '(') paren++;
           if (s[n] == ')' && --paren < 0) break;
+          if (s[n] == '[') square++;
+          if (s[n] == ']' && --square < 0) break;
           n++;
         }
         while (n > i + 8 && '.,;:!?\'"*_'.contains(s[n - 1])) {

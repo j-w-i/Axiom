@@ -33,6 +33,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
   final _scope = FocusScopeNode();
   FocusNode? _back;
   Rect _at = Rect.zero;
+  _Side _side = _Side();
 
   @override
   void initState() {
@@ -49,6 +50,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
     final box = context.findRenderObject()! as RenderBox;
     final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
     _at = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    _side = _Side();
     _back = FocusManager.instance.primaryFocus;
     setState(_ctl.show);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -78,7 +80,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
     child: OverlayPortal(
       controller: _ctl,
       overlayChildBuilder: (context) => CustomSingleChildLayout(
-        delegate: _Place(_at, widget.alignEnd),
+        delegate: _Place(_at, _side, end: widget.alignEnd),
         child: TapRegion(
           groupId: this,
           onTapOutside: (_) => close(),
@@ -141,8 +143,14 @@ class _RiseState extends State<_Rise> {
   );
 }
 
+/// Which side a panel hangs on: settled when it opens, so that one that grows stays there.
+class _Side {
+  bool? below;
+}
+
 class _Place extends SingleChildLayoutDelegate {
-  const _Place(this.at, this.end);
+  const _Place(this.at, this.side, {required this.end});
+  final _Side side;
   final Rect at;
   final bool end;
   @override
@@ -150,7 +158,7 @@ class _Place extends SingleChildLayoutDelegate {
       BoxConstraints(maxWidth: c.maxWidth - 16, maxHeight: c.maxHeight - 16);
   @override
   Offset getPositionForChild(Size s, Size child) {
-    final below = at.bottom + 5 + child.height <= s.height - 8;
+    final below = side.below ??= at.bottom + 5 + child.height <= s.height - 8;
     final x = end ? at.right - child.width : at.left;
     final y = below ? at.bottom + 5 : at.top - 5 - child.height;
     return Offset(
@@ -160,7 +168,7 @@ class _Place extends SingleChildLayoutDelegate {
   }
 
   @override
-  bool shouldRelayout(_Place o) => o.at != at || o.end != end;
+  bool shouldRelayout(_Place o) => o.at != at || o.end != end || o.side != side;
 }
 
 class AxMenuItem<T> {

@@ -168,11 +168,11 @@ class AxColors {
     liveText: Color(0xFF86DCFB),
     attention: Color(0xFFE3A947),
     attentionText: Color(0xFFEBB965),
-    fault: Color(0xFFE8635A),
+    fault: Color(0xFFEF736B),
     faultText: Color(0xFFF49A92),
     done: Color(0xFF52BC88),
     doneText: Color(0xFF7ED3A6),
-    idle: Color(0xFF7D889C),
+    idle: Color(0xFF8C97AB),
     focus: Color(0xFF55CDF6),
     selection: Color(0x6620A9DB),
     rule: Color(0xFF121317),
@@ -181,7 +181,7 @@ class AxColors {
     hover: Color(0x0AFFFFFF),
     rowSelectedTop: Color(0xFF363A43),
     rowSelectedBottom: Color(0xFF32353E),
-    meterTrack: Color(0x17FFFFFF),
+    meterTrack: Color(0x12FFFFFF),
     meterFill: Color(0xFF8A97B0),
     chassis: SurfaceSpec(
       top: Color(0xFF212429),
@@ -354,7 +354,7 @@ class AxColors {
     hover: Color(0x0D10182C),
     rowSelectedTop: Color(0xFFF4F7FF),
     rowSelectedBottom: Color(0xFFEEF3FD),
-    meterTrack: Color(0x1F243149),
+    meterTrack: Color(0x14243149),
     meterFill: Color(0xFF66748E),
     chassis: SurfaceSpec(
       top: Color(0xFFD3DAE6),
@@ -586,6 +586,9 @@ abstract final class AxMotion {
     ratio: .86,
   );
   static const Duration hoverDelay = Duration(milliseconds: 450);
+
+  /// How long something new under a resting pointer cannot be pressed: a double click.
+  static const Duration settle = Duration(milliseconds: 500);
   static const Duration turn = Duration(milliseconds: 1400);
   static const Duration blink = Duration(milliseconds: 1060);
 }

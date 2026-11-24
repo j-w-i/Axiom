@@ -240,7 +240,9 @@ class _AgentRowState extends State<AgentRow> {
                                                   ),
                                                 TextSpan(
                                                   text: a.model,
-                                                  style: t.type.label.ink(c.ink4),
+                                                  style: t.type.label.ink(
+                                                    widget.selected ? c.ink3 : c.ink4,
+                                                  ),
                                                 ),
                                               ],
                                             ),
@@ -250,7 +252,13 @@ class _AgentRowState extends State<AgentRow> {
                                           ),
                                         ),
                                         const SizedBox(width: 8),
-                                        if (!keys) Text(a.elapsed, style: t.type.small.ink(c.ink4)),
+                                        if (!keys)
+                                          Text(
+                                            a.elapsed,
+                                            style: t.type.small.ink(
+                                              widget.selected ? c.ink3 : c.ink4,
+                                            ),
+                                          ),
                                       ],
                                     ),
                                     if (now != null)

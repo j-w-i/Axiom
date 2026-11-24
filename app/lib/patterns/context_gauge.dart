@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 
 import '../ui/overlay.dart';
@@ -50,51 +52,83 @@ class ContextGauge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors, v = view;
-    final share = v.provenance == Provenance.unknown ? null : v.share;
+    final given = v.provenance == Provenance.unknown ? null : v.share;
+    final share = given == null || !given.isFinite ? null : given.clamp(0.0, 1.0);
     final high = share != null && share >= .85;
-    final figure = share == null
-        ? 'not reported'
-        : v.used != null && v.window != null
-        ? '${tokens(v.used!)} of ${tokens(v.window!)}'
-        : '${v.provenance == Provenance.estimated ? 'about ' : ''}${(share * 100).round()}%';
-    final face = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('Context', style: t.type.label.ink(c.ink3)),
-        const SizedBox(width: 9),
-        SizedBox(
-          width: 92,
-          child: AxMeter(
-            label: 'Context used',
-            value: v.share,
-            provenance: v.provenance,
-            thickness: 5,
-            color: hue,
-          ),
-        ),
-        const SizedBox(width: 9),
-        Text(
-          share == null ? figure : '${(share * 100).round()}%',
-          style: t.type.labelStrong.ink(high ? c.attentionText : c.ink1),
-        ),
-        if (share != null && v.used != null && v.window != null) ...[
-          const SizedBox(width: 8),
-          Text(figure, style: t.type.label.ink(c.ink3)),
-        ],
-      ],
+    final about = v.provenance == Provenance.estimated ? 'about ' : '';
+    final percent = share == null ? 'not reported' : '$about${(share * 100).round()}%';
+    final amount = share != null && v.used != null && v.window != null
+        ? '$about${tokens(v.used!)} of ${tokens(v.window!)}'
+        : null;
+    final spoken =
+        'Context, ${amount == null ? percent : '$percent, $amount'}'
+        '${share == null ? '' : ', ${v.provenance.words}'}';
+    final strong = t.type.labelStrong.ink(high ? c.attentionText : c.ink1);
+    final quiet = t.type.label.ink(c.ink3);
+    final scaler = MediaQuery.textScalerOf(context);
+    double wide(String words, TextStyle s) {
+      final p = TextPainter(
+        text: TextSpan(text: words, style: s),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      final w = p.width.ceilToDouble();
+      p.dispose();
+      return w;
+    }
+
+    // What there is no room for is left out, the figure last.
+    final face = LayoutBuilder(
+      builder: (context, box) {
+        var left = box.maxWidth - wide(percent, strong);
+        bool fits(double w) {
+          if (left < w) return false;
+          left -= w;
+          return true;
+        }
+
+        final meter = fits(9 + 92);
+        final small = !meter && fits(9 + 40);
+        final label = fits(9 + wide('Context', quiet));
+        final more = amount != null && fits(8 + wide(amount, quiet));
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (label) ...[Text('Context', style: quiet), const SizedBox(width: 9)],
+            if (meter || small) ...[
+              SizedBox(
+                width: meter ? 92 : 40,
+                child: AxMeter(
+                  label: 'Context used',
+                  value: share,
+                  provenance: v.provenance,
+                  thickness: 5,
+                  color: hue,
+                ),
+              ),
+              const SizedBox(width: 9),
+            ],
+            Flexible(
+              child: Text(percent, maxLines: 1, overflow: TextOverflow.ellipsis, style: strong),
+            ),
+            if (more) ...[const SizedBox(width: 8), Text(amount, style: quiet)],
+          ],
+        );
+      },
     );
     if (v.parts.isEmpty && v.note == null) {
       return Semantics(
-        label: 'Context, $figure',
+        label: spoken,
         excludeSemantics: true,
         child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: face),
       );
     }
-    final free = v.window == null || v.used == null ? null : v.window! - v.used!;
+    final free = v.window == null || v.used == null ? null : math.max(0, v.window! - v.used!);
     return AxPopover(
       width: 300,
       anchor: (context, open, toggle) => Pressable(
-        label: 'Context, $figure, ${v.provenance.words}',
+        label: spoken,
         expanded: open,
         onPressed: toggle,
         builder: (_, s) => DecoratedBox(

@@ -1,5 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
-import 'package:flutter/semantics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -153,3 +155,76 @@ class FocusRing extends CustomPainter {
 }
 
 bool reducedMotion(BuildContext c) => MediaQuery.maybeDisableAnimationsOf(c) ?? false;
+
+/// Lets no pointer through right after [stamp] has changed, until it has moved or a moment has
+/// passed: what has just come under a pointer is not what its person was about to press. The
+/// keyboard and a screen reader say what they act on, and are not held up.
+class Settle extends StatefulWidget {
+  const Settle({required this.stamp, required this.child, super.key});
+  final Object? stamp;
+  final Widget child;
+  @override
+  State<Settle> createState() => _SettleState();
+}
+
+class _SettleState extends State<Settle> {
+  static const _far = 6.0;
+  Timer? _timer;
+  Offset? _last, _from;
+
+  @override
+  void didUpdateWidget(Settle old) {
+    super.didUpdateWidget(old);
+    if (old.stamp == widget.stamp) return;
+    _from = _last;
+    _timer?.cancel();
+    _timer = Timer(AxMotion.settle, _open);
+  }
+
+  void _open() {
+    _timer?.cancel();
+    _timer = null;
+    if (mounted) setState(() {});
+  }
+
+  void _moved(PointerEvent e) {
+    _last = e.position;
+    if (_timer == null) return;
+    _from ??= e.position;
+    if ((e.position - _from!).distance > _far) _open();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Listener(
+    onPointerHover: _moved,
+    onPointerDown: (e) => _last = e.position,
+    child: _Shield(closed: _timer != null, child: widget.child),
+  );
+}
+
+class _Shield extends SingleChildRenderObjectWidget {
+  const _Shield({required this.closed, super.child});
+  final bool closed;
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderShield()..closed = closed;
+  @override
+  void updateRenderObject(BuildContext context, _RenderShield renderObject) =>
+      renderObject.closed = closed;
+}
+
+class _RenderShield extends RenderProxyBox {
+  bool closed = false;
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (!closed) return super.hitTest(result, position: position);
+    if (!size.contains(position)) return false;
+    result.add(BoxHitTestEntry(this, position));
+    return true;
+  }
+}

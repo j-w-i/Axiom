@@ -321,6 +321,9 @@ void main() {
     t('two  \nlines', 'two\nlines');
     t('a_*b*_c', 'a_/b/_c');
     t('[a](<u v>)', '<u v|a>');
+    t('[https://x.com/a](https://x.com/b)', '<https://x.com/b|https://x.com/a>');
+    t('[see https://x.com] then', '[see <https://x.com|https://x.com>] then');
+    t('https://x.com/a[1]/b', '<https://x.com/a[1]/b|https://x.com/a[1]/b>');
     t('[open and https://a.b', '[open and <https://a.b|https://a.b>');
     t('[a [b](c) d](e)', '[a <c|b> d](e)');
     t('a &#xD800; b', 'a &#xD800; b');
@@ -348,6 +351,9 @@ void main() {
         0xFFFC,
         0x13430,
         0x180B,
+        0x16FE4,
+        0x1D159,
+        0x1DA9B,
       ]) {
         final s = 'a${String.fromCharCode(c)}b';
         expect(visible(s), 'a\u{FFFD}b', reason: c.toRadixString(16));

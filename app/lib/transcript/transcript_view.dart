@@ -73,8 +73,12 @@ class TranscriptRows {
     ],
   };
 
+  /// Where the last [sync] began to change the rows.
+  int changedFrom = 0;
+
   /// Adds what is new. True if anything must be built again.
   bool sync() {
+    changedFrom = rows.length;
     while (_items < agent.items.length) {
       final i = agent.items[_items++];
       if (i.rich || _live.isEmpty) {
@@ -138,6 +142,7 @@ class TranscriptRows {
     while (same < old.length && same < next.length && identical(old[same], next[same])) {
       same++;
     }
+    if (g.first + same < changedFrom) changedFrom = g.first + same;
     rows.replaceRange(g.first + same, g.first + old.length, next.sublist(same));
     for (var k = g.first + same; k < rows.length; k++) {
       rows[k].ordinal = k;
@@ -169,7 +174,8 @@ class TranscriptViewState extends State<TranscriptView> {
   /// Changes when the origin is moved outright, so that nothing laid out from the old one is kept.
   int _epoch = 0;
   Key get _center => ValueKey(('now', _epoch));
-  late final ScrollController scroll = _EndController(() => _atEnd);
+  late final _end = _EndController(() => _atEnd);
+  ScrollController get scroll => _end;
   late TranscriptRows _rows;
 
   /// Rows before this one lie above the scroll view's origin: what happens after them cannot move
@@ -251,7 +257,9 @@ class TranscriptViewState extends State<TranscriptView> {
   void _changed() {
     final held = _atEnd ? null : _firstVisible();
     if (_rows.sync()) {
-      _hold(held);
+      // A view that coasts keeps its origin: it is on a course that was set from there. What grows
+      // after the origin moves nothing.
+      if (!_end.coasting || _rows.changedFrom < _pivot) _hold(held);
       setState(() {});
     }
     _listen();
@@ -294,7 +302,21 @@ class TranscriptViewState extends State<TranscriptView> {
       if (at < 0) return;
     }
     _pivot = at;
-    scroll.position.correctPixels(-y);
+    _end.shiftTo(-y);
+  }
+
+  /// What was pressed stays where it is: someone who opens an output is reading, and the end is not
+  /// followed over it.
+  void _toggle(ItemModel i) {
+    final held = _firstVisible();
+    setState(() {
+      if (!_opened.remove(i)) _opened.add(i);
+      _atEnd = false;
+      _hold(held);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && scroll.hasClients) _scrolled();
+    });
   }
 
   void _scrolled() {
@@ -353,9 +375,7 @@ class TranscriptViewState extends State<TranscriptView> {
           wide: _width >= 860,
           onLink: widget.onLink,
           opened: _opened.contains,
-          onToggle: (i) => setState(() {
-            if (!_opened.remove(i)) _opened.add(i);
-          }),
+          onToggle: _toggle,
         ),
       ),
     );
@@ -449,6 +469,12 @@ class TranscriptViewState extends State<TranscriptView> {
 class _EndController extends ScrollController {
   _EndController(this.atEnd);
   final bool Function() atEnd;
+
+  /// After a fling, until it comes to rest.
+  bool get coasting => hasClients && (position as _EndPosition).coasting;
+
+  void shiftTo(double pixels) => (position as _EndPosition).shiftTo(pixels);
+
   @override
   ScrollPosition createScrollPosition(
     ScrollPhysics physics,
@@ -460,6 +486,27 @@ class _EndController extends ScrollController {
 class _EndPosition extends ScrollPositionWithSingleContext {
   _EndPosition(this.atEnd, {required super.physics, required super.context, super.oldPosition});
   final bool Function() atEnd;
+  bool get coasting => activity is BallisticScrollActivity;
+  bool _gone = false;
+
+  /// Puts the view elsewhere because its origin moved. If it coasts it goes on as fast as it went.
+  void shiftTo(double pixels) {
+    final v = coasting ? activity!.velocity : 0.0;
+    if (v != 0) {
+      goIdle();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_gone && activity is IdleScrollActivity) goBallistic(v);
+      });
+    }
+    correctPixels(pixels);
+  }
+
+  @override
+  void dispose() {
+    _gone = true;
+    super.dispose();
+  }
+
   @override
   bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
     final follow = atEnd() && !isScrollingNotifier.value;
@@ -510,6 +557,11 @@ class _Ending extends StatelessWidget {
 /// Reading width of prose, and of everything that stands with it.
 const _measure = 640.0, _wide = 780.0;
 
+BlockKind? _firstKind(ItemModel i, int from) {
+  final closed = i.doc.closed;
+  return from < closed.length ? closed[from].kind : i.doc.tail.firstOrNull?.kind;
+}
+
 class _RowView extends StatelessWidget {
   const _RowView(
     this.rows,
@@ -549,38 +601,15 @@ class _RowView extends StatelessWidget {
         opens: r.index == 0,
         afterTool: r.index == 0 && afterWork && !wide,
         goesOn: r.index + 1 < blocks.length && blocks[r.index + 1].continues,
-        closes: r.index + 1 == blocks.length && i.doc.tail.isEmpty,
+        closes: !i.open && r.index + 1 == blocks.length && i.doc.tail.isEmpty,
         whole: () => wholeCode(blocks, r.index),
         onLink: onLink,
       );
       return RepaintBoundary(child: wide ? columns(w, const SizedBox.shrink()) : w);
     }
-    Widget prose() {
-      if (i == null) return const SizedBox(width: double.infinity);
-      Widget build(BuildContext _, [Widget? _]) {
-        final d = i.doc;
-        final tail = d.tail;
-        final all = [for (var k = r.index; k < d.closed.length; k++) d.closed[k], ...tail];
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final (k, b) in all.indexed)
-              BlockView(
-                b,
-                voice: i.kind,
-                opens: r.index + k == 0,
-                afterTool: r.index + k == 0 && afterWork && !wide,
-                goesOn: k + 1 < all.length && all[k + 1].continues,
-                closes: k + 1 == all.length,
-                whole: () => wholeCode([...d.closed, ...tail], r.index + k),
-                onLink: onLink,
-              ),
-          ],
-        );
-      }
-
-      return i.open ? ListenableBuilder(listenable: i, builder: build) : build(context);
-    }
+    Widget prose() => i == null
+        ? const SizedBox(width: double.infinity)
+        : _Prose(i, r.index, after: afterWork && !wide, onLink: onLink);
 
     if (r.work.isEmpty) {
       final w = prose();
@@ -593,7 +622,11 @@ class _RowView extends StatelessWidget {
               ? 2.0
               : i == null || r.index == 0
               ? 17.0
-              : 10.0)
+              : switch (_firstKind(i, r.index)) {
+                  BlockKind.heading => 18.9,
+                  BlockKind.item => 5.0,
+                  _ => 10.0,
+                })
         : at == 0
         ? 16.0
         : first
@@ -626,6 +659,77 @@ class _RowView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [if (first) prose(), work],
             ),
+    );
+  }
+}
+
+/// The last blocks of a passage. While it is written, only the block being written builds again.
+class _Prose extends StatefulWidget {
+  const _Prose(this.item, this.from, {required this.after, this.onLink});
+  final ItemModel item;
+  final int from;
+
+  /// After a run of tools.
+  final bool after;
+  final void Function(String url)? onLink;
+  @override
+  State<_Prose> createState() => _ProseState();
+}
+
+class _ProseState extends State<_Prose> {
+  final _built = <int, BlockView>{};
+
+  @override
+  void didUpdateWidget(_Prose old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.item, widget.item) ||
+        old.from != widget.from ||
+        old.after != widget.after ||
+        old.onLink != widget.onLink) {
+      _built.clear();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final i = widget.item;
+    return i.open ? ListenableBuilder(listenable: i, builder: _blocks) : _blocks(context, null);
+  }
+
+  Widget _blocks(BuildContext _, Widget? _) {
+    final d = widget.item.doc, from = widget.from;
+    final tail = d.tail;
+    final all = [for (var k = from; k < d.closed.length; k++) d.closed[k], ...tail];
+    _built.removeWhere((k, _) => k >= all.length);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (k, b) in all.indexed)
+          _block(
+            k,
+            b,
+            goesOn: k + 1 < all.length && all[k + 1].continues,
+            last: k + 1 == all.length,
+          ),
+      ],
+    );
+  }
+
+  BlockView _block(int k, Block b, {required bool goesOn, required bool last}) {
+    final old = _built[k];
+    final i = widget.item, from = widget.from;
+    if (old != null && identical(old.block, b) && old.goesOn == goesOn && old.closes == last) {
+      return old;
+    }
+    return _built[k] = BlockView(
+      b,
+      voice: i.kind,
+      opens: from + k == 0,
+      afterTool: from + k == 0 && widget.after,
+      goesOn: goesOn,
+      closes: last,
+      whole: () => wholeCode([...i.doc.closed, ...i.doc.tail], from + k),
+      onLink: widget.onLink,
     );
   }
 }
@@ -883,14 +987,23 @@ class _Marker extends StatelessWidget {
     }
     final bullet = marker == '•';
     // Wide enough for any number, with the same gap before the words.
-    return ConstrainedBox(
-      constraints: BoxConstraints(minWidth: bullet ? 22 : 30),
-      child: Text(
-        '$marker ',
-        softWrap: false,
-        textAlign: bullet ? TextAlign.left : TextAlign.right,
-        style: style.copyWith(color: c.ink4, wordSpacing: bullet ? 0 : 4),
-      ),
+    final mark = style.copyWith(color: c.ink4);
+    if (bullet) {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 22),
+        child: Text('$marker ', softWrap: false, style: mark),
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 22),
+          child: Text(marker, softWrap: false, textAlign: TextAlign.right, style: mark),
+        ),
+        // A space that counts when it is copied, and that right alignment cannot drop.
+        const SizedBox(width: 8, child: CopyGap(' ')),
+      ],
     );
   }
 }
@@ -920,7 +1033,12 @@ class _CodeBlockState extends State<CodeBlock> {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors, b = widget.block;
     final style = t.type.code;
-    final lines = literal(b.text).split('\n');
+    final lines = [
+      for (final l in b.text.split('\n'))
+        l.length > CodeBlock.maxColumns
+            ? '${literal(cutTo(l, CodeBlock.maxColumns))} … ${l.length - CodeBlock.maxColumns} more'
+            : literal(l),
+    ];
     const r = Radius.circular(AxRadius.key);
     return MouseRegion(
       onEnter: (_) => setState(() => _over = true),
@@ -949,14 +1067,7 @@ class _CodeBlockState extends State<CodeBlock> {
                       children: [
                         for (final (i, l) in lines.indexed) ...[
                           if (i > 0) const TextSpan(text: '\n'),
-                          highlight(
-                            l.length > CodeBlock.maxColumns
-                                ? '${cutTo(l, CodeBlock.maxColumns)} … '
-                                      '${l.length - CodeBlock.maxColumns} more'
-                                : l,
-                            style,
-                            c,
-                          ),
+                          highlight(l, style, c),
                         ],
                       ],
                     ),
@@ -1108,6 +1219,7 @@ class ToolRow extends StatelessWidget {
     final detail = args is Map
         ? '${args['path'] ?? args['command'] ?? args['pattern'] ?? args.values.firstOrNull ?? ''}'
         : '${args ?? ''}';
+    final shown = oneLine(literal(cutTo(detail, 800)), 400);
     final result = item.result;
     final summary = result is Map ? oneLine('${result['summary'] ?? ''}', 160) : '';
     final name = item.name.isEmpty ? 'tool' : item.name;
@@ -1115,7 +1227,7 @@ class ToolRow extends StatelessWidget {
     final line = WorkLine(
       icon: ToolRow.iconOf(item.name),
       name: name[0].toUpperCase() + name.substring(1),
-      detail: oneLine(literal(detail), 400),
+      detail: shown,
       result: item.open
           ? 'running'
           : switch (item.outcome!) {
@@ -1139,7 +1251,7 @@ class ToolRow extends StatelessWidget {
               line
             else
               Pressable(
-                label: '$name $detail',
+                label: '$name $shown',
                 hint: opened ? 'Hide output' : 'Show output',
                 expanded: opened,
                 radius: 0,
@@ -1162,7 +1274,8 @@ class ToolRow extends StatelessWidget {
                         ),
                       ),
                     CodeBlock(
-                      Block(BlockKind.code, cutFrom(output, maxOutput)),
+                      // The line ends of another system are line ends.
+                      Block(BlockKind.code, cutFrom(output, maxOutput).replaceAll('\r\n', '\n')),
                       whole: () => output,
                     ),
                   ],
