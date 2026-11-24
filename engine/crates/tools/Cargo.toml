@@ -1,0 +1,28 @@
+[package]
+name = "axiom-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+axiom-policy.workspace = true
+axiom-proto.workspace = true
+axiom-spawn.workspace = true
+blake3.workspace = true
+cap-std = "4"
+cap-fs-ext = "4"
+ignore = "0.4"
+regex.workspace = true
+similar = "3"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
