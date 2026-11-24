@@ -73,6 +73,8 @@ class AxColors {
     required this.ruleLight,
     required this.bayRule,
     required this.hover,
+    required this.rowSelectedTop,
+    required this.rowSelectedBottom,
     required this.meterTrack,
     required this.meterLow,
     required this.chassis,
@@ -119,7 +121,16 @@ class AxColors {
 
   /// States. The plain colour is for marks (3:1), `…Text` for words (4.5:1).
   final Color live, liveText, attention, attentionText, fault, faultText, done, doneText, idle;
-  final Color focus, selection, rule, ruleLight, bayRule, hover, meterTrack, meterLow;
+  final Color focus,
+      selection,
+      rule,
+      ruleLight,
+      bayRule,
+      hover,
+      rowSelectedTop,
+      rowSelectedBottom,
+      meterTrack,
+      meterLow;
   final SurfaceSpec chassis, plate, plateHover, plateSelected, bay, block, well;
   final SurfaceSpec key, keyHover, keyDown, primary, primaryHover, primaryDown;
   final SurfaceSpec request, answer, overlay;
@@ -152,6 +163,8 @@ class AxColors {
     ruleLight: Color(0x0DFFFFFF),
     bayRule: Color(0xFF1C212B),
     hover: Color(0x0AFFFFFF),
+    rowSelectedTop: Color(0xFF363A42),
+    rowSelectedBottom: Color(0xFF33363E),
     meterTrack: Color(0x17FFFFFF),
     meterLow: Color(0xFF59647F),
     chassis: SurfaceSpec(
@@ -306,6 +319,8 @@ class AxColors {
     ruleLight: Color(0x8CFFFFFF),
     bayRule: Color(0xFFDDE1E8),
     hover: Color(0x0D10182C),
+    rowSelectedTop: Color(0xFFF8F9FB),
+    rowSelectedBottom: Color(0xFFF4F6F8),
     meterTrack: Color(0x1F243149),
     meterLow: Color(0xFF8B96AF),
     chassis: SurfaceSpec(

@@ -16,18 +16,24 @@ class ExecutionChoice {
   final ValueChanged<String> onChanged;
 }
 
-/// The writing area sits on the display itself; the execution line under it reads as a sentence.
+/// The agent's execution, beside its name: these belong to the agent, not to one message.
+class ExecutionLine extends StatelessWidget {
+  const ExecutionLine(this.choices, {super.key});
+  final List<ExecutionChoice> choices;
+  @override
+  Widget build(BuildContext context) => Wrap(children: [for (final ch in choices) _Choice(ch)]);
+}
+
+/// Writing sits on the display itself. Enter sends, Shift+Enter breaks the line.
 class Composer extends StatefulWidget {
   const Composer({
     required this.placeholder,
-    required this.choices,
     required this.action,
     required this.onSubmit,
     super.key,
     this.onAttach,
   });
   final String placeholder, action;
-  final List<ExecutionChoice> choices;
   final ValueChanged<String> onSubmit;
   final VoidCallback? onAttach;
   @override
@@ -66,55 +72,56 @@ class _ComposerState extends State<Composer> {
       mainAxisSize: MainAxisSize.min,
       children: [
         ColoredBox(color: _focus.hasFocus ? c.live : c.bayRule, child: const SizedBox(height: 1)),
-        CallbackShortcuts(
-          bindings: {const SingleActivator(LogicalKeyboardKey.enter): _submit},
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _focus.requestFocus,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 14, 24, 6),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 24, maxHeight: 220),
-                child: Stack(
-                  children: [
-                    if (_text.text.isEmpty)
-                      IgnorePointer(
-                        child: ExcludeSemantics(
-                          child: Text(
-                            widget.placeholder,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.type.prose.ink(c.ink4),
-                          ),
-                        ),
-                      ),
-                    Semantics(
-                      label: widget.placeholder,
-                      textField: true,
-                      child: EditableText(
-                        controller: _text,
-                        focusNode: _focus,
-                        style: t.type.prose,
-                        cursorColor: c.liveText,
-                        cursorWidth: 1.5,
-                        backgroundCursorColor: c.idle,
-                        selectionColor: c.selection,
-                        maxLines: null,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 14, 12),
+          padding: const EdgeInsets.fromLTRB(24, 10, 14, 10),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: Wrap(spacing: 2, children: [for (final ch in widget.choices) _Choice(ch)]),
+                child: CallbackShortcuts(
+                  bindings: {const SingleActivator(LogicalKeyboardKey.enter): _submit},
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _focus.requestFocus,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 23, maxHeight: 220),
+                        child: Stack(
+                          children: [
+                            if (_text.text.isEmpty)
+                              IgnorePointer(
+                                child: ExcludeSemantics(
+                                  child: Text(
+                                    widget.placeholder,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: t.type.prose.ink(c.ink4),
+                                  ),
+                                ),
+                              ),
+                            Semantics(
+                              label: widget.placeholder,
+                              textField: true,
+                              child: EditableText(
+                                controller: _text,
+                                focusNode: _focus,
+                                style: t.type.prose,
+                                cursorColor: c.liveText,
+                                cursorWidth: 1.5,
+                                backgroundCursorColor: c.idle,
+                                selectionColor: c.selection,
+                                maxLines: null,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
+              const SizedBox(width: 12),
               if (widget.onAttach != null)
                 AxButton.icon(
                   AxIcon.attach,
@@ -157,13 +164,11 @@ class _Choice extends StatelessWidget {
           child: SizedBox(
             height: t.density.control,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 7),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(ch.label, style: t.type.label.ink(c.ink4)),
-                  const SizedBox(width: 6),
-                  Text(label, style: t.type.label.ink(c.ink1)),
+                  Text(label, style: t.type.label.ink(open || s.hovered ? c.ink1 : c.ink2)),
                   const SizedBox(width: 5),
                   AxGlyph(AxIcon.down, size: 9, color: open || s.hovered ? c.ink2 : c.ink4),
                 ],

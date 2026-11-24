@@ -85,3 +85,27 @@ class DiffLine {
   final int number;
   final String text;
 }
+
+enum TaskState { todo, active, done, blocked }
+
+class TaskView {
+  const TaskView(this.title, this.state, {this.owner});
+  final String title;
+  final TaskState state;
+
+  /// The agent it is assigned to.
+  final String? owner;
+}
+
+class SessionView {
+  const SessionView({
+    required this.id,
+    required this.title,
+    required this.age,
+    this.agents = const [],
+    this.tasks = const [],
+  });
+  final String id, title, age;
+  final List<AgentView> agents;
+  final List<TaskView> tasks;
+}

@@ -1,0 +1,19 @@
+[package]
+name = "axiom-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "axiom"
+path = "src/main.rs"
+
+[dependencies]
+axiom-proto.workspace = true
+axiom-host.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

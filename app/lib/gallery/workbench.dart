@@ -1,12 +1,11 @@
 import 'package:flutter/widgets.dart';
 
 import '../patterns/composer.dart';
-import '../patterns/deck.dart';
+import '../patterns/session_panel.dart';
 import '../patterns/transcript_parts.dart';
 import '../patterns/usage.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
-import '../ui/press.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
@@ -37,6 +36,16 @@ class _WorkbenchState extends State<Workbench> {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     final agent = s.agents.firstWhere((a) => a.id == _agent);
+    Widget line(bool wide) => ExecutionLine([
+      for (final (k, items) in [
+        ('Model', s.models),
+        ('Harness', s.harnesses),
+        ('Connection', s.connections),
+        if (wide) ('Effort', s.efforts),
+        if (wide) ('Access', s.access),
+      ])
+        ExecutionChoice(k, items, _choice[k]!, (v) => setState(() => _choice[k] = v)),
+    ]);
     return Surface(
       c.chassis,
       radius: 0,
@@ -46,7 +55,15 @@ class _WorkbenchState extends State<Workbench> {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (wide) SizedBox(width: 216, child: _Side(inset: widget.titleInset)),
+              if (wide)
+                SizedBox(
+                  width: 264,
+                  child: _Side(
+                    inset: widget.titleInset,
+                    selected: _agent,
+                    onSelect: (id) => setState(() => _agent = id),
+                  ),
+                ),
               Expanded(
                 child: Column(
                   children: [
@@ -54,28 +71,12 @@ class _WorkbenchState extends State<Workbench> {
                       height: 44,
                       child: Row(
                         children: [
-                          SizedBox(width: wide ? 4 : widget.titleInset),
+                          SizedBox(width: wide ? 10 : widget.titleInset),
                           Expanded(
                             child: Row(
                               children: [
-                                Flexible(
-                                  child: Text(
-                                    'Double token rotation',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: t.type.uiStrong,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text('12:41', style: t.type.ui.ink(c.ink3)),
-                                const SizedBox(width: 6),
-                                AxButton.icon(
-                                  AxIcon.pause,
-                                  label: 'Pause every agent',
-                                  tone: AxTone.quiet,
-                                  onPressed: () {},
-                                ),
-                                const SizedBox(width: 10),
+                                Text('3 running', style: t.type.label.ink(c.ink3)),
+                                const SizedBox(width: 14),
                                 const AxLamp(AgentState.asking),
                                 const SizedBox(width: 7),
                                 Text('1 asking', style: t.type.label.ink(c.attentionText)),
@@ -103,7 +104,7 @@ class _WorkbenchState extends State<Workbench> {
                     ),
                     Expanded(
                       child: Padding(
-                        padding: EdgeInsets.only(left: wide ? 0 : 8, right: 8),
+                        padding: EdgeInsets.fromLTRB(wide ? 0 : 8, 0, 8, 8),
                         child: Surface(
                           c.bay,
                           radius: AxRadius.bay,
@@ -115,23 +116,13 @@ class _WorkbenchState extends State<Workbench> {
                                 child: Row(
                                   children: [
                                     Text(agent.name, style: t.type.uiStrong),
-                                    const SizedBox(width: 12),
-                                    AxGlyph(AxIcon.branch, size: 13, color: c.ink4),
-                                    const SizedBox(width: 5),
-                                    Expanded(
-                                      child: Text(
-                                        'refresh-guard',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: t.type.label.ink(c.ink3),
-                                      ),
-                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: line(wide)),
                                     AxTabs(
                                       tabs: const [
                                         ('Conversation', null),
                                         ('Changes', '3'),
                                         ('Terminal', null),
-                                        ('Context', '71%'),
                                       ],
                                       index: _tab,
                                       onChanged: (i) => setState(() => _tab = i),
@@ -157,36 +148,10 @@ class _WorkbenchState extends State<Workbench> {
                                 action: 'Queue',
                                 onAttach: () {},
                                 onSubmit: (_) {},
-                                choices: [
-                                  for (final (k, items) in [
-                                    ('Harness', s.harnesses),
-                                    ('Model', s.models),
-                                    ('Connection', s.connections),
-                                    ('Effort', s.efforts),
-                                    ('Access', s.access),
-                                  ])
-                                    ExecutionChoice(
-                                      k,
-                                      items,
-                                      _choice[k]!,
-                                      (v) => setState(() => _choice[k] = v),
-                                    ),
-                                ],
                               ),
                             ],
                           ),
                         ),
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(wide ? 0 : 8, 8, 8, 8),
-                      child: AgentDeck(
-                        agents: s.agents,
-                        selected: _agent,
-                        onSelect: (id) => setState(() => _agent = id),
-                        onPause: (_) {},
-                        onStop: (_) {},
-                        onAnswer: (_) => setState(() => _request = true),
                       ),
                     ),
                   ],
@@ -201,120 +166,56 @@ class _WorkbenchState extends State<Workbench> {
 }
 
 class _Side extends StatelessWidget {
-  const _Side({required this.inset});
+  const _Side({required this.inset, required this.selected, required this.onSelect});
   final double inset;
+  final String selected;
+  final ValueChanged<String> onSelect;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    Widget head(String x, [String? n]) => Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-      child: Row(
-        children: [
-          Text(x, style: t.type.labelStrong.ink(c.ink3)),
-          const Spacer(),
-          if (n != null) Text(n, style: t.type.small.ink(c.ink4)),
-        ],
-      ),
-    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
           height: 44,
           child: Padding(
-            padding: EdgeInsets.only(left: inset),
+            padding: EdgeInsets.only(left: inset, right: 10),
             child: Row(
               children: [
                 const AxMark(size: 17),
                 const SizedBox(width: 9),
-                Text('meridian', style: t.type.uiStrong),
+                Expanded(child: Text('meridian', style: t.type.uiStrong)),
+                AxButton.icon(
+                  AxIcon.plus,
+                  label: 'New session',
+                  tone: AxTone.quiet,
+                  onPressed: () {},
+                ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 8),
-        head('Sessions'),
-        for (final (x, age) in const [
-          ('Double token rotation', 'now'),
-          ('Queue backpressure', '2h'),
-          ('Release notes 4.2', '1d'),
-          ('Flaky export test', '3d'),
-        ])
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Pressable(
-              label: x,
-              selected: age == 'now',
-              onPressed: () {},
-              builder: (context, st) => DecoratedBox(
-                decoration: BoxDecoration(
-                  color: age == 'now' || st.hovered ? c.hover : null,
-                  borderRadius: BorderRadius.circular(AxRadius.key),
-                ),
-                child: SizedBox(
-                  height: t.density.row + 1,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            x,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: age == 'now' ? t.type.uiStrong : t.type.ui.ink(c.ink2),
-                          ),
-                        ),
-                        Text(age, style: t.type.small.ink(c.ink4)),
-                      ],
-                    ),
-                  ),
-                ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+            children: [
+              SessionPanel(
+                session: s.session,
+                selected: selected,
+                onSelect: onSelect,
+                onAddAgent: () {},
+                onPause: (_) {},
+                onStop: (_) {},
               ),
-            ),
-          ),
-        const SizedBox(height: 22),
-        head('Plan', '4 of 7'),
-        for (final (d, x) in const [
-          (2, 'Reproduce rotation'),
-          (2, 'Survey call sites'),
-          (2, 'Design note'),
-          (2, 'Failing test'),
-          (1, 'Single-flight guard'),
-          (1, 'Migrate sessions'),
-          (0, 'Independent review'),
-        ])
-          SizedBox(
-            height: t.density.row,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 20,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: d == 2
-                          ? AxGlyph(AxIcon.check, size: 12, color: c.doneText)
-                          : AxLamp(
-                              d == 1 ? AgentState.running : AgentState.waiting,
-                              width: 9,
-                              breathe: false,
-                            ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      x,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.ui.ink(d == 1 ? c.ink1 : c.ink3),
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                child: Text('Other sessions', style: t.type.label.ink(c.ink3)),
               ),
-            ),
+              for (final o in s.otherSessions) SessionRow(o, onOpen: () {}),
+            ],
           ),
+        ),
       ],
     );
   }

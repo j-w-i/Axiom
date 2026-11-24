@@ -193,9 +193,9 @@ const connections = [
   AxMenuItem('ok', 'OpenAI API key', detail: 'metered'),
 ];
 const efforts = [
-  AxMenuItem('low', 'Low'),
-  AxMenuItem('medium', 'Medium'),
-  AxMenuItem('high', 'High'),
+  AxMenuItem('low', 'Low effort'),
+  AxMenuItem('medium', 'Medium effort'),
+  AxMenuItem('high', 'High effort'),
 ];
 const access = [
   AxMenuItem('ask', 'Ask for everything'),
@@ -206,3 +206,24 @@ const access = [
 extension type ServiceViewX(ServiceView v) {
   ServiceView withActive(String id) => ServiceView(name: v.name, accounts: v.accounts, active: id);
 }
+
+const session = SessionView(
+  id: 's1',
+  title: 'Double token rotation',
+  age: '12:41',
+  agents: agents,
+  tasks: [
+    TaskView('Reproduce rotation', TaskState.done, owner: 'Tester'),
+    TaskView('Survey call sites', TaskState.done, owner: 'Surveyor'),
+    TaskView('Design note', TaskState.done, owner: 'Architect'),
+    TaskView('Failing test', TaskState.done, owner: 'Tester'),
+    TaskView('Single-flight guard', TaskState.active, owner: 'Builder'),
+    TaskView('Migrate sessions', TaskState.active, owner: 'Tester'),
+    TaskView('Independent review', TaskState.todo, owner: 'Reviewer'),
+  ],
+);
+final otherSessions = [
+  SessionView(id: 's2', title: 'Queue backpressure', age: '2h', agents: [agents[0], agents[3]]),
+  const SessionView(id: 's3', title: 'Release notes 4.2', age: '1d'),
+  const SessionView(id: 's4', title: 'Flaky export test', age: '3d'),
+];
