@@ -6,6 +6,7 @@ import '../patterns/transcript_parts.dart';
 import '../patterns/usage.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
+import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
@@ -216,9 +217,32 @@ class SurfacesSheet extends StatelessWidget {
         ],
       ),
       (
+        'Services',
+        [
+          for (final m in ServiceMark.values)
+            SizedBox(
+              width: 118,
+              child: Row(
+                children: [
+                  AxServiceMark(m, size: 15),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      m.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.label.ink(c.ink2),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+      (
         'Icons',
         [
-          for (final i in AxIcon.values) AxGlyph(i, size: 18, color: c.ink2),
+          for (final i in AxIcon.values) AxGlyph(i, size: 18, color: i.kind(c) ?? c.ink2),
           const AxMark(size: 22),
         ],
       ),

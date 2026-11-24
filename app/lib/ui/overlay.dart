@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'icons.dart';
+import 'marks.dart';
 import 'press.dart';
 import 'spring.dart';
 import 'surface.dart';
@@ -18,7 +19,11 @@ class AxPopover extends StatefulWidget {
     super.key,
     this.width,
     this.alignEnd = false,
+    this.hue,
   });
+
+  /// The service the panel belongs to: its top edge takes the colour.
+  final Color? hue;
   final Widget Function(BuildContext, bool open, VoidCallback toggle) anchor;
   final Widget Function(BuildContext, VoidCallback close) panel;
   final double? width;
@@ -94,6 +99,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
                   child: Surface(
                     Ax.of(context).colors.overlay,
                     radius: AxRadius.overlay,
+                    marker: widget.hue,
                     child: Padding(
                       padding: const EdgeInsets.all(5),
                       // However much there is, it stays in the window and scrolls.
@@ -163,11 +169,20 @@ class _Place extends SingleChildLayoutDelegate {
 }
 
 class AxMenuItem<T> {
-  const AxMenuItem(this.value, this.label, {this.detail, this.icon, this.enabled = true, this.why});
+  const AxMenuItem(
+    this.value,
+    this.label, {
+    this.detail,
+    this.icon,
+    this.mark,
+    this.enabled = true,
+    this.why,
+  });
   final T value;
   final String label;
   final String? detail;
   final AxIcon? icon;
+  final ServiceMark? mark;
   final bool enabled;
 
   /// Why a disabled item is disabled; shown in place of [detail].
@@ -294,7 +309,7 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
                   onPressed: it.enabled ? () => widget.onChosen(it.value) : null,
                   builder: (context, s) => DecoratedBox(
                     decoration: BoxDecoration(
-                      color: s.hovered || s.focused ? c.hover : null,
+                      color: s.hovered || s.focused ? c.tinted(it.mark?.color(c)) : null,
                       borderRadius: BorderRadius.circular(AxRadius.key),
                     ),
                     child: Padding(
@@ -302,22 +317,32 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
                       child: Row(
                         children: [
                           SizedBox(
-                            width: 18,
-                            child: it.value == widget.value
-                                ? AxGlyph(AxIcon.check, size: 12, color: c.liveText)
-                                : it.icon != null
-                                ? AxGlyph(it.icon!, size: 13)
-                                : null,
+                            width: 20,
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: it.value == widget.value
+                                  ? AxGlyph(
+                                      AxIcon.check,
+                                      size: 12,
+                                      color: it.mark?.color(c) ?? c.liveText,
+                                    )
+                                  : it.icon != null
+                                  ? AxGlyph(it.icon!, size: 13)
+                                  : null,
+                            ),
                           ),
-                          Flexible(
+                          if (it.mark case final m?) ...[
+                            AxServiceMark(m, color: it.enabled ? null : c.idle),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
                             child: Text(
                               it.label,
                               style: t.type.ui.ink(it.enabled ? c.ink1 : c.idle),
                             ),
                           ),
                           if ((it.enabled ? it.detail : it.why) case final d?) ...[
-                            const SizedBox(width: 14),
-                            const Spacer(),
+                            const SizedBox(width: 18),
                             Text(d, style: t.type.small.ink(c.ink3)),
                           ],
                         ],

@@ -11,6 +11,7 @@ import '../transcript/safe_text.dart';
 import '../transcript/transcript_view.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
+import '../ui/marks.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
@@ -304,6 +305,10 @@ class _Display extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 14),
+                  if (ServiceMark.of(x.model) case final m?) ...[
+                    AxServiceMark(m, size: 12),
+                    const SizedBox(width: 6),
+                  ],
                   Expanded(
                     child: Text(
                       [

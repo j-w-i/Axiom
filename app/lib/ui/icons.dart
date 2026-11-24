@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import 'svg_path.dart';
 import 'tokens.dart';
 
 /// Axiom's own icons: 16-unit grid, 1.35 stroke, round joins, drawn from path data.
@@ -32,48 +33,21 @@ enum AxIcon {
   more('M4 8 H4.1 M8 8 H8.1 M12 8 H12.1');
 
   const AxIcon(this.data);
+
+  /// The hue of the kind of work an icon stands for, if it stands for one.
+  Color? kind(AxColors c) => switch (this) {
+    file || list => c.kindRead,
+    edit => c.kindEdit,
+    search => c.kindSearch,
+    terminal => c.kindRun,
+    web => c.kindWeb,
+    think || delegate => c.kindThink,
+    shield || warn => c.attentionText,
+    _ => null,
+  };
   final String data;
   static final _cache = <AxIcon, Path>{};
-  Path get path => _cache[this] ??= _parse(data);
-}
-
-Path _parse(String d) {
-  final p = Path();
-  final tk = RegExp(r'[MLHVCAZ]|-?\d*\.?\d+').allMatches(d).map((m) => m[0]!).toList();
-  var i = 0, cmd = '', x = 0.0, y = 0.0;
-  double n() => double.parse(tk[i++]);
-  while (i < tk.length) {
-    if (RegExp('[A-Z]').hasMatch(tk[i])) cmd = tk[i++];
-    switch (cmd) {
-      case 'M':
-        p.moveTo(x = n(), y = n());
-        cmd = 'L';
-      case 'L':
-        p.lineTo(x = n(), y = n());
-      case 'H':
-        p.lineTo(x = n(), y);
-      case 'V':
-        p.lineTo(x, y = n());
-      case 'C':
-        final q = [for (var k = 0; k < 6; k++) n()];
-        p.cubicTo(q[0], q[1], q[2], q[3], x = q[4], y = q[5]);
-      case 'A':
-        final rx = n(), ry = n();
-        n();
-        final large = n() == 1, sweep = n() == 1;
-        p.arcToPoint(
-          Offset(x = n(), y = n()),
-          radius: Radius.elliptical(rx, ry),
-          largeArc: large,
-          clockwise: sweep,
-        );
-      case 'Z':
-        p.close();
-      default:
-        throw FormatException('icon path command $cmd', d);
-    }
-  }
-  return p;
+  Path get path => _cache[this] ??= svgPath(data);
 }
 
 class AxGlyph extends StatelessWidget {

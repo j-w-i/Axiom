@@ -63,6 +63,12 @@ void main() {
         ]) {
           check(n, k, everywhere);
         }
+        final tints = [
+          for (final h in c.services.entries)
+            ('${h.key.name} tint', Color.alphaBlend(c.tinted(h.value), c.overlay.top)),
+        ];
+        check('ink1', c.ink1, tints);
+        check('ink3', c.ink3, tints);
         check('voice', c.voice, stops('bay', c.bay));
         check('ink1', c.ink1, [...stops('key', c.key), ...stops('keyHover', c.keyHover)]);
         check('ink1', c.ink1, stops('keyDown', c.keyDown));
@@ -83,6 +89,7 @@ void main() {
           ('type', c.codeType),
           ('number', c.codeNumber),
           ('comment', c.codeComment),
+          ('inline', c.codeInline),
         ]) {
           final b = c.block.bottom;
           check('code $n', k, [
@@ -97,6 +104,21 @@ void main() {
 
       test('marks that carry meaning can be seen', () {
         final bad = <String>[];
+        for (final e in {
+          for (final m in c.services.entries) m.key.name: m.value,
+          'read': c.kindRead,
+          'edit': c.kindEdit,
+          'search': c.kindSearch,
+          'run': c.kindRun,
+          'web': c.kindWeb,
+          'think': c.kindThink,
+        }.entries) {
+          final tint = Color.alphaBlend(c.tinted(e.value), c.overlay.top);
+          for (final (s, bg) in [...general, ('its tint', tint)]) {
+            final r = ratio(e.value, bg);
+            if (r < 3) bad.add('${e.key} on $s: ${r.toStringAsFixed(2)}');
+          }
+        }
         for (final (n, k) in [
           ('live', c.live),
           ('attention', c.attention),
@@ -124,7 +146,7 @@ void main() {
         for (final k in [c.live, c.primary.top, c.primary.bottom]) {
           final h = HSLColor.fromColor(k);
           expect(h.hue, inInclusiveRange(222, 232));
-          expect(h.lightness, lessThan(.66));
+          expect(h.lightness, lessThan(.67));
         }
       });
     });

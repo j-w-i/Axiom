@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../ui/icons.dart';
+import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
@@ -18,11 +19,13 @@ class UsageKey extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
+    final hue = service.mark?.color(c);
     final acc = service.accounts.firstWhere((a) => a.id == service.active);
     final known = acc.windows.where((w) => w.used != null).toList()
       ..sort((a, b) => b.used!.compareTo(a.used!));
     final tight = known.firstOrNull ?? acc.windows.firstOrNull;
     return AxPopover(
+      hue: hue,
       width: 312,
       alignEnd: true,
       anchor: (context, open, toggle) => Pressable(
@@ -31,7 +34,7 @@ class UsageKey extends StatelessWidget {
         onPressed: toggle,
         builder: (context, s) => DecoratedBox(
           decoration: BoxDecoration(
-            color: open || s.hovered ? c.hover : null,
+            color: open || s.hovered ? c.tinted(hue) : null,
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
           child: Padding(
@@ -44,7 +47,11 @@ class UsageKey extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(service.name, style: t.type.small.ink(c.ink2)),
+                        if (service.mark case final m?) ...[
+                          AxServiceMark(m, size: 12),
+                          const SizedBox(width: 6),
+                        ],
+                        Text(service.name, style: t.type.small.ink(open ? c.ink1 : c.ink2)),
                         const SizedBox(width: 4),
                         AxGlyph(AxIcon.down, size: 8, color: open || s.hovered ? c.ink2 : c.ink4),
                         const SizedBox(width: 8),
@@ -68,6 +75,7 @@ class UsageKey extends StatelessWidget {
                         value: tight?.used,
                         provenance: tight?.provenance ?? Provenance.unknown,
                         thickness: 2,
+                        color: hue,
                       ),
                     ),
                   ],
@@ -85,6 +93,7 @@ class UsageKey extends StatelessWidget {
             if (i > 0) const SizedBox(height: 6),
             _Account(
               a,
+              hue: hue,
               active: a.id == service.active,
               onUse: () {
                 close();
@@ -104,7 +113,7 @@ class UsageKey extends StatelessWidget {
             },
             builder: (_, s) => DecoratedBox(
               decoration: BoxDecoration(
-                color: s.hovered || s.focused ? c.hover : null,
+                color: s.hovered || s.focused ? c.tinted(hue) : null,
                 borderRadius: BorderRadius.circular(AxRadius.key),
               ),
               child: Padding(
@@ -115,7 +124,7 @@ class UsageKey extends StatelessWidget {
                       width: 20,
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: AxGlyph(AxIcon.plus, size: 12, color: c.ink3),
+                        child: AxGlyph(AxIcon.plus, size: 12, color: hue ?? c.ink3),
                       ),
                     ),
                     Expanded(
@@ -136,7 +145,8 @@ class UsageKey extends StatelessWidget {
 }
 
 class _Account extends StatelessWidget {
-  const _Account(this.a, {required this.active, required this.onUse});
+  const _Account(this.a, {required this.active, required this.onUse, this.hue});
+  final Color? hue;
   final AccountView a;
   final bool active;
   final VoidCallback onUse;
@@ -150,7 +160,11 @@ class _Account extends StatelessWidget {
       onPressed: onUse,
       builder: (context, s) => DecoratedBox(
         decoration: BoxDecoration(
-          color: s.hovered || s.focused ? c.hover : null,
+          color: s.hovered || s.focused
+              ? c.tinted(hue)
+              : active && hue != null
+              ? hue!.withValues(alpha: .07)
+              : null,
           borderRadius: BorderRadius.circular(AxRadius.key),
         ),
         child: Padding(
@@ -164,7 +178,7 @@ class _Account extends StatelessWidget {
                 child: active
                     ? Align(
                         alignment: Alignment.centerLeft,
-                        child: AxGlyph(AxIcon.check, size: 12, color: c.liveText),
+                        child: AxGlyph(AxIcon.check, size: 13, color: hue ?? c.liveText),
                       )
                     : null,
               ),
@@ -201,7 +215,13 @@ class _Account extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 3),
-                      AxMeter(label: w.name, value: w.used, provenance: w.provenance, thickness: 3),
+                      AxMeter(
+                        label: w.name,
+                        value: w.used,
+                        provenance: w.provenance,
+                        thickness: 3,
+                        color: hue,
+                      ),
                       if (w.provenance != Provenance.reported) ...[
                         const SizedBox(height: 2),
                         Text(

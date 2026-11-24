@@ -124,6 +124,7 @@ class _WorkbenchState extends State<Workbench> {
                                         ('Changes', '3'),
                                         ('Terminal', null),
                                       ],
+                                      hue: agent.mark?.color(c),
                                       index: _tab,
                                       onChanged: (i) => setState(() => _tab = i),
                                     ),

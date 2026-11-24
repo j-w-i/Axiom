@@ -166,7 +166,11 @@ class AxMeter extends StatelessWidget {
     this.vertical = false,
     this.thickness = 4,
     this.warnAt = .85,
+    this.color,
   });
+
+  /// The service's hue, when the level is a service's.
+  final Color? color;
   final String label;
   final double? value;
   final Provenance provenance;
@@ -186,8 +190,8 @@ class AxMeter extends StatelessWidget {
           provenance == Provenance.estimated,
           vertical,
           c.meterTrack,
-          v != null && v >= warnAt ? c.attention : c.meterFill,
-          c.meterFill,
+          v != null && v >= warnAt ? c.attention : color ?? c.meterFill,
+          color ?? c.meterFill,
         ),
       ),
     );

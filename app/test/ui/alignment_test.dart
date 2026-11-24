@@ -3,6 +3,7 @@ import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/icons.dart';
+import 'package:axiom/ui/overlay.dart';
 import 'package:axiom/ui/status.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
@@ -64,6 +65,29 @@ void main() {
       marks.reduce((a, b) => a > b ? a : b) - marks.reduce((a, b) => a < b ? a : b),
       lessThan(.6),
     );
+  });
+
+  testWidgets('menu details end on one edge, and their marks keep their shape', (t) async {
+    await mount(
+      t,
+      Center(
+        child: SizedBox(
+          width: 260,
+          child: AxMenu<String>(items: s.harnesses, value: 'codex', onChosen: (_) {}),
+        ),
+      ),
+      dpr: 2,
+    );
+    final edges = [
+      for (final d in ['native engine', 'not found']) t.getTopRight(find.text(d)).dx,
+      for (final e in find.text('installed').evaluate()) t.getTopRight(find.byWidget(e.widget)).dx,
+    ];
+    for (final e in edges) {
+      expect(e, closeTo(edges.first, .3));
+    }
+    for (final g in t.renderObjectList<RenderBox>(find.byType(AxGlyph))) {
+      expect(g.size.width, g.size.height);
+    }
   });
 
   testWidgets('a key\'s glyph and its word share a centre', (t) async {

@@ -2,6 +2,7 @@
 library;
 
 import '../ui/icons.dart';
+import '../ui/marks.dart';
 import '../ui/status.dart';
 
 class AgentView {
@@ -20,6 +21,8 @@ class AgentView {
   });
   final String id, name, model, harness, connection, elapsed;
   final AgentState state;
+
+  ServiceMark? get mark => ServiceMark.of(model);
 
   /// 0–1 of the context window, or null when the harness does not say.
   final double? context;
@@ -76,8 +79,9 @@ class UsageWindow {
 }
 
 class ServiceView {
-  const ServiceView({required this.name, required this.accounts, required this.active});
+  const ServiceView({required this.name, required this.accounts, required this.active, this.mark});
   final String name, active;
+  final ServiceMark? mark;
   final List<AccountView> accounts;
 }
 

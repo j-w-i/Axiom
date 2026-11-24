@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 
 import '../ui/controls.dart';
 import '../ui/icons.dart';
+import '../ui/marks.dart';
 import '../ui/press.dart';
 import '../ui/spring.dart';
 import '../ui/status.dart';
@@ -157,6 +158,7 @@ class _AgentRowState extends State<AgentRow> {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors, a = widget.agent;
+    final hue = a.mark?.color(c);
     final live = a.state == AgentState.running || a.state == AgentState.asking;
     final now = a.recent.lastOrNull;
     final pause =
@@ -194,10 +196,20 @@ class _AgentRowState extends State<AgentRow> {
                         ? LinearGradient(
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
-                            colors: [c.rowSelectedTop, c.rowSelectedBottom],
+                            colors: [
+                              hue == null
+                                  ? c.rowSelectedTop
+                                  : Color.alphaBlend(hue.withValues(alpha: .05), c.rowSelectedTop),
+                              hue == null
+                                  ? c.rowSelectedBottom
+                                  : Color.alphaBlend(
+                                      hue.withValues(alpha: .05),
+                                      c.rowSelectedBottom,
+                                    ),
+                            ],
                           )
                         : null,
-                    color: !widget.selected && s.hovered ? c.hover : null,
+                    color: !widget.selected && s.hovered ? c.tinted(hue) : null,
                   ),
                   child: Stack(
                     children: [
@@ -207,7 +219,7 @@ class _AgentRowState extends State<AgentRow> {
                           top: 7,
                           bottom: 7,
                           child: ColoredBox(
-                            color: a.state == AgentState.asking ? c.attention : c.live,
+                            color: a.state == AgentState.asking ? c.attention : hue ?? c.live,
                             child: const SizedBox(width: 2),
                           ),
                         ),
@@ -230,8 +242,17 @@ class _AgentRowState extends State<AgentRow> {
                                           TextSpan(
                                             children: [
                                               TextSpan(text: a.name),
+                                              const TextSpan(text: '   '),
+                                              if (a.mark case final m?)
+                                                WidgetSpan(
+                                                  alignment: PlaceholderAlignment.middle,
+                                                  child: Padding(
+                                                    padding: const EdgeInsets.only(right: 5),
+                                                    child: AxServiceMark(m, size: 11),
+                                                  ),
+                                                ),
                                               TextSpan(
-                                                text: '   ${a.model}',
+                                                text: a.model,
                                                 style: t.type.label.ink(c.ink4),
                                               ),
                                             ],

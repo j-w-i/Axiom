@@ -494,7 +494,7 @@ class _BlockViewState extends State<BlockView> {
       _ => c.ink1,
     };
     final base = t.type.prose.ink(ink);
-    final code = t.type.code.copyWith(height: base.height, color: c.ink2, fontSize: 12.5);
+    final code = t.type.code.copyWith(height: base.height, color: c.codeInline, fontSize: 12.5);
     Widget text(TextStyle s, {bool header = false}) {
       final w = ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _measure),
@@ -593,7 +593,7 @@ class _Voice extends StatelessWidget {
     final t = Ax.of(context), c = t.colors;
     return DecoratedBox(
       decoration: BoxDecoration(
-        border: Border(left: BorderSide(color: c.idle, width: 2)),
+        border: Border(left: BorderSide(color: c.promptRule, width: 2)),
       ),
       child: Padding(
         padding: EdgeInsets.only(left: 12, top: opens ? 0 : 11),

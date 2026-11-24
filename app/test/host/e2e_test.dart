@@ -42,7 +42,16 @@ void main() {
   tearDown(() async {
     host?.kill(ProcessSignal.sigkill);
     await host?.exitCode;
-    dir.deleteSync(recursive: true);
+    // A host that was asked to stop may hold its files for a moment (Windows).
+    for (var n = 0; ; n++) {
+      try {
+        dir.deleteSync(recursive: true);
+        break;
+      } on FileSystemException {
+        if (n == 50) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
   });
 
   String script(int words, {int after = 0}) {

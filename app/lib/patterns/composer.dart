@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
+import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/tokens.dart';
@@ -145,15 +146,18 @@ class _Choice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    final label = ch.items.where((e) => e.value == ch.value).firstOrNull?.label ?? ch.value;
+    final item = ch.items.where((e) => e.value == ch.value).firstOrNull;
+    final label = item?.label ?? ch.value;
+    final hue = item?.mark?.color(c);
     return AxPopover(
+      hue: hue,
       anchor: (context, open, toggle) => Pressable(
         label: '${ch.label}: $label',
         expanded: open,
         onPressed: toggle,
         builder: (context, s) => DecoratedBox(
           decoration: BoxDecoration(
-            color: open || s.hovered ? c.hover : null,
+            color: open || s.hovered ? c.tinted(hue) : null,
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
           child: SizedBox(
@@ -163,6 +167,10 @@ class _Choice extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (item?.mark case final m?) ...[
+                    AxServiceMark(m, size: 12),
+                    const SizedBox(width: 6),
+                  ],
                   Text(label, style: t.type.label.ink(open || s.hovered ? c.ink1 : c.ink2)),
                   const SizedBox(width: 5),
                   AxGlyph(AxIcon.down, size: 9, color: open || s.hovered ? c.ink2 : c.ink4),

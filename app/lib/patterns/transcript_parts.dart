@@ -40,7 +40,11 @@ class WorkLine extends StatelessWidget {
               width: 22,
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: AxGlyph(icon, size: 13, color: failed ? c.faultText : c.ink4),
+                child: AxGlyph(
+                  icon,
+                  size: 13,
+                  color: failed ? c.faultText : icon.kind(c) ?? c.ink4,
+                ),
               ),
             ),
             ConstrainedBox(
@@ -64,8 +68,8 @@ class WorkLine extends StatelessWidget {
             const SizedBox(width: 12),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 200),
-              child: Text(
-                result,
+              child: Text.rich(
+                TextSpan(children: _tinted(result, c)),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: t.type.small.ink(failed ? c.faultText : c.ink3),
@@ -80,6 +84,24 @@ class WorkLine extends StatelessWidget {
       ),
     );
   }
+}
+
+/// `+7 −2` in the colours of what they count.
+List<InlineSpan> _tinted(String s, AxColors c) {
+  final out = <InlineSpan>[];
+  var p = 0;
+  for (final m in RegExp(r'(?<!\S)([+−-])\d+(?!\S)').allMatches(s)) {
+    if (m.start > p) out.add(TextSpan(text: s.substring(p, m.start)));
+    out.add(
+      TextSpan(
+        text: m[0],
+        style: TextStyle(color: m[1] == '+' ? c.doneText : c.faultText),
+      ),
+    );
+    p = m.end;
+  }
+  if (p < s.length) out.add(TextSpan(text: s.substring(p)));
+  return out;
 }
 
 class DiffBlock extends StatelessWidget {

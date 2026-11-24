@@ -4,6 +4,7 @@ library;
 
 import '../patterns/models.dart';
 import '../ui/icons.dart';
+import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/status.dart';
 
@@ -105,6 +106,7 @@ const request = RequestView(
 const services = [
   ServiceView(
     name: 'Claude',
+    mark: ServiceMark.claude,
     active: 'c1',
     accounts: [
       AccountView(
@@ -137,6 +139,7 @@ const services = [
   ),
   ServiceView(
     name: 'ChatGPT',
+    mark: ServiceMark.openai,
     active: 'o1',
     accounts: [
       AccountView(
@@ -158,6 +161,7 @@ const services = [
   ),
   ServiceView(
     name: 'Google',
+    mark: ServiceMark.gemini,
     active: 'g1',
     accounts: [
       AccountView(
@@ -187,16 +191,25 @@ const diff = [
 ];
 
 const harnesses = [
-  AxMenuItem('axiom', 'Axiom', detail: 'native engine'),
-  AxMenuItem('claude', 'Claude Code', detail: 'installed'),
-  AxMenuItem('codex', 'Codex', detail: 'installed'),
-  AxMenuItem('opencode', 'OpenCode', enabled: false, why: 'not found'),
+  AxMenuItem('axiom', 'Axiom', mark: ServiceMark.axiom, detail: 'native engine'),
+  AxMenuItem('claude', 'Claude Code', mark: ServiceMark.claudecode, detail: 'installed'),
+  AxMenuItem('codex', 'Codex', mark: ServiceMark.codex, detail: 'installed'),
+  AxMenuItem('opencode', 'OpenCode', mark: ServiceMark.opencode, enabled: false, why: 'not found'),
 ];
-const models = [AxMenuItem('gpt', 'GPT-5.6'), AxMenuItem('gptm', 'GPT-5.6 mini')];
+const models = [
+  AxMenuItem('gpt', 'GPT-5.6', mark: ServiceMark.openai),
+  AxMenuItem('gptm', 'GPT-5.6 mini', mark: ServiceMark.openai),
+];
 const connections = [
-  AxMenuItem('o1', 'ChatGPT Pro, work', detail: '31% used'),
-  AxMenuItem('o2', 'ChatGPT Plus, personal', enabled: false, why: 'signed out'),
-  AxMenuItem('ok', 'OpenAI API key', detail: 'metered'),
+  AxMenuItem('o1', 'ChatGPT Pro, work', mark: ServiceMark.openai, detail: '31% used'),
+  AxMenuItem(
+    'o2',
+    'ChatGPT Plus, personal',
+    mark: ServiceMark.openai,
+    enabled: false,
+    why: 'signed out',
+  ),
+  AxMenuItem('ok', 'OpenAI API key', mark: ServiceMark.openai, detail: 'metered'),
 ];
 const efforts = [
   AxMenuItem('low', 'Low effort'),
@@ -210,7 +223,8 @@ const access = [
 ];
 
 extension type ServiceViewX(ServiceView v) {
-  ServiceView withActive(String id) => ServiceView(name: v.name, accounts: v.accounts, active: id);
+  ServiceView withActive(String id) =>
+      ServiceView(name: v.name, mark: v.mark, accounts: v.accounts, active: id);
 }
 
 const session = SessionView(
