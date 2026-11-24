@@ -52,6 +52,13 @@ class HostStore extends ChangeNotifier {
   HostPhase phase = HostPhase.starting;
   String? problem;
   List<SessionInfo> sessions = [];
+
+  /// The list holds the last [listed] sessions; there are older ones.
+  bool older = false;
+  static const listed = 1000;
+
+  /// What the host found wrong with its journal, if it did.
+  String? damaged;
   SessionModel? current;
 
   HostLink? _link;
@@ -166,8 +173,13 @@ class HostStore extends ChangeNotifier {
   HostLink get _live => _link ?? (throw const LinkClosed('the host is not answering'));
 
   Future<void> refresh() async {
-    final r = await _live.call('session.list');
+    final link = _live;
+    final r = await link.call('session.list', {'limit': listed});
     sessions = [for (final j in r! as List<Object?>) SessionInfo.decode(j! as Json)];
+    older = sessions.length >= listed;
+    // The journal is checked in the background after the host starts, so this is asked again.
+    final s = await link.call('host.status');
+    damaged = s is Json ? s['damaged'] as String? : null;
     notifyListeners();
   }
 

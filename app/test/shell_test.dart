@@ -51,6 +51,20 @@ void main() {
     s.dispose();
   });
 
+  testWidgets('says that the journal is damaged, on one line, and that the list was cut', (
+    t,
+  ) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..damaged = 'row 3\nis missing'
+      ..older = true
+      ..current = recorded();
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    expect(find.textContaining('The journal is damaged: row 3'), findsOneWidget);
+    expect(find.textContaining('Older ones are in the journal'), findsOneWidget);
+    s.dispose();
+  });
+
   testWidgets('says so when the host is gone, and keeps what was shown', (t) async {
     final s = store()
       ..phase = HostPhase.unreachable

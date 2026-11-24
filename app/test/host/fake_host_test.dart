@@ -13,6 +13,9 @@ class FakeHost {
   final Directory dir;
   final ServerSocket server;
   int follows = 0;
+  List<Object> sessions = [];
+  Json status = {};
+  final listed = <Object?>[];
 
   /// What to write when a session is followed, after its answer; null answers nothing at all.
   Iterable<Object>? Function(String session) onFollow = (_) => const [];
@@ -42,7 +45,10 @@ class FakeHost {
             say({'id': id, 'result': <String, Object?>{}});
             out.forEach(say);
           case 'session.list':
-            say({'id': id, 'result': <Object>[]});
+            h.listed.add(m['params']);
+            say({'id': id, 'result': h.sessions});
+          case 'host.status':
+            say({'id': id, 'result': h.status});
           case _:
             say({'id': id, 'result': <String, Object?>{}});
         }
@@ -107,6 +113,29 @@ void main() {
       await s.open('x');
       await Future<void>.delayed(const Duration(milliseconds: 300));
       expect([s.current!.fault, h.follows], ['journal: damaged', 1]);
+      s.dispose();
+    });
+  });
+
+  testWidgets('a damaged journal and a list that was cut are known', (t) async {
+    await t.runAsync(() async {
+      Json session(int i) => {
+        'id': 's$i',
+        'title': 'T',
+        'created': 1,
+        'updated': 1,
+        'last_seq': 1,
+        'running': false,
+      };
+      h.sessions = [session(0)];
+      final s = store();
+      await s.start();
+      expect([s.older, s.damaged, s.phase], [false, null, HostPhase.connected]);
+      h.sessions = [for (var i = 0; i < HostStore.listed; i++) session(i)];
+      h.status = {'damaged': 'row 3 is missing'};
+      await s.refresh();
+      expect([s.older, s.damaged], [true, 'row 3 is missing']);
+      expect(h.listed.last, {'limit': HostStore.listed});
       s.dispose();
     });
   });

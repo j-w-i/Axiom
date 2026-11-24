@@ -84,6 +84,17 @@ class _ShellState extends State<Shell> {
                                   style: t.type.label.ink(c.faultText),
                                 ),
                               ),
+                            ] else if (s.damaged case final d?) ...[
+                              const AxLamp(AgentState.failed),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'The journal is damaged: ${oneLine(d, 200)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: t.type.label.ink(c.faultText),
+                                ),
+                              ),
                             ],
                           ],
                         ),
@@ -261,6 +272,14 @@ class _Side extends StatelessWidget {
                 SessionRow(
                   SessionView(id: s.id, title: oneLine(s.title), age: ageOf(s.updated)),
                   onOpen: () => unawaited(store.open(s.id).catchError((_) {})),
+                ),
+              if (store.older)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                  child: Text(
+                    'The last ${HostStore.listed}. Older ones are in the journal.',
+                    style: t.type.small.ink(c.ink3),
+                  ),
                 ),
             ],
           ),
