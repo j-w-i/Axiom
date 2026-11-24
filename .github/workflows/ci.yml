@@ -21,6 +21,15 @@ jobs:
         with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: engine }
+      - name: Sandbox
+        if: runner.os == 'Linux'
+        working-directory: .
+        # Ubuntu lets only named programs make user namespaces; this names bubblewrap.
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' | sudo tee /etc/apparmor.d/bwrap >/dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap || true
+          bwrap --version && bwrap --unshare-user --ro-bind / / true
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked

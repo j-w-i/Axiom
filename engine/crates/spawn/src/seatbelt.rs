@@ -57,11 +57,8 @@ fn profile(real: &Real) -> (String, Vec<(String, String)>) {
             let _ = writeln!(s, "({what} ({how} (param \"{k}\")))");
         }
     };
-    let up: std::collections::BTreeSet<Place> = real
-        .read
-        .iter()
-        .flat_map(|p| std::iter::successors(p.parent(), Place::parent))
-        .collect();
+    let up: std::collections::BTreeSet<Place> =
+        real.read.iter().flat_map(|p| std::iter::successors(p.parent(), Place::parent)).collect();
     rule(&mut s, "allow file-read-metadata", &up.into_iter().collect::<Vec<_>>(), "literal");
     rule(&mut s, "allow process-exec file-read* file-map-executable", &real.read, "subpath");
     rule(&mut s, "allow file-write*", &real.write, "subpath");
@@ -73,7 +70,12 @@ fn profile(real: &Real) -> (String, Vec<(String, String)>) {
         let _ = writeln!(s, "(deny file-write* (regex #\"{}(/|$)\"))", any_case(n));
     }
     s.push_str("(deny file-write-setugid)\n(deny file-mknod)\n");
-    rule(&mut s, "deny file-read* file-write* process-exec file-map-executable", &real.hidden, "subpath");
+    rule(
+        &mut s,
+        "deny file-read* file-write* process-exec file-map-executable",
+        &real.hidden,
+        "subpath",
+    );
     (s, params)
 }
 

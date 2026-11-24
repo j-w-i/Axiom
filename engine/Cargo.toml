@@ -23,7 +23,7 @@ libc = "0.2"
 proptest = { version = "1", default-features = false, features = ["std"] }
 tempfile = "3"
 toml = "1"
-blake3 = "1"
+blake3 = { version = "1", default-features = false, features = ["pure"] }
 uds_windows = "1"
 
 [workspace.lints.rust]

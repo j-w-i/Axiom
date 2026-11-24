@@ -65,7 +65,8 @@ impl Env {
 
     /// Sets one more. Names that make a loader or a shell run something are refused.
     pub fn set(&mut self, name: &str, value: &str) -> Result<(), SpawnError> {
-        let plain = !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        let plain =
+            !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
         let loaded = ["LD_", "DYLD_", "BASH_", "MALLOC_", "__"].iter().any(|p| name.starts_with(p))
             || matches!(name, "ENV" | "IFS" | "SHELLOPTS" | "PS4" | "PROMPT_COMMAND" | "ZDOTDIR");
         if !plain || loaded || value.contains('\0') {
@@ -100,12 +101,15 @@ pub enum SpawnError {
 }
 
 /// How a process ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Ended {
     pub code: Option<i32>,
     pub signal: Option<i32>,
     /// Processes it had left behind, which were ended with it.
     pub left: usize,
+    /// Protected names that appeared while it ran, where the system cannot prevent it (Linux): to be
+    /// shown to the person before anything else reads them.
+    pub made: Vec<std::path::PathBuf>,
 }
 
 /// A running process and all it starts. Dropped, all of it ends.
@@ -114,6 +118,9 @@ pub struct Running {
     child: Child,
     #[cfg(unix)]
     tree: tree::Tree,
+    /// Writable folders, with the protected names that were there.
+    #[cfg(target_os = "linux")]
+    before: Vec<(Place, Vec<std::path::PathBuf>)>,
     pub stdin: Option<ChildStdin>,
     pub stdout: Option<ChildStdout>,
     pub stderr: Option<ChildStderr>,
@@ -124,11 +131,17 @@ pub fn spawn(job: Job) -> Result<Running, SpawnError> {
     if job.args.iter().any(|a| a.contains('\0')) {
         return Err(SpawnError::Argument);
     }
+    #[cfg(target_os = "linux")]
+    let before = match &job.contain {
+        Contain::Sandbox(p) => bwrap::before(p)?,
+        Contain::None(_) => Vec::new(),
+    };
     let (program, args) = match &job.contain {
         Contain::Sandbox(p) => contained(&job, p)?,
-        Contain::None(_) => {
-            (std::ffi::OsString::from(job.program.as_path()), job.args.iter().map(Into::into).collect::<Vec<_>>())
-        }
+        Contain::None(_) => (
+            std::ffi::OsString::from(job.program.as_path()),
+            job.args.iter().map(Into::into).collect::<Vec<_>>(),
+        ),
     };
     let mut c = std::process::Command::new(program);
     c.args(args)
@@ -140,7 +153,8 @@ pub fn spawn(job: Job) -> Result<Running, SpawnError> {
         .stderr(Stdio::piped());
     #[cfg(unix)]
     let mark = tree::prepare(&mut c).map_err(SpawnError::Start)?;
-    let mut child = tokio::process::Command::from(c).kill_on_drop(true).spawn().map_err(SpawnError::Start)?;
+    let mut child =
+        tokio::process::Command::from(c).kill_on_drop(true).spawn().map_err(SpawnError::Start)?;
     #[cfg(unix)]
     let tree = tree::Tree::new(child.id().unwrap_or(0), mark);
     Ok(Running {
@@ -149,18 +163,25 @@ pub fn spawn(job: Job) -> Result<Running, SpawnError> {
         stderr: child.stderr.take(),
         #[cfg(unix)]
         tree,
+        #[cfg(target_os = "linux")]
+        before,
         child,
     })
 }
 
 /// The command that runs `job` contained.
-fn contained(job: &Job, p: &Profile) -> Result<(std::ffi::OsString, Vec<std::ffi::OsString>), SpawnError> {
+fn contained(
+    job: &Job,
+    p: &Profile,
+) -> Result<(std::ffi::OsString, Vec<std::ffi::OsString>), SpawnError> {
     if !p.net().is_empty() {
         return Err(SpawnError::Network);
     }
     let real = Real::of(p)?;
     let cwd = real_place(&job.cwd)?;
-    if !real.read.iter().any(|r| r.covers(&cwd)) || real.hidden.iter().any(|h| h.covers_folded(&cwd)) {
+    if !real.read.iter().any(|r| r.covers(&cwd))
+        || real.hidden.iter().any(|h| h.covers_folded(&cwd))
+    {
         return Err(SpawnError::Cwd(job.cwd.clone()));
     }
     #[cfg(target_os = "macos")]
@@ -207,7 +228,9 @@ impl Real {
         let write = all(p.write().roots())?;
         for w in &write {
             // What a link leads to is looked at again: the profile saw only its name.
-            if w.parent().is_none() || hidden.iter().any(|h| h.covers_folded(w) || w.covers_folded(h)) {
+            if w.parent().is_none()
+                || hidden.iter().any(|h| h.covers_folded(w) || w.covers_folded(h))
+            {
                 return Err(SpawnError::Hidden(w.clone()));
             }
         }
@@ -228,10 +251,14 @@ impl Running {
         {
             use std::os::unix::process::ExitStatusExt;
             let left = self.tree.kill();
-            Ok(Ended { code: st.code(), signal: st.signal(), left })
+            #[cfg(target_os = "linux")]
+            let made = bwrap::made(&self.before);
+            #[cfg(not(target_os = "linux"))]
+            let made = Vec::new();
+            Ok(Ended { code: st.code(), signal: st.signal(), left, made })
         }
         #[cfg(not(unix))]
-        Ok(Ended { code: st.code(), signal: None, left: 0 })
+        Ok(Ended { code: st.code(), ..Ended::default() })
     }
 
     /// Asks all of it to end, and after `grace` ends it.

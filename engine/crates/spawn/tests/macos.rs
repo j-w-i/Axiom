@@ -72,7 +72,12 @@ async fn nobody_else_is_made_to_start_anything() {
     let known = std::process::Command::new("launchctl").args(["list", &label]).output().unwrap();
     std::process::Command::new("launchctl").args(["remove", &label]).output().unwrap();
     assert!(!made && !known.status.success(), "{o:?}");
-    for s in ["echo '* * * * * true' | crontab -", "echo true | at now", "sudo -n true", "su root -c true"] {
+    for s in [
+        "echo '* * * * * true' | crontab -",
+        "echo true | at now",
+        "sudo -n true",
+        "su root -c true",
+    ] {
         let o = f.sh(s).await;
         assert!(!o.ok(), "{s}: {o:?}");
     }
