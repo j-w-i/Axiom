@@ -1,0 +1,14 @@
+[package]
+name = "p1-ipc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[lib]
+crate-type = ["cdylib"]
+[[bin]]
+name = "server"
+path = "src/server.rs"
+[profile.release]
+lto = true
+codegen-units = 1
+[workspace]

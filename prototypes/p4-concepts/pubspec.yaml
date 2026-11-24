@@ -1,0 +1,21 @@
+name: p4_concepts
+description: Visual concept studies (prototype; not the product).
+publish_to: none
+version: 0.0.0
+environment: { sdk: ^3.14.0 }
+dependencies:
+  flutter: { sdk: flutter }
+dev_dependencies:
+  flutter_test: { sdk: flutter }
+flutter:
+  fonts:
+    - { family: Mona, fonts: [{ asset: fonts/MonaSans.ttf }] }
+    - { family: Archivo, fonts: [{ asset: fonts/Archivo.ttf }] }
+    - { family: Instrument, fonts: [{ asset: fonts/InstrumentSans.ttf }] }
+    - { family: Sofia, fonts: [{ asset: fonts/SofiaSans.ttf }] }
+    - { family: SofiaSemi, fonts: [{ asset: fonts/SofiaSansSemi.ttf }] }
+    - { family: Hanken, fonts: [{ asset: fonts/Hanken.ttf }] }
+    - { family: JB, fonts: [{ asset: fonts/JetBrainsMono.ttf }] }
+    - { family: Martian, fonts: [{ asset: fonts/MartianMono.ttf }] }
+    - { family: Spline, fonts: [{ asset: fonts/SplineSansMono.ttf }] }
+    - { family: Sometype, fonts: [{ asset: fonts/SometypeMono.ttf }] }

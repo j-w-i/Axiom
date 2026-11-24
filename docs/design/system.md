@@ -1,0 +1,38 @@
+# Design system
+
+Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: `flutter test` writes `app/build/shots/` (offscreen).
+
+**The idea.** A professional instrument: graphite structure, one recessed navy display, cobalt only where something is live.
+
+## Rules
+1. **Containment is spent, not given.** A surface may hold another surface only if the person acts on it as a unit (a key, a request, a menu, the display, the deck). Lists, selectors and activity are text on the surface they belong to. (Round 3 failed on this; the owner named it: "something is off about most of the app", and the plain sidebar was the part that worked.)
+2. **Three depths.** Chassis; display (below); deck, keys, requests (above). Overlays float. Nothing else has depth.
+3. **One light, from above.** Raised parts have a faint lit top edge and a 1 px shadow; recessed parts a 5 px shade. Gradients span 2–4 %. No gloss, glow, engraving, side bevels or blur.
+4. **Cobalt means live**: running, focus, the primary act, the selected tab. Never decoration, never sky. Amber asks, red failed, green done; each also has a shape or a word.
+5. **Grid of 4.** Text starts on a shared left edge per surface (display 24, deck 12, sidebar 20). Icons are 12–14 in a fixed column; text uses even leading so glyphs and words share a centre.
+6. **Two voices.** Archivo for words; Spline Sans Mono only for literals: code, paths, commands.
+7. **Numbers say where they come from.** Solid meter = reported or measured; dashed = estimated; empty track and words = unknown.
+8. **Controls appear where the hand is.** A strip shows its keys when hovered or selected; state is always shown.
+9. **Motion** is springs (`snap`, `glide`) that can be interrupted; nothing waits for them; reduced motion jumps. Only a running lamp moves by itself.
+
+## Roles
+| Role | Use | Treatment |
+|------|-----|-----------|
+| `chassis` | window | graphite, lit top line |
+| `bay` | the display; text fields | navy, inset |
+| `plate` | deck | raised |
+| `key` / `keyDown` / `primary` / `answer` | buttons at rest, held or engaged, main act, answering a request | raised / inset |
+| `request` | something needs a person | warm graphite, raised |
+| `overlay` | menus, dialogs | floating |
+| `block` | code on the display | one tone up, no border |
+
+Radii 3–7. Type 10–19. Density compact/regular/roomy changes control height (24/28/32), never type size.
+States for every control: rest, hover, held, engaged, focused (keyboard ring), disabled, loading, error.
+
+## History
+| Round | Concepts | Verdict |
+|-------|----------|---------|
+| 1 | A Console, B Score, C Folio (`img/a…c.png`) | A's materials, C's parallel work column, B's timeline carried forward |
+| 2 | D synthesis (`img/d.png`) | owner: "mostly like it"; sky blue "is NOT it"; skeuomorphism "a tad too far" |
+| 3 | E cobalt, shallower (`img/e.png`) | owner: "needs a bit more polish"; "something is off about most of the app" |
+| 4 | real components, rule 1 (`img/round4-dark.png`, `-light`, `-usage`) | shown 2026-11-24; awaiting the owner |
