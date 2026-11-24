@@ -30,3 +30,4 @@
 | K27 | 64 clients that follow and never read hold about 8 MiB each | M7 soak |
 | K28 | If the journal's file is moved away the host stops, and the endings of what ran are lost | accepted |
 | K29 | A write lock held by another program during a stop costs up to 10 s, and endings may then be unwritten | accepted |
+| K30 | Engine, third review pass: a refused event leaves a replay's run open, a second lock soon after an exhausted outage fails at once, U+2060–U+206F count as emoji in the CLI's prose; four behaviours have no test (connection cap, growing script, lock inode, runtime shutdown limit) | M2 |
