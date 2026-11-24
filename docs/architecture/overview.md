@@ -58,7 +58,7 @@ projections they change and the effects they order (decision 0004). Anything sho
 | `axiom-harness` | adapter contract, ACP client, native adapters (M3) | spawn, proto |
 | `axiom-orchestra` | delegation, tasks, worktrees (M5) | engine, harness |
 | `axiom-host` | sockets, subscriptions, lifecycle | all |
-| `axiom-cli` | command line | proto |
+| `axiom-cli` | command line | proto, host (its client and paths) |
 
 A crate is created when its first real code is written. Edges not in this table need a decision.
 
@@ -77,7 +77,8 @@ transcript lays out only visible blocks (decision 0010).
 |-------|-----------|
 | Client dies | Host continues; next client gets a snapshot then the tail |
 | Host dies | Journal is the truth; running attempts become `interrupted`, their process trees are killed by job object / process group / parent-death watch; nothing re-runs by itself |
-| Machine loses power | WAL recovery; the last ≤ 33 ms of deltas may be lost, a committed tool effect never is (intent is journalled first) |
+| Machine loses power | WAL recovery. What a person did and what comes before an effect (session created or titled, prompt, tool call, run start, request and answer) is flushed to the drive before it is answered or acted on, and is never lost. Everything else (deltas, an item's or a run's ending, usage) is safe from a crash of the host, but what followed the last such flush may be lost; recovery then ends it as interrupted |
+| The journal cannot be read or written | Passing errors are tried again for 10 s. Then that session alone stops with a fault in words, in the client and in `host.status`; the next use opens it again from the journal |
 | Harness dies or speaks nonsense | Attempt fails with the raw frames kept; the agent is resumable if the adapter said so |
 | Provider interrupts a stream | Partial item kept and marked; retry policy per error class; tool calls cut short are never executed |
 

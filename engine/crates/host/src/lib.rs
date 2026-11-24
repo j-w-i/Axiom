@@ -6,12 +6,14 @@
 //! - the listener is local, owned by one user, and needs a token (SI-20).
 
 pub mod client;
+mod faults;
 mod net;
 mod outbox;
 pub mod paths;
 mod replay;
 mod server;
 mod session;
+pub mod signal;
 mod store;
 
 pub use server::{Config, Host, HostError};

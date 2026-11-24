@@ -41,43 +41,92 @@ impl Paths {
     pub fn token(&self) -> PathBuf {
         self.run().join("token")
     }
-    /// Where the socket is, for clients that do not compute it.
+    /// Where the socket is.
     pub fn endpoint_file(&self) -> PathBuf {
         self.run().join("endpoint")
     }
+    /// Beside the journal, because that is what it protects: `run` may be removed at any time.
     pub fn lock(&self) -> PathBuf {
-        self.run().join("lock")
+        self.data.join("journal.lock")
     }
 
-    /// The socket. Unix paths are limited to about 100 bytes, so a long data directory gets a
-    /// short private directory instead; its name is kept in `run/endpoint`.
+    /// The socket of the host that serves, or last served, this directory.
     pub fn endpoint(&self) -> io::Result<String> {
-        let near = self.run().join("host.sock");
-        if near.as_os_str().len() <= 100 {
-            return near
-                .into_os_string()
-                .into_string()
-                .map_err(|_| io::Error::other("the data directory's name is not UTF-8"));
-        }
-        let dir = std::env::temp_dir().join(format!("axiom-{:016x}", self.hash()));
-        private_dir(&dir)?;
-        dir.join("host.sock")
-            .into_os_string()
-            .into_string()
-            .map_err(|_| io::Error::other("the temporary directory's name is not UTF-8"))
+        std::fs::read_to_string(self.endpoint_file())
     }
 
     fn hash(&self) -> u64 {
-        // FNV-1a: stable between builds, and only used to make a distinct name.
+        // FNV-1a: stable between builds, and only used to tell names apart.
         self.data.as_os_str().as_encoded_bytes().iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
             (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
         })
     }
 }
 
+/// The place of a socket, emptied when dropped.
+pub struct Place {
+    pub path: String,
+    /// Made for this socket alone.
+    dir: Option<PathBuf>,
+}
+
+impl Place {
+    /// Unix paths are limited to about 100 bytes, so a long data directory gets a short private
+    /// directory instead. Its name is random: nobody can make it first, and clients read it.
+    /// The caller holds the lock, so what the last host of this directory left is stale.
+    pub fn new(paths: &Paths) -> io::Result<Self> {
+        // The name says whose it is: a copied data directory must not clean up after its original.
+        let ours = format!("axiom-{:016x}-", paths.hash());
+        if let Ok(path) = paths.endpoint() {
+            let dir = Path::new(&path).parent();
+            let name = dir.and_then(|d| d.file_name()).and_then(|n| n.to_str());
+            if name.is_some_and(|n| n.starts_with(&ours)) {
+                drop(Self { dir: dir.map(Into::into), path });
+            }
+        }
+        let near = paths.run().join("host.sock");
+        let (path, dir) = if near.as_os_str().len() <= 100 {
+            (near, None)
+        } else {
+            let mut b = [0u8; 4];
+            axiom_proto::random(&mut b).map_err(io::Error::other)?;
+            let temp = std::env::temp_dir();
+            make_dir(&temp, true)?;
+            let dir = temp.join(format!("{ours}{:08x}", u32::from_ne_bytes(b)));
+            make_dir(&dir, false)?;
+            (dir.join("host.sock"), Some(dir))
+        };
+        let path = path
+            .into_os_string()
+            .into_string()
+            .map_err(|_| io::Error::other("the socket's directory has a name that is not UTF-8"))?;
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(Self { path, dir }),
+        }
+    }
+}
+
+impl Drop for Place {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        if let Some(d) = &self.dir {
+            let _ = std::fs::remove_dir(d);
+        }
+    }
+}
+
+fn make_dir(p: &Path, parents: bool) -> io::Result<()> {
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(parents);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+    b.create(p)
+}
+
 /// Creates a directory only this user can enter, or checks that an existing one is so.
 pub fn private_dir(p: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(p)?;
+    make_dir(p, true)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -101,13 +150,22 @@ pub fn private_dir(p: &Path) -> io::Result<()> {
 pub fn private_file(p: &Path, text: &str) -> io::Result<()> {
     let tmp = p.with_extension("new");
     let _ = std::fs::remove_file(&tmp);
-    let mut o = std::fs::OpenOptions::new();
-    o.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
-    let mut f = o.open(&tmp)?;
+    let mut f = private_options().write(true).create_new(true).open(&tmp)?;
     f.write_all(text.as_bytes())?;
     f.sync_all()?;
     drop(f);
     std::fs::rename(tmp, p)
+}
+
+/// Opens the lock's file. Only its existence matters.
+pub fn lock_file(p: &Path) -> io::Result<std::fs::File> {
+    private_options().write(true).create(true).truncate(false).open(p)
+}
+
+fn private_options() -> std::fs::OpenOptions {
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut o = std::fs::OpenOptions::new();
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o
 }

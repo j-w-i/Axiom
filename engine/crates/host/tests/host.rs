@@ -3,115 +3,16 @@
 // A test's helpers fail the test.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::{
-    collections::BTreeMap,
-    io::{BufRead, BufReader},
-    process::{Child, Command, Stdio},
-    time::Duration,
-};
+use std::{process::Command, time::Duration};
 
 use axiom_host::{
     Config, Host, HostError,
     client::{Client, ClientError},
-    paths::Paths,
 };
 use axiom_proto::*;
 
-const LONG: Duration = Duration::from_secs(10);
-
-struct Fixture {
-    dir: tempfile::TempDir,
-    paths: Paths,
-}
-fn fixture() -> Fixture {
-    let dir = tempfile::tempdir().unwrap();
-    let paths = Paths::new(dir.path().join("data"));
-    Fixture { dir, paths }
-}
-impl Fixture {
-    fn serve(&self) -> tokio::task::JoinHandle<Result<(), HostError>> {
-        self.serve_with(Config::new(self.paths.clone()))
-    }
-    fn serve_with(&self, c: Config) -> tokio::task::JoinHandle<Result<(), HostError>> {
-        let h = Host::start(c).unwrap();
-        tokio::spawn(h.serve())
-    }
-    fn script(&self, steps: &str) -> String {
-        let p = self.dir.path().join(format!("{}.jsonl", ItemId::new()));
-        std::fs::write(&p, steps).unwrap();
-        p.to_str().unwrap().to_owned()
-    }
-    /// `n` pieces of text, `after` ms apart, in one item.
-    fn talker(&self, n: usize, after: u64) -> String {
-        let mut s = String::from(
-            "{\"do\":\"agent\",\"name\":\"T\"}\n{\"do\":\"start\",\"item\":\"p\",\"kind\":\"prose\"}\n",
-        );
-        for i in 0..n {
-            s += &format!(
-                "{{\"after\":{after},\"do\":\"text\",\"item\":\"p\",\"text\":\"w{i} \"}}\n"
-            );
-        }
-        s += "{\"do\":\"end\",\"item\":\"p\",\"outcome\":\"completed\"}\n{\"do\":\"finish\",\"outcome\":\"completed\"}\n";
-        self.script(&s)
-    }
-    async fn client(&self) -> Client {
-        Client::connect(&self.paths, "test").await.unwrap()
-    }
-}
-fn words(n: usize) -> String {
-    (0..n).map(|i| format!("w{i} ")).collect()
-}
-async fn session(c: &mut Client) -> SessionId {
-    let v = c.call(Call::SessionCreate { title: "S".into(), workspace: None }).await.unwrap();
-    SessionId(v["session"].as_str().unwrap().into())
-}
-async fn replay(c: &mut Client, s: &SessionId, path: &str, speed: f64) -> RunId {
-    let v =
-        c.call(Call::ReplayStart { session: s.clone(), path: path.into(), speed }).await.unwrap();
-    RunId(v["run"].as_str().unwrap().into())
-}
-
-/// What a client would show, rebuilt from events, checking order on the way.
-#[derive(Default, Debug, PartialEq, Clone)]
-struct View {
-    seq: u64,
-    text: BTreeMap<String, String>,
-    ended: Option<Outcome>,
-    resync: bool,
-}
-impl View {
-    fn take(&mut self, m: Message) {
-        match m {
-            Message::Events { events, .. } => {
-                for e in events {
-                    assert!(e.seq > self.seq, "event {} after {}", e.seq, self.seq);
-                    self.seq = e.seq;
-                    match e.body {
-                        Body::ItemStarted { item, .. } => {
-                            self.text.insert(item.0, String::new());
-                        }
-                        Body::ItemDelta { item, text } => {
-                            self.text.get_mut(&item.0).unwrap().push_str(&text)
-                        }
-                        Body::ItemEnded { item, text, .. } => {
-                            self.text.insert(item.0, text);
-                        }
-                        Body::RunEnded { outcome, .. } => self.ended = Some(outcome),
-                        b => assert!(!b.malformed()),
-                    }
-                }
-            }
-            Message::Resync { .. } => self.resync = true,
-            _ => {}
-        }
-    }
-    async fn until_end(&mut self, c: &mut Client) {
-        while self.ended.is_none() {
-            let m = c.next_within(LONG).await.unwrap().expect("the run ends");
-            self.take(m);
-        }
-    }
-}
+mod common;
+use common::*;
 
 #[tokio::test]
 async fn a_run_is_seen_whole_by_every_follower() {
@@ -135,7 +36,7 @@ async fn a_run_is_seen_whole_by_every_follower() {
     let mut vl = View::default();
     vl.until_end(&mut late).await;
     assert_eq!(vl.text, va.text);
-    let list = a.call(Call::SessionList {}).await.unwrap();
+    let list = a.call(Call::list()).await.unwrap();
     assert_eq!(list[0]["running"], false);
 }
 
@@ -244,6 +145,9 @@ async fn cancelling_ends_everything_that_was_open() {
         let m = c.next_within(LONG).await.unwrap().unwrap();
         v.take(m);
     }
+    let other = session(&mut c).await;
+    let wrong = c.call(Call::Cancel { session: other, run: run.clone() }).await;
+    assert!(matches!(wrong, Err(ClientError::Refused(e)) if e.code == ErrorCode::NotFound));
     let t = std::time::Instant::now();
     c.call(Call::Cancel { session: s.clone(), run: run.clone() }).await.unwrap();
     v.until_end(&mut c).await;
@@ -289,7 +193,7 @@ async fn strangers_learn_nothing() {
     for (call, code) in [
         (hello("wrong", PROTOCOL), ErrorCode::Unauthorised),
         (hello(&token[1..], PROTOCOL), ErrorCode::Unauthorised),
-        (Call::SessionList {}, ErrorCode::Unauthorised),
+        (Call::list(), ErrorCode::Unauthorised),
         (hello(&token, PROTOCOL + 1), ErrorCode::Protocol),
     ] {
         let mut c = Client::raw(&f.paths).await.unwrap();
@@ -335,7 +239,10 @@ async fn bad_requests_do_not_end_a_known_connection() {
         Call::ReplayStart { session: s.clone(), path: "/no/such/file".into(), speed: 1.0 },
         Call::ReplayStart { session: s.clone(), path: "/".into(), speed: 1.0 },
         Call::ReplayStart { session: s.clone(), path: f.script("{\"do\":\"fly\"}\n"), speed: 1.0 },
-        Call::ReplayStart { session: s, path: f.talker(1, 0), speed: -1.0 },
+        Call::ReplayStart { session: s.clone(), path: f.talker(1, 0), speed: -1.0 },
+        Call::ReplayStart { session: s, path: "/dev/zero".into(), speed: 0.0 },
+        Call::SessionCreate { title: "\0".repeat(84), workspace: None },
+        Call::SessionCreate { title: "t".into(), workspace: Some("w".repeat(4097)) },
     ] {
         assert!(matches!(c.call(call).await, Err(ClientError::Refused(_))));
     }
@@ -347,11 +254,18 @@ async fn bad_requests_do_not_end_a_known_connection() {
 async fn the_endpoint_is_private() {
     use std::{os::unix::fs::PermissionsExt, path::Path};
     let f = fixture();
+    // What is already there, and open to others, is closed to them.
+    std::fs::create_dir_all(f.paths.run()).unwrap();
+    for d in [&f.paths.data, &f.paths.run()] {
+        std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     f.serve();
     let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&f.paths.data), 0o700);
     assert_eq!(mode(&f.paths.run()), 0o700);
-    assert_eq!(mode(&f.paths.token()), 0o600);
+    for p in [f.paths.token(), f.paths.endpoint_file(), f.paths.journal(), f.paths.lock()] {
+        assert_eq!(mode(&p), 0o600, "{}", p.display());
+    }
     assert_eq!(mode(Path::new(&f.paths.endpoint().unwrap())), 0o600);
 }
 
@@ -360,7 +274,8 @@ async fn the_endpoint_is_private() {
 async fn a_long_data_directory_still_gets_a_private_endpoint() {
     use std::{os::unix::fs::PermissionsExt, path::Path};
     let d = tempfile::tempdir().unwrap();
-    let f = Fixture { paths: Paths::new(d.path().join("n".repeat(120))), dir: d };
+    let f =
+        Fixture { paths: axiom_host::paths::Paths::new(d.path().join("n".repeat(120))), dir: d };
     f.serve();
     f.client().await.call(Call::Status {}).await.unwrap();
     let e = f.paths.endpoint().unwrap();
@@ -372,10 +287,16 @@ async fn a_long_data_directory_still_gets_a_private_endpoint() {
 async fn one_host_per_data_directory() {
     let f = fixture();
     f.serve();
-    f.client().await;
+    f.client().await.call(Call::Status {}).await.unwrap();
     let second = Host::start(Config::new(f.paths.clone()));
     assert!(matches!(second, Err(HostError::AlreadyRunning)));
-    f.client().await.call(Call::Status {}).await.unwrap();
+    // Two writers of one journal are refused whatever happens to the place of the socket.
+    #[cfg(unix)]
+    {
+        std::fs::remove_dir_all(f.paths.run()).unwrap();
+        let third = Host::start(Config::new(f.paths.clone()));
+        assert!(matches!(third, Err(HostError::AlreadyRunning)));
+    }
 }
 
 #[tokio::test]
@@ -411,28 +332,6 @@ async fn an_idle_host_leaves_and_a_busy_one_stays() {
 
 // ---- the real process ----
 
-/// Never outlives its test, whatever happens to the test.
-struct Process(Child);
-impl Drop for Process {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn spawn(f: &Fixture) -> Process {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_axiom-host"))
-        .env("AXIOM_DATA", &f.paths.data)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let mut line = String::new();
-    BufReader::new(c.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    assert_eq!(line.trim(), "ready");
-    Process(c)
-}
-
 #[tokio::test]
 async fn killed_in_the_middle_nothing_seen_is_lost() {
     let f = fixture();
@@ -462,7 +361,8 @@ async fn killed_in_the_middle_nothing_seen_is_lost() {
     let (b, a) = (before.text.values().next().unwrap(), after.text.values().next().unwrap());
     assert!(a.starts_with(b.as_str()), "shown text must survive");
     assert!(words(10_000).starts_with(a.as_str()));
-    let list = c.call(Call::SessionList {}).await.unwrap();
+    assert_eq!(after.state, Some(AgentState::Paused), "nothing runs");
+    let list = c.call(Call::list()).await.unwrap();
     assert_eq!(list[0]["running"], false);
     c.call(Call::Shutdown { force: false }).await.unwrap();
     assert!(p.0.wait().unwrap().success());

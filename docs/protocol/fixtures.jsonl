@@ -3,3 +3,5 @@
 {"session":"s_1","resync":9}
 {"id":1,"result":[{"created":1,"id":"s_1","last_seq":3,"running":true,"title":"T","updated":2}]}
 {"id":2,"error":{"code":"not_found","message":"no"}}
+{"session":"s_1","fault":"cannot be read"}
+{"id":3,"result":{"clients":1,"damaged":"why","faults":[{"session":"s_1","words":"w"}],"pid":4,"runs":0,"version":"0"}}

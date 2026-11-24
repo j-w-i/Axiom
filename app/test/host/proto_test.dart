@@ -51,6 +51,9 @@ void main() {
     );
     expect([s.id, s.lastSeq, s.running], ['s_1', 3, true]);
     expect((messages[3] as Failed).code, 'not_found');
+    expect((messages[4] as Fault).words, 'cannot be read');
+    final status = (messages[5] as Answered).result! as Json;
+    expect([status['damaged'], (status['faults']! as List<Object?>).length], ['why', 1]);
   });
 
   test('what is newer or malformed keeps its place', () {

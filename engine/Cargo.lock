@@ -15,6 +15,7 @@ dependencies = [
  "axiom-host",
  "axiom-proto",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -24,6 +25,7 @@ version = "0.0.1"
 dependencies = [
  "axiom-journal",
  "axiom-proto",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

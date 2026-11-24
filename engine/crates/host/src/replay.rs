@@ -1,41 +1,74 @@
 //! Plays a recorded script into a session. The agent's harness is always `replay`.
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use axiom_proto::{
     AgentId, AgentState, Answerable, Body, ErrorCode, Execution, ItemId, Outcome, RequestId, RunId,
     WireError,
     script::{Act, Step},
 };
-use tokio::sync::watch;
+use tokio::{io::AsyncReadExt, sync::watch};
 
-use crate::session::{Say, Session};
+use crate::session::{Closed, Say, Session};
 
 const MAX_SCRIPT: u64 = 64 * 1024 * 1024;
 const MAX_PAUSE: Duration = Duration::from_secs(60);
 
 pub async fn load(path: &str) -> Result<Vec<Step>, WireError> {
-    let bad = |m: String| WireError::new(ErrorCode::BadRequest, m);
-    let meta = tokio::fs::metadata(path).await.map_err(|e| bad(format!("{path}: {e}")))?;
-    if !meta.is_file() || meta.len() > MAX_SCRIPT {
-        return Err(bad(format!("{path} is not a file of at most {MAX_SCRIPT} bytes")));
+    let bad = |m: &str| WireError::new(ErrorCode::BadRequest, m);
+    let not_a_script = || bad("the script is not a readable file of at most 64 MiB");
+    // Opening a pipe would wait for its other end.
+    let meta = tokio::fs::metadata(path).await.map_err(|_| not_a_script())?;
+    if !meta.is_file() {
+        return Err(not_a_script());
     }
-    let text = tokio::fs::read_to_string(path).await.map_err(|e| bad(format!("{path}: {e}")))?;
-    text.lines()
-        .enumerate()
-        .filter(|(_, l)| !l.trim().is_empty())
-        .map(|(n, l)| Step::parse(l).map_err(|e| bad(format!("{path}:{}: {e}", n + 1))))
-        .collect()
+    let file = tokio::fs::File::open(path).await.map_err(|_| not_a_script())?;
+    let mut text = String::new();
+    // What is read counts, not what a file says of itself.
+    file.take(MAX_SCRIPT + 1).read_to_string(&mut text).await.map_err(|_| not_a_script())?;
+    if text.len() as u64 > MAX_SCRIPT {
+        return Err(not_a_script());
+    }
+    let mut steps = Vec::new();
+    // Names in use: one given twice would leave the first without an end.
+    let (mut items, mut requests) = (HashSet::new(), HashSet::new());
+    for (n, l) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
+        // What the line holds is not repeated: it may be anything.
+        let step = Step::parse(l).map_err(|_| bad(&format!("line {} is not a step", n + 1)))?;
+        let fresh = match &step.act {
+            Act::Start { item, .. } => items.insert(item.clone()),
+            Act::End { item, .. } => items.remove(item) || true,
+            Act::Ask { request, .. } => requests.insert(request.clone()),
+            Act::Answered { request, .. } => requests.remove(request) || true,
+            _ => true,
+        };
+        if !fresh {
+            return Err(bad(&format!("line {} begins what has not ended", n + 1)));
+        }
+        steps.push(step);
+    }
+    Ok(steps)
 }
 
-pub async fn play(
+pub struct Player {
     s: Session,
     steps: Vec<Step>,
     speed: f64,
     run: RunId,
     agent: AgentId,
-    mut cancel: watch::Receiver<bool>,
-) {
+}
+
+/// Begins the run. It is in the journal for good when this returns.
+pub async fn start(
+    s: Session,
+    steps: Vec<Step>,
+    speed: f64,
+    run: RunId,
+    agent: AgentId,
+) -> Result<Player, Closed> {
     let (mut name, mut model) = ("Replay".to_owned(), None);
     if let Some(Act::Agent { name: n, model: m }) = steps.first().map(|s| &s.act) {
         name.clone_from(n);
@@ -58,96 +91,109 @@ pub async fn play(
         Say::Event(Body::RunStarted { run: run.clone(), agent: agent.clone() }),
         Say::Event(Body::AgentState { agent: agent.clone(), state: AgentState::Running }),
     ])
-    .await;
+    .await?;
+    s.sync().await?;
+    Ok(Player { s, steps, speed, run, agent })
+}
 
-    let mut items: HashMap<String, ItemId> = HashMap::new();
-    let mut requests: HashMap<String, RequestId> = HashMap::new();
-    let (mut outcome, mut error) = (Outcome::Completed, None);
-    for step in steps {
-        if speed > 0.0 && step.after > 0 {
-            let ms = (step.after as f64 / speed).min(MAX_PAUSE.as_millis() as f64);
-            tokio::select! {
-                () = tokio::time::sleep(Duration::from_micros((ms * 1000.0) as u64)) => {}
-                r = cancel.changed() => if r.is_err() { break },
+impl Player {
+    /// Plays to the end, or until cancelled. How it ended is in the journal when this returns.
+    pub async fn play(self, mut cancel: watch::Receiver<bool>) -> Result<(), Closed> {
+        let Self { s, steps, speed, run, agent } = self;
+        let mut items: HashMap<String, ItemId> = HashMap::new();
+        let mut requests: HashMap<String, RequestId> = HashMap::new();
+        let (mut outcome, mut error) = (Outcome::Completed, None);
+        for step in steps {
+            if speed > 0.0 && step.after > 0 {
+                let ms = (step.after as f64 / speed).min(MAX_PAUSE.as_millis() as f64);
+                tokio::select! {
+                    () = tokio::time::sleep(Duration::from_micros((ms * 1000.0) as u64)) => {}
+                    _ = cancel.wait_for(|c| *c) => {}
+                    () = s.closed() => return Err(Closed),
+                }
             }
-        }
-        if *cancel.borrow() {
-            outcome = Outcome::Cancelled;
-            break;
-        }
-        let say = match step.act {
-            Act::Agent { .. } => continue,
-            Act::State { state } => Say::Event(Body::AgentState { agent: agent.clone(), state }),
-            Act::Start { item, kind, name, args } => {
-                let id = ItemId::new();
-                items.insert(item, id.clone());
-                Say::Event(Body::ItemStarted {
-                    item: id,
-                    run: run.clone(),
-                    agent: agent.clone(),
-                    kind,
-                    name,
-                    args,
-                })
-            }
-            Act::Text { item, text } => match items.get(&item) {
-                Some(id) => Say::Text(id.clone(), text),
-                None => continue,
-            },
-            Act::End { item, outcome, result } => match items.remove(&item) {
-                Some(id) => Say::End(id, outcome, result),
-                None => continue,
-            },
-            Act::Ask { request, what, subject, scope } => {
-                let id = RequestId::new();
-                requests.insert(request, id.clone());
-                Say::Event(Body::RequestOpened {
-                    request: id,
-                    agent: agent.clone(),
-                    what,
-                    subject,
-                    scope,
-                    // Nobody is waiting: this already happened.
-                    answerable: Answerable::No,
-                })
-            }
-            Act::Answered { request, answer } => match requests.remove(&request) {
-                Some(request) => Say::Event(Body::RequestClosed { request, answer }),
-                None => continue,
-            },
-            Act::Usage { usage, provenance } => {
-                Say::Event(Body::Usage { agent: agent.clone(), usage, provenance })
-            }
-            Act::Finish { outcome: o, error: e } => {
-                (outcome, error) = (o, e);
+            if *cancel.borrow() {
+                outcome = Outcome::Cancelled;
                 break;
             }
-        };
-        s.say(vec![say]).await;
-    }
-    let mut end: Vec<_> = items
-        .into_values()
-        .map(|id| {
-            Say::End(
-                id,
-                if outcome == Outcome::Completed { Outcome::Interrupted } else { outcome },
-                None,
-            )
-        })
-        .collect();
-    end.extend(
-        requests
+            let say = match step.act {
+                Act::Agent { .. } => continue,
+                Act::State { state } => {
+                    Say::Event(Body::AgentState { agent: agent.clone(), state })
+                }
+                Act::Start { item, kind, name, args } => {
+                    let id = ItemId::new();
+                    items.insert(item, id.clone());
+                    Say::Event(Body::ItemStarted {
+                        item: id,
+                        run: run.clone(),
+                        agent: agent.clone(),
+                        kind,
+                        name,
+                        args,
+                    })
+                }
+                Act::Text { item, text } => match items.get(&item) {
+                    Some(id) => Say::Text(id.clone(), text),
+                    None => continue,
+                },
+                Act::End { item, outcome, result } => match items.remove(&item) {
+                    Some(id) => Say::End(id, outcome, result),
+                    None => continue,
+                },
+                Act::Ask { request, what, subject, scope } => {
+                    let id = RequestId::new();
+                    requests.insert(request, id.clone());
+                    Say::Event(Body::RequestOpened {
+                        request: id,
+                        agent: agent.clone(),
+                        what,
+                        subject,
+                        scope,
+                        // Nobody is waiting: this already happened.
+                        answerable: Answerable::No,
+                    })
+                }
+                Act::Answered { request, answer } => match requests.remove(&request) {
+                    Some(request) => Say::Event(Body::RequestClosed { request, answer }),
+                    None => continue,
+                },
+                Act::Usage { usage, provenance } => {
+                    Say::Event(Body::Usage { agent: agent.clone(), usage, provenance })
+                }
+                Act::Finish { outcome: o, error: e } => {
+                    (outcome, error) = (o, e);
+                    break;
+                }
+            };
+            s.say(vec![say]).await?;
+        }
+        let mut end: Vec<_> = items
             .into_values()
-            .map(|request| Say::Event(Body::RequestClosed { request, answer: "expired".into() })),
-    );
-    end.push(Say::Event(Body::RunEnded { run, outcome, error }));
-    end.push(Say::Event(Body::AgentState {
-        agent,
-        state: match outcome {
-            Outcome::Failed => AgentState::Failed,
-            Outcome::Completed => AgentState::Done,
-            _ => AgentState::Paused,
-        },
-    }));
-    s.say(end).await;
+            .map(|id| {
+                Say::End(
+                    id,
+                    if outcome == Outcome::Completed { Outcome::Interrupted } else { outcome },
+                    None,
+                )
+            })
+            .collect();
+        end.extend(
+            requests.into_values().map(|request| {
+                Say::Event(Body::RequestClosed { request, answer: "expired".into() })
+            }),
+        );
+        end.push(Say::Event(Body::RunEnded { run, outcome, error }));
+        end.push(Say::Event(Body::AgentState {
+            agent,
+            state: match outcome {
+                Outcome::Failed => AgentState::Failed,
+                Outcome::Completed => AgentState::Done,
+                _ => AgentState::Paused,
+            },
+        }));
+        s.say(end).await?;
+        s.sync().await?;
+        Ok(())
+    }
 }

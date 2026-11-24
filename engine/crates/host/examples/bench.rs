@@ -111,12 +111,19 @@ async fn stream(bin: &std::path::Path, agents: usize, rate: usize, secs: usize) 
         c.call(Call::Follow { session: id.clone(), after: 0 }).await?;
         sessions.push(id);
     }
-    for id in &sessions {
-        let path = script.display().to_string();
-        c.call(Call::ReplayStart { session: id.clone(), path, speed: 1.0 }).await?;
-    }
     let (cpu0, _) = usage(host.id())?;
     let t = Instant::now();
+    // From another connection: a start is answered when it is on the drive, and the events of those
+    // started before are to be read as they come.
+    let mut starter = Client::connect(&p, "bench").await?;
+    let path = script.display().to_string();
+    let starting = tokio::spawn(async move {
+        for session in sessions {
+            let call = Call::ReplayStart { session, path: path.clone(), speed: 1.0 };
+            starter.call(call).await.map_err(|e| e.to_string())?;
+        }
+        Ok::<_, String>(())
+    });
     let (mut ended, mut text, mut events, mut msgs, mut resync) = (0, 0usize, 0usize, 0usize, 0);
     let mut lag = Vec::new();
     while ended < agents {
@@ -143,6 +150,7 @@ async fn stream(bin: &std::path::Path, agents: usize, rate: usize, secs: usize) 
             _ => {}
         }
     }
+    starting.await??;
     let wall = t.elapsed().as_secs_f64();
     let (cpu1, rss) = usage(host.id())?;
     let db: u64 = std::fs::read_dir(&p.data)?

@@ -86,6 +86,14 @@ fn main() -> Result<(), serde_json::Error> {
             }])?,
         },
         Message::Err { id: 2, error: WireError::new(ErrorCode::NotFound, "no") },
+        Message::Fault { session: SessionId("s_1".into()), fault: "cannot be read".into() },
+        Message::Ok {
+            id: 3,
+            result: json!({
+                "version": "0", "pid": 4, "clients": 1, "runs": 0, "damaged": "why",
+                "faults": [Fault { session: SessionId("s_1".into()), words: "w".into() }],
+            }),
+        },
     ] {
         println!("{}", serde_json::to_string(&m)?);
     }

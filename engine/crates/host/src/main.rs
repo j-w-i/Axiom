@@ -1,6 +1,6 @@
-use std::{process::ExitCode, time::Duration};
+use std::{io::Write, process::ExitCode, time::Duration};
 
-use axiom_host::{Config, Host, HostError, paths::Paths};
+use axiom_host::{Config, Host, HostError, paths::Paths, signal};
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -33,9 +33,14 @@ fn main() -> ExitCode {
             }
         };
     let r = rt.block_on(async {
+        let stop = signal::stop()?;
         let h = Host::start(cfg)?;
-        println!("ready");
-        h.serve().await
+        // Nobody may be there to read it.
+        let _ = writeln!(std::io::stdout(), "ready");
+        h.serve_until(async {
+            stop.await;
+        })
+        .await
     });
     match r {
         Ok(()) => ExitCode::SUCCESS,
