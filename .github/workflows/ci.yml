@@ -62,9 +62,8 @@ jobs:
         working-directory: app
       - run: dart run tool/check_licences.dart
         working-directory: app
-      - run: flutter test --reporter expanded
-        working-directory: app
-        timeout-minutes: 15 # a step that is cut off keeps its log; a job that is does not
+      - run: scripts/ci-flutter-test.sh
+        shell: bash
       - name: Build
         working-directory: app
         shell: bash
