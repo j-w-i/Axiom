@@ -485,3 +485,89 @@ proptest! {
         prop_assert_eq!(whole.read(&s, 0, ALL).unwrap(), cut.read(&s, 0, ALL).unwrap());
     }
 }
+
+#[test]
+fn what_the_host_needs_is_kept_beside_the_events() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j");
+    let mut j = Journal::open(&p).unwrap();
+    let (s, t) = (SessionId::new(), SessionId::new());
+    for x in [&s, &t] {
+        j.create(x, "t", None, 1).unwrap();
+    }
+    let (a, b) = (AgentId("a".into()), AgentId("b".into()));
+    j.put_agent(&s, &a, "one").unwrap();
+    j.put_agent(&s, &a, "two").unwrap();
+    j.put_agent(&s, &b, "b").unwrap();
+    for (n, m) in ["m0", "m1"].iter().enumerate() {
+        j.put_message(&s, &a, n as u64, m).unwrap();
+    }
+    j.put_message(&s, &b, 0, "other").unwrap();
+    for (n, why) in [(1, "a repeat"), (3, "a gap")] {
+        assert!(j.put_message(&s, &a, n, "x").is_err(), "{why}");
+    }
+    assert!(j.put_message(&SessionId::new(), &a, 0, "x").is_err(), "no such session");
+    assert_eq!(j.last_audit().unwrap(), None);
+    j.put_audit(1, "e1").unwrap();
+    j.put_audit(2, "e2").unwrap();
+    for n in [0, 2, 4] {
+        assert!(j.put_audit(n, "x").is_err());
+    }
+    drop(j);
+    let mut j = Journal::open(&p).unwrap();
+    let r = Reader::open(&p).unwrap();
+    assert_eq!(r.agents(&s).unwrap(), [(a.clone(), "two".into()), (b.clone(), "b".into())]);
+    assert_eq!(r.messages(&s, &a).unwrap(), ["m0", "m1"]);
+    assert_eq!(r.messages(&s, &b).unwrap(), ["other"]);
+    assert!(r.messages(&t, &a).unwrap().is_empty() && r.agents(&t).unwrap().is_empty());
+    assert_eq!(r.audit(0, 10).unwrap(), ["e1", "e2"]);
+    assert_eq!(r.audit(1, 10).unwrap(), ["e2"]);
+    assert_eq!(j.last_audit().unwrap().as_deref(), Some("e2"));
+    // A message taken out from behind.
+    rusqlite::Connection::open(&p)
+        .unwrap()
+        .execute("delete from message where n=0 and agent='a'", [])
+        .unwrap();
+    assert!(r.messages(&s, &a).is_err());
+    j.delete(&s).unwrap();
+    assert!(r.messages(&s, &b).unwrap().is_empty() && r.agents(&s).unwrap().is_empty());
+    assert_eq!(r.audit(0, 10).unwrap().len(), 2, "what was done stays on record");
+}
+
+#[test]
+fn schema_2_is_brought_forward() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j.db");
+    let c = rusqlite::Connection::open(&p).unwrap();
+    c.execute_batch(
+        r#"pragma journal_mode=WAL;
+        create table session(
+          id text primary key, title text not null, workspace text,
+          created integer not null, updated integer not null, last_seq integer not null);
+        create table event(
+          session text not null references session(id) on delete cascade,
+          seq integer not null, at integer not null, delta_of text, body text not null,
+          primary key(session, seq)) without rowid;
+        create index event_delta on event(session, delta_of) where delta_of is not null;
+        create table open(
+          session text not null references session(id) on delete cascade,
+          kind integer not null, id text not null, seq integer not null,
+          primary key(session, kind, id)) without rowid;
+        insert into session values('s','T',null,1,1,2);
+        insert into event values
+          ('s',1,1,null,'{"type":"session.created","title":"T"}'),
+          ('s',2,1,null,'{"type":"run.started","run":"r","agent":"a"}');
+        insert into open values('s',2,'r',2);
+        pragma user_version=2;"#,
+    )
+    .unwrap();
+    drop(c);
+    let s = SessionId("s".into());
+    for n in 0..2 {
+        let mut j = Journal::open(&p).unwrap();
+        assert_eq!(j.read(&s, 0, ALL).unwrap().len(), 2);
+        assert!(j.session(&s).unwrap().unwrap().running);
+        j.put_message(&s, &AgentId("a".into()), n, "m").unwrap();
+    }
+    assert_eq!(Journal::open(&p).unwrap().recover(9).unwrap().0, 1);
+}
