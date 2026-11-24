@@ -5,4 +5,9 @@
 //! providers differ, [`transport`] is HTTP, and [`Accumulator`] folds events into a [`Reply`]. There is
 //! no loop here: nothing is retried, and no tool is run.
 
+pub mod error;
+mod secret;
 pub mod sse;
+
+pub use error::{Class, Error, Retry};
+pub use secret::{Auth, Credential, Endpoint, Origin, Secret, SetupError};
