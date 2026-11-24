@@ -18,12 +18,15 @@
 | K15 | A code block over 120 lines scrolls sideways in parts of 120 lines | M2 |
 | K16 | Sessions are keyed by session id only; the workspace is a label until workspaces have ids (SI-21) | M2 policy |
 | K17 | A journal restored from a backup whose numbers have caught up is not noticed: the journal has no identity on the wire | M2 |
-| K18 | The host does not raise its open-file limit; its caps keep it near 120 descriptors | M2 spawn |
-| K19 | 32 silent local connections can delay a new client by up to 5 s | accepted, same user only |
+| K18 | The host does not raise its open-file limit; its caps keep it near 150 descriptors | M2 spawn |
+| K19 | A process of the same user that floods the socket makes some new connections fail; silent ones keep nobody out | accepted, same user only |
 | K20 | Text dropped past 1 MiB is marked after a crash but not counted | accepted |
-| K21 | An approval subject over 64 KiB is cut with a note; M2 policy must refuse such a request (SI-15) | M2 policy |
-| K22 | Schema 2 is one-way; a host from before it must be stopped before this one starts on the same data | accepted before 1.0 |
+| K21 | A request that can be answered and is too long to show is refused by the host with a typed error; the engine must tell the agent so | M2 engine |
+| K22 | Schema 2 is one-way; hosts from before it and this one exclude each other by `run/lock` | accepted before 1.0 |
 | K23 | The client lists the last 1 000 sessions | M4 |
 | K24 | Running lamps turn, so a frame is drawn on every refresh while an agent runs (6 paints of 12 × 10 px, nothing rebuilt); one scrolled just out of sight still counts. Reduced motion stops it | M2: measure power |
 | K25 | A table being written costs up to 20 ms per frame in a debug build near its cut at 4 000 characters | M2 |
 | K26 | Icons and lamps do not grow with the text | M2 accessibility |
+| K27 | 64 clients that follow and never read hold about 8 MiB each | M7 soak |
+| K28 | If the journal's file is moved away the host stops, and the endings of what ran are lost | accepted |
+| K29 | A write lock held by another program during a stop costs up to 10 s, and endings may then be unwritten | accepted |
