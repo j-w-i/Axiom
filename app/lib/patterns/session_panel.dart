@@ -44,7 +44,7 @@ class _SessionPanelState extends State<SessionPanel> {
         c.plate,
         radius: AxRadius.bay,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 5),
+          padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 1),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,

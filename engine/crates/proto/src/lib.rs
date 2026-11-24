@@ -46,7 +46,16 @@ fn fresh(prefix: &str) -> String {
     let _ = getrandom::fill(&mut b);
     static N: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
     let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("{prefix}_{:011x}{:016x}{n:04x}", now_ms(), u64::from_le_bytes(b))
+    format!(
+        "{prefix}_{:011x}{:016x}{n:04x}",
+        now_ms(),
+        u64::from_le_bytes(b)
+    )
+}
+
+/// Fills `b` from the system's generator, or says why it cannot.
+pub fn random(b: &mut [u8]) -> Result<(), String> {
+    getrandom::fill(b).map_err(|e| e.to_string())
 }
 
 pub fn now_ms() -> u64 {
@@ -207,7 +216,11 @@ pub enum Body {
     #[serde(rename = "request.closed")]
     RequestClosed { request: RequestId, answer: String },
     #[serde(rename = "usage")]
-    Usage { agent: AgentId, usage: Usage, provenance: Provenance },
+    Usage {
+        agent: AgentId,
+        usage: Usage,
+        provenance: Provenance,
+    },
     /// Something newer than this build.
     #[serde(untagged)]
     Unknown(Value),
@@ -226,7 +239,8 @@ pub enum Answerable {
     Unknown,
 }
 
-/// One entry of a session's journal. `seq` starts at 1 and never skips.
+/// One entry of a session's journal. `seq` starts at 1 and rises by one as events happen. Stored
+/// history may have holes: the deltas of an ended item are folded into its `item.ended`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub seq: u64,
@@ -251,7 +265,11 @@ pub struct SessionInfo {
 pub enum Call {
     /// Must be the first line on a connection.
     #[serde(rename = "hello")]
-    Hello { token: String, client: String, protocol: u32 },
+    Hello {
+        token: String,
+        client: String,
+        protocol: u32,
+    },
     #[serde(rename = "host.status")]
     Status {},
     /// Stops the host if nothing runs, or always with `force`.
@@ -268,7 +286,7 @@ pub enum Call {
         #[serde(default)]
         workspace: Option<String>,
     },
-    /// Sends the events after `after`, then follows. `live_text: false` omits deltas.
+    /// Sends the events after `after`, then follows.
     #[serde(rename = "session.follow")]
     Follow {
         session: SessionId,
@@ -303,12 +321,24 @@ pub struct Request {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Message {
-    Ok { id: u64, result: Value },
-    Err { id: u64, error: WireError },
-    /// Events of one session, in order, without gaps.
-    Events { session: SessionId, events: Vec<Event> },
+    Ok {
+        id: u64,
+        result: Value,
+    },
+    Err {
+        id: u64,
+        error: WireError,
+    },
+    /// Events of one session, in order. What has been sent before is never sent again.
+    Events {
+        session: SessionId,
+        events: Vec<Event>,
+    },
     /// This client fell behind. Nothing more comes for the session until it follows again.
-    Resync { session: SessionId, resync: u64 },
+    Resync {
+        session: SessionId,
+        resync: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
@@ -319,7 +349,10 @@ pub struct WireError {
 }
 impl WireError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { code, message: message.into() }
+        Self {
+            code,
+            message: message.into(),
+        }
     }
 }
 
@@ -338,6 +371,35 @@ pub enum ErrorCode {
 impl std::fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
+    }
+}
+
+/// The event types this build knows.
+pub const KNOWN: &[&str] = &[
+    "session.created",
+    "session.titled",
+    "agent.added",
+    "agent.state",
+    "run.started",
+    "run.ended",
+    "item.started",
+    "item.delta",
+    "item.ended",
+    "request.opened",
+    "request.closed",
+    "usage",
+];
+
+impl Body {
+    /// A body of a known type that did not decode: a fault of the sender, not a newer version.
+    pub fn malformed(&self) -> bool {
+        match self {
+            Body::Unknown(v) => v
+                .get("type")
+                .and_then(Value::as_str)
+                .is_none_or(|t| KNOWN.contains(&t)),
+            _ => false,
+        }
     }
 }
 
@@ -400,7 +462,13 @@ mod tests {
         let e: Body =
             serde_json::from_str(r#"{"type":"agent.state","agent":"a","state":"dozing","z":1}"#)
                 .unwrap();
-        assert_eq!(e, Body::AgentState { agent: AgentId("a".into()), state: AgentState::Unknown });
+        assert_eq!(
+            e,
+            Body::AgentState {
+                agent: AgentId("a".into()),
+                state: AgentState::Unknown
+            }
+        );
     }
 
     #[test]
@@ -413,7 +481,10 @@ mod tests {
 
     #[test]
     fn requests_have_one_shape() {
-        let r = Request { id: 3, call: Call::Status {} };
+        let r = Request {
+            id: 3,
+            call: Call::Status {},
+        };
         assert_eq!(
             serde_json::to_string(&r).unwrap(),
             r#"{"id":3,"method":"host.status","params":{}}"#
@@ -421,7 +492,13 @@ mod tests {
         let f: Request =
             serde_json::from_str(r#"{"id":1,"method":"session.follow","params":{"session":"s"}}"#)
                 .unwrap();
-        assert_eq!(f.call, Call::Follow { session: SessionId("s".into()), after: 0 });
+        assert_eq!(
+            f.call,
+            Call::Follow {
+                session: SessionId("s".into()),
+                after: 0
+            }
+        );
     }
 
     #[test]
@@ -463,33 +540,5 @@ mod tests {
         let mut s = Lines::default();
         s.push(&vec![b'x'; MAX_LINE + 1]);
         assert_eq!(s.next_line(), Err(LineTooLong));
-    }
-}
-
-/// The event types this build knows.
-pub const KNOWN: &[&str] = &[
-    "session.created",
-    "session.titled",
-    "agent.added",
-    "agent.state",
-    "run.started",
-    "run.ended",
-    "item.started",
-    "item.delta",
-    "item.ended",
-    "request.opened",
-    "request.closed",
-    "usage",
-];
-
-impl Body {
-    /// A body of a known type that did not decode: a fault of the sender, not a newer version.
-    pub fn malformed(&self) -> bool {
-        match self {
-            Body::Unknown(v) => {
-                v.get("type").and_then(Value::as_str).is_none_or(|t| KNOWN.contains(&t))
-            }
-            _ => false,
-        }
     }
 }

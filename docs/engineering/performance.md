@@ -8,13 +8,15 @@ Budgets come from measurement where one exists (marked ✔) and are targets othe
 | Same, 10 visible transcripts, 2 000 blocks each | p99 ≤ 8.33 ms | not measured |
 | Transcript of 50 000 blocks, append | same as 200 blocks ± 20 % | not measured |
 | Client decode | ≤ 2 µs/event, ≤ 1 % core at 1 k events/s | ✔ 0.8 µs (prototype) |
-| Host: 10 agents × 100 tok/s, journalled | ≤ 5 % of a core, ≤ 40 MB | see `engine` bench |
-| Host: 100 agents × 100 tok/s | ≤ 35 % of a core, no subscriber over budget | see `engine` bench |
+| Host: 10 agents × 100 tok/s, journalled | ≤ 6 % of a core, ≤ 40 MB (first target: 5 %) | ✔ 5.3 %, 9.5 MB |
+| Host: 100 agents × 100 tok/s | ≤ 35 % of a core, no resync, commit to client p99 ≤ 50 ms | ✔ 22 %, 36 MB, p99 25 ms, worst 37 ms, 0 resyncs |
 | Journal commit, 20 events | p99 ≤ 1 ms | ✔ 0.096 ms (prototype) |
-| Host start to ready | ≤ 50 ms | see `engine` bench |
+| Host start to ready | p99 ≤ 50 ms | ✔ 12 / 25 ms |
 | Client cold start to first frame | ≤ 700 ms | not measured |
 | Idle, 1 session open | ≤ 0.5 % CPU, ≤ 180 MB client + 20 MB host | not measured |
 | Markdown, 1 MB document, incremental | ≤ 16 ms per 4 KB chunk on the decode isolate | see `app/benchmark` |
 | Soak: 8 h, 10 agents | memory slope < 1 MB/h after the first hour | M7, short version weekly |
 
 Run: `scripts/bench.sh` (host and headless client benchmarks).
+
+Host figures: M4 Pro, macOS 27, 2026-11-25, `cargo run --release --example bench`, replayed scripts (their parsing and timers are included). Before group commit the 100-agent worst case was 366 ms.
