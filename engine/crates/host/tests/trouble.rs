@@ -469,14 +469,23 @@ async fn a_host_that_runs_out_of_files_goes_on_and_is_not_busy_with_it() {
     // It looks after its files meanwhile, which it cannot open.
     tokio::time::sleep(Duration::from_secs(4)).await;
     assert!(p.0.try_wait().unwrap().is_none(), "it still serves");
+    let busy = cpu_seconds(p.0.id());
+    assert!(busy < 2.0, "{busy} s of 4: it tries without a pause");
     c.call(Call::Cancel { session: s, run }).await.unwrap();
     drop(raw);
     let next = tokio::time::timeout(LONG, f.client()).await.unwrap();
     drop((next, c));
     p.0.kill().unwrap();
     let lines = std::io::read_to_string(said).unwrap();
-    let tries = lines.lines().filter(|l| l.contains("accepting")).count();
-    assert!((1..40).contains(&tries), "{tries}");
+    assert!(lines.contains("accepting"), "{lines}");
+}
+
+/// What a process has used of a processor. `ps` writes `[hours:]minutes:seconds`.
+#[cfg(unix)]
+fn cpu_seconds(pid: u32) -> f64 {
+    let ps = Command::new("ps").args(["-o", "time=", "-p", &pid.to_string()]).output().unwrap();
+    let text = String::from_utf8(ps.stdout).unwrap();
+    text.trim().split(':').fold(0.0, |all, x| all * 60.0 + x.parse::<f64>().unwrap())
 }
 
 // ---- nobody reads what it says ----
