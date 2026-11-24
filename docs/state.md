@@ -4,16 +4,16 @@ Updated 2026-11-25. Branch `m1/foundations`, pull request j-w-i/Axiom#14 into `m
 
 ## Where things stand
 - **M0**: done except the owner's reading of decisions 0006 (Google plans via Antigravity; Gemini CLI's consumer tier has ended) and 0007 (subscription lanes; written confirmation from Anthropic before launch).
-- **M1**: in progress. Design accepted by the owner at round 6 (`design/system.md`). Host, journal, wire, Dart client, transcript, live shell, gallery, tests, goldens, gate and CI exist.
+- **M1**: in progress. Design accepted by the owner at round 10 (`design/system.md`). Host, journal, wire, Dart client, transcript, live shell, gallery, tests, goldens, gate and CI exist.
 - **M2 and later**: nothing. There is no agent engine, no provider, no harness adapter, no tool, no sandbox. The app can list sessions and show replays; it cannot run an agent.
 
 ## What was verified, and where
 | What | How | OS |
 |------|-----|----|
 | v1 archive | refs compared; bundle restored, 357 commits | GitHub, macOS |
-| Wire, journal, host (34 tests), including kill -9, slow clients, strangers | `scripts/check.sh rust`; seven deliberate breakages, each caught | macOS 27 arm64 |
+| Wire, journal, host, CLI (106 tests), including kill -9, locked and damaged journals, slow and silent clients, strangers, signals | `scripts/check.sh rust`; 57 deliberate breakages, one equivalent survivor | macOS 27 arm64 |
 | Client through the real host process, kill -9 and reconnect | `app/test/host/e2e_test.dart` | macOS 27 arm64 |
-| Controls, contrast, transcript, shell, goldens (84 tests) | `scripts/check.sh app`, offscreen | macOS 27 arm64 |
+| Controls, contrast, transcript, shell, goldens, with the host tests above 241 tests in all | `scripts/check.sh app`, offscreen | macOS 27 arm64 |
 | Release build | `flutter build macos` | macOS 27 arm64 |
 | Host and Markdown benchmarks | `scripts/bench.sh` | M4 Pro |
 | Linux, Windows | CI only, see the pull request | |

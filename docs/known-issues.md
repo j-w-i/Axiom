@@ -8,7 +8,7 @@
 | K4 | Windows has no verified sandbox backend (decision 0008) | M2 spike |
 | K5 | Provider long-tail facts (rate-limit headers, replay flags) are unverified (`research/providers.md` §8) | M2, per provider |
 | K6 | `highlight.dart` is a one-line scanner, not a grammar | M4 |
-| K7 | Windows uses a Unix socket too (Dart ≥ 3.11 and `uds_windows`); proved by CI only. The peer's identity is not checked there: the directory's ACL and the token are | M2 security tests |
+| K7 | Windows uses a Unix socket too (Dart ≥ 3.11 and `uds_windows`); proved by CI only. The peer's identity is not checked there and directories get no ACL of their own: keep `AXIOM_DATA` inside the user's profile | M2 security tests |
 | K8 | The macOS window (transparent title bar, traffic lights, dragging by the header) is built but has not been looked at: it needs a real window and the owner's yes | M1 exit |
 | K9 | The application bundle does not contain `axiom-host` yet; set `AXIOM_HOST` | M2 packaging |
 | K10 | Keycaps use ⌘, which Archivo lacks: the system font supplies it on macOS, unverified elsewhere | M1 exit |
@@ -16,3 +16,11 @@
 | K13 | The transcript's ends are reached by moving its origin; there is no scroll bar, because a lazy list cannot know its length | M2: measured extents |
 | K14 | Selecting text across rows that are not built copies only what is built | M2 |
 | K15 | A code block over 120 lines scrolls sideways in parts of 120 lines | M2 |
+| K16 | Sessions are keyed by session id only; the workspace is a label until workspaces have ids (SI-21) | M2 policy |
+| K17 | A journal restored from a backup whose numbers have caught up is not noticed: the journal has no identity on the wire | M2 |
+| K18 | The host does not raise its open-file limit; its caps keep it near 120 descriptors | M2 spawn |
+| K19 | 32 silent local connections can delay a new client by up to 5 s | accepted, same user only |
+| K20 | Text dropped past 1 MiB is marked after a crash but not counted | accepted |
+| K21 | An approval subject over 64 KiB is cut with a note; M2 policy must refuse such a request (SI-15) | M2 policy |
+| K22 | Schema 2 is one-way; a host from before it must be stopped before this one starts on the same data | accepted before 1.0 |
+| K23 | The client lists the last 1 000 sessions | M4 |
