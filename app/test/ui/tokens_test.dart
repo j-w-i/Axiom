@@ -154,12 +154,11 @@ void main() {
         }
       });
 
-      // The owner's sample runs from hue 210 to 223; below it is sky, above it is violet. Both
-      // were rejected.
-      test('the blue is neither sky nor violet', () {
+      // The owner's choice of three (B, 2026-11-25), after cobalt, violet and a truer blue.
+      test('the accent is the aqua that was chosen', () {
         for (final k in [c.live, c.primary.top, c.primary.bottom]) {
           final h = HSLColor.fromColor(k);
-          expect(h.hue, inInclusiveRange(210, 223));
+          expect(h.hue, inInclusiveRange(192, 201));
           expect(h.lightness, lessThan(.67));
         }
       });

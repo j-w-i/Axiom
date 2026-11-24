@@ -1,7 +1,7 @@
 /// Every visual constant in Axiom. Nothing outside this file names a colour, a duration or a spring
 /// (test/ui/tokens_test.dart enforces it and checks contrast in both themes).
 ///
-/// The language: graphite structure, charcoal displays, blue only for what is live. Depth comes from
+/// The language: graphite structure, charcoal displays, aqua only for what is live. Depth comes from
 /// one light above: raised parts carry a faint lit top edge, displays sit slightly below the surface.
 library;
 
@@ -163,9 +163,9 @@ class AxColors {
     ink3: Color(0xFFB0B9C9),
     ink4: Color(0xFFA2ACBE),
     voice: Color(0xFFB2BCD0),
-    onPrimary: Color(0xFFFFFFFF),
-    live: Color(0xFF4A97FF),
-    liveText: Color(0xFF8CBDFF),
+    onPrimary: Color(0xFF04222E),
+    live: Color(0xFF35C3F3),
+    liveText: Color(0xFF86DCFB),
     attention: Color(0xFFE3A947),
     attentionText: Color(0xFFEBB965),
     fault: Color(0xFFE8635A),
@@ -173,8 +173,8 @@ class AxColors {
     done: Color(0xFF52BC88),
     doneText: Color(0xFF7ED3A6),
     idle: Color(0xFF7D889C),
-    focus: Color(0xFF5AA2FF),
-    selection: Color(0x663B8BEF),
+    focus: Color(0xFF55CDF6),
+    selection: Color(0x6620A9DB),
     rule: Color(0xFF121317),
     ruleLight: Color(0x0DFFFFFF),
     bayRule: Color(0xFF292C32),
@@ -250,23 +250,23 @@ class AxColors {
       lip: Color(0x0AFFFFFF),
     ),
     primary: SurfaceSpec(
-      top: Color(0xFF2470EE),
-      bottom: Color(0xFF1E69E8),
-      border: Color(0xFF0E3C92),
+      top: Color(0xFF3CC3F4),
+      bottom: Color(0xFF30BAED),
+      border: Color(0xFF0B5F80),
       edge: Color(0x29FFFFFF),
       shadows: [BoxShadow(color: Color(0x38000000), blurRadius: 2, offset: Offset(0, 1))],
     ),
     primaryHover: SurfaceSpec(
-      top: Color(0xFF2470EE),
-      bottom: Color(0xFF2470EE),
-      border: Color(0xFF0E3C92),
+      top: Color(0xFF55CFF9),
+      bottom: Color(0xFF55CFF9),
+      border: Color(0xFF0B5F80),
       edge: Color(0x4DFFFFFF),
       shadows: [BoxShadow(color: Color(0x40000000), blurRadius: 3, offset: Offset(0, 1))],
     ),
     primaryDown: SurfaceSpec(
-      top: Color(0xFF1857C6),
-      bottom: Color(0xFF1B5DD0),
-      border: Color(0xFF0B2F74),
+      top: Color(0xFF1F9CCB),
+      bottom: Color(0xFF25A5D5),
+      border: Color(0xFF0B5F80),
       inset: Color(0x3D000000),
       lip: Color(0x14FFFFFF),
     ),
@@ -283,7 +283,7 @@ class AxColors {
     diffAdd: Color(0x2B4DB585),
     diffRemove: Color(0x30E5645B),
     codePlain: Color(0xFFB4BFD2),
-    codeKeyword: Color(0xFF8CBEFF),
+    codeKeyword: Color(0xFF86DCFB),
     codeString: Color(0xFF9FD08E),
     codeCall: Color(0xFFE6EBF5),
     codeType: Color(0xFFD9AEE6),
@@ -291,12 +291,12 @@ class AxColors {
     codeComment: Color(0xFF99A2B4),
     scrim: Color(0x8A05080E),
     kindRead: Color(0xFF8EA5CE),
-    kindEdit: Color(0xFF6FB2FF),
+    kindEdit: Color(0xFF86DCFB),
     kindSearch: Color(0xFF5FBFA8),
     kindRun: Color(0xFFDDAE62),
     kindWeb: Color(0xFF7FB58A),
     kindThink: Color(0xFFBCA3DE),
-    codeInline: Color(0xFFA6D0FF),
+    codeInline: Color(0xFF86DCFB),
     services: {
       ServiceMark.anthropic: Color(0xFFE08A66),
       ServiceMark.claude: Color(0xFFE08A66),
@@ -336,9 +336,9 @@ class AxColors {
     ink3: Color(0xFF424A58),
     ink4: Color(0xFF4A5260),
     voice: Color(0xFF45506A),
-    onPrimary: Color(0xFFFFFFFF),
-    live: Color(0xFF1A66DC),
-    liveText: Color(0xFF124FA8),
+    onPrimary: Color(0xFF04222E),
+    live: Color(0xFF08709C),
+    liveText: Color(0xFF06587B),
     attention: Color(0xFF966612),
     attentionText: Color(0xFF6E4A07),
     fault: Color(0xFFBE4038),
@@ -346,8 +346,8 @@ class AxColors {
     done: Color(0xFF357A59),
     doneText: Color(0xFF1B5A3D),
     idle: Color(0xFF6B7380),
-    focus: Color(0xFF1F6CEC),
-    selection: Color(0x4D4B97F2),
+    focus: Color(0xFF0874A2),
+    selection: Color(0x4D35B9E6),
     rule: Color(0xFFAAB6C9),
     ruleLight: Color(0x8CFFFFFF),
     bayRule: Color(0xFFD6DEEC),
@@ -423,23 +423,23 @@ class AxColors {
       lip: Color(0x80FFFFFF),
     ),
     primary: SurfaceSpec(
-      top: Color(0xFF2470EE),
-      bottom: Color(0xFF1E69E8),
-      border: Color(0xFF1551B8),
+      top: Color(0xFF4FCBF6),
+      bottom: Color(0xFF43C4F2),
+      border: Color(0xFF2389B0),
       edge: Color(0x47FFFFFF),
       shadows: [BoxShadow(color: Color(0x3324408F), blurRadius: 2, offset: Offset(0, 1))],
     ),
     primaryHover: SurfaceSpec(
-      top: Color(0xFF2470EE),
-      bottom: Color(0xFF2470EE),
-      border: Color(0xFF1551B8),
+      top: Color(0xFF66D4FA),
+      bottom: Color(0xFF66D4FA),
+      border: Color(0xFF2389B0),
       edge: Color(0x52FFFFFF),
       shadows: [BoxShadow(color: Color(0x4024408F), blurRadius: 3, offset: Offset(0, 1))],
     ),
     primaryDown: SurfaceSpec(
-      top: Color(0xFF1857C6),
-      bottom: Color(0xFF1B5DD0),
-      border: Color(0xFF1048A6),
+      top: Color(0xFF2AA9D8),
+      bottom: Color(0xFF31B1E0),
+      border: Color(0xFF1C7396),
       inset: Color(0x3D000000),
       lip: Color(0x66FFFFFF),
     ),
@@ -456,7 +456,7 @@ class AxColors {
     diffAdd: Color(0x2E2F8A5C),
     diffRemove: Color(0x2ECB453D),
     codePlain: Color(0xFF39414F),
-    codeKeyword: Color(0xFF1650A6),
+    codeKeyword: Color(0xFF065A7E),
     codeString: Color(0xFF2F6A2A),
     codeCall: Color(0xFF171B23),
     codeType: Color(0xFF7B3A94),
@@ -464,12 +464,12 @@ class AxColors {
     codeComment: Color(0xFF4F5A6E),
     scrim: Color(0x66202A3C),
     kindRead: Color(0xFF45608F),
-    kindEdit: Color(0xFF1757B4),
+    kindEdit: Color(0xFF06587B),
     kindSearch: Color(0xFF14725F),
     kindRun: Color(0xFF85590B),
     kindWeb: Color(0xFF2E6B3B),
     kindThink: Color(0xFF6A4A98),
-    codeInline: Color(0xFF1650A6),
+    codeInline: Color(0xFF065A7E),
     services: {
       ServiceMark.anthropic: Color(0xFFAD4F2B),
       ServiceMark.claude: Color(0xFFAD4F2B),
@@ -557,7 +557,7 @@ abstract final class AxSpace {
 }
 
 abstract final class AxRadius {
-  static const double tick = 2, key = 4, plate = 5, bay = 6, overlay = 7;
+  static const double tick = 2, key = 6, plate = 7, bay = 8, overlay = 10;
 }
 
 /// Control sizes. Density changes height and padding, never type size.
