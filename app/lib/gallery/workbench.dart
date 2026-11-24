@@ -51,13 +51,13 @@ class _WorkbenchState extends State<Workbench> {
       radius: 0,
       child: LayoutBuilder(
         builder: (context, box) {
-          final wide = box.maxWidth >= 1080;
+          final wide = box.maxWidth >= 860;
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (wide)
                 SizedBox(
-                  width: 264,
+                  width: box.maxWidth >= 1080 ? 264 : 224,
                   child: _Side(
                     inset: widget.titleInset,
                     selected: _agent,
@@ -83,7 +83,7 @@ class _WorkbenchState extends State<Workbench> {
                               ],
                             ),
                           ),
-                          if (box.maxWidth >= 900)
+                          if (box.maxWidth >= 1000)
                             for (final v in s.services)
                               UsageKey(
                                 s.ServiceViewX(v).withActive(_active[v.name]!),
@@ -117,7 +117,7 @@ class _WorkbenchState extends State<Workbench> {
                                   children: [
                                     Text(agent.name, style: t.type.uiStrong),
                                     const SizedBox(width: 8),
-                                    Expanded(child: line(wide)),
+                                    Expanded(child: line(box.maxWidth >= 1240)),
                                     AxTabs(
                                       tabs: const [
                                         ('Conversation', null),

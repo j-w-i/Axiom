@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 import '../host/host_store.dart';
@@ -5,6 +7,7 @@ import '../host/proto.dart';
 import '../host/session_model.dart';
 import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
+import '../transcript/safe_text.dart';
 import '../transcript/transcript_view.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
@@ -25,10 +28,11 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> {
   String? _agent;
+  String? _session;
 
   @override
   Widget build(BuildContext context) {
-    final c = Ax.of(context).colors;
+    final t = Ax.of(context), c = t.colors;
     return Surface(
       c.chassis,
       radius: 0,
@@ -36,6 +40,12 @@ class _ShellState extends State<Shell> {
         listenable: widget.store,
         builder: (context, _) {
           final s = widget.store;
+          // An agent is chosen within its session only.
+          if (_session != s.current?.id) {
+            _session = s.current?.id;
+            _agent = null;
+          }
+          final stale = s.phase != HostPhase.connected;
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -49,28 +59,65 @@ class _ShellState extends State<Shell> {
                 ),
               ),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
-                  child: Surface(
-                    c.bay,
-                    radius: AxRadius.bay,
-                    child: switch (s) {
-                      HostStore(phase: HostPhase.starting) => const _Word('Starting the host'),
-                      HostStore(phase: HostPhase.unreachable, current: null) => _Unreachable(s),
-                      HostStore(current: final m?) => _Display(
-                        m,
-                        agent: _agent,
-                        stale: s.phase != HostPhase.connected,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: 44,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 12, right: 20),
+                        child: Row(
+                          children: [
+                            if (stale && s.phase != HostPhase.starting) ...[
+                              const AxLamp(AgentState.failed),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  s.binary == null && s.current == null
+                                      ? 'axiom-host was not found beside the application'
+                                      : 'The host is not answering. Trying again.',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: t.type.label.ink(c.faultText),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
-                      _ => _Word(
-                        s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
-                        detail: s.sessions.isEmpty
-                            ? 'This build replays recorded sessions: axiom replay SESSION SCRIPT. '
-                                  'Running agents comes with the native engine.'
-                            : null,
+                    ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 8, bottom: 8),
+                        child: Surface(
+                          c.bay,
+                          radius: AxRadius.bay,
+                          child: switch (s) {
+                            HostStore(phase: HostPhase.starting, current: null) => const _Word(
+                              'Starting the host',
+                            ),
+                            HostStore(phase: HostPhase.unreachable, current: null) => _Word(
+                              'The host is not answering',
+                              detail: s.problem,
+                            ),
+                            HostStore(current: final m?) => _Display(
+                              m,
+                              agent: _agent,
+                              stale: stale,
+                              onAgain: () => unawaited(s.open(m.id).catchError((_) {})),
+                            ),
+                            _ => _Word(
+                              s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
+                              detail: s.sessions.isEmpty
+                                  ? 'This build replays recorded sessions: axiom replay SESSION '
+                                        'SCRIPT. Running agents comes with the native engine.'
+                                  : null,
+                            ),
+                          },
+                        ),
                       ),
-                    },
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -103,7 +150,7 @@ AgentView viewOf(AgentModel a) {
     id: a.id,
     name: a.name,
     state: phaseOf(a.phase),
-    model: a.execution.model ?? '',
+    model: oneLine(a.execution.model ?? '', 60),
     harness: a.execution.harness,
     connection: a.execution.connection ?? '',
     elapsed: '',
@@ -164,28 +211,18 @@ class _Side extends StatelessWidget {
                   tone: AxTone.quiet,
                   onPressed: store.phase != HostPhase.connected
                       ? null
-                      : () async => store.open(await store.create('New session')),
+                      : () async {
+                          try {
+                            await store.open(await store.create('New session'));
+                          } on Exception {
+                            // The connection's loss is shown by the store itself.
+                          }
+                        },
                 ),
               ],
             ),
           ),
         ),
-        if (store.phase == HostPhase.unreachable)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 12, 10),
-            child: Row(
-              children: [
-                const AxLamp(AgentState.failed, width: 12),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'The host is not answering. Trying again.',
-                    style: t.type.label.ink(c.faultText),
-                  ),
-                ),
-              ],
-            ),
-          ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
@@ -202,7 +239,7 @@ class _Side extends StatelessWidget {
                         age: '',
                         agents: [for (final a in m.agents.values) viewOf(a)],
                       ),
-                      selected: agent ?? m.agents.keys.firstOrNull,
+                      selected: m.agents.containsKey(agent) ? agent : m.agents.keys.firstOrNull,
                       onSelect: onAgent,
                     ),
                   ),
@@ -219,8 +256,8 @@ class _Side extends StatelessWidget {
                 ),
               for (final s in others)
                 SessionRow(
-                  SessionView(id: s.id, title: s.title, age: ageOf(s.updated)),
-                  onOpen: () => store.open(s.id),
+                  SessionView(id: s.id, title: oneLine(s.title), age: ageOf(s.updated)),
+                  onOpen: () => unawaited(store.open(s.id).catchError((_) {})),
                 ),
             ],
           ),
@@ -231,35 +268,47 @@ class _Side extends StatelessWidget {
 }
 
 class _Display extends StatelessWidget {
-  const _Display(this.session, {required this.agent, required this.stale});
+  const _Display(this.session, {required this.agent, required this.stale, required this.onAgain});
   final SessionModel session;
   final String? agent;
   final bool stale;
+  final VoidCallback onAgain;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: session,
     builder: (context, _) {
       final t = Ax.of(context), c = t.colors;
       final a = session.agents[agent] ?? session.agents.values.firstOrNull;
+      if (session.fault case final f?) {
+        return _Word('This session cannot be shown', detail: f, action: ('Try again', onAgain));
+      }
+      if (!session.loaded) return _Word(stale ? 'Waiting for the host' : 'Reading the session');
       if (a == null) return const _Word('No agent has worked here yet');
       final x = a.execution;
+      final asked = session.requests.values.where((r) => r.opened.agent == a.id).firstOrNull;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(
-            height: 36,
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 40),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
                 children: [
-                  Text(a.name, style: t.type.uiStrong),
+                  Flexible(
+                    child: Text(
+                      a.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.uiStrong,
+                    ),
+                  ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Text(
                       [
-                        ?x.model,
-                        if (x.harness == 'replay') 'replay' else x.harness,
-                        ?x.connection,
+                        for (final p in [x.model, x.harness, x.connection])
+                          if (p != null) oneLine(p, 60),
                       ].join('   '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -273,6 +322,22 @@ class _Display extends StatelessWidget {
           ),
           ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
           Expanded(child: TranscriptView(a)),
+          if (asked != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    asked.opened.answerable == Answerable.no
+                        ? 'Asked, and no longer waiting for an answer'
+                        : 'Asking',
+                    style: t.type.label.ink(c.attentionText),
+                  ),
+                  Text(literal(asked.opened.subject), style: t.type.code.ink(c.ink2)),
+                ],
+              ),
+            ),
         ],
       );
     },
@@ -280,38 +345,33 @@ class _Display extends StatelessWidget {
 }
 
 class _Word extends StatelessWidget {
-  const _Word(this.text, {this.detail});
+  const _Word(this.text, {this.detail, this.action});
   final String text;
   final String? detail;
+  final (String, VoidCallback)? action;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 380),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(text, style: t.type.title.ink(c.ink2)),
-            if (detail case final d?) ...[
-              const SizedBox(height: 8),
-              Text(d, textAlign: TextAlign.center, style: t.type.ui.ink(c.ink3)),
+      child: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(text, textAlign: TextAlign.center, style: t.type.title.ink(c.ink2)),
+              if (detail case final d?) ...[
+                const SizedBox(height: 8),
+                Text(visible(d), textAlign: TextAlign.center, style: t.type.ui.ink(c.ink3)),
+              ],
+              if (action case (final l, final f)?) ...[
+                const SizedBox(height: 14),
+                AxButton(label: l, onPressed: f),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
   }
-}
-
-class _Unreachable extends StatelessWidget {
-  const _Unreachable(this.store);
-  final HostStore store;
-  @override
-  Widget build(BuildContext context) => _Word(
-    'The host is not answering',
-    detail: store.binary == null
-        ? 'axiom-host was not found beside the application.'
-        : store.problem,
-  );
 }

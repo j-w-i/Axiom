@@ -56,11 +56,13 @@ class HostStore extends ChangeNotifier {
 
   HostLink? _link;
   StreamSubscription<Message>? _sub;
-  Timer? _retry;
-  bool _disposed = false;
+  Timer? _retry, _drainTimer;
+  bool _disposed = false, _starting = false;
   int _attempt = 0;
   final _pending = <Event>[];
+  int _at = 0;
   bool _scheduled = false;
+  final _restarts = <DateTime>[];
 
   static String? findBinary() {
     final exe = Platform.isWindows ? 'axiom-host.exe' : 'axiom-host';
@@ -72,23 +74,35 @@ class HostStore extends ChangeNotifier {
   }
 
   Future<void> start() async {
-    if (_disposed) return;
+    if (_disposed || _starting) return;
+    _starting = true;
     try {
       await _connect();
+      _attempt = 0;
     } on Object catch (e) {
-      if (_disposed) return;
-      phase = HostPhase.unreachable;
-      problem = '$e';
-      notifyListeners();
-      _later();
+      if (!_disposed) _unreachable('$e');
+    } finally {
+      _starting = false;
     }
   }
 
-  void _later() {
+  void _unreachable(String why) {
+    _drop();
+    phase = HostPhase.unreachable;
+    problem = why;
+    notifyListeners();
     _attempt++;
     final ms = (250 << _attempt.clamp(0, 5)).clamp(250, 8000);
     _retry?.cancel();
     _retry = Timer(Duration(milliseconds: ms), () => unawaited(start()));
+  }
+
+  /// Lets go of the connection, whatever state it is in.
+  void _drop() {
+    unawaited(_sub?.cancel());
+    _sub = null;
+    _link?.close();
+    _link = null;
   }
 
   Future<HostLink> _open() async => HostLink.connect(
@@ -114,13 +128,16 @@ class HostStore extends ChangeNotifier {
     }
     if (_disposed) return link.close();
     _link = link;
-    _attempt = 0;
     _sub = link.messages.listen(_message);
-    unawaited(link.closed.then((why) => _lost(link, why)));
+    unawaited(
+      link.closed.then((why) {
+        if (!_disposed && identical(link, _link)) _unreachable(why);
+      }),
+    );
     phase = HostPhase.connected;
     problem = null;
     await refresh();
-    if (current case final c?) await _follow(c);
+    if (current case final c? when c.fault == null) await _follow(c);
     notifyListeners();
   }
 
@@ -136,87 +153,130 @@ class HostStore extends ChangeNotifier {
     }
   }
 
-  void _lost(HostLink link, String why) {
-    if (_disposed || !identical(link, _link)) return;
-    _link = null;
-    unawaited(_sub?.cancel());
-    phase = HostPhase.unreachable;
-    problem = why;
-    notifyListeners();
-    _later();
-  }
+  HostLink get _live => _link ?? (throw const LinkClosed('the host is not answering'));
 
   Future<void> refresh() async {
-    final r = await _link!.call('session.list');
+    final r = await _live.call('session.list');
     sessions = [for (final j in r! as List<Object?>) SessionInfo.decode(j! as Json)];
     notifyListeners();
   }
 
   Future<String> create(String title, {String? workspace}) async {
-    final r = await _link!.call('session.create', {'title': title, 'workspace': ?workspace});
+    final r = await _live.call('session.create', {'title': title, 'workspace': ?workspace});
     await refresh();
     return (r! as Json)['session']! as String;
   }
 
   Future<void> open(String id) async {
+    final link = _link;
     if (current case final c? when c.id != id) {
-      _pending.clear();
-      unawaited(_link?.call('session.unfollow', {'session': c.id}).catchError((_) => null));
+      _forget();
+      if (link != null) unawaited(link.unfollow(c.id).catchError((_) {}));
     }
-    if (current?.id != id) current = SessionModel(id);
+    if (current?.id != id || current?.fault != null) current = SessionModel(id);
     notifyListeners();
-    if (_link != null) await _follow(current!);
+    if (link != null) await _follow(current!);
   }
 
   Future<void> replay(String session, String path, {double speed = 1}) async =>
-      _link!.call('replay.start', {'session': session, 'path': path, 'speed': speed});
+      _live.call('replay.start', {'session': session, 'path': path, 'speed': speed});
 
-  Future<void> _follow(SessionModel m) async =>
-      _link?.call('session.follow', {'session': m.id, 'after': m.seq});
+  Future<void> _follow(SessionModel m) async {
+    try {
+      await _link?.follow(m.id, m.seq);
+    } on Failed catch (e) {
+      // The connection is well; this session is not.
+      if (identical(m, current)) m.failed(e.message);
+    }
+  }
 
   void _message(Message m) {
+    final c = current;
     switch (m) {
-      case Events(:final session, :final events) when session == current?.id:
+      case Events(:final session, :final events):
+        if (session != c?.id) return _link?.consumed(events.length);
         _pending.addAll(events);
         _schedule();
-      case Resync(:final session, :final last) when session == current?.id:
-        final c = current!;
-        _drain();
-        if (last == 0) {
-          // The host has another history: begin again rather than mix the two.
-          current = SessionModel(c.id);
-          notifyListeners();
+      case Resync(:final session, :final last) when session == c?.id:
+        if (last > 0) {
+          unawaited(_follow(c!).catchError((_) {}));
+          return;
         }
+        // The host has another history: begin again rather than mix the two. If that goes on
+        // happening, say so instead of going round.
+        final now = DateTime.now();
+        _restarts
+          ..removeWhere((t) => now.difference(t) > const Duration(seconds: 10))
+          ..add(now);
+        if (_restarts.length > 3) {
+          c!.failed('the host and this window disagree about the session');
+          return;
+        }
+        _forget();
+        current = SessionModel(c!.id);
+        notifyListeners();
         unawaited(_follow(current!).catchError((_) {}));
+      case Fault(:final session, :final words) when session == c?.id:
+        c!.failed(words);
       case _:
     }
   }
 
-  /// One batch per frame, however many messages came.
-  void _schedule() {
-    if (_scheduled) return;
-    _scheduled = true;
-    SchedulerBinding.instance
-      ..scheduleFrameCallback((_) {
-        _scheduled = false;
-        _drain();
-      })
-      ..ensureVisualUpdate();
+  void _forget() {
+    _link?.consumed(_pending.length - _at);
+    _pending.clear();
+    _at = 0;
   }
 
+  /// Waiting events, for the tests.
+  @visibleForTesting
+  int get waiting => _pending.length - _at;
+
+  /// One batch per frame, however many messages came; on a timer while no frames are drawn.
+  void _schedule() {
+    if (_scheduled || _disposed) return;
+    _scheduled = true;
+    final b = SchedulerBinding.instance;
+    if (b.framesEnabled) {
+      b
+        ..scheduleFrameCallback((_) => _drain())
+        ..ensureVisualUpdate();
+      // A window that is hidden while this waits must not hold it.
+      _drainTimer = Timer(const Duration(milliseconds: 250), _drain);
+    } else {
+      _drainTimer = Timer(const Duration(milliseconds: 100), _drain);
+    }
+  }
+
+  static const _slice = 256, _budget = Duration(milliseconds: 4);
+
   void _drain() {
-    if (_pending.isEmpty) return;
-    final batch = List.of(_pending);
-    _pending.clear();
-    current?.apply(batch);
+    if (!_scheduled || _disposed) return;
+    _drainTimer?.cancel();
+    _scheduled = false;
+    final c = current;
+    final sw = Stopwatch()..start();
+    final from = _at;
+    while (_at < _pending.length && sw.elapsed < _budget) {
+      final to = _at + _slice < _pending.length ? _at + _slice : _pending.length;
+      c?.apply(_pending.sublist(_at, to));
+      _at = to;
+    }
+    _link?.consumed(_at - from);
+    if (_at == _pending.length) {
+      _pending.clear();
+      _at = 0;
+    } else {
+      _schedule();
+    }
   }
 
   @override
   void dispose() {
     _disposed = true;
     _retry?.cancel();
-    unawaited(_sub?.cancel());
-    _link?.close();
+    _drainTimer?.cancel();
+    _drop();
     super.dispose();
   }
 }

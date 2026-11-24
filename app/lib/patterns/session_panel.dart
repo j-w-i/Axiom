@@ -1,3 +1,4 @@
+import 'package:flutter/semantics.dart';
 import 'package:flutter/widgets.dart';
 
 import '../ui/controls.dart';
@@ -44,34 +45,39 @@ class _SessionPanelState extends State<SessionPanel> {
         c.plate,
         radius: AxRadius.bay,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 1),
+          padding: const EdgeInsets.fromLTRB(1, 1, 1, 5),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 6, 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        s.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.type.uiStrong,
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 36),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 11, right: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          s.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.type.uiStrong,
+                        ),
                       ),
-                    ),
-                    Text(s.age, style: t.type.small.ink(c.ink3)),
-                    const SizedBox(width: 4),
-                    if (widget.onAddAgent != null)
-                      AxButton.icon(
-                        AxIcon.plus,
-                        label: 'Add an agent to ${s.title}',
-                        tone: AxTone.quiet,
-                        size: 22,
-                        onPressed: widget.onAddAgent,
-                      ),
-                  ],
+                      Text(s.age, style: t.type.small.ink(c.ink3)),
+                      if (widget.onAddAgent != null) ...[
+                        const SizedBox(width: 2),
+                        AxButton.icon(
+                          AxIcon.plus,
+                          label: 'Add an agent to ${s.title}',
+                          tone: AxTone.quiet,
+                          size: 22,
+                          onPressed: widget.onAddAgent,
+                        ),
+                      ] else
+                        const SizedBox(width: 5),
+                    ],
+                  ),
                 ),
               ),
               for (final a in s.agents)
@@ -83,20 +89,20 @@ class _SessionPanelState extends State<SessionPanel> {
                   onStop: widget.onStop == null ? null : () => widget.onStop!(a.id),
                 ),
               if (s.tasks.isNotEmpty) ...[
-                const Padding(padding: EdgeInsets.fromLTRB(12, 6, 12, 2), child: Seam()),
+                const Padding(padding: EdgeInsets.fromLTRB(11, 6, 11, 2), child: Seam()),
                 Pressable(
                   label: 'Plan, $done of ${s.tasks.length} done',
                   expanded: _plan,
                   radius: 0,
                   onPressed: () => setState(() => _plan = !_plan),
                   builder: (context, st) => Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                    padding: const EdgeInsets.fromLTRB(11, 4, 11, 4),
                     child: Row(
                       children: [
                         SizedBox(
                           width: 22,
                           child: Align(
-                            alignment: Alignment.centerLeft,
+                            alignment: const Alignment(-.82, 0),
                             child: SpringTo(
                               target: _plan ? 1 : 0,
                               spring: AxMotion.snap,
@@ -147,132 +153,166 @@ class AgentRow extends StatefulWidget {
 }
 
 class _AgentRowState extends State<AgentRow> {
-  bool _hover = false;
+  bool _hover = false, _within = false;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors, a = widget.agent;
     final live = a.state == AgentState.running || a.state == AgentState.asking;
     final now = a.recent.lastOrNull;
-    final keys = _hover && (live || a.state == AgentState.paused);
+    final pause =
+        widget.onPause != null && (a.state == AgentState.running || a.state == AgentState.paused);
+    final stop = widget.onStop != null && live;
+    final pauseWord = '${a.state == AgentState.paused ? 'Resume' : 'Pause'} ${a.name}';
+    final keys = (_hover || _within) && (pause || stop);
     return RepaintBoundary(
       child: MouseRegion(
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
-        child: Stack(
-          alignment: Alignment.centerRight,
-          children: [
-            Pressable(
-              label: '${a.name}, ${a.state.word}',
-              hint: '${a.model}, ${a.harness}, ${a.connection}. ${now?.text ?? ''}',
-              selected: widget.selected,
-              radius: 0,
-              onPressed: widget.onSelect,
-              builder: (context, s) => DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: widget.selected
-                      ? LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [c.rowSelectedTop, c.rowSelectedBottom],
-                        )
-                      : null,
-                  color: !widget.selected && s.hovered ? c.hover : null,
-                ),
-                child: Stack(
-                  children: [
-                    if (widget.selected)
-                      Positioned(
-                        left: 0,
-                        top: 7,
-                        bottom: 7,
-                        child: ColoredBox(
-                          color: a.state == AgentState.asking ? c.attention : c.live,
-                          child: const SizedBox(width: 2),
-                        ),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 7),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(
-                            width: 22,
-                            height: 18,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: AxLamp(a.state, width: 12),
-                            ),
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onFocusChange: (v) => setState(() => _within = v),
+          child: Stack(
+            alignment: Alignment.centerRight,
+            children: [
+              Pressable(
+                label: '${a.name}, ${a.state.word}',
+                hint: [
+                  for (final x in [a.model, a.harness, a.connection, now?.text ?? ''])
+                    if (x.isNotEmpty) x,
+                ].join(', '),
+                selected: widget.selected,
+                radius: 0,
+                onPressed: widget.onSelect,
+                actions: {
+                  if (pause) CustomSemanticsAction(label: pauseWord): widget.onPause!,
+                  if (stop) CustomSemanticsAction(label: 'Stop ${a.name}'): widget.onStop!,
+                },
+                builder: (context, s) => DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: widget.selected
+                        ? LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [c.rowSelectedTop, c.rowSelectedBottom],
+                          )
+                        : null,
+                    color: !widget.selected && s.hovered ? c.hover : null,
+                  ),
+                  child: Stack(
+                    children: [
+                      if (widget.selected)
+                        Positioned(
+                          left: 0,
+                          top: 7,
+                          bottom: 7,
+                          child: ColoredBox(
+                            color: a.state == AgentState.asking ? c.attention : c.live,
+                            child: const SizedBox(width: 2),
                           ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(a.name, style: t.type.ui.ink(c.ink1)),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        a.model,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: t.type.label.ink(c.ink4),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(11, 6, 11, 7),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _Mark(AxLamp(a.state), t.type.ui),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                                    textBaseline: TextBaseline.alphabetic,
+                                    children: [
+                                      Expanded(
+                                        child: Text.rich(
+                                          TextSpan(
+                                            children: [
+                                              TextSpan(text: a.name),
+                                              TextSpan(
+                                                text: '   ${a.model}',
+                                                style: t.type.label.ink(c.ink4),
+                                              ),
+                                            ],
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: t.type.ui,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      if (!keys) Text(a.elapsed, style: t.type.small.ink(c.ink4)),
+                                    ],
+                                  ),
+                                  if (now != null)
+                                    Text(
+                                      now.text,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.type.label.ink(
+                                        a.state == AgentState.asking
+                                            ? c.attentionText
+                                            : now.failed
+                                            ? c.faultText
+                                            : c.ink3,
                                       ),
                                     ),
-                                    if (!keys) Text(a.elapsed, style: t.type.small.ink(c.ink4)),
-                                  ],
-                                ),
-                                if (now != null)
-                                  Text(
-                                    now.text,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: t.type.label.ink(
-                                      a.state == AgentState.asking
-                                          ? c.attentionText
-                                          : now.failed
-                                          ? c.faultText
-                                          : c.ink3,
-                                    ),
-                                  ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            if (keys)
-              Positioned(
-                right: 8,
-                child: Row(
-                  children: [
-                    if (widget.onPause != null && a.state != AgentState.asking)
-                      AxButton.icon(
-                        a.state == AgentState.paused ? AxIcon.play : AxIcon.pause,
-                        label: '${a.state == AgentState.paused ? 'Resume' : 'Pause'} ${a.name}',
-                        size: 22,
-                        onPressed: widget.onPause,
-                      ),
-                    const SizedBox(width: 3),
-                    if (widget.onStop != null && live)
-                      AxButton.icon(
-                        AxIcon.stop,
-                        label: 'Stop ${a.name}',
-                        size: 22,
-                        onPressed: widget.onStop,
-                      ),
-                  ],
+              if (keys)
+                Positioned(
+                  right: 11,
+                  child: Row(
+                    children: [
+                      if (pause)
+                        AxButton.icon(
+                          a.state == AgentState.paused ? AxIcon.play : AxIcon.pause,
+                          label: pauseWord,
+                          size: 22,
+                          onPressed: widget.onPause,
+                        ),
+                      if (pause && stop) const SizedBox(width: 3),
+                      if (stop)
+                        AxButton.icon(
+                          AxIcon.stop,
+                          label: 'Stop ${a.name}',
+                          size: 22,
+                          onPressed: widget.onStop,
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// A mark in the first column, centred on a line of [style] at any text size.
+class _Mark extends StatelessWidget {
+  const _Mark(this.child, this.style);
+  final Widget child;
+  final TextStyle style;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 22,
+    height: MediaQuery.textScalerOf(context).scale(style.fontSize!) * style.height!,
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: SizedBox(width: 12, child: Center(child: child)),
+    ),
+  );
 }
 
 class TaskRow extends StatelessWidget {
@@ -283,29 +323,31 @@ class TaskRow extends StatelessWidget {
     final t = Ax.of(context), c = t.colors;
     final (mark, word) = switch (task.state) {
       TaskState.done => (AxGlyph(AxIcon.check, size: 12, color: c.doneText), 'done'),
-      TaskState.active => (const AxLamp(AgentState.running, width: 9, breathe: false), 'active'),
-      TaskState.todo => (const AxLamp(AgentState.waiting, width: 9), 'to do'),
+      TaskState.active => (const AxLamp(AgentState.running, breathe: false), 'active'),
+      TaskState.asking => (const AxLamp(AgentState.asking), 'asking'),
+      TaskState.todo => (const AxLamp(AgentState.waiting), 'to do'),
       TaskState.blocked => (AxGlyph(AxIcon.warn, size: 12, color: c.attentionText), 'blocked'),
     };
     return Semantics(
       label: '${task.title}, $word${task.owner == null ? '' : ', ${task.owner}'}',
       excludeSemantics: true,
-      child: SizedBox(
-        height: 25,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 25),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 11),
           child: Row(
             children: [
-              SizedBox(
-                width: 22,
-                child: Align(alignment: Alignment.centerLeft, child: mark),
-              ),
+              _Mark(mark, t.type.label),
               Expanded(
                 child: Text(
                   task.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: t.type.label.ink(task.state == TaskState.active ? c.ink1 : c.ink3),
+                  style: t.type.label.ink(switch (task.state) {
+                    TaskState.active => c.ink1,
+                    TaskState.asking => c.attentionText,
+                    _ => c.ink3,
+                  }),
                 ),
               ),
               if (task.owner != null && task.state != TaskState.done) ...[
@@ -354,10 +396,7 @@ class SessionRow extends StatelessWidget {
                     style: t.type.ui.ink(c.ink2),
                   ),
                 ),
-                for (final a in busy.take(4)) ...[
-                  const SizedBox(width: 3),
-                  AxLamp(a.state, width: 8),
-                ],
+                for (final a in busy.take(4)) ...[const SizedBox(width: 4), AxLamp(a.state)],
                 const SizedBox(width: 8),
                 Text(session.age, style: t.type.small.ink(c.ink4)),
               ],

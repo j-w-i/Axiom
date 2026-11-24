@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -26,6 +27,8 @@ class Pressable extends StatefulWidget {
     this.selected,
     this.toggled,
     this.expanded,
+    this.checked,
+    this.actions,
     this.button = true,
     this.radius = AxRadius.key,
     this.autofocus = false,
@@ -34,7 +37,10 @@ class Pressable extends StatefulWidget {
   });
   final String label;
   final String? hint;
-  final bool? selected, toggled, expanded;
+  final bool? selected, toggled, expanded, checked;
+
+  /// Further things a screen reader can do here.
+  final Map<CustomSemanticsAction, VoidCallback>? actions;
   final bool button, autofocus;
   final double radius;
   final VoidCallback? onPressed;
@@ -73,6 +79,10 @@ class _PressableState extends State<Pressable> {
       selected: widget.selected,
       toggled: widget.toggled,
       expanded: widget.expanded,
+      checked: widget.checked,
+      focusable: _enabled,
+      focused: _focus,
+      customSemanticsActions: widget.actions,
       label: widget.label,
       hint: widget.hint,
       onTap: _enabled ? _activate : null,
@@ -127,7 +137,11 @@ class FocusRing extends CustomPainter {
   final double radius;
   @override
   void paint(Canvas c, Size s) => c.drawRRect(
-    RRect.fromRectAndRadius((Offset.zero & s).inflate(2), Radius.circular(radius + 2)),
+    // A part that fills its row gets the ring inside, where nothing paints over it.
+    RRect.fromRectAndRadius(
+      radius == 0 ? (Offset.zero & s).deflate(2) : (Offset.zero & s).inflate(2),
+      Radius.circular(radius == 0 ? 3 : radius + 2),
+    ),
     Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2

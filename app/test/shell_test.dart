@@ -66,12 +66,43 @@ void main() {
   testWidgets('with nothing to show, says what is true', (t) async {
     final s = store()..phase = HostPhase.unreachable;
     await mount(t, Shell(s), dpr: 1);
-    expect(find.text('axiom-host was not found beside the application.'), findsOneWidget);
+    expect(find.text('axiom-host was not found beside the application'), findsOneWidget);
     s.phase = HostPhase.connected;
     // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
     s.notifyListeners();
     await t.pump();
     expect(find.text('No sessions yet'), findsOneWidget);
+    s.dispose();
+  });
+
+  testWidgets('an unreadable session says so and offers to try again', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = (recorded()..failed('journal: damaged'));
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    expect(find.text('This session cannot be shown'), findsOneWidget);
+    expect(find.text('journal: damaged'), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
+    s.dispose();
+  });
+
+  testWidgets('a session that is still arriving is not called empty', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = SessionModel('s');
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    expect(find.text('Reading the session'), findsOneWidget);
+    s.dispose();
+  });
+
+  testWidgets('the title row of the session and of the display share a line', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    final a = t.getCenter(find.text('Double token rotation')).dy;
+    final b = t.getCenter(find.text('Builder').last).dy;
+    expect((a - b).abs(), lessThan(1.1));
     s.dispose();
   });
 

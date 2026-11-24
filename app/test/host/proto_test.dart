@@ -104,7 +104,7 @@ void main() {
       final m = SessionModel('s')..apply(start());
       m.apply([e(4, const ItemDelta('i', 'one\n\n')), e(5, const ItemDelta('i', 'tw'))]);
       final item = m.agents['a']!.items.single;
-      expect([item.doc.closed.single.text, item.doc.tail!.text], ['one', 'tw']);
+      expect([item.doc.closed.single.text, item.doc.tail.single.text], ['one', 'tw']);
       m.apply([e(6, const ItemEnded('i', Outcome.completed, 'one\n\ntw', null))]);
       expect(item.doc.closed.map((b) => b.text), ['one', 'tw']);
       expect(item.open, isFalse);
@@ -130,8 +130,46 @@ void main() {
         ..apply(d)
         ..apply(d)
         ..apply(start());
-      expect(m.agents['a']!.items.single.doc.tail!.text, 'x');
+      expect(m.agents['a']!.items.single.doc.tail.single.text, 'x');
       expect(m.agents.length, 1);
+    });
+
+    test('the end is authoritative: shorter, or the same length with other words', () {
+      for (final (streamed, text) in [('a\n\nb\n\nc\n\nd', 'a\n\nb'), ('aaaa', 'bbbb')]) {
+        final m = SessionModel('s')..apply(start());
+        final i = m.agents['a']!.items.single;
+        m.apply([e(4, ItemDelta('i', streamed))]);
+        final before = i.doc.revision;
+        m.apply([e(5, ItemEnded('i', Outcome.completed, text, null))]);
+        expect(i.doc.closed.map((b) => b.text).join('\n\n'), text);
+        expect(i.doc.revision, greaterThan(before));
+      }
+    });
+
+    test('an agent does not run after its run has ended', () {
+      final m = SessionModel('s')
+        ..apply([
+          ...start(),
+          e(4, const RunStarted('r', 'a')),
+          e(5, const AgentStateChanged('a', AgentPhase.running)),
+          e(6, const RunEnded('r', Outcome.failed, '429 from the provider')),
+        ]);
+      final a = m.agents['a']!;
+      expect(
+        [a.phase, a.ended, a.error],
+        [AgentPhase.failed, Outcome.failed, '429 from the provider'],
+      );
+    });
+
+    test('names cannot hide or reorder anything', () {
+      final rlo = String.fromCharCode(0x202E);
+      final m = SessionModel('s')
+        ..apply([
+          e(1, SessionCreated('a${rlo}b\nc', null)),
+          e(2, AgentAdded('a', 'x${rlo}y', x, null)),
+        ]);
+      expect(m.title, 'a\u{FFFD}b c');
+      expect(m.agents['a']!.name, 'x\u{FFFD}y');
     });
 
     test('a batch notifies each listener once', () {

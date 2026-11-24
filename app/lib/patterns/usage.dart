@@ -1,11 +1,9 @@
 import 'package:flutter/widgets.dart';
 
-import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
-import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'models.dart';
 
@@ -37,37 +35,43 @@ class UsageKey extends StatelessWidget {
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            child: SizedBox(
-              width: 118,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Text(service.name, style: t.type.small.ink(c.ink2)),
-                      const SizedBox(width: 4),
-                      AxGlyph(AxIcon.down, size: 8, color: open || s.hovered ? c.ink2 : c.ink4),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          tight?.text ?? '–',
-                          maxLines: 1,
-                          textAlign: TextAlign.end,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.small.ink(c.ink3),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 112, maxWidth: 190, minHeight: 30),
+              child: IntrinsicWidth(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Text(service.name, style: t.type.small.ink(c.ink2)),
+                        const SizedBox(width: 4),
+                        AxGlyph(AxIcon.down, size: 8, color: open || s.hovered ? c.ink2 : c.ink4),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            tight?.text ?? '–',
+                            maxLines: 1,
+                            textAlign: TextAlign.end,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.type.small.ink(c.ink3),
+                          ),
                         ),
+                      ],
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 3,
+                      child: AxMeter(
+                        label: '${service.name}, ${acc.name}',
+                        value: tight?.used,
+                        provenance: tight?.provenance ?? Provenance.unknown,
+                        thickness: 2,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  AxMeter(
-                    label: '${service.name}, ${acc.name}',
-                    value: tight?.used,
-                    provenance: tight?.provenance ?? Provenance.unknown,
-                    thickness: 3,
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -78,7 +82,7 @@ class UsageKey extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final (i, a) in service.accounts.indexed) ...[
-            if (i > 0) const Padding(padding: EdgeInsets.symmetric(vertical: 3), child: Seam()),
+            if (i > 0) const SizedBox(height: 6),
             _Account(
               a,
               active: a.id == service.active,
@@ -88,17 +92,41 @@ class UsageKey extends StatelessWidget {
               },
             ),
           ],
-          const Padding(padding: EdgeInsets.symmetric(vertical: 3), child: Seam()),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: AxButton(
-              label: 'Link another ${service.name} account',
-              icon: AxIcon.plus,
-              tone: AxTone.quiet,
-              onPressed: () {
-                close();
-                onLink();
-              },
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+            child: ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
+          ),
+          Pressable(
+            label: 'Link another ${service.name} account',
+            onPressed: () {
+              close();
+              onLink();
+            },
+            builder: (_, s) => DecoratedBox(
+              decoration: BoxDecoration(
+                color: s.hovered || s.focused ? c.hover : null,
+                borderRadius: BorderRadius.circular(AxRadius.key),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: AxGlyph(AxIcon.plus, size: 12, color: c.ink3),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'Link another ${service.name} account',
+                        style: t.type.ui.ink(c.ink2),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -116,7 +144,7 @@ class _Account extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Pressable(
-      label: '${a.name}, ${a.identity}',
+      label: '${a.name}, ${a.lane}, ${a.identity}',
       selected: active,
       hint: active ? 'In use' : 'Use for new agents',
       onPressed: onUse,
@@ -144,19 +172,17 @@ class _Account extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      children: [
-                        Text(a.name, style: t.type.uiStrong),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            a.identity,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.type.small.ink(c.ink3),
-                          ),
-                        ),
-                      ],
+                    Text(
+                      a.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.uiStrong,
+                    ),
+                    Text(
+                      '${a.lane}   ${a.identity}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.small.ink(c.ink3),
                     ),
                     if (a.problem case final p?) ...[
                       const SizedBox(height: 4),

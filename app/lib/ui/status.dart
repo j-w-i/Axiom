@@ -29,12 +29,12 @@ enum AgentState {
   };
 }
 
-/// A state lamp: a flat capsule. Shape backs up colour (waiting is hollow, paused is split), and a
-/// running lamp breathes slowly. The word is always in the semantics.
+/// A state lamp. Each state has its own shape, so colour is never alone: running is a capsule that
+/// breathes slowly, asking a bar with a notch, waiting a hollow capsule, paused two bars, done a
+/// check, failed a cross. The word is always in the semantics.
 class AxLamp extends StatefulWidget {
-  const AxLamp(this.state, {super.key, this.width = 14, this.breathe = true});
+  const AxLamp(this.state, {super.key, this.breathe = true});
   final AgentState state;
-  final double width;
   final bool breathe;
   @override
   State<AxLamp> createState() => _AxLampState();
@@ -74,7 +74,7 @@ class _AxLampState extends State<AxLamp> with SingleTickerProviderStateMixin {
     label: widget.state.word,
     child: RepaintBoundary(
       child: CustomPaint(
-        size: Size(widget.width, 5),
+        size: const Size(12, 8),
         painter: _LampPainter(widget.state, widget.state.mark(Ax.of(context).colors), _c),
       ),
     ),
@@ -88,27 +88,56 @@ class _LampPainter extends CustomPainter {
   final Animation<double> t;
   @override
   void paint(Canvas c, Size s) {
-    final r = RRect.fromRectAndRadius(Offset.zero & s, Radius.circular(s.height / 2));
     final p = Paint()
       ..color = color.withValues(alpha: color.a * (1 - .45 * Curves.easeInOut.transform(t.value)));
+    final bar = Rect.fromLTWH(0, s.height / 2 - 2.5, s.width, 5);
+    final r = RRect.fromRectAndRadius(bar, const Radius.circular(2.5));
+    final line = Paint()
+      ..color = p.color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
     switch (state) {
-      case AgentState.waiting:
+      case AgentState.running:
+        c.drawRRect(r, p);
+      case AgentState.asking:
+        // Two parts: something is missing between them.
+        const gap = 3.0, dot = 3.0;
         c.drawRRect(
-          r.deflate(.6),
-          p
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.2,
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(0, bar.top, s.width - gap - dot, 5),
+            const Radius.circular(2.5),
+          ),
+          p,
         );
+        c.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(s.width - dot, bar.top, dot, 5),
+            const Radius.circular(1.5),
+          ),
+          p,
+        );
+      case AgentState.waiting:
+        c.drawRRect(r.deflate(.65), line..strokeWidth = 1.3);
       case AgentState.paused:
-        final w = (s.width - 3) / 2;
-        for (final x in [0.0, w + 3]) {
+        for (final x in [2.5, 7.0]) {
           c.drawRRect(
-            RRect.fromRectAndRadius(Rect.fromLTWH(x, 0, w, s.height), const Radius.circular(1.5)),
+            RRect.fromRectAndRadius(Rect.fromLTWH(x, 0, 2.5, 8), const Radius.circular(1)),
             p,
           );
         }
-      case _:
-        c.drawRRect(r, p);
+      case AgentState.done:
+        c.drawPath(
+          Path()
+            ..moveTo(1.6, 4.4)
+            ..lineTo(4.6, 7.2)
+            ..lineTo(10.2, 1),
+          line,
+        );
+      case AgentState.failed:
+        c.drawLine(const Offset(2.6, .8), const Offset(9.2, 7.2), line);
+        c.drawLine(const Offset(9.2, .8), const Offset(2.6, 7.2), line);
     }
   }
 
@@ -157,8 +186,8 @@ class AxMeter extends StatelessWidget {
           provenance == Provenance.estimated,
           vertical,
           c.meterTrack,
-          v != null && v >= warnAt ? c.attention : c.live,
-          c.meterLow,
+          v != null && v >= warnAt ? c.attention : c.meterFill,
+          c.meterFill,
         ),
       ),
     );

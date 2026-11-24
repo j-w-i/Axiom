@@ -55,10 +55,14 @@ class AccountView {
     required this.id,
     required this.name,
     required this.identity,
+    required this.lane,
     required this.windows,
     this.problem,
   });
   final String id, name, identity;
+
+  /// How it is reached: a plan, a key, or an agent installed on this machine (decision 0007).
+  final String lane;
   final List<UsageWindow> windows;
   final String? problem;
 }
@@ -86,7 +90,7 @@ class DiffLine {
   final String text;
 }
 
-enum TaskState { todo, active, done, blocked }
+enum TaskState { todo, active, asking, done, blocked }
 
 class TaskView {
   const TaskView(this.title, this.state, {this.owner});

@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../ui/controls.dart';
+import '../ui/editable.dart';
 import '../ui/icons.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
@@ -57,6 +58,20 @@ class _ComposerState extends State<Composer> {
     super.dispose();
   }
 
+  /// Enter sends. While an input method is composing, Enter is its own and is left to it.
+  KeyEventResult _key(FocusNode _, KeyEvent e) {
+    final enter =
+        e.logicalKey == LogicalKeyboardKey.enter || e.logicalKey == LogicalKeyboardKey.numpadEnter;
+    final k = HardwareKeyboard.instance;
+    if (!enter || e is! KeyDownEvent || k.isShiftPressed || k.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    final v = _text.value;
+    if (v.composing.isValid && !v.composing.isCollapsed) return KeyEventResult.ignored;
+    _submit();
+    return KeyEventResult.handled;
+  }
+
   void _submit() {
     final s = _text.text.trim();
     if (s.isEmpty) return;
@@ -78,8 +93,10 @@ class _ComposerState extends State<Composer> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: CallbackShortcuts(
-                  bindings: {const SingleActivator(LogicalKeyboardKey.enter): _submit},
+                child: Focus(
+                  canRequestFocus: false,
+                  skipTraversal: true,
+                  onKeyEvent: _key,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: _focus.requestFocus,
@@ -87,34 +104,12 @@ class _ComposerState extends State<Composer> {
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(minHeight: 23, maxHeight: 220),
-                        child: Stack(
-                          children: [
-                            if (_text.text.isEmpty)
-                              IgnorePointer(
-                                child: ExcludeSemantics(
-                                  child: Text(
-                                    widget.placeholder,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: t.type.prose.ink(c.ink4),
-                                  ),
-                                ),
-                              ),
-                            Semantics(
-                              label: widget.placeholder,
-                              textField: true,
-                              child: EditableText(
-                                controller: _text,
-                                focusNode: _focus,
-                                style: t.type.prose,
-                                cursorColor: c.liveText,
-                                cursorWidth: 1.5,
-                                backgroundCursorColor: c.idle,
-                                selectionColor: c.selection,
-                                maxLines: null,
-                              ),
-                            ),
-                          ],
+                        child: AxEditable(
+                          label: widget.placeholder,
+                          placeholder: widget.placeholder,
+                          controller: _text,
+                          focusNode: _focus,
+                          style: t.type.prose,
                         ),
                       ),
                     ),

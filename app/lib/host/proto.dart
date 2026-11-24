@@ -246,6 +246,7 @@ sealed class Message {
       return Events(s, [for (final x in e) Event.decode(x! as Json)]);
     }
     if (j case {'session': final String s, 'resync': final int n}) return Resync(s, n);
+    if (j case {'session': final String s, 'fault': final String f}) return Fault(s, f);
     if (j case {'id': final int id, 'error': final Json e}) {
       return Failed(id, e['code'] as String? ?? 'unknown', e['message'] as String? ?? '');
     }
@@ -264,6 +265,12 @@ class Resync extends Message {
   const Resync(this.session, this.last);
   final String session;
   final int last;
+}
+
+/// The host cannot read or write this session. Nothing more comes for it.
+class Fault extends Message {
+  const Fault(this.session, this.words);
+  final String session, words;
 }
 
 class Answered extends Message {

@@ -76,7 +76,7 @@ class AxColors {
     required this.rowSelectedTop,
     required this.rowSelectedBottom,
     required this.meterTrack,
-    required this.meterLow,
+    required this.meterFill,
     required this.chassis,
     required this.plate,
     required this.plateHover,
@@ -130,7 +130,7 @@ class AxColors {
       rowSelectedTop,
       rowSelectedBottom,
       meterTrack,
-      meterLow;
+      meterFill;
   final SurfaceSpec chassis, plate, plateHover, plateSelected, bay, block, well;
   final SurfaceSpec key, keyHover, keyDown, primary, primaryHover, primaryDown;
   final SurfaceSpec request, answer, overlay;
@@ -161,12 +161,12 @@ class AxColors {
     selection: Color(0x663F62C8),
     rule: Color(0xFF131518),
     ruleLight: Color(0x0DFFFFFF),
-    bayRule: Color(0xFF1C212B),
+    bayRule: Color(0xFF222834),
     hover: Color(0x0AFFFFFF),
     rowSelectedTop: Color(0xFF30343C),
     rowSelectedBottom: Color(0xFF2E3139),
     meterTrack: Color(0x17FFFFFF),
-    meterLow: Color(0xFF59647F),
+    meterFill: Color(0xFF8A93A4),
     chassis: SurfaceSpec(
       top: Color(0xFF1F2126),
       bottom: Color(0xFF191B1F),
@@ -322,7 +322,7 @@ class AxColors {
     rowSelectedTop: Color(0xFFF8F9FB),
     rowSelectedBottom: Color(0xFFF4F6F8),
     meterTrack: Color(0x1F243149),
-    meterLow: Color(0xFF8B96AF),
+    meterFill: Color(0xFF6C7686),
     chassis: SurfaceSpec(
       top: Color(0xFFD9DCE1),
       bottom: Color(0xFFD0D4DA),

@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'editable.dart';
 import 'icons.dart';
 import 'press.dart';
 import 'spring.dart';
@@ -66,7 +67,6 @@ class AxButton extends StatelessWidget {
                 AxTone.quiet => s.hovered || engaged ? c.ink1 : c.ink2,
               };
         final spec = switch (tone) {
-          AxTone.primary when !s.enabled => c.keyDown,
           AxTone.primary =>
             s.pressed
                 ? c.primaryDown
@@ -74,7 +74,6 @@ class AxButton extends StatelessWidget {
                 ? c.primaryHover
                 : c.primary,
           AxTone.answer => s.pressed ? c.keyDown : c.answer,
-          _ when !s.enabled => c.keyDown,
           _ =>
             s.pressed || engaged
                 ? c.keyDown
@@ -111,6 +110,7 @@ class AxButton extends StatelessWidget {
             ),
           ),
         );
+        if (!s.enabled) return body;
         if (tone == AxTone.quiet && !s.pressed && !engaged) {
           return DecoratedBox(
             decoration: BoxDecoration(
@@ -205,119 +205,80 @@ class AxSegments<T> extends StatelessWidget {
   }
 }
 
-/// Tabs on a display. The mark under the active tab glides.
-class AxTabs extends StatefulWidget {
+/// Tabs on a display. The active one carries its mark, so the mark always fits it.
+class AxTabs extends StatelessWidget {
   const AxTabs({required this.tabs, required this.index, required this.onChanged, super.key});
   final List<(String, String?)> tabs;
   final int index;
   final ValueChanged<int> onChanged;
-  @override
-  State<AxTabs> createState() => _AxTabsState();
-}
-
-class _AxTabsState extends State<AxTabs> {
-  late List<GlobalKey> _keys = [for (final _ in widget.tabs) GlobalKey()];
-  double _x = 0, _w = 0;
-  @override
-  void didUpdateWidget(AxTabs old) {
-    super.didUpdateWidget(old);
-    if (_keys.length != widget.tabs.length) _keys = [for (final _ in widget.tabs) GlobalKey()];
-  }
-
-  void _measure() {
-    final box = context.findRenderObject() as RenderBox?;
-    final tab = _keys[widget.index].currentContext?.findRenderObject() as RenderBox?;
-    if (!mounted || box == null || tab == null) return;
-    final x = tab.localToGlobal(Offset.zero, ancestor: box).dx;
-    if (x != _x || tab.size.width != _w) {
-      setState(() {
-        _x = x;
-        _w = tab.size.width;
-      });
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
     final t = Ax.of(context);
+    void to(int i) => onChanged(i.clamp(0, tabs.length - 1));
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
-            widget.onChanged((widget.index - 1).clamp(0, widget.tabs.length - 1)),
-        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
-            widget.onChanged((widget.index + 1).clamp(0, widget.tabs.length - 1)),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () => to(index - 1),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () => to(index + 1),
       },
-      child: Stack(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final (i, (name, count)) in widget.tabs.indexed)
-                KeyedSubtree(
-                  key: _keys[i],
-                  child: Pressable(
-                    label: count == null ? name : '$name, $count',
-                    selected: i == widget.index,
-                    onPressed: () => widget.onChanged(i),
-                    builder: (context, s) {
-                      final on = i == widget.index;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: SizedBox(
-                          height: 36,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
+          for (final (i, (name, count)) in tabs.indexed)
+            Pressable(
+              label: count == null ? name : '$name, $count',
+              selected: i == index,
+              radius: 0,
+              onPressed: () => onChanged(i),
+              builder: (context, s) {
+                final on = i == index;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          width: 2,
+                          color: on ? t.colors.live : const Color(0x00000000),
+                        ),
+                      ),
+                    ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 38),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // The strong width is always reserved: selecting a tab moves nothing.
+                          Stack(
+                            alignment: Alignment.center,
                             children: [
-                              // The strong width is always reserved: selecting a tab moves nothing.
-                              Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Visibility.maintain(
-                                    visible: false,
-                                    child: Text(name, style: t.type.labelStrong),
-                                  ),
-                                  Text(
-                                    name,
-                                    style: (on ? t.type.labelStrong : t.type.label).ink(
-                                      on
-                                          ? t.colors.ink1
-                                          : s.hovered
-                                          ? t.colors.ink2
-                                          : t.colors.ink3,
-                                    ),
-                                  ),
-                                ],
+                              Visibility.maintain(
+                                visible: false,
+                                child: Text(name, style: t.type.labelStrong),
                               ),
-                              if (count != null) ...[
-                                const SizedBox(width: 5),
-                                Text(count, style: t.type.small.ink(t.colors.ink4)),
-                              ],
+                              Text(
+                                name,
+                                style: (on ? t.type.labelStrong : t.type.label).ink(
+                                  on
+                                      ? t.colors.ink1
+                                      : s.hovered
+                                      ? t.colors.ink2
+                                      : t.colors.ink3,
+                                ),
+                              ),
                             ],
                           ),
-                        ),
-                      );
-                    },
+                          if (count != null) ...[
+                            const SizedBox(width: 5),
+                            Text(count, style: t.type.small.ink(t.colors.ink4)),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-            ],
-          ),
-          if (_w > 0)
-            Positioned(
-              left: 0,
-              bottom: 0,
-              child: SpringTo(
-                target: _x + 10,
-                builder: (_, x, child) => Transform.translate(offset: Offset(x, 0), child: child),
-                child: SpringTo(
-                  target: _w - 20,
-                  builder: (_, w, _) => SizedBox(
-                    width: w.clamp(0, 600),
-                    height: 2,
-                    child: ColoredBox(color: t.colors.live),
-                  ),
-                ),
-              ),
+                );
+              },
             ),
         ],
       ),
@@ -375,35 +336,33 @@ class AxCheck extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    return Semantics(
+    return Pressable(
+      label: label,
+      button: false,
       checked: value,
-      child: Pressable(
-        label: label,
-        button: false,
-        onPressed: onChanged == null ? null : () => onChanged!(!value),
-        builder: (context, s) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox.square(
-              dimension: 16,
-              child: Surface(
-                value && s.enabled ? c.primary : c.keyDown,
-                radius: 3,
-                child: value
-                    ? Center(
-                        child: AxGlyph(
-                          AxIcon.check,
-                          size: 12,
-                          color: s.enabled ? c.onPrimary : c.idle,
-                        ),
-                      )
-                    : null,
-              ),
+      onPressed: onChanged == null ? null : () => onChanged!(!value),
+      builder: (context, s) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox.square(
+            dimension: 16,
+            child: Surface(
+              value && s.enabled ? c.primary : c.keyDown,
+              radius: 3,
+              child: value
+                  ? Center(
+                      child: AxGlyph(
+                        AxIcon.check,
+                        size: 12,
+                        color: s.enabled ? c.onPrimary : c.idle,
+                      ),
+                    )
+                  : null,
             ),
-            const SizedBox(width: 8),
-            Text(label, style: t.type.ui.ink(s.enabled ? c.ink2 : c.idle)),
-          ],
-        ),
+          ),
+          const SizedBox(width: 8),
+          Text(label, style: t.type.ui.ink(s.enabled ? c.ink2 : c.idle)),
+        ],
       ),
     );
   }
@@ -438,23 +397,15 @@ class AxField extends StatefulWidget {
 }
 
 class _AxFieldState extends State<AxField> {
-  late final TextEditingController _c = widget.controller ?? TextEditingController();
-  late final FocusNode _f = widget.focusNode ?? FocusNode();
-  final _editable = GlobalKey<EditableTextState>();
-  @override
-  void initState() {
-    super.initState();
-    _f.addListener(_changed);
-    _c.addListener(_changed);
-  }
+  TextEditingController? _ownText;
+  FocusNode? _ownFocus;
+  TextEditingController get _c => widget.controller ?? (_ownText ??= TextEditingController());
+  FocusNode get _f => widget.focusNode ?? (_ownFocus ??= FocusNode());
 
-  void _changed() => setState(() {});
   @override
   void dispose() {
-    _f.removeListener(_changed);
-    _c.removeListener(_changed);
-    if (widget.controller == null) _c.dispose();
-    if (widget.focusNode == null) _f.dispose();
+    _ownText?.dispose();
+    _ownFocus?.dispose();
     super.dispose();
   }
 
@@ -467,17 +418,15 @@ class _AxFieldState extends State<AxField> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Semantics(
-          label: widget.label,
-          textField: true,
-          enabled: widget.enabled,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapDown: (_) => widget.enabled ? _f.requestFocus() : null,
-            child: Surface(
-              widget.enabled ? c.bay : c.keyDown,
-              radius: AxRadius.key,
-              child: DecoratedBox(
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.enabled ? () => _f.requestFocus() : null,
+          child: Surface(
+            widget.enabled ? c.bay : c.keyDown,
+            radius: AxRadius.key,
+            child: ListenableBuilder(
+              listenable: _f,
+              builder: (_, child) => DecoratedBox(
                 position: DecorationPosition.foreground,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(AxRadius.key),
@@ -485,57 +434,36 @@ class _AxFieldState extends State<AxField> {
                       ? Border.all(color: bad ? c.fault : c.focus, width: 1.5)
                       : null,
                 ),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: t.density.control),
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: t.density.pad + 1,
-                      vertical: widget.lines > 1 ? 7 : 0,
-                    ),
-                    child: Row(
-                      crossAxisAlignment: widget.lines > 1
-                          ? CrossAxisAlignment.start
-                          : CrossAxisAlignment.center,
-                      children: [
-                        if (widget.leading != null) ...[widget.leading!, const SizedBox(width: 7)],
-                        Expanded(
-                          child: Stack(
-                            alignment: Alignment.topLeft,
-                            children: [
-                              if (_c.text.isEmpty)
-                                IgnorePointer(
-                                  child: ExcludeSemantics(
-                                    child: Text(
-                                      widget.placeholder,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: style.ink(widget.enabled ? c.ink4 : c.idle),
-                                    ),
-                                  ),
-                                ),
-                              EditableText(
-                                key: _editable,
-                                controller: _c,
-                                focusNode: _f,
-                                readOnly: !widget.enabled,
-                                style: style,
-                                strutStyle: StrutStyle.fromTextStyle(style, forceStrutHeight: true),
-                                cursorColor: c.liveText,
-                                cursorWidth: 1.5,
-                                backgroundCursorColor: c.idle,
-                                selectionColor: c.selection,
-                                maxLines: widget.lines == 1 ? 1 : null,
-                                minLines: widget.lines,
-                                onSubmitted: widget.onSubmitted,
-                                onChanged: widget.onChanged,
-                                selectionControls: emptyTextSelectionControls,
-                                rendererIgnoresPointer: false,
-                              ),
-                            ],
-                          ),
+                child: child,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: t.density.control),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: t.density.pad + 1,
+                    vertical: widget.lines > 1 ? 7 : 0,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: widget.lines > 1
+                        ? CrossAxisAlignment.start
+                        : CrossAxisAlignment.center,
+                    children: [
+                      if (widget.leading != null) ...[widget.leading!, const SizedBox(width: 7)],
+                      Expanded(
+                        child: AxEditable(
+                          label: widget.label,
+                          placeholder: widget.placeholder,
+                          controller: _c,
+                          focusNode: _f,
+                          style: style,
+                          enabled: widget.enabled,
+                          maxLines: widget.lines == 1 ? 1 : null,
+                          minLines: widget.lines,
+                          onSubmitted: widget.onSubmitted,
+                          onChanged: widget.onChanged,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),

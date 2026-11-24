@@ -110,6 +110,7 @@ const services = [
       AccountView(
         id: 'c1',
         name: 'Max, personal',
+        lane: 'plan, through Claude Code',
         identity: 'sam@example.com',
         windows: [
           UsageWindow('5 hours', .62, '62%', Provenance.reported, resets: 'in 2 h 10 min'),
@@ -119,13 +120,15 @@ const services = [
       AccountView(
         id: 'c2',
         name: 'Team, work',
+        lane: 'plan, through Claude Code',
         identity: 'sam@example.org',
         windows: [UsageWindow('5 hours', .08, '8%', Provenance.reported, resets: 'in 4 h')],
       ),
       AccountView(
         id: 'c3',
-        name: 'API key',
-        identity: 'workspace meridian',
+        name: 'Meridian',
+        lane: 'API key',
+        identity: 'sk-…3f2a',
         windows: [
           UsageWindow('This month', .18, r'$1.84 of $10', Provenance.estimated, resets: '1 Dec'),
         ],
@@ -139,12 +142,14 @@ const services = [
       AccountView(
         id: 'o1',
         name: 'Pro, work',
+        lane: 'plan sign-in',
         identity: 'sam@example.org',
         windows: [UsageWindow('Weekly', .31, '31%', Provenance.reported, resets: 'Sunday')],
       ),
       AccountView(
         id: 'o2',
         name: 'Plus, personal',
+        lane: 'plan sign-in',
         identity: 'sam@example.com',
         problem: 'Signed out. Sign in again to use it.',
         windows: [],
@@ -158,6 +163,7 @@ const services = [
       AccountView(
         id: 'g1',
         name: 'AI Pro',
+        lane: 'plan, through Antigravity',
         identity: 'sam@example.com',
         windows: [UsageWindow('Daily', null, 'not reported', Provenance.unknown)],
       ),
@@ -218,7 +224,7 @@ const session = SessionView(
     TaskView('Design note', TaskState.done, owner: 'Architect'),
     TaskView('Failing test', TaskState.done, owner: 'Tester'),
     TaskView('Single-flight guard', TaskState.active, owner: 'Builder'),
-    TaskView('Migrate sessions', TaskState.active, owner: 'Tester'),
+    TaskView('Migrate sessions', TaskState.asking, owner: 'Tester'),
     TaskView('Independent review', TaskState.todo, owner: 'Reviewer'),
   ],
 );

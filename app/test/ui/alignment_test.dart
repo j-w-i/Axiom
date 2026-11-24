@@ -1,7 +1,9 @@
 import 'package:axiom/gallery/specimen.dart' as s;
+import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/icons.dart';
+import 'package:axiom/ui/status.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -33,6 +35,35 @@ void main() {
         p.localToGlobal(Offset.zero).dy +
         p.computeDistanceToActualBaseline(TextBaseline.alphabetic);
     expect(y(number), closeTo(y(code), .01));
+  });
+
+  testWidgets('every time and owner in a session ends on the same edge', (t) async {
+    await mount(
+      t,
+      Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(
+          width: 248,
+          child: SessionPanel(session: s.session, selected: 'builder', onSelect: (_) {}),
+        ),
+      ),
+      dpr: 2,
+    );
+    final right = {
+      for (final x in ['6:08', '9:55', '3:17', '2:20', '4 of 7', 'Reviewer'])
+        x: t.getTopRight(find.text(x).last).dx,
+    };
+    for (final e in right.entries) {
+      expect(e.value, closeTo(right['6:08']!, .3), reason: '$right');
+    }
+    final marks = {
+      for (final m in t.renderObjectList<RenderBox>(find.byType(AxLamp)))
+        m.localToGlobal(m.size.center(Offset.zero)).dx,
+    };
+    expect(
+      marks.reduce((a, b) => a > b ? a : b) - marks.reduce((a, b) => a < b ? a : b),
+      lessThan(.6),
+    );
   });
 
   testWidgets('a key\'s glyph and its word share a centre', (t) async {

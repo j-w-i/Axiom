@@ -1,8 +1,8 @@
 import 'package:flutter/widgets.dart';
 
 import '../ui/controls.dart';
+import '../transcript/safe_text.dart';
 import '../ui/icons.dart';
-import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'highlight.dart';
@@ -18,23 +18,40 @@ class WorkLine extends StatelessWidget {
     super.key,
     this.result = '',
     this.failed = false,
+    this.more,
   });
   final AxIcon icon;
   final String name, detail, result;
   final bool failed;
+
+  /// Whether more is shown below; null if there is nothing more.
+  final bool? more;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Semantics(
       label: '$name $detail $result',
       excludeSemantics: true,
-      child: SizedBox(
-        height: 24,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 24),
         child: Row(
           children: [
-            AxGlyph(icon, size: 13, color: failed ? c.faultText : c.ink4),
-            const SizedBox(width: 9),
-            Text(name, style: t.type.label.ink(c.ink2)),
+            SizedBox(
+              width: 22,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: AxGlyph(icon, size: 13, color: failed ? c.faultText : c.ink4),
+              ),
+            ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.label.ink(c.ink2),
+              ),
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -44,8 +61,20 @@ class WorkLine extends StatelessWidget {
                 style: t.type.codeSmall.ink(c.ink3),
               ),
             ),
-            const SizedBox(width: 8),
-            Text(result, style: t.type.small.ink(failed ? c.faultText : c.ink3)),
+            const SizedBox(width: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 200),
+              child: Text(
+                result,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.small.ink(failed ? c.faultText : c.ink3),
+              ),
+            ),
+            if (more case final m?) ...[
+              const SizedBox(width: 7),
+              AxGlyph(m ? AxIcon.down : AxIcon.right, size: 9, color: c.ink4),
+            ],
           ],
         ),
       ),
@@ -110,7 +139,7 @@ class DiffBlock extends StatelessWidget {
                           ),
                           Expanded(
                             child: Text.rich(
-                              highlight(l.text, t.type.codeSmall, c),
+                              highlight(literal(l.text), t.type.codeSmall, c),
                               style: t.type.codeSmall,
                               maxLines: 1,
                               softWrap: false,
@@ -130,8 +159,10 @@ class DiffBlock extends StatelessWidget {
   }
 }
 
-/// A permission request. The subject is exact; the scope says what saying yes allows.
-class RequestBar extends StatelessWidget {
+/// A permission request. The subject is exact, whole and spelled out: what cannot be seen is escaped,
+/// nothing is cut off, and if it is too long to show at once, saying yes waits until it has been
+/// scrolled through (SI-15).
+class RequestBar extends StatefulWidget {
   const RequestBar(
     this.request, {
     required this.onOnce,
@@ -141,71 +172,127 @@ class RequestBar extends StatelessWidget {
   });
   final RequestView request;
   final VoidCallback onOnce, onAlways, onDeny;
+  static const maxSubject = 168.0;
+  @override
+  State<RequestBar> createState() => _RequestBarState();
+}
+
+class _RequestBarState extends State<RequestBar> {
+  final _scroll = ScrollController();
+
+  /// Null until laid out: not knowing is not having seen.
+  bool? _seen;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_look);
+  }
+
+  @override
+  void didUpdateWidget(RequestBar old) {
+    super.didUpdateWidget(old);
+    if (old.request.subject != widget.request.subject) {
+      _seen = null;
+      if (_scroll.hasClients) _scroll.jumpTo(0);
+    }
+  }
+
+  void _look() {
+    if (!mounted || !_scroll.hasClients || _seen == true) return;
+    final p = _scroll.position;
+    final seen = p.pixels >= p.maxScrollExtent - 1;
+    if (seen != _seen) setState(() => _seen = seen);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _look());
+    final t = Ax.of(context), c = t.colors, r = widget.request;
+    final ok = _seen ?? false;
     final words = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(text: '${request.agent} ${request.what}', style: t.type.uiStrong),
-              TextSpan(text: '   ${request.scope}', style: t.type.label.ink(c.ink3)),
-            ],
+        Text('${oneLine(r.agent, 60)} ${oneLine(r.what, 160)}', style: t.type.uiStrong),
+        const SizedBox(height: 3),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: RequestBar.maxSubject),
+          child: NotificationListener<ScrollMetricsNotification>(
+            onNotification: (_) {
+              WidgetsBinding.instance.addPostFrameCallback((_) => _look());
+              return false;
+            },
+            child: SingleChildScrollView(
+              controller: _scroll,
+              child: Text(literal(r.subject), style: t.type.code.ink(c.attentionText)),
+            ),
           ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 2),
-        Text(
-          request.subject,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: t.type.code.ink(c.attentionText),
-        ),
+        const SizedBox(height: 3),
+        Text(literal(r.scope), style: t.type.label.ink(c.ink3)),
+        if (_seen == false) ...[
+          const SizedBox(height: 3),
+          Text('Scroll to the end to allow this.', style: t.type.label.ink(c.ink2)),
+        ],
       ],
     );
-    final keys = Row(
-      mainAxisSize: MainAxisSize.min,
+    final keys = Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      alignment: WrapAlignment.end,
       children: [
-        AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: onDeny),
-        const SizedBox(width: 4),
-        AxButton(label: request.always, onPressed: onAlways),
-        const SizedBox(width: 6),
-        AxButton(label: 'Allow once', tone: AxTone.answer, onPressed: onOnce),
+        AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: widget.onDeny),
+        AxButton(label: r.always, onPressed: ok ? widget.onAlways : null),
+        AxButton(label: 'Allow once', tone: AxTone.answer, onPressed: ok ? widget.onOnce : null),
       ],
     );
     return Semantics(
       container: true,
       liveRegion: true,
-      label: 'Permission request from ${request.agent}',
+      label: 'Permission request from ${oneLine(r.agent, 60)}',
       explicitChildNodes: true,
       child: Surface(
         c.request,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 9, 10, 10),
-          child: LayoutBuilder(
-            builder: (context, box) => box.maxWidth < 620
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      words,
-                      const SizedBox(height: 8),
-                      Align(alignment: Alignment.centerRight, child: keys),
-                    ],
-                  )
-                : Row(
-                    children: [
-                      const AxLamp(AgentState.asking),
-                      const SizedBox(width: 12),
-                      Expanded(child: words),
-                      const SizedBox(width: 12),
-                      keys,
-                    ],
-                  ),
-          ),
+        child: Stack(
+          children: [
+            Positioned(
+              left: 0,
+              top: 8,
+              bottom: 8,
+              child: ColoredBox(color: c.attention, child: const SizedBox(width: 2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 9, 10, 10),
+              child: LayoutBuilder(
+                builder: (context, box) => box.maxWidth < 620
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          words,
+                          const SizedBox(height: 8),
+                          Align(alignment: Alignment.centerRight, child: keys),
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Expanded(child: words),
+                          const SizedBox(width: 16),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: box.maxWidth * .5),
+                            child: keys,
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ],
         ),
       ),
     );

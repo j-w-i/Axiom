@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -25,11 +27,21 @@ class AxPopover extends StatefulWidget {
   State<AxPopover> createState() => AxPopoverState();
 }
 
-class AxPopoverState extends State<AxPopover> {
+class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
   final _ctl = OverlayPortalController();
   final _scope = FocusScopeNode();
   FocusNode? _back;
   Rect _at = Rect.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// The anchor has moved: the panel would hang where it was.
+  @override
+  void didChangeMetrics() => close();
 
   void toggle() => _ctl.isShowing ? close() : open();
   void open() {
@@ -39,7 +51,10 @@ class AxPopoverState extends State<AxPopover> {
     _back = FocusManager.instance.primaryFocus;
     setState(_ctl.show);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _scope.requestFocus();
+      if (!mounted) return;
+      _scope.requestFocus();
+      // A panel without a menu of its own still takes the keyboard.
+      if (_scope.focusedChild == null) _scope.nextFocus();
     });
   }
 
@@ -51,6 +66,7 @@ class AxPopoverState extends State<AxPopover> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scope.dispose();
     super.dispose();
   }
@@ -65,22 +81,23 @@ class AxPopoverState extends State<AxPopover> {
         child: TapRegion(
           groupId: this,
           onTapOutside: (_) => close(),
-          child: FocusScope(
-            node: _scope,
-            child: CallbackShortcuts(
-              bindings: {const SingleActivator(LogicalKeyboardKey.escape): close},
+          child: CallbackShortcuts(
+            bindings: {const SingleActivator(LogicalKeyboardKey.escape): close},
+            child: FocusScope(
+              node: _scope,
               child: _Rise(
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
                     minWidth: widget.width ?? _at.width,
-                    maxWidth: widget.width ?? 360,
+                    maxWidth: widget.width ?? (_at.width > 360 ? _at.width : 360),
                   ),
                   child: Surface(
                     Ax.of(context).colors.overlay,
                     radius: AxRadius.overlay,
                     child: Padding(
                       padding: const EdgeInsets.all(5),
-                      child: widget.panel(context, close),
+                      // However much there is, it stays in the window and scrolls.
+                      child: SingleChildScrollView(child: widget.panel(context, close)),
                     ),
                   ),
                 ),
@@ -182,7 +199,7 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
     final i = widget.items.indexWhere((e) => e.value == widget.value && e.enabled);
     final first = i >= 0 ? i : widget.items.indexWhere((e) => e.enabled);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && first >= 0) _nodes[first].requestFocus();
+      if (mounted && first >= 0) _take(first);
     });
   }
 
@@ -198,12 +215,33 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
     var i = from;
     for (var k = 0; k < _nodes.length; k++) {
       i = (i + step) % _nodes.length;
-      if (widget.items[i].enabled) return _nodes[i].requestFocus();
+      if (widget.items[i].enabled) return _take(i);
+    }
+  }
+
+  /// Focus, and into view if the menu scrolls.
+  void _take(int i) {
+    _nodes[i].requestFocus();
+    if (_nodes[i].context case final c?) {
+      unawaited(
+        Scrollable.ensureVisible(
+          c,
+          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+        ),
+      );
+      unawaited(
+        Scrollable.ensureVisible(
+          c,
+          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+        ),
+      );
     }
   }
 
   KeyEventResult _key(FocusNode _, KeyEvent e) {
     if (e is KeyUpEvent) return KeyEventResult.ignored;
+    final k = HardwareKeyboard.instance;
+    if (k.isMetaPressed || k.isControlPressed || k.isAltPressed) return KeyEventResult.ignored;
     final at = _nodes.indexWhere((n) => n.hasFocus);
     switch (e.logicalKey) {
       case LogicalKeyboardKey.arrowDown:
@@ -216,12 +254,15 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
         _go(0, -1);
       default:
         final ch = e.character?.toLowerCase();
-        if (ch == null || ch.trim().isEmpty) return KeyEventResult.ignored;
+        // Some systems deliver Escape and friends as control characters.
+        if (ch == null || ch.trim().isEmpty || ch.codeUnitAt(0) < 32 || ch.codeUnitAt(0) == 127) {
+          return KeyEventResult.ignored;
+        }
         for (var k = 1; k <= _nodes.length; k++) {
           final i = (at + k) % _nodes.length;
           final it = widget.items[i];
           if (it.enabled && it.label.toLowerCase().startsWith(ch)) {
-            _nodes[i].requestFocus();
+            _take(i);
             break;
           }
         }

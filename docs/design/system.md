@@ -8,7 +8,7 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 1. **Containment is spent, not given.** A surface may hold another surface only if the person acts on it as a unit (a key, a request, a menu, the display, the open session). Lists, selectors and activity are text on the surface they belong to. (Round 3 failed on this; the owner named it: "something is off about most of the app", and the plain sidebar was the part that worked.)
 2. **Three depths.** Chassis; display (below); session panel, keys, requests (above). Overlays float. Nothing else has depth.
 3. **One light, from above.** Raised parts have a faint lit top edge and a 1 px shadow; recessed parts a 5 px shade. Gradients span 2–4 %. No gloss, glow, engraving, side bevels or blur.
-4. **Cobalt means live**: running, focus, the primary act, the selected tab. Never decoration, never sky. Amber asks, red failed, green done; each also has a shape or a word.
+4. **Cobalt means live**: running, focus, the primary act, the selected tab. Never decoration, never sky; levels are neutral. Amber asks, red failed, green done; each state has its own shape (tested).
 5. **Grid of 4.** Text starts on a shared left edge per surface (display 24, panel 12). Icons are 12–14 in a fixed column; text uses even leading so glyphs and words share a centre.
 6. **Two voices.** Archivo for words; Spline Sans Mono only for literals: code, paths, commands.
 7. **Numbers say where they come from.** Solid meter = reported or measured; dashed = estimated; empty track and words = unknown.
@@ -28,7 +28,9 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 | `block` | code on the display | one tone up, no border |
 
 Radii 3–7. Type 10–19. Density compact/regular/roomy changes control height (24/28/32), never type size.
-States for every control: rest, hover, held, engaged, focused (keyboard ring), disabled, loading, error.
+States for every control: rest, hover, held, engaged (sunken), focused (keyboard ring), disabled (flat words, no surface), loading, error.
+
+**A request** is shown whole, spelled out, and cannot be allowed before it has been seen to its end.
 
 ## History
 | Round | Concepts | Verdict |
