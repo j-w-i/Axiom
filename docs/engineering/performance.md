@@ -19,4 +19,4 @@ Budgets come from measurement where one exists (marked ✔) and are targets othe
 
 Run: `scripts/bench.sh` (host and headless client benchmarks).
 
-Host figures: M4 Pro, macOS 27, 2026-11-25, `cargo run --release --example bench`, replayed scripts (their parsing and timers are included). Three runs interleaved with the build before the review fixes, on a machine that was not idle (load 6–7); no figure got worse beyond its spread. Before group commit the 100-agent worst case was 366 ms.
+Host figures: M4 Pro, macOS 27, 2026-11-25, `cargo run --release --example bench`, replayed scripts (their parsing and timers are included). Three runs interleaved with the build before the review fixes, on a machine that was not idle (load 6–7); no figure got worse beyond its spread. After the second round, again interleaved and with more load (4–8, test runs beside it): 10 agents 4.6–5.0 % (the build before 5.0–5.2 %), 100 agents 22 % (21.6–22.6 %), p99 22–24 ms (21–24 ms), start 18 / 23–24 ms. CPU figures move with the load; the comparison is the measurement. Before group commit the 100-agent worst case was 366 ms.
