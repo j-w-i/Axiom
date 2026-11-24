@@ -13,7 +13,7 @@ Updated 2026-11-25. Branch `m1/foundations`, pull request j-w-i/Axiom#14 into `m
 | v1 archive | refs compared; bundle restored, 357 commits | GitHub, macOS |
 | Wire, journal, host, CLI (106 tests), including kill -9, locked and damaged journals, slow and silent clients, strangers, signals | `scripts/check.sh rust`; 57 deliberate breakages, one equivalent survivor | macOS 27 arm64 |
 | Client through the real host process, kill -9 and reconnect | `app/test/host/e2e_test.dart` | macOS 27 arm64 |
-| Controls, contrast, transcript, shell, goldens, with the host tests above 241 tests in all | `scripts/check.sh app`, offscreen | macOS 27 arm64 |
+| Controls, contrast, transcript, shell, goldens, with the host tests above 292 tests in all | `scripts/check.sh app`, offscreen | macOS 27 arm64 |
 | Release build | `flutter build macos` | macOS 27 arm64 |
 | Host and Markdown benchmarks | `scripts/bench.sh` | M4 Pro |
 | Linux, Windows | CI only, see the pull request | |
