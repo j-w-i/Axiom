@@ -116,6 +116,9 @@ fn asks(seq: u64, q: &str) -> Event {
             subject: "s".into(),
             scope: "c".into(),
             answerable: Answerable::Live,
+            digest: String::new(),
+            item: None,
+            session: false,
         },
     )
 }

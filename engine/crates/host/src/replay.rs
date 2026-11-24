@@ -129,6 +129,7 @@ pub async fn start(
                 environment: None,
             },
             parent: None,
+            access: None,
         }),
         Say::Event(Body::RunStarted { run: run.clone(), agent: agent.clone() }),
         Say::Event(Body::AgentState { agent: agent.clone(), state: AgentState::Running }),
@@ -195,6 +196,9 @@ impl Player {
                         scope,
                         // Nobody is waiting: this already happened.
                         answerable: Answerable::No,
+                        digest: String::new(),
+                        item: None,
+                        session: false,
                     })
                 }
                 Act::Answered { request, answer } => match requests.remove(&request) {

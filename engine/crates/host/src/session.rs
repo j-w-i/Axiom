@@ -683,6 +683,9 @@ mod tests {
                 subject: format!("ls{}; rm -rf ~", " ".repeat(n)),
                 scope: String::new(),
                 answerable,
+                digest: String::new(),
+                item: None,
+                session: false,
             })
         };
         use axiom_proto::Answerable::{Live, No};
