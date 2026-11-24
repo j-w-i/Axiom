@@ -236,6 +236,7 @@ class _BlockViewState extends State<BlockView> {
       constraints: const BoxConstraints(maxWidth: _measure),
       child: Text.rich(
         inlineSpan(b.text, s, code, c, onLink: widget.onLink, recognizers: _recognizers),
+        style: s,
       ),
     );
     final child = switch (b.kind) {
@@ -323,6 +324,7 @@ class CodeBlock extends StatelessWidget {
               ],
               style: style,
             ),
+            style: style,
             softWrap: false,
           ),
         ),

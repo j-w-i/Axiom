@@ -111,6 +111,7 @@ class DiffBlock extends StatelessWidget {
                           Expanded(
                             child: Text.rich(
                               highlight(l.text, t.type.codeSmall, c),
+                              style: t.type.codeSmall,
                               maxLines: 1,
                               softWrap: false,
                               overflow: TextOverflow.fade,
