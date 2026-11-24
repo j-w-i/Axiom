@@ -557,7 +557,7 @@ abstract final class AxSpace {
 }
 
 abstract final class AxRadius {
-  static const double tick = 2, key = 6, plate = 7, bay = 8, overlay = 10;
+  static const double tick = 2, key = 5, plate = 6, bay = 7, overlay = 9;
 }
 
 /// Control sizes. Density changes height and padding, never type size.

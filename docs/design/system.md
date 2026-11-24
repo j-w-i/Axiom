@@ -29,7 +29,7 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 | `overlay` | menus, dialogs | floating |
 | `block` | code on the display | one tone up, no border |
 
-Radii: key 6, plate 7, display 8, overlay 10; what is inside is never rounder than what holds it. Type 10–19. Density compact/regular/roomy changes control height (24/28/32), never type size.
+Radii: key 5, plate 6, display 7, overlay 9; what is inside is never rounder than what holds it. Type 10–19. Density compact/regular/roomy changes control height (24/28/32), never type size.
 States for every control: rest, hover, held, engaged (sunken), focused (keyboard ring), disabled (flat words, no surface), loading, error.
 
 **A request** is shown whole, spelled out, and cannot be allowed before it has been seen to its end.
@@ -46,4 +46,4 @@ States for every control: rest, hover, held, engaged (sunken), focused (keyboard
 | 7 | neutral charcoal: option B of three, "slightly darker"; the two-column transcript is the real one (`img/round7-*.png`) | the owner's choice, 2026-11-25; then: execution into the talking bar behind an expandable key, a warning before changing models, context shown clearly, views next to the agent, the agent in its own section |
 | 8 | `ExecutionKey`, `ContextGauge`, `AgentBar`; the first had a lip on the agent's section and brown keys, rejected at once: all accent edges and amber grounds removed (`img/round8-*.png`) | 2026-11-25: conversation "better now"; not the cobalt of the buttons, and the violet running pill "just bad" |
 | 9 | the owner's sampled blue for keys, links and live; lamps redrawn (`img/round9-*.png`) | 2026-11-25: "more of an aqua" |
-| 10 | aqua, option B of three, with dark words on keys; every corner 2 rounder (asked for on buttons) (`img/round10-*.png`) | the owner's choice, 2026-11-25 |
+| 10 | aqua, option B of three, with dark words on keys; every corner 2 rounder, then 1 back (asked for on buttons) (`img/round10-*.png`) | the owner's choice, 2026-11-25 |
