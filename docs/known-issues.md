@@ -31,3 +31,4 @@
 | K28 | If the journal's file is moved away the host stops, and the endings of what ran are lost | accepted |
 | K29 | A write lock held by another program during a stop costs up to 10 s, and endings may then be unwritten | accepted |
 | K30 | Engine, third review pass: a refused event leaves a replay's run open, a second lock soon after an exhausted outage fails at once, U+2060–U+206F count as emoji in the CLI's prose; four behaviours have no test (connection cap, growing script, lock inode, runtime shutdown limit) | M2 |
+| K31 | On Windows `flutter test` has hung on every run since `b63bdbf`, the commit that added `fake_host_test.dart`; unnoticed because a job cut off at its limit leaves no log and is not counted as failing. Cause not yet known; a hanging test now names itself | before merging M1 |

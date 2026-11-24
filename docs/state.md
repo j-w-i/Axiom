@@ -16,7 +16,8 @@ Updated 2026-11-25. Branch `m1/foundations`, pull request j-w-i/Axiom#14 into `m
 | Controls, contrast, transcript, shell, goldens, with the host tests above 293 tests in all | `scripts/check.sh app`, offscreen | macOS 27 arm64 |
 | Release build | `flutter build macos` | macOS 27 arm64 |
 | Host and Markdown benchmarks | `scripts/bench.sh` | M4 Pro |
-| Linux, Windows | CI only, see the pull request | |
+| Linux | CI only, see the pull request | |
+| Windows | CI only: the engine passes; **the app's tests hang and have not passed since `9befc74`** (K31) | |
 
 ## Not verified
 The real window has not been opened since the owner asked for none (K8); frame times on a display with many panes (K1); anything on Linux or Windows beyond CI; accessibility with a real screen reader.
