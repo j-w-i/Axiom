@@ -1,0 +1,9 @@
+HTTP/1.1 400 Bad Request
+X-Powered-By: Express
+Content-Type: application/json; charset=utf-8
+Content-Length: 45
+ETag: W/"2d-1iE7/OYErt3dK078e2hWf4YfZfU"
+Date: Tue, 24 Nov 2026 23:42:19 GMT
+Connection: close
+
+{"error":"'messages' array cannot be empty."}

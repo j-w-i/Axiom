@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/proto", "crates/journal", "crates/policy", "crates/spawn", "crates/tools", "crates/host", "crates/cli"]
+members = ["crates/proto", "crates/journal", "crates/policy", "crates/spawn", "crates/tools", "crates/model", "crates/engine", "crates/host", "crates/cli"]
 resolver = "3"
 
 [workspace.package]
@@ -15,6 +15,8 @@ axiom-host = { path = "crates/host" }
 axiom-policy = { path = "crates/policy" }
 axiom-spawn = { path = "crates/spawn" }
 axiom-tools = { path = "crates/tools" }
+axiom-model = { path = "crates/model" }
+axiom-engine = { path = "crates/engine" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -28,6 +30,10 @@ toml = "1"
 regex = "1"
 blake3 = { version = "1", default-features = false, features = ["pure"] }
 uds_windows = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7"
+zeroize = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

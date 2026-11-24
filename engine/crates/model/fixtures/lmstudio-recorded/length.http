@@ -1,0 +1,42 @@
+HTTP/1.1 200 OK
+X-Powered-By: Express
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+Date: Tue, 24 Nov 2026 23:40:42 GMT
+Transfer-Encoding: chunked
+
+124
+data: {"id":"chatcmpl-4mqh2wlm2he6muy2qralay","object":"chat.completion.chunk","created":1795563642,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{"role":"assistant","content":"Of"},"logprobs":null,"finish_reason":null}]}
+
+
+116
+data: {"id":"chatcmpl-4mqh2wlm2he6muy2qralay","object":"chat.completion.chunk","created":1795563642,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{"content":" course"},"logprobs":null,"finish_reason":null}]}
+
+
+110
+data: {"id":"chatcmpl-4mqh2wlm2he6muy2qralay","object":"chat.completion.chunk","created":1795563642,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{"content":","},"logprobs":null,"finish_reason":null}]}
+
+
+111
+data: {"id":"chatcmpl-4mqh2wlm2he6muy2qralay","object":"chat.completion.chunk","created":1795563642,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{"content":" I"},"logprobs":null,"finish_reason":null}]}
+
+
+111
+data: {"id":"chatcmpl-4mqh2wlm2he6muy2qralay","object":"chat.completion.chunk","created":1795563642,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{"content":"'d"},"logprobs":null,"finish_reason":null}]}
+
+
+107
+data: {"id":"chatcmpl-4mqh2wlm2he6muy2qralay","object":"chat.completion.chunk","created":1795563642,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"length"}]}
+
+
+140
+data: {"id":"chatcmpl-4mqh2wlm2he6muy2qralay","object":"chat.completion.chunk","created":1795563642,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[],"usage":{"prompt_tokens":37,"completion_tokens":5,"total_tokens":42,"completion_tokens_details":{"reasoning_tokens":0}}}
+
+
+e
+data: [DONE]
+
+
+0
+
