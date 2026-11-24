@@ -33,12 +33,7 @@ impl Client {
     pub async fn connect(paths: &Paths, name: &str) -> Result<Self, ClientError> {
         let token = tokio::fs::read_to_string(paths.token()).await?;
         let mut c = Self::raw(paths).await?;
-        c.call(Call::Hello {
-            token,
-            client: name.into(),
-            protocol: PROTOCOL,
-        })
-        .await?;
+        c.call(Call::Hello { token, client: name.into(), protocol: PROTOCOL }).await?;
         Ok(c)
     }
 
@@ -88,10 +83,8 @@ impl Client {
 
     async fn read(&mut self) -> Result<Message, ClientError> {
         loop {
-            let line = self
-                .lines
-                .next_line()
-                .map_err(|e| ClientError::Unreadable(e.to_string()))?;
+            let line =
+                self.lines.next_line().map_err(|e| ClientError::Unreadable(e.to_string()))?;
             if let Some(l) = line {
                 return serde_json::from_slice(&l).map_err(|e| {
                     let start: String = String::from_utf8_lossy(&l).chars().take(120).collect();

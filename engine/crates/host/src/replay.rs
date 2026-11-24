@@ -16,17 +16,11 @@ const MAX_PAUSE: Duration = Duration::from_secs(60);
 
 pub async fn load(path: &str) -> Result<Vec<Step>, WireError> {
     let bad = |m: String| WireError::new(ErrorCode::BadRequest, m);
-    let meta = tokio::fs::metadata(path)
-        .await
-        .map_err(|e| bad(format!("{path}: {e}")))?;
+    let meta = tokio::fs::metadata(path).await.map_err(|e| bad(format!("{path}: {e}")))?;
     if !meta.is_file() || meta.len() > MAX_SCRIPT {
-        return Err(bad(format!(
-            "{path} is not a file of at most {MAX_SCRIPT} bytes"
-        )));
+        return Err(bad(format!("{path} is not a file of at most {MAX_SCRIPT} bytes")));
     }
-    let text = tokio::fs::read_to_string(path)
-        .await
-        .map_err(|e| bad(format!("{path}: {e}")))?;
+    let text = tokio::fs::read_to_string(path).await.map_err(|e| bad(format!("{path}: {e}")))?;
     text.lines()
         .enumerate()
         .filter(|(_, l)| !l.trim().is_empty())
@@ -61,14 +55,8 @@ pub async fn play(
             },
             parent: None,
         }),
-        Say::Event(Body::RunStarted {
-            run: run.clone(),
-            agent: agent.clone(),
-        }),
-        Say::Event(Body::AgentState {
-            agent: agent.clone(),
-            state: AgentState::Running,
-        }),
+        Say::Event(Body::RunStarted { run: run.clone(), agent: agent.clone() }),
+        Say::Event(Body::AgentState { agent: agent.clone(), state: AgentState::Running }),
     ])
     .await;
 
@@ -89,16 +77,8 @@ pub async fn play(
         }
         let say = match step.act {
             Act::Agent { .. } => continue,
-            Act::State { state } => Say::Event(Body::AgentState {
-                agent: agent.clone(),
-                state,
-            }),
-            Act::Start {
-                item,
-                kind,
-                name,
-                args,
-            } => {
+            Act::State { state } => Say::Event(Body::AgentState { agent: agent.clone(), state }),
+            Act::Start { item, kind, name, args } => {
                 let id = ItemId::new();
                 items.insert(item, id.clone());
                 Say::Event(Body::ItemStarted {
@@ -114,20 +94,11 @@ pub async fn play(
                 Some(id) => Say::Text(id.clone(), text),
                 None => continue,
             },
-            Act::End {
-                item,
-                outcome,
-                result,
-            } => match items.remove(&item) {
+            Act::End { item, outcome, result } => match items.remove(&item) {
                 Some(id) => Say::End(id, outcome, result),
                 None => continue,
             },
-            Act::Ask {
-                request,
-                what,
-                subject,
-                scope,
-            } => {
+            Act::Ask { request, what, subject, scope } => {
                 let id = RequestId::new();
                 requests.insert(request, id.clone());
                 Say::Event(Body::RequestOpened {
@@ -144,15 +115,10 @@ pub async fn play(
                 Some(request) => Say::Event(Body::RequestClosed { request, answer }),
                 None => continue,
             },
-            Act::Usage { usage, provenance } => Say::Event(Body::Usage {
-                agent: agent.clone(),
-                usage,
-                provenance,
-            }),
-            Act::Finish {
-                outcome: o,
-                error: e,
-            } => {
+            Act::Usage { usage, provenance } => {
+                Say::Event(Body::Usage { agent: agent.clone(), usage, provenance })
+            }
+            Act::Finish { outcome: o, error: e } => {
                 (outcome, error) = (o, e);
                 break;
             }
@@ -164,26 +130,17 @@ pub async fn play(
         .map(|id| {
             Say::End(
                 id,
-                if outcome == Outcome::Completed {
-                    Outcome::Interrupted
-                } else {
-                    outcome
-                },
+                if outcome == Outcome::Completed { Outcome::Interrupted } else { outcome },
                 None,
             )
         })
         .collect();
-    end.extend(requests.into_values().map(|request| {
-        Say::Event(Body::RequestClosed {
-            request,
-            answer: "expired".into(),
-        })
-    }));
-    end.push(Say::Event(Body::RunEnded {
-        run,
-        outcome,
-        error,
-    }));
+    end.extend(
+        requests
+            .into_values()
+            .map(|request| Say::Event(Body::RequestClosed { request, answer: "expired".into() })),
+    );
+    end.push(Say::Event(Body::RunEnded { run, outcome, error }));
     end.push(Say::Event(Body::AgentState {
         agent,
         state: match outcome {

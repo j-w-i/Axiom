@@ -98,7 +98,10 @@ class _GlyphPainter extends CustomPainter {
   final bool filled;
   @override
   void paint(Canvas c, Size s) {
-    c.scale(s.width / 16);
+    // Square and centred, whatever box it is given.
+    final k = s.shortestSide;
+    c.translate((s.width - k) / 2, (s.height - k) / 2);
+    c.scale(k / 16);
     c.drawPath(
       icon.path,
       Paint()

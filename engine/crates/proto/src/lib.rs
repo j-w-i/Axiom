@@ -46,11 +46,7 @@ fn fresh(prefix: &str) -> String {
     let _ = getrandom::fill(&mut b);
     static N: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
     let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!(
-        "{prefix}_{:011x}{:016x}{n:04x}",
-        now_ms(),
-        u64::from_le_bytes(b)
-    )
+    format!("{prefix}_{:011x}{:016x}{n:04x}", now_ms(), u64::from_le_bytes(b))
 }
 
 /// Fills `b` from the system's generator, or says why it cannot.
@@ -216,11 +212,7 @@ pub enum Body {
     #[serde(rename = "request.closed")]
     RequestClosed { request: RequestId, answer: String },
     #[serde(rename = "usage")]
-    Usage {
-        agent: AgentId,
-        usage: Usage,
-        provenance: Provenance,
-    },
+    Usage { agent: AgentId, usage: Usage, provenance: Provenance },
     /// Something newer than this build.
     #[serde(untagged)]
     Unknown(Value),
@@ -265,11 +257,7 @@ pub struct SessionInfo {
 pub enum Call {
     /// Must be the first line on a connection.
     #[serde(rename = "hello")]
-    Hello {
-        token: String,
-        client: String,
-        protocol: u32,
-    },
+    Hello { token: String, client: String, protocol: u32 },
     #[serde(rename = "host.status")]
     Status {},
     /// Stops the host if nothing runs, or always with `force`.
@@ -349,10 +337,7 @@ pub struct WireError {
 }
 impl WireError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-        }
+        Self { code, message: message.into() }
     }
 }
 
@@ -394,10 +379,9 @@ impl Body {
     /// A body of a known type that did not decode: a fault of the sender, not a newer version.
     pub fn malformed(&self) -> bool {
         match self {
-            Body::Unknown(v) => v
-                .get("type")
-                .and_then(Value::as_str)
-                .is_none_or(|t| KNOWN.contains(&t)),
+            Body::Unknown(v) => {
+                v.get("type").and_then(Value::as_str).is_none_or(|t| KNOWN.contains(&t))
+            }
             _ => false,
         }
     }
@@ -462,13 +446,7 @@ mod tests {
         let e: Body =
             serde_json::from_str(r#"{"type":"agent.state","agent":"a","state":"dozing","z":1}"#)
                 .unwrap();
-        assert_eq!(
-            e,
-            Body::AgentState {
-                agent: AgentId("a".into()),
-                state: AgentState::Unknown
-            }
-        );
+        assert_eq!(e, Body::AgentState { agent: AgentId("a".into()), state: AgentState::Unknown });
     }
 
     #[test]
@@ -481,10 +459,7 @@ mod tests {
 
     #[test]
     fn requests_have_one_shape() {
-        let r = Request {
-            id: 3,
-            call: Call::Status {},
-        };
+        let r = Request { id: 3, call: Call::Status {} };
         assert_eq!(
             serde_json::to_string(&r).unwrap(),
             r#"{"id":3,"method":"host.status","params":{}}"#
@@ -492,13 +467,7 @@ mod tests {
         let f: Request =
             serde_json::from_str(r#"{"id":1,"method":"session.follow","params":{"session":"s"}}"#)
                 .unwrap();
-        assert_eq!(
-            f.call,
-            Call::Follow {
-                session: SessionId("s".into()),
-                after: 0
-            }
-        );
+        assert_eq!(f.call, Call::Follow { session: SessionId("s".into()), after: 0 });
     }
 
     #[test]

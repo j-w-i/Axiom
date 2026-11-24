@@ -15,10 +15,7 @@ const USAGE: &str = "usage:
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
+    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => return fail(&e),
     };
@@ -36,26 +33,17 @@ async fn run(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
     let call = match args {
         ["status"] => Call::Status {},
         ["sessions"] => Call::SessionList {},
-        ["new", title] => Call::SessionCreate {
-            title: (*title).into(),
-            workspace: None,
-        },
+        ["new", title] => Call::SessionCreate { title: (*title).into(), workspace: None },
         ["new", title, w] => {
             let w = std::fs::canonicalize(w)?;
-            Call::SessionCreate {
-                title: (*title).into(),
-                workspace: Some(w.display().to_string()),
-            }
+            Call::SessionCreate { title: (*title).into(), workspace: Some(w.display().to_string()) }
         }
         ["replay", s, path, rest @ ..] => Call::ReplayStart {
             session: SessionId((*s).into()),
             path: std::fs::canonicalize(path)?.display().to_string(),
             speed: rest.first().map_or(Ok(1.0), |v| v.parse())?,
         },
-        ["follow", s] => Call::Follow {
-            session: SessionId((*s).into()),
-            after: 0,
-        },
+        ["follow", s] => Call::Follow { session: SessionId((*s).into()), after: 0 },
         ["stop"] => Call::Shutdown { force: false },
         ["stop", "--force"] => Call::Shutdown { force: true },
         _ => return Err(USAGE.into()),
@@ -81,20 +69,12 @@ async fn run(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
                             shown.insert(item.0);
                             write!(out, "{}", plain(&text))?;
                         }
-                        Body::ItemEnded {
-                            item,
-                            text,
-                            outcome,
-                            ..
-                        } => {
+                        Body::ItemEnded { item, text, outcome, .. } => {
                             if !shown.remove(&item.0) {
                                 write!(out, "{}", plain(&text))?;
                             }
-                            let note = if outcome == Outcome::Completed {
-                                ""
-                            } else {
-                                " [cut short]"
-                            };
+                            let note =
+                                if outcome == Outcome::Completed { "" } else { " [cut short]" };
                             writeln!(out, "{note}")?;
                         }
                         Body::RunEnded { outcome, error, .. } => {
@@ -120,12 +100,6 @@ async fn run(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
 /// What agents write never reaches the terminal as control codes (SI-15).
 fn plain(s: &str) -> String {
     s.chars()
-        .map(|c| {
-            if c.is_control() && c != '\n' && c != '\t' {
-                '\u{fffd}'
-            } else {
-                c
-            }
-        })
+        .map(|c| if c.is_control() && c != '\n' && c != '\t' { '\u{fffd}' } else { c })
         .collect()
 }

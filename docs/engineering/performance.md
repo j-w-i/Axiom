@@ -6,15 +6,15 @@ Budgets come from measurement where one exists (marked ✔) and are targets othe
 |----------|--------|-----|
 | Frame build + raster, one agent at 100 tok/s + 10 live strips | p99 ≤ 4 ms, none over 8.33 ms | ✔ 0.35/1.62 + 0.94/1.38 ms (prototype) |
 | Same, 10 visible transcripts, 2 000 blocks each | p99 ≤ 8.33 ms | not measured |
-| Transcript of 50 000 blocks, append | same as 200 blocks ± 20 % | not measured |
+| Transcript of 50 000 blocks, append | ≤ 2 × the cost at 300 blocks | ✔ widget test, debug, offscreen; display run owed (K1) |
 | Client decode | ≤ 2 µs/event, ≤ 1 % core at 1 k events/s | ✔ 0.8 µs (prototype) |
-| Host: 10 agents × 100 tok/s, journalled | ≤ 6 % of a core, ≤ 40 MB (first target: 5 %) | ✔ 5.3 %, 9.5 MB |
-| Host: 100 agents × 100 tok/s | ≤ 35 % of a core, no resync, commit to client p99 ≤ 50 ms | ✔ 22 %, 36 MB, p99 25 ms, worst 37 ms, 0 resyncs |
+| Host: 10 agents × 100 tok/s, journalled | ≤ 6 % of a core, ≤ 40 MB (first target: 5 %) | ✔ 2.9–5.3 % over four runs, 9.6 MB |
+| Host: 100 agents × 100 tok/s | ≤ 35 % of a core, no resync, commit to client p99 ≤ 50 ms | ✔ 16–22 %, 37 MB, p99 20–25 ms, worst 37 ms, 0 resyncs |
 | Journal commit, 20 events | p99 ≤ 1 ms | ✔ 0.096 ms (prototype) |
 | Host start to ready | p99 ≤ 50 ms | ✔ 12 / 25 ms |
 | Client cold start to first frame | ≤ 700 ms | not measured |
 | Idle, 1 session open | ≤ 0.5 % CPU, ≤ 180 MB client + 20 MB host | not measured |
-| Markdown, 1 MB document, incremental | ≤ 16 ms per 4 KB chunk on the decode isolate | see `app/benchmark` |
+| Markdown, incremental, 4 KB chunk | p99 ≤ 1 ms at any document size | ✔ p50 49 µs, p99 ≤ 205 µs at 100 KB, 1 MB and 10 MB (worst 3.8 ms) |
 | Soak: 8 h, 10 agents | memory slope < 1 MB/h after the first hour | M7, short version weekly |
 
 Run: `scripts/bench.sh` (host and headless client benchmarks).

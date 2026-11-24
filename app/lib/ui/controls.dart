@@ -475,7 +475,7 @@ class _AxFieldState extends State<AxField> {
             behavior: HitTestBehavior.opaque,
             onTapDown: (_) => widget.enabled ? _f.requestFocus() : null,
             child: Surface(
-              c.bay,
+              widget.enabled ? c.bay : c.keyDown,
               radius: AxRadius.key,
               child: DecoratedBox(
                 position: DecorationPosition.foreground,
@@ -509,7 +509,7 @@ class _AxFieldState extends State<AxField> {
                                       widget.placeholder,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: style.ink(c.ink4),
+                                      style: style.ink(widget.enabled ? c.ink4 : c.idle),
                                     ),
                                   ),
                                 ),

@@ -53,9 +53,7 @@ impl Drop for Listener {
 
 #[cfg(unix)]
 pub async fn connect(paths: &Paths) -> io::Result<Boxed> {
-    Ok(Box::new(
-        tokio::net::UnixStream::connect(paths.endpoint()?).await?,
-    ))
+    Ok(Box::new(tokio::net::UnixStream::connect(paths.endpoint()?).await?))
 }
 
 #[cfg(windows)]

@@ -24,17 +24,14 @@ fn main() -> ExitCode {
             }
         }
     }
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("axiom-host: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let rt =
+        match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("axiom-host: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
     let r = rt.block_on(async {
         let h = Host::start(cfg)?;
         println!("ready");

@@ -22,22 +22,10 @@ fn started(seq: u64, i: &str) -> Event {
     )
 }
 fn delta(seq: u64, i: &str, t: &str) -> Event {
-    ev(
-        seq,
-        Body::ItemDelta {
-            item: ItemId(i.into()),
-            text: t.into(),
-        },
-    )
+    ev(seq, Body::ItemDelta { item: ItemId(i.into()), text: t.into() })
 }
 fn run(seq: u64) -> Event {
-    ev(
-        seq,
-        Body::RunStarted {
-            run: RunId("r".into()),
-            agent: AgentId("a".into()),
-        },
-    )
+    ev(seq, Body::RunStarted { run: RunId("r".into()), agent: AgentId("a".into()) })
 }
 
 #[test]
@@ -45,12 +33,7 @@ fn what_is_written_is_read_back() {
     let mut j = Journal::in_memory().unwrap();
     let s = SessionId::new();
     let first = j.create(&s, "T", Some("/w"), 5).unwrap();
-    let more = [
-        run(2),
-        started(3, "i"),
-        delta(4, "i", "he"),
-        delta(5, "i", "llo"),
-    ];
+    let more = [run(2), started(3, "i"), delta(4, "i", "he"), delta(5, "i", "llo")];
     j.append(&s, &more, Durability::Stream).unwrap();
     let mut all = vec![first];
     all.extend(more);
@@ -58,10 +41,7 @@ fn what_is_written_is_read_back() {
     assert_eq!(j.read(&s, 3, 1).unwrap(), all[3..4]);
     let i = j.session(&s).unwrap().unwrap();
     assert!(i.running);
-    assert_eq!(
-        (i.last_seq, i.updated, i.workspace.as_deref()),
-        (5, 5, Some("/w"))
-    );
+    assert_eq!((i.last_seq, i.updated, i.workspace.as_deref()), (5, 5, Some("/w")));
 }
 
 #[test]
@@ -69,16 +49,8 @@ fn a_gap_or_a_repeat_is_refused_whole() {
     let mut j = Journal::in_memory().unwrap();
     let s = SessionId::new();
     j.create(&s, "T", None, 1).unwrap();
-    for bad in [
-        vec![run(3)],
-        vec![run(1)],
-        vec![run(2), run(2)],
-        vec![run(2), run(4)],
-    ] {
-        assert!(matches!(
-            j.append(&s, &bad, Durability::Stream),
-            Err(Error::Damaged(_))
-        ));
+    for bad in [vec![run(3)], vec![run(1)], vec![run(2), run(2)], vec![run(2), run(4)]] {
+        assert!(matches!(j.append(&s, &bad, Durability::Stream), Err(Error::Damaged(_))));
     }
     assert_eq!(j.session(&s).unwrap().unwrap().last_seq, 1);
     assert_eq!(j.read(&s, 0, 9).unwrap().len(), 1);
@@ -122,22 +94,12 @@ fn ending_an_item_folds_its_deltas() {
     );
     j.append(
         &s,
-        &[
-            started(2, "i"),
-            delta(3, "i", "hel"),
-            started(4, "k"),
-            delta(5, "i", "lo"),
-            end.clone(),
-        ],
+        &[started(2, "i"), delta(3, "i", "hel"), started(4, "k"), delta(5, "i", "lo"), end.clone()],
         Durability::Stream,
     )
     .unwrap();
     let seqs: Vec<_> = j.read(&s, 0, 99).unwrap().iter().map(|e| e.seq).collect();
-    assert_eq!(
-        seqs,
-        [1, 2, 4, 6],
-        "order is kept; folded deltas leave holes a reader skips"
-    );
+    assert_eq!(seqs, [1, 2, 4, 6], "order is kept; folded deltas leave holes a reader skips");
 }
 
 #[test]
@@ -161,13 +123,7 @@ fn recovery_ends_what_was_open_and_keeps_the_text() {
         );
         j.append(
             &s,
-            &[
-                run(2),
-                started(3, "i"),
-                delta(4, "i", "par"),
-                delta(5, "i", "tial"),
-                ask,
-            ],
+            &[run(2), started(3, "i"), delta(4, "i", "par"), delta(5, "i", "tial"), ask],
             Durability::Stream,
         )
         .unwrap();
@@ -175,12 +131,7 @@ fn recovery_ends_what_was_open_and_keeps_the_text() {
     }
     let mut j = Journal::open(&p).unwrap();
     assert_eq!(j.recover(9).unwrap(), 1);
-    let tail: Vec<_> = j
-        .read(&s, 6, 99)
-        .unwrap()
-        .into_iter()
-        .map(|e| e.body)
-        .collect();
+    let tail: Vec<_> = j.read(&s, 6, 99).unwrap().into_iter().map(|e| e.body).collect();
     assert_eq!(
         tail,
         [
@@ -190,15 +141,8 @@ fn recovery_ends_what_was_open_and_keeps_the_text() {
                 text: "partial".into(),
                 result: None
             },
-            Body::RequestClosed {
-                request: RequestId("q".into()),
-                answer: "expired".into()
-            },
-            Body::RunEnded {
-                run: RunId("r".into()),
-                outcome: Outcome::Interrupted,
-                error: None
-            },
+            Body::RequestClosed { request: RequestId("q".into()), answer: "expired".into() },
+            Body::RunEnded { run: RunId("r".into()), outcome: Outcome::Interrupted, error: None },
         ]
     );
     assert!(!j.session(&s).unwrap().unwrap().running);
@@ -222,11 +166,7 @@ fn a_damaged_file_is_an_error_not_a_fresh_journal() {
     let p = d.path().join("j.db");
     std::fs::write(&p, vec![7u8; 9000]).unwrap();
     assert!(Journal::open(&p).is_err());
-    assert_eq!(
-        std::fs::read(&p).unwrap().len(),
-        9000,
-        "the file is untouched"
-    );
+    assert_eq!(std::fs::read(&p).unwrap().len(), 9000, "the file is untouched");
 }
 
 #[test]
@@ -235,12 +175,7 @@ fn sessions_do_not_see_each_other() {
     let (a, b) = (SessionId::new(), SessionId::new());
     j.create(&a, "A", None, 1).unwrap();
     j.create(&b, "B", None, 2).unwrap();
-    j.append(
-        &a,
-        &[started(2, "i"), delta(3, "i", "x")],
-        Durability::Stream,
-    )
-    .unwrap();
+    j.append(&a, &[started(2, "i"), delta(3, "i", "x")], Durability::Stream).unwrap();
     assert_eq!(j.read(&b, 0, 9).unwrap().len(), 1);
     assert!(j.delete(&a).unwrap());
     assert!(j.read(&a, 0, 9).unwrap().is_empty());

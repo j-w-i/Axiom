@@ -21,10 +21,7 @@ fn main() -> R<()> {
     if !bin.exists() {
         return Err(format!("build the host first: {}", bin.display()).into());
     }
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
     rt.block_on(async {
         start(&bin)?;
         for (agents, rate, secs) in [(1, 100, 5), (10, 100, 8), (100, 100, 8)] {
@@ -40,10 +37,7 @@ fn dir() -> R<tempdir::Dir> {
 
 fn spawn(bin: &std::path::Path, p: &Paths) -> R<(std::process::Child, f64)> {
     let t = Instant::now();
-    let mut c = Command::new(bin)
-        .env("AXIOM_DATA", &p.data)
-        .stdout(Stdio::piped())
-        .spawn()?;
+    let mut c = Command::new(bin).env("AXIOM_DATA", &p.data).stdout(Stdio::piped()).spawn()?;
     let mut l = String::new();
     BufReader::new(c.stdout.take().ok_or("no stdout")?).read_line(&mut l)?;
     Ok((c, t.elapsed().as_secs_f64() * 1e3))
@@ -51,16 +45,12 @@ fn spawn(bin: &std::path::Path, p: &Paths) -> R<(std::process::Child, f64)> {
 
 fn pct(v: &mut [f64], p: f64) -> f64 {
     v.sort_by(f64::total_cmp);
-    v.get(((v.len() as f64 * p) as usize).min(v.len().saturating_sub(1)))
-        .copied()
-        .unwrap_or(0.0)
+    v.get(((v.len() as f64 * p) as usize).min(v.len().saturating_sub(1))).copied().unwrap_or(0.0)
 }
 
 /// CPU seconds and resident MB, as `ps` reports them.
 fn usage(pid: u32) -> R<(f64, f64)> {
-    let o = Command::new("ps")
-        .args(["-o", "time=,rss=", "-p", &pid.to_string()])
-        .output()?;
+    let o = Command::new("ps").args(["-o", "time=,rss=", "-p", &pid.to_string()]).output()?;
     let s = String::from_utf8_lossy(&o.stdout).into_owned();
     let mut w = s.split_whitespace();
     let cpu = w
@@ -116,28 +106,14 @@ async fn stream(bin: &std::path::Path, agents: usize, rate: usize, secs: usize) 
     let mut c = Client::connect(&p, "bench").await?;
     let mut sessions = Vec::new();
     for i in 0..agents {
-        let v = c
-            .call(Call::SessionCreate {
-                title: format!("B{i}"),
-                workspace: None,
-            })
-            .await?;
+        let v = c.call(Call::SessionCreate { title: format!("B{i}"), workspace: None }).await?;
         let id = SessionId(v["session"].as_str().unwrap_or_default().into());
-        c.call(Call::Follow {
-            session: id.clone(),
-            after: 0,
-        })
-        .await?;
+        c.call(Call::Follow { session: id.clone(), after: 0 }).await?;
         sessions.push(id);
     }
     for id in &sessions {
         let path = script.display().to_string();
-        c.call(Call::ReplayStart {
-            session: id.clone(),
-            path,
-            speed: 1.0,
-        })
-        .await?;
+        c.call(Call::ReplayStart { session: id.clone(), path, speed: 1.0 }).await?;
     }
     let (cpu0, _) = usage(host.id())?;
     let t = Instant::now();

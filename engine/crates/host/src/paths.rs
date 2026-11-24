@@ -17,11 +17,7 @@ impl Paths {
 
     /// `AXIOM_DATA`, else the platform's place for application data.
     pub fn discover() -> Option<Self> {
-        let var = |k: &str| {
-            std::env::var_os(k)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        };
+        let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
         let data = var("AXIOM_DATA").or_else(|| {
             if cfg!(target_os = "macos") {
                 var("HOME").map(|h| h.join("Library/Application Support/Axiom"))
@@ -72,13 +68,9 @@ impl Paths {
 
     fn hash(&self) -> u64 {
         // FNV-1a: stable between builds, and only used to make a distinct name.
-        self.data
-            .as_os_str()
-            .as_encoded_bytes()
-            .iter()
-            .fold(0xcbf2_9ce4_8422_2325, |h, b| {
-                (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
-            })
+        self.data.as_os_str().as_encoded_bytes().iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
     }
 }
 
@@ -90,10 +82,7 @@ pub fn private_dir(p: &Path) -> io::Result<()> {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
         let m = std::fs::symlink_metadata(p)?;
         if !m.is_dir() {
-            return Err(io::Error::other(format!(
-                "{} is not a directory",
-                p.display()
-            )));
+            return Err(io::Error::other(format!("{} is not a directory", p.display())));
         }
         if m.permissions().mode() & 0o077 != 0 {
             // Succeeds only for the owner, so a directory planted by someone else fails here.

@@ -97,9 +97,7 @@ impl Journal {
                 workspace: workspace.map(Into::into),
             },
         };
-        let tx = self
-            .db
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self.db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
             "insert into session(id, title, workspace, created, updated, last_seq) values(?,?,?,?,?,1)",
             params![id.0, title, workspace, as_i64(at), as_i64(at)],
@@ -144,9 +142,7 @@ impl Journal {
         };
         let tx = self.db.savepoint()?;
         let have: i64 = tx
-            .query_row("select last_seq from session where id=?", [&id.0], |r| {
-                r.get(0)
-            })
+            .query_row("select last_seq from session where id=?", [&id.0], |r| r.get(0))
             .optional()?
             .ok_or_else(|| Error::NoSession(id.clone()))?;
         let mut want = have;
@@ -201,26 +197,12 @@ impl Journal {
             "select seq, at, body from event where session=? and seq>? order by seq limit ?",
         )?;
         let rows = q.query_map(
-            params![
-                id.0,
-                as_i64(after),
-                i64::try_from(limit).unwrap_or(i64::MAX)
-            ],
-            |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            },
+            params![id.0, as_i64(after), i64::try_from(limit).unwrap_or(i64::MAX)],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?)),
         )?;
         rows.map(|r| {
             let (seq, at, body) = r?;
-            Ok(Event {
-                seq: as_u64(seq),
-                at: as_u64(at),
-                body: serde_json::from_str(&body)?,
-            })
+            Ok(Event { seq: as_u64(seq), at: as_u64(at), body: serde_json::from_str(&body)? })
         })
         .collect()
     }
@@ -258,35 +240,20 @@ impl Journal {
             if open.is_empty() {
                 continue;
             }
-            let mut seq = self
-                .session(&id)?
-                .ok_or_else(|| Error::NoSession(id.clone()))?
-                .last_seq;
+            let mut seq = self.session(&id)?.ok_or_else(|| Error::NoSession(id.clone()))?.last_seq;
             let mut out = Vec::new();
             let mut say = |body| {
                 seq += 1;
                 out.push(Event { seq, at, body });
             };
             for (item, text) in open.items {
-                say(Body::ItemEnded {
-                    item,
-                    outcome: Outcome::Interrupted,
-                    text,
-                    result: None,
-                });
+                say(Body::ItemEnded { item, outcome: Outcome::Interrupted, text, result: None });
             }
             for request in open.requests {
-                say(Body::RequestClosed {
-                    request,
-                    answer: "expired".into(),
-                });
+                say(Body::RequestClosed { request, answer: "expired".into() });
             }
             for run in open.runs {
-                say(Body::RunEnded {
-                    run,
-                    outcome: Outcome::Interrupted,
-                    error: None,
-                });
+                say(Body::RunEnded { run, outcome: Outcome::Interrupted, error: None });
             }
             n += 1;
             self.append(&id, &out, Durability::Intent)?;

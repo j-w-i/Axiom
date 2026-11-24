@@ -140,25 +140,13 @@ impl Actor {
                     self.flush(bodies).await;
                 }
             }
-            Cmd::Follow {
-                client,
-                out,
-                after,
-                joined,
-            } => {
+            Cmd::Follow { client, out, after, joined } => {
                 let ok = after >= self.floor && after <= self.seq;
                 if ok {
-                    let gap: Vec<_> = self
-                        .recent
-                        .iter()
-                        .filter(|e| e.seq > after)
-                        .cloned()
-                        .collect();
+                    let gap: Vec<_> =
+                        self.recent.iter().filter(|e| e.seq > after).cloned().collect();
                     let fits = gap.is_empty()
-                        || out.offer(&Message::Events {
-                            session: self.id.clone(),
-                            events: gap,
-                        });
+                        || out.offer(&Message::Events { session: self.id.clone(), events: gap });
                     if fits {
                         self.followers.insert(client, out);
                     }
@@ -206,15 +194,9 @@ impl Actor {
                 };
                 self.order.retain(|o| *o != item);
                 if i.dropped > 0 {
-                    i.text
-                        .push_str(&format!("\n[{} more bytes were not kept]", i.dropped));
+                    i.text.push_str(&format!("\n[{} more bytes were not kept]", i.dropped));
                 }
-                bodies.push(Body::ItemEnded {
-                    item,
-                    outcome,
-                    text: i.text,
-                    result,
-                });
+                bodies.push(Body::ItemEnded { item, outcome, text: i.text, result });
             }
             Say::Event(b) => {
                 self.drain(bodies);
@@ -243,33 +225,20 @@ impl Actor {
         if bodies.is_empty() || self.broken {
             return;
         }
-        let how = if bodies.iter().any(intent) {
-            Durability::Intent
-        } else {
-            Durability::Stream
-        };
+        let how = if bodies.iter().any(intent) { Durability::Intent } else { Durability::Stream };
         let at = now_ms();
         let first = self.seq + 1;
-        let events: Vec<_> = bodies
-            .into_iter()
-            .zip(first..)
-            .map(|(body, seq)| Event { seq, at, body })
-            .collect();
+        let events: Vec<_> =
+            bodies.into_iter().zip(first..).map(|(body, seq)| Event { seq, at, body }).collect();
         match self.store.append(self.id.clone(), events, how).await {
             Ok(events) => {
                 self.seq += events.len() as u64;
-                let m = Message::Events {
-                    session: self.id.clone(),
-                    events,
-                };
+                let m = Message::Events { session: self.id.clone(), events };
                 let (id, seq) = (&self.id, self.seq);
                 self.followers.retain(|_, out| {
                     let ok = out.offer(&m);
                     if !ok {
-                        out.force(&Message::Resync {
-                            session: id.clone(),
-                            resync: seq,
-                        });
+                        out.force(&Message::Resync { session: id.clone(), resync: seq });
                     }
                     ok
                 });
@@ -288,10 +257,7 @@ impl Actor {
                 eprintln!("axiom-host: {}: {e}", self.id);
                 self.broken = true;
                 for out in self.followers.values() {
-                    out.force(&Message::Resync {
-                        session: self.id.clone(),
-                        resync: self.seq,
-                    });
+                    out.force(&Message::Resync { session: self.id.clone(), resync: self.seq });
                 }
                 self.followers.clear();
             }

@@ -47,11 +47,7 @@ pub struct Config {
 }
 impl Config {
     pub fn new(paths: Paths) -> Self {
-        Self {
-            paths,
-            outbox: 8 * 1024 * 1024,
-            idle_exit: None,
-        }
+        Self { paths, outbox: 8 * 1024 * 1024, idle_exit: None }
     }
 }
 
@@ -82,11 +78,8 @@ impl Host {
         let p = &cfg.paths;
         private_dir(&p.data)?;
         private_dir(&p.run())?;
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(p.lock())?;
+        let lock =
+            std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(p.lock())?;
         match lock.try_lock() {
             Ok(()) => {}
             Err(std::fs::TryLockError::WouldBlock) => return Err(HostError::AlreadyRunning),
@@ -243,12 +236,7 @@ async fn serve_client(st: &Arc<State>, stream: Boxed) {
                 }
             };
             let answer = match (known, req.call) {
-                (
-                    false,
-                    Call::Hello {
-                        token, protocol, ..
-                    },
-                ) => {
+                (false, Call::Hello { token, protocol, .. }) => {
                     if !same(&token, &st.token) {
                         let error = WireError::new(ErrorCode::Unauthorised, "wrong token");
                         out.force(&Message::Err { id: req.id, error });
@@ -277,10 +265,7 @@ async fn serve_client(st: &Arc<State>, stream: Boxed) {
                     match open(st, &session).await {
                         Ok(s) => {
                             // The answer comes before the first event.
-                            out.force(&Message::Ok {
-                                id: req.id,
-                                result: json!({}),
-                            });
+                            out.force(&Message::Ok { id: req.id, result: json!({}) });
                             let t =
                                 tokio::spawn(follow(st.store.clone(), s, id, out.clone(), after));
                             following.insert(session, t);
@@ -321,13 +306,7 @@ async fn serve_client(st: &Arc<State>, stream: Boxed) {
 async fn follow(store: Store, s: Session, client: u64, out: Arc<Outbox>, mut after: u64) {
     loop {
         let (joined, ok) = oneshot::channel();
-        s.cmd(Cmd::Follow {
-            client,
-            out: out.clone(),
-            after,
-            joined,
-        })
-        .await;
+        s.cmd(Cmd::Follow { client, out: out.clone(), after, joined }).await;
         if ok.await != Ok(false) {
             return;
         }
@@ -335,28 +314,16 @@ async fn follow(store: Store, s: Session, client: u64, out: Arc<Outbox>, mut aft
             Ok(events) => {
                 let Some(last) = events.last().map(|e| e.seq) else {
                     // `after` is ahead of the journal: the client remembers another history.
-                    out.force(&Message::Resync {
-                        session: s.id.clone(),
-                        resync: 0,
-                    });
+                    out.force(&Message::Resync { session: s.id.clone(), resync: 0 });
                     return;
                 };
                 after = last;
-                if !out
-                    .send(&Message::Events {
-                        session: s.id.clone(),
-                        events,
-                    })
-                    .await
-                {
+                if !out.send(&Message::Events { session: s.id.clone(), events }).await {
                     return;
                 }
             }
             Err(_) => {
-                out.force(&Message::Resync {
-                    session: s.id.clone(),
-                    resync: 0,
-                });
+                out.force(&Message::Resync { session: s.id.clone(), resync: 0 });
                 return;
             }
         }
@@ -391,10 +358,9 @@ async fn open(st: &State, id: &SessionId) -> Result<Session, WireError> {
 async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
     match call {
         Call::Hello { .. } => Err(WireError::new(ErrorCode::BadRequest, "already said hello")),
-        Call::Follow { .. } | Call::Unfollow { .. } => Err(WireError::new(
-            ErrorCode::Internal,
-            "handled by the connection",
-        )),
+        Call::Follow { .. } | Call::Unfollow { .. } => {
+            Err(WireError::new(ErrorCode::Internal, "handled by the connection"))
+        }
         Call::Status {} => Ok(json!({
             "version": env!("CARGO_PKG_VERSION"),
             "pid": std::process::id(),
@@ -421,22 +387,12 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 ));
             }
             let id = SessionId::new();
-            st.store
-                .create(id.clone(), title, workspace, now_ms())
-                .await
-                .map_err(internal)?;
+            st.store.create(id.clone(), title, workspace, now_ms()).await.map_err(internal)?;
             Ok(json!({ "session": id }))
         }
-        Call::ReplayStart {
-            session,
-            path,
-            speed,
-        } => {
+        Call::ReplayStart { session, path, speed } => {
             if !speed.is_finite() || speed < 0.0 {
-                return Err(WireError::new(
-                    ErrorCode::BadRequest,
-                    "speed is a number from 0",
-                ));
+                return Err(WireError::new(ErrorCode::BadRequest, "speed is a number from 0"));
             }
             let s = open(st, &session).await?;
             let steps = replay::load(&path).await?;
@@ -457,10 +413,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 let _ = c.send(true);
                 Ok(json!({}))
             }
-            None => Err(WireError::new(
-                ErrorCode::NotFound,
-                format!("no running {run}"),
-            )),
+            None => Err(WireError::new(ErrorCode::NotFound, format!("no running {run}"))),
         },
     }
 }

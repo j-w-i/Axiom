@@ -23,12 +23,7 @@ struct Q {
 
 impl Outbox {
     pub fn new(limit: usize) -> Self {
-        Self {
-            q: Mutex::default(),
-            ready: Notify::new(),
-            room: Notify::new(),
-            limit,
-        }
+        Self { q: Mutex::default(), ready: Notify::new(), room: Notify::new(), limit }
     }
     fn q(&self) -> MutexGuard<'_, Q> {
         self.q.lock().unwrap_or_else(PoisonError::into_inner)

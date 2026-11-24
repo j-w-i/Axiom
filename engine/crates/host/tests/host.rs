@@ -63,24 +63,12 @@ fn words(n: usize) -> String {
     (0..n).map(|i| format!("w{i} ")).collect()
 }
 async fn session(c: &mut Client) -> SessionId {
-    let v = c
-        .call(Call::SessionCreate {
-            title: "S".into(),
-            workspace: None,
-        })
-        .await
-        .unwrap();
+    let v = c.call(Call::SessionCreate { title: "S".into(), workspace: None }).await.unwrap();
     SessionId(v["session"].as_str().unwrap().into())
 }
 async fn replay(c: &mut Client, s: &SessionId, path: &str, speed: f64) -> RunId {
-    let v = c
-        .call(Call::ReplayStart {
-            session: s.clone(),
-            path: path.into(),
-            speed,
-        })
-        .await
-        .unwrap();
+    let v =
+        c.call(Call::ReplayStart { session: s.clone(), path: path.into(), speed }).await.unwrap();
     RunId(v["run"].as_str().unwrap().into())
 }
 
@@ -133,12 +121,7 @@ async fn a_run_is_seen_whole_by_every_follower() {
     let (mut a, mut b) = (f.client().await, f.client().await);
     let s = session(&mut a).await;
     for c in [&mut a, &mut b] {
-        c.call(Call::Follow {
-            session: s.clone(),
-            after: 0,
-        })
-        .await
-        .unwrap();
+        c.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
     }
     replay(&mut a, &s, &f.talker(400, 1), 4.0).await;
     let (mut va, mut vb) = (View::default(), View::default());
@@ -149,12 +132,7 @@ async fn a_run_is_seen_whole_by_every_follower() {
     assert_eq!(va.ended, Some(Outcome::Completed));
     // A late follower reads the folded history and arrives at the same view.
     let mut late = f.client().await;
-    late.call(Call::Follow {
-        session: s.clone(),
-        after: 0,
-    })
-    .await
-    .unwrap();
+    late.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
     let mut vl = View::default();
     vl.until_end(&mut late).await;
     assert_eq!(vl.text, va.text);
@@ -173,12 +151,7 @@ async fn reconnecting_in_the_middle_loses_and_repeats_nothing() {
     let mut rounds = 0;
     while v.ended.is_none() {
         let mut c = f.client().await;
-        c.call(Call::Follow {
-            session: s.clone(),
-            after: v.seq,
-        })
-        .await
-        .unwrap();
+        c.call(Call::Follow { session: s.clone(), after: v.seq }).await.unwrap();
         // Read a little, then drop the connection without a word.
         for _ in 0..3 {
             match c.next_within(Duration::from_millis(60)).await.unwrap() {
@@ -189,10 +162,7 @@ async fn reconnecting_in_the_middle_loses_and_repeats_nothing() {
         rounds += 1;
         assert!(rounds < 500);
     }
-    assert!(
-        rounds > 3,
-        "the point is to reconnect while it streams ({rounds})"
-    );
+    assert!(rounds > 3, "the point is to reconnect while it streams ({rounds})");
     assert_eq!(v.text.values().next().unwrap(), &words(1500));
     assert!(!v.resync);
 }
@@ -205,19 +175,8 @@ async fn a_client_that_stops_reading_is_told_to_resync_and_harms_nobody() {
     f.serve_with(cfg);
     let (mut slow, mut quick) = (f.client().await, f.client().await);
     let s = session(&mut quick).await;
-    slow.call(Call::Follow {
-        session: s.clone(),
-        after: 0,
-    })
-    .await
-    .unwrap();
-    quick
-        .call(Call::Follow {
-            session: s.clone(),
-            after: 0,
-        })
-        .await
-        .unwrap();
+    slow.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
+    quick.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
     // Far more than the socket buffer and the outbox hold.
     let mut script = String::from("{\"do\":\"agent\",\"name\":\"T\"}\n");
     let big = "x".repeat(2000);
@@ -232,22 +191,13 @@ async fn a_client_that_stops_reading_is_told_to_resync_and_harms_nobody() {
     assert_eq!(q.text.len(), 600);
     let mut v = View::default();
     while !v.resync {
-        let m = slow
-            .next_within(LONG)
-            .await
-            .unwrap()
-            .expect("a resync notice");
+        let m = slow.next_within(LONG).await.unwrap().expect("a resync notice");
         v.take(m);
     }
     assert!(v.text.len() < 600);
     // It follows again from where it was, at its own pace, and ends up equal.
     v.resync = false;
-    slow.call(Call::Follow {
-        session: s.clone(),
-        after: v.seq,
-    })
-    .await
-    .unwrap();
+    slow.call(Call::Follow { session: s.clone(), after: v.seq }).await.unwrap();
     v.until_end(&mut slow).await;
     assert_eq!(v.text, q.text);
 }
@@ -258,12 +208,7 @@ async fn text_arrives_before_the_event_that_followed_it() {
     f.serve();
     let mut c = f.client().await;
     let s = session(&mut c).await;
-    c.call(Call::Follow {
-        session: s.clone(),
-        after: 0,
-    })
-    .await
-    .unwrap();
+    c.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
     let script = f.script(
         "{\"do\":\"start\",\"item\":\"p\",\"kind\":\"prose\"}
 {\"do\":\"text\",\"item\":\"p\",\"text\":\"Reading it now.\"}
@@ -276,10 +221,7 @@ async fn text_arrives_before_the_event_that_followed_it() {
         if let Message::Events { events, .. } = c.next_within(LONG).await.unwrap().unwrap() {
             seen.extend(events.iter().filter_map(|e| match &e.body {
                 Body::ItemDelta { .. } => Some("text"),
-                Body::ItemStarted {
-                    kind: ItemKind::Tool,
-                    ..
-                } => Some("tool"),
+                Body::ItemStarted { kind: ItemKind::Tool, .. } => Some("tool"),
                 Body::RunEnded { .. } => Some("end"),
                 _ => None,
             }));
@@ -294,12 +236,7 @@ async fn cancelling_ends_everything_that_was_open() {
     f.serve();
     let mut c = f.client().await;
     let s = session(&mut c).await;
-    c.call(Call::Follow {
-        session: s.clone(),
-        after: 0,
-    })
-    .await
-    .unwrap();
+    c.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
     let run = replay(&mut c, &s, &f.talker(10_000, 5), 1.0).await;
     let mut v = View::default();
     while v.text.values().next().is_none_or(String::is_empty) {
@@ -307,18 +244,9 @@ async fn cancelling_ends_everything_that_was_open() {
         v.take(m);
     }
     let t = std::time::Instant::now();
-    c.call(Call::Cancel {
-        session: s.clone(),
-        run: run.clone(),
-    })
-    .await
-    .unwrap();
+    c.call(Call::Cancel { session: s.clone(), run: run.clone() }).await.unwrap();
     v.until_end(&mut c).await;
-    assert!(
-        t.elapsed() < Duration::from_millis(500),
-        "{:?}",
-        t.elapsed()
-    );
+    assert!(t.elapsed() < Duration::from_millis(500), "{:?}", t.elapsed());
     assert_eq!(v.ended, Some(Outcome::Cancelled));
     assert!(words(10_000).starts_with(v.text.values().next().unwrap().as_str()));
     let again = c.call(Call::Cancel { session: s, run }).await;
@@ -331,12 +259,7 @@ async fn following_from_the_future_is_answered_with_a_resync() {
     f.serve();
     let mut c = f.client().await;
     let s = session(&mut c).await;
-    c.call(Call::Follow {
-        session: s,
-        after: 999,
-    })
-    .await
-    .unwrap();
+    c.call(Call::Follow { session: s, after: 999 }).await.unwrap();
     let m = c.next_within(LONG).await.unwrap().unwrap();
     assert!(matches!(m, Message::Resync { resync: 0, .. }), "{m:?}");
 }
@@ -347,12 +270,7 @@ async fn an_unfollowed_session_is_quiet() {
     f.serve();
     let mut c = f.client().await;
     let s = session(&mut c).await;
-    c.call(Call::Follow {
-        session: s.clone(),
-        after: 0,
-    })
-    .await
-    .unwrap();
+    c.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
     c.call(Call::Unfollow { session: s.clone() }).await.unwrap();
     c.queue.clear();
     replay(&mut c, &s, &f.talker(50, 0), 0.0).await;
@@ -365,11 +283,7 @@ async fn strangers_learn_nothing() {
     let f = fixture();
     f.serve();
     f.client().await;
-    let hello = |t: &str, p| Call::Hello {
-        token: t.into(),
-        client: "x".into(),
-        protocol: p,
-    };
+    let hello = |t: &str, p| Call::Hello { token: t.into(), client: "x".into(), protocol: p };
     let token = std::fs::read_to_string(f.paths.token()).unwrap();
     for (call, code) in [
         (hello("wrong", PROTOCOL), ErrorCode::Unauthorised),
@@ -382,10 +296,7 @@ async fn strangers_learn_nothing() {
             Err(ClientError::Refused(e)) => assert_eq!(e.code, code),
             r => panic!("{r:?}"),
         }
-        assert!(matches!(
-            c.next().await,
-            Err(ClientError::Closed | ClientError::Io(_))
-        ));
+        assert!(matches!(c.next().await, Err(ClientError::Closed | ClientError::Io(_))));
     }
     for garbage in [&b"\x00\xff\xfe\n"[..], b"{}\n", b"GET / HTTP/1.1\r\n\r\n"] {
         let mut c = Client::raw(&f.paths).await.unwrap();
@@ -403,9 +314,7 @@ async fn bad_requests_do_not_end_a_known_connection() {
     let f = fixture();
     f.serve();
     let mut c = f.client().await;
-    c.send_raw(b"nonsense\n{\"id\":77,\"method\":\"no.such\",\"params\":{}}\n")
-        .await
-        .unwrap();
+    c.send_raw(b"nonsense\n{\"id\":77,\"method\":\"no.such\",\"params\":{}}\n").await.unwrap();
     for want in [0, 77] {
         match c.next().await.unwrap() {
             Message::Err { id, error } => {
@@ -415,47 +324,17 @@ async fn bad_requests_do_not_end_a_known_connection() {
         }
     }
     for title in [String::new(), " ".into(), "x".repeat(501)] {
-        assert!(
-            c.call(Call::SessionCreate {
-                title,
-                workspace: None
-            })
-            .await
-            .is_err()
-        );
+        assert!(c.call(Call::SessionCreate { title, workspace: None }).await.is_err());
     }
     let s = session(&mut c).await;
     let gone = SessionId("s_none".into());
     for call in [
-        Call::Follow {
-            session: gone.clone(),
-            after: 0,
-        },
-        Call::ReplayStart {
-            session: gone,
-            path: "/x".into(),
-            speed: 1.0,
-        },
-        Call::ReplayStart {
-            session: s.clone(),
-            path: "/no/such/file".into(),
-            speed: 1.0,
-        },
-        Call::ReplayStart {
-            session: s.clone(),
-            path: "/".into(),
-            speed: 1.0,
-        },
-        Call::ReplayStart {
-            session: s.clone(),
-            path: f.script("{\"do\":\"fly\"}\n"),
-            speed: 1.0,
-        },
-        Call::ReplayStart {
-            session: s,
-            path: f.talker(1, 0),
-            speed: -1.0,
-        },
+        Call::Follow { session: gone.clone(), after: 0 },
+        Call::ReplayStart { session: gone, path: "/x".into(), speed: 1.0 },
+        Call::ReplayStart { session: s.clone(), path: "/no/such/file".into(), speed: 1.0 },
+        Call::ReplayStart { session: s.clone(), path: "/".into(), speed: 1.0 },
+        Call::ReplayStart { session: s.clone(), path: f.script("{\"do\":\"fly\"}\n"), speed: 1.0 },
+        Call::ReplayStart { session: s, path: f.talker(1, 0), speed: -1.0 },
     ] {
         assert!(matches!(c.call(call).await, Err(ClientError::Refused(_))));
     }
@@ -480,18 +359,12 @@ async fn the_endpoint_is_private() {
 async fn a_long_data_directory_still_gets_a_private_endpoint() {
     use std::os::unix::fs::PermissionsExt;
     let d = tempfile::tempdir().unwrap();
-    let f = Fixture {
-        paths: Paths::new(d.path().join("n".repeat(120))),
-        dir: d,
-    };
+    let f = Fixture { paths: Paths::new(d.path().join("n".repeat(120))), dir: d };
     f.serve();
     f.client().await.call(Call::Status {}).await.unwrap();
     let e = f.paths.endpoint().unwrap();
     let dir = Path::new(&e).parent().unwrap();
-    assert_eq!(
-        std::fs::metadata(dir).unwrap().permissions().mode() & 0o777,
-        0o700
-    );
+    assert_eq!(std::fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o700);
 }
 
 #[tokio::test]
@@ -514,11 +387,7 @@ async fn shutdown_waits_for_consent_while_agents_run() {
     let busy = c.call(Call::Shutdown { force: false }).await;
     assert!(matches!(busy, Err(ClientError::Refused(e)) if e.code == ErrorCode::Busy));
     c.call(Call::Shutdown { force: true }).await.unwrap();
-    tokio::time::timeout(LONG, host)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(LONG, host).await.unwrap().unwrap().unwrap();
     assert!(!f.paths.token().exists());
 }
 
@@ -534,16 +403,9 @@ async fn an_idle_host_leaves_and_a_busy_one_stays() {
     drop(c); // the window is closed; the work goes on (PR-14)
     tokio::time::sleep(Duration::from_millis(250)).await;
     assert!(!host.is_finished());
-    tokio::time::timeout(LONG, host)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(LONG, host).await.unwrap().unwrap().unwrap();
     let j = axiom_journal::Journal::open(&f.paths.journal()).unwrap();
-    assert!(
-        !j.session(&s).unwrap().unwrap().running,
-        "the run finished without a client"
-    );
+    assert!(!j.session(&s).unwrap().unwrap().running, "the run finished without a client");
 }
 
 // ---- the real process ----
@@ -565,9 +427,7 @@ fn spawn(f: &Fixture) -> Process {
         .spawn()
         .unwrap();
     let mut line = String::new();
-    BufReader::new(c.stdout.take().unwrap())
-        .read_line(&mut line)
-        .unwrap();
+    BufReader::new(c.stdout.take().unwrap()).read_line(&mut line).unwrap();
     assert_eq!(line.trim(), "ready");
     Process(c)
 }
@@ -578,12 +438,7 @@ async fn killed_in_the_middle_nothing_seen_is_lost() {
     let mut p = spawn(&f);
     let mut c = f.client().await;
     let s = session(&mut c).await;
-    c.call(Call::Follow {
-        session: s.clone(),
-        after: 0,
-    })
-    .await
-    .unwrap();
+    c.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
     replay(&mut c, &s, &f.talker(10_000, 1), 4.0).await;
     let mut before = View::default();
     while before.text.values().next().is_none_or(|t| t.len() < 400) {
@@ -595,26 +450,15 @@ async fn killed_in_the_middle_nothing_seen_is_lost() {
     while let Ok(Some(m)) = c.next_within(Duration::from_millis(200)).await {
         before.take(m);
     }
-    assert!(
-        f.paths.run().exists(),
-        "a killed host cleans nothing; the next one must cope"
-    );
+    assert!(f.paths.run().exists(), "a killed host cleans nothing; the next one must cope");
 
     let mut p = spawn(&f);
     let mut c = f.client().await;
-    c.call(Call::Follow {
-        session: s.clone(),
-        after: before.seq,
-    })
-    .await
-    .unwrap();
+    c.call(Call::Follow { session: s.clone(), after: before.seq }).await.unwrap();
     let mut after = before.clone();
     after.until_end(&mut c).await;
     assert_eq!(after.ended, Some(Outcome::Interrupted));
-    let (b, a) = (
-        before.text.values().next().unwrap(),
-        after.text.values().next().unwrap(),
-    );
+    let (b, a) = (before.text.values().next().unwrap(), after.text.values().next().unwrap());
     assert!(a.starts_with(b.as_str()), "shown text must survive");
     assert!(words(10_000).starts_with(a.as_str()));
     let list = c.call(Call::SessionList {}).await.unwrap();
@@ -632,10 +476,6 @@ async fn a_second_process_is_turned_away() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
-    f.client()
-        .await
-        .call(Call::Shutdown { force: false })
-        .await
-        .unwrap();
+    f.client().await.call(Call::Shutdown { force: false }).await.unwrap();
     p.0.wait().unwrap();
 }

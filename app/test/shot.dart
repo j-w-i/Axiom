@@ -44,19 +44,12 @@ Future<void> mount(
             disableAnimations: reduceMotion,
             textScaler: TextScaler.linear(textScale),
           ),
-          child: DefaultTextEditingShortcuts(
-            child: Shortcuts(
-              shortcuts: WidgetsApp.defaultShortcuts,
-              child: Actions(
-                actions: WidgetsApp.defaultActions,
-                child: FocusTraversalGroup(
-                  child: Ax(
-                    theme: theme,
-                    child: Overlay(initialEntries: [OverlayEntry(builder: (_) => w)]),
-                  ),
-                ),
-              ),
-            ),
+          child: WidgetsApp(
+            color: const Color(0xFF000000),
+            debugShowCheckedModeBanner: false,
+            pageRouteBuilder: <T>(RouteSettings s, WidgetBuilder b) =>
+                PageRouteBuilder<T>(settings: s, pageBuilder: (c, _, _) => b(c)),
+            home: Ax(theme: theme, child: w),
           ),
         ),
       ),
