@@ -1,0 +1,30 @@
+HTTP/1.1 200 OK
+X-Powered-By: Express
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+Date: Tue, 24 Nov 2026 23:40:36 GMT
+Transfer-Encoding: chunked
+
+126
+data: {"id":"chatcmpl-91cxgcaqybto6o3u8hq35","object":"chat.completion.chunk","created":1795563636,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{"role":"assistant","content":"Paris"},"logprobs":null,"finish_reason":null}]}
+
+
+10e
+data: {"id":"chatcmpl-91cxgcaqybto6o3u8hq35","object":"chat.completion.chunk","created":1795563636,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{"content":""},"logprobs":null,"finish_reason":null}]}
+
+
+104
+data: {"id":"chatcmpl-91cxgcaqybto6o3u8hq35","object":"chat.completion.chunk","created":1795563636,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}
+
+
+13f
+data: {"id":"chatcmpl-91cxgcaqybto6o3u8hq35","object":"chat.completion.chunk","created":1795563636,"model":"qwen2.5-0.5b-instruct-mlx","system_fingerprint":"qwen2.5-0.5b-instruct-mlx","choices":[],"usage":{"prompt_tokens":25,"completion_tokens":2,"total_tokens":27,"completion_tokens_details":{"reasoning_tokens":0}}}
+
+
+e
+data: [DONE]
+
+
+0
+
