@@ -6,7 +6,6 @@
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader},
-    path::Path,
     process::{Child, Command, Stdio},
     time::Duration,
 };
@@ -171,16 +170,17 @@ async fn reconnecting_in_the_middle_loses_and_repeats_nothing() {
 async fn a_client_that_stops_reading_is_told_to_resync_and_harms_nobody() {
     let f = fixture();
     let mut cfg = Config::new(f.paths.clone());
-    cfg.outbox = 4 * 1024;
+    // Room for a client that reads, on any machine; none for one that does not.
+    cfg.outbox = 256 * 1024;
     f.serve_with(cfg);
     let (mut slow, mut quick) = (f.client().await, f.client().await);
     let s = session(&mut quick).await;
     slow.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
     quick.call(Call::Follow { session: s.clone(), after: 0 }).await.unwrap();
-    // Far more than the socket buffer and the outbox hold.
+    // About 5 MB: far more than the socket buffers and the outbox hold.
     let mut script = String::from("{\"do\":\"agent\",\"name\":\"T\"}\n");
     let big = "x".repeat(2000);
-    for i in 0..600 {
+    for i in 0..1200 {
         script += &format!(
             "{{\"do\":\"start\",\"item\":\"{i}\",\"kind\":\"prose\"}}\n{{\"do\":\"text\",\"item\":\"{i}\",\"text\":\"{big}\"}}\n{{\"after\":1,\"do\":\"end\",\"item\":\"{i}\",\"outcome\":\"completed\"}}\n"
         );
@@ -188,13 +188,14 @@ async fn a_client_that_stops_reading_is_told_to_resync_and_harms_nobody() {
     replay(&mut quick, &s, &f.script(&script), 1.0).await;
     let mut q = View::default();
     q.until_end(&mut quick).await;
-    assert_eq!(q.text.len(), 600);
+    assert_eq!(q.text.len(), 1200);
+    assert!(!q.resync, "the client that reads is not disturbed");
     let mut v = View::default();
     while !v.resync {
         let m = slow.next_within(LONG).await.unwrap().expect("a resync notice");
         v.take(m);
     }
-    assert!(v.text.len() < 600);
+    assert!(v.text.len() < 1200);
     // It follows again from where it was, at its own pace, and ends up equal.
     v.resync = false;
     slow.call(Call::Follow { session: s.clone(), after: v.seq }).await.unwrap();
@@ -344,7 +345,7 @@ async fn bad_requests_do_not_end_a_known_connection() {
 #[cfg(unix)]
 #[tokio::test]
 async fn the_endpoint_is_private() {
-    use std::os::unix::fs::PermissionsExt;
+    use std::{os::unix::fs::PermissionsExt, path::Path};
     let f = fixture();
     f.serve();
     let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
@@ -357,7 +358,7 @@ async fn the_endpoint_is_private() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_long_data_directory_still_gets_a_private_endpoint() {
-    use std::os::unix::fs::PermissionsExt;
+    use std::{os::unix::fs::PermissionsExt, path::Path};
     let d = tempfile::tempdir().unwrap();
     let f = Fixture { paths: Paths::new(d.path().join("n".repeat(120))), dir: d };
     f.serve();
