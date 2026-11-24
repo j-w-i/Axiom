@@ -11,6 +11,7 @@ mod fold;
 pub mod profile;
 mod secret;
 pub mod sse;
+pub mod transport;
 mod types;
 
 pub use codec::{EncodeError, Encoded, Loss, Lost};
@@ -18,4 +19,5 @@ pub use error::{Class, Error, Retry};
 pub use fold::{Accumulator, OutOfOrder, Reply};
 pub use profile::{Profile, Quirks};
 pub use secret::{Auth, Credential, Endpoint, Origin, Secret, SetupError};
+pub use transport::{Answer, CallError, Client, ModelInfo, Options};
 pub use types::*;
