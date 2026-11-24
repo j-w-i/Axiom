@@ -78,9 +78,10 @@ impl Listener {
         let rt = tokio::runtime::Handle::current();
         std::thread::Builder::new().name("accept".into()).spawn(move || {
             while let Ok((s, _)) = sock.accept() {
-                match carry(s, &rt) {
-                    Ok(b) if tx.blocking_send(b).is_err() => break,
-                    _ => {}
+                if let Ok(b) = carry(s, &rt)
+                    && tx.blocking_send(b).is_err()
+                {
+                    break;
                 }
             }
         })?;

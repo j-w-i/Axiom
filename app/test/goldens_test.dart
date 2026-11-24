@@ -3,27 +3,54 @@ library;
 
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:axiom/gallery/sheets.dart';
 import 'package:axiom/gallery/workbench.dart';
 import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'shot.dart';
 
-/// Fonts and antialiasing differ slightly between machines; a change a person would notice does not
-/// fit in 0.3 % of the pixels.
+/// Machines rasterise glyph edges with rounding differences of a few levels in 255. Those are not
+/// counted; everything larger is, and at most 0.1 % of the pixels may differ by that much.
 class Tolerant extends LocalFileComparator {
   Tolerant(super.testFile);
+  static const level = 8, share = .001;
+
+  static Future<(int, int, ByteData)> _pixels(List<int> png) async {
+    final codec = await ui.instantiateImageCodec(Uint8List.fromList(png));
+    final img = (await codec.getNextFrame()).image;
+    final d = (await img.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+    final r = (img.width, img.height, d);
+    img.dispose();
+    return r;
+  }
+
+  static Future<double> difference(List<int> a, List<int> b) async {
+    final (w, h, x) = await _pixels(a);
+    final (w2, h2, y) = await _pixels(b);
+    if (w != w2 || h != h2) return 1;
+    var n = 0;
+    for (var i = 0; i < x.lengthInBytes; i += 4) {
+      if ((x.getUint8(i) - y.getUint8(i)).abs() > level ||
+          (x.getUint8(i + 1) - y.getUint8(i + 1)).abs() > level ||
+          (x.getUint8(i + 2) - y.getUint8(i + 2)).abs() > level) {
+        n++;
+      }
+    }
+    return n / (w * h);
+  }
+
   @override
   Future<bool> compare(Uint8List image, Uri golden) async {
-    final r = await GoldenFileComparator.compareLists(image, await getGoldenBytes(golden));
-    final ok = r.passed || r.diffPercent <= .003;
-    if (!ok) throw FlutterError(await generateFailureOutput(r, golden, basedir));
-    r.dispose();
-    return ok;
+    final master = await getGoldenBytes(golden);
+    if (await difference(image, master) <= share) return true;
+    final r = await GoldenFileComparator.compareLists(image, master);
+    throw FlutterError(await generateFailureOutput(r, golden, basedir));
   }
 }
 
@@ -77,6 +104,30 @@ void main() {
       });
     }
   }
+
+  testWidgets('the comparison sees one pixel of movement', (t) async {
+    Future<Uint8List> shot(double dx) async {
+      await mount(
+        t,
+        Transform.translate(offset: Offset(dx, 0), child: const Workbench()),
+        size: const Size(1100, 700),
+        dpr: 1,
+      );
+      late Uint8List out;
+      await t.runAsync(() async {
+        final r = stage.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final img = await r.toImage();
+        out = (await img.toByteData(format: ui.ImageByteFormat.png))!.buffer.asUint8List();
+      });
+      return out;
+    }
+
+    final (a, b, c) = (await shot(0), await shot(0), await shot(1));
+    await t.runAsync(() async {
+      expect(await Tolerant.difference(a, b), 0);
+      expect(await Tolerant.difference(a, c), greaterThan(Tolerant.share * 10));
+    });
+  });
 
   test('every golden is used', () {
     final files = Directory('test/goldens').listSync().length;
