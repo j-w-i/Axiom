@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, ReadHalf},
-    sync::{Notify, OwnedSemaphorePermit, Semaphore, oneshot, watch},
+    sync::{Notify, OwnedMutexGuard, OwnedSemaphorePermit, Semaphore, oneshot, watch},
     task::{JoinHandle, JoinSet},
     time::{Instant, sleep_until, timeout},
 };
@@ -132,7 +132,7 @@ impl State {
     }
 
     /// The session, opened from the journal if nobody has it open.
-    async fn open(&self, id: &SessionId) -> Result<Session, WireError> {
+    async fn open(self: &Arc<Self>, id: &SessionId) -> Result<Session, WireError> {
         let none = || WireError::new(ErrorCode::NotFound, "no such session");
         // Longer than any of ours; not worth keeping, even in words about it.
         if id.0.len() > 100 {
@@ -148,10 +148,23 @@ impl State {
             all.entry(id.clone()).or_default().clone()
         };
         // Only those who want this session wait for it.
-        let mut slot = slot.lock().await;
+        let slot = slot.lock_owned().await;
         if let Some(s) = slot.as_ref().and_then(Opened::session) {
             return Ok(s);
         }
+        // Whoever asked may leave. What has begun ends all the same, and the next one waits for it.
+        let (st, id) = (self.clone(), id.clone());
+        match tokio::spawn(async move { st.open_in(slot, &id).await }).await {
+            Ok(r) => r.and_then(|s| s.ok_or_else(none)),
+            Err(e) => Err(internal(e.to_string())),
+        }
+    }
+
+    async fn open_in(
+        &self,
+        mut slot: OwnedMutexGuard<Option<Opened>>,
+        id: &SessionId,
+    ) -> Result<Option<Session>, WireError> {
         if let Some(before) = slot.take() {
             before.end().await;
         }
@@ -161,9 +174,9 @@ impl State {
                 let (s, opened) =
                     Session::open(id.clone(), seq, self.store.clone(), self.faults.clone());
                 *slot = Some(opened);
-                Ok(s)
+                Ok(Some(s))
             }
-            Ok(None) => Err(none()),
+            Ok(None) => Ok(None),
             Err(e) => Err(internal(self.faults.note(id, Access::Write, &e))),
         }
     }
@@ -301,7 +314,7 @@ impl Host {
         let mut connections = JoinSet::new();
         let mut look = tokio::time::interval(st.cfg.look_every);
         look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let (mut lost, mut failed) = (None, 0);
+        let (mut lost, mut failed) = (None, 0u32);
         tokio::pin!(stop);
         {
             let idle = idle(&st);
@@ -323,9 +336,10 @@ impl Host {
                     _ = look.tick() => match self.put_back() {
                         Ok(()) => failed = 0,
                         // Too many open files, a full disk: it may pass.
-                        Err(Gone::NotNow(e)) if failed < LOOKS => {
+                        Err(Gone::NotNow(e)) if failed < LOOKS || too_many_files(&e) => {
                             log::note(format!("looking after its files: {e}"));
-                            failed += 1;
+                            // Others may hold them for as long as they like. Nothing is lost by it.
+                            failed += u32::from(!too_many_files(&e));
                         }
                         Err(Gone::NotNow(e) | Gone::Lost(e)) => {
                             lost = Some(HostError::Lost(e));
@@ -388,6 +402,14 @@ impl From<io::Error> for Gone {
     fn from(e: io::Error) -> Self {
         Gone::NotNow(e)
     }
+}
+
+fn too_many_files(e: &io::Error) -> bool {
+    #[cfg(unix)]
+    return matches!(e.raw_os_error(), Some(libc::EMFILE | libc::ENFILE));
+    // ERROR_TOO_MANY_OPEN_FILES
+    #[cfg(windows)]
+    return e.raw_os_error() == Some(4);
 }
 
 fn holds(file: &std::path::Path, text: &str) -> io::Result<bool> {
@@ -726,7 +748,7 @@ fn hello(st: &State, call: Call) -> Result<OwnedSemaphorePermit, WireError> {
 
 /// Opens a session and reads the first page, so that what cannot be read is an error answer.
 async fn follow(
-    st: &State,
+    st: &Arc<State>,
     id: &SessionId,
     after: u64,
 ) -> Result<(Session, Vec<Event>), WireError> {
@@ -941,6 +963,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_open_that_nobody_waits_for_ends_before_the_next_begins() {
+        let d = tempfile::tempdir().unwrap();
+        let (st, _host) = host(&d);
+        let id = session(&st).await;
+        let s = st.open(&id).await.unwrap();
+        s.say(vec![started("p")]).await.unwrap();
+        s.sync().await.unwrap();
+        let lock = rusqlite::Connection::open(st.cfg.paths.journal()).unwrap();
+        lock.execute_batch("begin immediate").unwrap();
+        s.say(vec![Say::Text(ItemId("p".into()), "last".into())]).await.unwrap();
+        drop(s);
+        // Both the end of the one before and what recovery writes are behind the lock.
+        for _ in 0..3 {
+            assert!(timeout(Duration::from_millis(80), st.open(&id)).await.is_err());
+        }
+        lock.execute_batch("rollback").unwrap();
+        let s = timeout(Duration::from_secs(5), st.open(&id)).await.unwrap().unwrap();
+        s.say(vec![started("q")]).await.unwrap();
+        s.sync().await.unwrap();
+        let history = st.store.read(id.clone(), 0).await.unwrap();
+        let ends = history.iter().filter(|e| matches!(e.body, Body::ItemEnded { .. })).count();
+        assert_eq!(ends, 1, "{history:?}");
+    }
+
+    #[tokio::test]
     async fn one_session_is_open_once_however_many_ask_and_is_forgotten_after() {
         let d = tempfile::tempdir().unwrap();
         let (st, _host) = host(&d);
@@ -966,6 +1013,15 @@ mod tests {
         assert!(st.open(&SessionId::new()).await.is_err());
         st.open(&id).await.unwrap();
         assert!(st.sessions().len() <= 2, "{}", st.sessions().len());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn too_few_files_is_told_from_what_else_fails() {
+        for (code, few) in [(libc::EMFILE, true), (libc::ENFILE, true), (libc::ENOSPC, false)] {
+            assert_eq!(too_many_files(&io::Error::from_raw_os_error(code)), few);
+        }
+        assert!(!too_many_files(&io::Error::other("x")));
     }
 
     #[tokio::test]
