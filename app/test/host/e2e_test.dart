@@ -1,6 +1,3 @@
-@TestOn('mac-os || linux')
-library;
-
 import 'dart:async';
 import 'dart:io';
 
@@ -11,7 +8,9 @@ import 'package:axiom/host/session_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Through the real host process. `scripts/check.sh` builds it first; without it this fails.
-final hostBinary = File('../engine/target/debug/axiom-host').absolute.path;
+final hostBinary = File('../engine/target/debug/axiom-host${Platform.isWindows ? '.exe' : ''}')
+    .absolute
+    .path;
 
 void main() {
   late Directory dir;
@@ -28,13 +27,14 @@ void main() {
     await p.stdout.first;
   }
 
-  Future<HostLink> link() async =>
-      HostLink.connect(endpoint: paths.endpoint, token: File(paths.token).readAsStringSync());
+  Future<HostLink> link() async => HostLink.connect(
+    endpoint: File(paths.endpointFile).readAsStringSync(),
+    token: File(paths.token).readAsStringSync(),
+  );
 
   setUp(() async {
     expect(File(hostBinary).existsSync(), isTrue, reason: 'cargo build -p axiom-host first');
-    // Short: a Unix socket's name is limited.
-    dir = Directory('/tmp').createTempSync('ax');
+    dir = Directory.systemTemp.createTempSync('ax');
     paths = HostPaths('${dir.path}/d');
     await startHost();
   });
@@ -83,7 +83,7 @@ void main() {
 
   test('a wrong token and a missing host are errors with words', () async {
     await expectLater(
-      HostLink.connect(endpoint: paths.endpoint, token: 'no'),
+      HostLink.connect(endpoint: File(paths.endpointFile).readAsStringSync(), token: 'no'),
       throwsA(isA<Failed>().having((f) => f.code, 'code', 'unauthorised')),
     );
     await expectLater(

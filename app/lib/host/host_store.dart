@@ -28,7 +28,9 @@ class HostPaths {
 
   final String data;
   String get token => '$data/run/token';
-  String get endpoint => '$data/run/host.sock';
+
+  /// Written by the host: the socket's place depends on the length of the directory's name.
+  String get endpointFile => '$data/run/endpoint';
 }
 
 extension _Let<T> on T {
@@ -89,8 +91,10 @@ class HostStore extends ChangeNotifier {
     _retry = Timer(Duration(milliseconds: ms), () => unawaited(start()));
   }
 
-  Future<HostLink> _open() async =>
-      HostLink.connect(endpoint: paths.endpoint, token: await File(paths.token).readAsString());
+  Future<HostLink> _open() async => HostLink.connect(
+    endpoint: await File(paths.endpointFile).readAsString(),
+    token: await File(paths.token).readAsString(),
+  );
 
   Future<void> _connect() async {
     HostLink link;

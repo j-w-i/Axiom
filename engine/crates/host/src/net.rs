@@ -1,4 +1,4 @@
-//! The local listener: a Unix socket in a private directory, or a Windows named pipe.
+//! The local listener: a Unix socket in a private directory, on every system.
 
 use std::io;
 
@@ -58,42 +58,83 @@ pub async fn connect(paths: &Paths) -> io::Result<Boxed> {
 
 #[cfg(windows)]
 pub struct Listener {
-    next: tokio::net::windows::named_pipe::NamedPipeServer,
-    name: String,
+    rx: tokio::sync::mpsc::Receiver<Boxed>,
+    path: String,
 }
 
+/// Windows has Unix sockets but no way to wait for them with tokio's sockets, so each connection
+/// gets two threads that carry its bytes. There are a few clients, not thousands. The socket lies
+/// in the user's own application data, which other users cannot enter; the token does the rest.
 #[cfg(windows)]
 impl Listener {
     pub fn bind(paths: &Paths) -> io::Result<Self> {
-        let name = paths.endpoint()?;
-        // `first_pipe_instance` fails if another process already owns the name.
-        let next = tokio::net::windows::named_pipe::ServerOptions::new()
-            .first_pipe_instance(true)
-            .reject_remote_clients(true)
-            .create(&name)?;
-        Ok(Self { next, name })
+        let path = paths.endpoint()?;
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+        let sock = uds_windows::UnixListener::bind(&path)?;
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        let rt = tokio::runtime::Handle::current();
+        std::thread::Builder::new().name("accept".into()).spawn(move || {
+            while let Ok((s, _)) = sock.accept() {
+                match carry(s, &rt) {
+                    Ok(b) if tx.blocking_send(b).is_err() => break,
+                    _ => {}
+                }
+            }
+        })?;
+        Ok(Self { rx, path })
     }
 
     pub async fn accept(&mut self) -> io::Result<Boxed> {
-        self.next.connect().await?;
-        let fresh = tokio::net::windows::named_pipe::ServerOptions::new()
-            .reject_remote_clients(true)
-            .create(&self.name)?;
-        Ok(Box::new(std::mem::replace(&mut self.next, fresh)))
+        self.rx.recv().await.ok_or_else(|| io::Error::other("the listener has stopped"))
     }
+}
+
+#[cfg(windows)]
+impl Drop for Listener {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(windows)]
+fn carry(s: uds_windows::UnixStream, rt: &tokio::runtime::Handle) -> io::Result<Boxed> {
+    use std::io::{Read, Write};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+    let (mut from_us, mut to_us) = tokio::io::split(theirs);
+    let (mut rd, mut wr) = (s.try_clone()?, s);
+    let h = rt.clone();
+    std::thread::Builder::new().name("socket in".into()).spawn(move || {
+        let mut buf = vec![0u8; 64 * 1024];
+        while let Ok(n) = rd.read(&mut buf) {
+            if n == 0 || h.block_on(to_us.write_all(&buf[..n])).is_err() {
+                break;
+            }
+        }
+        let _ = h.block_on(to_us.shutdown());
+    })?;
+    let h = rt.clone();
+    std::thread::Builder::new().name("socket out".into()).spawn(move || {
+        let mut buf = vec![0u8; 64 * 1024];
+        while let Ok(n) = h.block_on(from_us.read(&mut buf)) {
+            if n == 0 || wr.write_all(&buf[..n]).is_err() {
+                break;
+            }
+        }
+        // Also wakes the other thread.
+        let _ = wr.shutdown(std::net::Shutdown::Both);
+    })?;
+    Ok(Box::new(ours))
 }
 
 #[cfg(windows)]
 pub async fn connect(paths: &Paths) -> io::Result<Boxed> {
-    let name = paths.endpoint()?;
-    loop {
-        match tokio::net::windows::named_pipe::ClientOptions::new().open(&name) {
-            Ok(c) => return Ok(Box::new(c)),
-            // ERROR_PIPE_BUSY: every instance is taken for the moment.
-            Err(e) if e.raw_os_error() == Some(231) => {
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-            Err(e) => return Err(e),
-        }
-    }
+    let path = paths.endpoint()?;
+    let s = tokio::task::spawn_blocking(move || uds_windows::UnixStream::connect(path))
+        .await
+        .map_err(io::Error::other)??;
+    carry(s, &tokio::runtime::Handle::current())
 }

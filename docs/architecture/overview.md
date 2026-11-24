@@ -1,7 +1,7 @@
 # Architecture
 
 ```
-┌────────────────────────┐   local socket / named pipe    ┌──────────────────────────────────────┐
+┌────────────────────────┐        local socket            ┌──────────────────────────────────────┐
 │ axiom (Flutter)        │   peer identity + launch token  │ axiom-host (Rust)                    │
 │ design system, stores, │ ◀────── JSON lines ───────────▶ │ journal · sessions · policy          │
 │ transcript, deck       │                                 │ native engine · adapters · tools     │

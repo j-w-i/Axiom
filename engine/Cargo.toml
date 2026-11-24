@@ -20,6 +20,7 @@ rusqlite = { version = "0.43", features = ["bundled"] }
 getrandom = "0.4"
 proptest = { version = "1", default-features = false, features = ["std"] }
 tempfile = "3"
+uds_windows = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

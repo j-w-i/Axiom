@@ -41,6 +41,10 @@ impl Paths {
     pub fn token(&self) -> PathBuf {
         self.run().join("token")
     }
+    /// Where the socket is, for clients that do not compute it.
+    pub fn endpoint_file(&self) -> PathBuf {
+        self.run().join("endpoint")
+    }
     pub fn lock(&self) -> PathBuf {
         self.run().join("lock")
     }
@@ -48,9 +52,6 @@ impl Paths {
     /// The socket. Unix paths are limited to about 100 bytes, so a long data directory gets a
     /// short private directory instead; its name is kept in `run/endpoint`.
     pub fn endpoint(&self) -> io::Result<String> {
-        if cfg!(windows) {
-            return Ok(format!(r"\\.\pipe\axiom-{:016x}", self.hash()));
-        }
         let near = self.run().join("host.sock");
         if near.as_os_str().len() <= 100 {
             return near

@@ -65,9 +65,6 @@ class HostLink {
     required String token,
     String client = 'axiom-app/0.0.1',
   }) async {
-    if (Platform.isWindows) {
-      throw const LinkClosed('the Windows transport is not implemented yet (known issue K7)');
-    }
     final rp = ReceivePort();
     final iso = await Isolate.spawn(_worker, (rp.sendPort, endpoint), debugName: 'host link');
     final first = Completer<Object?>();

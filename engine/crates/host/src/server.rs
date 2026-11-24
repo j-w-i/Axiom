@@ -88,8 +88,9 @@ impl Host {
         let mut journal = Journal::open(&p.journal())?;
         journal.recover(now_ms())?;
         let token = token()?;
-        private_file(&p.token(), &token)?;
         let listener = Listener::bind(p)?;
+        private_file(&p.endpoint_file(), &p.endpoint()?)?;
+        private_file(&p.token(), &token)?;
         Ok(Self {
             st: Arc::new(State {
                 store: Store::start(journal)?,
