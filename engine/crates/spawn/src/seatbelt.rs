@@ -24,7 +24,8 @@ const BASE: &str = r#"(version 1)
     "kern.osproductversion" "kern.osrelease" "kern.ostype" "kern.osversion" "kern.osvariant_status"
     "kern.secure_kernel" "kern.usrstack64" "kern.version" "kern.waketime" "kern.ngroups"
     "kern.iossupportversion" "sysctl.proc_cputype" "security.mac.lockdown_mode_state" "vm.loadavg"))
-(allow file-read* (literal "/") (literal "/dev/null") (literal "/dev/zero") (literal "/dev/random")
+(allow file-read* (literal "/") (literal "/etc") (literal "/tmp") (literal "/var")
+  (literal "/private/var/db/xcode_select_link") (subpath "/private/var/select") (literal "/dev/null") (literal "/dev/zero") (literal "/dev/random")
   (literal "/dev/urandom") (literal "/dev/dtracehelper") (subpath "/dev/fd"))
 (allow file-write-data file-ioctl (literal "/dev/null") (literal "/dev/zero") (literal "/dev/dtracehelper"))
 (allow ipc-posix-sem)

@@ -161,6 +161,7 @@ async fn nothing_is_inherited() {
                 "PAGER",
                 "GIT_PAGER",
                 "GIT_TERMINAL_PROMPT",
+                "GIT_CONFIG_GLOBAL",
                 "CI",
                 "PWD",
                 "OLDPWD",

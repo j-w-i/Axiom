@@ -58,6 +58,8 @@ impl Env {
             ("PAGER", "cat".into()),
             ("GIT_PAGER", "cat".into()),
             ("GIT_TERMINAL_PROMPT", "0".into()),
+            // A person's own names programs to run, and may hold what signs them in.
+            ("GIT_CONFIG_GLOBAL", "/dev/null".into()),
             ("CI", "1".into()),
         ];
         Self { vars: vars.into_iter().map(|(k, v)| (k.to_string(), v)).collect() }
