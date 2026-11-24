@@ -53,8 +53,17 @@ enum Cmd {
 }
 
 /// The session takes nothing more: its journal failed. [`Faults`] has the words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the session is closed")]
 pub struct Closed;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Refused {
+    #[error(transparent)]
+    Closed(#[from] Closed),
+    #[error(transparent)]
+    TooLong(#[from] limits::TooLong),
+}
 
 /// Keeps the session open.
 #[derive(Clone)]
@@ -92,9 +101,15 @@ impl Session {
         (Self { id, tx }, opened)
     }
 
-    /// Waits while the session is behind: this is the producer's backpressure.
-    pub async fn say(&self, s: Vec<Say>) -> Result<(), Closed> {
-        self.tx.send(Cmd::Say(s)).await.map_err(|_| Closed)
+    /// Waits while the session is behind: this is the producer's backpressure. All of it is taken,
+    /// or none.
+    pub async fn say(&self, all: Vec<Say>) -> Result<(), Refused> {
+        for s in &all {
+            if let Say::Event(b) = s {
+                b.check()?;
+            }
+        }
+        Ok(self.tx.send(Cmd::Say(all)).await.map_err(|_| Closed)?)
     }
     /// Resolves once everything said before is in the journal.
     pub async fn sync(&self) -> Result<u64, Closed> {
@@ -302,7 +317,7 @@ impl Actor {
                 if i.dropped > 0 {
                     i.text.push_str(&limits::cut_note(i.dropped));
                 }
-                bodies.push(Body::ItemEnded { item, outcome, text: i.text, result });
+                bodies.push(Body::ItemEnded { item, outcome, text: i.text, result, result_cut: 0 });
             }
             Say::Event(b) => {
                 self.drain(bodies);
@@ -454,6 +469,7 @@ mod tests {
             kind: ItemKind::Prose,
             name: String::new(),
             args: None,
+            args_cut: 0,
         })
     }
     fn text(i: &str, t: impl Into<String>) -> Say {
@@ -610,7 +626,7 @@ mod tests {
         let task = tokio::spawn(b.a.run(rx));
         s.say(vec![start("p")]).await.unwrap();
         tokio::time::timeout(Duration::from_secs(5), task).await.unwrap().unwrap();
-        assert_eq!(s.say(vec![start("q")]).await, Err(Closed));
+        assert_eq!(s.say(vec![start("q")]).await, Err(Closed.into()));
         assert_eq!(s.sync().await, Err(Closed));
         assert!(matches!(s.join(b.f.clone(), 1).await, Err(Closed)));
         let words = &faults.list()[0].words;
@@ -653,5 +669,38 @@ mod tests {
         let next = rx.try_recv().ok().unwrap();
         b.a.handle(next, &mut rx).await.unwrap();
         assert_eq!(synced.await, Ok(101), "and what waited behind it is done after it");
+    }
+
+    #[tokio::test]
+    async fn a_request_that_cannot_be_shown_whole_is_refused_with_all_that_came_with_it() {
+        let b = Bench::new(1 << 20).await;
+        let (s, _opened) = Session::open(b.a.id.clone(), 1, b.a.store.clone(), Arc::default());
+        let ask = |n, answerable| {
+            Say::Event(Body::RequestOpened {
+                request: axiom_proto::RequestId::new(),
+                agent: AgentId("a".into()),
+                what: "Run".into(),
+                subject: format!("ls{}; rm -rf ~", " ".repeat(n)),
+                scope: String::new(),
+                answerable,
+            })
+        };
+        use axiom_proto::Answerable::{Live, No};
+        let r = s.say(vec![start("p"), ask(70_000, Live)]).await;
+        assert!(matches!(r, Err(Refused::TooLong(_))), "{r:?}");
+        assert_eq!(s.sync().await, Ok(1), "nothing of it is journalled");
+        // One that nobody can answer is only told.
+        s.say(vec![ask(70_000, No)]).await.unwrap();
+        s.say(vec![ask(60_000, Live)]).await.unwrap();
+        assert_eq!(s.sync().await, Ok(3));
+        let subjects: Vec<_> = b.a.store.read(s.id.clone(), 1).await.unwrap();
+        let ends: Vec<_> = subjects
+            .iter()
+            .map(|e| match &e.body {
+                Body::RequestOpened { subject, .. } => subject.ends_with("rm -rf ~"),
+                b => panic!("{b:?}"),
+            })
+            .collect();
+        assert_eq!(ends, [false, true]);
     }
 }

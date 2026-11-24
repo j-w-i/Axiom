@@ -202,7 +202,13 @@ mod tests {
     }
     fn end(text: &str) -> Body {
         let item = ItemId("i".into());
-        Body::ItemEnded { item, outcome: Outcome::Completed, text: text.into(), result: None }
+        Body::ItemEnded {
+            item,
+            outcome: Outcome::Completed,
+            text: text.into(),
+            result: None,
+            result_cut: 0,
+        }
     }
 
     #[test]

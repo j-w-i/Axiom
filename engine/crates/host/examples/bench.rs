@@ -1,6 +1,9 @@
 //! Host benchmark: N agents streaming at R tokens/s each through the real process and socket.
 //! `cargo run --release -p axiom-host --example bench`. Prints one JSON line per scenario.
 
+// What it prints is what it is for.
+#![allow(clippy::print_stdout)]
+
 use std::{
     io::{BufRead, BufReader},
     process::{Command, Stdio},

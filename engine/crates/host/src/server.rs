@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io,
     sync::{
         Arc, Mutex, MutexGuard, OnceLock, PoisonError,
@@ -14,18 +14,19 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, ReadHalf},
-    sync::{Notify, OwnedSemaphorePermit, Semaphore, watch},
-    task::JoinSet,
-    time::{Instant, timeout, timeout_at},
+    sync::{Notify, OwnedSemaphorePermit, Semaphore, oneshot, watch},
+    task::{JoinHandle, JoinSet},
+    time::{Instant, sleep_until, timeout},
 };
 
 use crate::{
     faults::{Access, Faults},
+    log,
     net::{self, Boxed, Listener},
     outbox::{Follower, Outbox},
-    paths::{Paths, lock_file, private_dir, private_file},
+    paths::{Lock, Paths, Same, private_dir, private_file},
     replay,
-    session::{Joined, Opened, Session, encode, lines},
+    session::{Joined, Opened, Refused, Session, encode, lines},
     store::Store,
 };
 
@@ -39,6 +40,8 @@ pub enum HostError {
     Journal(#[from] axiom_journal::Error),
     #[error("the system has no randomness: {0}")]
     Random(String),
+    #[error("stopped, because its files are not its own any more: {0}")]
+    Lost(io::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +55,8 @@ pub struct Config {
     pub hello_within: Duration,
     /// How long a connection that has ended may take to be written out.
     pub linger: Duration,
+    /// How often it looks whether clients still find it.
+    pub look_every: Duration,
 }
 impl Config {
     pub fn new(paths: Paths) -> Self {
@@ -61,14 +66,23 @@ impl Config {
             idle_exit: None,
             hello_within: Duration::from_secs(5),
             linger: Duration::from_secs(2),
+            look_every: Duration::from_secs(3),
         }
     }
 }
 
-/// Connections that have not shown the token. The next ones wait to be accepted.
+/// Connections that have not shown the token. One more closes the oldest.
 const STRANGERS: usize = 32;
 /// Connections that have.
 const CLIENTS: usize = 64;
+/// All of them, with those that are being closed. More wait to be accepted.
+const CONNECTIONS: usize = 128;
+/// Runs at once.
+const RUNS: usize = 128;
+/// How many times in a row it may fail to look after its files.
+const LOOKS: u32 = 10;
+/// Bytes read ahead of a request that is being answered.
+const AHEAD: usize = 64 * 1024;
 /// How long runs may take to say how they ended when the host stops. Logout allows little more.
 const ENDINGS: Duration = Duration::from_secs(10);
 
@@ -83,6 +97,7 @@ struct State {
     runs: Mutex<Runs>,
     connections: AtomicU64,
     clients: Arc<Semaphore>,
+    scripts: Arc<Semaphore>,
     stop: Notify,
     /// Connections or runs came or went.
     changed: Notify,
@@ -175,6 +190,9 @@ impl Live {
         if runs.closing {
             return Err(stopping());
         }
+        if runs.live.len() >= RUNS {
+            return Err(WireError::new(ErrorCode::Busy, "too much is running"));
+        }
         runs.live.insert(run.clone(), (session.clone(), tx));
         drop(runs);
         st.changed.notify_waiters();
@@ -190,9 +208,15 @@ impl Drop for Live {
 
 pub struct Host {
     st: Arc<State>,
-    listener: Listener,
-    // Held for the life of the host; the system releases it if the process dies.
-    _lock: std::fs::File,
+    listener: Option<Listener>,
+    journal: Same,
+    // Released after the socket is gone.
+    lock: Lock,
+    old_lock: Lock,
+}
+
+fn lock(p: &std::path::Path) -> Result<Lock, HostError> {
+    Lock::take(p)?.ok_or(HostError::AlreadyRunning)
 }
 
 impl Host {
@@ -200,15 +224,11 @@ impl Host {
         let p = &cfg.paths;
         private_dir(&p.data)?;
         private_dir(&p.run())?;
-        let lock = lock_file(&p.lock())?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => return Err(HostError::AlreadyRunning),
-            Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
-        }
+        let (lock, old_lock) = (lock(&p.lock())?, lock(&p.old_lock())?);
         // A host that stops removes its token.
         let unclean = p.token().exists();
         let mut journal = Journal::open(&p.journal())?;
+        let same = Same::of(&p.journal())?;
         let faults = Faults::default();
         for (id, e) in journal.recover(now_ms())?.1 {
             faults.note(&id, Access::Write, &e);
@@ -226,6 +246,7 @@ impl Host {
             runs: Mutex::default(),
             connections: AtomicU64::new(0),
             clients: Arc::new(Semaphore::new(CLIENTS)),
+            scripts: Arc::new(Semaphore::new(replay::HELD)),
             stop: Notify::new(),
             changed: Notify::new(),
             over: watch::Sender::new(false),
@@ -234,7 +255,38 @@ impl Host {
         if unclean {
             check(&st)?;
         }
-        Ok(Self { st, listener, _lock: lock })
+        Ok(Self { st, listener: Some(listener), journal: same, lock, old_lock })
+    }
+
+    /// Clients find the host by its files, which anybody may remove (a cleaner of temporary files, a
+    /// hand). Puts back what is gone; fails for good if that would not be safe.
+    fn put_back(&mut self) -> Result<(), Gone> {
+        let p = &self.st.cfg.paths;
+        if !self.journal.still() {
+            return Err(Gone::Lost(io::Error::other("the journal was removed or replaced")));
+        }
+        private_dir(&p.data)?;
+        private_dir(&p.run())?;
+        for (held, path) in [(&mut self.lock, p.lock()), (&mut self.old_lock, p.old_lock())] {
+            if !held.still() {
+                *held = Lock::take(&path)?.ok_or_else(|| {
+                    Gone::Lost(io::Error::other("another host serves this directory"))
+                })?;
+            }
+        }
+        if !self.listener.as_ref().is_some_and(Listener::still) {
+            // The old one first: it cleans up the name they may share.
+            self.listener = None;
+            self.listener = Some(Listener::bind(p)?);
+            log::note("its socket was gone; there is a new one".into());
+        }
+        let path = self.listener.as_ref().map_or("", Listener::path);
+        for (file, text) in [(p.endpoint_file(), path), (p.token(), &self.st.token)] {
+            if !holds(&file, text)? {
+                private_file(&file, text)?;
+            }
+        }
+        Ok(())
     }
 
     /// Serves until `host.shutdown` or idleness.
@@ -245,27 +297,41 @@ impl Host {
     /// Or until `stop`, which is `host.shutdown` with force.
     pub async fn serve_until(mut self, stop: impl Future<Output = ()>) -> Result<(), HostError> {
         let st = self.st.clone();
-        let strangers = Arc::new(Semaphore::new(STRANGERS));
+        let strangers = Arc::new(Strangers::default());
         let mut connections = JoinSet::new();
+        let mut look = tokio::time::interval(st.cfg.look_every);
+        look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let (mut lost, mut failed) = (None, 0);
         tokio::pin!(stop);
         {
             let idle = idle(&st);
             tokio::pin!(idle);
             loop {
+                let room = connections.len() < CONNECTIONS;
                 tokio::select! {
-                    (s, stranger) = next(&mut self.listener, &strangers) => {
-                        let st = st.clone();
+                    s = next(&mut self.listener), if room => {
+                        let (st, place) = (st.clone(), strangers.admit());
+                        let here = Here::new(&st);
                         connections.spawn(async move {
-                            st.connections.fetch_add(1, Relaxed);
-                            st.changed.notify_waiters();
                             if let Ok(s) = net::carry(s) {
-                                connection(&st, s, stranger).await;
+                                connection(&st, s, place).await;
                             }
-                            st.connections.fetch_sub(1, Relaxed);
-                            st.changed.notify_waiters();
+                            drop(here);
                         });
                     }
                     Some(_) = connections.join_next() => {}
+                    _ = look.tick() => match self.put_back() {
+                        Ok(()) => failed = 0,
+                        // Too many open files, a full disk: it may pass.
+                        Err(Gone::NotNow(e)) if failed < LOOKS => {
+                            log::note(format!("looking after its files: {e}"));
+                            failed += 1;
+                        }
+                        Err(Gone::NotNow(e) | Gone::Lost(e)) => {
+                            lost = Some(HostError::Lost(e));
+                            break;
+                        }
+                    },
                     () = st.stop.notified() => break,
                     () = &mut idle => break,
                     () = &mut stop => break,
@@ -301,9 +367,84 @@ impl Host {
             }
         })
         .await;
-        let _ = std::fs::remove_file(st.cfg.paths.token());
-        let _ = std::fs::remove_file(st.cfg.paths.endpoint_file());
-        Ok(())
+        // Only what is still its own: there may be another host by now.
+        let p = &st.cfg.paths;
+        let path = self.listener.as_ref().map_or("", Listener::path);
+        for (file, text) in [(p.token(), st.token.as_str()), (p.endpoint_file(), path)] {
+            if holds(&file, text).unwrap_or(false) {
+                let _ = std::fs::remove_file(file);
+            }
+        }
+        lost.map_or(Ok(()), Err)
+    }
+}
+
+/// Why the host's files are not as they were.
+enum Gone {
+    Lost(io::Error),
+    NotNow(io::Error),
+}
+impl From<io::Error> for Gone {
+    fn from(e: io::Error) -> Self {
+        Gone::NotNow(e)
+    }
+}
+
+fn holds(file: &std::path::Path, text: &str) -> io::Result<bool> {
+    match std::fs::read(file) {
+        Ok(t) => Ok(t == text.as_bytes()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Counts a connection, however it ends.
+struct Here(Arc<State>);
+impl Here {
+    fn new(st: &Arc<State>) -> Self {
+        st.connections.fetch_add(1, Relaxed);
+        st.changed.notify_waiters();
+        Self(st.clone())
+    }
+}
+impl Drop for Here {
+    fn drop(&mut self) {
+        self.0.connections.fetch_sub(1, Relaxed);
+        self.0.changed.notify_waiters();
+    }
+}
+
+/// Who is connected and has not shown the token, oldest first.
+#[derive(Default)]
+struct Strangers {
+    list: Mutex<VecDeque<(u64, oneshot::Sender<()>)>>,
+    ids: AtomicU64,
+}
+impl Strangers {
+    fn list(&self) -> MutexGuard<'_, VecDeque<(u64, oneshot::Sender<()>)>> {
+        self.list.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+    /// One more. The oldest goes if they are too many: silence must not keep anybody out.
+    fn admit(self: &Arc<Self>) -> Stranger {
+        let id = self.ids.fetch_add(1, Relaxed);
+        let (tx, leave) = oneshot::channel();
+        let mut list = self.list();
+        if list.len() >= STRANGERS {
+            // Dropped, its other end resolves.
+            list.pop_front();
+        }
+        list.push_back((id, tx));
+        Stranger { all: self.clone(), id, leave }
+    }
+}
+struct Stranger {
+    all: Arc<Strangers>,
+    id: u64,
+    leave: oneshot::Receiver<()>,
+}
+impl Drop for Stranger {
+    fn drop(&mut self) {
+        self.all.list().retain(|(id, _)| *id != self.id);
     }
 }
 
@@ -326,19 +467,18 @@ async fn idle(st: &State) {
     }
 }
 
-/// The next connection, when there is room for one more stranger. An error of the listener (too
-/// many open files, say) passes or it does not; the sessions do not end because of it.
-async fn next(l: &mut Listener, strangers: &Arc<Semaphore>) -> (net::Raw, OwnedSemaphorePermit) {
-    let Ok(permit) = strangers.clone().acquire_owned().await else {
-        // Nobody closes it.
+/// The next connection. An error of the listener (too many open files, say) passes or it does not;
+/// the sessions do not end because of it.
+async fn next(l: &mut Option<Listener>) -> net::Raw {
+    let Some(l) = l else {
         return std::future::pending().await;
     };
     let mut pause = Duration::from_millis(20);
     loop {
         match l.accept().await {
-            Ok(s) => return (s, permit),
+            Ok(s) => return s,
             Err(e) => {
-                eprintln!("axiom-host: accepting a connection: {e}");
+                log::note(format!("accepting a connection: {e}"));
                 tokio::time::sleep(pause).await;
                 pause = (pause * 2).min(Duration::from_secs(1));
             }
@@ -351,10 +491,10 @@ fn check(st: &Arc<State>) -> io::Result<()> {
     let (st, path) = (st.clone(), st.cfg.paths.journal());
     std::thread::Builder::new().name("journal check".into()).spawn(move || {
         if let Err(e) = Reader::open(&path).and_then(|r| r.check()) {
-            eprintln!("axiom-host: {e}");
             let mut words = e.to_string();
             limits::clip(&mut words, limits::TITLE);
-            let _ = st.damaged.set(words);
+            let _ = st.damaged.set(words.clone());
+            log::note(words);
         }
     })?;
     Ok(())
@@ -370,12 +510,24 @@ fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |d, (x, y)| d | (x ^ y)) == 0
 }
 
-async fn connection(st: &Arc<State>, stream: Boxed, stranger: OwnedSemaphorePermit) {
+/// The writing half of a connection. However the reading half ends, it holds nothing after that.
+struct Writer {
+    out: Arc<Outbox>,
+    task: JoinHandle<()>,
+}
+impl Drop for Writer {
+    fn drop(&mut self) {
+        self.task.abort();
+        self.out.abandon();
+    }
+}
+
+async fn connection(st: &Arc<State>, stream: Boxed, stranger: Stranger) {
     let out = Arc::new(Outbox::new(st.cfg.outbox));
     let (rd, mut wr) = tokio::io::split(stream);
     let mut writer = {
-        let out = out.clone();
-        tokio::spawn(async move {
+        let (out, o) = (out.clone(), out.clone());
+        let task = tokio::spawn(async move {
             while let Some(b) = out.take().await {
                 if wr.write_all(&b).await.is_err() || wr.flush().await.is_err() {
                     break;
@@ -383,56 +535,105 @@ async fn connection(st: &Arc<State>, stream: Boxed, stranger: OwnedSemaphorePerm
             }
             out.abandon();
             let _ = wr.shutdown().await;
-        })
+        });
+        Writer { out: o, task }
     };
     let mut over = st.over.subscribe();
+    let reader = Reading {
+        rd,
+        buf: vec![0; 64 * 1024],
+        lines: Lines::new(limits::HELLO_LINE),
+        linger: st.cfg.linger,
+        until: None,
+    };
     tokio::select! {
-        () = requests(st, rd, &out, stranger) => {}
+        () = requests(st, reader, &out, stranger) => {}
         _ = over.wait_for(|o| *o) => {}
     }
     out.close();
     // A client that stopped reading must not keep the socket.
-    if timeout(st.cfg.linger, &mut writer).await.is_err() {
-        writer.abort();
+    let _ = timeout(st.cfg.linger, &mut writer.task).await;
+}
+
+/// The reading half of a connection.
+struct Reading {
+    rd: ReadHalf<Boxed>,
+    buf: Vec<u8>,
+    lines: Lines,
+    linger: Duration,
+    /// The client has ended its side; what it asked may take until then.
+    until: Option<Instant>,
+}
+
+impl Reading {
+    /// False if no more comes.
+    async fn more(&mut self) -> bool {
+        if self.until.is_some() {
+            return false;
+        }
+        let n = self.rd.read(&mut self.buf).await;
+        self.took(n)
     }
-    out.abandon();
+    fn took(&mut self, n: io::Result<usize>) -> bool {
+        match n {
+            Ok(n @ 1..) => {
+                self.lines.push(&self.buf[..n]);
+                true
+            }
+            _ => {
+                self.until = Some(Instant::now() + self.linger);
+                false
+            }
+        }
+    }
+    /// Does `f`, unless the client leaves: then `f` has a moment more, and is given up.
+    async fn during<T>(&mut self, f: impl Future<Output = T>) -> Option<T> {
+        tokio::pin!(f);
+        loop {
+            let until = self.until;
+            let listens = until.is_none() && self.lines.waiting() < AHEAD;
+            tokio::select! {
+                biased;
+                r = &mut f => return Some(r),
+                n = self.rd.read(&mut self.buf), if listens => {
+                    self.took(n);
+                }
+                () = sleep_until(until.unwrap_or_else(Instant::now)), if until.is_some() => {
+                    return None;
+                }
+            }
+        }
+    }
 }
 
 /// Reads requests until the client ends, or does what ends it.
-async fn requests(
-    st: &Arc<State>,
-    mut rd: ReadHalf<Boxed>,
-    out: &Arc<Outbox>,
-    stranger: OwnedSemaphorePermit,
-) {
-    let mut lines = Lines::new(limits::HELLO_LINE);
-    let mut buf = vec![0u8; 64 * 1024];
+async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: Stranger) {
     // The place this connection takes: a stranger's, until it shows the token.
-    let mut _place = stranger;
-    let mut known = false;
+    let mut stranger = Some(stranger);
+    let mut _place = None;
     // Keeps what is followed open.
     let mut following: HashMap<SessionId, Session> = HashMap::new();
     let deadline = Instant::now() + st.cfg.hello_within;
     loop {
-        let read = rd.read(&mut buf);
-        let n = if known {
-            read.await
-        } else {
-            match timeout_at(deadline, read).await {
-                Ok(r) => r,
-                Err(_) => return,
-            }
+        let more = match &mut stranger {
+            None => r.more().await,
+            Some(s) => tokio::select! {
+                // What it has said counts before how long it took.
+                biased;
+                m = r.more() => m,
+                _ = &mut s.leave => return,
+                () = sleep_until(deadline) => return,
+            },
         };
-        match n {
-            Ok(n @ 1..) => lines.push(&buf[..n]),
-            _ => return,
+        if !more {
+            return;
         }
         loop {
             // Answers are bounded by not asking for more of them.
-            if !out.room().await {
+            if r.during(out.room()).await != Some(true) {
                 return;
             }
-            let line = match lines.next_line() {
+            let line = match r.lines.next_line() {
                 Ok(Some(l)) => l,
                 Ok(None) => break,
                 Err(e) => {
@@ -445,18 +646,18 @@ async fn requests(
                 Err(_) => {
                     let error = WireError::new(ErrorCode::BadRequest, "not a request");
                     out.answer(id_of(&line), Err(error));
-                    if known {
+                    if stranger.is_none() {
                         continue;
                     }
                     return;
                 }
             };
-            match (known, req.call) {
+            match (stranger.is_none(), req.call) {
                 (false, call) => match hello(st, call) {
                     Ok(client) => {
-                        _place = client;
-                        known = true;
-                        lines.set_limit(MAX_LINE);
+                        _place = Some(client);
+                        stranger = None;
+                        r.lines.set_limit(MAX_LINE);
                         let version = env!("CARGO_PKG_VERSION");
                         out.answer(req.id, Ok(json!({ "protocol": PROTOCOL, "version": version })));
                     }
@@ -468,17 +669,18 @@ async fn requests(
                 (true, Call::Follow { session, after }) => {
                     following.remove(&session);
                     let f = Follower::begin(out, &session);
-                    match follow(st, &session, after).await {
-                        Ok((s, page)) => {
+                    match r.during(follow(st, &session, after)).await {
+                        Some(Ok((s, page))) => {
                             // The answer comes before the first event.
                             out.answer(req.id, Ok(json!({})));
                             tokio::spawn(feed(st.clone(), s.clone(), f, after, page));
                             following.insert(session, s);
                         }
-                        Err(e) => {
+                        Some(Err(e)) => {
                             out.unfollow(&session);
                             out.answer(req.id, Err(e));
                         }
+                        None => return,
                     }
                 }
                 (true, Call::Unfollow { session }) => {
@@ -486,7 +688,10 @@ async fn requests(
                     following.remove(&session);
                     out.answer(req.id, Ok(json!({})));
                 }
-                (true, call) => out.answer(req.id, handle(st, call).await),
+                (true, call) => match r.during(handle(st, call)).await {
+                    Some(answer) => out.answer(req.id, answer),
+                    None => return,
+                },
             }
         }
     }
@@ -643,18 +848,32 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 return Err(WireError::new(ErrorCode::BadRequest, "speed is a number from 0"));
             }
             let s = st.open(&session).await?;
-            let steps = replay::load(&path).await?;
             let (run, agent) = (RunId::new(), AgentId::new());
             let (live, cancel) = Live::new(st, &session, &run)?;
-            // Answered when it is in the journal for good that the run started.
-            let p = replay::start(s, steps, speed, run.clone(), agent.clone())
-                .await
-                .map_err(|_| st.closed(&session))?;
+            let script = replay::load(path, st.scripts.clone()).await?;
+            // By itself: a client that leaves now does not leave a run that never ends.
+            let (told, begun) = oneshot::channel();
+            let (st, r, a) = (st.clone(), run.clone(), agent.clone());
             tokio::spawn(async move {
-                // Closed, the session has no more to say; what it has is in the journal.
-                let _ = p.play(cancel).await;
+                // Answered when it is in the journal for good that the run started.
+                match replay::start(s, script, speed, r, a).await {
+                    Ok(p) => {
+                        let _ = told.send(Ok(()));
+                        // Refused, the session has no more to say; the journal has what it said.
+                        let _ = p.play(cancel).await;
+                    }
+                    Err(e) => {
+                        let _ = told.send(Err(match e {
+                            Refused::Closed(_) => st.closed(&session),
+                            Refused::TooLong(e) => {
+                                WireError::new(ErrorCode::BadRequest, e.to_string())
+                            }
+                        }));
+                    }
+                }
                 drop(live);
             });
+            begun.await.map_err(|_| internal("the run did not start"))??;
             Ok(json!({ "run": run, "agent": agent }))
         }
         Call::Cancel { session, run } => match st.runs().live.get(&run) {
@@ -664,5 +883,130 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             }
             _ => Err(WireError::new(ErrorCode::NotFound, "no such run in this session")),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{paths::Paths, session::Say};
+
+    fn host(d: &tempfile::TempDir) -> (Arc<State>, Host) {
+        let h = Host::start(Config::new(Paths::new(d.path().join("d")))).unwrap();
+        (h.st.clone(), h)
+    }
+    async fn session(st: &Arc<State>) -> SessionId {
+        let id = SessionId::new();
+        st.store.create(id.clone(), "t".into(), None, 1).await.unwrap();
+        id
+    }
+    fn started(item: &str) -> Say {
+        Say::Event(Body::ItemStarted {
+            item: ItemId(item.into()),
+            run: RunId("r".into()),
+            agent: AgentId("a".into()),
+            kind: ItemKind::Prose,
+            name: String::new(),
+            args: None,
+            args_cut: 0,
+        })
+    }
+
+    #[tokio::test]
+    async fn a_session_is_not_opened_again_before_it_is_closed() {
+        let d = tempfile::tempdir().unwrap();
+        let (st, _host) = host(&d);
+        let id = session(&st).await;
+        let s = st.open(&id).await.unwrap();
+        s.say(vec![started("p")]).await.unwrap();
+        s.sync().await.unwrap();
+        // Its last text waits behind a lock when nobody holds it any more.
+        let lock = rusqlite::Connection::open(st.cfg.paths.journal()).unwrap();
+        lock.execute_batch("begin immediate").unwrap();
+        s.say(vec![Say::Text(ItemId("p".into()), "last".into())]).await.unwrap();
+        drop(s);
+        let again = st.open(&id);
+        tokio::pin!(again);
+        assert!(timeout(Duration::from_millis(150), &mut again).await.is_err());
+        lock.execute_batch("rollback").unwrap();
+        let s = timeout(Duration::from_secs(5), again).await.unwrap().unwrap();
+        s.say(vec![started("q")]).await.unwrap();
+        s.sync().await.unwrap();
+        let history = st.store.read(id.clone(), 0).await.unwrap();
+        let ended = history.iter().find_map(|e| match &e.body {
+            Body::ItemEnded { text, .. } => Some(text.as_str()),
+            _ => None,
+        });
+        assert_eq!(ended, Some("last"), "nothing said is lost between the two");
+    }
+
+    #[tokio::test]
+    async fn one_session_is_open_once_however_many_ask_and_is_forgotten_after() {
+        let d = tempfile::tempdir().unwrap();
+        let (st, _host) = host(&d);
+        let id = session(&st).await;
+        let (a, b, c) = tokio::join!(st.open(&id), st.open(&id), st.open(&id));
+        for s in [a.unwrap(), b.unwrap(), c.unwrap()] {
+            // Two writers would both give the next number.
+            s.say(vec![started(&ItemId::new().0)]).await.unwrap();
+            s.sync().await.unwrap();
+        }
+        for _ in 0..20 {
+            let other = session(&st).await;
+            st.open(&other).await.unwrap();
+            let t = Instant::now();
+            while !st.sessions()[&other]
+                .try_lock()
+                .is_ok_and(|s| s.as_ref().is_none_or(Opened::ended))
+            {
+                assert!(t.elapsed() < Duration::from_secs(5));
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
+        assert!(st.open(&SessionId::new()).await.is_err());
+        st.open(&id).await.unwrap();
+        assert!(st.sessions().len() <= 2, "{}", st.sessions().len());
+    }
+
+    #[tokio::test]
+    async fn the_oldest_stranger_goes() {
+        let all = Arc::new(Strangers::default());
+        let mut here: Vec<_> = (0..STRANGERS).map(|_| all.admit()).collect();
+        let gone =
+            |s: &mut Stranger| s.leave.try_recv() == Err(oneshot::error::TryRecvError::Closed);
+        assert!(!here.iter_mut().any(gone));
+        // One that is known by now has made room.
+        drop(here.remove(0));
+        here.push(all.admit());
+        assert!(!here.iter_mut().any(gone));
+        here.push(all.admit());
+        assert!(gone(&mut here[0]) && !here[1..].iter_mut().any(gone));
+        assert_eq!(all.list().len(), STRANGERS);
+        drop(here);
+        assert!(all.list().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_panics_leaves_nothing_behind() {
+        let d = tempfile::tempdir().unwrap();
+        let (st, _host) = host(&d);
+        let out = Arc::new(Outbox::new(1000));
+        let (here, o) = (Here::new(&st), out.clone());
+        let (held, released) = oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            // As the writer holds the socket.
+            let task = tokio::spawn(async move {
+                let _held = held;
+                std::future::pending().await
+            });
+            let _writer = Writer { out: o, task };
+            let _here = here;
+            tokio::task::yield_now().await;
+            panic!("as a defect would");
+        });
+        assert!(task.await.is_err());
+        assert_eq!(st.connections.load(Relaxed), 0);
+        assert!(timeout(Duration::from_secs(5), released).await.unwrap().is_err(), "let go");
+        assert!(!out.room().await, "closed");
     }
 }

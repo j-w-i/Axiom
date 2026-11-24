@@ -1,5 +1,8 @@
 //! Writes docs/protocol/fixtures.jsonl: one of every message and event body. The Dart tests decode
 //! it, so a change here that the client does not know fails there.
+// What it prints is what it is for.
+#![allow(clippy::print_stdout)]
+
 use axiom_proto::*;
 use serde_json::json;
 
@@ -32,6 +35,7 @@ fn main() -> Result<(), serde_json::Error> {
             kind: ItemKind::Tool,
             name: "read".into(),
             args: Some(json!({"path": "x"})),
+            args_cut: 0,
         },
         Body::ItemDelta { item: i.clone(), text: "tö\n\"k\"".into() },
         Body::ItemEnded {
@@ -39,6 +43,7 @@ fn main() -> Result<(), serde_json::Error> {
             outcome: Outcome::Interrupted,
             text: "t".into(),
             result: Some(json!({"lines": 3})),
+            result_cut: 0,
         },
         Body::RequestOpened {
             request: q.clone(),
@@ -60,6 +65,32 @@ fn main() -> Result<(), serde_json::Error> {
                 context: Some(0.5),
             },
             provenance: Provenance::Estimated,
+        },
+    ];
+    let cut = vec![
+        Event {
+            seq: 13,
+            at: 1013,
+            body: Body::ItemStarted {
+                item: ItemId("i_2".into()),
+                run: RunId("r_1".into()),
+                agent: AgentId("a_1".into()),
+                kind: ItemKind::Tool,
+                name: "write".into(),
+                args: None,
+                args_cut: 300_000,
+            },
+        },
+        Event {
+            seq: 14,
+            at: 1014,
+            body: Body::ItemEnded {
+                item: ItemId("i_2".into()),
+                outcome: Outcome::Completed,
+                text: String::new(),
+                result: None,
+                result_cut: 400_000,
+            },
         },
     ];
     let session = SessionId("s_1".into());
@@ -94,6 +125,7 @@ fn main() -> Result<(), serde_json::Error> {
                 "faults": [Fault { session: SessionId("s_1".into()), words: "w".into() }],
             }),
         },
+        Message::Events { session: SessionId("s_1".into()), events: cut },
     ] {
         println!("{}", serde_json::to_string(&m)?);
     }

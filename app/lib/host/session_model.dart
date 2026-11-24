@@ -6,12 +6,16 @@ import 'proto.dart';
 
 /// One item of a transcript. Notifies when its own text or state changes, and only then.
 class ItemModel extends ChangeNotifier {
-  ItemModel(this.id, this.agent, this.run, this.kind, String name, this.args)
+  ItemModel(this.id, this.agent, this.run, this.kind, String name, this.args, {this.argsCut = 0})
     : name = oneLine(name, 60);
   final String id, agent, run, name;
   final ItemKind kind;
   final Object? args;
   Object? result;
+
+  /// Bytes that were too many for the host to keep.
+  final int argsCut;
+  int resultCut = 0;
   Outcome? outcome;
   bool get open => outcome == null;
 
@@ -42,6 +46,7 @@ class ItemModel extends ChangeNotifier {
   void _end(ItemEnded e) {
     outcome = e.outcome;
     result = e.result;
+    resultCut = e.resultCut;
     if (rich) {
       // `text` is authoritative: if what was streamed differs in any way, it replaces it.
       if (_length != e.text.length || _hash != _fold(0, e.text)) {
@@ -179,13 +184,14 @@ class SessionModel extends ChangeNotifier {
         :final kind,
         :final name,
         :final args,
+        :final argsCut,
       ):
         final a = agents[agent];
         if (a == null) {
           unknown++;
           return false;
         }
-        final i = ItemModel(item, agent, run, kind, name, args);
+        final i = ItemModel(item, agent, run, kind, name, args, argsCut: argsCut);
         _open[item] = i;
         a.items.add(i);
         a.last = i;

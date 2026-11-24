@@ -1187,6 +1187,12 @@ class TableBlock extends StatelessWidget {
   }
 }
 
+String _bytes(int n) => n < 1000
+    ? '$n B'
+    : n < 1000000
+    ? '${(n / 1000).round()} kB'
+    : '${(n / 1000000).toStringAsFixed(1)} MB';
+
 /// A tool call, as one line; its output opens under it.
 class ToolRow extends StatelessWidget {
   const ToolRow(this.item, {super.key, this.opened = false, this.onToggle});
@@ -1219,9 +1225,15 @@ class ToolRow extends StatelessWidget {
     final detail = args is Map
         ? '${args['path'] ?? args['command'] ?? args['pattern'] ?? args.values.firstOrNull ?? ''}'
         : '${args ?? ''}';
-    final shown = oneLine(literal(cutTo(detail, 800)), 400);
+    final shown = item.argsCut > 0
+        ? '${_bytes(item.argsCut)} of arguments, not kept'
+        : oneLine(literal(cutTo(detail, 800)), 400);
     final result = item.result;
-    final summary = result is Map ? oneLine('${result['summary'] ?? ''}', 160) : '';
+    final summary = item.resultCut > 0
+        ? '${_bytes(item.resultCut)}, not kept'
+        : result is Map
+        ? oneLine('${result['summary'] ?? ''}', 160)
+        : '';
     final name = item.name.isEmpty ? 'tool' : item.name;
     final output = item.plain;
     final line = WorkLine(

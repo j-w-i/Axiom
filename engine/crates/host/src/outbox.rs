@@ -125,10 +125,7 @@ impl Outbox {
 
     /// Nothing more goes in; what waits is still written.
     pub fn close(&self) {
-        let mut q = self.q();
-        q.closed = true;
-        q.follows.clear();
-        drop(q);
+        self.q().closed = true;
         self.ready.notify_one();
         self.room.notify_waiters();
     }

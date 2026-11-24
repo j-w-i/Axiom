@@ -84,6 +84,7 @@ sealed class Body {
           _enum(ItemKind.values, j['kind'], ItemKind.unknown),
           j['name'] as String? ?? '',
           j['args'],
+          argsCut: j['args_cut'] as int? ?? 0,
         ),
         'item.delta' => ItemDelta(j['item']! as String, j['text']! as String),
         'item.ended' => ItemEnded(
@@ -91,6 +92,7 @@ sealed class Body {
           _enum(Outcome.values, j['outcome'], Outcome.unknown),
           j['text']! as String,
           j['result'],
+          resultCut: j['result_cut'] as int? ?? 0,
         ),
         'request.opened' => RequestOpened(
           j['request']! as String,
@@ -166,7 +168,18 @@ class RunEnded extends Body {
 }
 
 class ItemStarted extends Body {
-  const ItemStarted(this.item, this.run, this.agent, this.kind, this.name, this.args);
+  const ItemStarted(
+    this.item,
+    this.run,
+    this.agent,
+    this.kind,
+    this.name,
+    this.args, {
+    this.argsCut = 0,
+  });
+
+  /// How many bytes of arguments were too many to keep; then there are none.
+  final int argsCut;
   final String item, run, agent, name;
   final ItemKind kind;
   final Object? args;
@@ -178,7 +191,8 @@ class ItemDelta extends Body {
 }
 
 class ItemEnded extends Body {
-  const ItemEnded(this.item, this.outcome, this.text, this.result);
+  const ItemEnded(this.item, this.outcome, this.text, this.result, {this.resultCut = 0});
+  final int resultCut;
   final String item, text;
   final Outcome outcome;
   final Object? result;

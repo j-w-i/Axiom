@@ -25,7 +25,7 @@ pub enum Error {
     Damaged(String),
     #[error("no such session")]
     NoSession(SessionId),
-    #[error("journal: {0}")]
+    #[error("{0}")]
     Unavailable(String),
 }
 pub type Result<T> = std::result::Result<T, Error>;
@@ -49,8 +49,10 @@ impl Error {
 }
 
 const SCHEMA: i64 = 2;
-/// How long one statement waits for another process. The caller decides about more tries.
-const BUSY: Duration = Duration::from_secs(1);
+/// How long opening waits for another process.
+const OPENING: Duration = Duration::from_secs(1);
+/// How long a read does. It needs to only while another process recovers the file.
+const READING: Duration = Duration::from_millis(100);
 
 /// What began and has not ended. Recovery needs nothing else.
 const OPEN_TABLE: &str = "create table open(
@@ -109,7 +111,7 @@ impl Journal {
     }
 
     fn setup(mut db: Connection) -> Result<Self> {
-        db.busy_timeout(BUSY)?;
+        db.busy_timeout(OPENING)?;
         let v: i64 = db.query_row("pragma user_version", [], |r| r.get(0))?;
         if v > SCHEMA {
             return Err(Error::TooNew(v));
@@ -146,6 +148,11 @@ impl Journal {
             #[cfg(test)]
             synced: Vec::new(),
         })
+    }
+
+    /// From here on nothing waits for another process: the caller decides how long to try.
+    pub fn hurry(&self) -> Result<()> {
+        Ok(self.db.busy_timeout(Duration::ZERO)?)
     }
 
     pub fn create(
@@ -194,7 +201,7 @@ impl Journal {
                 if j.db.is_autocommit() {
                     return Err(match r {
                         Err(e) => e,
-                        Ok(()) => Error::Unavailable("the transaction was lost".into()),
+                        Ok(()) => Error::Unavailable("journal: the transaction was lost".into()),
                     });
                 }
                 each.push(r);
@@ -297,59 +304,19 @@ impl Journal {
         let (mut n, mut failed) = (0, Vec::new());
         for id in unfinished.into_iter().map(SessionId) {
             match self.recover_session(&id, at) {
-                Ok(_) => n += 1,
+                Ok(()) => n += 1,
                 Err(e) => failed.push((id, e)),
             }
         }
         Ok((n, failed))
     }
 
-    /// Ends what is open in one session and says where its history ends, or `None` if there is no
-    /// such session. The caller knows that nothing runs in it.
-    pub fn recover_session(&mut self, id: &SessionId, at: u64) -> Result<Option<u64>> {
-        let Some(mut seq) = self.session(id)?.map(|s| s.last_seq) else {
-            return Ok(None);
-        };
-        let open: Vec<(i64, String)> = {
-            let mut q = self
-                .db
-                .prepare_cached("select kind, id from open where session=? order by kind, seq")?;
-            let rows = q.query_map([&id.0], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            rows.collect::<std::result::Result<_, _>>()?
-        };
-        let mut out = Vec::new();
-        for (kind, it) in open {
-            let body = match kind {
-                ITEM => {
-                    let text = self.text_so_far(id, &it)?;
-                    let item = ItemId(it);
-                    Body::ItemEnded { item, outcome: Outcome::Interrupted, text, result: None }
-                }
-                REQUEST => Body::RequestClosed { request: RequestId(it), answer: "expired".into() },
-                RUN => {
-                    Body::RunEnded { run: RunId(it), outcome: Outcome::Interrupted, error: None }
-                }
-                AGENT => Body::AgentState { agent: AgentId(it), state: AgentState::Paused },
-                k => return Err(Error::Damaged(format!("an open thing of kind {k}"))),
-            };
-            seq += 1;
-            out.push(Event { seq, at, body });
+    /// Ends what is open in one session. The caller knows that nothing runs in it.
+    fn recover_session(&mut self, id: &SessionId, at: u64) -> Result<()> {
+        match ending(&self.db, id, at)? {
+            Some((_, events)) => self.append(id, &events),
+            None => Ok(()),
         }
-        self.append(id, &out)?;
-        Ok(Some(seq))
-    }
-
-    fn text_so_far(&self, id: &SessionId, item: &str) -> Result<String> {
-        let mut q = self.db.prepare_cached(DELTAS)?;
-        let mut rows = q.query(params![id.0, item])?;
-        let mut text = String::new();
-        while let Some(r) = rows.next()? {
-            match serde_json::from_str(r.get_ref(0)?.as_str().unwrap_or_default()) {
-                Ok(Body::ItemDelta { text: t, .. }) => text.push_str(&t),
-                _ => return Err(Error::Damaged("text of an unfinished item".into())),
-            }
-        }
-        Ok(text)
     }
 
     pub fn delete(&mut self, id: &SessionId) -> Result<bool> {
@@ -366,7 +333,7 @@ impl Reader {
     pub fn open(path: &Path) -> Result<Self> {
         let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let db = Connection::open_with_flags(path, flags)?;
-        db.busy_timeout(BUSY)?;
+        db.busy_timeout(READING)?;
         Ok(Self { db })
     }
     /// Events after `after`, in order, of about `bytes` as they are encoded, and at least one if
@@ -380,6 +347,11 @@ impl Reader {
     }
     pub fn session(&self, id: &SessionId) -> Result<Option<SessionInfo>> {
         session(&self.db, id)
+    }
+    /// Where a session's history ends, and the events that would end what is open in it. `None` if
+    /// there is no such session.
+    pub fn ending(&self, id: &SessionId, at: u64) -> Result<Option<(u64, Vec<Event>)>> {
+        ending(&self.db, id, at)
     }
     /// Looks through the whole file.
     pub fn check(&self) -> Result<()> {
@@ -419,11 +391,56 @@ fn decode(text: &str) -> Option<Body> {
     if b.malformed() {
         return None;
     }
-    if text.len() > limits::TEXT {
-        // Written before there were limits.
-        b.fit();
-    }
+    // What was written before there were limits.
+    b.fit();
     Some(b)
+}
+
+fn ending(db: &Connection, id: &SessionId, at: u64) -> Result<Option<(u64, Vec<Event>)>> {
+    let Some(last) = session(db, id)?.map(|s| s.last_seq) else {
+        return Ok(None);
+    };
+    let open: Vec<(i64, String)> = {
+        let mut q =
+            db.prepare_cached("select kind, id from open where session=? order by kind, seq")?;
+        let rows = q.query_map([&id.0], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    let mut out = Vec::new();
+    for (kind, it) in open {
+        let body = match kind {
+            ITEM => Body::ItemEnded {
+                text: text_so_far(db, id, &it)?,
+                item: ItemId(it),
+                outcome: Outcome::Interrupted,
+                result: None,
+                result_cut: 0,
+            },
+            REQUEST => Body::RequestClosed { request: RequestId(it), answer: "expired".into() },
+            RUN => Body::RunEnded { run: RunId(it), outcome: Outcome::Interrupted, error: None },
+            AGENT => Body::AgentState { agent: AgentId(it), state: AgentState::Paused },
+            k => return Err(Error::Damaged(format!("an open thing of kind {k}"))),
+        };
+        out.push(Event { seq: last + 1 + out.len() as u64, at, body });
+    }
+    Ok(Some((last, out)))
+}
+
+/// Stands where a part of an unfinished item's text cannot be read.
+const LOST: &str = "\n[a part of this is damaged and could not be read]\n";
+
+fn text_so_far(db: &Connection, id: &SessionId, item: &str) -> Result<String> {
+    let mut q = db.prepare_cached(DELTAS)?;
+    let mut rows = q.query(params![id.0, item])?;
+    let mut text = String::new();
+    while let Some(r) = rows.next()? {
+        match serde_json::from_str(r.get_ref(0)?.as_str().unwrap_or_default()) {
+            Ok(Body::ItemDelta { text: t, .. }) => text.push_str(&t),
+            _ if text.ends_with(LOST) => {}
+            _ => text.push_str(LOST),
+        }
+    }
+    Ok(text)
 }
 
 const INFO: &str = "select id, title, workspace, created, updated, last_seq,
@@ -544,6 +561,7 @@ mod tests {
             kind,
             name: String::new(),
             args: None,
+            args_cut: 0,
         };
         vec![
             (Body::SessionTitled { title: "t".into() }, Intent),
@@ -592,6 +610,7 @@ mod tests {
                     outcome: Outcome::Completed,
                     text: "t".into(),
                     result: None,
+                    result_cut: 0,
                 },
                 Stream,
             ),
@@ -664,7 +683,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("j");
         let mut j = Journal::open(&p).unwrap();
-        j.db.busy_timeout(Duration::ZERO).unwrap();
+        j.hurry().unwrap();
         let s = SessionId::new();
         j.create(&s, "t", None, 1).unwrap();
         let other = Connection::open(&p).unwrap();

@@ -54,6 +54,10 @@ void main() {
     expect((messages[4] as Fault).words, 'cannot be read');
     final status = (messages[5] as Answered).result! as Json;
     expect([status['damaged'], (status['faults']! as List<Object?>).length], ['why', 1]);
+    final cut = (messages[6] as Events).events;
+    final begun = cut[0].body as ItemStarted, over = cut[1].body as ItemEnded;
+    expect([begun.args, begun.argsCut, tool.argsCut], [null, 300000, 0]);
+    expect([over.result, over.resultCut, done.resultCut], [null, 400000, 0]);
   });
 
   test('what is newer or malformed keeps its place', () {

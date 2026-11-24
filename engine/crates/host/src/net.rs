@@ -31,22 +31,23 @@ mod unix {
     impl Listener {
         pub fn bind(paths: &Paths) -> io::Result<Self> {
             use std::os::unix::fs::{MetadataExt, PermissionsExt};
-            let place = Place::new(paths)?;
+            let mut place = Place::new(paths)?;
             let sock = tokio::net::UnixListener::bind(&place.path)?;
+            place.made()?;
             std::fs::set_permissions(&place.path, std::fs::Permissions::from_mode(0o600))?;
             // The socket was made by this process, so its owner is who we are.
             let uid = std::fs::symlink_metadata(&place.path)?.uid();
-            for d in [&paths.data, &paths.run()] {
-                if std::fs::metadata(d)?.uid() != uid {
-                    let m = format!("{} belongs to another user", d.display());
-                    return Err(io::Error::other(m));
-                }
-            }
+            owned(uid, &paths.data)?;
+            owned(uid, &paths.run())?;
             Ok(Self { sock, uid, place })
         }
 
         pub fn path(&self) -> &str {
             &self.place.path
+        }
+        /// Whether clients that look for it find this one.
+        pub fn still(&self) -> bool {
+            self.place.still()
         }
 
         /// The next peer of this user. Others are dropped without a word.
@@ -58,6 +59,14 @@ mod unix {
                     _ => drop(s),
                 }
             }
+        }
+    }
+
+    fn owned(uid: u32, dir: &std::path::Path) -> io::Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        match std::fs::metadata(dir)?.uid() == uid {
+            true => Ok(()),
+            false => Err(io::Error::other(format!("{} belongs to another user", dir.display()))),
         }
     }
 
@@ -94,6 +103,32 @@ mod unix {
             l.uid = ours;
             let _peer = tokio::net::UnixStream::connect(l.path()).await.unwrap();
             l.accept().await.unwrap();
+        }
+
+        #[test]
+        fn a_directory_of_another_user_is_refused() {
+            use std::os::unix::fs::MetadataExt;
+            let d = tempfile::tempdir().unwrap();
+            let ours = std::fs::metadata(d.path()).unwrap().uid();
+            owned(ours, d.path()).unwrap();
+            assert!(owned(ours + 1, d.path()).is_err());
+        }
+
+        #[tokio::test]
+        async fn a_socket_that_is_not_ours_any_more_is_seen_and_left_alone() {
+            let d = tempfile::tempdir().unwrap();
+            let p = Paths::new(d.path().join("d"));
+            crate::paths::private_dir(&p.run()).unwrap();
+            let l = Listener::bind(&p).unwrap();
+            assert!(l.still());
+            let path = std::path::PathBuf::from(l.path());
+            std::fs::remove_file(&path).unwrap();
+            assert!(!l.still());
+            let other = std::os::unix::net::UnixListener::bind(&path).unwrap();
+            assert!(!l.still());
+            drop(l);
+            assert!(path.exists());
+            drop(other);
         }
 
         #[tokio::test]
@@ -149,8 +184,9 @@ mod windows {
 
     impl Listener {
         pub fn bind(paths: &Paths) -> io::Result<Self> {
-            let place = Place::new(paths)?;
+            let mut place = Place::new(paths)?;
             let sock = UnixListener::bind(&place.path)?;
+            place.made()?;
             // One at a time: the rest wait in the system's queue until the host wants them.
             let (tx, rx) = mpsc::channel(1);
             std::thread::Builder::new().name("accept".into()).spawn(move || {
@@ -162,6 +198,10 @@ mod windows {
 
         pub fn path(&self) -> &str {
             &self.place.path
+        }
+        /// Whether clients that look for it find one.
+        pub fn still(&self) -> bool {
+            self.place.still()
         }
 
         pub async fn accept(&mut self) -> io::Result<Raw> {

@@ -42,7 +42,9 @@ computed from declared capabilities and explained in the menu, never silently re
 - **Task**: a node of the session's plan, with dependencies and a gate.
 
 State changes are **events** in an append-only journal, committed in one transaction with the
-projections they change and the effects they order (decision 0004). Anything shown can be rebuilt by replay.
+projections they change (decision 0004): the session's row and what is open in it. Anything shown can be
+rebuilt by replay. Planned (M2, with the first effects): an outbox of the effects an event orders, in the
+same transaction. Until then nothing has effects.
 
 ## Crates (engine/)
 
@@ -65,9 +67,11 @@ A crate is created when its first real code is written. Edges not in this table 
 ## The stream to the screen
 
 Source → item delta in memory → coalesced (per item, ≤ 33 ms) → journal batch → subscribers.
-Each subscriber has a byte and event budget; one that falls behind is told to resynchronise from a
-snapshot rather than buffering without limit. Process output is a separate channel delivered only
-while something displays it; the journal keeps a bounded head and tail, the full text goes to a file.
+Each subscriber has a byte budget (8 MiB); one that falls behind is told to resynchronise: it follows again
+from the last event it has, and reads the journal at its own pace. Nothing is buffered without limit.
+There are no snapshots: a new client reads the history, in which ended items' deltas are folded into
+their text. Planned (M2): process output as a separate channel, delivered only while something displays
+it, of which the journal keeps a bounded head and tail and a file the full text.
 In the client one isolate reads and decodes, the UI isolate applies a batch per frame, and the
 transcript lays out only visible blocks (decision 0010).
 
@@ -75,10 +79,11 @@ transcript lays out only visible blocks (decision 0010).
 
 | Event | Behaviour |
 |-------|-----------|
-| Client dies | Host continues; next client gets a snapshot then the tail |
+| Client dies | Host continues; next client reads the history, then the tail |
 | Host dies | Journal is the truth; running attempts become `interrupted`, their process trees are killed by job object / process group / parent-death watch; nothing re-runs by itself |
 | Machine loses power | WAL recovery. What a person did and what comes before an effect (session created or titled, prompt, tool call, run start, request and answer) is flushed to the drive before it is answered or acted on, and is never lost. Everything else (deltas, an item's or a run's ending, usage) is safe from a crash of the host, but what followed the last such flush may be lost; recovery then ends it as interrupted |
-| The journal cannot be read or written | Passing errors are tried again for 10 s. Then that session alone stops with a fault in words, in the client and in `host.status`; the next use opens it again from the journal |
+| The journal cannot be read or written | While another process locks it, writing waits: 10 s for all together, then every session that wants to write stops with a fault in words, in the client and in `host.status`. Other errors are tried a few times and cost only the session they meet. The next use opens a session again from the journal |
+| The host's files are removed | It looks every 3 s and puts its socket, token, endpoint and locks back; if another host has them or the journal has gone, it stops in order |
 | Harness dies or speaks nonsense | Attempt fails with the raw frames kept; the agent is resumable if the adapter said so |
 | Provider interrupts a stream | Partial item kept and marked; retry policy per error class; tool calls cut short are never executed |
 

@@ -28,7 +28,6 @@ fn item(name: &str, text: &str) -> String {
 const AGENT: &str = "{\"do\":\"agent\",\"name\":\"T\"}\n";
 const FINISH: &str = "{\"do\":\"finish\",\"outcome\":\"completed\"}\n";
 
-/// `n` requests one after the other: each waits for the drive.
 /// `n` events that are flushed to the drive, the first `after` ms in, and then no end to wait for:
 /// how long the flushing takes depends on the drive.
 fn asks(n: usize, after: u64) -> String {
@@ -133,6 +132,15 @@ async fn sessions_are_listed_in_pages() {
     assert_eq!(all, want);
     assert_eq!([page(2, 0).await, page(2, 2).await, page(2, 4).await].concat(), page(9, 0).await);
     assert_eq!(page(u32::MAX, 5).await, [""; 0]);
+    rusqlite::Connection::open(f.paths.journal())
+        .unwrap()
+        .execute_batch(
+            "with recursive n(i) as (select 1 union all select i + 1 from n where i < 1100)
+             insert into session select 'x' || i, 't', null, 1, 1, 1 from n",
+        )
+        .unwrap();
+    assert_eq!(page(u32::MAX, 0).await.len(), MAX_LIST as usize, "in one answer");
+    assert_eq!(page(u32::MAX, MAX_LIST).await.len(), 105);
 }
 
 #[tokio::test]
@@ -283,6 +291,49 @@ async fn stream(p: &Paths) -> tokio::net::UnixStream {
     tokio::net::UnixStream::connect(p.endpoint().unwrap()).await.unwrap()
 }
 
+#[tokio::test]
+async fn a_client_that_leaves_does_not_wait_for_its_answer() {
+    let f = fixture();
+    let mut cfg = Config::new(f.paths.clone());
+    cfg.linger = Duration::from_millis(200);
+    f.serve_with(cfg);
+    let mut c = f.client().await;
+    let mut d = f.client().await;
+    let lock = rusqlite::Connection::open(f.paths.journal()).unwrap();
+    lock.execute_batch("begin immediate").unwrap();
+    // It waits for the lock: ten seconds.
+    let create = "{\"id\":9,\"method\":\"session.create\",\"params\":{\"title\":\"t\"}}\n";
+    d.send_raw(create.as_bytes()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(d);
+    let t = Instant::now();
+    while c.call(Call::Status {}).await.unwrap()["clients"] != 1 {
+        assert!(t.elapsed() < Duration::from_secs(3), "its place is free again");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    lock.execute_batch("rollback").unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_client_that_only_ends_its_side_is_answered() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let f = fixture();
+    f.serve();
+    f.client().await;
+    let token = std::fs::read_to_string(f.paths.token()).unwrap();
+    let mut raw = stream(&f.paths).await;
+    let hello = format!(
+        "{{\"id\":1,\"method\":\"hello\",\"params\":{{\"token\":\"{token}\",\"client\":\"x\",\"protocol\":1}}}}\n"
+    );
+    let create = "{\"id\":2,\"method\":\"session.create\",\"params\":{\"title\":\"t\"}}\n";
+    raw.write_all((hello + create).as_bytes()).await.unwrap();
+    raw.shutdown().await.unwrap();
+    let mut got = String::new();
+    tokio::time::timeout(LONG, raw.read_to_string(&mut got)).await.unwrap().unwrap();
+    assert!(got.lines().count() == 2 && got.contains("\"session\":"), "{got}");
+}
+
 // ---- strangers ----
 
 #[tokio::test]
@@ -320,22 +371,49 @@ async fn a_stranger_has_little_room_and_is_not_repeated() {
 }
 
 #[tokio::test]
-async fn silence_is_closed_and_takes_no_place_for_long() {
+async fn silence_is_closed() {
     let f = fixture();
     let mut cfg = Config::new(f.paths.clone());
     cfg.hello_within = Duration::from_millis(300);
     f.serve_with(cfg);
     f.client().await;
     let mut silent = Vec::new();
-    for _ in 0..40 {
+    for _ in 0..20 {
         silent.push(Client::raw(&f.paths).await.unwrap());
     }
-    // More than may wait at once; the next one is let in when they are closed.
-    tokio::time::timeout(LONG, f.client()).await.unwrap().call(Call::Status {}).await.unwrap();
     for mut c in silent {
         let r = tokio::time::timeout(LONG, c.next()).await.expect("closed");
         assert!(matches!(r, Err(ClientError::Closed | ClientError::Io(_))));
     }
+}
+
+#[tokio::test]
+async fn silence_keeps_nobody_out() {
+    let f = fixture();
+    let mut cfg = Config::new(f.paths.clone());
+    // Nobody is closed for being silent in this test.
+    cfg.hello_within = Duration::from_secs(600);
+    f.serve_with(cfg);
+    let mut c = f.client().await;
+    let mut silent = Vec::new();
+    for _ in 0..60 {
+        silent.push(Client::raw(&f.paths).await.unwrap());
+    }
+    let t = Instant::now();
+    f.client().await.call(Call::Status {}).await.unwrap();
+    assert!(t.elapsed() < Duration::from_secs(2), "at once");
+    c.call(Call::Status {}).await.unwrap();
+    // The oldest made room; the last ones are still welcome to speak.
+    let token = std::fs::read_to_string(f.paths.token()).unwrap();
+    let mut open = 0;
+    for (n, c) in silent.iter_mut().enumerate() {
+        let hello = Call::Hello { token: token.clone(), client: "x".into(), protocol: PROTOCOL };
+        match tokio::time::timeout(LONG, c.call(hello)).await.unwrap() {
+            Ok(_) => open += 1,
+            Err(_) => assert!(n < 30, "{n}"),
+        }
+    }
+    assert!((30..=32).contains(&open), "{open}");
 }
 
 #[tokio::test]
@@ -376,11 +454,11 @@ async fn every_host_has_its_own_token() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_host_that_runs_out_of_files_goes_on() {
+async fn a_host_that_runs_out_of_files_goes_on_and_is_not_busy_with_it() {
     let f = fixture();
     let mut few = Command::new("/bin/sh");
     few.args(["-c", "ulimit -n 32; exec \"$0\"", env!("CARGO_BIN_EXE_axiom-host")]);
-    let mut p = spawn_as(&f, &mut few);
+    let (mut p, said) = spawn_heard(&f, &mut few);
     let mut c = f.client().await;
     let s = session(&mut c).await;
     let run = replay(&mut c, &s, &f.talker(10_000, 5), 1.0).await;
@@ -388,12 +466,100 @@ async fn a_host_that_runs_out_of_files_goes_on() {
     for _ in 0..60 {
         raw.push(stream(&f.paths).await);
     }
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // It looks after its files meanwhile, which it cannot open.
+    tokio::time::sleep(Duration::from_secs(4)).await;
     assert!(p.0.try_wait().unwrap().is_none(), "it still serves");
     c.call(Call::Cancel { session: s, run }).await.unwrap();
     drop(raw);
     let next = tokio::time::timeout(LONG, f.client()).await.unwrap();
-    drop(next);
+    drop((next, c));
+    p.0.kill().unwrap();
+    let lines = std::io::read_to_string(said).unwrap();
+    let tries = lines.lines().filter(|l| l.contains("accepting")).count();
+    assert!((1..40).contains(&tries), "{tries}");
+}
+
+// ---- nobody reads what it says ----
+
+/// Its stderr is closed at the other end: writing there is an error.
+#[cfg(unix)]
+fn spawn_unheard(f: &Fixture, command: &mut Command) -> Process {
+    spawn_heard(f, command).0
+}
+#[cfg(unix)]
+fn host_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_axiom-host"))
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn it_works_though_nobody_reads_what_it_says() {
+    let f = fixture();
+    let mut p = spawn_unheard(&f, host_command().args(["--idle-exit", "1"]));
+    let mut c = f.client().await;
+    let s = session(&mut c).await;
+    damage(&f, "update event set body='{'");
+    for _ in 0..3 {
+        // One connection each: a panic would take its place among the clients with it.
+        let mut d = f.client().await;
+        let r = d.call(Call::Follow { session: s.clone(), after: 0 });
+        let e = refused(tokio::time::timeout(LONG, r).await.expect("an answer"));
+        assert_eq!(e.message, "journal: damaged: event 1 cannot be read");
+    }
+    let t = Instant::now();
+    while c.call(Call::Status {}).await.unwrap()["clients"] != 1 {
+        assert!(t.elapsed() < LONG);
+    }
+    assert_eq!(c.call(Call::Status {}).await.unwrap()["faults"][0]["session"], s.0.as_str());
+    drop(c);
+    // It knows that the last one has left.
+    let t = Instant::now();
+    while p.0.try_wait().unwrap().is_none() {
+        assert!(t.elapsed() < LONG, "idle");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(p.0.wait().unwrap().success());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn it_runs_out_of_files_and_starts_though_nobody_reads_what_it_says() {
+    let f = fixture();
+    let mut few = Command::new("/bin/sh");
+    few.args(["-c", "ulimit -n 32; exec \"$0\"", env!("CARGO_BIN_EXE_axiom-host")]);
+    let mut p = spawn_unheard(&f, &mut few);
+    let mut c = f.client().await;
+    let s = session(&mut c).await;
+    replay(&mut c, &s, &f.talker(10_000, 5), 1.0).await;
+    let mut raw = Vec::new();
+    for _ in 0..60 {
+        raw.push(stream(&f.paths).await);
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    c.call(Call::Status {}).await.unwrap();
+    p.0.kill().unwrap();
+    p.0.wait().unwrap();
+    // What was open in it cannot be ended; that is said to nobody, and it starts.
+    damage(&f, "update open set kind=9");
+    let _p = spawn_unheard(&f, &mut host_command());
+    let status = f.client().await.call(Call::Status {}).await.unwrap();
+    assert_eq!(status["faults"][0]["session"], s.0.as_str());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn it_does_not_wait_for_whoever_could_read_what_it_says() {
+    let f = fixture();
+    // The other end is open, and nobody reads it.
+    let (_p, _unread) = spawn_heard(&f, &mut host_command());
+    let mut c = f.client().await;
+    let s = session(&mut c).await;
+    damage(&f, "update event set body='{'");
+    // More words than a pipe holds.
+    for _ in 0..1500 {
+        let r = c.call(Call::Follow { session: s.clone(), after: 0 });
+        refused(tokio::time::timeout(LONG, r).await.expect("an answer"));
+    }
 }
 
 // ---- the journal ----
@@ -654,19 +820,22 @@ async fn nothing_starts_once_the_host_is_stopping() {
     let host = f.serve();
     let (mut c, mut d) = (f.client().await, f.client().await);
     let (s, busy) = (session(&mut c).await, session(&mut c).await);
-    replay(&mut c, &busy, &f.script(&asks(3000, 0)), 1.0).await;
     let script = f.talker(10_000, 5);
+    replay(&mut c, &busy, &script, 1.0).await;
+    // It cannot have stopped before it was asked: the end of the run cannot be written.
+    let lock = rusqlite::Connection::open(f.paths.journal()).unwrap();
+    lock.busy_timeout(LONG).unwrap();
+    lock.execute_batch("begin immediate").unwrap();
     c.call(Call::Shutdown { force: true }).await.unwrap();
-    for _ in 0..20 {
-        let start = Call::ReplayStart { session: s.clone(), path: script.clone(), speed: 1.0 };
-        match d.call(start).await {
-            Err(ClientError::Refused(e)) => assert_eq!(e.code, ErrorCode::Busy),
-            Err(ClientError::Closed | ClientError::Io(_)) => break,
-            r => panic!("{r:?}"),
-        }
+    let start = Call::ReplayStart { session: s.clone(), path: script.clone(), speed: 1.0 };
+    let create = Call::SessionCreate { title: "late".into(), workspace: None };
+    for call in [start, create] {
+        assert_eq!(refused(d.call(call).await).code, ErrorCode::Busy);
     }
-    host.await.unwrap().unwrap();
+    lock.execute_batch("rollback").unwrap();
+    tokio::time::timeout(LONG, host).await.unwrap().unwrap().unwrap();
     assert_eq!(history(&f, &s).len(), 1);
+    assert_eq!(journal(&f).sessions(9, 0).unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -703,7 +872,195 @@ async fn a_signal_stops_it_in_order() {
     }
 }
 
+// ---- its files ----
+
+#[cfg(unix)]
+async fn found_again(f: &Fixture, mut c: Client) -> Client {
+    let t = Instant::now();
+    let mut d = loop {
+        match Client::connect(&f.paths, "x").await {
+            Ok(d) => break d,
+            Err(e) => assert!(t.elapsed() < LONG, "{e}"),
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    d.call(Call::Status {}).await.unwrap();
+    c.call(Call::Status {}).await.unwrap();
+    c
+}
+#[cfg(unix)]
+fn looking(f: &Fixture) -> Config {
+    let mut cfg = Config::new(f.paths.clone());
+    cfg.look_every = Duration::from_millis(50);
+    cfg
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn what_clients_find_it_by_is_put_back() {
+    let f = fixture();
+    f.serve_with(looking(&f));
+    let mut c = f.client().await;
+    let socket = f.paths.endpoint().unwrap();
+    std::fs::remove_dir_all(f.paths.run()).unwrap();
+    c = found_again(&f, c).await;
+    for file in [f.paths.token(), f.paths.endpoint_file(), socket.clone().into()] {
+        std::fs::remove_file(file).unwrap();
+        c = found_again(&f, c).await;
+    }
+    for file in [f.paths.token(), f.paths.endpoint_file()] {
+        std::fs::write(file, "somebody else's").unwrap();
+        c = found_again(&f, c).await;
+    }
+    // And nobody else can serve the directory meanwhile.
+    std::fs::remove_file(f.paths.old_lock()).unwrap();
+    std::fs::remove_file(f.paths.lock()).unwrap();
+    let held = |p| std::fs::File::open(p).is_ok_and(|f: std::fs::File| f.try_lock().is_err());
+    let t = Instant::now();
+    while !held(f.paths.lock()) || !held(f.paths.old_lock()) {
+        assert!(t.elapsed() < LONG);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    found_again(&f, c).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_short_place_that_was_cleaned_away_is_replaced() {
+    let d = tempfile::tempdir().unwrap();
+    let f = Fixture { paths: Paths::new(d.path().join("n".repeat(120))), dir: d };
+    let host = f.serve_with(looking(&f));
+    let c = f.client().await;
+    let first = f.paths.endpoint().unwrap();
+    std::fs::remove_dir_all(std::path::Path::new(&first).parent().unwrap()).unwrap();
+    let mut c = found_again(&f, c).await;
+    assert_ne!(f.paths.endpoint().unwrap(), first);
+    c.call(Call::Shutdown { force: false }).await.unwrap();
+    host.await.unwrap().unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn it_stops_in_order_when_they_cannot_be_put_back() {
+    use axiom_host::HostError;
+    // Another host took over; the journal went.
+    for taken_over in [true, false] {
+        let f = fixture();
+        let mut cfg = looking(&f);
+        // Time to take over before it looks again.
+        cfg.look_every = Duration::from_secs(1);
+        let host = f.serve_with(cfg);
+        let mut c = f.client().await;
+        let s = session(&mut c).await;
+        replay(&mut c, &s, &f.talker(10_000, 5), 1.0).await;
+        let mut other = None;
+        if taken_over {
+            std::fs::remove_dir_all(f.paths.run()).unwrap();
+            axiom_host::paths::private_dir(&f.paths.run()).unwrap();
+            let lock = std::fs::File::create(f.paths.old_lock()).unwrap();
+            lock.try_lock().unwrap();
+            std::fs::write(f.paths.token(), "another's").unwrap();
+            other = Some(lock);
+        } else {
+            std::fs::rename(f.paths.journal(), f.dir.path().join("aside")).unwrap();
+        }
+        let r = tokio::time::timeout(LONG, host).await.unwrap().unwrap();
+        assert!(matches!(r, Err(HostError::Lost(_))), "{r:?}");
+        if taken_over {
+            let cancelled =
+                |b: &Body| matches!(b, Body::RunEnded { outcome: Outcome::Cancelled, .. });
+            assert!(history(&f, &s).iter().any(cancelled));
+        }
+        let token = std::fs::read_to_string(f.paths.token());
+        assert_eq!(token.is_ok_and(|t| t == "another's"), taken_over, "not its own to remove");
+        drop(other);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn what_may_pass_is_tried_again_and_then_it_stops() {
+    use axiom_host::HostError;
+    let f = fixture();
+    let host = f.serve_with(looking(&f));
+    let c = f.client().await;
+    let blocked = || {
+        std::fs::remove_dir_all(f.paths.run()).unwrap();
+        std::fs::write(f.paths.run(), "not a directory").unwrap();
+    };
+    blocked();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    std::fs::remove_file(f.paths.run()).unwrap();
+    let mut c = found_again(&f, c).await;
+    let s = session(&mut c).await;
+    replay(&mut c, &s, &f.talker(10_000, 5), 1.0).await;
+    blocked();
+    let r = tokio::time::timeout(LONG, host).await.unwrap().unwrap();
+    assert!(matches!(r, Err(HostError::Lost(_))), "{r:?}");
+    assert_eq!(ended(&f, &s), Some(Outcome::Cancelled));
+}
+
+#[tokio::test]
+async fn a_host_from_before_schema_2_and_this_one_exclude_each_other() {
+    use axiom_host::{Host, HostError};
+    let f = fixture();
+    axiom_host::paths::private_dir(&f.paths.run()).unwrap();
+    let old = std::fs::File::create(f.paths.old_lock()).unwrap();
+    old.try_lock().unwrap();
+    let r = Host::start(Config::new(f.paths.clone()));
+    assert!(matches!(r, Err(HostError::AlreadyRunning)));
+    assert!(!f.paths.journal().exists(), "the journal is not touched");
+    drop(old);
+    f.serve();
+    f.client().await;
+    let old = std::fs::OpenOptions::new().write(true).open(f.paths.old_lock()).unwrap();
+    assert!(old.try_lock().is_err());
+}
+
 // ---- scripts ----
+
+#[tokio::test]
+async fn only_so_much_runs_at_once() {
+    let f = fixture();
+    f.serve();
+    let mut c = f.client().await;
+    let s = session(&mut c).await;
+    let pause = f.script("{\"after\":50000,\"do\":\"finish\",\"outcome\":\"completed\"}\n");
+    let mut runs = Vec::new();
+    for _ in 0..128 {
+        runs.push(replay(&mut c, &s, &pause, 1.0).await);
+    }
+    let start = || Call::ReplayStart { session: s.clone(), path: pause.clone(), speed: 1.0 };
+    assert_eq!(refused(c.call(start()).await).code, ErrorCode::Busy);
+    for run in runs {
+        c.call(Call::Cancel { session: s.clone(), run }).await.unwrap();
+    }
+    quiet(&mut c).await;
+    c.call(start()).await.unwrap();
+}
+
+#[tokio::test]
+async fn only_so_much_of_scripts_is_held_at_once() {
+    let f = fixture();
+    f.serve();
+    let mut c = f.client().await;
+    let s = session(&mut c).await;
+    // 60 MiB of which only one line says something.
+    let step = "{\"after\":50000,\"do\":\"finish\",\"outcome\":\"completed\"}\n";
+    let big = f.script(&(step.to_owned() + &" ".repeat(60 * 1024 * 1024)));
+    let first = replay(&mut c, &s, &big, 1.0).await;
+    let second = replay(&mut c, &s, &big, 1.0).await;
+    let start = || Call::ReplayStart { session: s.clone(), path: big.clone(), speed: 1.0 };
+    assert_eq!(refused(c.call(start()).await).code, ErrorCode::Busy);
+    assert_eq!(c.call(Call::Status {}).await.unwrap()["runs"], 2, "what was refused does not run");
+    // A small one still fits.
+    let small = replay(&mut c, &s, &f.script(step), 1.0).await;
+    for run in [first, second, small] {
+        c.call(Call::Cancel { session: s.clone(), run }).await.unwrap();
+    }
+    quiet(&mut c).await;
+    c.call(start()).await.unwrap();
+}
 
 #[tokio::test]
 async fn a_script_that_begins_a_name_twice_is_refused() {

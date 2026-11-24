@@ -713,6 +713,20 @@ void main() {
     expect(find.textContaining('line two', findRichText: true), findsOneWidget);
   });
 
+  testWidgets('what the host could not keep is said, and is not made up', (t) async {
+    final f = Feed()
+      ..add([
+        const ItemStarted('t', 'r', 'a', ItemKind.tool, 'write', null, argsCut: 300000),
+        const ItemEnded('t', Outcome.completed, '', null, resultCut: 4200000),
+        // A tool may really have these.
+        const ItemStarted('u', 'r', 'a', ItemKind.tool, 'cut', {'truncated': 7}),
+      ]);
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    expect(find.text('300 kB of arguments, not kept'), findsOneWidget);
+    expect(find.text('4.2 MB, not kept'), findsOneWidget);
+    expect(find.text('7'), findsOneWidget);
+  });
+
   testWidgets('long results and names do not overflow', (t) async {
     final f = Feed()..open('t', ItemKind.tool, 'n' * 300, {'path': 'p' * 900});
     f.end('t', '', {'summary': 's' * 900});

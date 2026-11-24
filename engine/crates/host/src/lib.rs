@@ -7,6 +7,7 @@
 
 pub mod client;
 mod faults;
+mod log;
 mod net;
 mod outbox;
 pub mod paths;

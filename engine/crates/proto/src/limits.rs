@@ -5,7 +5,7 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::{Body, Execution};
+use crate::{Answerable, Body, Execution};
 
 /// A line from someone who has not shown the token.
 pub const HELLO_LINE: usize = 4 * 1024;
@@ -94,12 +94,16 @@ fn clip_opt(s: &mut Option<String>, max: usize) {
     }
 }
 
-fn clip_value(v: &mut Option<Value>) {
+/// Takes away what is too long, and says how long it was: 0 if it stays.
+fn cut_value(v: &mut Option<Value>, cut: &mut u64) {
     if let Some(v) = v
         && let n = encoded_len(v)
         && (n > VALUE || deeper(v, DEPTH))
     {
-        *v = json!({ "truncated": n });
+        *cut = n as u64;
+    }
+    if *cut > 0 {
+        *v = None;
     }
 }
 
@@ -111,7 +115,35 @@ fn deeper(v: &Value, than: usize) -> bool {
     }
 }
 
+/// A person cannot decide on what they are not shown (SI-15).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("a request's {what} has {bytes} bytes; with more than {max} it cannot be asked")]
+pub struct TooLong {
+    pub what: &'static str,
+    pub bytes: usize,
+    pub max: usize,
+}
+
 impl Body {
+    /// Refuses what must not be cut: the text of a request that can be answered.
+    pub fn check(&self) -> Result<(), TooLong> {
+        let Body::RequestOpened { what, subject, scope, answerable, .. } = self else {
+            return Ok(());
+        };
+        if *answerable == Answerable::No {
+            return Ok(());
+        }
+        for (what, s, max) in
+            [("action", what, NAME), ("subject", subject, LONG), ("scope", scope, SCOPE)]
+        {
+            let bytes = text_len(s);
+            if bytes > max {
+                return Err(TooLong { what, bytes, max });
+            }
+        }
+        Ok(())
+    }
+
     /// Cuts what is too long, visibly.
     pub fn fit(&mut self) {
         match self {
@@ -130,16 +162,17 @@ impl Body {
                 }
             }
             Body::RunEnded { error, .. } => clip_opt(error, LONG),
-            Body::ItemStarted { name, args, .. } => {
+            Body::ItemStarted { name, args, args_cut, .. } => {
                 clip(name, NAME);
-                clip_value(args);
+                cut_value(args, args_cut);
             }
             Body::ItemDelta { text, .. } => clip(text, TEXT),
-            Body::ItemEnded { text, result, .. } => {
+            Body::ItemEnded { text, result, result_cut, .. } => {
                 clip(text, TEXT);
-                clip_value(result);
+                cut_value(result, result_cut);
             }
-            Body::RequestOpened { what, subject, scope, .. } => {
+            // One that can be answered is whole, or refused: see [`Body::check`].
+            Body::RequestOpened { what, subject, scope, answerable: Answerable::No, .. } => {
                 clip(what, NAME);
                 clip(subject, LONG);
                 clip(scope, SCOPE);
@@ -154,7 +187,10 @@ impl Body {
                     *v = json!({ "type": kind, "truncated": n });
                 }
             }
-            Body::AgentState { .. } | Body::RunStarted { .. } | Body::Usage { .. } => {}
+            Body::RequestOpened { .. }
+            | Body::AgentState { .. }
+            | Body::RunStarted { .. }
+            | Body::Usage { .. } => {}
         }
     }
 }
@@ -224,9 +260,16 @@ mod tests {
                 kind: ItemKind::Tool,
                 name: nul(),
                 args: wide(),
+                args_cut: 0,
             },
             Body::ItemDelta { item: i.clone(), text: nul() },
-            Body::ItemEnded { item: i, outcome: Outcome::Failed, text: nul(), result: wide() },
+            Body::ItemEnded {
+                item: i,
+                outcome: Outcome::Failed,
+                text: nul(),
+                result: wide(),
+                result_cut: 0,
+            },
             Body::RequestOpened {
                 request: q.clone(),
                 agent: a,
@@ -270,10 +313,12 @@ mod tests {
                 kind: ItemKind::Tool,
                 name: "t".into(),
                 args: Some(args),
+                args_cut: 0,
             };
             b.fit();
-            let Body::ItemStarted { args: Some(args), .. } = &b else { panic!() };
-            assert_eq!(args.get("truncated").is_some(), depth > DEPTH, "{depth}");
+            let Body::ItemStarted { args, args_cut, .. } = &b else { panic!() };
+            assert_eq!(args.is_none(), depth > DEPTH, "{depth}");
+            assert_eq!(*args_cut, if depth > DEPTH { 2 * depth as u64 + 1 } else { 0 });
             let line = serde_json::to_string(&Message::Events {
                 session: SessionId("s".into()),
                 events: vec![Event { seq: 1, at: 1, body: b }],
@@ -281,6 +326,65 @@ mod tests {
             .unwrap();
             serde_json::from_str::<Message>(&line).unwrap();
         }
+    }
+
+    #[test]
+    fn a_value_is_whole_or_gone_and_then_its_length_is_kept() {
+        let end = |text: usize, result: Option<Value>| {
+            let mut b = Body::ItemEnded {
+                item: ItemId("i".into()),
+                outcome: Outcome::Completed,
+                text: "x".repeat(text),
+                result,
+                result_cut: 0,
+            };
+            b.fit();
+            // Fitting again changes nothing.
+            let once = b.clone();
+            b.fit();
+            assert_eq!(b, once);
+            serde_json::to_value(b).unwrap()
+        };
+        // What a tool may really have said is not taken for a mark of ours.
+        let own = json!({ "truncated": 5 });
+        assert_eq!(end(1, Some(own.clone()))["result"], own);
+        assert!(end(1, Some(own)).get("result_cut").is_none());
+        let fits = json!("x".repeat(VALUE - 2));
+        assert_eq!(end(1, Some(fits.clone()))["result"], fits);
+        let cut = end(1, Some(json!("x".repeat(VALUE - 1))));
+        assert!(cut.get("result").is_none());
+        assert_eq!(cut["result_cut"], VALUE + 1);
+    }
+
+    #[test]
+    fn what_can_be_answered_is_never_cut() {
+        let ask = |what: usize, subject: usize, scope: usize, answerable| Body::RequestOpened {
+            request: RequestId("q".into()),
+            agent: AgentId("a".into()),
+            what: "w".repeat(what),
+            subject: "s".repeat(subject),
+            scope: "c".repeat(scope),
+            answerable,
+        };
+        use Answerable::{Live, Message, No, Unknown};
+        for answerable in [Live, Message, Unknown] {
+            assert_eq!(ask(NAME, LONG, SCOPE, answerable).check(), Ok(()));
+            for (b, what) in [
+                (ask(NAME + 1, 1, 1, answerable), "action"),
+                (ask(1, LONG + 1, 1, answerable), "subject"),
+                (ask(1, 1, SCOPE + 1, answerable), "scope"),
+            ] {
+                assert_eq!(b.check().unwrap_err().what, what);
+                let mut same = b.clone();
+                same.fit();
+                assert_eq!(same, b, "refused, so there is nothing to cut");
+            }
+        }
+        let mut told = ask(NAME + 1, LONG + 1, SCOPE + 1, No);
+        assert_eq!(told.check(), Ok(()));
+        told.fit();
+        let Body::RequestOpened { subject, .. } = told else { panic!() };
+        assert!(subject.ends_with("more bytes were not kept]"));
     }
 
     #[test]

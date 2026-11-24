@@ -7,6 +7,8 @@ use std::{
 
 use axiom_proto::{Fault, SessionId, limits};
 
+use crate::log;
+
 /// Most of them kept, and in one answer.
 const KEPT: usize = 200;
 
@@ -33,11 +35,12 @@ impl Faults {
     pub fn note(&self, id: &SessionId, what: Access, why: &dyn std::fmt::Display) -> String {
         let mut words = why.to_string();
         limits::clip(&mut words, limits::TITLE);
-        eprintln!("axiom-host: session {id}: {words}");
         let mut all = self.all();
         if all.len() < KEPT || all.contains_key(id) {
             *all.entry(id.clone()).or_default().of(what) = Some(words.clone());
         }
+        drop(all);
+        log::note(format!("session {id}: {words}"));
         words
     }
     /// It works again.

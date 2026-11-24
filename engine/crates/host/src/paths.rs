@@ -50,6 +50,11 @@ impl Paths {
         self.data.join("journal.lock")
     }
 
+    /// What hosts before schema 2 hold. This one holds it too, so that they exclude each other.
+    pub fn old_lock(&self) -> PathBuf {
+        self.run().join("lock")
+    }
+
     /// The socket of the host that serves, or last served, this directory.
     pub fn endpoint(&self) -> io::Result<String> {
         std::fs::read_to_string(self.endpoint_file())
@@ -63,11 +68,79 @@ impl Paths {
     }
 }
 
+/// Which file a name stands for, to see later whether it still does. The file is held open all that
+/// time, so its number is not given to another.
+#[derive(Debug)]
+pub struct Same {
+    path: PathBuf,
+    id: Id,
+}
+
+impl Same {
+    pub fn of(path: &Path) -> io::Result<Self> {
+        Ok(Self { path: path.into(), id: id(path)? })
+    }
+    pub fn still(&self) -> bool {
+        id(&self.path).is_ok_and(|i| i == self.id)
+    }
+}
+
+type Id = (u64, u64);
+#[cfg(unix)]
+fn id(path: &Path) -> io::Result<Id> {
+    Ok(id_of(&std::fs::symlink_metadata(path)?))
+}
+#[cfg(unix)]
+fn id_of(m: &std::fs::Metadata) -> Id {
+    use std::os::unix::fs::MetadataExt;
+    (m.dev(), m.ino())
+}
+
+/// Files that are open are neither removed nor replaced there, and it is not said of every kind of
+/// file (a socket) what it is: whether there is one has to do.
+#[cfg(not(unix))]
+fn id(path: &Path) -> io::Result<Id> {
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Err(e),
+        _ => Ok((0, 0)),
+    }
+}
+
+/// Held for the life of the host; the system releases it if the process dies.
+#[derive(Debug)]
+pub struct Lock {
+    _file: std::fs::File,
+    same: Same,
+}
+
+impl Lock {
+    /// `None` if somebody else holds it.
+    pub fn take(path: &Path) -> io::Result<Option<Self>> {
+        let file = private_options().write(true).create(true).truncate(false).open(path)?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => return Err(e),
+        }
+        let same = Same::of(path)?;
+        #[cfg(unix)]
+        if same.id != id_of(&file.metadata()?) {
+            return Err(io::Error::other(format!("{} is being replaced", path.display())));
+        }
+        Ok(Some(Self { _file: file, same }))
+    }
+    pub fn still(&self) -> bool {
+        self.same.still()
+    }
+}
+
 /// The place of a socket, emptied when dropped.
 pub struct Place {
     pub path: String,
     /// Made for this socket alone.
     dir: Option<PathBuf>,
+    /// The socket itself, once it is there.
+    socket: Option<Same>,
 }
 
 impl Place {
@@ -81,7 +154,7 @@ impl Place {
             let dir = Path::new(&path).parent();
             let name = dir.and_then(|d| d.file_name()).and_then(|n| n.to_str());
             if name.is_some_and(|n| n.starts_with(&ours)) {
-                drop(Self { dir: dir.map(Into::into), path });
+                drop(Self { dir: dir.map(Into::into), path, socket: None });
             }
         }
         let near = paths.run().join("host.sock");
@@ -102,14 +175,25 @@ impl Place {
             .map_err(|_| io::Error::other("the socket's directory has a name that is not UTF-8"))?;
         match std::fs::remove_file(&path) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(Self { path, dir }),
+            _ => Ok(Self { path, dir, socket: None }),
         }
+    }
+
+    pub fn made(&mut self) -> io::Result<()> {
+        self.socket = Some(Same::of(Path::new(&self.path))?);
+        Ok(())
+    }
+    pub fn still(&self) -> bool {
+        self.socket.as_ref().is_some_and(Same::still)
     }
 }
 
 impl Drop for Place {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        // Somebody else's socket of that name stays.
+        if self.socket.as_ref().is_none_or(Same::still) {
+            let _ = std::fs::remove_file(&self.path);
+        }
         if let Some(d) = &self.dir {
             let _ = std::fs::remove_dir(d);
         }
@@ -155,11 +239,6 @@ pub fn private_file(p: &Path, text: &str) -> io::Result<()> {
     f.sync_all()?;
     drop(f);
     std::fs::rename(tmp, p)
-}
-
-/// Opens the lock's file. Only its existence matters.
-pub fn lock_file(p: &Path) -> io::Result<std::fs::File> {
-    private_options().write(true).create(true).truncate(false).open(p)
 }
 
 fn private_options() -> std::fs::OpenOptions {

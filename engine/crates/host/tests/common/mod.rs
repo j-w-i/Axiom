@@ -4,7 +4,7 @@
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader},
-    process::{Child, Command, Stdio},
+    process::{Child, ChildStderr, Command, Stdio},
     time::Duration,
 };
 
@@ -27,8 +27,17 @@ impl Fixture {
         self.serve_with(Config::new(self.paths.clone()))
     }
     pub fn serve_with(&self, c: Config) -> tokio::task::JoinHandle<Result<(), HostError>> {
-        let h = Host::start(c).unwrap();
-        tokio::spawn(h.serve())
+        // A process another test is just starting may hold, for a moment, a copy of a lock that was
+        // let go here.
+        let until = std::time::Instant::now() + LONG;
+        loop {
+            match Host::start(c.clone()) {
+                Err(HostError::AlreadyRunning) if std::time::Instant::now() < until => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                h => return tokio::spawn(h.unwrap().serve()),
+            }
+        }
     }
     pub fn script(&self, steps: &str) -> String {
         let p = self.dir.path().join(format!("{}.jsonl", ItemId::new()));
@@ -124,16 +133,21 @@ pub fn spawn(f: &Fixture) -> Process {
     spawn_as(f, &mut Command::new(env!("CARGO_BIN_EXE_axiom-host")))
 }
 pub fn spawn_as(f: &Fixture, command: &mut Command) -> Process {
-    let mut c = command
-        .env("AXIOM_DATA", &f.paths.data)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    start(f, command.stderr(Stdio::null()))
+}
+/// With the other end of its stderr.
+pub fn spawn_heard(f: &Fixture, command: &mut Command) -> (Process, ChildStderr) {
+    let mut p = start(f, command.stderr(Stdio::piped()));
+    let said = p.0.stderr.take().unwrap();
+    (p, said)
+}
+fn start(f: &Fixture, command: &mut Command) -> Process {
+    let mut c = command.env("AXIOM_DATA", &f.paths.data).stdout(Stdio::piped()).spawn().unwrap();
     let mut line = String::new();
     BufReader::new(c.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let p = Process(c);
     assert_eq!(line.trim(), "ready");
-    Process(c)
+    p
 }
 
 /// Nothing runs any more.

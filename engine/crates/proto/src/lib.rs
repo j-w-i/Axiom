@@ -148,6 +148,10 @@ pub struct Usage {
     pub context: Option<f64>,
 }
 
+fn none(n: &u64) -> bool {
+    *n == 0
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Body {
@@ -190,6 +194,9 @@ pub enum Body {
         /// For a tool: its arguments, as the model wrote them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         args: Option<Value>,
+        /// How long they were, if they were too long to keep: then `args` is absent.
+        #[serde(default, skip_serializing_if = "none")]
+        args_cut: u64,
     },
     /// Text appended to an item. Coalesced: one per item per flush.
     #[serde(rename = "item.delta")]
@@ -202,6 +209,9 @@ pub enum Body {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         result: Option<Value>,
+        /// As `args_cut`.
+        #[serde(default, skip_serializing_if = "none")]
+        result_cut: u64,
     },
     #[serde(rename = "request.opened")]
     RequestOpened {
@@ -457,6 +467,10 @@ impl Default for Lines {
 impl Lines {
     pub fn new(limit: usize) -> Self {
         Self { buf: Vec::new(), scanned: 0, limit }
+    }
+    /// Bytes that are not yet taken as lines.
+    pub fn waiting(&self) -> usize {
+        self.buf.len()
     }
     /// For the lines after this one.
     pub fn set_limit(&mut self, limit: usize) {

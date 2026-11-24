@@ -20,6 +20,7 @@ fn started(seq: u64, i: &str) -> Event {
             kind: ItemKind::Prose,
             name: String::new(),
             args: None,
+            args_cut: 0,
         },
     )
 }
@@ -93,6 +94,7 @@ fn ending_an_item_folds_its_deltas() {
             outcome: Outcome::Completed,
             text: "hello".into(),
             result: None,
+            result_cut: 0,
         },
     );
     j.append(
@@ -126,6 +128,7 @@ fn cut_short(i: &str, text: &str) -> Body {
         outcome: Outcome::Interrupted,
         text: text.into(),
         result: None,
+        result_cut: 0,
     }
 }
 
@@ -144,6 +147,7 @@ fn recovery_ends_what_was_open_and_keeps_the_text() {
                 outcome: Outcome::Completed,
                 text: "b".into(),
                 result: None,
+                result_cut: 0,
             },
         );
         j.append(
@@ -188,9 +192,10 @@ fn recovery_ends_what_was_open_and_keeps_the_text() {
     );
     assert!(!j.session(&s).unwrap().unwrap().running);
     assert_eq!(j.recover(10).unwrap().0, 0, "recovery is idempotent");
-    assert_eq!(j.recover_session(&s, 10).unwrap(), Some(20));
-    assert_eq!(j.recover_session(&done, 10).unwrap(), Some(1));
-    assert_eq!(j.recover_session(&SessionId::new(), 10).unwrap(), None);
+    let r = Reader::open(&p).unwrap();
+    assert_eq!(r.ending(&s, 10).unwrap(), Some((20, vec![])));
+    assert_eq!(r.ending(&done, 10).unwrap(), Some((1, vec![])));
+    assert_eq!(r.ending(&SessionId::new(), 10).unwrap(), None);
 }
 
 /// Damages one event behind the journal's back.
@@ -209,23 +214,33 @@ fn damage(p: &std::path::Path, s: &SessionId, seq: i64, body: &str) {
 fn a_damaged_event_costs_what_needs_it_and_nothing_else() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("j.db");
-    let ids: Vec<_> = ["a", "b", "c"].into_iter().map(|s| SessionId(s.into())).collect();
+    let ids: Vec<_> = ["a", "b", "c", "d"].into_iter().map(|s| SessionId(s.into())).collect();
     {
         let mut j = Journal::open(&p).unwrap();
         for s in &ids {
             j.create(s, "T", None, 1).unwrap();
-            j.append(s, &[run(2), started(3, "i"), delta(4, "i", "x"), delta(5, "i", "y")])
-                .unwrap();
+            let texts = ["x", "y", "z", "!"];
+            let deltas = texts.iter().zip(4..).map(|(t, n)| delta(n, "i", t));
+            let events: Vec<_> = [run(2), started(3, "i")].into_iter().chain(deltas).collect();
+            j.append(s, &events).unwrap();
         }
     }
-    // Old history of a; unfinished text of b. Neither keeps c, or the other sessions, from opening.
+    // Old history of a; unfinished text of b; the list of what is open in d. None of it keeps the
+    // others from opening, and text that can be read is not lost with text that cannot.
     damage(&p, &ids[0], 2, r#"{"type":"run.started"}"#);
     damage(&p, &ids[1], 5, "{");
+    damage(&p, &ids[1], 6, "[]");
+    let c = rusqlite::Connection::open(&p).unwrap();
+    c.execute("update open set kind=9 where session='d'", []).unwrap();
     let mut j = Journal::open(&p).unwrap();
     let (n, failed) = j.recover(9).unwrap();
-    assert_eq!(n, 2, "recovery reads what is open, not the history");
-    assert_eq!(failed.iter().map(|(s, _)| s).collect::<Vec<_>>(), [&ids[1]]);
-    assert_eq!(j.read(&ids[2], 5, ALL).unwrap()[0].body, cut_short("i", "xy"));
+    assert_eq!(n, 3, "recovery reads what is open, not the history");
+    assert_eq!(failed.iter().map(|(s, _)| s).collect::<Vec<_>>(), [&ids[3]]);
+    assert_eq!(j.read(&ids[2], 7, ALL).unwrap()[0].body, cut_short("i", "xyz!"));
+    let lost = "x\n[a part of this is damaged and could not be read]\n!";
+    assert_eq!(j.read(&ids[1], 7, ALL).unwrap()[0].body, cut_short("i", lost));
+    let whole: Vec<_> = j.read(&ids[1], 0, ALL).unwrap().iter().map(|e| e.seq).collect();
+    assert_eq!(whole, [1, 2, 3, 8, 9], "the damaged part has gone with the others");
     // What lies before the damage is readable; then it is an error, every time.
     let r = Reader::open(&p).unwrap();
     for _ in 0..2 {
@@ -348,6 +363,31 @@ fn the_files_are_private_even_if_they_were_not() {
 }
 
 #[test]
+fn old_rows_that_nest_too_deep_are_cut_though_they_are_short() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j.db");
+    let s = SessionId::new();
+    let mut j = Journal::open(&p).unwrap();
+    j.create(&s, "T", None, 1).unwrap();
+    for n in [60, 100, 120] {
+        let args = format!("{}{}", "[".repeat(n), "]".repeat(n));
+        let body = format!(
+            r#"{{"type":"item.started","item":"i","run":"r","agent":"a","kind":"tool","args":{args}}}"#
+        );
+        damage(&p, &s, 1, &body);
+        let event = j.read(&s, 0, ALL).unwrap().remove(0);
+        let Body::ItemStarted { args, args_cut, .. } = &event.body else { panic!() };
+        assert_eq!(
+            (args.is_none(), *args_cut),
+            if n > 64 { (true, 2 * n as u64) } else { (false, 0) }
+        );
+        // As it goes over the wire, a client can read it.
+        let m = Message::Events { session: s.clone(), events: vec![event] };
+        serde_json::from_str::<Message>(&serde_json::to_string(&m).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn old_rows_over_the_limits_are_cut_when_read() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("j.db");
@@ -359,6 +399,7 @@ fn old_rows_over_the_limits_are_cut_when_read() {
         outcome: Outcome::Completed,
         text: "\0".repeat(3 << 20),
         result: None,
+        result_cut: 0,
     });
     damage(&p, &s, 1, &long.unwrap());
     let c = rusqlite::Connection::open(&p).unwrap();
@@ -427,7 +468,7 @@ proptest! {
         let mut events = vec![run(2), started(3, "i")];
         for n in 0..30u64 { events.push(delta(4 + n, "i", &format!("t{n}"))); }
         if ends {
-            events.push(ev(34, Body::ItemEnded { item: ItemId("i".into()), outcome: Outcome::Completed, text: "all".into(), result: None }));
+            events.push(ev(34, Body::ItemEnded { item: ItemId("i".into()), outcome: Outcome::Completed, text: "all".into(), result: None, result_cut: 0 }));
         }
         let s = SessionId("s".into());
         let mut whole = Journal::in_memory().unwrap();
