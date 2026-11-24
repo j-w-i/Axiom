@@ -29,13 +29,18 @@ const AGENT: &str = "{\"do\":\"agent\",\"name\":\"T\"}\n";
 const FINISH: &str = "{\"do\":\"finish\",\"outcome\":\"completed\"}\n";
 
 /// `n` requests one after the other: each waits for the drive.
-fn asks(n: usize) -> String {
+/// `n` events that are flushed to the drive, the first `after` ms in, and then no end to wait for:
+/// how long the flushing takes depends on the drive.
+fn asks(n: usize, after: u64) -> String {
     let ask = |i| {
+        let after = if i == 0 { after } else { 0 };
         format!(
-            "{{\"do\":\"ask\",\"request\":\"{i}\",\"what\":\"w\",\"subject\":\"s\",\"scope\":\"\"}}\n"
+            "{{\"after\":{after},\"do\":\"ask\",\"request\":\"{i}\",\"what\":\"w\",\"subject\":\"s\",\"scope\":\"\"}}\n"
         )
     };
-    AGENT.to_owned() + &(0..n).map(ask).collect::<String>()
+    AGENT.to_owned()
+        + &(0..n).map(ask).collect::<String>()
+        + "{\"after\":50000,\"do\":\"finish\",\"outcome\":\"completed\"}\n"
 }
 
 fn damage(f: &Fixture, sql: &str) {
@@ -598,16 +603,24 @@ async fn every_run_ends_in_the_journal_when_the_host_stops() {
     let host = f.serve();
     let mut c = f.client().await;
     let mut all = Vec::new();
-    // Behind their backpressure, in a long pause, and in between.
+    // Behind their backpressure (the journal is locked), in a long pause, and in between.
     let pause = f.script("{\"after\":50000,\"do\":\"finish\",\"outcome\":\"completed\"}\n");
-    for script in [f.script(&asks(3000)), f.script(&asks(3000)), pause, f.talker(10_000, 5)] {
+    for script in
+        [f.script(&asks(3000, 1000)), f.script(&asks(3000, 1000)), pause, f.talker(10_000, 5)]
+    {
         let s = session(&mut c).await;
         replay(&mut c, &s, &script, 1.0).await;
         all.push(s);
     }
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    let lock = rusqlite::Connection::open(f.paths.journal()).unwrap();
+    lock.busy_timeout(LONG).unwrap();
+    lock.execute_batch("begin immediate").unwrap();
+    tokio::time::sleep(Duration::from_millis(1300)).await;
     let t = Instant::now();
     c.call(Call::Shutdown { force: true }).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!host.is_finished(), "nothing can have been written");
+    lock.execute_batch("rollback").unwrap();
     tokio::time::timeout(LONG, host).await.unwrap().unwrap().unwrap();
     assert!(t.elapsed() < Duration::from_secs(8), "{:?}", t.elapsed());
     for s in &all {
@@ -641,7 +654,7 @@ async fn nothing_starts_once_the_host_is_stopping() {
     let host = f.serve();
     let (mut c, mut d) = (f.client().await, f.client().await);
     let (s, busy) = (session(&mut c).await, session(&mut c).await);
-    replay(&mut c, &busy, &f.script(&asks(3000)), 0.0).await;
+    replay(&mut c, &busy, &f.script(&asks(3000, 0)), 1.0).await;
     let script = f.talker(10_000, 5);
     c.call(Call::Shutdown { force: true }).await.unwrap();
     for _ in 0..20 {
