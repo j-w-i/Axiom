@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 
 import 'package:axiom/gallery/sheets.dart';
 import 'package:axiom/gallery/workbench.dart';
+import 'package:axiom/patterns/execution.dart';
 import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/rendering.dart';
@@ -105,6 +106,20 @@ void main() {
     }
   }
 
+  testWidgets('what an agent runs on, with a question open', (t) async {
+    await mount(t, const Workbench(), size: const Size(1100, 700), dpr: 1);
+    for (final f in [
+      find.byType(ExecutionKey),
+      find.bySemanticsLabel('Model: GPT-5.6'),
+      find.bySemanticsLabel('GPT-5.6 mini'),
+    ]) {
+      await t.tap(f);
+      await t.pump(const Duration(milliseconds: 50));
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    await expectLater(find.byKey(stage), matchesGoldenFile('goldens/execution-dark.png'));
+  });
+
   testWidgets('the comparison sees one pixel of movement', (t) async {
     Future<Uint8List> shot(double dx) async {
       await mount(
@@ -131,6 +146,6 @@ void main() {
 
   test('every golden is used', () {
     final files = Directory('test/goldens').listSync().length;
-    expect(files, 2 * (sheets.length + 3));
+    expect(files, 2 * (sheets.length + 3) + 1);
   });
 }

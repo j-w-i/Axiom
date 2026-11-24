@@ -5,6 +5,8 @@ import 'package:flutter/widgets.dart';
 import '../host/host_store.dart';
 import '../host/proto.dart';
 import '../host/session_model.dart';
+import '../patterns/agent_bar.dart';
+import '../patterns/context_gauge.dart';
 import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
 import '../transcript/safe_text.dart';
@@ -289,46 +291,37 @@ class _Display extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 38),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      a.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.uiStrong,
-                    ),
+          AgentBar(
+            name: a.name,
+            state: phaseOf(a.phase),
+            mark: ServiceMark.of(x.model),
+            tabs: const [('Conversation', null)],
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    [
+                      for (final p in [x.model, x.harness, x.connection])
+                        if (p != null) oneLine(p, 60),
+                    ].join('   '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.type.label.ink(c.ink3),
                   ),
-                  const SizedBox(width: 14),
-                  if (ServiceMark.of(x.model) case final m?) ...[
-                    AxServiceMark(m, size: 12),
-                    const SizedBox(width: 6),
-                  ],
-                  Expanded(
-                    child: Text(
-                      [
-                        for (final p in [x.model, x.harness, x.connection])
-                          if (p != null) oneLine(p, 60),
-                      ].join('   '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.label.ink(c.ink3),
-                    ),
+                ),
+                if (a.context != null) ...[
+                  const SizedBox(width: 10),
+                  ContextGauge(
+                    ContextView(share: a.context, provenance: provenanceOf(a.contextKnown)),
+                    hue: ServiceMark.of(x.model)?.color(c),
                   ),
-                  if (a.context case final u?) ...[
-                    Text(
-                      '${a.contextKnown == Known.estimated ? 'about ' : ''}${(u * 100).round()}% of context',
-                      style: t.type.label.ink(c.ink3),
-                    ),
-                    const SizedBox(width: 14),
-                  ],
-                  if (stale) Text('not live', style: t.type.label.ink(c.attentionText)),
                 ],
-              ),
+                if (stale) ...[
+                  const SizedBox(width: 10),
+                  Text('not live', style: t.type.label.ink(c.attentionText)),
+                ],
+              ],
             ),
           ),
           ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
@@ -350,7 +343,7 @@ class _Asked extends StatelessWidget {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 180),
       child: ColoredBox(
-        color: c.request.bottom,
+        color: c.block.bottom,
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 10, 24, 12),
           child: Column(

@@ -25,7 +25,6 @@ class UsageKey extends StatelessWidget {
       ..sort((a, b) => b.used!.compareTo(a.used!));
     final tight = known.firstOrNull ?? acc.windows.firstOrNull;
     return AxPopover(
-      hue: hue,
       width: 312,
       alignEnd: true,
       anchor: (context, open, toggle) => Pressable(

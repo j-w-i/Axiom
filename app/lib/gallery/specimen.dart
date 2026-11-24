@@ -4,6 +4,7 @@ library;
 
 import '../host/proto.dart' as p;
 import '../host/session_model.dart';
+import '../patterns/context_gauge.dart';
 import '../patterns/models.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
@@ -202,6 +203,27 @@ const models = [
   AxMenuItem('gpt', 'GPT-5.6', mark: ServiceMark.openai),
   AxMenuItem('gptm', 'GPT-5.6 mini', mark: ServiceMark.openai),
 ];
+const harnessesForGpt = [
+  AxMenuItem('axiom', 'Axiom', mark: ServiceMark.axiom, detail: 'native engine'),
+  AxMenuItem('codex', 'Codex', mark: ServiceMark.codex, detail: 'installed'),
+  AxMenuItem(
+    'claude',
+    'Claude Code',
+    mark: ServiceMark.claudecode,
+    enabled: false,
+    why: 'Claude models only',
+  ),
+  AxMenuItem('opencode', 'OpenCode', mark: ServiceMark.opencode, enabled: false, why: 'not found'),
+];
+const axiomModels = [
+  ...models,
+  AxMenuItem('opus', 'Opus 5.5', mark: ServiceMark.claude),
+  AxMenuItem('gem', 'Gemini 3.5 Pro', mark: ServiceMark.gemini),
+];
+const otherConnections = {
+  'opus': [AxMenuItem('ck', 'Anthropic API key', mark: ServiceMark.claude, detail: 'metered')],
+  'gem': [AxMenuItem('gk', 'Gemini API key', mark: ServiceMark.gemini, detail: 'metered')],
+};
 const connections = [
   AxMenuItem('o1', 'ChatGPT Pro, work', mark: ServiceMark.openai, detail: '31% used'),
   AxMenuItem(
@@ -315,3 +337,17 @@ SessionModel transcript() {
   );
   return SessionModel('s1')..apply([for (final b in e) p.Event(++n, n, b)]);
 }
+
+const contextView = ContextView(
+  share: .71,
+  used: 142000,
+  window: 200000,
+  provenance: Provenance.reported,
+  parts: [
+    ContextPart('Instructions and tools', 19400),
+    ContextPart('Conversation', 61200),
+    ContextPart('Files read', 44800),
+    ContextPart('Command output', 16600),
+  ],
+  note: 'Summarised at 85%.',
+);

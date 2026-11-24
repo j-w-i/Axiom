@@ -69,6 +69,19 @@ void main() {
         ];
         check('ink1', c.ink1, tints);
         check('ink3', c.ink3, tints);
+        final chosen = [
+          for (final h in c.services.entries)
+            for (final k in [c.rowSelectedTop, c.rowSelectedBottom])
+              ('${h.key.name} selected', c.selected(k, h.value)),
+        ];
+        for (final (n, k) in [
+          ('ink1', c.ink1),
+          ('ink2', c.ink2),
+          ('ink3', c.ink3),
+          ('attention', c.attentionText),
+        ]) {
+          check(n, k, chosen);
+        }
         check('voice', c.voice, stops('bay', c.bay));
         check('ink1', c.ink1, [...stops('key', c.key), ...stops('keyHover', c.keyHover)]);
         check('ink1', c.ink1, stops('keyDown', c.keyDown));
@@ -77,9 +90,8 @@ void main() {
         for (final s in [c.primary, c.primaryHover, c.primaryDown]) {
           check('onPrimary', c.onPrimary, stops('primary', s));
         }
-        check('onAttention', c.onAttention, stops('answer', c.answer));
         for (final (n, k) in [('ink1', c.ink1), ('ink3', c.ink3), ('attention', c.attentionText)]) {
-          check(n, k, stops('request', c.request));
+          check(n, k, stops('plate (a request)', c.plate));
         }
         for (final (n, k) in [
           ('plain', c.codePlain),
@@ -202,5 +214,15 @@ void main() {
     final sockets = sources.where((f) => f.readAsStringSync().contains('Socket.connect'));
     expect(sockets.map((f) => f.uri.pathSegments.last), ['link.dart']);
     expect(sockets.single.readAsStringSync(), contains('InternetAddressType.unix'));
+  });
+
+  test('no surface has a strip of colour along one side', () {
+    final one = RegExp(r'Border\(\s*(left|right|top)\s*:|BorderDirectional');
+    for (final f in Directory('lib').listSync(recursive: true).whereType<File>()) {
+      if (!f.path.endsWith('.dart')) continue;
+      final hits = one.allMatches(f.readAsStringSync()).length;
+      // A quotation's rule, in the ink of its words, is typography.
+      expect(hits, f.path.endsWith('transcript_view.dart') ? 1 : 0, reason: f.path);
+    }
   });
 }

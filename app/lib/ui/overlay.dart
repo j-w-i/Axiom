@@ -19,11 +19,7 @@ class AxPopover extends StatefulWidget {
     super.key,
     this.width,
     this.alignEnd = false,
-    this.hue,
   });
-
-  /// The service the panel belongs to: its top edge takes the colour.
-  final Color? hue;
   final Widget Function(BuildContext, bool open, VoidCallback toggle) anchor;
   final Widget Function(BuildContext, VoidCallback close) panel;
   final double? width;
@@ -99,7 +95,6 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
                   child: Surface(
                     Ax.of(context).colors.overlay,
                     radius: AxRadius.overlay,
-                    marker: widget.hue,
                     child: Padding(
                       padding: const EdgeInsets.all(5),
                       // However much there is, it stays in the window and scrolls.

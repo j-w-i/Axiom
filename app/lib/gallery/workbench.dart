@@ -1,6 +1,9 @@
 import 'package:flutter/widgets.dart';
 
+import '../patterns/agent_bar.dart';
 import '../patterns/composer.dart';
+import '../patterns/context_gauge.dart';
+import '../patterns/execution.dart';
 import '../patterns/session_panel.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/transcript_view.dart';
@@ -28,7 +31,7 @@ class _WorkbenchState extends State<Workbench> {
   final _choice = {
     'Harness': 'codex',
     'Model': 'gpt',
-    'Connection': 'o1',
+    'Account': 'o1',
     'Effort': 'high',
     'Access': 'tree',
   };
@@ -38,16 +41,39 @@ class _WorkbenchState extends State<Workbench> {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     final agent = s.agents.firstWhere((a) => a.id == _agent);
-    Widget line(bool wide) => ExecutionLine([
+    final choices = [
       for (final (k, items) in [
-        ('Model', s.models),
-        ('Harness', s.harnesses),
-        ('Connection', s.connections),
-        if (wide) ('Effort', s.efforts),
-        if (wide) ('Access', s.access),
+        ('Model', _choice['Harness'] == 'axiom' ? s.axiomModels : s.models),
+        ('Harness', s.harnessesForGpt),
+        ('Account', s.otherConnections[_choice['Model']] ?? s.connections),
+        ('Effort', s.efforts),
+        ('Access', s.access),
       ])
-        ExecutionChoice(k, items, _choice[k]!, (v) => setState(() => _choice[k] = v)),
-    ]);
+        ExecutionChoice(
+          k,
+          items,
+          _choice[k]!,
+          (v) => setState(() {
+            _choice[k] = v;
+            // A model is reached by an account of its own service.
+            if (k == 'Model') {
+              _choice['Account'] = (s.otherConnections[v] ?? s.connections).first.value;
+            }
+          }),
+          cost: switch (k) {
+            'Model' =>
+              (v) =>
+                  'The whole conversation has to be read again: about ${tokens(s.contextView.used!)} '
+                  'tokens, none of them from the cache. Reasoning this model kept is not carried over.',
+            'Harness' =>
+              (v) =>
+                  'Another harness cannot take over this one\'s session. It begins with the '
+                  'conversation as text: about ${tokens(s.contextView.used!)} tokens to read.',
+            _ => null,
+          },
+        ),
+    ];
+    final mark = agent.id == 'builder' ? choices.first.item?.mark : agent.mark;
     return Surface(
       c.chassis,
       radius: 0,
@@ -113,25 +139,17 @@ class _WorkbenchState extends State<Workbench> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Padding(
-                                padding: const EdgeInsets.only(left: 24, right: 14),
-                                child: Row(
-                                  children: [
-                                    Text(agent.name, style: t.type.uiStrong),
-                                    const SizedBox(width: 8),
-                                    Expanded(child: line(box.maxWidth >= 1240)),
-                                    AxTabs(
-                                      tabs: const [
-                                        ('Conversation', null),
-                                        ('Changes', '3'),
-                                        ('Terminal', null),
-                                      ],
-                                      hue: agent.mark?.color(c),
-                                      index: _tab,
-                                      onChanged: (i) => setState(() => _tab = i),
-                                    ),
-                                  ],
-                                ),
+                              AgentBar(
+                                name: agent.name,
+                                state: agent.state,
+                                mark: mark,
+                                tabs: const [
+                                  ('Conversation', null),
+                                  ('Changes', '3'),
+                                  ('Terminal', null),
+                                ],
+                                index: _tab,
+                                onTab: (i) => setState(() => _tab = i),
                               ),
                               ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
                               Expanded(
@@ -153,6 +171,10 @@ class _WorkbenchState extends State<Workbench> {
                                 placeholder:
                                     'Steer ${agent.name}. It reads this after the current tool call.',
                                 action: 'Queue',
+                                leading: [
+                                  ExecutionKey(choices),
+                                  ContextGauge(s.contextView, hue: mark?.color(c)),
+                                ],
                                 onAttach: () {},
                                 onSubmit: (_) {},
                               ),

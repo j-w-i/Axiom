@@ -59,7 +59,6 @@ class AxColors {
     required this.ink4,
     required this.voice,
     required this.onPrimary,
-    required this.onAttention,
     required this.live,
     required this.liveText,
     required this.attention,
@@ -92,8 +91,6 @@ class AxColors {
     required this.primary,
     required this.primaryHover,
     required this.primaryDown,
-    required this.request,
-    required this.answer,
     required this.overlay,
     required this.diffAdd,
     required this.diffRemove,
@@ -117,7 +114,6 @@ class AxColors {
     required this.kindWeb,
     required this.kindThink,
     required this.codeInline,
-    required this.promptRule,
     required this.services,
   });
 
@@ -128,7 +124,7 @@ class AxColors {
 
   /// The person's and other agents' words in a transcript.
   final Color voice;
-  final Color onPrimary, onAttention;
+  final Color onPrimary;
 
   /// States. The plain colour is for marks (3:1), `…Text` for words (4.5:1).
   final Color live, liveText, attention, attentionText, fault, faultText, done, doneText, idle;
@@ -144,7 +140,7 @@ class AxColors {
       meterFill;
   final SurfaceSpec chassis, plate, plateHover, plateSelected, bay, block, well;
   final SurfaceSpec key, keyHover, keyDown, primary, primaryHover, primaryDown;
-  final SurfaceSpec request, answer, overlay;
+  final SurfaceSpec overlay;
   final Color diffAdd, diffRemove;
   final Color codePlain, codeKeyword, codeString, codeCall, codeType, codeNumber, codeComment;
   final Color clipWrite, clipRead, clipThink, clipFault, clipAsk;
@@ -152,7 +148,7 @@ class AxColors {
 
   /// What kind of work: reading, changing, searching, running, the web, thinking or delegating.
   final Color kindRead, kindEdit, kindSearch, kindRun, kindWeb, kindThink;
-  final Color codeInline, promptRule;
+  final Color codeInline;
 
   /// A service's hue, for its mark and its levels. Neutral marks have none.
   final Map<ServiceMark, Color> services;
@@ -160,6 +156,11 @@ class AxColors {
   /// The hover of something that belongs to a service.
   Color tinted(Color? hue) =>
       hue == null ? hover : hue.withValues(alpha: brightness == Brightness.dark ? .11 : .10);
+
+  /// A selected row's own colour with the hue of what it stands for.
+  Color selected(Color base, Color? hue) => hue == null
+      ? base
+      : Color.alphaBlend(hue.withValues(alpha: brightness == Brightness.dark ? .09 : .15), base);
 
   static const dark = AxColors(
     brightness: Brightness.dark,
@@ -169,7 +170,6 @@ class AxColors {
     ink4: Color(0xFFA2ACBE),
     voice: Color(0xFFB2BCD0),
     onPrimary: Color(0xFFFFFFFF),
-    onAttention: Color(0xFFF6ECD9),
     live: Color(0xFF5B80F2),
     liveText: Color(0xFF9DB3FA),
     attention: Color(0xFFE3A947),
@@ -276,20 +276,6 @@ class AxColors {
       inset: Color(0x3D000000),
       lip: Color(0x14FFFFFF),
     ),
-    request: SurfaceSpec(
-      top: Color(0xFF35302A),
-      bottom: Color(0xFF302C26),
-      border: Color(0xFF1A1814),
-      edge: Color(0x14FFE3B0),
-      shadows: [BoxShadow(color: Color(0x40000000), blurRadius: 4, offset: Offset(0, 1))],
-    ),
-    answer: SurfaceSpec(
-      top: Color(0xFF7C5F2E),
-      bottom: Color(0xFF70552A),
-      border: Color(0xFF33260F),
-      edge: Color(0x24FFE9C4),
-      shadows: [BoxShadow(color: Color(0x33000000), blurRadius: 2, offset: Offset(0, 1))],
-    ),
     overlay: SurfaceSpec(
       top: Color(0xFF2C2F36),
       bottom: Color(0xFF282B31),
@@ -322,7 +308,6 @@ class AxColors {
     kindWeb: Color(0xFF7FB58A),
     kindThink: Color(0xFFBCA3DE),
     codeInline: Color(0xFFB9C5FF),
-    promptRule: Color(0xFF5B80F2),
     services: {
       ServiceMark.anthropic: Color(0xFFE08A66),
       ServiceMark.claude: Color(0xFFE08A66),
@@ -363,7 +348,6 @@ class AxColors {
     ink4: Color(0xFF4A5260),
     voice: Color(0xFF45506A),
     onPrimary: Color(0xFFFFFFFF),
-    onAttention: Color(0xFF3A2A08),
     live: Color(0xFF3355C4),
     liveText: Color(0xFF2545AE),
     attention: Color(0xFF966612),
@@ -470,20 +454,6 @@ class AxColors {
       inset: Color(0x3D000000),
       lip: Color(0x66FFFFFF),
     ),
-    request: SurfaceSpec(
-      top: Color(0xFFFBEFD3),
-      bottom: Color(0xFFF7E9C9),
-      border: Color(0xFFD0B377),
-      edge: Color(0xFFFFFBF0),
-      shadows: [BoxShadow(color: Color(0x1F3A2A08), blurRadius: 4, offset: Offset(0, 1))],
-    ),
-    answer: SurfaceSpec(
-      top: Color(0xFFF0C875),
-      bottom: Color(0xFFE9BF69),
-      border: Color(0xFFB28A3A),
-      edge: Color(0xA6FFFFFF),
-      shadows: [BoxShadow(color: Color(0x263A2A08), blurRadius: 2, offset: Offset(0, 1))],
-    ),
     overlay: SurfaceSpec(
       top: Color(0xFFF6F9FE),
       bottom: Color(0xFFF2F5FB),
@@ -516,7 +486,6 @@ class AxColors {
     kindWeb: Color(0xFF2E6B3B),
     kindThink: Color(0xFF6A4A98),
     codeInline: Color(0xFF3044A8),
-    promptRule: Color(0xFF3355C4),
     services: {
       ServiceMark.anthropic: Color(0xFFAD4F2B),
       ServiceMark.claude: Color(0xFFAD4F2B),

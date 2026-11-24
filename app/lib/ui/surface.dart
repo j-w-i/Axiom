@@ -9,24 +9,20 @@ import 'tokens.dart';
 /// Paints [SurfaceSpec]s. Shaders are cached until the size or the spec changes, so a surface whose
 /// contents repaint costs three rounded rectangles.
 class Surface extends SingleChildRenderObjectWidget {
-  const Surface(this.spec, {super.key, this.radius = AxRadius.plate, this.marker, super.child});
+  const Surface(this.spec, {super.key, this.radius = AxRadius.plate, super.child});
   final SurfaceSpec spec;
   final double radius;
 
-  /// A 2 px mark along the top edge: the selected part of a set.
-  final Color? marker;
-
   @override
-  RenderObject createRenderObject(BuildContext context) => RenderSurface(spec, radius, marker);
+  RenderObject createRenderObject(BuildContext context) => RenderSurface(spec, radius);
   @override
   void updateRenderObject(BuildContext context, RenderSurface renderObject) => renderObject
     ..spec = spec
-    ..radius = radius
-    ..marker = marker;
+    ..radius = radius;
 }
 
 class RenderSurface extends RenderProxyBox {
-  RenderSurface(this._spec, this._radius, this._marker);
+  RenderSurface(this._spec, this._radius);
   SurfaceSpec _spec;
   set spec(SurfaceSpec v) {
     if (identical(v, _spec)) return;
@@ -39,13 +35,6 @@ class RenderSurface extends RenderProxyBox {
     if (v == _radius) return;
     _radius = v;
     _drop();
-  }
-
-  Color? _marker;
-  set marker(Color? v) {
-    if (v == _marker) return;
-    _marker = v;
-    markNeedsPaint();
   }
 
   ui.Shader? _fill, _inset, _edge;
@@ -112,15 +101,6 @@ class RenderSurface extends RenderProxyBox {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1
           ..color = _spec.border,
-      );
-    }
-    if (_marker case final m?) {
-      c.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(_radius + 3, 1, size.width - 2 * _radius - 6, 2),
-          const Radius.circular(1),
-        ),
-        Paint()..color = m,
       );
     }
     c.restore();

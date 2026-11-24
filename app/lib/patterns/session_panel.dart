@@ -197,15 +197,8 @@ class _AgentRowState extends State<AgentRow> {
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
-                              hue == null
-                                  ? c.rowSelectedTop
-                                  : Color.alphaBlend(hue.withValues(alpha: .05), c.rowSelectedTop),
-                              hue == null
-                                  ? c.rowSelectedBottom
-                                  : Color.alphaBlend(
-                                      hue.withValues(alpha: .05),
-                                      c.rowSelectedBottom,
-                                    ),
+                              for (final k in [c.rowSelectedTop, c.rowSelectedBottom])
+                                c.selected(k, hue),
                             ],
                           )
                         : null,
@@ -213,16 +206,6 @@ class _AgentRowState extends State<AgentRow> {
                   ),
                   child: Stack(
                     children: [
-                      if (widget.selected)
-                        Positioned(
-                          left: 0,
-                          top: 7,
-                          bottom: 7,
-                          child: ColoredBox(
-                            color: a.state == AgentState.asking ? c.attention : hue ?? c.live,
-                            child: const SizedBox(width: 2),
-                          ),
-                        ),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(11, 6, 11, 7),
                         child: Row(

@@ -7,6 +7,7 @@ import '../ui/editable.dart';
 import '../ui/icons.dart';
 import '../ui/press.dart';
 import '../ui/surface.dart';
+import '../ui/status.dart';
 import '../ui/tokens.dart';
 import 'highlight.dart';
 import 'models.dart';
@@ -285,7 +286,13 @@ class _RequestBarState extends State<RequestBar> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('$agent ${literal(r.what)}', style: t.type.uiStrong),
+                    Row(
+                      children: [
+                        const AxLamp(AgentState.asking),
+                        const SizedBox(width: 9),
+                        Expanded(child: Text('$agent ${literal(r.what)}', style: t.type.uiStrong)),
+                      ],
+                    ),
                     const SizedBox(height: 3),
                     Text(literal(r.subject), style: t.type.code.ink(c.attentionText)),
                     const SizedBox(height: 3),
@@ -316,7 +323,7 @@ class _RequestBarState extends State<RequestBar> {
       children: [
         AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: widget.onDeny),
         AxButton(label: oneLine(literal(r.always), 80), onPressed: ok ? widget.onAlways : null),
-        AxButton(label: 'Allow once', tone: AxTone.answer, onPressed: ok ? widget.onOnce : null),
+        AxButton(label: 'Allow once', tone: AxTone.primary, onPressed: ok ? widget.onOnce : null),
       ],
     );
     return Semantics(
@@ -325,15 +332,9 @@ class _RequestBarState extends State<RequestBar> {
       label: 'Permission request from $agent',
       explicitChildNodes: true,
       child: Surface(
-        c.request,
+        c.plate,
         child: Stack(
           children: [
-            Positioned(
-              left: 0,
-              top: 8,
-              bottom: 8,
-              child: ColoredBox(color: c.attention, child: const SizedBox(width: 2)),
-            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
               child: LayoutBuilder(

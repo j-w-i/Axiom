@@ -67,7 +67,7 @@ class _ControlsSheetState extends State<ControlsSheet> {
       [
         AxButton(label: 'Run the tests', onPressed: () {}),
         AxButton(label: 'Queue', icon: AxIcon.send, tone: AxTone.primary, onPressed: () {}),
-        AxButton(label: 'Allow once', tone: AxTone.answer, onPressed: () {}),
+        AxButton(label: 'Allow once', tone: AxTone.primary, onPressed: () {}),
         AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: () {}),
         AxButton(label: 'Engaged', engaged: true, onPressed: () {}),
         const AxButton(label: 'Disabled', onPressed: null),
@@ -178,16 +178,7 @@ class SurfacesSheet extends StatelessWidget {
         x,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: Text(
-            n,
-            style: t.type.label.ink(
-              n.startsWith('primary')
-                  ? c.onPrimary
-                  : n == 'answer'
-                  ? c.onAttention
-                  : c.ink2,
-            ),
-          ),
+          child: Text(n, style: t.type.label.ink(n.startsWith('primary') ? c.onPrimary : c.ink2)),
         ),
       ),
     );
@@ -200,7 +191,6 @@ class SurfacesSheet extends StatelessWidget {
           sw('plateHover', c.plateHover),
           sw('plateSelected', c.plateSelected),
           sw('overlay', c.overlay),
-          sw('request', c.request),
         ],
       ),
       ('Displays', [sw('bay', c.bay), sw('block', c.block), sw('well', c.well)]),
@@ -213,7 +203,6 @@ class SurfacesSheet extends StatelessWidget {
           sw('primary', c.primary),
           sw('primaryHover', c.primaryHover),
           sw('primaryDown', c.primaryDown),
-          sw('answer', c.answer),
         ],
       ),
       (

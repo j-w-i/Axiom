@@ -549,6 +549,7 @@ class _RowView extends StatelessWidget {
         opens: r.index == 0,
         afterTool: r.index == 0 && afterWork && !wide,
         goesOn: r.index + 1 < blocks.length && blocks[r.index + 1].continues,
+        closes: r.index + 1 == blocks.length && i.doc.tail.isEmpty,
         whole: () => wholeCode(blocks, r.index),
         onLink: onLink,
       );
@@ -570,6 +571,7 @@ class _RowView extends StatelessWidget {
                 opens: r.index + k == 0,
                 afterTool: r.index + k == 0 && afterWork && !wide,
                 goesOn: k + 1 < all.length && all[k + 1].continues,
+                closes: k + 1 == all.length,
                 whole: () => wholeCode([...d.closed, ...tail], r.index + k),
                 onLink: onLink,
               ),
@@ -670,6 +672,7 @@ class BlockView extends StatefulWidget {
     this.opens = false,
     this.afterTool = false,
     this.goesOn = false,
+    this.closes = false,
     this.whole,
     this.onLink,
   });
@@ -677,8 +680,8 @@ class BlockView extends StatefulWidget {
   final Block block;
   final ItemKind voice;
 
-  /// First of its item; after a run of tools; continued by the next block.
-  final bool opens, afterTool, goesOn;
+  /// First of its item; after a run of tools; continued by the next block; last of its item.
+  final bool opens, afterTool, goesOn, closes;
   final void Function(String url)? onLink;
   @override
   State<BlockView> createState() => _BlockViewState();
@@ -774,9 +777,16 @@ class _BlockViewState extends State<BlockView> {
         ? 6.0
         : 11.0;
     final asked = widget.voice == ItemKind.prompt;
-    if (asked) child = _Voice(child, gap: widget.opens ? 0 : top);
+    if (asked) child = _Voice(child, opens: widget.opens, closes: widget.closes, gap: top);
     child = Padding(
-      padding: EdgeInsets.only(top: asked && !widget.opens ? 0 : top),
+      // The tile begins above its words, which stay on the line any others would.
+      padding: EdgeInsets.only(
+        top: !asked
+            ? top
+            : widget.opens
+            ? top - _Voice.pad
+            : 0,
+      ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _wide),
         child: child,
@@ -812,22 +822,32 @@ class _BlockViewState extends State<BlockView> {
   }
 }
 
-/// What was asked: a rule in the margin, so it is found when scrolling back. The words themselves
-/// are as strong as any others.
+/// What was asked stands on a tile of its own, so it is found when scrolling back. The words
+/// themselves are as strong as any others.
 class _Voice extends StatelessWidget {
-  const _Voice(this.child, {required this.gap});
+  const _Voice(this.child, {required this.opens, required this.closes, required this.gap});
   final Widget child;
+  final bool opens, closes;
   final double gap;
+  static const pad = 8.0;
   @override
   Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
+    final c = Ax.of(context).colors;
+    const r = Radius.circular(AxRadius.plate);
     return DecoratedBox(
       decoration: BoxDecoration(
-        border: Border(left: BorderSide(color: c.promptRule, width: 2)),
+        color: c.block.top,
+        borderRadius: BorderRadius.vertical(
+          top: opens ? r : Radius.zero,
+          bottom: closes ? r : Radius.zero,
+        ),
       ),
-      child: Padding(
-        padding: EdgeInsets.only(left: 12, top: gap),
-        child: child,
+      child: SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(12, opens ? pad : gap, 12, closes ? pad : 0),
+          child: child,
+        ),
       ),
     );
   }

@@ -8,7 +8,7 @@ import 'spring.dart';
 import 'surface.dart';
 import 'tokens.dart';
 
-enum AxTone { key, primary, answer, quiet }
+enum AxTone { key, primary, quiet }
 
 /// A key: raised at rest, recessed while held or engaged.
 class AxButton extends StatelessWidget {
@@ -25,6 +25,7 @@ class AxButton extends StatelessWidget {
     this.width,
     this.shortcut,
     this.autofocus = false,
+    this.focusNode,
   });
   const AxButton.icon(
     AxIcon this.icon, {
@@ -38,7 +39,9 @@ class AxButton extends StatelessWidget {
     this.width,
     this.shortcut,
     this.autofocus = false,
+    this.focusNode,
   }) : iconOnly = true;
+  final FocusNode? focusNode;
   final String label;
   final AxIcon? icon;
   final AxTone tone;
@@ -56,13 +59,13 @@ class AxButton extends StatelessWidget {
       hint: shortcut,
       toggled: engaged ? true : null,
       onPressed: onPressed,
+      focusNode: focusNode,
       autofocus: autofocus,
       builder: (context, s) {
         final ink = !s.enabled
             ? c.idle
             : switch (tone) {
                 AxTone.primary => c.onPrimary,
-                AxTone.answer => c.onAttention,
                 AxTone.key => c.ink1,
                 AxTone.quiet => s.hovered || engaged ? c.ink1 : c.ink2,
               };
@@ -73,7 +76,6 @@ class AxButton extends StatelessWidget {
                 : s.hovered
                 ? c.primaryHover
                 : c.primary,
-          AxTone.answer => s.pressed ? c.keyDown : c.answer,
           _ =>
             s.pressed || engaged
                 ? c.keyDown
@@ -237,23 +239,18 @@ class AxTabs extends StatelessWidget {
             Pressable(
               label: count == null ? name : '$name, $count',
               selected: i == index,
-              radius: 0,
               onPressed: () => onChanged(i),
               builder: (context, s) {
                 final on = i == index;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          width: 2,
-                          color: on ? hue ?? t.colors.live : const Color(0x00000000),
-                        ),
-                      ),
-                    ),
+                return DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: on ? t.colors.tinted(hue) : null,
+                    borderRadius: BorderRadius.circular(AxRadius.key),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 38),
+                      constraints: BoxConstraints(minHeight: t.density.control),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.center,
