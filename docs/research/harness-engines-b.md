@@ -2,7 +2,7 @@
 
 Researched 2026-11-24 for Axiom (native agent engine plus delegation to existing harnesses).
 Source-code projects were cloned shallow (read only, nothing built or run) into
-`/private/tmp/claude-501/-Users-jwalr--claude-spares-spare-LYfEvH/eae82657-7207-476b-b2ca-f3ec628be277/scratchpad/research/engines-b/<name>`.
+`<scratchpad>/research/engines-b/<name>`.
 Paths below are relative to each repo root. Claude Code and Cursor are **closed source: documentation-sourced** (official docs and
 engineering blog, fetched 2026-11-24), labelled `[DOC]`. `[INF]` marks inference.
 
