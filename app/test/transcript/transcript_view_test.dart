@@ -1,11 +1,13 @@
 import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
+import 'package:axiom/transcript/safe_text.dart';
 import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
 
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -78,24 +80,113 @@ void main() {
       ..open('q')
       ..text('q', 'x\n\ny');
     final rows = TranscriptRows(f.agent);
-    String show() => rows.rows.map((r) => '${r.item.id}${r.index}${r.open ? '*' : ''}').join(' ');
-    expect(show(), 'p0 p1* t0* q0 q1*');
+    String show() => rows.rows
+        .map(
+          (r) => r.isEnd
+              ? '${r.item?.id ?? ''}${r.index}[${r.work.sublist(r.from, r.to).map((w) => w.id).join(' ')}]'
+              : '${r.item!.id}${r.index}',
+        )
+        .join(' ');
+    expect(show(), 'p0[t] q0 q1[]');
     f
       ..text('p', '\n\nc\n\nd')
       ..text('q', '\n\nz');
-    rows.sync();
-    expect(show(), 'p0 p1 p2 p3* t0* q0 q1 q2*');
+    expect(rows.sync(), isTrue);
+    expect(show(), 'p0[t] q0 q1 q2[]');
     f.end('p', 'a\n\nb\n\nc\n\nd');
     rows.sync();
-    expect(show(), 'p0 p1 p2 p3 t0* q0 q1 q2*');
+    expect(show(), 'p0[t] q0 q1 q2[]');
     // The end says less than was streamed.
     f.end('q', 'x');
     rows.sync();
-    expect(show(), 'p0 p1 p2 p3 t0* q0');
+    expect(show(), 'p0[t] q0');
     f.open('r', ItemKind.tool, 'x');
     rows.sync();
-    expect(show(), 'p0 p1 p2 p3 t0* q0 r0*');
+    expect(show(), 'p0[t] q0[r]');
     expect([for (final r in rows.rows) r.ordinal], [for (var i = 0; i < rows.rows.length; i++) i]);
+  });
+
+  test('long passages keep only their last blocks beside the work; much work is cut into rows', () {
+    final f = Feed()..open('p');
+    f.text('p', [for (var i = 0; i < 20; i++) 'P$i'].join('\n\n'));
+    f.end('p', [for (var i = 0; i < 20; i++) 'P$i'].join('\n\n'));
+    for (var i = 0; i < 70; i++) {
+      f
+        ..open('t$i', ItemKind.tool, 'read')
+        ..end('t$i', '');
+    }
+    final rows = TranscriptRows(f.agent).rows;
+    expect(rows.where((r) => !r.isEnd).length, 20 - TranscriptRows.beside);
+    final ends = rows.where((r) => r.isEnd).toList();
+    expect(ends.map((r) => r.to - r.from), [30, 30, 10]);
+    expect(ends.first.index, 14);
+  });
+
+  test('however it grows, the rows hold every block and every piece of work once, in order', () {
+    final r = Random(5);
+    for (var seed = 0; seed < 200; seed++) {
+      final f = Feed();
+      final rows = TranscriptRows(f.agent);
+      final open = <String>[];
+      var n = 0;
+      for (var step = 0; step < 40; step++) {
+        switch (r.nextInt(5)) {
+          case 0:
+            final id = 'p${n++}';
+            f.open(id);
+            open.add(id);
+          case 1:
+            final id = 't${n++}';
+            f.open(id, ItemKind.tool, 'x');
+            open.add(id);
+          case 2 || 3 when open.isNotEmpty:
+            final id = open[r.nextInt(open.length)];
+            f.text(id, id.startsWith('p') ? 'w${r.nextInt(9)}\n\n' * r.nextInt(5) : 'o');
+          case 4 when open.isNotEmpty:
+            final id = open.removeAt(r.nextInt(open.length));
+            f.end(id, r.nextBool() ? 'short' : 'a\n\nb\n\nc');
+          case _:
+        }
+        if (r.nextBool()) rows.sync();
+      }
+      rows.sync();
+      final blocks = <String>[], work = <String>[];
+      for (final (k, row) in rows.rows.indexed) {
+        expect(row.ordinal, k);
+        if (!row.isEnd) {
+          blocks.add('${row.item!.id}:${row.index}');
+        } else {
+          if (row.from == 0 && row.item != null) {
+            for (var b = row.index; b < row.item!.doc.closed.length; b++) {
+              blocks.add('${row.item!.id}:$b');
+            }
+          }
+          work.addAll(row.work.sublist(row.from, row.to).map((w) => w.id));
+        }
+      }
+      expect(blocks, [
+        for (final i in f.agent.items.where((i) => i.rich))
+          for (var b = 0; b < i.doc.closed.length; b++) '${i.id}:$b',
+      ]);
+      expect(work, [for (final i in f.agent.items.where((i) => !i.rich)) i.id]);
+    }
+  });
+
+  testWidgets('wide, the work stands beside the words it followed; narrow, under them', (t) async {
+    final f = Feed()..open('p');
+    f
+      ..end('p', 'I will read the file.')
+      ..open('t', ItemKind.tool, 'read', {'path': 'a.dart'})
+      ..end('t', '', {'summary': '20 lines'})
+      ..open('q')
+      ..end('q', 'It is fine.');
+    await mount(t, TranscriptView(f.agent), size: const Size(1200, 500), dpr: 1);
+    Rect of(String x) => t.getRect(find.text(x, findRichText: true));
+    expect(of('a.dart').left, greaterThan(of('I will read the file.').right));
+    expect((of('a.dart').center.dy - of('I will read the file.').center.dy).abs(), lessThan(2));
+    expect(of('It is fine.').top, greaterThan(of('a.dart').bottom));
+    await mount(t, TranscriptView(f.agent), size: const Size(700, 500), dpr: 1);
+    expect(of('a.dart').top, greaterThan(of('I will read the file.').bottom));
   });
 
   testWidgets('an end shorter than what was streamed is shown as it is', (t) async {
@@ -112,9 +203,9 @@ void main() {
   testWidgets('what is being read does not move, by a single pixel, while text arrives', (t) async {
     final f = Feed()..open('i');
     f.text('i', [for (var i = 0; i < 300; i++) 'Paragraph $i.'].join('\n\n'));
-    final c = ScrollController();
-    await mount(t, TranscriptView(f.agent, controller: c), dpr: 1);
+    await mount(t, TranscriptView(f.agent), dpr: 1);
     await t.pump();
+    final c = t.state<TranscriptViewState>(find.byType(TranscriptView)).scroll;
     c.jumpTo(c.offset - 900);
     await t.pump();
     final seen = t
@@ -208,6 +299,192 @@ void main() {
     expect(board, 'npm i');
   });
 
+  testWidgets('an earlier item that grows does not move what is read below it', (t) async {
+    final f = Feed()
+      ..open('p')
+      ..text('p', 'Early.\n\n')
+      ..open('q')
+      ..text('q', [for (var i = 0; i < 120; i++) 'Paragraph $i.'].join('\n\n'));
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    final c = t.state<TranscriptViewState>(find.byType(TranscriptView)).scroll;
+    c.jumpTo(c.offset - 600);
+    await t.pump();
+    final seen = t
+        .widgetList<RichText>(find.byType(RichText))
+        .map((r) => r.text.toPlainText())
+        .firstWhere((x) => x.startsWith('Paragraph '));
+    final y = t.getTopLeft(find.text(seen, findRichText: true));
+    for (var k = 0; k < 5; k++) {
+      f.text('p', 'Grown $k.\n\n');
+      await t.pump();
+      expect(t.getTopLeft(find.text(seen, findRichText: true)), y);
+    }
+  });
+
+  testWidgets('a change of width keeps the place', (t) async {
+    final f = Feed()..open('i');
+    f.text(
+      'i',
+      [for (var i = 0; i < 300; i++) 'Paragraph $i ${'with some words ' * (i % 9)}'].join('\n\n'),
+    );
+    Future<void> at(double w) async {
+      await mount(t, TranscriptView(f.agent), size: Size(w, 700), dpr: 1);
+      await t.pump();
+    }
+
+    await at(900);
+    final st = t.state<TranscriptViewState>(find.byType(TranscriptView));
+    st.scroll.jumpTo(st.scroll.offset - 1500);
+    await t.pump();
+    String first() => t
+        .widgetList<RichText>(find.byType(RichText))
+        .map((r) => r.text.toPlainText())
+        .firstWhere((x) {
+          if (!x.startsWith('Paragraph')) return false;
+          final r = t.getRect(find.text(x, findRichText: true));
+          return r.bottom > 0 && r.top < 700;
+        });
+    final before = first();
+    await at(520);
+    expect(first(), before);
+  });
+
+  testWidgets('the first frame is already at the end', (t) async {
+    final f = Feed()..open('i');
+    f.text('i', [for (var i = 0; i < 400; i++) 'Paragraph $i.'].join('\n\n'));
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(900, 700);
+    addTearDown(t.view.reset);
+    await t.pumpWidget(
+      WidgetsApp(
+        color: const Color(0xFF000000),
+        pageRouteBuilder: <T>(RouteSettings s, WidgetBuilder b) =>
+            PageRouteBuilder<T>(settings: s, pageBuilder: (c, _, _) => b(c)),
+        home: Ax(theme: const AxTheme(), child: TranscriptView(f.agent)),
+      ),
+    );
+    expect(find.text('Paragraph 399.', findRichText: true), findsOneWidget);
+    expect(
+      t.getBottomLeft(find.text('Paragraph 399.', findRichText: true)).dy,
+      inInclusiveRange(600, 700),
+    );
+  });
+
+  testWidgets('many short rows fill a tall window from its top', (t) async {
+    final f = Feed();
+    for (var i = 0; i < 88; i++) {
+      f
+        ..open('t$i', ItemKind.tool, 'read', {'path': 'file$i.dart'})
+        ..end('t$i', '', {'summary': 'ok'});
+    }
+    await mount(t, TranscriptView(f.agent), size: const Size(900, 2400), dpr: 1);
+    final st = t.state<TranscriptViewState>(find.byType(TranscriptView));
+    expect(st.scroll.position.minScrollExtent, 0);
+    expect(st.scroll.position.maxScrollExtent, lessThan(120));
+    expect(find.text('file87.dart'), findsOneWidget);
+    expect(t.getRect(find.text('file87.dart')).bottom, lessThan(2400));
+  });
+
+  testWidgets('Home is the very beginning', (t) async {
+    final f = Feed()..open('i');
+    f.text('i', [for (var i = 0; i < 5000; i++) 'Paragraph $i.'].join('\n\n'));
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    final st = t.state<TranscriptViewState>(find.byType(TranscriptView))..toStart();
+    await t.pump();
+    expect([st.scroll.offset, st.scroll.position.minScrollExtent], [0, 0]);
+    await t.pump();
+    expect(st.scroll.offset, 0);
+  });
+
+  testWidgets('an item long left behind still shows what it gains', (t) async {
+    final f = Feed()
+      ..open('p')
+      ..text('p', 'Start');
+    for (var i = 0; i < 70; i++) {
+      f
+        ..open('t$i', ItemKind.tool, 'read', {'path': 'f$i'})
+        ..end('t$i', '');
+    }
+    await mount(t, TranscriptView(f.agent), size: const Size(900, 3000), dpr: 1);
+    f.text('p', ' and end.\n\nMore');
+    await t.pump();
+    expect(find.text('Start and end.', findRichText: true), findsOneWidget);
+    expect(find.text('More', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('what is copied reads as it stands', (t) async {
+    String? board;
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
+      if (c.method == 'Clipboard.setData') board = (c.arguments as Map)['text'] as String;
+      return null;
+    });
+    final f = Feed()..open('i');
+    f
+      ..text(
+        'i',
+        'First para.\n\nSecond para.\n\n- one\n- two\n\n```\nlet a;\n```\n\n|h|k|\n|-|-|\n|1|2|\n\n',
+      )
+      ..open('t', ItemKind.tool, 'read', {'path': 'a.dart'})
+      ..end('t', '', {'summary': '3 lines'});
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    final s = t.state<SelectableRegionState>(find.byType(SelectableRegion));
+    s.selectAll(SelectionChangedCause.keyboard);
+    await t.pump();
+    Actions.invoke(
+      t.element(find.text('First para.', findRichText: true)),
+      CopySelectionTextIntent.copy,
+    );
+    await t.pump();
+    expect(
+      board!.trim(),
+      'First para.\n\nSecond para.\n\n• one\n• two\nlet a;\n\nh\tk\n1\t2\n\n\nRead a.dart  3 lines',
+    );
+  });
+
+  testWidgets('a right click offers to copy', (t) async {
+    final f = Feed()..open('i');
+    f.text('i', 'Some words here.\n\n');
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    final at = t.getRect(find.text('Some words here.', findRichText: true));
+    await t.tapAt(at.center, buttons: kSecondaryButton, kind: PointerDeviceKind.mouse);
+    await t.pumpAndSettle();
+    expect(find.text('Copy'), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets('copying code takes all its parts; the key is seen when focused', (t) async {
+    String? board;
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
+      if (c.method == 'Clipboard.setData') board = (c.arguments as Map)['text'] as String;
+      return null;
+    });
+    final code = [for (var i = 0; i < 300; i++) 'line $i'].join('\n');
+    final f = Feed()..open('i');
+    f.text('i', '```py\n$code\n```\n');
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    t.state<TranscriptViewState>(find.byType(TranscriptView)).toStart();
+    await t.pump();
+    final key = find.ancestor(of: find.text('Copy'), matching: find.byType(Opacity)).first;
+    expect(t.widget<Opacity>(key).opacity, 0);
+    for (var i = 0; i < 4 && t.widget<Opacity>(key).opacity == 0; i++) {
+      await t.sendKeyEvent(LogicalKeyboardKey.tab);
+      await t.pump();
+      await t.pump();
+    }
+    expect(t.widget<Opacity>(key).opacity, 1);
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.pump();
+    expect(board, code);
+  });
+
+  testWidgets('half characters never spoil the text around them', (t) async {
+    final f = Feed()..open('i');
+    f.text('i', 'a &#xD800; b ${'x' * 1999}🙂 end\n\n```\n${'y' * 1999}🙂 tail\n```\n');
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    expect(t.takeException(), isNull);
+    expect(find.textContaining('end', findRichText: true), findsWidgets);
+    expect(oneLine('${'a' * 799}🙂 title').runes.where((c) => c >= 0xD800 && c <= 0xDFFF), isEmpty);
+  });
+
   testWidgets('a failed run says why', (t) async {
     final f = Feed()
       ..add([const RunStarted('r', 'a')])
@@ -242,7 +519,7 @@ void main() {
       ..text('p', 'First I read.\n\nThen ')
       ..open('t1', ItemKind.tool, 'read', {'path': 'a.dart'})
       ..open('t2', ItemKind.tool, 'search', {'pattern': 'foo'});
-    await mount(t, TranscriptView(f.agent), dpr: 1);
+    await mount(t, TranscriptView(f.agent), size: const Size(700, 700), dpr: 1);
     f
       ..text('p', 'this continues.\n\nAnd closes')
       ..end('t2', '', {'summary': '3 hits'})

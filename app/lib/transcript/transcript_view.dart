@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -15,15 +16,40 @@ import 'inline.dart';
 import 'markdown.dart';
 import 'safe_text.dart';
 
-/// A row: one closed block of an item, or what is open of it.
+/// A row: one closed block, or the end of a passage: its last blocks and the work that followed it.
 class TranscriptRow {
-  TranscriptRow(this.item, this.index, this.ordinal, {this.open = false});
-  final ItemModel item;
+  TranscriptRow.block(ItemModel this.item, this.index)
+    : work = const [],
+      from = 0,
+      to = 0,
+      isEnd = false;
+  TranscriptRow.end(this.item, this.index, this.work, this.from, this.to) : isEnd = true;
+
+  /// The passage; null for work that nothing was said before.
+  final ItemModel? item;
+
+  /// Which block; for an end, the first block it shows.
   final int index;
-  final bool open;
+
+  /// The work, from [from] to [to].
+  final List<ItemModel> work;
+  final int from;
+  int to;
+  final bool isEnd;
 
   /// Its place in the transcript. Rows are only inserted near the end, so few ever change it.
-  int ordinal;
+  int ordinal = 0;
+}
+
+/// A passage and the work up to the next one.
+class _Group {
+  _Group(this.item, this.first);
+  final ItemModel? item;
+  final List<ItemModel> work = [];
+  int first;
+  List<TranscriptRow> rows = [];
+  (int, int, bool, int) seen = (-1, -1, false, -1);
+  bool get open => (item?.open ?? false) || work.any((w) => w.open);
 }
 
 /// The rows of one agent's transcript. Growing costs what grew.
@@ -34,99 +60,131 @@ class TranscriptRows {
   final AgentModel agent;
   final List<TranscriptRow> rows = [];
   int _items = 0;
+  final List<_Group> _live = [];
 
-  /// The items that can still change, in order, with what is known of them.
-  final List<_Live> _live = [];
+  /// How many blocks stand beside the work they led to, and how much work stands in one row.
+  static const beside = 6, together = 30;
 
-  /// Adds what is new. True if any row was added, removed or replaced.
+  /// The items whose rows may still change.
+  Set<ItemModel> get live => {
+    for (final g in _live) ...[
+      if (g.item case final i? when i.open) i,
+      ...g.work.where((w) => w.open),
+    ],
+  };
+
+  /// Adds what is new. True if anything must be built again.
   bool sync() {
-    var changed = false;
-    for (final l in _live) {
-      changed = _grow(l) || changed;
-    }
-    _live.removeWhere((l) => !l.item.open && l.done);
     while (_items < agent.items.length) {
-      final l = _Live(agent.items[_items++], rows.length);
-      _live.add(l);
-      _grow(l);
-      changed = true;
-      if (!l.item.open) {
-        l.done = true;
+      final i = agent.items[_items++];
+      if (i.rich || _live.isEmpty) {
+        // Settle what stands before, so that the new group knows where it begins.
+        for (final g in _live) {
+          _grow(g);
+        }
+        _live.add(_Group(i.rich ? i : null, rows.length));
       }
+      if (!i.rich) _live.last.work.add(i);
     }
-    _live.removeWhere((l) => !l.item.open && l.done);
-    return changed;
+    var changed = false;
+    for (final g in _live) {
+      changed = _grow(g) || changed;
+    }
+    // The last group can still be given work.
+    if (_live.length > 1) {
+      final last = _live.last;
+      _live.removeWhere((g) => !identical(g, last) && !g.open);
+    }
+    final dirty = _dirty();
+    return changed || dirty;
   }
 
-  bool _grow(_Live l) {
-    final i = l.item;
-    final wants = i.rich ? i.doc.closed.length : 0;
-    final open = !i.rich || i.open;
-    final replaced = i.rich && i.doc.revision != l.revision;
-    if (!replaced && wants == l.closed && open == l.opened) {
-      if (!i.open) l.done = true;
-      return false;
+  bool _was = false;
+  bool _dirty() {
+    final d = _was;
+    _was = false;
+    return d;
+  }
+
+  bool _grow(_Group g) {
+    final i = g.item;
+    final closed = i?.doc.closed.length ?? 0, open = i?.open ?? false;
+    final sig = (closed, i?.doc.revision ?? 0, open, g.work.length);
+    if (sig == g.seen) return false;
+    final replaced = g.seen.$2 != sig.$2;
+    g.seen = sig;
+    final keep = g.work.isEmpty ? closed : (closed > beside ? closed - beside : 0);
+    final old = g.rows;
+    final next = <TranscriptRow>[];
+    for (var k = 0; k < keep; k++) {
+      final same = !replaced && k < old.length && !old[k].isEnd && old[k].index == k;
+      next.add(same ? old[k] : TranscriptRow.block(i!, k));
     }
-    // Items are contiguous: this one's rows start where its first row is.
-    final at = l.first;
-    final had = l.closed + (l.opened ? 1 : 0);
-    final keep = replaced ? 0 : l.closed;
-    final fresh = [
-      for (var k = keep; k < wants; k++) TranscriptRow(i, k, 0),
-      if (open) TranscriptRow(i, wants, 0, open: true),
-    ];
-    rows.replaceRange(at + keep, at + had, fresh);
-    for (var k = at + keep; k < rows.length; k++) {
+    if (open || g.work.isNotEmpty) {
+      for (var f = 0; f == 0 || f < g.work.length; f += together) {
+        final to = f + together < g.work.length ? f + together : g.work.length;
+        final at = f == 0 ? keep : closed;
+        final o = old
+            .where((r) => r.isEnd && r.from == f && r.index == at && identical(r.work, g.work))
+            .firstOrNull;
+        if (o != null && !replaced) {
+          next.add(o..to = to);
+        } else {
+          next.add(TranscriptRow.end(i, at, g.work, f, to));
+        }
+      }
+    }
+    var same = 0;
+    while (same < old.length && same < next.length && identical(old[same], next[same])) {
+      same++;
+    }
+    rows.replaceRange(g.first + same, g.first + old.length, next.sublist(same));
+    for (var k = g.first + same; k < rows.length; k++) {
       rows[k].ordinal = k;
     }
-    final shift = fresh.length - (had - keep);
+    final shift = next.length - old.length;
     if (shift != 0) {
-      // Items stand in order, so everything after this one moves, also what has no rows yet.
-      for (var k = _live.indexOf(l) + 1; k < _live.length; k++) {
+      for (var k = _live.indexOf(g) + 1; k < _live.length; k++) {
         _live[k].first += shift;
       }
     }
-    l
-      ..closed = wants
-      ..opened = open
-      ..revision = i.doc.revision
-      ..done = !i.open;
+    g.rows = next;
+    _was = true;
     return true;
   }
-}
-
-class _Live {
-  _Live(this.item, this.first);
-  final ItemModel item;
-  int first;
-  int closed = 0, revision = 0;
-  bool opened = false, done = false;
 }
 
 /// An agent's transcript. Only what is visible exists as widgets; closed blocks never rebuild; the
 /// block being written rebuilds alone, at most once per frame. What is being read stays where it is;
 /// at the end, the view follows.
 class TranscriptView extends StatefulWidget {
-  const TranscriptView(this.agent, {super.key, this.onLink, this.controller});
+  const TranscriptView(this.agent, {super.key, this.onLink});
   final AgentModel agent;
   final void Function(String url)? onLink;
-  final ScrollController? controller;
   @override
   State<TranscriptView> createState() => TranscriptViewState();
 }
 
 class TranscriptViewState extends State<TranscriptView> {
-  static const _center = ValueKey('now'), _ahead = 80;
-  ScrollController? _own;
-  ScrollController get scroll => widget.controller ?? (_own ??= ScrollController());
+  /// Changes when the origin is moved outright, so that nothing laid out from the old one is kept.
+  int _epoch = 0;
+  Key get _center => ValueKey(('now', _epoch));
+  late final ScrollController scroll = _EndController(() => _atEnd);
   late TranscriptRows _rows;
 
   /// Rows before this one lie above the scroll view's origin: what happens after them cannot move
   /// them, and what is above is built only when someone goes there.
   int _pivot = 0;
+
+  /// How many rows surely fill the viewport.
+  int _ahead = 80;
+  double _width = 0;
   final _listening = <ItemModel>{};
   final _focus = FocusNode(debugLabel: 'transcript');
   bool _atEnd = true;
+
+  /// What has been opened by hand, kept here so that a row can be rebuilt without losing it.
+  final _opened = <ItemModel>{};
 
   @override
   void initState() {
@@ -139,9 +197,14 @@ class TranscriptViewState extends State<TranscriptView> {
     _rows = TranscriptRows(widget.agent);
     widget.agent.addListener(_changed);
     _listen();
-    _pivot = _rows.rows.length > _ahead ? _rows.rows.length - _ahead : 0;
     _atEnd = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _toEnd());
+    _opened.clear();
+    _pivot = _fromEnd();
+  }
+
+  int _fromEnd() {
+    final n = _rows.rows.length;
+    return n > _ahead ? n - _ahead : 0;
   }
 
   void _close(AgentModel a) {
@@ -155,13 +218,8 @@ class TranscriptViewState extends State<TranscriptView> {
   @override
   void didUpdateWidget(TranscriptView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final old = oldWidget;
-    if (old.controller != widget.controller) {
-      (old.controller ?? _own)?.removeListener(_scrolled);
-      scroll.addListener(_scrolled);
-    }
-    if (!identical(old.agent, widget.agent)) {
-      _close(old.agent);
+    if (!identical(oldWidget.agent, widget.agent)) {
+      _close(oldWidget.agent);
       _open();
     }
   }
@@ -169,18 +227,16 @@ class TranscriptViewState extends State<TranscriptView> {
   @override
   void dispose() {
     _close(widget.agent);
-    scroll.removeListener(_scrolled);
-    _own?.dispose();
+    scroll
+      ..removeListener(_scrolled)
+      ..dispose();
     _focus.dispose();
     super.dispose();
   }
 
-  /// Follows the items that can still change.
+  /// Follows every item that can still change, wherever it stands.
   void _listen() {
-    final open = {
-      for (final i in widget.agent.items.reversed.take(64))
-        if (i.open) i,
-    };
+    final open = _rows.live;
     for (final i in _listening.difference(open)) {
       i.removeListener(_changed);
     }
@@ -193,8 +249,52 @@ class TranscriptViewState extends State<TranscriptView> {
   }
 
   void _changed() {
-    if (_rows.sync()) setState(() {});
+    final held = _atEnd ? null : _firstVisible();
+    if (_rows.sync()) {
+      _hold(held);
+      setState(() {});
+    }
     _listen();
+  }
+
+  /// The first row in view and where its top is, from the last layout.
+  (TranscriptRow, double)? _firstVisible() {
+    final view = context.findRenderObject();
+    if (view is! RenderBox || !view.hasSize) return null;
+    (TranscriptRow, double)? best;
+    void visit(RenderObject o) {
+      if (o is RenderMetaData && o.metaData is TranscriptRow) {
+        if (!o.hasSize || !o.attached) return;
+        final y = o.localToGlobal(Offset.zero, ancestor: view).dy;
+        if (y + o.size.height > 0 && y < view.size.height && (best == null || y < best!.$2)) {
+          best = (o.metaData as TranscriptRow, y);
+        }
+        return;
+      }
+      o.visitChildrenForSemantics(visit);
+    }
+
+    view.visitChildrenForSemantics(visit);
+    return best;
+  }
+
+  /// Puts [held] back where it was: it becomes the origin, so nothing above can push it.
+  void _hold((TranscriptRow, double)? held) {
+    if (held == null || !scroll.hasClients) return;
+    final (row, y) = held;
+    final rows = _rows.rows;
+    var at = row.ordinal;
+    if (at >= rows.length || !identical(rows[at], row)) {
+      // It was replaced; its successor stands at the same place of the same item.
+      at = rows.indexWhere(
+        (r) =>
+            identical(r.item, row.item) &&
+            (r.index == row.index || (r.isEnd && r.index <= row.index) || r.index > row.index),
+      );
+      if (at < 0) return;
+    }
+    _pivot = at;
+    scroll.position.correctPixels(-y);
   }
 
   void _scrolled() {
@@ -203,49 +303,61 @@ class TranscriptViewState extends State<TranscriptView> {
     if (end != _atEnd) setState(() => _atEnd = end);
   }
 
-  void _toEnd() {
-    if (!mounted || !scroll.hasClients) return;
-    scroll.jumpTo(scroll.position.maxScrollExtent);
-    // The far end's extent is an estimate until it has been laid out.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && scroll.hasClients && _atEnd) scroll.jumpTo(scroll.position.maxScrollExtent);
-    });
-  }
-
   /// Both ends are reached by moving the origin, not by laying out everything between.
-  void toStart() {
-    setState(() {
-      _pivot = 0;
-      _atEnd = false;
-    });
-    scroll.jumpTo(0);
-  }
+  void toStart() => setState(() {
+    _epoch++;
+    _pivot = 0;
+    _atEnd = false;
+    scroll.position.correctPixels(0);
+  });
 
-  void toEnd() {
-    setState(() {
-      final n = _rows.rows.length;
-      _pivot = n > _ahead ? n - _ahead : 0;
-      _atEnd = true;
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _toEnd());
-  }
+  void toEnd() => setState(() {
+    _epoch++;
+    _pivot = _fromEnd();
+    _atEnd = true;
+  });
 
   void _by(double viewports) {
     final p = scroll.position;
-    final to = (p.pixels + viewports * p.viewportDimension).clamp(
-      p.minScrollExtent,
-      p.maxScrollExtent,
+    scroll.jumpTo(
+      (p.pixels + viewports * p.viewportDimension).clamp(p.minScrollExtent, p.maxScrollExtent),
     );
-    scroll.jumpTo(to);
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final ahead = box.maxHeight.isFinite ? (box.maxHeight / 18).ceil() + 24 : 80;
+      if (ahead > _ahead) {
+        _ahead = ahead;
+        if (_atEnd) _pivot = _fromEnd();
+      }
+      if (box.maxWidth != _width) {
+        if (_width > 0 && !_atEnd) _hold(_firstVisible());
+        _width = box.maxWidth;
+      }
+      return _view(context);
+    },
+  );
+
+  Widget _view(BuildContext context) {
     final rows = _rows.rows, n = rows.length;
     if (_pivot > n) _pivot = n;
     Widget row(int k) => KeyedSubtree(
       key: ObjectKey(rows[k]),
-      child: _RowView(rows, k, onLink: widget.onLink),
+      child: MetaData(
+        metaData: rows[k],
+        child: _RowView(
+          rows,
+          k,
+          wide: _width >= 860,
+          onLink: widget.onLink,
+          opened: _opened.contains,
+          onToggle: (i) => setState(() {
+            if (!_opened.remove(i)) _opened.add(i);
+          }),
+        ),
+      ),
     );
     int? find(Key k, int from, int step) {
       final r = (k as ObjectKey).value! as TranscriptRow;
@@ -279,16 +391,17 @@ class TranscriptViewState extends State<TranscriptView> {
             Positioned.fill(
               child: SelectableRegion(
                 focusNode: _focus,
-                selectionControls: emptyTextSelectionControls,
+                selectionControls: axSelectionControls,
                 contextMenuBuilder: (context, s) =>
                     AxContextMenu(anchors: s.contextMenuAnchors, items: s.contextMenuButtonItems),
                 child: CustomScrollView(
                   controller: scroll,
                   center: _center,
-                  physics: _Follow(() => _atEnd),
+                  physics: const ClampingScrollPhysics(),
                   scrollCacheExtent: const ScrollCacheExtent.pixels(400),
                   slivers: [
                     SliverPadding(
+                      key: ValueKey(('before', _epoch)),
                       padding: side,
                       sliver: SliverList.builder(
                         itemCount: _pivot,
@@ -331,26 +444,32 @@ class TranscriptViewState extends State<TranscriptView> {
   }
 }
 
-/// Keeps to the end when at the end; otherwise leaves the position alone.
-class _Follow extends ClampingScrollPhysics {
-  const _Follow(this.atEnd, {super.parent});
+/// Keeps to the end while [atEnd] says so, within the layout that moved it: no frame shows the place
+/// before. A person's own scrolling is never overruled.
+class _EndController extends ScrollController {
+  _EndController(this.atEnd);
   final bool Function() atEnd;
   @override
-  _Follow applyTo(ScrollPhysics? ancestor) => _Follow(atEnd, parent: buildParent(ancestor));
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) => _EndPosition(atEnd, physics: physics, context: context, oldPosition: oldPosition);
+}
+
+class _EndPosition extends ScrollPositionWithSingleContext {
+  _EndPosition(this.atEnd, {required super.physics, required super.context, super.oldPosition});
+  final bool Function() atEnd;
   @override
-  double adjustPositionForNewDimensions({
-    required ScrollMetrics oldPosition,
-    required ScrollMetrics newPosition,
-    required bool isScrolling,
-    required double velocity,
-  }) => !isScrolling && atEnd()
-      ? newPosition.maxScrollExtent
-      : super.adjustPositionForNewDimensions(
-          oldPosition: oldPosition,
-          newPosition: newPosition,
-          isScrolling: isScrolling,
-          velocity: velocity,
-        );
+  bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    final follow = atEnd() && !isScrollingNotifier.value;
+    if (follow && (!hasPixels || pixels != maxScrollExtent)) {
+      correctPixels(maxScrollExtent);
+      super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+      return false;
+    }
+    return super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+  }
 }
 
 /// How the run ended, if not well.
@@ -392,62 +511,155 @@ class _Ending extends StatelessWidget {
 const _measure = 640.0, _wide = 780.0;
 
 class _RowView extends StatelessWidget {
-  const _RowView(this.rows, this.at, {this.onLink});
+  const _RowView(
+    this.rows,
+    this.at, {
+    required this.wide,
+    required this.opened,
+    required this.onToggle,
+    this.onLink,
+  });
   final List<TranscriptRow> rows;
   final int at;
+  final bool wide;
+  final bool Function(ItemModel) opened;
+  final void Function(ItemModel) onToggle;
   final void Function(String url)? onLink;
+
+  /// Prose and work side by side, at the proportions of the accepted design.
+  static Widget columns(Widget left, Widget right) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Expanded(flex: 54, child: _Unit(left)),
+      const SizedBox(width: 44),
+      Expanded(flex: 46, child: _Unit(right)),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final r = rows[at], i = r.item;
     final before = at > 0 ? rows[at - 1] : null;
-    final first = at == 0;
-    final Widget child;
-    if (!i.rich) {
-      final follows = before != null && !before.item.rich;
-      child = Padding(
-        padding: EdgeInsets.only(
-          top: first
-              ? 16
-              : follows
-              ? 2
-              : 10,
-        ),
-        child: ListenableBuilder(listenable: i, builder: (_, _) => ToolRow(i)),
-      );
-    } else if (!r.open) {
+    final afterWork = before != null && before.work.isNotEmpty;
+    if (i != null && !r.isEnd) {
       final blocks = i.doc.closed;
-      child = BlockView(
+      final w = BlockView(
         blocks[r.index],
         voice: i.kind,
         opens: r.index == 0,
-        afterTool: r.index == 0 && before != null && !before.item.rich,
+        afterTool: r.index == 0 && afterWork && !wide,
         goesOn: r.index + 1 < blocks.length && blocks[r.index + 1].continues,
+        whole: () => wholeCode(blocks, r.index),
         onLink: onLink,
       );
-    } else {
-      child = ListenableBuilder(
-        listenable: i,
-        builder: (_, _) {
-          final tail = i.doc.tail;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final (k, b) in tail.indexed)
-                BlockView(
-                  b,
-                  voice: i.kind,
-                  opens: r.index + k == 0,
-                  afterTool: r.index + k == 0 && before != null && !before.item.rich,
-                  goesOn: k + 1 < tail.length && tail[k + 1].continues,
-                  onLink: onLink,
-                ),
-            ],
-          );
-        },
-      );
+      return RepaintBoundary(child: wide ? columns(w, const SizedBox.shrink()) : w);
     }
-    return RepaintBoundary(child: child);
+    Widget prose() {
+      if (i == null) return const SizedBox(width: double.infinity);
+      Widget build(BuildContext _, [Widget? _]) {
+        final d = i.doc;
+        final tail = d.tail;
+        final all = [for (var k = r.index; k < d.closed.length; k++) d.closed[k], ...tail];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (k, b) in all.indexed)
+              BlockView(
+                b,
+                voice: i.kind,
+                opens: r.index + k == 0,
+                afterTool: r.index + k == 0 && afterWork && !wide,
+                goesOn: k + 1 < all.length && all[k + 1].continues,
+                whole: () => wholeCode([...d.closed, ...tail], r.index + k),
+                onLink: onLink,
+              ),
+          ],
+        );
+      }
+
+      return i.open ? ListenableBuilder(listenable: i, builder: build) : build(context);
+    }
+
+    if (r.work.isEmpty) {
+      final w = prose();
+      return RepaintBoundary(child: wide ? columns(w, const SizedBox.shrink()) : w);
+    }
+    final first = r.from == 0;
+    // The first line of the work stands on the first line of the words.
+    final top = wide
+        ? (!first
+              ? 2.0
+              : i == null || r.index == 0
+              ? 17.0
+              : 10.0)
+        : at == 0
+        ? 16.0
+        : first
+        ? 10.0
+        : 2.0;
+    final work = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var k = r.from; k < r.to; k++)
+          Padding(
+            padding: EdgeInsets.only(top: k == r.from ? top : 2),
+            child: RepaintBoundary(
+              child: ListenableBuilder(
+                key: ObjectKey(r.work[k]),
+                listenable: r.work[k],
+                builder: (_, _) => ToolRow(
+                  r.work[k],
+                  opened: opened(r.work[k]),
+                  onToggle: () => onToggle(r.work[k]),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+    return RepaintBoundary(
+      child: wide
+          ? columns(first ? prose() : const SizedBox.shrink(), work)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [if (first) prose(), work],
+            ),
+    );
   }
+}
+
+/// Copied as a whole before what stands beside it.
+class _Unit extends StatefulWidget {
+  const _Unit(this.child);
+  final Widget child;
+  @override
+  State<_Unit> createState() => _UnitState();
+}
+
+class _UnitState extends State<_Unit> {
+  final _delegate = StaticSelectionContainerDelegate();
+  @override
+  void dispose() {
+    _delegate.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      SelectionContainer(delegate: _delegate, child: widget.child);
+}
+
+/// All of a code block that was cut into parts, from any of them.
+String wholeCode(List<Block> blocks, int at) {
+  var from = at;
+  while (from > 0 && blocks[from].continues) {
+    from--;
+  }
+  var to = at + 1;
+  while (to < blocks.length && blocks[to].continues) {
+    to++;
+  }
+  return blocks.sublist(from, to).map((b) => b.text).join('\n');
 }
 
 class BlockView extends StatefulWidget {
@@ -458,8 +670,10 @@ class BlockView extends StatefulWidget {
     this.opens = false,
     this.afterTool = false,
     this.goesOn = false,
+    this.whole,
     this.onLink,
   });
+  final String Function()? whole;
   final Block block;
   final ItemKind voice;
 
@@ -523,7 +737,7 @@ class _BlockViewState extends State<BlockView> {
       BlockKind.item => Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 22, child: _Marker(b.marker, base)),
+          _Marker(b.marker, base),
           Expanded(child: left(text(base))),
         ],
       ),
@@ -539,7 +753,7 @@ class _BlockViewState extends State<BlockView> {
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
       ),
-      BlockKind.code => CodeBlock(b, goesOn: widget.goesOn),
+      BlockKind.code => CodeBlock(b, goesOn: widget.goesOn, whole: widget.whole),
       BlockKind.table => TableBlock(b.text),
     };
     // An item's marker stands in the column of its own depth; what belongs to it stands after.
@@ -550,7 +764,6 @@ class _BlockViewState extends State<BlockView> {
         child: child,
       );
     }
-    if (widget.voice == ItemKind.prompt) child = _Voice(child, opens: widget.opens);
     final top = b.continues
         ? 0.0
         : widget.opens
@@ -560,14 +773,31 @@ class _BlockViewState extends State<BlockView> {
         : b.kind == BlockKind.item
         ? 6.0
         : 11.0;
+    final asked = widget.voice == ItemKind.prompt;
+    if (asked) child = _Voice(child, gap: widget.opens ? 0 : top);
     child = Padding(
-      padding: EdgeInsets.only(top: widget.voice == ItemKind.prompt && !widget.opens ? 0 : top),
+      padding: EdgeInsets.only(top: asked && !widget.opens ? 0 : top),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _wide),
         child: child,
       ),
     );
-    child = Align(alignment: Alignment.topLeft, heightFactor: 1, child: child);
+    child = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Align(alignment: Alignment.topLeft, heightFactor: 1, child: child),
+        // At the right, so that it is read after the words and not among them.
+        SizedBox(
+          width: double.infinity,
+          child: Align(
+            alignment: Alignment.topRight,
+            heightFactor: 1,
+            child: CopyGap(widget.goesOn || b.kind == BlockKind.item ? '\n' : '\n\n'),
+          ),
+        ),
+      ],
+    );
     if (!widget.opens) return child;
     return Semantics(
       container: true,
@@ -585,9 +815,9 @@ class _BlockViewState extends State<BlockView> {
 /// What was asked: a rule in the margin, so it is found when scrolling back. The words themselves
 /// are as strong as any others.
 class _Voice extends StatelessWidget {
-  const _Voice(this.child, {required this.opens});
+  const _Voice(this.child, {required this.gap});
   final Widget child;
-  final bool opens;
+  final double gap;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
@@ -596,7 +826,7 @@ class _Voice extends StatelessWidget {
         border: Border(left: BorderSide(color: c.promptRule, width: 2)),
       ),
       child: Padding(
-        padding: EdgeInsets.only(left: 12, top: opens ? 0 : 11),
+        padding: EdgeInsets.only(left: 12, top: gap),
         child: child,
       ),
     );
@@ -614,6 +844,7 @@ class _Marker extends StatelessWidget {
       return Semantics(
         label: marker == 'done' ? 'done' : 'to do',
         child: SizedBox(
+          width: 22,
           height: MediaQuery.textScalerOf(context).scale(style.fontSize!) * style.height!,
           child: Align(
             alignment: Alignment.centerLeft,
@@ -630,30 +861,41 @@ class _Marker extends StatelessWidget {
         ),
       );
     }
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
+    final bullet = marker == '•';
+    // Wide enough for any number, with the same gap before the words.
+    return ConstrainedBox(
+      constraints: BoxConstraints(minWidth: bullet ? 22 : 30),
       child: Text(
-        marker,
-        textAlign: marker == '•' ? TextAlign.left : TextAlign.right,
+        '$marker ',
         softWrap: false,
-        overflow: TextOverflow.visible,
-        style: style.ink(c.ink4),
+        textAlign: bullet ? TextAlign.left : TextAlign.right,
+        style: style.copyWith(color: c.ink4, wordSpacing: bullet ? 0 : 4),
       ),
     );
   }
 }
 
 class CodeBlock extends StatefulWidget {
-  const CodeBlock(this.block, {super.key, this.goesOn = false});
+  const CodeBlock(this.block, {super.key, this.goesOn = false, this.whole});
   final Block block;
   final bool goesOn;
+
+  /// What Copy copies, if it is more than is shown here.
+  final String Function()? whole;
   static const maxColumns = 2000;
   @override
   State<CodeBlock> createState() => _CodeBlockState();
 }
 
 class _CodeBlockState extends State<CodeBlock> {
-  bool _over = false, _copied = false;
+  bool _over = false, _within = false, _copied = false;
+
+  Future<void> _copy() async {
+    // What was written, all of it, not what is shown.
+    await Clipboard.setData(ClipboardData(text: widget.whole?.call() ?? widget.block.text));
+    if (mounted) setState(() => _copied = true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors, b = widget.block;
@@ -689,7 +931,7 @@ class _CodeBlockState extends State<CodeBlock> {
                           if (i > 0) const TextSpan(text: '\n'),
                           highlight(
                             l.length > CodeBlock.maxColumns
-                                ? '${l.substring(0, CodeBlock.maxColumns)} … '
+                                ? '${cutTo(l, CodeBlock.maxColumns)} … '
                                       '${l.length - CodeBlock.maxColumns} more'
                                 : l,
                             style,
@@ -709,16 +951,15 @@ class _CodeBlockState extends State<CodeBlock> {
             Positioned(
               right: 5,
               top: 5,
-              child: Opacity(
-                opacity: _over ? 1 : 0,
-                child: AxButton(
-                  label: _copied ? 'Copied' : 'Copy',
-                  size: 22,
-                  onPressed: () async {
-                    // What was written, not what is shown.
-                    await Clipboard.setData(ClipboardData(text: b.text));
-                    if (mounted) setState(() => _copied = true);
-                  },
+              child: SelectionContainer.disabled(
+                child: Focus(
+                  canRequestFocus: false,
+                  skipTraversal: true,
+                  onFocusChange: (v) => setState(() => _within = v),
+                  child: Opacity(
+                    opacity: _over || _within ? 1 : 0,
+                    child: AxButton(label: _copied ? 'Copied' : 'Copy', size: 22, onPressed: _copy),
+                  ),
                 ),
               ),
             ),
@@ -750,9 +991,7 @@ class TableBlock extends StatelessWidget {
       }
     }
     if (b.toString().trim().isNotEmpty || !x.endsWith('|')) out.add(b.toString().trim());
-    return [
-      for (final e in out.take(maxColumns)) e.length > maxCell ? '${e.substring(0, maxCell)}…' : e,
-    ];
+    return [for (final e in out.take(maxColumns)) e.length > maxCell ? '${cutTo(e, maxCell)}…' : e];
   }
 
   @override
@@ -789,15 +1028,23 @@ class TableBlock extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(0, 5, 22, 5),
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 340),
-                      child: Text.rich(
-                        inlineSpan(
-                          k < r.length ? r[k] : '',
-                          head && i == 0 ? t.type.labelStrong : t.type.ui.ink(c.ink2),
-                          t.type.codeSmall,
-                          c,
-                        ),
-                        style: head && i == 0 ? t.type.labelStrong : t.type.ui,
-                        textAlign: k < align.length ? align[k] : TextAlign.left,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text.rich(
+                              inlineSpan(
+                                k < r.length ? r[k] : '',
+                                head && i == 0 ? t.type.labelStrong : t.type.ui.ink(c.ink2),
+                                t.type.codeSmall,
+                                c,
+                              ),
+                              style: head && i == 0 ? t.type.labelStrong : t.type.ui,
+                              textAlign: k < align.length ? align[k] : TextAlign.left,
+                            ),
+                          ),
+                          CopyGap(k + 1 < n ? '\t' : '\n'),
+                        ],
                       ),
                     ),
                   ),
@@ -810,9 +1057,12 @@ class TableBlock extends StatelessWidget {
 }
 
 /// A tool call, as one line; its output opens under it.
-class ToolRow extends StatefulWidget {
-  const ToolRow(this.item, {super.key});
+class ToolRow extends StatelessWidget {
+  const ToolRow(this.item, {super.key, this.opened = false, this.onToggle});
   final ItemModel item;
+  final bool opened;
+  final VoidCallback? onToggle;
+  static const maxOutput = 20000;
 
   static AxIcon iconOf(String name) => switch (name) {
     'read' => AxIcon.file,
@@ -825,16 +1075,8 @@ class ToolRow extends StatefulWidget {
   };
 
   @override
-  State<ToolRow> createState() => _ToolRowState();
-}
-
-class _ToolRowState extends State<ToolRow> {
-  bool _shown = false;
-  static const maxOutput = 20000;
-
-  @override
   Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors, item = widget.item;
+    final t = Ax.of(context), c = t.colors;
     final args = item.args;
     final notice = item.kind == ItemKind.notice;
     if (notice) {
@@ -863,7 +1105,7 @@ class _ToolRowState extends State<ToolRow> {
               _ => summary,
             },
       failed: item.outcome == Outcome.failed,
-      more: output.isEmpty ? null : _shown,
+      more: output.isEmpty ? null : opened,
     );
     return Align(
       alignment: Alignment.topLeft,
@@ -878,25 +1120,35 @@ class _ToolRowState extends State<ToolRow> {
             else
               Pressable(
                 label: '$name $detail',
-                hint: _shown ? 'Hide output' : 'Show output',
-                expanded: _shown,
+                hint: opened ? 'Hide output' : 'Show output',
+                expanded: opened,
                 radius: 0,
-                onPressed: () => setState(() => _shown = !_shown),
+                onPressed: onToggle ?? () {},
                 builder: (_, s) =>
                     ColoredBox(color: s.hovered ? c.hover : c.bay.bottom, child: line),
               ),
-            if (_shown)
+            if (opened && output.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(22, 4, 0, 6),
-                child: CodeBlock(
-                  Block(
-                    BlockKind.code,
-                    output.length > maxOutput
-                        ? '${output.substring(output.length - maxOutput)}\n'
-                        : output,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (output.length > maxOutput)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          'The last part of ${output.length} characters. Copy takes all of them.',
+                          style: t.type.small.ink(c.ink3),
+                        ),
+                      ),
+                    CodeBlock(
+                      Block(BlockKind.code, cutFrom(output, maxOutput)),
+                      whole: () => output,
+                    ),
+                  ],
                 ),
               ),
+            const CopyGap('\n'),
           ],
         ),
       ),

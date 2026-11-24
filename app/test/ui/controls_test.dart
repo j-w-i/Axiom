@@ -334,7 +334,7 @@ void main() {
       await t.tap(find.text('Allow once'));
       await t.tap(find.text('Allow here'));
       expect(got, isEmpty);
-      expect(find.text('Scroll to the end to allow this.'), findsOneWidget);
+      expect(find.textContaining('Scroll to the end'), findsOneWidget);
       await t.tap(find.text('Deny'));
       expect(got, ['deny'], reason: 'no is always possible');
       await t.drag(
@@ -344,6 +344,55 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.text('Allow once'));
       expect(got, ['deny', 'once']);
+    });
+
+    testWidgets('the same command with another scope is another request', (t) async {
+      await show(t, req('make', scope: 'One file.'));
+      final got = await show(t, req('make', scope: 'Full network. ${'Every host. ' * 400}'));
+      expect(t.takeException(), isNull);
+      await t.tap(find.text('Allow once'));
+      expect(got, isEmpty);
+    });
+
+    testWidgets('is gone through and allowed by keyboard alone', (t) async {
+      final got = await show(t, req([for (var i = 0; i < 80; i++) 'line $i'].join('\n')));
+      await t.sendKeyEvent(LogicalKeyboardKey.tab);
+      await t.pump();
+      for (var i = 0; i < 40; i++) {
+        await t.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        await t.pump();
+      }
+      await t.pump();
+      for (var i = 0; i < 4 && got.isEmpty; i++) {
+        await t.sendKeyEvent(LogicalKeyboardKey.tab);
+        await t.pump();
+        if (i == 2) await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      }
+      expect(got, ['once']);
+    });
+
+    testWidgets('every word of it is whole and spelled out', (t) async {
+      final rlo = String.fromCharCode(0x202E);
+      await put(
+        t,
+        SizedBox(
+          width: 800,
+          child: RequestBar(
+            RequestView(
+              agent: 'T',
+              what: 'asks to ${'do things and ' * 20}DELETE EVERYTHING',
+              subject: 'x',
+              scope: 'y',
+              always: 'Allow ${rlo}here',
+            ),
+            onOnce: () {},
+            onAlways: () {},
+            onDeny: () {},
+          ),
+        ),
+      );
+      expect(find.textContaining('DELETE EVERYTHING'), findsOneWidget);
+      expect(find.text(r'Allow \u{202E}here'), findsOneWidget);
     });
 
     testWidgets('a new request is not already seen', (t) async {
@@ -527,6 +576,66 @@ void main() {
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(done, ['pause lead']);
     h.dispose();
+  });
+
+  testWidgets('a field offers the clipboard on a right click; a disabled one takes no focus', (
+    t,
+  ) async {
+    final c = TextEditingController(text: 'words');
+    await put(
+      t,
+      Column(
+        children: [
+          const SizedBox(width: 200, child: AxField(label: 'Off', enabled: false)),
+          SizedBox(
+            width: 200,
+            child: AxField(label: 'On', controller: c),
+          ),
+        ],
+      ),
+    );
+    await t.sendKeyEvent(LogicalKeyboardKey.tab);
+    await t.pump();
+    expect(
+      t.state<EditableTextState>(find.byType(EditableText).last).widget.focusNode.hasFocus,
+      isTrue,
+    );
+    await t.tap(find.text('words'));
+    await t.pump(const Duration(milliseconds: 400));
+    await t.tapAt(
+      t.getRect(find.text('words')).centerLeft + const Offset(12, 0),
+      buttons: kSecondaryButton,
+      kind: PointerDeviceKind.mouse,
+    );
+    await t.pumpAndSettle();
+    expect(find.text('Select all'), findsOneWidget);
+  });
+
+  testWidgets('an agent\'s keys cover none of its words', (t) async {
+    await put(
+      t,
+      SizedBox(
+        width: 248,
+        child: SessionPanel(
+          session: s.session,
+          selected: 'lead',
+          onSelect: (_) {},
+          onPause: (_) {},
+          onStop: (_) {},
+        ),
+      ),
+    );
+    final g = await t.createGesture(kind: PointerDeviceKind.mouse);
+    await g.addPointer(location: Offset.zero);
+    await g.moveTo(t.getCenter(find.textContaining('Surveyor', findRichText: true).first));
+    await t.pump();
+    final keys = t.getRect(find.byType(AxButton).first).left;
+    for (final w in ['Surveyor', 'Reading queue']) {
+      expect(
+        t.getRect(find.textContaining(w, findRichText: true).first).right,
+        lessThanOrEqualTo(keys),
+      );
+    }
   });
 
   testWidgets('every state has its own shape', (t) async {

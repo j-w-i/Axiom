@@ -48,6 +48,17 @@ class RequestView {
     required this.always,
   });
 
+  @override
+  bool operator ==(Object other) =>
+      other is RequestView &&
+      other.agent == agent &&
+      other.what == what &&
+      other.subject == subject &&
+      other.scope == scope &&
+      other.always == always;
+  @override
+  int get hashCode => Object.hash(agent, what, subject, scope, always);
+
   /// [subject] is the exact command, path or address. [scope] says what allowing it would permit.
   final String agent, what, subject, scope, always;
 }

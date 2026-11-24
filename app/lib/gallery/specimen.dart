@@ -2,6 +2,8 @@
 /// in the product: `lib/main.dart` does not import it (test/gallery_isolation_test.dart).
 library;
 
+import '../host/proto.dart' as p;
+import '../host/session_model.dart';
 import '../patterns/models.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
@@ -128,7 +130,7 @@ const services = [
       ),
       AccountView(
         id: 'c3',
-        name: 'Meridian',
+        name: 'Company key',
         lane: 'API key',
         identity: 'sk-…3f2a',
         windows: [
@@ -247,3 +249,69 @@ final otherSessions = [
   const SessionView(id: 's3', title: 'Release notes 4.2', age: '1d'),
   const SessionView(id: 's4', title: 'Flaky export test', age: '3d'),
 ];
+
+/// The specimen conversation, through the same model and view as a real one.
+SessionModel transcript() {
+  var n = 0;
+  const x = p.Execution(harness: 'codex', model: 'GPT-5.6');
+  final e = <p.Body>[
+    const p.SessionCreated('Double token rotation', null),
+    const p.AgentAdded('builder', 'Builder', x, null),
+  ];
+  void say(String id, p.ItemKind k, String text) => e
+    ..add(p.ItemStarted(id, 'r', 'builder', k, '', null))
+    ..add(p.ItemEnded(id, p.Outcome.completed, text, null));
+  void work(
+    String id,
+    String name,
+    Map<String, Object?> args,
+    String summary, {
+    bool failed = false,
+  }) => e
+    ..add(p.ItemStarted(id, 'r', 'builder', p.ItemKind.tool, name, args))
+    ..add(
+      p.ItemEnded(
+        id,
+        failed ? p.Outcome.failed : p.Outcome.completed,
+        failed ? '2 failed, 116 passed' : '',
+        {'summary': summary},
+      ),
+    );
+  say(
+    'a',
+    p.ItemKind.prompt,
+    'Two tabs can both see an expired token and rotate it twice. Follow `docs/refresh.md`: re-check '
+        'expiry inside the lock and make rotation single-flight per account.',
+  );
+  work('b', 'read', {'path': 'docs/refresh.md'}, '84 lines');
+  say(
+    'c',
+    p.ItemKind.prose,
+    'I will read the refresh path and its callers first, then run the new test to see it fail.',
+  );
+  work('d', 'read', {'path': 'src/auth/refresh.ts'}, '220 lines');
+  work('f', 'search', {'pattern': 'locks.acquire'}, '9 in 4 files');
+  work('g', 'test', {'command': 'pnpm test auth'}, '2 failed', failed: true);
+  say(
+    'h',
+    p.ItemKind.prose,
+    'The expiry check happens **before** the lock is held, so the second tab acts on a token the first '
+        'already replaced. I am moving the read inside the critical section and adding a single-flight '
+        'map keyed by account.\n\n```ts\nasync refresh(account: Account) {\n  return this.inflight.run'
+        '(account.id, async () => {\n    await using lock = await this.locks.acquire(account.id);\n    '
+        'const session = await this.store.read(account.id);\n    if (!expired(session.token)) return '
+        'session;\n  });\n}\n```\n\nBoth writers now go through one entry point:\n\n- the store keeps '
+        'its interface\n- nothing outside `auth` changes',
+  );
+  work('i', 'edit', {'path': 'src/auth/refresh.ts'}, '+7 −2');
+  work('j', 'edit', {'path': 'src/auth/inflight.ts'}, '+31 −0');
+  work('k', 'fetch', {'path': 'developer.mozilla.org/…/Symbol/asyncDispose'}, '12 KB');
+  e.add(const p.ItemStarted('l', 'r', 'builder', p.ItemKind.prose, '', null));
+  e.add(
+    const p.ItemDelta(
+      'l',
+      'Now the migration. It adds a `rotated_at` column, and Tester will run it agai',
+    ),
+  );
+  return SessionModel('s1')..apply([for (final b in e) p.Event(++n, n, b)]);
+}

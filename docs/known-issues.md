@@ -12,7 +12,7 @@
 | K8 | The macOS window (transparent title bar, traffic lights, dragging by the header) is built but has not been looked at: it needs a real window and the owner's yes | M1 exit |
 | K9 | The application bundle does not contain `axiom-host` yet; set `AXIOM_HOST` | M2 packaging |
 | K10 | Keycaps use ⌘, which Archivo lacks: the system font supplies it on macOS, unverified elsewhere | M1 exit |
-| K11 | The live transcript is one column; the workbench's prose-and-work columns exist only in the gallery | M1 exit, with the owner's view of it |
 | K12 | Markdown: quotes do not nest blocks; HTML is shown as text; a link is styled but nothing opens it yet (it will ask first) | M2 |
 | K13 | The transcript's ends are reached by moving its origin; there is no scroll bar, because a lazy list cannot know its length | M2: measured extents |
 | K14 | Selecting text across rows that are not built copies only what is built | M2 |
+| K15 | A code block over 120 lines scrolls sideways in parts of 120 lines | M2 |

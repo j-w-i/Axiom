@@ -117,6 +117,16 @@ void main() {
     t('a table without outer pipes', 'a | b\n--|--\n1 | 2', [r'table(a | b\n--|--\n1 | 2)']);
     t('a bar alone is text', '| not a table', ['paragraph(| not a table)']);
     t('quotes', '> a\n> b\nlazy\n\nc', [r'quote(a\nb\nlazy)', 'paragraph(c)']);
+    t('a list under a number by two spaces', '1. a\n  - b\n2. c', [
+      'item>1.(a)',
+      'item>>•(b)',
+      'item>2.(c)',
+    ]);
+    t('what follows a table with a bar in it', '|a|b|\n|-|-|\n|1|2|\n- see|x\n> q|r', [
+      r'table(|a|b|\n|-|-|\n|1|2|)',
+      'item>•(see|x)',
+      'quote(q|r)',
+    ]);
     t('rules', 'a\n\n***\n* * *\n_ _ _', ['paragraph(a)', 'rule()', 'rule()', 'rule()']);
   });
 
@@ -309,6 +319,14 @@ void main() {
     t('unclosed `tick and **star', 'unclosed `tick and **star');
     t('**bold\nacross**', '!bold across!');
     t('two  \nlines', 'two\nlines');
+    t('a_*b*_c', 'a_/b/_c');
+    t('[a](<u v>)', '<u v|a>');
+    t('[open and https://a.b', '[open and <https://a.b|https://a.b>');
+    t('[a [b](c) d](e)', '[a <c|b> d](e)');
+    t('a &#xD800; b', 'a &#xD800; b');
+    test('a break of two spaces survives to the end', () {
+      expect(html(parse('one  \ntwo').single.text), 'one\ntwo');
+    });
   });
 
   group('safe text', () {
@@ -322,27 +340,52 @@ void main() {
         0x1B,
         0x7,
         0x9B,
-        0xAD,
         0x202E,
         0x2066,
-        0x200B,
-        0xFEFF,
         0x2028,
         0x115F,
         0xE0041,
+        0xFFFC,
+        0x13430,
+        0x180B,
       ]) {
         final s = 'a${String.fromCharCode(c)}b';
         expect(visible(s), 'a\u{FFFD}b', reason: c.toRadixString(16));
         expect(literal(s), 'a\\u{${c.toRadixString(16).toUpperCase()}}b');
       }
     });
+    test('harmless marks go from prose and are spelled out where a person decides', () {
+      for (final c in [0xAD, 0x200B, 0x200E, 0x200F, 0xFEFF, 0x61C]) {
+        final s = 'a${String.fromCharCode(c)}b';
+        expect(visible(s), 'ab', reason: c.toRadixString(16));
+        expect(literal(s), 'a\\u{${c.toRadixString(16).toUpperCase()}}b');
+      }
+    });
+    test('where a person decides, nothing unusual passes', () {
+      for (final c in [0xFE0F, 0x1D173, 0x1BCA0, 0xFFFE, 0x1680, 0x2800, 0x3164, 0xFFFD, 0xE000]) {
+        expect(
+          literal('a${String.fromCharCode(c)}b'),
+          contains(r'\u{'),
+          reason: c.toRadixString(16),
+        );
+      }
+      expect(literal('rm -rf ./é 日本 🙂 "x" | sh'), 'rm -rf ./é 日本 🙂 "x" | sh');
+    });
     test('joiners stay where they belong and nowhere else', () {
       final family = String.fromCharCodes([0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467]);
       expect(visible(family), family);
       final persian = String.fromCharCodes([0x645, 0x6CC, 0x200C, 0x62E, 0x648]);
       expect(visible(persian), persian);
+      final malayalam = String.fromCharCodes([0xD28, 0xD4D, 0x200D, 0x20, 0x61]);
+      expect(visible(malayalam), malayalam);
       expect(visible('a${String.fromCharCode(0x200D)}b'), 'a\u{FFFD}b');
       expect(literal(family), contains(r'\u{200D}'));
+    });
+    test('halves of characters are not passed on', () {
+      final half = String.fromCharCode(0xD83D);
+      expect(visible('a$half b'), 'a\u{FFFD} b');
+      expect(cutTo('ab🙂', 3), 'ab');
+      expect(cutFrom('🙂ab', 3), 'ab');
     });
     test('look-alike spaces are spelled out where a person decides', () {
       expect(literal('rm${String.fromCharCode(0xA0)}-rf'), r'rm\u{A0}-rf');

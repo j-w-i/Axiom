@@ -43,7 +43,8 @@ class LinkClosed implements Exception {
 
 /// The connection to the host. Reading and decoding happen on another isolate, so a large page of
 /// history never holds up a frame. What has been read but not yet [consumed] is bounded: past
-/// [highWater] events the isolate stops reading, and the host's own bound takes over.
+/// [highWater] events the isolate stops reading, and the host's own bound takes over. Answers wait
+/// behind those events, so whoever listens to [messages] must keep consuming.
 class HostLink {
   HostLink._(this._fromWorker, this._toWorker, this._isolate);
 
@@ -160,6 +161,8 @@ class HostLink {
   }
 
   void _one(Message x) {
+    // The worker may have sent more before it learned of the end.
+    if (_closed.isCompleted) return;
     switch (x) {
       case Answered(:final id, :final result):
         _fences.removeWhere((_, f) => f == id);

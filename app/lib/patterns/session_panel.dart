@@ -54,7 +54,7 @@ class _SessionPanelState extends State<SessionPanel> {
               ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 36),
                 child: Padding(
-                  padding: const EdgeInsets.only(left: 11, right: 6),
+                  padding: const EdgeInsets.only(left: 11, right: 3),
                   child: Row(
                     children: [
                       Expanded(
@@ -230,56 +230,61 @@ class _AgentRowState extends State<AgentRow> {
                           children: [
                             _Mark(AxLamp(a.state), t.type.ui),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                                    textBaseline: TextBaseline.alphabetic,
-                                    children: [
-                                      Expanded(
-                                        child: Text.rich(
-                                          TextSpan(
-                                            children: [
-                                              TextSpan(text: a.name),
-                                              const TextSpan(text: '   '),
-                                              if (a.mark case final m?)
-                                                WidgetSpan(
-                                                  alignment: PlaceholderAlignment.middle,
-                                                  child: Padding(
-                                                    padding: const EdgeInsets.only(right: 5),
-                                                    child: AxServiceMark(m, size: 11),
+                              child: Padding(
+                                padding: EdgeInsets.only(
+                                  right: keys ? (pause && stop ? 59 : 32) : 0,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                                      textBaseline: TextBaseline.alphabetic,
+                                      children: [
+                                        Expanded(
+                                          child: Text.rich(
+                                            TextSpan(
+                                              children: [
+                                                TextSpan(text: a.name),
+                                                const TextSpan(text: '   '),
+                                                if (a.mark case final m?)
+                                                  WidgetSpan(
+                                                    alignment: PlaceholderAlignment.middle,
+                                                    child: Padding(
+                                                      padding: const EdgeInsets.only(right: 5),
+                                                      child: AxServiceMark(m, size: 11),
+                                                    ),
                                                   ),
+                                                TextSpan(
+                                                  text: a.model,
+                                                  style: t.type.label.ink(c.ink4),
                                                 ),
-                                              TextSpan(
-                                                text: a.model,
-                                                style: t.type.label.ink(c.ink4),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: t.type.ui,
                                           ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: t.type.ui,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        if (!keys) Text(a.elapsed, style: t.type.small.ink(c.ink4)),
+                                      ],
+                                    ),
+                                    if (now != null)
+                                      Text(
+                                        now.text,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: t.type.label.ink(
+                                          a.state == AgentState.asking
+                                              ? c.attentionText
+                                              : now.failed
+                                              ? c.faultText
+                                              : c.ink3,
                                         ),
                                       ),
-                                      const SizedBox(width: 8),
-                                      if (!keys) Text(a.elapsed, style: t.type.small.ink(c.ink4)),
-                                    ],
-                                  ),
-                                  if (now != null)
-                                    Text(
-                                      now.text,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: t.type.label.ink(
-                                        a.state == AgentState.asking
-                                            ? c.attentionText
-                                            : now.failed
-                                            ? c.faultText
-                                            : c.ink3,
-                                      ),
-                                    ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ],

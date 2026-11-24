@@ -2,7 +2,7 @@
 
 Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: `flutter test` writes `app/build/shots/` (offscreen).
 
-**The idea.** A professional instrument: navy-steel structure, one recessed deep-navy display, cobalt where something is live, a service's hue where something is its own.
+**The idea.** A professional instrument: neutral graphite structure, one recessed charcoal display, cobalt where something is live, a service's hue where something is its own.
 
 ## Rules
 1. **Containment is spent, not given.** A surface may hold another surface only if the person acts on it as a unit (a key, a request, a menu, the display, the open session). Lists, selectors and activity are text on the surface they belong to. (Round 3 failed on this; the owner named it: "something is off about most of the app", and the plain sidebar was the part that worked.)
@@ -21,7 +21,7 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 | Role | Use | Treatment |
 |------|-----|-----------|
 | `chassis` | window | graphite, lit top line |
-| `bay` | the display; text fields | navy, inset |
+| `bay` | the display; text fields | charcoal, inset |
 | `plate` | the open session's panel | raised |
 | `key` / `keyDown` / `primary` / `answer` | buttons at rest, held or engaged, main act, answering a request | raised / inset |
 | `request` | something needs a person | warm graphite, raised |
@@ -41,4 +41,5 @@ States for every control: rest, hover, held, engaged (sunken), focused (keyboard
 | 3 | E cobalt, shallower (`img/e.png`) | owner: "needs a bit more polish"; "something is off about most of the app" |
 | 4 | real components, rule 1 (`img/round4-dark.png`) | owner: plan and models must belong to a session; not a fan of the layout at the bottom |
 | 5 | agents and plan inside the open session's panel; execution beside the agent's name; no deck (`img/round5-*.png`) | shown 2026-11-24; owner: more colour, service marks, "the claude is orange cus claude" |
-| 6 | hues by service and by kind of work, marks, richer code and states (`img/round6-*.png`) | **accepted by the owner, 2026-11-25** |
+| 6 | hues by service and by kind of work, marks, richer code and states (`img/round6-*.png`) | accepted by the owner, then: "not a fan of this colour" of the navy conversation area |
+| 7 | neutral charcoal: option B of three, "slightly darker"; the two-column transcript is the real one (`img/round7-*.png`) | the owner's choice, 2026-11-25 |

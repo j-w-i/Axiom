@@ -56,7 +56,7 @@ class HostStore extends ChangeNotifier {
 
   HostLink? _link;
   StreamSubscription<Message>? _sub;
-  Timer? _retry, _drainTimer;
+  Timer? _retry, _drainTimer, _list;
   bool _disposed = false, _starting = false;
   int _attempt = 0;
   final _pending = <Event>[];
@@ -87,6 +87,8 @@ class HostStore extends ChangeNotifier {
   }
 
   void _unreachable(String why) {
+    // What arrived is true whether or not the connection lives; the next follow starts after it.
+    _drainAll();
     _drop();
     phase = HostPhase.unreachable;
     problem = why;
@@ -99,6 +101,7 @@ class HostStore extends ChangeNotifier {
 
   /// Lets go of the connection, whatever state it is in.
   void _drop() {
+    _list?.cancel();
     unawaited(_sub?.cancel());
     _sub = null;
     _link?.close();
@@ -129,6 +132,13 @@ class HostStore extends ChangeNotifier {
     if (_disposed) return link.close();
     _link = link;
     _sub = link.messages.listen(_message);
+    // Other windows and the command line make sessions too, and ages go on.
+    _list?.cancel();
+    _list = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (_link != null && SchedulerBinding.instance.framesEnabled) {
+        unawaited(refresh().catchError((_) {}));
+      }
+    });
     unawaited(
       link.closed.then((why) {
         if (!_disposed && identical(link, _link)) _unreachable(why);
@@ -173,7 +183,13 @@ class HostStore extends ChangeNotifier {
       _forget();
       if (link != null) unawaited(link.unfollow(c.id).catchError((_) {}));
     }
-    if (current?.id != id || current?.fault != null) current = SessionModel(id);
+    if (current?.id != id || current?.fault != null) {
+      _forget();
+      if (current != null && link != null && current!.id == id) {
+        unawaited(link.unfollow(id).catchError((_) {}));
+      }
+      current = SessionModel(id);
+    }
     notifyListeners();
     if (link != null) await _follow(current!);
   }
@@ -182,11 +198,15 @@ class HostStore extends ChangeNotifier {
       _live.call('replay.start', {'session': session, 'path': path, 'speed': speed});
 
   Future<void> _follow(SessionModel m) async {
+    final link = _link;
     try {
-      await _link?.follow(m.id, m.seq);
+      await link?.follow(m.id, m.seq);
     } on Failed catch (e) {
       // The connection is well; this session is not.
       if (identical(m, current)) m.failed(e.message);
+    } on LinkClosed catch (e) {
+      // Not answered in time, on a connection that is otherwise alive.
+      if (identical(m, current) && identical(link, _link) && link != null) m.failed(e.why);
     }
   }
 
@@ -198,24 +218,28 @@ class HostStore extends ChangeNotifier {
         _pending.addAll(events);
         _schedule();
       case Resync(:final session, :final last) when session == c?.id:
-        if (last > 0) {
-          unawaited(_follow(c!).catchError((_) {}));
-          return;
-        }
-        // The host has another history: begin again rather than mix the two. If that goes on
-        // happening, say so instead of going round.
+        // Falling behind now and then is normal, and goes on at a slower pace each time. A history
+        // that keeps changing is not, and is said.
         final now = DateTime.now();
         _restarts
           ..removeWhere((t) => now.difference(t) > const Duration(seconds: 10))
           ..add(now);
+        if (last > 0) {
+          _drainAll();
+          Timer(Duration(milliseconds: 20 << _restarts.length.clamp(0, 6)), () {
+            if (!_disposed && identical(current, c)) unawaited(_follow(c!));
+          });
+          return;
+        }
         if (_restarts.length > 3) {
           c!.failed('the host and this window disagree about the session');
           return;
         }
+        // The host has another history: begin again rather than mix the two.
         _forget();
         current = SessionModel(c!.id);
         notifyListeners();
-        unawaited(_follow(current!).catchError((_) {}));
+        unawaited(_follow(current!));
       case Fault(:final session, :final words) when session == c?.id:
         c!.failed(words);
       case _:
@@ -248,7 +272,18 @@ class HostStore extends ChangeNotifier {
     }
   }
 
-  static const _slice = 256, _budget = Duration(milliseconds: 4);
+  /// Applies everything that waits, whatever it costs: before a connection is let go.
+  void _drainAll() {
+    if (_at < _pending.length) current?.apply(_pending.sublist(_at));
+    _forget();
+  }
+
+  static const _slice = 256, _sliceText = 64 * 1024, _budget = Duration(milliseconds: 4);
+
+  static int _weight(Event e) => switch (e.body) {
+    ItemDelta(:final text) || ItemEnded(:final text) => text.length,
+    _ => 64,
+  };
 
   void _drain() {
     if (!_scheduled || _disposed) return;
@@ -258,7 +293,10 @@ class HostStore extends ChangeNotifier {
     final sw = Stopwatch()..start();
     final from = _at;
     while (_at < _pending.length && sw.elapsed < _budget) {
-      final to = _at + _slice < _pending.length ? _at + _slice : _pending.length;
+      var to = _at, text = 0;
+      while (to < _pending.length && to - _at < _slice && text < _sliceText) {
+        text += _weight(_pending[to++]);
+      }
       c?.apply(_pending.sublist(_at, to));
       _at = to;
     }

@@ -89,7 +89,7 @@ class MarkdownDoc {
   bool _indented = false, _continues = false, _blank = false, _forced = false, _finished = false;
   bool _forcedSpace = false;
 
-  /// Content columns of the list items the next line may belong to.
+  /// The list items the next line may belong to: the column from which text is inside one.
   final List<int> _stack = [];
 
   static const maxText = 4000, maxCodeLines = 120, maxDepth = 12;
@@ -276,7 +276,7 @@ class MarkdownDoc {
     _openLength += l.length + 1;
     if (_kind == BlockKind.table) {
       // A table is cut between rows; its header goes with each part.
-      if (_openLength > maxText * 4 && _open.length > 3) {
+      if (_openLength > maxText && _open.length > 3) {
         final head = _open.take(2).toList();
         final last = _open.removeLast();
         _close();
@@ -451,6 +451,8 @@ class MarkdownDoc {
       _close();
     }
     final t = l.substring(at).trimRight();
+    // Two spaces at the end break the line; they must outlive the trimming.
+    final text = l.endsWith('  ') ? '$t  ' : t;
 
     // Which items is this line inside?
     var keep = _stack.length;
@@ -491,7 +493,7 @@ class MarkdownDoc {
       _add(head.trim());
       return _add(t);
     }
-    if (_kind == BlockKind.table && !blank && t.contains('|')) return _add(t);
+    final row = _kind == BlockKind.table && !blank && t.contains('|');
 
     final starts =
         fence != null ||
@@ -499,10 +501,11 @@ class MarkdownDoc {
         rule ||
         quote ||
         (canItem && (item.$3 || !_text || blank || keep < _stack.length));
+    if (row && !starts) return _add(t);
     if (!starts) {
       // A line that only continues a paragraph, however it is indented.
-      if (_text && !blank) return _add(t);
-      if (_kind == BlockKind.quote && !blank) return _add(t);
+      if (_text && !blank) return _add(text);
+      if (_kind == BlockKind.quote && !blank) return _add(text);
     }
     if (keep < _stack.length) {
       _close();
@@ -517,7 +520,7 @@ class MarkdownDoc {
     if (rule) return _one(BlockKind.rule, '');
     if (heading != null) return _one(BlockKind.heading, heading.$2, level: heading.$1);
     if (quote) {
-      final x = t.substring(1);
+      final x = text.substring(1);
       if (_kind != BlockKind.quote) _start(BlockKind.quote);
       return _add(x.startsWith(' ') ? x.substring(1) : x);
     }
@@ -527,7 +530,9 @@ class MarkdownDoc {
       final (gap, skip) = _indent(rest);
       var body = rest.substring(skip);
       if (_stack.length >= maxDepth) _stack.removeLast();
-      _stack.add(col + width + (body.isEmpty || gap > 4 ? 1 : gap));
+      // Text is inside an item from two columns after its marker on, whatever the marker's width:
+      // stricter than needed for `- `, kinder than CommonMark to what is written under `1. `.
+      _stack.add(col + 2);
       var marker = mark;
       if (body.length >= 3 && body[0] == '[' && body[2] == ']' && ' xX'.contains(body[1])) {
         marker = body[1] == ' ' ? 'todo' : 'done';
@@ -539,10 +544,10 @@ class MarkdownDoc {
         _close();
         _start(BlockKind.code, language: f.$2);
         _fence = f.$1;
-        _fenceIndent = _stack.last;
+        _fenceIndent = col + width + gap;
         return;
       }
-      if (body.isNotEmpty) _add(body);
+      if (body.isNotEmpty) _add(text.endsWith('  ') ? '$body  ' : body);
       return;
     }
     if (shift >= 4 && keep == 0) {
@@ -550,7 +555,7 @@ class MarkdownDoc {
       return _add(_strip(l, 4));
     }
     _start(BlockKind.paragraph);
-    _add(t);
+    _add(text);
   }
 
   void _code(String l) {

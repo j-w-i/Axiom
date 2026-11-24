@@ -52,7 +52,7 @@ class Pressable extends StatefulWidget {
 }
 
 class _PressableState extends State<Pressable> {
-  bool _hover = false, _down = false, _focus = false;
+  bool _hover = false, _down = false, _focus = false, _has = false;
   bool get _enabled => widget.onPressed != null;
 
   void _activate() => widget.onPressed?.call();
@@ -81,7 +81,7 @@ class _PressableState extends State<Pressable> {
       expanded: widget.expanded,
       checked: widget.checked,
       focusable: _enabled,
-      focused: _focus,
+      focused: _has,
       customSemanticsActions: widget.actions,
       label: widget.label,
       hint: widget.hint,
@@ -93,6 +93,7 @@ class _PressableState extends State<Pressable> {
         focusNode: widget.focusNode,
         mouseCursor: _enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
         onShowHoverHighlight: (v) => setState(() => _hover = v),
+        onFocusChange: (v) => setState(() => _has = v),
         onShowFocusHighlight: (v) => setState(() => _focus = v),
         shortcuts: const {
           SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),

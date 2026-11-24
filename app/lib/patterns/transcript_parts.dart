@@ -1,8 +1,11 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../ui/controls.dart';
 import '../transcript/safe_text.dart';
+import '../ui/editable.dart';
 import '../ui/icons.dart';
+import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'highlight.dart';
@@ -56,6 +59,7 @@ class WorkLine extends StatelessWidget {
                 style: t.type.label.ink(c.ink2),
               ),
             ),
+            const CopyGap(' '),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -65,6 +69,7 @@ class WorkLine extends StatelessWidget {
                 style: t.type.codeSmall.ink(c.ink3),
               ),
             ),
+            CopyGap(result.isEmpty ? '' : '  '),
             const SizedBox(width: 12),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 200),
@@ -194,13 +199,15 @@ class RequestBar extends StatefulWidget {
   });
   final RequestView request;
   final VoidCallback onOnce, onAlways, onDeny;
-  static const maxSubject = 168.0;
+  static const maxHeight = 220.0;
   @override
   State<RequestBar> createState() => _RequestBarState();
 }
 
 class _RequestBarState extends State<RequestBar> {
   final _scroll = ScrollController();
+  final _focus = FocusNode(debugLabel: 'request');
+  bool _focused = false;
 
   /// Null until laid out: not knowing is not having seen.
   bool? _seen;
@@ -214,7 +221,8 @@ class _RequestBarState extends State<RequestBar> {
   @override
   void didUpdateWidget(RequestBar old) {
     super.didUpdateWidget(old);
-    if (old.request.subject != widget.request.subject) {
+    // Any difference makes it another request, and nothing about it has been seen.
+    if (old.request != widget.request) {
       _seen = null;
       if (_scroll.hasClients) _scroll.jumpTo(0);
     }
@@ -227,9 +235,17 @@ class _RequestBarState extends State<RequestBar> {
     if (seen != _seen) setState(() => _seen = seen);
   }
 
+  void _by(double viewports) {
+    final p = _scroll.position;
+    _scroll.jumpTo(
+      (p.pixels + viewports * p.viewportDimension).clamp(p.minScrollExtent, p.maxScrollExtent),
+    );
+  }
+
   @override
   void dispose() {
     _scroll.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -238,30 +254,58 @@ class _RequestBarState extends State<RequestBar> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _look());
     final t = Ax.of(context), c = t.colors, r = widget.request;
     final ok = _seen ?? false;
-    final words = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('${oneLine(r.agent, 60)} ${oneLine(r.what, 160)}', style: t.type.uiStrong),
-        const SizedBox(height: 3),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: RequestBar.maxSubject),
-          child: NotificationListener<ScrollMetricsNotification>(
-            onNotification: (_) {
-              WidgetsBinding.instance.addPostFrameCallback((_) => _look());
-              return false;
-            },
-            child: SingleChildScrollView(
-              controller: _scroll,
-              child: Text(literal(r.subject), style: t.type.code.ink(c.attentionText)),
+    final agent = oneLine(literal(r.agent), 60);
+    final words = ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: RequestBar.maxHeight),
+      child: NotificationListener<ScrollMetricsNotification>(
+        onNotification: (_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _look());
+          return false;
+        },
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.arrowDown): () => _by(.2),
+            const SingleActivator(LogicalKeyboardKey.arrowUp): () => _by(-.2),
+            const SingleActivator(LogicalKeyboardKey.pageDown): () => _by(.9),
+            const SingleActivator(LogicalKeyboardKey.pageUp): () => _by(-.9),
+            const SingleActivator(LogicalKeyboardKey.space): () => _by(.9),
+            const SingleActivator(LogicalKeyboardKey.end): () => _by(1e6),
+            const SingleActivator(LogicalKeyboardKey.home): () => _by(-1e6),
+          },
+          child: Focus(
+            focusNode: _focus,
+            // A stop on the way to the keys only if there is something to scroll.
+            canRequestFocus: !ok || _focused,
+            onFocusChange: (v) => setState(() => _focused = v),
+            child: CustomPaint(
+              foregroundPainter: _focused ? FocusRing(c.focus, 0) : null,
+              child: SingleChildScrollView(
+                controller: _scroll,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('$agent ${literal(r.what)}', style: t.type.uiStrong),
+                    const SizedBox(height: 3),
+                    Text(literal(r.subject), style: t.type.code.ink(c.attentionText)),
+                    const SizedBox(height: 3),
+                    Text(literal(r.scope), style: t.type.label.ink(c.ink3)),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
-        const SizedBox(height: 3),
-        Text(literal(r.scope), style: t.type.label.ink(c.ink3)),
+      ),
+    );
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        words,
         if (_seen == false) ...[
-          const SizedBox(height: 3),
-          Text('Scroll to the end to allow this.', style: t.type.label.ink(c.ink2)),
+          const SizedBox(height: 5),
+          Text('There is more. Scroll to the end to allow this.', style: t.type.label.ink(c.ink2)),
         ],
       ],
     );
@@ -271,14 +315,14 @@ class _RequestBarState extends State<RequestBar> {
       alignment: WrapAlignment.end,
       children: [
         AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: widget.onDeny),
-        AxButton(label: r.always, onPressed: ok ? widget.onAlways : null),
+        AxButton(label: oneLine(literal(r.always), 80), onPressed: ok ? widget.onAlways : null),
         AxButton(label: 'Allow once', tone: AxTone.answer, onPressed: ok ? widget.onOnce : null),
       ],
     );
     return Semantics(
       container: true,
       liveRegion: true,
-      label: 'Permission request from ${oneLine(r.agent, 60)}',
+      label: 'Permission request from $agent',
       explicitChildNodes: true,
       child: Surface(
         c.request,
@@ -291,20 +335,21 @@ class _RequestBarState extends State<RequestBar> {
               child: ColoredBox(color: c.attention, child: const SizedBox(width: 2)),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 9, 10, 10),
+              padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
               child: LayoutBuilder(
                 builder: (context, box) => box.maxWidth < 620
                     ? Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          words,
+                          body,
                           const SizedBox(height: 8),
                           Align(alignment: Alignment.centerRight, child: keys),
                         ],
                       )
                     : Row(
                         children: [
-                          Expanded(child: words),
+                          Expanded(child: body),
                           const SizedBox(width: 16),
                           ConstrainedBox(
                             constraints: BoxConstraints(maxWidth: box.maxWidth * .5),

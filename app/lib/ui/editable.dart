@@ -4,6 +4,12 @@ import 'press.dart';
 import 'surface.dart';
 import 'tokens.dart';
 
+/// Nothing is drawn at a selection's ends on a desktop; the mixin is what lets a context menu be shown
+/// through `contextMenuBuilder`.
+class AxSelectionControls extends EmptyTextSelectionControls with TextSelectionHandleControls {}
+
+final axSelectionControls = AxSelectionControls();
+
 /// Text editing as people expect it: drag and double-click select, right click offers the clipboard,
 /// input methods work. Fields and the composer are this with a surface around it.
 class AxEditable extends StatefulWidget {
@@ -60,46 +66,73 @@ class _AxEditableState extends State<AxEditable>
       minLines: widget.minLines,
       onSubmitted: widget.onSubmitted,
       onChanged: widget.onChanged,
-      selectionControls: emptyTextSelectionControls,
+      selectionControls: axSelectionControls,
       rendererIgnoresPointer: true,
       mouseCursor: SystemMouseCursors.text,
       showSelectionHandles: false,
       contextMenuBuilder: (context, s) =>
           AxContextMenu(anchors: s.contextMenuAnchors, items: s.contextMenuButtonItems),
     );
-    return MergeSemantics(
-      child: Semantics(
-        label: widget.label,
-        enabled: widget.enabled,
-        child: Stack(
-          children: [
-            ValueListenableBuilder(
-              valueListenable: widget.controller,
-              builder: (_, v, _) => v.text.isNotEmpty
-                  ? const SizedBox.shrink()
-                  : IgnorePointer(
-                      child: ExcludeSemantics(
-                        child: Text(
-                          widget.placeholder,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: widget.style.ink(widget.enabled ? c.ink4 : c.idle),
+    return ExcludeFocus(
+      excluding: !widget.enabled,
+      child: MergeSemantics(
+        child: Semantics(
+          label: widget.label,
+          enabled: widget.enabled,
+          child: Stack(
+            children: [
+              ValueListenableBuilder(
+                valueListenable: widget.controller,
+                builder: (_, v, _) => v.text.isNotEmpty
+                    ? const SizedBox.shrink()
+                    : IgnorePointer(
+                        child: ExcludeSemantics(
+                          child: Text(
+                            widget.placeholder,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: widget.style.ink(widget.enabled ? c.ink4 : c.idle),
+                          ),
                         ),
                       ),
-                    ),
-            ),
-            MouseRegion(
-              cursor: widget.enabled ? SystemMouseCursors.text : SystemMouseCursors.basic,
-              child: _gestures.buildGestureDetector(
-                behavior: HitTestBehavior.translucent,
-                child: editable,
               ),
-            ),
-          ],
+              MouseRegion(
+                cursor: widget.enabled ? SystemMouseCursors.text : SystemMouseCursors.basic,
+                child: _gestures.buildGestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  child: editable,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// Text that is not seen but belongs to what is copied: the break between two blocks, the space
+/// between two columns. It is part of a selection only when the selection goes across it.
+class CopyGap extends StatelessWidget {
+  const CopyGap(this.text, {super.key});
+  final String text;
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+    child: SizedBox(
+      width: .01,
+      height: .01,
+      child: ClipRect(
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          minWidth: 0,
+          minHeight: 0,
+          maxWidth: 100,
+          maxHeight: 100,
+          child: Text(text, style: const TextStyle(fontSize: .5, height: .1)),
+        ),
+      ),
+    ),
+  );
 }
 
 /// Cut, copy, paste, select all: as our own menu.

@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import '../patterns/composer.dart';
 import '../patterns/session_panel.dart';
 import '../patterns/transcript_parts.dart';
+import '../transcript/transcript_view.dart';
 import '../patterns/usage.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
@@ -20,6 +21,7 @@ class Workbench extends StatefulWidget {
 }
 
 class _WorkbenchState extends State<Workbench> {
+  final _transcript = s.transcript();
   String _agent = 'builder';
   int _tab = 0;
   bool _request = true;
@@ -132,7 +134,11 @@ class _WorkbenchState extends State<Workbench> {
                                 ),
                               ),
                               ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
-                              const Expanded(child: _Folio()),
+                              Expanded(
+                                child: TranscriptView(
+                                  _transcript.agents[_agent] ?? _transcript.agents['builder']!,
+                                ),
+                              ),
                               if (_request)
                                 Padding(
                                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -180,12 +186,21 @@ class _Side extends StatelessWidget {
         SizedBox(
           height: 44,
           child: Padding(
-            padding: EdgeInsets.only(left: inset, right: 10),
+            padding: EdgeInsets.only(left: inset, right: 9),
             child: Row(
               children: [
                 const AxMark(size: 17),
                 const SizedBox(width: 9),
-                Expanded(child: Text('meridian', style: t.type.uiStrong)),
+                Text('Axiom', style: t.type.uiStrong),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'web-store',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.type.ui.ink(c.ink3),
+                  ),
+                ),
                 AxButton.icon(
                   AxIcon.plus,
                   label: 'New session',
@@ -218,100 +233,6 @@ class _Side extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Prose on the left, the work it caused on the right. Narrow displays stack them.
-class _Folio extends StatelessWidget {
-  const _Folio();
-  @override
-  Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
-    Text p(String x, [Color? k]) => Text(x, style: k == null ? t.type.prose : t.type.prose.ink(k));
-    final turns = <(Widget, Widget)>[
-      (
-        p(
-          'Two tabs can both see an expired token and rotate it twice. Follow docs/refresh.md: '
-          're-check expiry inside the lock and make rotation single-flight per account.',
-          c.voice,
-        ),
-        const WorkLine(
-          icon: AxIcon.attach,
-          name: 'Attached',
-          detail: 'docs/refresh.md',
-          result: '84 lines',
-        ),
-      ),
-      (
-        p(
-          'I will read the refresh path and its callers first, then run the new test to see it fail.',
-        ),
-        const Column(
-          children: [
-            WorkLine(
-              icon: AxIcon.file,
-              name: 'Read',
-              detail: 'src/auth/refresh.ts',
-              result: '220 lines',
-            ),
-            WorkLine(
-              icon: AxIcon.search,
-              name: 'Search',
-              detail: 'locks.acquire',
-              result: '9 in 4 files',
-            ),
-            WorkLine(
-              icon: AxIcon.terminal,
-              name: 'Test',
-              detail: 'pnpm test auth',
-              result: '2 failed',
-              failed: true,
-            ),
-          ],
-        ),
-      ),
-      (
-        p(
-          'The expiry check happens before the lock is held, so the second tab acts on a token the '
-          'first already replaced. I am moving the read inside the critical section and adding a '
-          'single-flight map keyed by account.\n\nBoth writers now go through one entry point. The '
-          'store keeps its interface, so nothing outside the auth module changes.',
-        ),
-        const DiffBlock(path: 'src/auth/refresh.ts', lines: s.diff),
-      ),
-    ];
-    return LayoutBuilder(
-      builder: (context, box) {
-        final two = box.maxWidth >= 860;
-        return Align(
-          alignment: Alignment.topCenter,
-          child: ListView(
-            reverse: true,
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(24, 18, 20, 22),
-            children: [
-              for (final (l, r) in turns.reversed)
-                Padding(
-                  padding: const EdgeInsets.only(top: 22),
-                  child: two
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(flex: 54, child: l),
-                            const SizedBox(width: 44),
-                            Expanded(flex: 46, child: r),
-                          ],
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [l, const SizedBox(height: 10), r],
-                        ),
-                ),
-            ],
-          ),
-        );
-      },
     );
   }
 }

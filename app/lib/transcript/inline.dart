@@ -37,7 +37,8 @@ const _maxOpen = 64, _maxUrl = 2000;
 const _entities = {'lt': '<', 'gt': '>', 'amp': '&', 'quot': '"', 'apos': "'", 'nbsp': ' '};
 bool _space(String? c) => c == null || c.trim().isEmpty;
 final _word = RegExp(r'[\p{L}\p{N}_]', unicode: true);
-bool _punct(String? c) => c != null && !_space(c) && !_word.hasMatch(c);
+final _sign = RegExp(r'[\p{P}\p{S}]', unicode: true);
+bool _punct(String? c) => c != null && _sign.hasMatch(c);
 
 /// The runs of one block's text.
 List<InlineRun> inlineRuns(String source) {
@@ -195,8 +196,9 @@ List<InlineRun> inlineRuns(String source) {
           words = words || out[k].text.isNotEmpty;
         }
         if (!words) out.add(InlineRun(url.$1, 0, url.$1));
-        // Emphasis does not reach out of a link.
+        // Emphasis does not reach out of a link, and a link holds no other.
         stack.removeWhere((d) => d.at > open);
+        brackets.clear();
         i = url.$2;
       case '&':
         final e = s.indexOf(';', i);
@@ -210,7 +212,7 @@ List<InlineRun> inlineRuns(String source) {
         if (_entities[name] case final t?) {
           lit.write(t);
           i = e + 1;
-        } else if (num != null && num > 0 && num <= 0x10FFFF) {
+        } else if (num != null && num > 0 && num <= 0x10FFFF && (num < 0xD800 || num > 0xDFFF)) {
           lit.write(visible(String.fromCharCode(num)));
           i = e + 1;
         } else {
@@ -233,8 +235,7 @@ List<InlineRun> inlineRuns(String source) {
         }
       case 'h'
           when (s.startsWith('https://', i) || s.startsWith('http://', i)) &&
-              (i == 0 || !_word.hasMatch(s[i - 1])) &&
-              brackets.isEmpty:
+              (i == 0 || !_word.hasMatch(s[i - 1])):
         var n = i;
         var paren = 0;
         while (n < s.length && n - i < _maxUrl && !_space(s[n]) && !'<>"`'.contains(s[n])) {
@@ -263,6 +264,16 @@ List<InlineRun> inlineRuns(String source) {
   var i = at;
   while (i < s.length && s[i] == ' ') {
     i++;
+  }
+  // A destination in angle brackets may hold spaces.
+  if (i < s.length && s[i] == '<') {
+    final e = s.indexOf('>', i);
+    final nl = s.indexOf('\n', i);
+    if (e > i && e - i < _maxUrl && (nl < 0 || nl > e)) {
+      final end = s.indexOf(')', e);
+      final url = s.substring(i + 1, e);
+      return url.isEmpty || end < 0 || end - e > 300 ? null : (url, end + 1);
+    }
   }
   final from = i;
   var depth = 0;

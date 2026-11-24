@@ -286,12 +286,11 @@ class _Display extends StatelessWidget {
       if (!session.loaded) return _Word(stale ? 'Waiting for the host' : 'Reading the session');
       if (a == null) return const _Word('No agent has worked here yet');
       final x = a.execution;
-      final asked = session.requests.values.where((r) => r.opened.agent == a.id).firstOrNull;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 40),
+            constraints: const BoxConstraints(minHeight: 38),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
@@ -320,6 +319,13 @@ class _Display extends StatelessWidget {
                       style: t.type.label.ink(c.ink3),
                     ),
                   ),
+                  if (a.context case final u?) ...[
+                    Text(
+                      '${a.contextKnown == Known.estimated ? 'about ' : ''}${(u * 100).round()}% of context',
+                      style: t.type.label.ink(c.ink3),
+                    ),
+                    const SizedBox(width: 14),
+                  ],
                   if (stale) Text('not live', style: t.type.label.ink(c.attentionText)),
                 ],
               ),
@@ -327,26 +333,51 @@ class _Display extends StatelessWidget {
           ),
           ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
           Expanded(child: TranscriptView(a)),
-          if (asked != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    asked.opened.answerable == Answerable.no
-                        ? 'Asked, and no longer waiting for an answer'
-                        : 'Asking',
-                    style: t.type.label.ink(c.attentionText),
-                  ),
-                  Text(literal(asked.opened.subject), style: t.type.code.ink(c.ink2)),
-                ],
-              ),
-            ),
+          if (session.requests.isNotEmpty) _Asked(session),
         ],
       );
     },
   );
+}
+
+/// What agents of the session have asked. Nothing here can be answered yet: this build replays.
+class _Asked extends StatelessWidget {
+  const _Asked(this.session);
+  final SessionModel session;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 180),
+      child: ColoredBox(
+        color: c.request.bottom,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 10, 24, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final r in session.requests.values)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${session.agents[r.opened.agent]?.name ?? 'An agent'} ${literal(r.opened.what)}'
+                        '${r.opened.answerable == Answerable.no ? ' (no longer waiting)' : ''}',
+                        style: t.type.label.ink(c.attentionText),
+                      ),
+                      Text(literal(r.opened.subject), style: t.type.code.ink(c.ink1)),
+                      Text(literal(r.opened.scope), style: t.type.label.ink(c.ink3)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _Word extends StatelessWidget {
