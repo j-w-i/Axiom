@@ -1,13 +1,27 @@
 import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/svg_path.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// The outline itself; a path's bounds include its control points.
+Rect outline(Path p) {
+  Rect? r;
+  for (final m in p.computeMetrics()) {
+    for (var d = 0.0; d <= m.length; d += .05) {
+      final at = m.getTangentForOffset(d)!.position;
+      final dot = Rect.fromLTWH(at.dx, at.dy, 0, 0);
+      r = r?.expandToInclude(dot) ?? dot;
+    }
+  }
+  return r!;
+}
 
 void main() {
   test('every mark and icon is drawn inside its grid', () {
     for (final m in ServiceMark.values) {
       if (m == ServiceMark.axiom || m == ServiceMark.local) continue;
-      final b = m.path!.getBounds();
+      final b = outline(m.path!);
       expect(b.isEmpty, isFalse, reason: m.name);
       expect(b.left, greaterThan(-.2), reason: m.name);
       expect(b.top, greaterThan(-.2), reason: m.name);
@@ -16,7 +30,7 @@ void main() {
       expect(b.longestSide, greaterThan(14), reason: m.name);
     }
     for (final i in AxIcon.values) {
-      final b = i.path.getBounds();
+      final b = outline(i.path);
       expect(b.left >= 0 && b.right <= 16 && b.top >= 0 && b.bottom <= 16, isTrue, reason: i.name);
     }
   });
