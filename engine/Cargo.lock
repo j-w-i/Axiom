@@ -79,6 +79,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-spawn"
+version = "0.0.1"
+dependencies = [
+ "axiom-policy",
+ "libc",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
