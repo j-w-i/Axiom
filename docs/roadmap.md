@@ -11,7 +11,7 @@ Milestones are complete when every criterion is verified and recorded in `state.
 
 ## M1 Visual identity and foundations ← M0
 - [x] several distinct concepts rendered and criticised; direction agreed with the owner
-- [ ] owner accepts the round-4 look
+- [x] owner accepts the look (round 6, 2026-11-25)
 - [ ] tokens, components, gallery; every control passes keyboard, semantics and contrast tests in both themes
 - [ ] host + journal + wire + Dart client: a replayed session streams end to end through the real processes
 - [ ] transcript: chunk-invariant incremental Markdown, virtualised; benchmarks recorded

@@ -41,4 +41,4 @@ States for every control: rest, hover, held, engaged (sunken), focused (keyboard
 | 3 | E cobalt, shallower (`img/e.png`) | owner: "needs a bit more polish"; "something is off about most of the app" |
 | 4 | real components, rule 1 (`img/round4-dark.png`) | owner: plan and models must belong to a session; not a fan of the layout at the bottom |
 | 5 | agents and plan inside the open session's panel; execution beside the agent's name; no deck (`img/round5-*.png`) | shown 2026-11-24; owner: more colour, service marks, "the claude is orange cus claude" |
-| 6 | hues by service and by kind of work, marks, richer code and states (`img/round6-*.png`) | shown 2026-11-25; awaiting the owner |
+| 6 | hues by service and by kind of work, marks, richer code and states (`img/round6-*.png`) | **accepted by the owner, 2026-11-25** |
