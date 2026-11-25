@@ -82,6 +82,115 @@ async fn it_works_until_there_is_nothing_to_do() {
     assert!(t.stage.before("audit shell", "sync shell"), "{:?}", t.stage.log());
 }
 
+/// In Anthropic's form: what it signed goes back as it was, and every call has its result.
+#[tokio::test]
+async fn the_same_in_anthropics_form() {
+    let t = T::anthropic(
+        Access::Work,
+        vec![
+            anthropic(
+                Some(("I look first.", "sig-1==")),
+                "Reading.",
+                &[("t1", "read", r#"{"path":"a.txt"}"#), ("t2", "list", "{}")],
+            ),
+            anthropic(None, "", &[("t3", "edit", r#"{"path":"a.txt","old":"two","new":"2"}"#)]),
+            anthropic(Some(("Done now.", "sig-2==")), "It is done.", &[]),
+        ],
+    )
+    .await;
+    let mut a = t.agent();
+    a.model = "claude-test".into();
+    let e = t.run(&mut a, "Make it 2.").await;
+    assert_eq!((e.outcome, e.error), (Outcome::Completed, None));
+    assert_eq!(t.file("a.txt").as_deref(), Some("one\n2\n"));
+    assert_eq!(t.stage.texts(ItemKind::Reasoning), ["I look first.", "Done now."]);
+    let r = t.server.requests();
+    assert_eq!(r.len(), 3);
+    assert!(r[0]["system"].to_string().contains("sandbox"));
+    assert_eq!(r[0]["tools"].as_array().unwrap().len(), 9);
+    let m = r[2]["messages"].as_array().unwrap();
+    let roles: Vec<&str> = m.iter().map(|m| m["role"].as_str().unwrap()).collect();
+    assert_eq!(roles, ["user", "assistant", "user", "assistant", "user"]);
+    let first = m[1]["content"].as_array().unwrap();
+    assert_eq!(first[0]["type"], "thinking");
+    assert_eq!(
+        (first[0]["thinking"].as_str(), first[0]["signature"].as_str()),
+        (Some("I look first."), Some("sig-1=="))
+    );
+    assert_eq!(first.iter().filter(|b| b["type"] == "tool_use").count(), 2);
+    // Both results in one message, in the order of the calls.
+    let results: Vec<&str> = m[2]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["tool_use_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(results, ["t1", "t2"]);
+    // What was sent is sent again unchanged, cache marks aside.
+    let bare = |v: &serde_json::Value| {
+        let mut v = v.clone();
+        for m in v.as_array_mut().unwrap() {
+            for b in m["content"].as_array_mut().into_iter().flatten() {
+                b.as_object_mut().unwrap().remove("cache_control");
+            }
+        }
+        v
+    };
+    let (one, two) = (bare(&r[1]["messages"]), bare(&r[2]["messages"]));
+    assert_eq!(
+        one.as_array().unwrap()[..],
+        two.as_array().unwrap()[..one.as_array().unwrap().len()]
+    );
+    // A host that comes back has the same, to the byte.
+    let (c, _) = Context::load(&t.stage.turns()).unwrap();
+    let mut again = T::again(&t, vec![anthropic(None, "Yes.", &[])]).await;
+    again.profile = t.profile.clone();
+    let mut b = again.agent();
+    b.model = "claude-test".into();
+    b.context = c;
+    again.run(&mut b, "Still there?").await;
+    let three = bare(&again.server.requests()[0]["messages"]);
+    assert_eq!(
+        three.as_array().unwrap()[..two.as_array().unwrap().len()],
+        two.as_array().unwrap()[..]
+    );
+    assert_eq!(t.stage.usage(), 4);
+}
+
+#[tokio::test]
+async fn cancelled_in_anthropics_form_the_conversation_goes_on() {
+    let t = T::anthropic(
+        Access::Work,
+        vec![
+            anthropic(
+                Some(("Hm.", "s")),
+                "Running.",
+                &[("t1", "shell", r#"{"command":"sleep 30"}"#), ("t2", "list", "{}")],
+            ),
+            anthropic(None, "Going on.", &[]),
+        ],
+    )
+    .await;
+    let mut a = t.agent();
+    a.model = "claude-test".into();
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let person = async {
+        t.stage.until(|s| s.before("audit shell", "sync shell")).await;
+        tx.send(true).unwrap();
+    };
+    let (e, ()) = tokio::join!(t.run_with(&mut a, "go", rx), person);
+    assert_eq!(e.outcome, Outcome::Cancelled);
+    assert_eq!(t.run(&mut a, "go on").await.outcome, Outcome::Completed);
+    let m = t.server.requests()[1]["messages"].as_array().unwrap().clone();
+    let roles: Vec<&str> = m.iter().map(|m| m["role"].as_str().unwrap()).collect();
+    // The results come first in what follows the calls; what the person said may be beside them.
+    assert_eq!(&roles[..3], ["user", "assistant", "user"]);
+    let after = m[2]["content"].as_array().unwrap();
+    assert_eq!(after[0]["tool_use_id"], "t1");
+    assert_eq!(after[1]["tool_use_id"], "t2");
+    assert!(m.last().unwrap().to_string().contains("go on"));
+}
+
 #[tokio::test]
 async fn a_person_is_asked_and_their_answer_counts() {
     let edit = r#"{"path":"n.txt","content":"x"}"#;

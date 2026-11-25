@@ -84,6 +84,58 @@ pub fn calls(all: &[(&str, &str, &str)]) -> Reply {
     b.extend(ends("tool_calls"));
     sse(b)
 }
+/// The same in Anthropic's form: thinking that is signed, then words or calls.
+pub fn anthropic(
+    thinking: Option<(&str, &str)>,
+    words: &str,
+    calls: &[(&str, &str, &str)],
+) -> Reply {
+    let event = |v: Value| format!("event: {}\ndata: {v}\n\n", v["type"].as_str().unwrap());
+    let mut b = vec![event(json!({"type": "message_start", "message": {
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-test", "content": [],
+        "stop_reason": null, "usage": {"input_tokens": 40, "output_tokens": 1}}}))];
+    let mut i = 0;
+    let mut block = |start: Value, deltas: Vec<Value>| {
+        b.push(event(json!({"type": "content_block_start", "index": i, "content_block": start})));
+        for d in deltas {
+            b.push(event(json!({"type": "content_block_delta", "index": i, "delta": d})));
+        }
+        b.push(event(json!({"type": "content_block_stop", "index": i})));
+        i += 1;
+    };
+    if let Some((t, signature)) = thinking {
+        block(
+            json!({"type": "thinking", "thinking": "", "signature": ""}),
+            vec![
+                json!({"type": "thinking_delta", "thinking": t}),
+                json!({"type": "signature_delta", "signature": signature}),
+            ],
+        );
+    }
+    if !words.is_empty() {
+        block(
+            json!({"type": "text", "text": ""}),
+            vec![json!({"type": "text_delta", "text": words})],
+        );
+    }
+    for (id, name, args) in calls {
+        let half = args.len() / 2;
+        block(
+            json!({"type": "tool_use", "id": id, "name": name, "input": {}}),
+            [&args[..half], &args[half..]]
+                .iter()
+                .map(|p| json!({"type": "input_json_delta", "partial_json": p}))
+                .collect(),
+        );
+    }
+    let stop = if calls.is_empty() { "end_turn" } else { "tool_use" };
+    b.push(event(
+        json!({"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": null},
+        "usage": {"output_tokens": 9}}),
+    ));
+    b.push(event(json!({"type": "message_stop"})));
+    sse(b)
+}
 pub fn status(code: u16, body: &str) -> Reply {
     Reply {
         status: code,

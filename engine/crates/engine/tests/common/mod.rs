@@ -207,7 +207,7 @@ pub struct T {
     pub inbox: mpsc::Sender<Word>,
     rx: Mutex<Option<mpsc::Receiver<Word>>>,
     access: Access,
-    profile: Profile,
+    pub profile: Profile,
 }
 
 impl T {
@@ -248,6 +248,12 @@ impl T {
         let profile = Profile::openai_compatible("fake", server.url.clone());
         Self::make(Arc::new(d), access, server, Memory::default(), profile)
     }
+    /// A provider that speaks as Anthropic does.
+    pub async fn anthropic(access: Access, script: Vec<Reply>) -> Self {
+        let mut t = Self::new(access, script).await;
+        t.profile = Profile::anthropic();
+        t
+    }
     /// The same folder and journal, with another host.
     pub async fn again(t: &T, script: Vec<Reply>) -> Self {
         let server = Server::start(script).await;
@@ -271,7 +277,7 @@ impl T {
             desk: self.desk.clone(),
             client: Client::new(self.profile.clone(), endpoint, None, Options::default()).unwrap(),
             model: "m".into(),
-            settings: Settings::default(),
+            settings: Settings { max_output: Some(1000), ..Settings::default() },
             window: Some(1000),
             site: Site {
                 workspace: p("w"),
