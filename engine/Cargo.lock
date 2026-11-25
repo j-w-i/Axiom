@@ -89,6 +89,7 @@ dependencies = [
  "axiom-tools",
  "keyring-core",
  "libc",
+ "ring",
  "rusqlite",
  "security-framework",
  "serde",

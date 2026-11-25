@@ -196,7 +196,7 @@ struct Now {
 const KEYS: usize = 64;
 
 pub struct Agents {
-    pub connections: Connections,
+    pub connections: Arc<Connections>,
     parties: Mutex<HashMap<SessionId, Party>>,
     audit: tokio::sync::Mutex<Option<Entry>>,
     pub switch: OnceLock<Weak<dyn Switch>>,
@@ -221,7 +221,7 @@ fn internal(words: impl std::fmt::Display) -> WireError {
 
 impl Agents {
     pub fn new(
-        connections: Connections,
+        connections: Arc<Connections>,
         paths: &Paths,
         home: Option<PathBuf>,
         scratch: PathBuf,

@@ -197,7 +197,7 @@ impl Client {
         #[derive(Deserialize)]
         struct Named {
             slug: String,
-            #[serde(default)]
+            display_name: Option<String>,
             visibility: Option<String>,
         }
         let url = self.endpoint.at("models").map_err(setup)?;
@@ -210,7 +210,11 @@ impl Client {
         for raw in list.models {
             let m: Named = page.model(&raw)?;
             if m.visibility.as_deref() == Some("list") {
-                models.push(ModelInfo { id: m.slug, native: Json::from(&*raw) });
+                models.push(ModelInfo {
+                    id: m.slug,
+                    name: m.display_name,
+                    native: Json::from(&*raw),
+                });
             }
         }
         Ok(models)
@@ -234,7 +238,7 @@ impl Client {
         let mut models = Vec::with_capacity(list.data.len());
         for raw in list.data {
             let Named { id } = page.model(&raw)?;
-            models.push(ModelInfo { id, native: Json::from(&*raw) });
+            models.push(ModelInfo { id, name: None, native: Json::from(&*raw) });
         }
         Ok(models)
     }
@@ -279,7 +283,7 @@ impl Client {
                 let asked = |methods: Vec<String>| methods.iter().any(|m| m == "generateContent");
                 if named.supported_generation_methods.is_none_or(asked) {
                     let id = named.name.strip_prefix("models/").unwrap_or(&named.name).to_owned();
-                    models.push(ModelInfo { id, native: Json::from(&*raw) });
+                    models.push(ModelInfo { id, name: None, native: Json::from(&*raw) });
                 }
             }
             token = list.next_page_token.filter(|t| !t.is_empty());
@@ -415,6 +419,8 @@ fn too_many_models() -> Error {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelInfo {
     pub id: String,
+    /// For people, where the list has one beside the id.
+    pub name: Option<String>,
     pub native: Json,
 }
 

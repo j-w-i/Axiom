@@ -467,8 +467,21 @@ pub enum Call {
         #[serde(default)]
         secret: Option<SecretText>,
     },
+    /// Of an account that was signed in to here, it is signed out of as well.
     #[serde(rename = "connection.remove")]
     ConnectionRemove { connection: String },
+    /// Signs in to a ChatGPT plan, or again to an account of one. Answers with an address for the
+    /// person's browser, which nothing here opens.
+    #[serde(rename = "signin.begin")]
+    SigninBegin {
+        #[serde(default)]
+        connection: Option<String>,
+    },
+    #[serde(rename = "signin.state")]
+    SigninState { signin: String },
+    /// Only while it waits for a person.
+    #[serde(rename = "signin.cancel")]
+    SigninCancel { signin: String },
     /// What can be used through a connection. Asks the provider.
     #[serde(rename = "model.list")]
     Models { connection: String },
@@ -517,6 +530,27 @@ pub struct Connection {
     /// Of an account of a program of the person's own: the command they sign in with, in a terminal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sign_in: Option<String>,
+    /// Why it cannot be used until somebody signs in to it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
+/// How far a sign-in is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Signin {
+    /// For a person, in their browser.
+    Waiting,
+    /// They are done there.
+    Finishing,
+    Done {
+        connection: String,
+    },
+    Failed {
+        problem: String,
+    },
+    #[serde(other)]
+    Unknown,
 }
 
 /// Words of a workspace for agents: a file, and which content of it.

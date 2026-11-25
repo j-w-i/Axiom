@@ -11,6 +11,7 @@ use std::{
 };
 
 use axiom_journal::{Journal, Reader};
+use axiom_model::chatgpt::Places;
 use axiom_proto::*;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -32,6 +33,7 @@ use crate::{
     paths::{Lock, Paths, Same, private_dir, private_file},
     peers, replay,
     session::{Joined, Opened, Refused, Say, Session, encode, lines},
+    signin::Signins,
     store::Store,
 };
 
@@ -72,6 +74,8 @@ pub struct Config {
     /// The host's own program, if installed programs are to have tools of Axiom's.
     pub bridge: Option<PathBuf>,
     pub vault: Arc<dyn Vault>,
+    /// Where a ChatGPT plan is signed in to and used.
+    pub chatgpt: Places,
 }
 impl Config {
     pub fn new(paths: Paths) -> Self {
@@ -88,6 +92,7 @@ impl Config {
             programs: None,
             bridge: None,
             vault: Arc::new(MemoryVault::default()),
+            chatgpt: Places::default(),
         }
     }
 }
@@ -130,6 +135,7 @@ struct State {
     /// Connections end.
     over: watch::Sender<bool>,
     agents: Arc<Agents>,
+    signins: Arc<Signins>,
 }
 
 type Slot = tokio::sync::Mutex<Option<Opened>>;
@@ -277,9 +283,10 @@ impl Host {
         let listener = Listener::bind(p)?;
         private_file(&p.endpoint_file(), listener.path())?;
         private_file(&p.token(), &token)?;
-        let connections = Connections::open(&p.data.join("connections.json"), cfg.vault.clone())?;
+        let file = p.data.join("connections.json");
+        let connections = Connections::open(&file, cfg.vault.clone(), cfg.chatgpt.clone())?;
         let agents = Agents::new(
-            connections,
+            Arc::new(connections),
             p,
             cfg.home.clone(),
             cfg.scratch.clone(),
@@ -289,6 +296,7 @@ impl Host {
         );
         let st = Arc::new(State {
             agents: Arc::new(agents),
+            signins: Arc::default(),
             store: Store::start(journal, &p.journal())?,
             token,
             faults: Arc::new(faults),
@@ -410,6 +418,7 @@ impl Host {
         })
         .await;
         // What runs between runs: it ends, and lets its session go.
+        st.signins.end();
         st.agents.end().await;
         // The last answers and events reach whoever still reads.
         st.over.send_replace(true);
@@ -1403,10 +1412,20 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             Ok(json!({ "connection": id }))
         }
         Call::ConnectionRemove { connection } => {
-            let a = st.agents.clone();
-            blocking(move || a.connections.remove(&connection)).await??;
-            Ok(json!({}))
+            // To its end, also when who asked is gone.
+            let leave = tokio::spawn(st.agents.connections.clone().leave(connection));
+            let ended = leave.await.map_err(|e| internal(e.to_string()))??;
+            Ok(ended.map_or_else(|| json!({}), |e| json!({ "ended": e })))
         }
+        Call::SigninBegin { connection } => {
+            let c = st.agents.connections.clone();
+            let (signin, url) = st.signins.begin(c, connection).await?;
+            Ok(json!({ "signin": signin, "url": url }))
+        }
+        Call::SigninState { signin } => {
+            serde_json::to_value(st.signins.state(&signin)?).map_err(|e| internal(e.to_string()))
+        }
+        Call::SigninCancel { signin } => st.signins.cancel(&signin).map(|()| json!({})),
         Call::Models { connection } => {
             let a = st.agents.clone();
             let client = blocking(move || a.connections.client(&connection)).await??;
@@ -1420,9 +1439,12 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let all: Vec<_> = all
                 .into_iter()
                 .map(|m| {
-                    let mut id = m.id;
+                    let (mut id, mut name) = (m.id, m.name);
                     limits::clip(&mut id, limits::TITLE);
-                    axiom_proto::ModelInfo { context: quirks(&id).context, name: None, id }
+                    if let Some(n) = &mut name {
+                        limits::clip(n, limits::TITLE);
+                    }
+                    axiom_proto::ModelInfo { context: quirks(&id).context, name, id }
                 })
                 .collect();
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))

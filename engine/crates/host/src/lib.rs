@@ -17,10 +17,12 @@ mod net;
 mod outbox;
 pub mod paths;
 mod peers;
+mod plan;
 mod replay;
 mod server;
 mod session;
 pub mod signal;
+mod signin;
 mod store;
 pub mod vault;
 

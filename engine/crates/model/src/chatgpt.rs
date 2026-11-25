@@ -158,6 +158,16 @@ fn random(bytes: usize) -> Result<String, Failed> {
     Ok(base64url(&b))
 }
 
+/// A name for an installation: random, and nothing else.
+pub fn installation() -> Result<String, Failed> {
+    let mut b = [0u8; 16];
+    SystemRandom::new().fill(&mut b).map_err(|_| Failed::Setup("no randomness".into()))?;
+    (b[6], b[8]) = (b[6] & 0x0f | 0x40, b[8] & 0x3f | 0x80);
+    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let part = [&hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..]];
+    Ok(format!("urn:uuid:{}", part.join("-")))
+}
+
 impl Attempt {
     /// `host` names this installation, always the same; `port` is where the browser comes back to on
     /// this machine.
