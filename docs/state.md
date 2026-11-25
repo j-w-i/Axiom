@@ -37,6 +37,9 @@ The real window has not been opened since the owner asked for none (K8); frame t
 ## The design spec (`design/spec-fable.md`)
 Steps 1–16 are done on `design/fable-spec`; the owner chose B for D1, D3, D4 and D5 (2026-11-25). D2 stays as it is: step 17 is not built, and in `workbench-dark` it would have changed nothing (no run there is over four calls). One departure: at a ChatGPT plan's limit "Manage usage" is the primary key, as OpenAI's own page for whoever uses a plan asks; the spec says never. Eleven goldens were recorded again with the owner's yes (2026-11-25). From steps 3 and 4: `controls-*` (the empty box, step 4), `workbench-*` and `execution-dark` ("Deny" is 2 px further left, step 3; with it seven pixels of one letter in the sidebar's "web-store" in the wider ones, which come and go with where "Deny" stands and with nothing else). From steps 13 to 15: the subject of a request in `ink1`, the fill of the selected row and tab, the outline of a disabled key (`status-*` too, for its selected row).
 
+## The look, round 12 (`design/flat`)
+Built 2026-11-25 on the owner's yes to pictures (`design/system.md`, history). Not merged. The fifteen goldens are of the round before and fail; they are recorded again only when the owner has seen the app's own pictures (`app/build/shots`). In the pictures and not in the app, because the host has nothing for it: a plan, levels of use per service in the header, a terminal, renaming and removing sessions. The folder window (`file_selector`, by the Flutter team, BSD: a person had to type a whole path) has been opened by nobody. `spec-fable.md` is older than this and describes what was before.
+
 ## Next
 1. Owner: say whether a real window may be opened once, when convenient, to check chrome and frame times.
 2. Owner: say whether the real Claude Code or Codex on this computer may be started once, to see a delegated agent work (K40).
