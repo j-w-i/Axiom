@@ -400,6 +400,14 @@ void main() {
 
   testWidgets('a question is answered once, with what it showed', (t) async {
     final s = await shell(t, session: working(asks: true));
+    s.known = const [ModelInfo('claude-opus-5-5', name: 'Claude Opus 5.5')];
+    await t.runAsync(() => s.models('c1'));
+    s.calls.clear();
+    await settled(t);
+    expect(
+      find.descendant(of: find.byType(AgentRow), matching: find.textContaining('Claude Opus 5.5')),
+      findsOneWidget,
+    );
     expect(find.byType(RequestBar), findsOneWidget);
     expect(find.text('1 more waiting'), findsOneWidget);
     expect(find.text('cargo test'), findsWidgets);

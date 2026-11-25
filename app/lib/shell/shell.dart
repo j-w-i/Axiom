@@ -365,6 +365,16 @@ ActivityView? _activity(AgentModel a, HostStore s) {
 AgentState stateOf(AgentModel a) =>
     a.ended == Outcome.failed ? AgentState.failed : phaseOf(a.phase);
 
+/// What its model is called, where the host has said so.
+String? _modelName(Execution x, HostStore s) {
+  final id = x.model, on = x.connection;
+  if (id == null || on == null) return id;
+  for (final m in s.modelsOf(on) ?? const <ModelInfo>[]) {
+    if (m.id == id) return m.name ?? id;
+  }
+  return id;
+}
+
 AgentView viewOf(AgentModel a, HostStore s) {
   return AgentView(
     id: a.id,
@@ -372,7 +382,7 @@ AgentView viewOf(AgentModel a, HostStore s) {
     state: stateOf(a),
     // What chooses its model itself is named instead.
     model: oneLine(
-      a.execution.model ??
+      _modelName(a.execution, s) ??
           (a.execution.harness == 'axiom' ? '' : s.harnessName(a.execution.harness)),
       60,
     ),
