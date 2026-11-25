@@ -2,6 +2,7 @@ import 'package:axiom/host/host_store.dart';
 import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:axiom/shell/shell.dart';
+import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -28,6 +29,13 @@ SessionModel recorded({String agent = 'Builder'}) {
     e(const ItemStarted('j', 'r', 'a', ItemKind.prose, '', null)),
     e(const ItemDelta('j', 'The check happens **before** the lock is held, so `rotate()` runs tw')),
   ]);
+}
+
+class Opens extends HostStore {
+  Opens(this.opened) : super(paths: HostPaths('/nonexistent'), binary: null, spawn: false);
+  final List<String> opened;
+  @override
+  Future<void> open(String id) async => opened.add(id);
 }
 
 HostStore store() => HostStore(paths: HostPaths('/nonexistent'), binary: null, spawn: false);
@@ -179,6 +187,65 @@ void main() {
     ];
     expect(changes.length, lessThanOrEqualTo(40 ~/ 14 * 2));
     expect(changes.first, greaterThan(10), reason: '$xs');
+    s.dispose();
+  });
+
+  testWidgets('in a narrow window the list is behind a key', (t) async {
+    final opened = <String>[];
+    final s = Opens(opened)
+      ..phase = HostPhase.connected
+      ..current = recorded()
+      ..sessions = [
+        SessionInfo.decode(const {
+          'id': 'o',
+          'title': 'Other work',
+          'created': 1,
+          'updated': 1,
+          'last_seq': 1,
+          'running': false,
+        }),
+      ];
+    await mount(t, Shell(s, titleInset: 58), size: const Size(760, 520));
+    expect(find.bySemanticsLabel('Sessions'), findsOneWidget);
+    expect(find.text('Other work'), findsNothing);
+    expect(t.getRect(find.byType(TranscriptView)).left, lessThan(10));
+    expect(find.bySemanticsLabel('New session'), findsOneWidget);
+    expect(find.bySemanticsLabel('Accounts and servers'), findsOneWidget);
+    await snap(t, 'shell-narrow');
+    await t.sendKeyEvent(LogicalKeyboardKey.tab);
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.pumpAndSettle();
+    expect(find.text('Double token rotation'), findsOneWidget);
+    expect(find.text('Other work'), findsOneWidget);
+    expect(t.takeException(), isNull);
+    await snap(t, 'shell-narrow-open');
+    // Escape gives the keyboard back to where it was.
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await t.pumpAndSettle();
+    expect(find.text('Other work'), findsNothing);
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.pumpAndSettle();
+    await t.tap(find.text('Other work'));
+    await t.pumpAndSettle();
+    expect(opened, ['o']);
+    expect(find.text('Other work'), findsNothing);
+    // What waits is in sight without the list.
+    s
+      ..needs = const [
+        Waits('s', 'Double token rotation', 'a', 'Builder', 'q', 'asks to run a command', 'ls', 1),
+        Waits('o', 'Other work', 'b', 'Ada', 'q2', 'asks to write a file', 'a.txt', 2),
+      ]
+      ..notifyListeners();
+    await t.pump();
+    expect(find.text('2 asking'), findsOneWidget);
+    expect(find.bySemanticsLabel('2 asking, open the first'), findsOneWidget);
+    // Wider, the list is beside it again, at 224 and at 264.
+    for (final (width, left) in [(860.0, 224.0), (1079.0, 224.0), (1080.0, 264.0)]) {
+      await mount(t, Shell(s, titleInset: 58), size: Size(width, 520));
+      expect(find.bySemanticsLabel('Sessions'), findsNothing);
+      expect(find.text('Other work'), findsWidgets);
+      expect(t.getRect(find.byType(TranscriptView)).left, closeTo(left, 2));
+    }
     s.dispose();
   });
 

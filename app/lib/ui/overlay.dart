@@ -19,11 +19,12 @@ class AxPopover extends StatefulWidget {
     required this.panel,
     super.key,
     this.width,
+    this.maxHeight,
     this.alignEnd = false,
   });
   final Widget Function(BuildContext, bool open, VoidCallback toggle) anchor;
   final Widget Function(BuildContext, VoidCallback close) panel;
-  final double? width;
+  final double? width, maxHeight;
   final bool alignEnd;
   @override
   State<AxPopover> createState() => AxPopoverState();
@@ -94,6 +95,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
                   constraints: BoxConstraints(
                     minWidth: widget.width ?? _at.width,
                     maxWidth: widget.width ?? (_at.width > 360 ? _at.width : 360),
+                    maxHeight: widget.maxHeight ?? double.infinity,
                   ),
                   child: Surface(
                     Ax.of(context).colors.overlay,
