@@ -74,7 +74,9 @@ class _TalkState extends State<Talk> {
   /// The models of the account, if they have not been asked for.
   void _look() {
     final c = widget.agent.execution.connection;
-    if (c == null || widget.store.modelsOf(c) != null) return;
+    // A program's account lists nothing.
+    if (c == null || widget.agent.execution.harness != 'axiom') return;
+    if (widget.store.modelsOf(c) != null) return;
     unawaited(_do(() => widget.store.models(c)));
   }
 
@@ -99,7 +101,11 @@ class _TalkState extends State<Talk> {
       harness: x.harness,
       provider: provider ?? x.provider,
       model: model ?? x.model,
-      connection: connection ?? x.connection,
+      connection: connection == null
+          ? x.connection
+          : connection.isEmpty
+          ? null
+          : connection,
       effort: x.effort,
       environment: x.environment,
     );
@@ -146,18 +152,25 @@ class _TalkState extends State<Talk> {
           if (other) const AxMenuItem('', 'Its own sign-in'),
           if (connection == null && x.connection != null)
             AxMenuItem(x.connection!, 'Removed', enabled: false, why: 'add it again'),
-          for (final c in other ? const <Connection>[] : s.connections)
+          for (final c in other ? s.accountsOf(x.harness) : s.own)
             AxMenuItem(
               c.id,
               oneLine(c.name, 60),
               detail: providerName(c.provider),
               mark: markOf(c.provider, null),
-              enabled: c.provider == x.provider,
-              why: c.provider == x.provider ? null : 'another provider: choose its model first',
+              enabled: other || c.provider == x.provider,
+              why: other || c.provider == x.provider
+                  ? null
+                  : 'another provider: choose its model first',
             ),
         ],
         x.connection ?? '',
         (v) => set(execution: with_(connection: v)),
+        // What was said stays with the account it was said on.
+        cost: (_) => !other || a.items.isEmpty
+            ? null
+            : 'The other account does not know this conversation: it begins anew there. Nothing is '
+                  'sent from one account to the other.',
       ),
       ExecutionChoice(
         'Access',

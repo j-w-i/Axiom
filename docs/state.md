@@ -1,12 +1,12 @@
 # State (handover)
 
-Updated 2026-11-25. M1 is merged (j-w-i/Axiom#14). Branch `m2/native-engine`, pull request j-w-i/Axiom#15 into `main`.
+Updated 2026-11-25. M1 is merged (j-w-i/Axiom#14). M2 so far is merged (j-w-i/Axiom#15). Branch `m3/accounts`.
 
 ## Where things stand
 - **M0**: done except the owner's reading of decisions 0006 (Google plans via Antigravity; Gemini CLI's consumer tier has ended) and 0007 (subscription lanes; written confirmation from Anthropic before launch).
 - **M1**: merged. What its exit still needs a real window for is K1, K2 and K8.
 - **M2**: agents run. Policy, spawn with a sandbox, ten tools (read, write, edit, patch, list, glob, search, shell, job, fetch), codecs for Anthropic, OpenAI (Responses and Chat), Gemini and OpenRouter, the loop with compaction, approvals, accounts, CLI and app. A correctness review is filed with what became of each finding (`reviews/2026-11-25-m2-correctness.md`). Left of it: seccomp on Linux, branching, Bedrock. **The independent security review has not been done** (K32).
-- **M3**: begun. `axiom-harness` drives Claude Code, Codex and ACP agents; host and app set them up, ask before each start, show and journal what they do. No real one has been started (K40). Left: MCP for them, several accounts of one service, Copilot.
+- **M3**: begun. `axiom-harness` drives Claude Code, Codex and ACP agents; host and app set them up, ask before each start, show and journal what they do. No real one has been started (K40). Claude Code can have several accounts, each in a folder of its own where a person signs in themselves (K44). Left: MCP for them, Copilot.
 - **M5**: begun. Several agents in a session, of any harness, added in the app; an agent gives others work with the tool `agent` (list, tell, wait, read), and a person is asked whenever that would widen what it may. Left: a worktree for each writer, conflicts, task graphs.
 - **M4**: what has been changed in a folder is shown (git in the sandbox, not on Windows). Nothing else.
 - **M6, M7**: nothing but `scripts/package.sh`.

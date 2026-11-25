@@ -36,6 +36,7 @@
 | K33 | Linux: a protected name that does not exist yet can be made by a command; it is told to the person afterwards. No seccomp filter yet | M2 |
 | K34 | macOS: a process that closes every file it got, loses its parent and leaves its group between two looks outlives its command. It stays contained | accepted |
 | K40 | Delegated agents (Claude Code, Codex, ACP) have been driven by scripted programs only: no real one has been started. Claude Code can only look or work, not ask first, because the switch for asking is not in its documentation | the owner's yes |
+| K44 | Several accounts of one program: Claude Code only, whose documentation says that logins are kept apart by folder. Codex documents `CODEX_HOME`, but not whether it parts what is in the system's store. Not tried with a real login | the owner's yes |
 | K41 | A delegated agent is not told Axiom's tools (no MCP yet), so it can be given work but not give any | M3 |
 | K42 | Windows: programs installed as `.cmd` are not found, the environment a harness gets is too small, and process tests do not run there | M3 |
 | K43 | Fetching a page is one request for one address that a person is asked about; commands still have no network at all | accepted until the proxy, M4 |

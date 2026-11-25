@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../host/host_store.dart';
@@ -34,6 +35,7 @@ ServiceMark? markOf(String? provider, String? model, [String? harness]) =>
     } ??
     switch (provider) {
       'anthropic' => ServiceMark.claude,
+      'claude-code' => ServiceMark.claudecode,
       'openai' => ServiceMark.openai,
       'gemini' => ServiceMark.gemini,
       'openrouter' => ServiceMark.openrouter,
@@ -162,6 +164,9 @@ class StartDraft extends ChangeNotifier {
   /// The folder's own settings for that may take effect.
   bool trust = false;
 
+  /// Of a program: another account than its first.
+  String? account;
+
   HarnessInfo? get delegated =>
       harness == 'axiom' ? null : store.harnesses.where((h) => h.id == harness).firstOrNull;
 
@@ -169,6 +174,7 @@ class StartDraft extends ChangeNotifier {
     harness = id;
     problem = null;
     trust = false;
+    account = null;
     typed = false;
     model.clear();
     final can = delegated?.access ?? Access.values;
@@ -260,7 +266,7 @@ class StartDraft extends ChangeNotifier {
         harness: harness,
         provider: other ? null : c!.provider,
         model: written.isEmpty ? null : written,
-        connection: other ? null : c!.id,
+        connection: other ? account : c!.id,
       );
       final followed = [
         for (final w in words)
@@ -365,7 +371,7 @@ class _StartPageState extends State<StartPage> {
     builder: (context, _) {
       final s = d.store;
       final t = Ax.of(context), c = t.colors;
-      final all = s.connections;
+      final all = s.own;
       final chosen = all.where((x) => x.id == d.connection).firstOrNull ?? all.firstOrNull;
       if (chosen != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) => d.ask(chosen.id));
@@ -522,7 +528,21 @@ class _StartPageState extends State<StartPage> {
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: [runsWith, if (d.harness != 'axiom') accessSelect],
+                children: [
+                  runsWith,
+                  if (s.accountsOf(d.harness).isNotEmpty)
+                    AxSelect<String>(
+                      label: 'Account',
+                      items: [
+                        const AxMenuItem('', 'Its own sign-in'),
+                        for (final x in s.accountsOf(d.harness))
+                          AxMenuItem(x.id, oneLine(x.name, 60), mark: markOf(x.provider, null)),
+                      ],
+                      value: d.account ?? '',
+                      onChanged: (v) => d.change(() => d.account = v.isEmpty ? null : v),
+                    ),
+                  if (d.harness != 'axiom') accessSelect,
+                ],
               ),
             ),
           if (d.harness != 'axiom') ...[
@@ -656,6 +676,7 @@ String providerName(String p) => switch (p) {
   'openai' => 'OpenAI API',
   'gemini' => 'Gemini API',
   'openrouter' => 'OpenRouter',
+  'claude-code' => 'Claude Code, another account',
   'lm-studio' => 'LM Studio on this machine',
   'openai-compatible' => 'OpenAI-compatible server',
   _ => oneLine(p, 40),
@@ -735,6 +756,11 @@ class _AccountsPageState extends State<AccountsPage> {
     builder: (context, _) {
       final t = Ax.of(context), c = t.colors;
       final own = _provider == 'openai-compatible', from = _keyFrom(_provider);
+      final programs = [
+        for (final h in widget.store.harnesses)
+          if (h.program != null && h.accounts != null) h.accounts!,
+      ];
+      final program = programs.contains(_provider);
       final ready =
           !_busy &&
           _name.text.trim().isNotEmpty &&
@@ -744,7 +770,7 @@ class _AccountsPageState extends State<AccountsPage> {
         title: 'Accounts and servers',
         problem: _problem,
         children: [
-          for (final x in widget.store.connections)
+          for (final x in widget.store.connections) ...[
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
@@ -769,6 +795,7 @@ class _AccountsPageState extends State<AccountsPage> {
                             providerName(x.provider),
                             if (x.url case final u?) oneLine(u, 60),
                             switch (x) {
+                              Connection(signIn: _?) => 'its own sign-in',
                               Connection(lasts: true) => 'key in the system\'s store',
                               Connection(secret: true) => 'key until the host stops',
                               _ => 'no key',
@@ -810,6 +837,12 @@ class _AccountsPageState extends State<AccountsPage> {
                 ],
               ),
             ),
+            if (x.signIn case final command?)
+              Padding(
+                padding: const EdgeInsets.only(left: 24, bottom: 12),
+                child: _SignIn(command, leaving: _leaving == x.id),
+              ),
+          ],
           if (widget.store.connections.isNotEmpty) const SizedBox(height: 18),
           FormPart(
             null,
@@ -825,7 +858,7 @@ class _AccountsPageState extends State<AccountsPage> {
                     'gemini',
                     'openrouter',
                     'openai-compatible',
-                  ])
+                  ].followedBy(programs))
                     AxMenuItem(p, providerName(p), mark: markOf(p, null)),
                 ],
                 value: _provider,
@@ -856,7 +889,17 @@ class _AccountsPageState extends State<AccountsPage> {
                 placeholder: 'https://example.com/v1',
               ),
             ),
-          if (_provider != 'lm-studio')
+          if (program)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(
+                'Your own Claude Code keeps it in a folder of its own. You sign in to it yourself, in '
+                'a terminal, with the command that is shown once it is added. Agents use an account '
+                'only where you choose it.',
+                style: t.type.label.ink(c.ink3),
+              ),
+            ),
+          if (_provider != 'lm-studio' && !program)
             FormPart(
               'Key',
               note: from != null
@@ -880,4 +923,64 @@ class _AccountsPageState extends State<AccountsPage> {
       );
     },
   );
+}
+
+/// How an account of a program is signed in to: by its person, in their own terminal.
+class _SignIn extends StatefulWidget {
+  const _SignIn(this.command, {required this.leaving});
+  final String command;
+
+  /// It is about to be removed here.
+  final bool leaving;
+  @override
+  State<_SignIn> createState() => _SignInState();
+}
+
+class _SignInState extends State<_SignIn> {
+  bool _copied = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Surface(
+                c.block,
+                radius: AxRadius.key,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  child: Text(
+                    // Whole: it is what its person is about to run.
+                    literal(widget.command),
+                    style: t.type.codeSmall.ink(c.ink2),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            AxButton(
+              label: _copied ? 'Copied' : 'Copy to sign in',
+              tone: AxTone.quiet,
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: widget.command));
+                if (mounted) setState(() => _copied = true);
+              },
+            ),
+          ],
+        ),
+        if (widget.leaving)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Removing it here does not sign it out, and leaves its folder.',
+              style: t.type.small.ink(c.ink3),
+            ),
+          ),
+      ],
+    );
+  }
 }

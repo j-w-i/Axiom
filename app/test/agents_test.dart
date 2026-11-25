@@ -60,6 +60,7 @@ class Asked extends HostStore {
     session,
     name,
     if (x.harness != 'axiom') (x.harness, trust) else x.connection,
+    if (x.harness != 'axiom' && x.connection != null) x.connection,
     x.model,
     access,
     for (final i in instructions) i.digest,
@@ -642,6 +643,7 @@ void main() {
       'Claude Code',
       program: '/usr/local/bin/claude',
       access: [Access.read, Access.work],
+      accounts: 'claude-code',
     ),
     HarnessInfo(
       'goose',
@@ -677,6 +679,97 @@ void main() {
       ['add', 's_new', 'Lead', ('claude', false), null, Access.work],
       ['open', 's_new'],
       ['prompt', 's_new', 'a_new', 'Do it.'],
+    ]);
+  });
+
+  const work = Connection(
+    'c9',
+    'Work',
+    'claude-code',
+    signIn: "CLAUDE_CONFIG_DIR='/data/accounts/c9' claude auth login",
+  );
+
+  testWidgets('a program can have several accounts', (t) async {
+    final s = await shell(t);
+    s.harnesses = harnesses;
+    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Add: LM Studio on this machine'));
+    await press(t, find.bySemanticsLabel('Claude Code, another account').last);
+    expect(field('Key'), findsNothing, reason: 'it signs in by itself');
+    await t.enterText(field('Name'), 'Work');
+    await settled(t);
+    s.calls.clear();
+    await press(t, find.widgetWithText(AxButton, 'Add'));
+    expect(s.calls, [
+      ['connect', 'Work', 'claude-code', null, null],
+    ]);
+    s.connections = [key, work];
+    s.notifyListeners();
+    await settled(t);
+    expect(find.text(work.signIn!), findsOneWidget);
+    String? copied;
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (m) async {
+      if (m.method == 'Clipboard.setData') copied = (m.arguments as Map)['text'] as String;
+      return null;
+    });
+    await press(t, find.text('Copy to sign in'));
+    expect(copied, work.signIn);
+    expect(find.text('Copied'), findsOneWidget);
+    await snap(t, 'accounts-program');
+    await press(t, find.widgetWithText(AxButton, 'Remove').last);
+    expect(find.textContaining('does not sign it out'), findsOneWidget);
+    await press(t, find.text('Keep'));
+    // It is one to choose for its program, and not for Axiom's own loop.
+    await press(t, find.bySemanticsLabel('New session').first);
+    await press(t, find.bySemanticsLabel('Account: Mine'));
+    expect(find.bySemanticsLabel('Work'), findsNothing);
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settled(t);
+    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    await press(t, find.bySemanticsLabel('Goose').last);
+    expect(find.byType(AxSelect<String>), findsOneWidget, reason: 'it has one account');
+    await press(t, find.bySemanticsLabel('Runs with: Goose'));
+    await press(t, find.bySemanticsLabel('Claude Code').last);
+    await press(t, find.bySemanticsLabel('Account: Its own sign-in'));
+    await press(t, find.bySemanticsLabel('Work').last);
+    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Folder'), '/w');
+    await settled(t);
+    s.calls.clear();
+    await press(t, find.text('Start'));
+    expect(s.calls.where((c) => c.first == 'add').single, [
+      'add',
+      's_new',
+      'Lead',
+      ('claude', false),
+      'c9',
+      null,
+      Access.read,
+    ]);
+  });
+
+  testWidgets('changing a program\'s account says what that means', (t) async {
+    final s = await shell(t, session: working());
+    s
+      ..harnesses = harnesses
+      ..connections = [key, work];
+    const was = Execution(harness: 'claude', connection: 'c9');
+    s.current!.apply([
+      const Event(91, 91, AgentStateChanged('a', AgentPhase.done)),
+      const Event(92, 92, AgentChanged('a', was, Access.read)),
+    ]);
+    s.notifyListeners();
+    await settled(t);
+    await t.tap(find.byType(ExecutionKey));
+    await settled(t);
+    expect(s.calls, isEmpty, reason: 'it lists no models');
+    await press(t, find.bySemanticsLabel('Account: Work'));
+    await press(t, find.bySemanticsLabel('Its own sign-in').last);
+    expect(find.textContaining('begins anew there'), findsOneWidget);
+    await t.pump(AxMotion.settle);
+    await press(t, find.text('Change to Its own sign-in'));
+    expect(s.calls, [
+      ['set', 's', 'a', null, null, null],
     ]);
   });
 

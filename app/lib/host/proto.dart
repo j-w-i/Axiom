@@ -63,6 +63,7 @@ class Connection {
     this.url,
     this.secret = false,
     this.lasts = false,
+    this.signIn,
   });
   Connection.decode(Json j)
     : id = j['id']! as String,
@@ -70,7 +71,11 @@ class Connection {
       provider = j['provider']! as String,
       url = j['url'] as String?,
       secret = j['secret'] as bool? ?? false,
-      lasts = j['lasts'] as bool? ?? false;
+      lasts = j['lasts'] as bool? ?? false,
+      signIn = j['sign_in'] as String?;
+
+  /// Of an account of a program of the person's own: the command they sign in with, in a terminal.
+  final String? signIn;
   final String id, name, provider;
   final String? url;
 
@@ -130,6 +135,7 @@ class HarnessInfo {
     this.problem,
     this.needsTrust = false,
     this.access = const [],
+    this.accounts,
   });
   HarnessInfo.decode(Json j)
     : id = j['id']! as String,
@@ -137,6 +143,7 @@ class HarnessInfo {
       program = j['program'] as String?,
       problem = j['problem'] as String?,
       needsTrust = j['needs_trust'] as bool? ?? true,
+      accounts = j['accounts'] as String?,
       access = [
         for (final a in j['access'] as List<Object?>? ?? const [])
           _enum(Access.values, a, Access.unknown),
@@ -145,6 +152,9 @@ class HarnessInfo {
 
   /// Null if it is not there or may not be started; then [problem] says why.
   final String? program, problem;
+
+  /// What an account of it beside the first is called as a provider, if there can be any.
+  final String? accounts;
 
   /// It cannot be told to ignore a folder's own settings for it.
   final bool needsTrust;

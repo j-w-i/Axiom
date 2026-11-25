@@ -268,6 +268,21 @@ class HostStore extends ChangeNotifier {
   Future<Changes> changes(String session) async =>
       Changes.decode((await _live.call('workspace.changes', {'session': session}))! as Json);
 
+  /// Accounts that Axiom's own loop can use: not those of programs.
+  List<Connection> get own => [
+    for (final c in connections)
+      if (c.signIn == null) c,
+  ];
+
+  /// Accounts of a program, beside its first.
+  List<Connection> accountsOf(String harness) {
+    final p = harnesses.where((h) => h.id == harness).firstOrNull?.accounts;
+    return [
+      for (final c in connections)
+        if (p != null && c.provider == p) c,
+    ];
+  }
+
   /// As a person knows it.
   String harnessName(String id) =>
       id == 'axiom' ? 'Axiom' : harnesses.where((h) => h.id == id).firstOrNull?.name ?? id;

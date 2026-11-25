@@ -71,7 +71,7 @@ DELEGATE-TO-HARNESS, medium.** Ask Anthropic (sales contact on the legal page) b
 4. Warn users: `-p`/SDK traffic has been measured draining the 5-hour window ~1.3–1.8× faster than the TUI
    (claude-code #97074, 2026-09-25; #107106, 2026-11-04; **no Anthropic reply found**) [N,U].
 5. Scrub inherited `ANTHROPIC_API_KEY`/`AUTH_TOKEN` from the child env when the user chose "subscription" (it silently wins in `-p`).
-6. No multi-account rotation. A separate work profile via `CLAUDE_CONFIG_DIR` is documented and fine.
+6. No multi-account rotation. A separate profile via `CLAUDE_CONFIG_DIR` is documented and fine: one folder per account, each with its own login; on macOS the Keychain entry is keyed to the folder too (code.claude.com/docs/en/authentication, read 2026-11-25). Two *Console* sign-ins without a key are not kept apart by it. `CODEX_HOME`: where `auth.json` is; nothing found on whether keyring entries depend on it.
 7. Say "runs your installed Claude Code" in plain text; agent label "Claude"/"Claude Agent"; no Anthropic logos.
 
 **Usage reporting through supported interfaces**: stream-json `rate_limit_event` (`status, resetsAt, utilization, errorCode,
