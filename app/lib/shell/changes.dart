@@ -101,25 +101,30 @@ class _ChangesViewState extends State<ChangesView> {
           padding: const EdgeInsets.fromLTRB(24, 10, 18, 8),
           child: Row(
             children: [
-              if (all?.branch case final b?) ...[
-                AxGlyph(AxIcon.branch, size: 13, color: c.ink3),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: Text(
-                    oneLine(literal(b), 80),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.type.label.ink(c.ink2),
-                  ),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (all?.branch case final b?) ...[
+                      AxGlyph(AxIcon.branch, size: 13, color: c.ink3),
+                      const SizedBox(width: 7),
+                      Flexible(
+                        child: Text(
+                          oneLine(literal(b), 80),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.type.label.ink(c.ink2),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                    ],
+                    if (_files.isNotEmpty)
+                      Text(
+                        '${_files.length} ${_files.length == 1 ? 'file' : 'files'}',
+                        style: t.type.label.ink(c.ink3),
+                      ),
+                  ],
                 ),
-                const SizedBox(width: 14),
-              ],
-              if (_files.isNotEmpty)
-                Text(
-                  '${_files.length} ${_files.length == 1 ? 'file' : 'files'}',
-                  style: t.type.label.ink(c.ink3),
-                ),
-              const Spacer(),
+              ),
               AxButton(
                 label: _looking ? 'Looking' : 'Look again',
                 tone: AxTone.quiet,
@@ -187,21 +192,28 @@ class _ChangesViewState extends State<ChangesView> {
               children: [
                 AxGlyph(open ? AxIcon.down : AxIcon.right, size: 9, color: c.ink4),
                 const SizedBox(width: 9),
-                Flexible(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.type.codeSmall.ink(s.hovered ? c.ink1 : c.ink2),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.type.codeSmall.ink(s.hovered ? c.ink1 : c.ink2),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      if (file.what != 'changed')
+                        Text(
+                          file.what,
+                          style: t.type.small.ink(
+                            file.what == 'conflict' ? c.attentionText : c.ink3,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                if (file.what != 'changed')
-                  Text(
-                    file.what,
-                    style: t.type.small.ink(file.what == 'conflict' ? c.attentionText : c.ink3),
-                  ),
-                const Spacer(),
                 if (add > 0) Text('+$add', style: t.type.small.ink(c.doneText)),
                 if (remove > 0) ...[
                   const SizedBox(width: 8),
