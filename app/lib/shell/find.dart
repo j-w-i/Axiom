@@ -146,7 +146,7 @@ class _SearchBoxState extends State<SearchBox> {
                               placeholder: 'Search sessions and actions',
                               controller: _words,
                               focusNode: _focus,
-                              leading: AxGlyph(AxIcon.search, size: 14, color: c.ink3),
+                              leading: AxGlyph(AxIcon.search, color: c.ink3),
                             ),
                             const SizedBox(height: 6),
                             if (shown.isEmpty)
@@ -213,7 +213,7 @@ class _SearchBoxState extends State<SearchBox> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: f.mark == null
-                      ? AxGlyph(f.icon ?? AxIcon.comment, size: 15, color: c.ink3)
+                      ? AxGlyph(f.icon ?? AxIcon.chat, color: c.ink3)
                       : AxServiceMark(f.mark!, size: 14),
                 ),
               ),

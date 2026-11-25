@@ -1,23 +1,27 @@
 import 'package:flutter/widgets.dart';
 
 import '../patterns/agent_bar.dart';
+import '../patterns/beside.dart';
 import '../patterns/composer.dart';
 import '../patterns/context_gauge.dart';
 import '../patterns/execution.dart';
+import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/transcript_view.dart';
 import '../patterns/usage.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
+import '../ui/marks.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'specimen.dart' as s;
 
 /// The components at work together, on specimen content. It proves the system, not the product.
 class Workbench extends StatefulWidget {
-  const Workbench({super.key, this.titleInset = 78});
+  const Workbench({super.key, this.titleInset = 78, this.panel = true, this.terminal = false});
   final double titleInset;
+  final bool panel, terminal;
   @override
   State<Workbench> createState() => _WorkbenchState();
 }
@@ -25,7 +29,9 @@ class Workbench extends StatefulWidget {
 class _WorkbenchState extends State<Workbench> {
   final _transcript = s.transcript();
   String _agent = 'builder';
-  int _tab = 0;
+  late bool _panel = widget.panel, _terminal = widget.terminal;
+  final _opened = <String>{};
+  var _sizes = Beside.usual;
   bool _request = true;
   final _choice = {
     'Harness': 'codex',
@@ -89,6 +95,8 @@ class _WorkbenchState extends State<Workbench> {
                       inset: widget.titleInset,
                       selected: _agent,
                       onSelect: (id) => setState(() => _agent = id),
+                      active: _active,
+                      onUse: (name, id) => setState(() => _active[name] = id),
                     ),
                   ),
                 ),
@@ -96,84 +104,29 @@ class _WorkbenchState extends State<Workbench> {
                 child: FocusTraversalGroup(
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(wide ? 0 : 8, 8, 8, 8),
-                    child: Surface(
-                      c.canvas,
-                      radius: AxRadius.canvas,
-                      child: ClipPath(
-                        clipper: const ContinuousClip(AxRadius.canvas),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            AgentBar(
-                              name: agent.name,
-                              state: agent.state,
-                              mark: mark,
-                              inset: wide ? 24 : widget.titleInset + 12,
-                              tabs: const [
-                                ('Conversation', null),
-                                ('Changes', '3'),
-                                ('Terminal', null),
-                              ],
-                              index: _tab,
-                              onTab: (i) => setState(() => _tab = i),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (box.maxWidth >= 1080)
-                                    for (final v in s.services)
-                                      Flexible(
-                                        child: UsageKey(
-                                          s.ServiceViewX(v).withActive(_active[v.name]!),
-                                          onUse: (id) => setState(() => _active[v.name] = id),
-                                          onLink: () {},
-                                        ),
-                                      ),
-                                  const SizedBox(width: 8),
-                                  Flexible(
-                                    child: AxButton(
-                                      label: 'Stop',
-                                      icon: AxIcon.stop,
-                                      onPressed: () {},
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  AxButton.icon(
-                                    AxIcon.panel,
-                                    label: 'Hide the panel',
-                                    tone: AxTone.quiet,
-                                    onPressed: () {},
-                                  ),
-                                ],
+                    child: AxCanvas(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _bar(agent, mark, wide: wide),
+                          Expanded(
+                            child: LayoutBuilder(
+                              builder: (context, room) => Beside(
+                                main: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(child: _talk(choices, agent.name, agent.id)),
+                                    if (_terminal) _drawer(context),
+                                  ],
+                                ),
+                                panel: _panel && Beside.fits(room.maxWidth) ? _side() : null,
+                                wide: _opened.isNotEmpty,
+                                sizes: _sizes,
+                                onSizes: (v) => setState(() => _sizes = v),
                               ),
                             ),
-                            Expanded(
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Expanded(child: _talk(choices, agent.name, agent.id)),
-                                  if (box.maxWidth >= 1180)
-                                    SidePanel(
-                                      groups: [
-                                        planGroup(context, s.session.tasks),
-                                        (
-                                          'Changed files',
-                                          const ChangedBy(57, 2),
-                                          [
-                                            for (final (path, a, r) in const [
-                                              ('src/auth/refresh.ts', 7, 2),
-                                              ('src/auth/inflight.ts', 31, 0),
-                                              ('test/refresh.test.ts', 19, 0),
-                                            ])
-                                              ChangedRow(path, added: a, removed: r, onOpen: () {}),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -182,6 +135,139 @@ class _WorkbenchState extends State<Workbench> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _bar(AgentView agent, ServiceMark? mark, {required bool wide}) => AgentBar(
+    name: agent.name,
+    state: agent.state,
+    mark: mark,
+    inset: wide ? 20 : widget.titleInset + 12,
+    trailing: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: AxButton(label: 'Stop', icon: AxIcon.stop, iconFilled: true, onPressed: () {}),
+        ),
+        const SizedBox(width: 6),
+        ChangesKey(
+          files: 3,
+          open: _panel,
+          figure: _panel ? null : const ChangedBy(57, 2),
+          onPressed: () => setState(() => _panel = !_panel),
+        ),
+      ],
+    ),
+  );
+
+  Widget _side() {
+    final t = Ax.of(context);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(6, 0, 14, 16),
+      children: [
+        PlanView(s.session.tasks),
+        const PanelHeading('3 changed files', ChangedBy(57, 2)),
+        for (final (i, (path, a, r)) in s.changed.indexed)
+          CardPart(
+            first: i == 0,
+            last: i == s.changed.length - 1,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: ChangedRow(
+                    path,
+                    added: a,
+                    removed: r,
+                    open: _opened.contains(path),
+                    onPressed: () => setState(
+                      () => _opened.contains(path) ? _opened.remove(path) : _opened.add(path),
+                    ),
+                  ),
+                ),
+                if (_opened.contains(path))
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(10, 0, 10, 10),
+                    child: DiffLines(s.diff),
+                  ),
+                if (i < s.changed.length - 1)
+                  const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Hairline()),
+              ],
+            ),
+          ),
+        const SizedBox(height: 6),
+        PanelGroup(
+          'Terminals',
+          AxButton.icon(
+            AxIcon.plus,
+            label: 'New terminal',
+            tone: AxTone.quiet,
+            size: 26,
+            onPressed: () {},
+          ),
+          [
+            PanelRow(
+              AxIcon.terminal,
+              'pnpm test auth',
+              state: 'running',
+              open: _terminal,
+              onPressed: () => setState(() => _terminal = !_terminal),
+            ),
+            PanelRow(AxIcon.terminal, 'pnpm dev', state: ':5173', onPressed: () {}),
+          ],
+          acts: true,
+        ),
+        SizedBox(height: t.density.row / 4),
+      ],
+    );
+  }
+
+  Widget _drawer(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 4, 12),
+      child: Surface(
+        c.block,
+        radius: AxRadius.card,
+        child: SizedBox(
+          height: 180,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 6, 6, 2),
+                child: Row(
+                  children: [
+                    AxGlyph(AxIcon.terminal, color: c.ink3),
+                    const SizedBox(width: 9),
+                    Expanded(child: Text('pnpm test auth', style: t.type.code.ink(c.ink1))),
+                    AxButton.icon(
+                      AxIcon.close,
+                      label: 'Close the terminal',
+                      tone: AxTone.quiet,
+                      size: 26,
+                      onPressed: () => setState(() => _terminal = false),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(14, 2, 14, 10),
+                  child: Text(
+                    '  PASS  src/auth/refresh.test.ts (6)\n'
+                    '  PASS  src/auth/inflight.test.ts (4)\n'
+                    '  Tests 10 passed\n\n'
+                    '  Waiting for file changes',
+                    style: t.type.code.ink(c.ink2),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -229,7 +315,15 @@ class _WorkbenchState extends State<Workbench> {
 }
 
 class _Side extends StatelessWidget {
-  const _Side({required this.inset, required this.selected, required this.onSelect});
+  const _Side({
+    required this.inset,
+    required this.selected,
+    required this.onSelect,
+    required this.active,
+    required this.onUse,
+  });
+  final Map<String, String> active;
+  final void Function(String service, String account) onUse;
   final double inset;
   final String selected;
   final ValueChanged<String> onSelect;
@@ -305,7 +399,26 @@ class _Side extends StatelessWidget {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
-          child: NavRow(AxIcon.settings, 'Accounts', keys: '⌘,', onPressed: () {}),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Limits are an account's, and stand with the accounts.
+              Row(
+                children: [
+                  for (final v in s.services)
+                    Flexible(
+                      child: UsageKey(
+                        s.ServiceViewX(v).withActive(active[v.name]!),
+                        onUse: (id) => onUse(v.name, id),
+                        onLink: () {},
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              NavRow(AxIcon.account, 'Accounts', keys: '⌘,', onPressed: () {}),
+            ],
+          ),
         ),
       ],
     );

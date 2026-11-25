@@ -27,7 +27,7 @@ class UsageKey extends StatelessWidget {
     final tight = known.firstOrNull ?? acc.windows.firstOrNull;
     return AxPopover(
       width: 312,
-      alignEnd: true,
+      alignEnd: false,
       anchor: (context, open, toggle) => Pressable(
         label: '${service.name} usage, ${acc.name}',
         expanded: open,
@@ -111,7 +111,7 @@ class UsageKey extends StatelessWidget {
                       width: 20,
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: AxGlyph(AxIcon.plus, size: 12, color: hue ?? c.ink3),
+                        child: AxGlyph(AxIcon.plus, color: hue ?? c.ink3),
                       ),
                     ),
                     Expanded(
@@ -165,7 +165,7 @@ class _Account extends StatelessWidget {
                 child: active
                     ? Align(
                         alignment: Alignment.centerLeft,
-                        child: AxGlyph(AxIcon.check, size: 13, color: hue ?? c.liveText),
+                        child: AxGlyph(AxIcon.check, color: hue ?? c.liveText),
                       )
                     : null,
               ),

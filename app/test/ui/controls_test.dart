@@ -941,13 +941,7 @@ void main() {
   });
 
   testWidgets('a plan says how far it is, and how each part stands', (t) async {
-    await put(
-      t,
-      SizedBox(
-        height: 500,
-        child: Builder(builder: (c) => SidePanel(groups: [planGroup(c, s.session.tasks)])),
-      ),
-    );
+    await put(t, SizedBox(height: 500, child: PlanView(s.session.tasks)));
     expect(find.byType(TaskRow), findsNWidgets(7));
     expect(find.text('4 of 7'), findsOneWidget);
     expect(find.bySemanticsLabel('Single-flight guard, active, Builder'), findsOneWidget);
@@ -973,7 +967,7 @@ void main() {
               RequestBar(s.request, onOnce: () {}, onAlways: () {}, onDeny: () {}),
               Wrap(
                 children: [
-                  AxButton(label: 'A longer label', icon: AxIcon.send, onPressed: () {}),
+                  AxButton(label: 'A longer label', icon: AxIcon.up, onPressed: () {}),
                   const AxKeycap('⌘K'),
                 ],
               ),

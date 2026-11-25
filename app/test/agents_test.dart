@@ -237,12 +237,17 @@ Future<void> settled(WidgetTester t) async {
 }
 
 void main() {
-  Future<Asked> shell(WidgetTester t, {SessionModel? session, bool accounts = true}) async {
+  Future<Asked> shell(
+    WidgetTester t, {
+    SessionModel? session,
+    bool accounts = true,
+    Size size = const Size(1100, 760),
+  }) async {
     final s = Asked()
       ..current = session
       ..connections = accounts ? const [key, Connection('c2', 'Here', 'lm-studio')] : const [];
     addTearDown(s.dispose);
-    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    await mount(t, Shell(s), size: size, dpr: 1);
     return s;
   }
 
@@ -1357,8 +1362,9 @@ void main() {
       diff: '--- lib/cache.dart\n+++ lib/cache.dart\n@@ -4,2 +4,2 @@\n a\n-old\n+$line\n',
     );
     s.now = now('fresh');
-    await t.tap(find.text('Changes').last);
+    await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
     await settled(t);
+    await press(t, find.bySemanticsLabel(RegExp('^lib/cache.dart')));
     await press(t, find.textContaining('fresh', findRichText: true));
     expect(
       find.byWidgetPredicate((w) => w is AxField && w.label == 'About line 5'),
@@ -1380,7 +1386,7 @@ void main() {
     await t.enterText(field('About the file'), 'and test it');
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     await settled(t);
-    await t.tap(find.text('Conversation').last);
+    await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
     await settled(t);
     final said = t
         .widgetList<EditableText>(find.byType(EditableText))
@@ -1426,17 +1432,18 @@ void main() {
       await settled(t);
       await t.tap(find.bySemanticsLabel(RegExp('^Zoe')).first);
       await settled(t);
-      await t.tap(find.text('Changes').last);
+      await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
       await settled(t);
       await t.tap(find.bySemanticsLabel('Accounts').first);
       await settled(t);
       s.calls.clear();
       await press(t, find.text('Lead asks to run a command'));
-      expect(s.calls, isEmpty, reason: 'it is open already');
+      expect(s.calls.where((c) => c.first == 'open'), isEmpty, reason: 'it is open already');
       expect(find.byType(AccountsPage), findsNothing);
       expect(find.text('Message Lead. Sent before its next step'), findsWidgets);
       expect(find.byType(RequestBar), findsOneWidget);
       // In another session: that is opened, and its agent is the one that is shown.
+      s.calls.clear();
       await press(t, find.text('Ada asks to write a file'));
       expect(s.calls, [
         ['open', 's2'],
@@ -1561,7 +1568,7 @@ void main() {
     ];
     const all = CopyChanges(made: true, files: files, ignored: 2, odd: 1);
     Future<Asked> shown(WidgetTester t, {CopyChanges copy = all}) async {
-      final s = await shell(t, session: working());
+      final s = await shell(t, session: working(), size: const Size(1179, 1200));
       s.copy = copy;
       s.current!.apply([
         const Event(90, 90, AgentStateChanged('a', AgentPhase.done)),
@@ -1570,7 +1577,7 @@ void main() {
       await settled(t);
       await t.tap(find.bySemanticsLabel(RegExp('^Ada')).first);
       await settled(t);
-      await t.tap(find.text('Changes').last);
+      await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
       await settled(t);
       return s;
     }
@@ -1689,7 +1696,7 @@ void main() {
       expect(find.textContaining('it is not sent yet'), findsOneWidget);
       expect(find.textContaining('out/x: something is in the way.'), findsOneWidget);
       expect(s.calls.where((c) => c.first == 'prompt'), isEmpty);
-      await t.tap(find.text('Conversation').last);
+      await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
       await settled(t);
       expect(find.text('The project has changed: both.txt.'), findsOneWidget);
     });
@@ -1805,7 +1812,7 @@ void main() {
       addTearDown(s.dispose);
       await mount(t, Shell(s), size: const Size(760, 520), dpr: 1, textScale: 2);
       await settled(t);
-      await press(t, find.text('Changes').last);
+      await press(t, find.bySemanticsLabel(RegExp('^Changes')).first);
       expect(t.takeException(), isNull);
       await press(t, find.text('Discard copy…'));
       expect(t.takeException(), isNull);
@@ -1854,10 +1861,10 @@ void main() {
           '--- (new)\n+++ new dir/é.txt\n@@ -0,0 +1 @@\n+fresh\n',
       whole: false,
     );
-    await t.tap(find.text('Changes').last);
+    await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
     await settled(t);
     expect(find.text('trunk'), findsOneWidget);
-    expect(find.text('4 files'), findsOneWidget);
+    expect(find.text('4 changed files'), findsOneWidget);
     for (final (file, what, add, remove) in [
       ('lib/cache.dart', 'changed', 1, 1),
       ('new dir/é.txt', 'new', 1, 0),
@@ -1870,6 +1877,11 @@ void main() {
         reason: file,
       );
     }
+    // What has changed in one is read where it is listed.
+    expect(find.textContaining('fresh', findRichText: true), findsNothing);
+    await press(t, find.bySemanticsLabel('gone.txt, removed, 0 added, 1 removed'));
+    await press(t, find.bySemanticsLabel('new dir/é.txt, new, 1 added, 0 removed'));
+    await press(t, find.bySemanticsLabel('lib/cache.dart, changed, 1 added, 1 removed'));
     for (final l in ['  final b;', 'fresh', 'was here', '-- old']) {
       expect(find.textContaining(l, findRichText: true), findsWidgets, reason: l);
     }
@@ -1894,7 +1906,7 @@ void main() {
     await t.tap(find.bySemanticsLabel('Refresh'));
     await settled(t);
     expect(find.text('there is no sandbox on this system'), findsOneWidget);
-    await t.tap(find.text('Conversation').last);
+    await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
     await settled(t);
     expect(find.textContaining('I will run the tests'), findsOneWidget);
   });
@@ -1980,33 +1992,103 @@ void main() {
       ..connections = const [key]
       ..now = const Changes(
         repository: true,
+        branch: 'trunk',
         files: [Changed('lib/a.dart', 'changed')],
         diff: '--- lib/a.dart\n+++ lib/a.dart\n@@ -1 +1,2 @@\n-old\n+fresh\n+more\n',
       );
     addTearDown(s.dispose);
     await mount(t, Shell(s), size: const Size(1280, 820), dpr: 2);
     await settled(t);
+    // It is there without being asked for, slim; what is in a file is read in it, and then it is wide.
     expect(s.calls, [
       ['changes', 's'],
     ]);
-    expect(find.text('Changed files'), findsOneWidget);
-    expect(find.bySemanticsLabel('lib/a.dart, 2 added, 1 removed'), findsOneWidget);
-    expect(find.bySemanticsLabel('Changes, 1'), findsOneWidget);
+    expect(find.bySemanticsLabel('Changes, 1 file'), findsOneWidget);
+    expect(find.text('1 changed file'), findsOneWidget);
+    expect(find.textContaining('fresh', findRichText: true), findsNothing);
     await snap(t, 'panel');
-    await press(t, find.bySemanticsLabel('Hide the panel'));
-    expect(find.text('Changed files'), findsNothing);
-    await press(t, find.bySemanticsLabel('Show the panel'));
-    await press(t, find.bySemanticsLabel('lib/a.dart, 2 added, 1 removed'));
+    double wide() => t.getSize(find.byType(ChangesView)).width;
+    final slim = wide();
+    await press(t, find.bySemanticsLabel(RegExp('^lib/a.dart')));
+    await snap(t, 'changes-beside');
+    expect(wide(), greaterThan(slim + 60));
     expect(find.textContaining('fresh', findRichText: true), findsOneWidget);
-    // Nothing has changed: there is no panel, and the conversation has the room.
-    await press(t, find.text('Conversation').last);
-    s.now = const Changes(repository: true);
-    s.current!.apply(const [
-      Event(92, 92, RunEnded('r', Outcome.completed, null)),
-      Event(93, 93, AgentStateChanged('a', AgentPhase.done)),
-    ]);
-    await settled(t);
-    expect(find.text('Changed files'), findsNothing);
+    // Both are there: what is said about a line is written where it can be seen.
+    expect(find.byType(TranscriptView), findsOneWidget);
+    expect(find.text('Message Lead. Sent before its next step'), findsWidgets);
+    await press(t, find.bySemanticsLabel('Comment on lib/a.dart'));
+    await t.enterText(field('About the file'), 'why?');
+    await press(t, find.text('Add to message'));
+    expect(find.text('On lib/a.dart:\nwhy?'), findsOneWidget);
+    // The room between them is the handle, for the hand and for the keyboard.
+    final was = wide();
+    await t.drag(find.bySemanticsLabel('Width of the panel'), const Offset(-60, 0));
+    await t.pump();
+    expect(wide(), greaterThan(was + 20));
+    final dragged = wide();
+    bool held() {
+      var found = false;
+      FocusManager.instance.primaryFocus?.context?.visitAncestorElements((e) {
+        final w = e.widget;
+        found = w is Semantics && w.properties.label == 'Width of the panel';
+        return !found;
+      });
+      return found;
+    }
+
+    for (var k = 0; k < 60 && !held(); k++) {
+      await t.sendKeyEvent(LogicalKeyboardKey.tab);
+      await t.pump();
+    }
+    expect(held(), isTrue);
+    await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await t.pump();
+    expect(wide(), closeTo(dragged - 24, 1));
+    // Neither is squeezed away.
+    await t.drag(find.bySemanticsLabel('Width of the panel'), const Offset(-2000, 0));
+    await t.pump();
+    expect(t.getSize(find.byType(TranscriptView)).width, greaterThanOrEqualTo(359));
+    await t.drag(find.bySemanticsLabel('Width of the panel'), const Offset(2000, 0));
+    await t.pump();
+    expect(wide(), closeTo(360, 1));
+    await press(t, find.bySemanticsLabel(RegExp('^lib/a.dart')));
+    expect(wide(), closeTo(slim, 1), reason: 'slim again when nothing is read');
+    // Away and back, by the bar and by the keys; what has changed is said while it is away.
+    await press(t, find.bySemanticsLabel('Changes, 1 file'));
+    expect(find.byType(ChangesView), findsNothing);
+    expect(find.text('+2'), findsOneWidget);
+    s.calls.clear();
+    await press(t, find.bySemanticsLabel('Changes, 1 file'));
+    expect(find.byType(ChangesView), findsOneWidget);
+    expect(s.calls, [
+      ['changes', 's'],
+    ], reason: 'who asks sees what there is now');
+  });
+
+  testWidgets('where there is no room for both, what has changed stands in front', (t) async {
+    for (final size in const [Size(600, 600), Size(860, 600)]) {
+      final s = Asked()
+        ..current = working(asks: true)
+        ..connections = const [key]
+        ..now = const Changes(repository: true, files: [Changed('a', 'new')]);
+      await mount(t, Shell(s, key: ValueKey(size)), size: size, dpr: 1);
+      await settled(t);
+      await t.enterText(find.byType(EditableText), 'half a thought');
+      await press(t, find.bySemanticsLabel(RegExp('^Changes')).first);
+      expect(find.byType(ChangesView), findsOneWidget);
+      // Not pressed, read or reached behind it.
+      expect(find.text('Allow once').hitTestable(), findsNothing);
+      for (var k = 0; k < 30; k++) {
+        await t.sendKeyEvent(LogicalKeyboardKey.tab);
+        await t.pump();
+        final at = FocusManager.instance.primaryFocus?.context;
+        expect(at?.findAncestorWidgetOfExactType<RequestBar>(), isNull);
+      }
+      await press(t, find.bySemanticsLabel(RegExp('^Changes')).first);
+      expect(find.text('half a thought'), findsOneWidget);
+      expect(find.text('Allow once').hitTestable(), findsOneWidget);
+      s.dispose();
+    }
   });
 
   testWidgets('what is being written to an agent is there when its person comes back', (t) async {

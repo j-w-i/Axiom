@@ -5,6 +5,7 @@
 | Inter | `app/fonts/Inter.ttf` | SIL OFL 1.1 (`app/fonts/OFL-inter.txt`) |
 | JetBrains Mono | `app/fonts/JetBrainsMono.ttf` | SIL OFL 1.1 (`app/fonts/OFL-jetbrainsmono.txt`) |
 | Service marks (path data) | `app/lib/ui/mark_data.dart`, from `@lobehub/icons-static-svg` 1.102.0 | MIT, © LobeHub |
+| Fluent System Icons (path data) | `app/lib/ui/icon_data.dart`, from `@fluentui/svg-icons` 1.1.345 | MIT, © 2020 Microsoft Corporation |
 
 The names and marks of services (Claude, OpenAI, Gemini and others) belong to their owners. Axiom shows them
 only to identify a service that a connection, model or harness uses. Axiom is not affiliated with, endorsed by

@@ -8,10 +8,10 @@ import '../host/host_store.dart';
 import '../host/proto.dart';
 import '../host/session_model.dart';
 import '../patterns/agent_bar.dart';
+import '../patterns/beside.dart';
 import '../patterns/context_gauge.dart';
 import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
-import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
 import '../transcript/transcript_view.dart';
 import '../ui/controls.dart';
@@ -19,7 +19,6 @@ import '../ui/icons.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
-import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'changes.dart';
 import 'drafts.dart';
@@ -52,7 +51,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   void _answer(Waits w) {
     setState(() {
       _view = _View.work;
-      _tab = 0;
+      // Where the panel would be in front of it.
+      if (MediaQuery.sizeOf(context).width < 900) _changing = false;
       if (widget.store.current?.id == w.session) {
         _agent = w.agent;
       } else {
@@ -66,8 +66,21 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
 
   _View _view = _View.work;
 
-  /// Of the agent's views, which.
-  int _tab = 0;
+  /// The panel beside the conversation, as its person wants it, and how wide; null: where there is
+  /// room, if there is anything in it.
+  bool? _changing;
+  (double, double) _sizes = Beside.usual;
+
+  /// Who asks for it sees what there is now.
+  void _change(bool v) {
+    if (v && _changes?.all != null) unawaited(_changes!.look());
+    setState(() => _changing = v);
+  }
+
+  final _conversation = GlobalKey();
+
+  /// Whether it was shown when the window was drawn last.
+  bool? _shown;
   final _drafts = Drafts();
   late final _start = StartDraft(widget.store);
 
@@ -107,8 +120,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
 
   void _show(_View v) => setState(() => _view = v);
 
-  /// The list beside the display, and the panel on its other side, as their person wants them.
-  bool _list = true, _panel = true;
+  /// The list beside the display, as its person wants it.
+  bool _list = true;
   bool _finding = false;
 
   /// What has changed in the open session's folder.
@@ -146,6 +159,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
         setState(() => _finding = !_finding);
       case LogicalKeyboardKey.comma:
         _show(_View.accounts);
+      case LogicalKeyboardKey.keyD:
+        _change(!(_shown ?? false));
       case LogicalKeyboardKey.keyB:
         setState(() => _list = !_list);
       default:
@@ -156,7 +171,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
 
   List<Found> _everything(HostStore s) => [
     Found('New session', () => _startIn(null), icon: AxIcon.plus, keys: keysOf('N')),
-    Found('Accounts', () => _show(_View.accounts), icon: AxIcon.settings, keys: keysOf(',')),
+    Found('Accounts', () => _show(_View.accounts), icon: AxIcon.account, keys: keysOf(',')),
     if (s.current case final m?) ...[
       if (m.workspace != null)
         Found(
@@ -250,7 +265,6 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
           final stale = s.phase != HostPhase.connected;
           final width = MediaQuery.sizeOf(context).width;
           final narrow = width < 860, beside = !narrow && _list;
-          final roomy = width >= 1180;
           Widget side([VoidCallback? close]) => _Side(
             store: s,
             inset: widget.titleInset,
@@ -284,6 +298,65 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
             _ => _failed == null ? null : oneLine(_failed!, 200),
           };
           final onList = beside || narrow ? null : () => setState(() => _list = true);
+          final banner = problem == null
+              ? null
+              : _Banner(problem, inset: beside ? 20 : widget.titleInset + 12);
+          final content = switch (s) {
+            // Kept while the host is away: what was written is not lost.
+            _ when _view == _View.start => StartPage(
+              _start,
+              onStarted: (_) => _show(_View.work),
+              onAccounts: () => _show(_View.accounts),
+              onCancel: s.current == null ? null : _back,
+            ),
+            // Only while its session is the one that is open.
+            _ when _view == _View.agent && _more?.into == s.current?.id => StartPage(
+              _more!,
+              key: ObjectKey(_more),
+              onStarted: (_) => setState(() {
+                _agent = _more!.last;
+                _view = _View.work;
+              }),
+              onAccounts: () => _show(_View.accounts),
+              onCancel: _back,
+            ),
+            _ when _view == _View.accounts => AccountsPage(
+              s,
+              onDone: () => _show(s.current == null ? _View.start : _View.work),
+            ),
+            HostStore(phase: HostPhase.starting, current: null) => const _Word('Starting the host'),
+            HostStore(phase: HostPhase.unreachable, current: null) => _Word(
+              'The host is not answering',
+              detail: s.problem,
+            ),
+            HostStore(current: final m?) => _Display(
+              s,
+              m,
+              agent: _agent,
+              stale: stale,
+              drafts: _drafts,
+              changes: _changesOf(m),
+              changing: _changing,
+              onChanging: _change,
+              onShown: (v) => _shown = v,
+              sizes: _sizes,
+              onSizes: (v) => setState(() => _sizes = v),
+              conversation: _conversation,
+              looks: width >= 1180,
+              banner: banner,
+              onList: onList,
+              inset: beside ? 20 : widget.titleInset + 12,
+              alone: !beside && !narrow,
+              small: narrow,
+              onAgain: () => _do('The session could not be opened', () => s.open(m.id)),
+              onStop: (run) => _do('It could not be stopped', () => s.cancel(m.id, run)),
+              onAgent: (id) => setState(() => _agent = id),
+            ),
+            _ => _Word(
+              s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
+              action: s.sessions.isEmpty ? ('New session', () => _show(_View.start)) : null,
+            ),
+          };
           final window = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -298,105 +371,33 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                 child: FocusTraversalGroup(
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(beside ? 0 : 8, 8, 8, 8),
-                    child: Surface(
-                      c.canvas,
-                      radius: AxRadius.canvas,
-                      // What scrolls is cut where the canvas ends.
-                      child: ClipPath(
-                        clipper: const ContinuousClip(AxRadius.canvas),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (!narrow)
-                              if (problem case final p?)
-                                _Banner(p, inset: beside ? 20 : widget.titleInset + 12),
-                            if (narrow || page != null || s.current == null)
-                              SizedBox(
-                                height: narrow ? 46 : 50,
-                                child: _Strip(
-                                  problem: narrow ? problem : null,
-                                  page: page,
-                                  session: s.current,
-                                  inset: beside ? 0 : widget.titleInset,
-                                  needs: s.needs,
-                                  list: narrow ? side : null,
-                                  onList: onList,
-                                  onAnswer: _answer,
-                                  onStart: () => _startIn(null),
-                                  onAccounts: () => _show(_View.accounts),
-                                  onFind: () => setState(() => _finding = true),
-                                ),
-                              ),
-                            Expanded(
-                              child: switch (s) {
-                                // Kept while the host is away: what was written is not lost.
-                                _ when _view == _View.start => StartPage(
-                                  _start,
-                                  onStarted: (_) => _show(_View.work),
-                                  onAccounts: () => _show(_View.accounts),
-                                  onCancel: s.current == null ? null : _back,
-                                ),
-                                // Only while its session is the one that is open.
-                                _ when _view == _View.agent && _more?.into == s.current?.id =>
-                                  StartPage(
-                                    _more!,
-                                    key: ObjectKey(_more),
-                                    onStarted: (_) => setState(() {
-                                      _agent = _more!.last;
-                                      _view = _View.work;
-                                    }),
+                    child: page == null && s.current != null && !narrow
+                        ? content
+                        : AxCanvas(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                if (!narrow) ?banner,
+                                SizedBox(
+                                  height: narrow ? 46 : 50,
+                                  child: _Strip(
+                                    problem: narrow ? problem : null,
+                                    page: page,
+                                    session: s.current,
+                                    inset: beside ? 0 : widget.titleInset,
+                                    needs: s.needs,
+                                    list: narrow ? side : null,
+                                    onList: onList,
+                                    onAnswer: _answer,
+                                    onStart: () => _startIn(null),
                                     onAccounts: () => _show(_View.accounts),
-                                    onCancel: _back,
+                                    onFind: () => setState(() => _finding = true),
                                   ),
-                                _ when _view == _View.accounts => AccountsPage(
-                                  s,
-                                  onDone: () => _show(s.current == null ? _View.start : _View.work),
                                 ),
-                                HostStore(phase: HostPhase.starting, current: null) => const _Word(
-                                  'Starting the host',
-                                ),
-                                HostStore(phase: HostPhase.unreachable, current: null) => _Word(
-                                  'The host is not answering',
-                                  detail: s.problem,
-                                ),
-                                HostStore(current: final m?) => _Display(
-                                  s,
-                                  m,
-                                  agent: _agent,
-                                  stale: stale,
-                                  drafts: _drafts,
-                                  changes: _changesOf(m),
-                                  panel: roomy && _panel,
-                                  onPanel: roomy && m.workspace != null
-                                      ? () => setState(() => _panel = !_panel)
-                                      : null,
-                                  onList: onList,
-                                  inset: beside ? 20 : widget.titleInset + 12,
-                                  alone: !beside && !narrow,
-                                  small: narrow,
-                                  tab: _tab,
-                                  onTab: (i) => setState(() => _tab = i),
-                                  onAgain: () =>
-                                      _do('The session could not be opened', () => s.open(m.id)),
-                                  onStop: (run) =>
-                                      _do('It could not be stopped', () => s.cancel(m.id, run)),
-                                  onAgent: (id) => setState(() {
-                                    _agent = id;
-                                    _tab = 0;
-                                  }),
-                                ),
-                                _ => _Word(
-                                  s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
-                                  action: s.sessions.isEmpty
-                                      ? ('New session', () => _show(_View.start))
-                                      : null,
-                                ),
-                              },
+                                Expanded(child: content),
+                              ],
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
+                          ),
                   ),
                 ),
               ),
@@ -746,7 +747,7 @@ class _Strip extends StatelessWidget {
           const SizedBox(width: 8),
           AxButton.icon(AxIcon.search, label: 'Search', tone: AxTone.quiet, onPressed: onFind),
           AxButton.icon(
-            AxIcon.settings,
+            AxIcon.account,
             label: 'Accounts',
             tone: AxTone.quiet,
             onPressed: onAccounts,
@@ -974,7 +975,7 @@ class _Side extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
           child: NavRow(
-            AxIcon.settings,
+            AxIcon.account,
             'Accounts',
             keys: _ShellState.keysOf(','),
             selected: view == _View.accounts,
@@ -1033,35 +1034,44 @@ class _Display extends StatelessWidget {
     required this.agent,
     required this.stale,
     required this.drafts,
-    required this.tab,
-    required this.onTab,
     required this.onAgain,
     required this.onStop,
     required this.onAgent,
     required this.changes,
-    required this.panel,
-    required this.onPanel,
+    required this.changing,
+    required this.onChanging,
+    required this.onShown,
+    required this.sizes,
+    required this.onSizes,
+    required this.conversation,
+    required this.looks,
+    required this.banner,
     required this.onList,
     required this.inset,
     required this.alone,
     required this.small,
   });
 
-  /// Shows the panel or puts it away; null where there is no room for one.
-  final VoidCallback? onPanel, onList;
+  final bool? changing;
+  final ValueChanged<bool> onChanging, onShown;
+  final (double, double) sizes;
+  final ValueChanged<(double, double)> onSizes;
+
+  /// Keeps what is being read and written when the window is made wider or narrower.
+  final GlobalKey conversation;
+
+  /// How much has changed is looked at without being asked.
+  final bool looks;
+  final Widget? banner;
+  final VoidCallback? onList;
   final double inset;
 
   /// The list is put away, so where one is has to be said; the window is small, and it is said above.
   final bool alone, small;
   final FolderChanges changes;
-
-  /// There is room for the panel, and it is wanted.
-  final bool panel;
   final ValueChanged<String> onAgent;
   final HostStore store;
   final Drafts drafts;
-  final int tab;
-  final ValueChanged<int> onTab;
   final ValueChanged<String> onStop;
   final SessionModel session;
   final String? agent;
@@ -1086,39 +1096,46 @@ class _Display extends StatelessWidget {
   );
 
   /// With nothing to show: the way back to the list stays.
-  Widget _bare(Widget word) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (!small)
-        SizedBox(
-          height: 50,
-          child: Padding(
-            padding: EdgeInsets.only(left: inset, right: 14),
-            child: Row(
-              children: [
-                if (onList case final f?) ...[
-                  AxButton.icon(
-                    AxIcon.sidebar,
-                    label: 'Show the sidebar',
-                    tone: AxTone.quiet,
-                    onPressed: f,
-                  ),
-                  const SizedBox(width: 12),
+  Widget _bare(Widget word) {
+    final all = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ?banner,
+        if (!small)
+          SizedBox(
+            height: 50,
+            child: Padding(
+              padding: EdgeInsets.only(left: inset, right: 14),
+              child: Row(
+                children: [
+                  if (onList case final f?) ...[
+                    AxButton.icon(
+                      AxIcon.sidebar,
+                      label: 'Show the sidebar',
+                      tone: AxTone.quiet,
+                      onPressed: f,
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(child: Where(session)),
                 ],
-                Expanded(child: Where(session)),
-              ],
+              ),
             ),
           ),
-        ),
-      Expanded(child: word),
-    ],
-  );
+        Expanded(child: word),
+      ],
+    );
+    return small ? all : AxCanvas(child: all);
+  }
 
   /// Somebody looks: the window has their attention.
   static bool get _attended => switch (WidgetsBinding.instance.lifecycleState) {
     null || AppLifecycleState.resumed => true,
     _ => false,
   };
+
+  bool _open(AgentModel a) =>
+      a.access != null && (changing ?? (looks && !a.apart && changes.files.isNotEmpty));
 
   Widget _work(BuildContext context, AgentModel a) {
     final c = Ax.of(context).colors;
@@ -1127,103 +1144,119 @@ class _Display extends StatelessWidget {
         store.needs.any((w) => w.session == session.id && w.agent == a.id && w.need != Need.asks)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => store.seen(session.id, a.id));
     }
-    return Column(
+    if (looks && acts && !a.apart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(changes.lookOnce()));
+    }
+    final talk = KeyedSubtree(
+      key: conversation,
+      child: LayoutBuilder(
+        builder: (context, box) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: ListenableBuilder(
+                listenable: a,
+                builder: (context, full) => a.last != null || a.ended != null
+                    ? full!
+                    : Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          AxSpace.beside(box.maxWidth),
+                          20,
+                          AxSpace.gutter,
+                          0,
+                        ),
+                        child: Text('No messages yet.', style: Ax.of(context).type.ui.ink(c.ink3)),
+                      ),
+                child: TranscriptView(a),
+              ),
+            ),
+            // In a window too small for all of it, its end is in sight and the rest scrolls.
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: box.maxHeight),
+              child: SingleChildScrollView(
+                reverse: true,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (session.requests.values.any(
+                      (r) => !acts || r.opened.answerable != Answerable.live,
+                    ))
+                      _Asked(session, all: !acts),
+                    if (acts)
+                      ListenableBuilder(
+                        listenable: a,
+                        builder: (context, _) => Talk(
+                          store,
+                          session,
+                          a,
+                          draft: drafts.of(session.id, a.id),
+                          live: !stale,
+                          onAgent: onAgent,
+                          // What is asked stays in sight beside its keys.
+                          room: box.maxHeight * .35,
+                          key: ValueKey('${session.id} ${a.id}'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    void close() => onChanging(false);
+    final all = ListenableBuilder(
+      listenable: changes,
+      child: talk,
+      builder: (context, talk) {
+        final open = _open(a);
+        onShown(open);
+        final panel = !open
+            ? null
+            : CallbackShortcuts(
+                bindings: {const SingleActivator(LogicalKeyboardKey.escape): close},
+                child: FocusTraversalGroup(
+                  child: a.apart
+                      ? CopyView(
+                          store,
+                          session,
+                          a,
+                          draft: drafts.of(session.id, a.id),
+                          key: ValueKey((session.id, a.id)),
+                        )
+                      : ChangesView(
+                          changes,
+                          agent: a.name,
+                          draft: drafts.of(session.id, a.id),
+                          key: ValueKey(session.id),
+                        ),
+                ),
+              );
+        return Beside(
+          main: talk!,
+          panel: panel,
+          // What is in a copy is read before it is applied.
+          wide: a.apart || changes.reads,
+          sizes: sizes,
+          onSizes: onSizes,
+        );
+      },
+    );
+    final work = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (!small) ?banner,
         // The transcript between these two looks after itself.
         ListenableBuilder(
           listenable: Listenable.merge([a, changes]),
           builder: (context, _) => _bar(context, a),
         ),
-        if (acts && tab == 1)
-          Expanded(
-            child: a.apart
-                ? CopyView(
-                    store,
-                    session,
-                    a,
-                    draft: drafts.of(session.id, a.id),
-                    key: ValueKey((session.id, a.id)),
-                  )
-                : ChangesView(
-                    changes,
-                    agent: a.name,
-                    draft: drafts.of(session.id, a.id),
-                    key: ValueKey(session.id),
-                  ),
-          )
-        else
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, box) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(
-                          child: ListenableBuilder(
-                            listenable: a,
-                            builder: (context, full) => a.last != null || a.ended != null
-                                ? full!
-                                : Padding(
-                                    padding: EdgeInsets.fromLTRB(
-                                      AxSpace.beside(box.maxWidth),
-                                      20,
-                                      AxSpace.gutter,
-                                      0,
-                                    ),
-                                    child: Text(
-                                      'No messages yet.',
-                                      style: Ax.of(context).type.ui.ink(c.ink3),
-                                    ),
-                                  ),
-                            child: TranscriptView(a),
-                          ),
-                        ),
-                        // In a window too small for all of it, its end is in sight and the rest scrolls.
-                        ConstrainedBox(
-                          constraints: BoxConstraints(maxHeight: box.maxHeight),
-                          child: SingleChildScrollView(
-                            reverse: true,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (session.requests.values.any(
-                                  (r) => !acts || r.opened.answerable != Answerable.live,
-                                ))
-                                  _Asked(session, all: !acts),
-                                if (acts)
-                                  ListenableBuilder(
-                                    listenable: a,
-                                    builder: (context, _) => Talk(
-                                      store,
-                                      session,
-                                      a,
-                                      draft: drafts.of(session.id, a.id),
-                                      live: !stale,
-                                      onAgent: onAgent,
-                                      // What is asked stays in sight beside its keys.
-                                      room: box.maxHeight * .35,
-                                      key: ValueKey('${session.id} ${a.id}'),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (panel && acts && !a.apart) _Panel(changes, onOpen: () => onTab(1)),
-              ],
-            ),
-          ),
+        Expanded(child: all),
       ],
     );
+    return small ? work : AxCanvas(child: work);
   }
 
   Widget _bar(BuildContext context, AgentModel a) {
@@ -1236,13 +1269,6 @@ class _Display extends StatelessWidget {
       name: a.name,
       state: stateOf(a),
       mark: markOf(x.provider, x.model, x.harness),
-      tabs: [
-        ('Conversation', null),
-        if (acts)
-          ('Changes', !a.apart && changes.files.isNotEmpty ? '${changes.files.length}' : null),
-      ],
-      index: acts ? tab : 0,
-      onTab: onTab,
       inset: small ? 20 : inset,
       height: small ? 44 : 50,
       lead: onList == null
@@ -1282,7 +1308,12 @@ class _Display extends StatelessWidget {
           ],
           if (acts && works && run != null && !stale)
             Flexible(
-              child: AxButton(label: 'Stop', icon: AxIcon.stop, onPressed: () => onStop(run)),
+              child: AxButton(
+                label: 'Stop',
+                icon: AxIcon.stop,
+                iconFilled: true,
+                onPressed: () => onStop(run),
+              ),
             ),
           if (stale) ...[
             const SizedBox(width: 10),
@@ -1295,69 +1326,24 @@ class _Display extends StatelessWidget {
               ),
             ),
           ],
-          if (onPanel case final f? when acts && !a.apart) ...[
+          if (acts) ...[
             const SizedBox(width: 6),
-            AxButton.icon(
-              AxIcon.panel,
-              label: panel ? 'Hide the panel' : 'Show the panel',
-              tone: AxTone.quiet,
-              onPressed: f,
+            ChangesKey(
+              files: a.apart ? 0 : changes.files.length,
+              open: _open(a),
+              figure: small || _open(a)
+                  ? null
+                  : ChangedBy(
+                      changes.files.fold(0, (n, f) => n + f.$2.added),
+                      changes.files.fold(0, (n, f) => n + f.$2.removed),
+                    ),
+              onPressed: () => onChanging(!_open(a)),
             ),
           ],
         ],
       ),
     );
   }
-}
-
-/// What has changed in the folder, beside the conversation. There is none where nothing has.
-class _Panel extends StatefulWidget {
-  const _Panel(this.changes, {required this.onOpen});
-  final FolderChanges changes;
-  final VoidCallback onOpen;
-  @override
-  State<_Panel> createState() => _PanelState();
-}
-
-class _PanelState extends State<_Panel> {
-  @override
-  void initState() {
-    super.initState();
-    unawaited(widget.changes.lookOnce());
-  }
-
-  @override
-  void didUpdateWidget(_Panel old) {
-    super.didUpdateWidget(old);
-    if (!identical(old.changes, widget.changes)) unawaited(widget.changes.lookOnce());
-  }
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.changes,
-    builder: (context, _) {
-      final files = widget.changes.files;
-      if (files.isEmpty) return const SizedBox.shrink();
-      int sum(int Function(FileDiff) of) => files.fold(0, (n, f) => n + of(f.$2));
-      return SidePanel(
-        groups: [
-          (
-            'Changed files',
-            ChangedBy(sum((f) => f.added), sum((f) => f.removed)),
-            [
-              for (final (f, d) in files)
-                ChangedRow(
-                  oneLine(literal(f.path), 300),
-                  added: d.added,
-                  removed: d.removed,
-                  onOpen: widget.onOpen,
-                ),
-            ],
-          ),
-        ],
-      );
-    },
-  );
 }
 
 /// What agents of the session have asked and nobody can answer here: it is history, or a replay's.

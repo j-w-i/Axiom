@@ -12,7 +12,6 @@ import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
-import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
@@ -30,6 +29,15 @@ class FolderChanges extends ChangeNotifier {
 
   Changes? all;
   List<(Changed, FileDiff)> files = const [];
+
+  /// The files whose change is read.
+  final opened = <String>{};
+  bool get reads => files.any((f) => opened.contains(f.$1.path) && f.$2.lines.isNotEmpty);
+  void toggle(String path) {
+    opened.contains(path) ? opened.remove(path) : opened.add(path);
+    notifyListeners();
+  }
+
   String? problem;
   bool looking = false;
   bool _again = false, _gone = false;
@@ -85,7 +93,16 @@ class FolderChanges extends ChangeNotifier {
 }
 
 class ChangesView extends StatefulWidget {
-  const ChangesView(this.changes, {required this.agent, required this.draft, super.key});
+  const ChangesView(
+    this.changes, {
+    required this.agent,
+    required this.draft,
+    super.key,
+    this.lead = const [],
+  });
+
+  /// What stands over it in the panel.
+  final List<Widget> lead;
   final FolderChanges changes;
 
   /// Who is told of what is said about a line, and where that is written.
@@ -99,12 +116,10 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
   @override
   (String, Draft) get told => (widget.agent, widget.draft);
 
-  final _shut = <String>{};
-
   @override
   void initState() {
     super.initState();
-    unawaited(widget.changes.look());
+    unawaited(widget.changes.lookOnce());
   }
 
   @override
@@ -122,89 +137,88 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
         : files.isEmpty
         ? 'Nothing has changed since the last commit.'
         : null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    if (all?.branch case final b?) ...[
-                      AxGlyph(AxIcon.branch, size: 15, color: c.ink3),
-                      const SizedBox(width: 7),
-                      Flexible(
-                        child: Text(
-                          oneLine(literal(b), 80),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.ui.ink(c.ink1),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                    ],
-                    if (files.isNotEmpty)
-                      Text(
-                        '${files.length} ${files.length == 1 ? 'file' : 'files'}',
-                        style: t.type.label.ink(c.ink3),
-                      ),
-                  ],
+    final n = words == null ? files.length : 0;
+    final head = <Widget>[
+      ...widget.lead,
+      PanelHeading(
+        switch (n) {
+          0 => 'Changed files',
+          1 => '1 changed file',
+          _ => '$n changed files',
+        },
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (all?.branch case final b?) ...[
+              AxGlyph(AxIcon.branch, color: c.ink4),
+              const SizedBox(width: 4),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 110),
+                child: Text(
+                  oneLine(literal(b), 80),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.type.small.ink(c.ink3),
                 ),
               ),
-              AxButton.icon(
-                AxIcon.refresh,
-                label: 'Refresh',
-                tone: AxTone.quiet,
-                onPressed: looking ? null : () => unawaited(now.look()),
-              ),
+              const SizedBox(width: 10),
             ],
+            if (n > 0)
+              ChangedBy(
+                files.fold(0, (n, f) => n + f.$2.added),
+                files.fold(0, (n, f) => n + f.$2.removed),
+              ),
+            const SizedBox(width: 2),
+            AxButton.icon(
+              AxIcon.refresh,
+              label: 'Refresh',
+              tone: AxTone.quiet,
+              size: 26,
+              onPressed: looking ? null : () => unawaited(now.look()),
+            ),
+          ],
+        ),
+        acts: true,
+      ),
+      if (problem != null && all != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: Text(visible(problem), style: t.type.ui.ink(c.faultText)),
+        ),
+      if (words != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
+          child: Text(
+            visible(words),
+            style: t.type.ui.ink(problem != null && all == null ? c.faultText : c.ink3),
           ),
         ),
-        if (problem != null && all != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-            child: Text(visible(problem), style: t.type.ui.ink(c.faultText)),
-          ),
-        Expanded(
-          child: words != null
-              ? Align(
-                  alignment: Alignment.topLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                    child: Text(
-                      visible(words),
-                      style: t.type.ui.ink(problem != null && all == null ? c.faultText : c.ink3),
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: files.length + (all!.whole ? 0 : 1),
-                  itemBuilder: (context, i) => i == files.length
-                      ? Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-                          child: Text(
-                            'There is more than can be shown here.',
-                            style: t.type.label.ink(c.ink3),
-                          ),
-                        )
-                      : _file(context, files[i]),
-                ),
-        ),
-      ],
+    ];
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(6, 0, 14, 16),
+      itemCount: head.length + n + (words == null && !all!.whole ? 1 : 0),
+      itemBuilder: (context, i) => i < head.length
+          ? head[i]
+          : i < head.length + n
+          ? _file(files[i - head.length], i - head.length, n)
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: Text('There is more than can be shown here.', style: t.type.label.ink(c.ink3)),
+            ),
     );
   }
 
-  Widget _file(BuildContext context, (Changed, FileDiff) f) => _FileRow(
-    f.$1,
-    f.$2,
-    remarks: this,
-    open: !_shut.contains(f.$1.path),
-    onOpen: () => setState(() {
-      _shut.contains(f.$1.path) ? _shut.remove(f.$1.path) : _shut.add(f.$1.path);
-    }),
+  Widget _file((Changed, FileDiff) f, int i, int n) => CardPart(
+    first: i == 0,
+    last: i == n - 1,
+    child: _FileRow(
+      f.$1,
+      f.$2,
+      remarks: this,
+      last: i == n - 1,
+      open: widget.changes.opened.contains(f.$1.path),
+      onOpen: () => widget.changes.toggle(f.$1.path),
+    ),
   );
 }
 
@@ -221,7 +235,9 @@ class _FileRow extends StatelessWidget {
     this.notes = const [],
     this.tag,
     this.shut = false,
+    this.last = false,
   });
+  final bool last;
 
   /// What it is, in a word, where that is more than how it has changed.
   final String? tag;
@@ -247,50 +263,23 @@ class _FileRow extends StatelessWidget {
     final lines = diff.lines, add = diff.added, remove = diff.removed, left = diff.left;
     final open = this.open && lines.isNotEmpty;
     final name = oneLine(literal(file.path), 300);
-    final tag = this.tag ?? (file.what == 'changed' ? null : _upper(file.what));
-    final row = Pressable(
-      label: '$name, ${file.what}, $add added, $remove removed',
-      expanded: open,
+    final row = ChangedRow(
+      name,
+      added: add,
+      removed: remove,
+      what: file.what,
+      open: open,
+      tag: tag ?? (file.what == 'changed' ? null : _upper(file.what)),
+      quiet: shut,
       onPressed: lines.isEmpty ? null : onOpen,
-      builder: (_, s) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 9, 6, 9),
-        child: Row(
-          children: [
-            AxGlyph(
-              open ? AxIcon.down : AxIcon.right,
-              size: 12,
-              color: s.hovered ? c.ink1 : c.ink3,
-            ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.code.ink(shut ? c.ink3 : c.ink1),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  if (tag case final w?) _Tag(w),
-                ],
-              ),
-            ),
-            ChangedBy(add, remove),
-            if (lines.isEmpty) Text('No preview', style: t.type.small.ink(c.ink3)),
-          ],
-        ),
-      ),
     );
-    final left20 = leading == null ? 45.0 : 71.0;
+    final in_ = leading == null ? 37.0 : 62.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            const SizedBox(width: 16),
+            const SizedBox(width: 6),
             ?leading,
             Expanded(child: row),
             if (remarks._added == file.path)
@@ -306,23 +295,22 @@ class _FileRow extends StatelessWidget {
                 AxIcon.comment,
                 label: 'Comment on $name',
                 tone: AxTone.quiet,
+                size: 28,
                 onPressed: () => remarks.begin(file.path, null),
-              )
-            else
-              const SizedBox(width: 28),
-            const SizedBox(width: 12),
+              ),
+            const SizedBox(width: 6),
           ],
         ),
         for (final (note, look) in notes)
           Padding(
-            padding: EdgeInsets.fromLTRB(left20, 0, 20, 8),
+            padding: EdgeInsets.fromLTRB(in_, 0, 12, 8),
             child: look
                 ? Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
-                        child: AxGlyph(AxIcon.warn, size: 14, color: c.attention),
+                        child: AxGlyph(AxIcon.warn, color: c.attention),
                       ),
                       const SizedBox(width: 8),
                       Expanded(child: Text(visible(note), style: t.type.label.ink(c.ink2))),
@@ -332,7 +320,7 @@ class _FileRow extends StatelessWidget {
           ),
         if (open)
           Padding(
-            padding: EdgeInsets.fromLTRB(left20, 0, 20, 14),
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -350,31 +338,13 @@ class _FileRow extends StatelessWidget {
               ],
             ),
           ),
-        const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Hairline()),
+        if (!last) const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Hairline()),
       ],
     );
   }
 }
 
 String _upper(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
-
-/// What a file is, in a word.
-class _Tag extends StatelessWidget {
-  const _Tag(this.word);
-  final String word;
-  @override
-  Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
-    return Surface(
-      c.ghost,
-      radius: AxRadius.tick,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        child: Text(word, style: t.type.caption.ink(c.ink3)),
-      ),
-    );
-  }
-}
 
 /// What a person says about a line of a file: written here, and added to what they are saying to the
 /// agent. Nothing is sent. One at a time; looking again does not lose it.
@@ -449,7 +419,7 @@ mixin _Remarks<W extends StatefulWidget> on State<W> {
   Widget editor(BuildContext context, String? digest) {
     final t = Ax.of(context), c = t.colors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(56, 6, 10, 8),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -489,7 +459,15 @@ mixin _Remarks<W extends StatefulWidget> on State<W> {
 /// What an agent has changed in its own copy of the folder, and what of it is brought in. Nothing is,
 /// unless it is pressed here.
 class CopyView extends StatefulWidget {
-  const CopyView(this.store, this.session, this.agent, {required this.draft, super.key});
+  const CopyView(
+    this.store,
+    this.session,
+    this.agent, {
+    required this.draft,
+    super.key,
+    this.lead = const [],
+  });
+  final List<Widget> lead;
   final HostStore store;
   final SessionModel session;
   final AgentModel agent;
@@ -676,76 +654,10 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            alignment: WrapAlignment.spaceBetween,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AxGlyph(AxIcon.branch, size: 15, color: c.ink3),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      files.isEmpty
-                          ? '${widget.agent.name}\'s copy'
-                          : '${_files(files.length)} in ${widget.agent.name}\'s copy',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.ui,
-                    ),
-                  ),
-                  if (chosen.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    Text('${chosen.length} selected', style: t.type.ui.ink(c.ink3)),
-                  ],
-                ],
-              ),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: [
-                  AxButton.icon(
-                    AxIcon.refresh,
-                    label: 'Refresh',
-                    tone: AxTone.quiet,
-                    onPressed: _busy ? null : () => unawaited(_look()),
-                  ),
-                  if (made)
-                    AxButton(
-                      label: 'Update from folder',
-                      onPressed: quiet ? null : () => unawaited(_renew()),
-                    ),
-                  if (made && !_leaving)
-                    AxButton(
-                      label: 'Discard copy…',
-                      onPressed: quiet
-                          ? null
-                          : () {
-                              setState(() => _leaving = true);
-                              _up();
-                            },
-                    ),
-                  if (files.isNotEmpty)
-                    AxButton(
-                      label: chosen.isEmpty ? 'Apply' : 'Apply ${_files(chosen.length)}',
-                      tone: AxTone.primary,
-                      onPressed: _busy || chosen.isEmpty ? null : () => unawaited(_bring(chosen)),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
         Expanded(child: _list(context, all, files, words, only)),
-        if (files.isNotEmpty && _atWork) ...[
-          const Hairline(),
+        if (files.isNotEmpty && _atWork)
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: Text(
               '${widget.agent.name} is still working: there may be more changes.',
               maxLines: 2,
@@ -753,7 +665,45 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
               style: t.type.label.ink(c.ink3),
             ),
           ),
-        ],
+        // What is done with them stands where the reading ends.
+        if (made)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 14, 16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (!_leaving)
+                      AxButton(
+                        label: 'Discard copy…',
+                        onPressed: quiet
+                            ? null
+                            : () {
+                                setState(() => _leaving = true);
+                                _up();
+                              },
+                      ),
+                    AxButton(
+                      label: 'Update from folder',
+                      onPressed: quiet ? null : () => unawaited(_renew()),
+                    ),
+                  ],
+                ),
+                if (files.isNotEmpty)
+                  AxButton(
+                    label: chosen.isEmpty ? 'Apply' : 'Apply ${_files(chosen.length)}',
+                    tone: AxTone.primary,
+                    onPressed: _busy || chosen.isEmpty ? null : () => unawaited(_bring(chosen)),
+                  ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -769,9 +719,23 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
     final t = Ax.of(context), c = t.colors;
     final quiet = _busy || _atWork;
     final head = <Widget>[
+      ...widget.lead,
+      PanelHeading(
+        files.isEmpty
+            ? '${widget.agent.name}\'s copy'
+            : '${_files(files.length)} in ${widget.agent.name}\'s copy',
+        AxButton.icon(
+          AxIcon.refresh,
+          label: 'Refresh',
+          tone: AxTone.quiet,
+          size: 26,
+          onPressed: _busy ? null : () => unawaited(_look()),
+        ),
+        acts: true,
+      ),
       if (_leaving)
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 12, 4),
+          padding: const EdgeInsets.fromLTRB(12, 0, 8, 10),
           child: Wrap(
             spacing: 8,
             runSpacing: 6,
@@ -784,7 +748,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
                   if (only.isNotEmpty) ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 3),
-                      child: AxGlyph(AxIcon.warn, size: 12, color: c.attention),
+                      child: AxGlyph(AxIcon.warn, color: c.attention),
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -815,14 +779,14 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         ),
       if (_problem case final p? when all != null)
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 24, 0),
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
           child: Text(visible(p), style: t.type.ui.ink(c.faultText)),
         ),
       if (_said != null || all?.back != null)
         Semantics(
           liveRegion: true,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 12, 0),
+            padding: const EdgeInsets.fromLTRB(12, 0, 8, 10),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -843,24 +807,22 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         ),
       if (words != null)
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 24, 16),
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
           child: Text(
             visible(words),
             style: t.type.ui.ink(_problem != null && all == null ? c.faultText : c.ink3),
           ),
-        )
-      else
-        const SizedBox(height: 8),
+        ),
     ];
     final tail = <Widget>[
       if (words == null && !all!.whole)
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 24, 0),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
           child: Text('There is more than can be shown here.', style: t.type.label.ink(c.ink3)),
         ),
       if (all != null && all.ignored + all.odd > 0)
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 24, 8),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
           child: Text(
             [
               if (all.ignored > 0)
@@ -875,22 +837,28 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
     final n = words == null ? files.length : 0;
     return ListView.builder(
       controller: _scroll,
+      padding: const EdgeInsets.fromLTRB(6, 0, 14, 4),
       itemCount: head.length + n + tail.length,
       itemBuilder: (context, i) => i < head.length
           ? head[i]
           : i < head.length + n
-          ? _file(files[i - head.length])
+          ? CardPart(
+              first: i == head.length,
+              last: i == head.length + n - 1,
+              child: _file(files[i - head.length], last: i == head.length + n - 1),
+            )
           : tail[i - head.length - n],
     );
   }
 
-  Widget _file(CopyFile f) {
+  Widget _file(CopyFile f, {required bool last}) {
     final name = oneLine(literal(f.path), 300);
     return _FileRow(
       f,
       _diffs[f.path] ?? FileDiff(f.path),
       remarks: this,
       digest: f.digest,
+      last: last,
       open: !_shut.contains(f.path),
       onOpen: () => setState(() {
         _shut.contains(f.path) ? _shut.remove(f.path) : _shut.add(f.path);

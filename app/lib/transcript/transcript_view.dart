@@ -550,7 +550,7 @@ class _Ending extends StatelessWidget {
             height: 18,
             child: Align(
               alignment: Alignment.centerLeft,
-              child: AxGlyph(AxIcon.warn, size: 15, color: failed ? c.faultText : c.ink3),
+              child: AxGlyph(AxIcon.warn, color: failed ? c.faultText : c.ink3),
             ),
           ),
           Expanded(child: Text(words, style: t.type.ui.ink(failed ? c.faultText : c.ink3))),
@@ -980,7 +980,7 @@ class _Marker extends StatelessWidget {
           child: Align(
             alignment: Alignment.centerLeft,
             child: marker == 'done'
-                ? AxGlyph(AxIcon.check, size: 13, color: c.doneText)
+                ? AxGlyph(AxIcon.check, color: c.doneText)
                 : DecoratedBox(
                     decoration: BoxDecoration(
                       border: Border.all(color: c.idle, width: 1.3),

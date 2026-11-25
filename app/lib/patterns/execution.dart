@@ -98,7 +98,7 @@ class ExecutionKey extends StatelessWidget {
                     target: open ? 1 : 0,
                     spring: AxMotion.snap,
                     builder: (_, v, child) => Transform.rotate(angle: 3.1416 * v, child: child),
-                    child: AxGlyph(AxIcon.down, size: 11, color: open ? c.ink1 : c.ink3),
+                    child: AxGlyph(AxIcon.down, color: open ? c.ink1 : c.ink3),
                   ),
                 ],
               ),
@@ -278,7 +278,7 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
               target: open ? 1 : 0,
               spring: AxMotion.snap,
               builder: (_, v, child) => Transform.rotate(angle: v * 1.5708, child: child),
-              child: AxGlyph(AxIcon.right, size: 11, color: c.ink3),
+              child: AxGlyph(AxIcon.right, color: c.ink3),
             ),
           ],
         ),
@@ -317,7 +317,7 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: i.value == ch.value
-                  ? AxGlyph(AxIcon.check, size: 12, color: i.mark?.color(c) ?? c.liveText)
+                  ? AxGlyph(AxIcon.check, color: i.mark?.color(c) ?? c.liveText)
                   : null,
             ),
           ),

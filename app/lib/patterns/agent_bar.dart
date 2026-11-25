@@ -2,21 +2,17 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
-import '../ui/controls.dart';
 import '../ui/marks.dart';
 import '../ui/status.dart';
 import '../ui/tokens.dart';
 
-/// What stands over a conversation: the agent, the session it is in, and its views beside it.
+/// What stands over a conversation: the agent, and at the other end what can be done here.
 class AgentBar extends StatelessWidget {
   const AgentBar({
     required this.name,
     required this.state,
     super.key,
     this.mark,
-    this.tabs = const [],
-    this.index = 0,
-    this.onTab,
     this.trailing,
     this.lead,
     this.where,
@@ -26,39 +22,25 @@ class AgentBar extends StatelessWidget {
   final String name;
   final AgentState state;
   final ServiceMark? mark;
-  final List<(String, String?)> tabs;
-  final int index;
-  final ValueChanged<int>? onTab;
   final Widget? trailing;
 
-  /// Before the agent; after its name, where it is or what has failed.
+  /// Before the agent; after its name, where it is.
   final Widget? lead, where;
   final double inset, height;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, box) {
-      final t = Ax.of(context);
-      final words = MediaQuery.textScalerOf(context).scale(13) * 1.4;
-      final wide = box.maxWidth.isFinite
-          ? math.min(460.0, box.maxWidth * (where == null ? .42 : .46))
-          : 460.0;
-      final views = tabs.isEmpty
-          ? const SizedBox.shrink()
-          : SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: AxTabs(tabs: tabs, index: index, onChanged: onTab ?? (_) {}),
-            );
-      return SizedBox(
-        height: math.max(height, math.max(words, t.density.control.toDouble()) + 16),
-        child: Row(
-          children: [
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: wide),
-              child: Padding(
-                padding: EdgeInsets.only(left: inset, right: 14),
+  Widget build(BuildContext context) {
+    final t = Ax.of(context);
+    final words = MediaQuery.textScalerOf(context).scale(13) * 1.4;
+    return LayoutBuilder(
+      builder: (context, box) => SizedBox(
+        height: math.max(height, math.max(words, t.density.control) + 16),
+        child: Padding(
+          padding: EdgeInsets.only(left: inset, right: 12),
+          child: Row(
+            children: [
+              Expanded(
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     ?lead,
                     if (mark case final m?) ...[
@@ -76,31 +58,26 @@ class AgentBar extends StatelessWidget {
                     const SizedBox(width: 10),
                     AxLamp(state),
                     if (where case final w?) ...[
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 14),
                       Flexible(flex: 2, child: w),
                     ],
                   ],
                 ),
               ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(right: trailing == null ? 6 : 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Flexible(flex: 2, child: views),
-                    if (trailing case final w?) ...[
-                      const SizedBox(width: 12),
-                      Flexible(flex: 3, child: w),
-                    ],
-                  ],
+              if (trailing case final w?) ...[
+                const SizedBox(width: 12),
+                // As wide as it is; the name gives way first, down to a part of the bar.
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: box.maxWidth.isFinite ? box.maxWidth * .6 : double.infinity,
+                  ),
+                  child: w,
                 ),
-              ),
-            ),
-          ],
+              ],
+            ],
+          ),
         ),
-      );
-    },
-  );
+      ),
+    );
+  }
 }

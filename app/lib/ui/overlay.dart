@@ -469,13 +469,9 @@ class _ItemsState<T> extends State<_Items<T>> {
                             child: Align(
                               alignment: Alignment.centerLeft,
                               child: it.value == widget.value
-                                  ? AxGlyph(
-                                      AxIcon.check,
-                                      size: 12,
-                                      color: it.mark?.color(c) ?? c.liveText,
-                                    )
+                                  ? AxGlyph(AxIcon.check, color: it.mark?.color(c) ?? c.liveText)
                                   : it.icon != null
-                                  ? AxGlyph(it.icon!, size: 13)
+                                  ? AxGlyph(it.icon!)
                                   : null,
                             ),
                           ),
@@ -568,7 +564,7 @@ class AxSelect<T> extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  AxGlyph(AxIcon.down, size: 11, color: c.ink3),
+                  AxGlyph(AxIcon.down, color: c.ink3),
                 ],
               ),
             ),

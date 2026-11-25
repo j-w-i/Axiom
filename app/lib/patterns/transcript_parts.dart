@@ -47,7 +47,7 @@ class WorkLine extends StatelessWidget {
                 width: 26,
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: AxGlyph(icon, size: 16, color: failed ? c.faultText : c.ink3),
+                  child: AxGlyph(icon, color: failed ? c.faultText : c.ink3),
                 ),
               ),
               ConstrainedBox(
@@ -83,7 +83,7 @@ class WorkLine extends StatelessWidget {
               ),
               if (more case final m?) ...[
                 const SizedBox(width: 7),
-                AxGlyph(m ? AxIcon.down : AxIcon.right, size: 11, color: c.ink3),
+                AxGlyph(m ? AxIcon.down : AxIcon.right, color: c.ink3),
               ],
             ],
           ),
@@ -123,7 +123,12 @@ class DiffBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        WorkLine(icon: AxIcon.edit, name: 'Edit', detail: path, result: '+$add  −$rem'),
+        WorkLine(
+          icon: AxIcon.edit,
+          name: 'Edit',
+          detail: path,
+          result: [if (add > 0) '+$add', if (rem > 0) '−$rem'].join('  '),
+        ),
         const SizedBox(height: 4),
         DiffLines(lines),
       ],

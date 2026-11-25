@@ -66,7 +66,7 @@ class _ControlsSheetState extends State<ControlsSheet> {
       'Buttons',
       [
         AxButton(label: 'Run the tests', onPressed: () {}),
-        AxButton(label: 'Queue', icon: AxIcon.send, tone: AxTone.primary, onPressed: () {}),
+        AxButton(label: 'Queue', icon: AxIcon.up, tone: AxTone.primary, onPressed: () {}),
         AxButton(label: 'Allow once', tone: AxTone.primary, onPressed: () {}),
         AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: () {}),
         AxButton(label: 'Engaged', engaged: true, onPressed: () {}),
@@ -126,11 +126,7 @@ class _ControlsSheetState extends State<ControlsSheet> {
         ),
         const SizedBox(
           width: 220,
-          child: AxField(
-            label: 'Find',
-            placeholder: 'Find',
-            leading: AxGlyph(AxIcon.search, size: 12),
-          ),
+          child: AxField(label: 'Find', placeholder: 'Find', leading: AxGlyph(AxIcon.search)),
         ),
         const SizedBox(
           width: 220,

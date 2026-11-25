@@ -93,7 +93,7 @@ class AxButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null)
-              AxGlyph(icon!, size: iconOnly ? 17 : 15, color: ink, filled: iconFilled),
+              AxGlyph(icon!, color: ink, filled: iconFilled, size: iconFilled ? 13 : null),
             if (icon != null && !iconOnly) const SizedBox(width: 7),
             if (!iconOnly)
               Flexible(
@@ -204,7 +204,7 @@ class AxSegments<T> extends StatelessWidget {
                         widthFactor: 1,
                         child: icon == null
                             ? Text(name, style: t.type.labelStrong.ink(ink))
-                            : AxGlyph(icon, size: 14, color: ink),
+                            : AxGlyph(icon, color: ink),
                       ),
                     ),
                   );
@@ -352,11 +352,7 @@ class AxCheck extends StatelessWidget {
                     s.enabled ? c.primary : c.ghost,
                     radius: AxRadius.tick,
                     child: Center(
-                      child: AxGlyph(
-                        AxIcon.check,
-                        size: 13,
-                        color: s.enabled ? c.onPrimary : c.idle,
-                      ),
+                      child: AxGlyph(AxIcon.check, color: s.enabled ? c.onPrimary : c.idle),
                     ),
                   )
                 : DecoratedBox(
@@ -500,7 +496,7 @@ class _AxFieldState extends State<AxField> {
           const SizedBox(height: 4),
           Row(
             children: [
-              AxGlyph(AxIcon.warn, size: 12, color: c.faultText),
+              AxGlyph(AxIcon.warn, color: c.faultText),
               const SizedBox(width: 5),
               Expanded(child: Text(widget.error!, style: t.type.small.ink(c.faultText))),
             ],

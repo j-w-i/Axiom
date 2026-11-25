@@ -178,6 +178,11 @@ const services = [
   ),
 ];
 
+const changed = [
+  ('src/auth/refresh.ts', 7, 2),
+  ('src/auth/inflight.ts', 31, 0),
+  ('test/refresh.test.ts', 19, 0),
+];
 const diff = [
   DiffLine(DiffKind.same, 41, 'async refresh(account: Account) {'),
   DiffLine(DiffKind.remove, 42, '  if (!expired(session.token)) return session;'),

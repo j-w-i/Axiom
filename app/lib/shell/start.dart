@@ -120,7 +120,7 @@ class _Page extends StatelessWidget {
                       children: [
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
-                          child: AxGlyph(AxIcon.warn, size: 15, color: c.faultText),
+                          child: AxGlyph(AxIcon.warn, color: c.faultText),
                         ),
                         const SizedBox(width: 8),
                         Expanded(child: Text(visible(p), style: t.type.ui.ink(c.faultText))),
@@ -967,7 +967,7 @@ class _AccountsPageState extends State<AccountsPage> {
                         if (markOf(x.provider, null) case final m?)
                           AxServiceMark(m, size: 16)
                         else
-                          AxGlyph(AxIcon.web, size: 16, color: c.ink3),
+                          AxGlyph(AxIcon.web, color: c.ink3),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(

@@ -328,3 +328,64 @@ class Fade extends StatelessWidget {
     );
   }
 }
+
+/// One row of a raised surface that has many: built as it comes into sight, and drawn as a part of the
+/// whole.
+class CardPart extends SingleChildRenderObjectWidget {
+  const CardPart({required this.first, required this.last, required super.child, super.key});
+  final bool first, last;
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      RenderCardPart(Ax.of(context).colors.plate, first, last);
+  @override
+  void updateRenderObject(BuildContext context, RenderCardPart renderObject) => renderObject
+    ..spec = Ax.of(context).colors.plate
+    ..ends = (first, last);
+}
+
+class RenderCardPart extends RenderProxyBox {
+  RenderCardPart(this._spec, this._first, this._last);
+  SurfaceSpec _spec;
+  set spec(SurfaceSpec v) {
+    if (identical(v, _spec)) return;
+    _spec = v;
+    markNeedsPaint();
+  }
+
+  bool _first, _last;
+  set ends((bool, bool) v) {
+    if (v == (_first, _last)) return;
+    _first = v.$1;
+    _last = v.$2;
+    _shape = null;
+    markNeedsPaint();
+  }
+
+  /// How far beyond its ends the whole goes on, and how far a shade reaches.
+  static const _on = 48.0, _reach = 24.0;
+  _Shape? _shape;
+  Size? _for;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final top = _first ? 0.0 : _on, bottom = _last ? 0.0 : _on;
+    if (_shape == null || _for != size) {
+      _for = size;
+      _shape = _Shape(Size(size.width, size.height + top + bottom), AxRadius.card);
+    }
+    final c = context.canvas..save();
+    c.translate(offset.dx, offset.dy);
+    c.clipRect(
+      Rect.fromLTRB(
+        -_reach,
+        _first ? -_reach : 0,
+        size.width + _reach,
+        size.height + (_last ? _reach : 0),
+      ),
+    );
+    c.translate(0, -top);
+    paintSurface(c, _shape!, _spec, null);
+    c.restore();
+    super.paint(context, offset);
+  }
+}

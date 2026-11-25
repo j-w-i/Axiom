@@ -30,8 +30,16 @@ void main() {
       expect(b.longestSide, greaterThan(14), reason: m.name);
     }
     for (final i in AxIcon.values) {
-      final b = outline(i.path);
-      expect(b.left >= 0 && b.right <= 16 && b.top >= 0 && b.bottom <= 16, isTrue, reason: i.name);
+      for (final filled in [false, true]) {
+        final b = outline(i.path(filled: filled)), g = i.size;
+        expect(
+          b.left >= 0 && b.right <= g && b.top >= 0 && b.bottom <= g,
+          isTrue,
+          reason: '${i.name}, $filled',
+        );
+        // Of one weight on the page: none is much smaller than the others.
+        expect(b.longestSide, greaterThan(g * .5), reason: '${i.name}, $filled');
+      }
     }
   });
 

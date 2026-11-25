@@ -59,7 +59,11 @@ class NavRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Row(
               children: [
-                AxGlyph(icon, size: 17, color: selected || s.hovered || act ? c.ink1 : c.ink2),
+                AxGlyph(
+                  icon,
+                  color: selected || s.hovered || act ? c.ink1 : c.ink2,
+                  filled: selected,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -292,7 +296,7 @@ class _AgentRowState extends State<AgentRow> {
                       children: [
                         _Mark(
                           a.mark == null
-                              ? AxGlyph(AxIcon.comment, size: 15, color: c.ink3)
+                              ? AxGlyph(AxIcon.comment, color: c.ink3)
                               : AxServiceMark(a.mark!, size: 16),
                           t.type.uiMedium,
                         ),
@@ -387,36 +391,47 @@ class _Mark extends StatelessWidget {
 }
 
 /// What the session means to do: how far it is, its parts, how they stand and whose they are.
-(String, Widget?, List<Widget>) planGroup(BuildContext context, List<TaskView> tasks) {
-  final t = Ax.of(context);
-  final done = tasks.where((k) => k.state == TaskState.done).length;
-  return (
-    'Plan',
-    Text('$done of ${tasks.length}', style: t.type.small.ink(t.colors.ink3)),
-    [for (final k in tasks) TaskRow(k)],
-  );
+class PlanView extends StatelessWidget {
+  const PlanView(this.tasks, {super.key});
+  final List<TaskView> tasks;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context);
+    final done = tasks.where((k) => k.state == TaskState.done).length;
+    return PanelGroup(
+      'Plan',
+      Text('$done of ${tasks.length}', style: t.type.small.ink(t.colors.ink3)),
+      [for (final k in tasks) TaskRow(k)],
+    );
+  }
 }
 
 /// What a part of the panel beside the conversation is.
 class PanelHeading extends StatelessWidget {
-  const PanelHeading(this.label, this.trailing, {super.key});
+  const PanelHeading(this.label, this.trailing, {super.key, this.acts = false});
+
+  /// It ends in a key, whose sign, not its ground, stands in line.
+  final bool acts;
   final String label;
   final Widget? trailing;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 9, 12, 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Semantics(
-              header: true,
-              child: Text(label, style: t.type.smallStrong.ink(t.colors.ink3)),
+      padding: EdgeInsets.fromLTRB(12, 4, acts ? 7 : 12, 4),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 30),
+        child: Row(
+          children: [
+            Expanded(
+              child: Semantics(
+                header: true,
+                child: Text(label, style: t.type.smallStrong.ink(t.colors.ink3)),
+              ),
             ),
-          ),
-          ?trailing,
-        ],
+            ?trailing,
+          ],
+        ),
       ),
     );
   }
@@ -433,7 +448,7 @@ class TaskRow extends StatelessWidget {
       TaskState.active => (const AxLamp(AgentState.running, turns: false), 'active'),
       TaskState.asking => (const AxLamp(AgentState.asking), 'asking'),
       TaskState.todo => (const AxLamp(AgentState.waiting), 'to do'),
-      TaskState.blocked => (AxGlyph(AxIcon.warn, size: 13, color: c.attentionText), 'blocked'),
+      TaskState.blocked => (AxGlyph(AxIcon.warn, color: c.attentionText), 'blocked'),
     };
     return Semantics(
       container: true,
@@ -601,76 +616,167 @@ class NeedsRow extends StatelessWidget {
   }
 }
 
-/// A part beside the conversation, with the groove that parts them. Each group is one raised surface.
-class SidePanel extends StatelessWidget {
-  const SidePanel({required this.groups, super.key});
-
-  /// What each is called, what stands at the end of its name, and its rows.
-  final List<(String, Widget?, List<Widget>)> groups;
-  static const width = 300.0;
+/// Rows of one kind on one raised surface, and what they are.
+class PanelGroup extends StatelessWidget {
+  const PanelGroup(this.name, this.trailing, this.rows, {super.key, this.acts = false});
+  final bool acts;
+  final String name;
+  final Widget? trailing;
+  final List<Widget> rows;
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: width,
-    child: ListView(
-      padding: const EdgeInsets.fromLTRB(4, 0, 14, 16),
-      children: [
-        for (final (name, trailing, rows) in groups) ...[
-          PanelHeading(name, trailing),
-          Surface(
-            Ax.of(context).colors.plate,
-            radius: AxRadius.card,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
-            ),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ],
-    ),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      PanelHeading(name, trailing, acts: acts),
+      Surface(
+        Ax.of(context).colors.plate,
+        radius: AxRadius.card,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+        ),
+      ),
+      const SizedBox(height: 6),
+    ],
   );
 }
 
-/// A file that has been changed, and by how much.
+/// A file that has been changed, and by how much. Its change is opened under it, or not.
 class ChangedRow extends StatelessWidget {
   const ChangedRow(
     this.path, {
     required this.added,
     required this.removed,
-    required this.onOpen,
+    required this.open,
+    required this.onPressed,
     super.key,
+    this.what = 'changed',
+    this.tag,
+    this.quiet = false,
   });
-  final String path;
+  final String path, what;
   final int added, removed;
-  final VoidCallback onOpen;
+  final bool open;
+
+  /// Null if there is nothing of it to be read.
+  final VoidCallback? onPressed;
+
+  /// What it is, in a word, where that is more than how it has changed.
+  final String? tag;
+  final bool quiet;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    final dir = path.substring(0, path.lastIndexOf('/') + 1), name = path.substring(dir.length);
+    return Pressable(
+      label: '$path, $what, $added added, $removed removed',
+      expanded: open,
+      onPressed: onPressed,
+      builder: (_, s) => Padding(
+        padding: const EdgeInsets.fromLTRB(6, 7, 6, 7),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              child: Center(
+                child: AxGlyph(
+                  open ? AxIcon.down : AxIcon.right,
+                  color: s.hovered ? c.ink1 : c.ink3,
+                ),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              // Its own name is the last to be cut.
+              child: Text.rich(
+                TextSpan(
+                  text: name,
+                  children: [
+                    if (dir.isNotEmpty)
+                      TextSpan(
+                        text: '  ${dir.substring(0, dir.length - 1)}',
+                        style: t.type.codeSmall.ink(c.ink3),
+                      ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.code.ink(quiet ? c.ink3 : c.ink1),
+              ),
+            ),
+            if (tag case final w?) ...[
+              const SizedBox(width: 8),
+              Surface(
+                c.ghost,
+                radius: AxRadius.tick,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  child: Text(w, style: t.type.caption.ink(c.ink3)),
+                ),
+              ),
+            ],
+            const SizedBox(width: 10),
+            ChangedBy(added, removed),
+            if (onPressed == null) Text('No preview', style: t.type.small.ink(c.ink3)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Something at work in the session that can be brought into sight.
+class PanelRow extends StatelessWidget {
+  const PanelRow(
+    this.icon,
+    this.label, {
+    required this.onPressed,
+    super.key,
+    this.state,
+    this.open = false,
+  });
+  final AxIcon icon;
+  final String label;
+
+  /// In a word.
+  final String? state;
+  final bool open;
+  final VoidCallback onPressed;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Pressable(
-        label: '$path, $added added, $removed removed',
-        onPressed: onOpen,
-        builder: (context, s) => _ground(
-          c,
-          selected: false,
-          hovered: s.hovered,
+        label: state == null ? label : '$label, $state',
+        toggled: open,
+        onPressed: onPressed,
+        builder: (context, s) => Ground(
+          open
+              ? c.selected
+              : s.hovered
+              ? c.hover
+              : null,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 29),
+            constraints: const BoxConstraints(minHeight: 30),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
                 children: [
+                  AxGlyph(icon, color: open || s.hovered ? c.ink1 : c.ink3, filled: open),
+                  const SizedBox(width: 9),
                   Expanded(
                     child: Text(
-                      path,
+                      label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: t.type.codeSmall.ink(s.hovered ? c.ink1 : c.ink2),
+                      style: t.type.code.ink(open ? c.ink1 : c.ink2),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  ChangedBy(added, removed),
+                  if (state case final w?) ...[
+                    const SizedBox(width: 8),
+                    Text(w, style: t.type.small.ink(c.ink3)),
+                  ],
                 ],
               ),
             ),
