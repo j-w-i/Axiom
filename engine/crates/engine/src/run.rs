@@ -304,9 +304,13 @@ impl<S: Stage> Agent<S> {
             match stop {
                 Some(Stop::EndTurn | Stop::Sequence(_) | Stop::ToolUse) | None => {
                     // What was said while it answered is heard before it is done.
-                    match self.inbox.try_recv() {
-                        Ok(m) => self.heard(run, m).await?,
-                        Err(_) => return Ok(()),
+                    // Of what was taken back there is nothing to answer.
+                    let mut heard = false;
+                    while !heard && let Ok(m) = self.inbox.try_recv() {
+                        heard = self.heard(run, m).await?;
+                    }
+                    if !heard {
+                        return Ok(());
                     }
                 }
                 Some(Stop::Pause) => {}
@@ -333,10 +337,11 @@ impl<S: Stage> Agent<S> {
         )))
     }
 
-    /// Takes in what a person said: first for who reads along, then for the model.
-    async fn heard(&mut self, run: &RunId, w: Word) -> Result<(), Halt> {
+    /// Takes in what a person said: first for who reads along, then for the model. Not what has been
+    /// taken back meanwhile: whether there is something to answer.
+    async fn heard(&mut self, run: &RunId, w: Word) -> Result<bool, Halt> {
         if w.item.as_ref().is_some_and(|i| self.noted.remove(i)) {
-            return Ok(());
+            return Ok(true);
         }
         if w.item.is_none() {
             let (by, text) = match &w.shown {
@@ -354,7 +359,7 @@ impl<S: Stage> Agent<S> {
         for (item, text) in words {
             self.noted.insert(item.clone());
             match self.keep_turn(Turn::Message(Message::user(text)), Some(item)).await {
-                Ok(()) => {}
+                Ok(_) => {}
                 Err(Halt::Failed(why) | Halt::Full(why)) => return Err(Refused::This(why)),
                 Err(Halt::Cancelled | Halt::Unbegun | Halt::Gone) => return Err(Refused::Closed),
             }
@@ -385,14 +390,17 @@ impl<S: Stage> Agent<S> {
 
     /// On the drive before anything follows from it.
     async fn remember(&mut self, t: Turn) -> Result<(), Halt> {
-        self.keep_turn(t, None).await
+        self.keep_turn(t, None).await.map(drop)
     }
 
-    async fn keep_turn(&mut self, t: Turn, heard: Option<ItemId>) -> Result<(), Halt> {
+    /// What has been taken back is not kept, and nobody is told of it.
+    async fn keep_turn(&mut self, t: Turn, heard: Option<ItemId>) -> Result<bool, Halt> {
         let text = serde_json::to_string(&t).map_err(|e| Halt::Failed(e.to_string()))?;
-        self.stage.remember(self.context.turns(), text, heard).await?;
-        self.context.push(&t);
-        Ok(())
+        let kept = self.stage.remember(self.context.turns(), text, heard).await?;
+        if kept {
+            self.context.push(&t);
+        }
+        Ok(kept)
     }
 
     fn request(&self) -> Result<Request, Halt> {

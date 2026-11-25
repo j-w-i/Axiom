@@ -764,7 +764,7 @@ impl Stage for Floor {
     async fn sync(&self) -> Result<(), Refused> {
         self.session.sync().await.map(drop).map_err(|_| Refused::Closed)
     }
-    async fn remember(&self, n: u64, turn: String, heard: Option<ItemId>) -> Result<(), Refused> {
+    async fn remember(&self, n: u64, turn: String, heard: Option<ItemId>) -> Result<bool, Refused> {
         let (s, a) = (self.session.id.clone(), self.agent.clone());
         self.store.put_message(s, a, n, turn, heard).await.map_err(|e| Refused::This(e.to_string()))
     }
@@ -801,7 +801,8 @@ impl Floor {
             .await
             .map_err(|e| Refused::This(e.to_string()))
     }
-    pub async fn heard(&self, items: Vec<ItemId>) -> Result<(), Refused> {
+    /// Those that still waited.
+    pub async fn heard(&self, items: Vec<ItemId>) -> Result<Vec<ItemId>, Refused> {
         let (s, a) = (self.session.id.clone(), self.agent.clone());
         self.store.heard(s, a, items).await.map_err(|e| Refused::This(e.to_string()))
     }

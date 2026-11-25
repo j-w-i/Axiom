@@ -142,7 +142,12 @@ impl Store {
     ) -> Result<()> {
         self.write(move |j| j.put_pending(&id, &agent, &item, &body)).await
     }
-    pub async fn heard(&self, id: SessionId, agent: AgentId, items: Vec<ItemId>) -> Result<()> {
+    pub async fn heard(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        items: Vec<ItemId>,
+    ) -> Result<Vec<ItemId>> {
         self.write(move |j| j.heard(&id, &agent, &items)).await
     }
     pub async fn put_frames(
@@ -215,7 +220,7 @@ impl Store {
         n: u64,
         body: String,
         heard: Option<ItemId>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.write(move |j| j.put_message(&id, &agent, n, &body, heard.as_ref())).await
     }
     pub async fn messages(&self, id: SessionId, agent: AgentId) -> Result<Vec<String>> {
