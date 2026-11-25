@@ -4,39 +4,26 @@ on:
 permissions: { contents: read }
 jobs:
   app:
+    name: ${{ matrix.file }}
+    strategy:
+      fail-fast: false
+      matrix:
+        file: ["test/goldens_test.dart", "test/host/e2e_test.dart", "test/host/fake_host_test.dart", "test/host/proto_test.dart", "test/shell_test.dart", "test/shots_test.dart", "test/transcript/markdown_test.dart", "test/transcript/transcript_view_test.dart", "test/ui/alignment_test.dart", "test/ui/controls_test.dart", "test/ui/execution_test.dart", "test/ui/marks_test.dart", "test/ui/tokens_test.dart"]
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with: { channel: stable, flutter-version: 3.50.0, cache: true }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: engine }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: 3.50.0, cache: true }
       - run: cargo build -p axiom-host --locked
         working-directory: engine
       - run: flutter pub get --enforce-lockfile
         working-directory: app
-      - name: start
-        shell: pwsh
+      - name: the tests
+        shell: bash
         working-directory: app
-        run: |
-          $p = Start-Process cmd.exe -ArgumentList '/c','flutter test --reporter expanded > ..\out.log 2>&1' -PassThru -WindowStyle Hidden
-          "started $($p.Id)"
-      - name: wait
-        shell: pwsh
-        run: Start-Sleep 120; Get-Content out.log -Tail 40
-      - uses: actions/upload-artifact@v4
-        with: { name: app-out, path: out.log }
-      - name: processes
-        shell: pwsh
-        run: tasklist /fi "imagename eq flutter_tester.exe" /v; tasklist /fi "imagename eq dart.exe" | Out-File tasks.log; Get-Content tasks.log
-      - name: stacks
-        shell: pwsh
-        run: |
-          $q = (tasklist /fi "imagename eq flutter_tester.exe" /fo csv | ConvertFrom-Csv)[0].PID
-          & "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe" -pv -p $q -c "~*kn 25; qd" > stacks.log
-          Get-Content stacks.log -Tail 400
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: app-stacks, path: "*.log" }
+        timeout-minutes: 4
+        run: flutter test --reporter expanded ${{ matrix.file }}
