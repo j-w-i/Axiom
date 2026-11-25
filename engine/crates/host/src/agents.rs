@@ -71,6 +71,20 @@ pub struct Slot {
     keys: Mutex<VecDeque<(String, Value)>>,
 }
 
+impl Slot {
+    /// Nobody uses it, or is about to, and nothing runs in it.
+    fn idle(self: &Arc<Self>) -> bool {
+        Arc::strong_count(self) == 1
+            && self.live.try_lock().is_ok_and(|l| l.is_none())
+            && self.seen.1.running().is_empty()
+    }
+}
+
+/// Forgetting costs no more than asking, and reading, once more.
+fn forget_idle(all: &mut HashMap<SessionId, Party>) {
+    all.retain(|_, p| !p.agents.values().all(Slot::idle));
+}
+
 type Live = Option<Now>;
 
 /// The run an agent is in.
@@ -131,10 +145,7 @@ impl Agents {
     fn party<T>(&self, s: &SessionId, f: impl FnOnce(&mut Party) -> T) -> T {
         let mut all = self.parties();
         if all.len() >= PARTIES && !all.contains_key(s) {
-            // Forgetting costs no more than asking, and reading, once more.
-            all.retain(|_, p| {
-                p.agents.values().any(|a| a.live.try_lock().map_or(true, |l| l.is_some()))
-            });
+            forget_idle(&mut all);
         }
         f(all.entry(s.clone()).or_default())
     }
@@ -653,4 +664,41 @@ pub fn changed(agent: &AgentId, s: &Setup) -> Vec<Say> {
 
 pub fn full(n: usize) -> bool {
     n >= MOST
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// Two slots of one agent would be two runs of it.
+    #[tokio::test]
+    async fn who_is_at_work_is_not_forgotten() {
+        let mut all: HashMap<SessionId, Party> = HashMap::new();
+        let mut add = |n: &str| {
+            let slot = Arc::new(Slot::default());
+            let mut p = Party::default();
+            p.agents.insert(AgentId(n.into()), slot.clone());
+            p.agents.insert(AgentId("another".into()), Arc::default());
+            all.insert(SessionId(n.into()), p);
+            slot
+        };
+        let (works, _) = (add("works"), add("idle"));
+        let wanted = add("wanted");
+        let spoken_to = add("spoken to");
+        let (_tx, cancel) = watch::channel(false);
+        let (tx, _rx) = mpsc::channel(1);
+        *works.live.lock().await = Some(Now { run: RunId::new(), tx, cancel, late: false });
+        drop(works);
+        let live = spoken_to.live.clone();
+        drop(spoken_to);
+        let _held = live.lock().await;
+        forget_idle(&mut all);
+        let mut left: Vec<&str> = all.keys().map(|s| s.0.as_str()).collect();
+        left.sort();
+        assert_eq!(left, ["spoken to", "wanted", "works"]);
+        drop(wanted);
+        forget_idle(&mut all);
+        assert_eq!(all.len(), 2);
+    }
 }

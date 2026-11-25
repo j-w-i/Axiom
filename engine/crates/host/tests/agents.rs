@@ -401,6 +401,28 @@ async fn a_client_is_answered_while_a_provider_is_slow() {
     }
 }
 
+/// What the person chose is not what is there any more.
+#[tokio::test]
+async fn a_workspace_that_leads_elsewhere_is_not_worked_in() {
+    let mut t = T::new(vec![]).await;
+    let a = t.agent(Access::Work).await;
+    let w = t.f.dir.path().join("w");
+    std::fs::rename(&w, t.f.dir.path().join("was")).unwrap();
+    std::fs::create_dir(t.f.dir.path().join("other")).unwrap();
+    std::os::unix::fs::symlink(t.f.dir.path().join("other"), &w).unwrap();
+    let e = t.prompt(&a, "go").await.unwrap_err();
+    assert!(e.to_string().contains("leads elsewhere"), "{e}");
+    assert!(t.server.requests().is_empty());
+    // The name is free again, and so is the prompt's own.
+    let named = t.prompt_named(&a, "go", Some("k")).await;
+    assert!(named.is_err());
+    std::fs::remove_file(&w).unwrap();
+    std::fs::rename(t.f.dir.path().join("was"), &w).unwrap();
+    t.server.add(text(&["ok"]));
+    t.prompt_named(&a, "go", Some("k")).await.unwrap();
+    assert_eq!(t.ended().await.0, Outcome::Completed);
+}
+
 #[tokio::test]
 async fn an_agent_nobody_was_told_of_is_not_there() {
     let mut t = T::new(vec![]).await;

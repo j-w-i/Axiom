@@ -352,7 +352,7 @@ impl Policy {
             // A person who wrote "allow" for this answers the asking that access would do; another
             // rule that asks or denies still counts.
             if let Some(d) = hit.iter().map(|r| r.0.decision).max() {
-                v.decision = if access == Access::Ask { d } else { d.max(v.decision) };
+                v.decision = d;
                 let deciding: Vec<&&Rule> = hit.iter().filter(|r| r.0.decision == d).collect();
                 v.rules = deciding.iter().map(|r| r.0.id.clone()).collect();
                 v.why = format!("rule {}", v.rules.join(", "));
@@ -386,13 +386,11 @@ fn worse(a: Verdict, b: Verdict) -> Verdict {
     out
 }
 
-/// For files and hosts: an `allow` answers an asking base; nothing lowers a denial.
+/// For files and hosts: an `allow` answers an asking base; a base that denies is not brought here.
 fn strictest<'a>(v: &mut Verdict, hit: impl Iterator<Item = &'a Rule>) {
     let hit: Vec<&Rule> = hit.collect();
     let Some(d) = hit.iter().map(|r| r.0.decision).max() else { return };
-    if v.decision == Decision::Deny {
-        return;
-    }
+    debug_assert_ne!(v.decision, Decision::Deny);
     v.decision = d;
     v.rules = hit.iter().filter(|r| r.0.decision == d).map(|r| r.0.id.clone()).collect();
     v.why = format!("rule {}", v.rules.join(", "));
@@ -733,6 +731,11 @@ mod tests {
         );
         let v = run(&pol, "make && cargo test", Access::Ask);
         assert_eq!((v.decision, v.run_in, v.rules.len()), (Allow, RunIn::ReadOnly, 2));
+        // Whichever of the parts decides: in the narrower sandbox of the two.
+        for s in ["ls && make", "make && ls"] {
+            let v = run(&pol, s, Access::Ask);
+            assert_eq!((v.decision, v.run_in), (Ask, RunIn::ReadOnly), "{s}");
+        }
         let both = policy(TEST).and(Policy::parse("version=1\n[[rule]]\nid='c'\ntool='shell'\nargv=['cargo',{rest='any'}]\ndecision='deny'", Source::Workspace).unwrap());
         assert_eq!(run(&both, "cargo test", Access::Work).decision, Deny);
     }
