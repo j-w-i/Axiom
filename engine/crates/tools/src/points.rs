@@ -4,7 +4,7 @@
 //! taken for what it was.
 
 use std::{
-    collections::BTreeMap, ffi::OsStr, fs::Permissions, io, path::Path, sync::atomic::AtomicBool,
+    collections::BTreeMap, ffi::OsStr, io, path::Path, sync::atomic::AtomicBool,
     sync::atomic::Ordering,
 };
 
@@ -137,7 +137,10 @@ fn put_by(top: &Dir, rel: &str, is: &Is, store: &Dir) -> Result<bool, CopyError>
 fn plain(d: &Dir, name: &str, run: bool) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let mode = if run { 0o755 } else { 0o644 };
-    d.set_permissions(name, cap_std::fs::Permissions::from_std(Permissions::from_mode(mode)))
+    d.set_permissions(
+        name,
+        cap_std::fs::Permissions::from_std(std::fs::Permissions::from_mode(mode)),
+    )
 }
 #[cfg(not(unix))]
 fn plain(d: &Dir, name: &str, _: bool) -> io::Result<()> {

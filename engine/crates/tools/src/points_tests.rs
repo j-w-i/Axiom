@@ -137,7 +137,7 @@ fn links_stay_links_and_what_runs_runs() {
         let m = std::fs::symlink_metadata(p.as_path().join(f)).unwrap();
         m.permissions().mode() & 0o111 != 0
     };
-    let x = Permissions::from_mode(0o755);
+    let x = std::fs::Permissions::from_mode(0o755);
     std::fs::set_permissions(t.copy.as_path().join("run"), x).unwrap();
     symlink("/etc/hosts", t.copy.as_path().join("l")).unwrap();
     // The same in it as the link has, and another thing.
