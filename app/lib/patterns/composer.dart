@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
@@ -166,95 +167,99 @@ class _ComposerState extends State<Composer> {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     final empty = _text.text.trim().isEmpty;
-    return Surface(
-      c.written,
-      radius: AxRadius.written,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ?widget.header,
-          Padding(
-            padding: const EdgeInsets.fromLTRB(AxSpace.edge, 13, AxSpace.edge, 6),
-            child: Focus(
-              canRequestFocus: false,
-              skipTraversal: true,
-              onKeyEvent: _key,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _focus.requestFocus,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: widget.high, maxHeight: 220),
-                  child: AxEditable(
-                    label: widget.label ?? widget.placeholder,
-                    placeholder: widget.placeholder,
-                    controller: _text,
-                    focusNode: _focus,
-                    style: t.type.prose,
+    return OnCommand(
+      Command.stop,
+      widget.onStop,
+      child: Surface(
+        c.written,
+        radius: AxRadius.written,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ?widget.header,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AxSpace.edge, 13, AxSpace.edge, 6),
+              child: Focus(
+                canRequestFocus: false,
+                skipTraversal: true,
+                onKeyEvent: _key,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _focus.requestFocus,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: widget.high, maxHeight: 220),
+                    child: AxEditable(
+                      label: widget.label ?? widget.placeholder,
+                      placeholder: widget.placeholder,
+                      controller: _text,
+                      focusNode: _focus,
+                      style: t.type.prose,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(AxSpace.chip, 2, 10, 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Wrap(
-                    spacing: 2,
-                    runSpacing: 2,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: widget.leading,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AxSpace.chip, 2, 10, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Wrap(
+                      spacing: 2,
+                      runSpacing: 2,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: widget.leading,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                if (widget.onAttach != null)
-                  AxButton.icon(
-                    AxIcon.attach,
-                    label: 'Attach',
-                    tone: AxTone.quiet,
-                    onPressed: widget.onAttach,
-                  ),
-                const SizedBox(width: 4),
-                // A click meant to send does not stop, nor the other way round.
-                Settle(
-                  stamp: (widget.onStop == null, empty),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (widget.onStop case final stop?) ...[
-                        AxButton.icon(
-                          AxIcon.stop,
-                          key: const ValueKey('stop'),
-                          label: 'Stop',
-                          iconFilled: true,
-                          tone: AxTone.key,
-                          round: true,
-                          size: 30,
-                          onPressed: stop,
-                        ),
-                        if (!empty) const SizedBox(width: 6),
+                  const SizedBox(width: 12),
+                  if (widget.onAttach != null)
+                    AxButton.icon(
+                      AxIcon.attach,
+                      label: 'Attach',
+                      tone: AxTone.quiet,
+                      onPressed: widget.onAttach,
+                    ),
+                  const SizedBox(width: 4),
+                  // A click meant to send does not stop, nor the other way round.
+                  Settle(
+                    stamp: (widget.onStop == null, empty),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (widget.onStop case final stop?) ...[
+                          AxButton.icon(
+                            AxIcon.stop,
+                            key: const ValueKey('stop'),
+                            label: 'Stop',
+                            iconFilled: true,
+                            tone: AxTone.key,
+                            round: true,
+                            size: 30,
+                            onPressed: stop,
+                          ),
+                          if (!empty) const SizedBox(width: 6),
+                        ],
+                        if (!empty || widget.onStop == null)
+                          AxButton.icon(
+                            AxIcon.up,
+                            key: const ValueKey('send'),
+                            label: widget.action,
+                            tone: AxTone.primary,
+                            round: true,
+                            size: 30,
+                            onPressed: (widget.ready ?? !empty) && widget.enabled
+                                ? () => unawaited(_submit())
+                                : null,
+                          ),
                       ],
-                      if (!empty || widget.onStop == null)
-                        AxButton.icon(
-                          AxIcon.up,
-                          key: const ValueKey('send'),
-                          label: widget.action,
-                          tone: AxTone.primary,
-                          round: true,
-                          size: 30,
-                          onPressed: (widget.ready ?? !empty) && widget.enabled
-                              ? () => unawaited(_submit())
-                              : null,
-                        ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

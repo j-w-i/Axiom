@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../transcript/safe_text.dart';
 import '../ui/editable.dart';
@@ -335,10 +337,22 @@ class _RequestBarState extends State<RequestBar> {
   /// Null until laid out: not knowing is not having seen.
   bool? _seen;
 
+  /// A press meant for the question before this one is not an answer to it.
+  bool _settled = false;
+  Timer? _settling;
+  void _settle() {
+    _settled = false;
+    _settling?.cancel();
+    _settling = Timer(AxMotion.settle, () {
+      if (mounted) setState(() => _settled = true);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_look);
+    _settle();
   }
 
   @override
@@ -347,6 +361,7 @@ class _RequestBarState extends State<RequestBar> {
     // Any difference makes it another request, and nothing about it has been seen.
     if (old.request != widget.request) {
       _seen = null;
+      _settle();
       _says = false;
       _why.clear();
       if (_scroll.hasClients) _scroll.jumpTo(0);
@@ -369,6 +384,7 @@ class _RequestBarState extends State<RequestBar> {
 
   @override
   void dispose() {
+    _settling?.cancel();
     _scroll.dispose();
     _focus.dispose();
     _why.dispose();
@@ -522,27 +538,36 @@ class _RequestBarState extends State<RequestBar> {
           ]),
       ],
     );
-    return Semantics(
-      container: true,
-      liveRegion: true,
-      label: 'Permission request from $agent',
-      explicitChildNodes: true,
-      child: Settle(
-        stamp: r,
-        fresh: true,
-        child: Surface(
-          c.plate,
-          radius: AxRadius.card,
-          child: Padding(
-            padding: const EdgeInsets.all(AxSpace.card),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                body,
-                const SizedBox(height: 10),
-                Align(alignment: Alignment.centerRight, child: keys),
-              ],
+    return OnCommand(
+      Command.allow,
+      // Only what has been seen to its end, and been there long enough to be meant.
+      ok && _settled && !_says ? widget.onOnce : null,
+      child: OnCommand(
+        Command.deny,
+        _settled ? (_says ? _denyWith : widget.onDeny) : null,
+        child: Semantics(
+          container: true,
+          liveRegion: true,
+          label: 'Permission request from $agent',
+          explicitChildNodes: true,
+          child: Settle(
+            stamp: r,
+            fresh: true,
+            child: Surface(
+              c.plate,
+              radius: AxRadius.card,
+              child: Padding(
+                padding: const EdgeInsets.all(AxSpace.card),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    body,
+                    const SizedBox(height: 10),
+                    Align(alignment: Alignment.centerRight, child: keys),
+                  ],
+                ),
+              ),
             ),
           ),
         ),

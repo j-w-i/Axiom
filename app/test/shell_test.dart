@@ -11,6 +11,8 @@ import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/gestures.dart';
+import 'package:axiom/ui/commands.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -438,6 +440,57 @@ void main() {
     await t.pump();
     expect(find.byType(SessionPanel), findsOneWidget);
     s.dispose();
+  });
+
+  testWidgets('a key goes to another session, the stop key stops, F6 goes around', (t) async {
+    final opened = <String>[];
+    final s = Opens(opened)
+      ..phase = HostPhase.connected
+      ..current = recorded()
+      ..sessions = [
+        info('p', 'One', '/me/web', 3),
+        info('q', 'Two', '/me/web', 2),
+        info('r', 'Three', '/me/docs', 1),
+      ];
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    final order = sessionOrder(s);
+    Future<void> ctrl(LogicalKeyboardKey k, {bool shift = false}) async {
+      if (shift) await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await keys(t, k);
+      if (shift) await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    }
+
+    await ctrl(LogicalKeyboardKey.digit1);
+    await ctrl(LogicalKeyboardKey.digit3);
+    expect(opened, [order[0], order[2]].where((x) => x != s.current!.id));
+    // There is no ninth.
+    await ctrl(LogicalKeyboardKey.digit9);
+    expect(opened.length, lessThanOrEqualTo(2));
+    opened.clear();
+    await ctrl(LogicalKeyboardKey.tab);
+    await ctrl(LogicalKeyboardKey.tab, shift: true);
+    final at = order.indexOf(s.current!.id), n = order.length;
+    expect(opened, [order[(at + 1) % n], order[(at - 1) % n]]);
+    // Around the window, and back.
+    FocusNode? where() => FocusManager.instance.primaryFocus;
+    await t.sendKeyEvent(LogicalKeyboardKey.f6);
+    await t.pump();
+    final first = where();
+    await t.sendKeyEvent(LogicalKeyboardKey.f6);
+    await t.pump();
+    expect(where(), isNot(first));
+    s.dispose();
+  });
+
+  test('no two commands have one key', () {
+    for (final mac in [true, false]) {
+      debugDefaultTargetPlatformOverride = mac ? TargetPlatform.macOS : TargetPlatform.linux;
+      final all = Command.values.map((c) => c.keys).toList();
+      expect(all.toSet().length, all.length, reason: '$all');
+      expect(Command.find.keys, mac ? '⌘K' : 'Ctrl+K');
+      expect(Command.allow.keys, mac ? '⇧⌘Y' : 'Ctrl+Shift+Y');
+    }
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('everything can be found, and gone to by the keyboard', (t) async {

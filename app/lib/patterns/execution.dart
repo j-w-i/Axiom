@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
@@ -61,61 +62,68 @@ class ExecutionKey extends StatelessWidget {
     return AxPopover(
       key: ValueKey(of),
       width: 440,
-      anchor: (context, open, toggle) => Pressable(
-        label: 'Runs on ${words.join(', ')}. Change',
-        expanded: open,
-        onPressed: () {
+      anchor: (context, open, toggle) => OnCommand(
+        Command.model,
+        () {
           if (!open) onOpen?.call();
           toggle();
         },
-        builder: (context, s) => DecoratedBox(
-          decoration: BoxDecoration(
-            color: open
-                ? c.selected
-                : s.hovered
-                ? c.hover
-                : null,
-            borderRadius: BorderRadius.circular(AxRadius.key),
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: t.density.control),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (choices.first.item?.mark case final m?) ...[
-                    AxServiceMark(m, size: 13),
-                    const SizedBox(width: 7),
-                  ],
-                  Flexible(
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: words.first,
-                            style: TextStyle(fontVariations: t.type.labelStrong.fontVariations),
-                          ),
-                          if (words.length > 1)
+        child: Pressable(
+          label: 'Runs on ${words.join(', ')}. Change',
+          expanded: open,
+          onPressed: () {
+            if (!open) onOpen?.call();
+            toggle();
+          },
+          builder: (context, s) => DecoratedBox(
+            decoration: BoxDecoration(
+              color: open
+                  ? c.selected
+                  : s.hovered
+                  ? c.hover
+                  : null,
+              borderRadius: BorderRadius.circular(AxRadius.key),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: t.density.control),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (choices.first.item?.mark case final m?) ...[
+                      AxServiceMark(m, size: 13),
+                      const SizedBox(width: 7),
+                    ],
+                    Flexible(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
                             TextSpan(
-                              text: '   ${words[1]}',
-                              style: TextStyle(color: c.ink3),
+                              text: words.first,
+                              style: TextStyle(fontVariations: t.type.labelStrong.fontVariations),
                             ),
-                        ],
+                            if (words.length > 1)
+                              TextSpan(
+                                text: '   ${words[1]}',
+                                style: TextStyle(color: c.ink3),
+                              ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.type.label.ink(c.ink1),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.label.ink(c.ink1),
                     ),
-                  ),
-                  const SizedBox(width: 7),
-                  SpringTo(
-                    target: open ? 1 : 0,
-                    spring: AxMotion.snap,
-                    builder: (_, v, child) => Transform.rotate(angle: 3.1416 * v, child: child),
-                    child: AxGlyph(AxIcon.down, color: open ? c.ink1 : c.ink3),
-                  ),
-                ],
+                    const SizedBox(width: 7),
+                    SpringTo(
+                      target: open ? 1 : 0,
+                      spring: AxMotion.snap,
+                      builder: (_, v, child) => Transform.rotate(angle: 3.1416 * v, child: child),
+                      child: AxGlyph(AxIcon.down, color: open ? c.ink1 : c.ink3),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

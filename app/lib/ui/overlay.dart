@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'commands.dart';
 import 'controls.dart';
 import 'icons.dart';
 import 'marks.dart';
@@ -586,7 +587,11 @@ class AxSelect<T> extends StatelessWidget {
     this.face,
     this.quiet = false,
     this.icon,
+    this.command,
   });
+
+  /// Opens it.
+  final Command? command;
 
   /// It stands among others that have no ground of their own.
   final bool quiet;
@@ -606,58 +611,61 @@ class AxSelect<T> extends StatelessWidget {
     final t = Ax.of(context), c = t.colors;
     final chosen = items.where((e) => e.value == value).firstOrNull;
     return AxPopover(
-      anchor: (context, open, toggle) => quiet
-          ? AxChip(
-              label: '$label: ${chosen?.label ?? 'none'}',
-              words: face ?? chosen?.label ?? 'None',
-              icon: icon,
-              mark: chosen?.mark,
-              open: open,
-              onPressed: toggle,
-            )
-          : Pressable(
-              label: '$label: ${chosen?.label ?? 'none'}',
-              expanded: open,
-              onPressed: toggle,
-              builder: (context, s) => Surface(
-                s.pressed || open
-                    ? c.keyDown
-                    : s.hovered
-                    ? c.keyHover
-                    : c.key,
-                radius: AxRadius.key,
-                child: ConstrainedBox(
-                  // Taller with larger text.
-                  constraints: BoxConstraints(minHeight: t.density.control),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 10, 0),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (chosen?.mark case final m? when face == null) ...[
-                          AxServiceMark(m, size: 13),
-                          const SizedBox(width: 8),
-                        ],
-                        if (named && face == null) ...[
-                          Text(label, style: t.type.label.ink(c.ink3)),
-                          const SizedBox(width: 6),
-                        ],
-                        Flexible(
-                          child: Text(
-                            face ?? chosen?.label ?? 'None',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.type.labelStrong,
+      anchor: (context, open, toggle) => _commanded(
+        toggle,
+        quiet
+            ? AxChip(
+                label: '$label: ${chosen?.label ?? 'none'}',
+                words: face ?? chosen?.label ?? 'None',
+                icon: icon,
+                mark: chosen?.mark,
+                open: open,
+                onPressed: toggle,
+              )
+            : Pressable(
+                label: '$label: ${chosen?.label ?? 'none'}',
+                expanded: open,
+                onPressed: toggle,
+                builder: (context, s) => Surface(
+                  s.pressed || open
+                      ? c.keyDown
+                      : s.hovered
+                      ? c.keyHover
+                      : c.key,
+                  radius: AxRadius.key,
+                  child: ConstrainedBox(
+                    // Taller with larger text.
+                    constraints: BoxConstraints(minHeight: t.density.control),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 10, 0),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (chosen?.mark case final m? when face == null) ...[
+                            AxServiceMark(m, size: 13),
+                            const SizedBox(width: 8),
+                          ],
+                          if (named && face == null) ...[
+                            Text(label, style: t.type.label.ink(c.ink3)),
+                            const SizedBox(width: 6),
+                          ],
+                          Flexible(
+                            child: Text(
+                              face ?? chosen?.label ?? 'None',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.type.labelStrong,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        AxGlyph(AxIcon.down, color: c.ink3),
-                      ],
+                          const SizedBox(width: 6),
+                          AxGlyph(AxIcon.down, color: c.ink3),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
+      ),
       panel: (context, close) => AxMenu<T>(
         label: label,
         items: items,
@@ -669,4 +677,7 @@ class AxSelect<T> extends StatelessWidget {
       ),
     );
   }
+
+  Widget _commanded(VoidCallback toggle, Widget w) =>
+      command == null ? w : OnCommand(command!, toggle, child: w);
 }

@@ -15,6 +15,7 @@ import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
 import '../transcript/safe_text.dart';
 import '../transcript/transcript_view.dart';
+import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/overlay.dart';
@@ -157,36 +158,73 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     _show(_View.start);
   }
 
-  static final _mac = defaultTargetPlatform == TargetPlatform.macOS;
-  static String keysOf(String key) => _mac ? '⌘$key' : 'Ctrl+$key';
+  final _commands = Commands();
 
-  /// The window's own keys, wherever the keyboard is.
-  bool _key(KeyEvent e) {
-    final k = HardwareKeyboard.instance;
-    if (e is! KeyDownEvent || k.isAltPressed || k.isShiftPressed) return false;
-    if (_mac ? !k.isMetaPressed || k.isControlPressed : !k.isControlPressed || k.isMetaPressed) {
-      return false;
-    }
-    switch (e.logicalKey) {
-      case LogicalKeyboardKey.keyN:
+  /// Another session: the one so far from the open one in the list, around its end.
+  void _by(int d) {
+    final all = sessionOrder(widget.store);
+    if (all.isEmpty) return;
+    final at = all.indexOf(widget.store.current?.id ?? '');
+    _open(all[at < 0 ? (d > 0 ? 0 : all.length - 1) : (at + d) % all.length]);
+  }
+
+  /// What has waited longest after the one that is shown.
+  void _nextRequest() {
+    final all = widget.store.needs.where((w) => w.need == Need.asks).toList();
+    if (all.isEmpty) return;
+    final m = widget.store.current;
+    final agent = _agent ?? m?.agents.keys.firstOrNull;
+    final at = all.lastIndexWhere((w) => w.session == m?.id && w.agent == agent);
+    _answer(all[(at + 1) % all.length]);
+  }
+
+  bool _run(Command c) {
+    switch (c) {
+      case Command.start:
         _startIn(null);
-      case LogicalKeyboardKey.keyK:
+      case Command.find:
         setState(() => _finding = !_finding);
-      case LogicalKeyboardKey.comma:
+      case Command.accounts:
         _show(_View.accounts);
-      case LogicalKeyboardKey.keyD:
+      case Command.panel:
         if (_panel(context) case final open?) _change(!open);
-      case LogicalKeyboardKey.keyB:
+      case Command.list:
         setState(() => _list = !_list);
-      default:
-        return false;
+      case Command.next:
+        _by(1);
+      case Command.previous:
+        _by(-1);
+      case Command.request:
+        _nextRequest();
+      case Command.area:
+        _commands.area();
+      case Command.areaBack:
+        _commands.area(back: true);
+      case Command.stop || Command.model || Command.access || Command.allow || Command.deny:
+        // Of what is on the screen. Nothing there: it is nobody's.
+        return _commands.run(c);
     }
     return true;
   }
 
+  /// The window's own keys, wherever the keyboard is.
+  bool _key(KeyEvent e) {
+    if (Command.place(e) case final n? when !_finding) {
+      final all = sessionOrder(widget.store);
+      if (n > all.length) return false;
+      _open(all[n - 1]);
+      return true;
+    }
+    final c = Command.of(e);
+    if (c == null) return false;
+    // Nothing is decided on from under the search.
+    if (_finding && c != Command.find) return false;
+    return _run(c);
+  }
+
   List<Found> _everything(HostStore s) => [
-    Found('New session', () => _startIn(null), icon: AxIcon.plus, keys: keysOf('N')),
-    Found('Accounts', () => _show(_View.accounts), icon: AxIcon.account, keys: keysOf(',')),
+    for (final (c, icon) in [(Command.start, AxIcon.plus), (Command.accounts, AxIcon.account)])
+      Found(c.label, () => _run(c), icon: icon, keys: c.keys),
     if (s.current case final m?) ...[
       if (m.workspace != null)
         Found(
@@ -212,6 +250,17 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
         () => _open(x.id),
         detail: x.workspace == null ? null : folderName(x.workspace!),
       ),
+    // A yes is said where the question is, not from a list.
+    for (final c in Command.values)
+      if (switch (c) {
+        Command.panel => _panel(context) != null,
+        Command.list => true,
+        Command.next || Command.previous => s.sessions.length > 1,
+        Command.request => s.needs.any((w) => w.need == Need.asks),
+        Command.stop || Command.model || Command.access => _commands.can(c),
+        _ => false,
+      })
+        Found(c.label, () => _run(c), icon: AxIcon.more, keys: c.keys),
   ];
 
   void _open(String id) {
@@ -261,204 +310,214 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    return ColoredBox(
-      color: c.chassis.fill,
-      child: ListenableBuilder(
-        listenable: widget.store,
-        builder: (context, _) {
-          final s = widget.store;
-          _begin(s);
-          // An agent is chosen within its session only.
-          if (_session != s.current?.id) {
-            _session = s.current?.id;
-            _agent = switch (_wanted) {
-              (final session, final agent) when session == _session => agent,
-              _ => null,
-            };
-            _wanted = null;
-          }
-          final stale = s.phase != HostPhase.connected;
-          // With nothing to go back to, one begins.
-          final view =
-              _view == _View.work &&
-                  s.phase == HostPhase.connected &&
-                  s.current == null &&
-                  s.sessions.isEmpty
-              ? _View.start
-              : _view;
-          final width = MediaQuery.sizeOf(context).width;
-          final narrow = width < 860, beside = !narrow && _list;
-          Widget panelKey() => ListenableBuilder(
-            listenable: Listenable.merge([
-              if (s.current case final m?) ...[m, _changesOf(m), ...m.agents.values],
-            ]),
-            builder: (context, _) {
-              final open = _panel(context);
-              return PanelKey(
-                open: open ?? false,
-                shortcut: keysOf('D'),
-                onPressed: open == null ? null : () => _change(!open),
-              );
-            },
-          );
-          Widget side([VoidCallback? close]) => _Side(
-            store: s,
-            inset: widget.titleInset,
-            agent: _agent,
-            view: view,
-            close: close,
-            onAgent: (id) => setState(() {
-              _agent = id;
-              _view = _View.work;
-            }),
-            onAddAgent: () => _addAgent(s.current!.id),
-            onStart: _startIn,
-            onFind: () => setState(() => _finding = true),
-            onAccounts: () => _show(_View.accounts),
-            onHide: () => setState(() => _list = false),
-            onAnswer: _answer,
-            onOpen: _open,
-          );
-          final page = switch (view) {
-            _View.start => 'New session',
-            _View.agent => 'New agent',
-            _View.accounts => 'Accounts',
-            _View.work => null,
-          };
-          final problem = switch (s) {
-            _ when stale && s.phase != HostPhase.starting =>
-              s.binary == null && s.current == null
-                  ? 'axiom-host was not found beside the application'
-                  : 'The host is not answering. Trying again.',
-            HostStore(:final damaged?) => 'The journal is damaged: ${oneLine(damaged, 200)}',
-            _ => _failed == null ? null : oneLine(_failed!, 200),
-          };
-          final onList = beside || narrow ? null : () => setState(() => _list = true);
-          final banner = problem == null
-              ? null
-              : _Banner(problem, inset: beside ? AxSpace.gutter : widget.titleInset + AxSpace.edge);
-          final content = switch (s) {
-            // Kept while the host is away: what was written is not lost.
-            _ when view == _View.start => StartPage(
-              _start,
-              onStarted: (_) => _show(_View.work),
-              onAccounts: () => _show(_View.accounts),
-              onCancel: s.current == null ? null : _back,
-            ),
-            // Only while its session is the one that is open.
-            _ when _view == _View.agent && _more?.into == s.current?.id => StartPage(
-              _more!,
-              key: ObjectKey(_more),
-              onStarted: (_) => setState(() {
-                _agent = _more!.last;
+    return CommandScope(
+      _commands,
+      child: ColoredBox(
+        color: c.chassis.fill,
+        child: ListenableBuilder(
+          listenable: widget.store,
+          builder: (context, _) {
+            final s = widget.store;
+            _begin(s);
+            // An agent is chosen within its session only.
+            if (_session != s.current?.id) {
+              _session = s.current?.id;
+              _agent = switch (_wanted) {
+                (final session, final agent) when session == _session => agent,
+                _ => null,
+              };
+              _wanted = null;
+            }
+            final stale = s.phase != HostPhase.connected;
+            // With nothing to go back to, one begins.
+            final view =
+                _view == _View.work &&
+                    s.phase == HostPhase.connected &&
+                    s.current == null &&
+                    s.sessions.isEmpty
+                ? _View.start
+                : _view;
+            final width = MediaQuery.sizeOf(context).width;
+            final narrow = width < 860, beside = !narrow && _list;
+            Widget panelKey() => ListenableBuilder(
+              listenable: Listenable.merge([
+                if (s.current case final m?) ...[m, _changesOf(m), ...m.agents.values],
+              ]),
+              builder: (context, _) {
+                final open = _panel(context);
+                return PanelKey(
+                  open: open ?? false,
+                  shortcut: Command.panel.keys,
+                  onPressed: open == null ? null : () => _change(!open),
+                );
+              },
+            );
+            Widget side([VoidCallback? close]) => _Side(
+              store: s,
+              inset: widget.titleInset,
+              agent: _agent,
+              view: view,
+              close: close,
+              onAgent: (id) => setState(() {
+                _agent = id;
                 _view = _View.work;
               }),
+              onAddAgent: () => _addAgent(s.current!.id),
+              onStart: _startIn,
+              onFind: () => setState(() => _finding = true),
               onAccounts: () => _show(_View.accounts),
-              onCancel: _back,
-            ),
-            _ when _view == _View.accounts => AccountsPage(
-              s,
-              onDone: () => _show(s.current == null ? _View.start : _View.work),
-            ),
-            HostStore(phase: HostPhase.starting, current: null) => const _Word('Starting the host'),
-            HostStore(phase: HostPhase.unreachable, current: null) => _Word(
-              'The host is not answering',
-              detail: s.problem,
-            ),
-            HostStore(current: final m?) => _Display(
-              s,
-              m,
-              agent: _agent,
-              stale: stale,
-              drafts: _drafts,
-              changes: _changesOf(m),
-              onClose: () => _change(false),
-              panelKey: panelKey,
-              open: () => _panel(context) ?? false,
-              sizes: _sizes,
-              onSizes: (v) => setState(() => _sizes = v),
-              conversation: _conversation,
-              looks: width >= _roomy,
-              banner: banner,
-              onList: onList,
-              inset: beside ? AxSpace.gutter : widget.titleInset + AxSpace.edge,
-              alone: !beside && !narrow,
-              small: narrow,
-              onAgain: () => _do('The session could not be opened', () => s.open(m.id)),
-              onStop: (run) => _do('It could not be stopped', () => s.cancel(m.id, run)),
-              onAgent: (id) => setState(() => _agent = id),
-            ),
-            _ => _Word('Choose a session', action: ('New session', () => _startIn(null))),
-          };
-          final window = Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (beside)
-                SizedBox(
-                  width: width < 1080 ? 228 : 264,
-                  child: FocusTraversalGroup(child: side()),
-                ),
-              Expanded(
-                // Kept when the window is made wider or narrower.
-                key: const ValueKey('display'),
-                child: FocusTraversalGroup(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(beside ? 0 : 8, 8, 8, 8),
-                    child: page == null && s.current != null && !narrow
-                        ? content
-                        : AxCanvas(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                if (!narrow) ?banner,
-                                MoveArea(
-                                  child: Container(
-                                    height: 44,
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: _Strip(
-                                      problem: narrow ? problem : null,
-                                      page: page,
-                                      session: s.current,
-                                      inset: beside ? 0 : widget.titleInset,
-                                      needs: s.needs,
-                                      list: narrow ? side : null,
-                                      onList: onList,
-                                      onAnswer: _answer,
-                                      onStart: () => _startIn(null),
-                                      onLeave: switch (_view) {
-                                        _View.start when s.current != null => _back,
-                                        _View.agent => _back,
-                                        _ => null,
-                                      },
-                                      onAccounts: () => _show(_View.accounts),
-                                      onFind: () => setState(() => _finding = true),
+              onHide: () => setState(() => _list = false),
+              onAnswer: _answer,
+              onOpen: _open,
+            );
+            final page = switch (view) {
+              _View.start => 'New session',
+              _View.agent => 'New agent',
+              _View.accounts => 'Accounts',
+              _View.work => null,
+            };
+            final problem = switch (s) {
+              _ when stale && s.phase != HostPhase.starting =>
+                s.binary == null && s.current == null
+                    ? 'axiom-host was not found beside the application'
+                    : 'The host is not answering. Trying again.',
+              HostStore(:final damaged?) => 'The journal is damaged: ${oneLine(damaged, 200)}',
+              _ => _failed == null ? null : oneLine(_failed!, 200),
+            };
+            final onList = beside || narrow ? null : () => setState(() => _list = true);
+            final banner = problem == null
+                ? null
+                : _Banner(
+                    problem,
+                    inset: beside ? AxSpace.gutter : widget.titleInset + AxSpace.edge,
+                  );
+            final content = switch (s) {
+              // Kept while the host is away: what was written is not lost.
+              _ when view == _View.start => StartPage(
+                _start,
+                onStarted: (_) => _show(_View.work),
+                onAccounts: () => _show(_View.accounts),
+                onCancel: s.current == null ? null : _back,
+              ),
+              // Only while its session is the one that is open.
+              _ when _view == _View.agent && _more?.into == s.current?.id => StartPage(
+                _more!,
+                key: ObjectKey(_more),
+                onStarted: (_) => setState(() {
+                  _agent = _more!.last;
+                  _view = _View.work;
+                }),
+                onAccounts: () => _show(_View.accounts),
+                onCancel: _back,
+              ),
+              _ when _view == _View.accounts => AccountsPage(
+                s,
+                onDone: () => _show(s.current == null ? _View.start : _View.work),
+              ),
+              HostStore(phase: HostPhase.starting, current: null) => const _Word(
+                'Starting the host',
+              ),
+              HostStore(phase: HostPhase.unreachable, current: null) => _Word(
+                'The host is not answering',
+                detail: s.problem,
+              ),
+              HostStore(current: final m?) => _Display(
+                s,
+                m,
+                agent: _agent,
+                stale: stale,
+                drafts: _drafts,
+                changes: _changesOf(m),
+                onClose: () => _change(false),
+                panelKey: panelKey,
+                open: () => _panel(context) ?? false,
+                sizes: _sizes,
+                onSizes: (v) => setState(() => _sizes = v),
+                conversation: _conversation,
+                looks: width >= _roomy,
+                banner: banner,
+                onList: onList,
+                inset: beside ? AxSpace.gutter : widget.titleInset + AxSpace.edge,
+                alone: !beside && !narrow,
+                small: narrow,
+                onAgain: () => _do('The session could not be opened', () => s.open(m.id)),
+                onStop: (run) => _do('It could not be stopped', () => s.cancel(m.id, run)),
+                onAgent: (id) => setState(() => _agent = id),
+              ),
+              _ => _Word('Choose a session', action: ('New session', () => _startIn(null))),
+            };
+            final window = Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (beside)
+                  SizedBox(
+                    width: width < 1080 ? 228 : 264,
+                    child: CommandArea(0, child: FocusTraversalGroup(child: side())),
+                  ),
+                Expanded(
+                  // Kept when the window is made wider or narrower.
+                  key: const ValueKey('display'),
+                  child: FocusTraversalGroup(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(beside ? 0 : 8, 8, 8, 8),
+                      child: page == null && s.current != null && !narrow
+                          ? content
+                          : AxCanvas(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  if (!narrow) ?banner,
+                                  MoveArea(
+                                    child: Container(
+                                      height: 44,
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: _Strip(
+                                        problem: narrow ? problem : null,
+                                        page: page,
+                                        session: s.current,
+                                        inset: beside ? 0 : widget.titleInset,
+                                        needs: s.needs,
+                                        list: narrow ? side : null,
+                                        onList: onList,
+                                        onAnswer: _answer,
+                                        onStart: () => _startIn(null),
+                                        onLeave: switch (_view) {
+                                          _View.start when s.current != null => _back,
+                                          _View.agent => _back,
+                                          _ => null,
+                                        },
+                                        onAccounts: () => _show(_View.accounts),
+                                        onFind: () => setState(() => _finding = true),
+                                      ),
                                     ),
                                   ),
-                                ),
-                                Expanded(child: content),
-                              ],
+                                  Expanded(
+                                    child: page == null ? content : CommandArea(1, child: content),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
+                    ),
                   ),
                 ),
-              ),
-            ],
-          );
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: ExcludeFocus(excluding: _finding, child: window),
-              ),
-              if (_finding)
+              ],
+            );
+            return Stack(
+              children: [
                 Positioned.fill(
-                  child: SearchBox(
-                    all: _everything(s),
-                    onClose: () => setState(() => _finding = false),
-                  ),
+                  child: ExcludeFocus(excluding: _finding, child: window),
                 ),
-            ],
-          );
-        },
+                if (_finding)
+                  Positioned.fill(
+                    child: SearchBox(
+                      all: _everything(s),
+                      onClose: () => setState(() => _finding = false),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -1018,7 +1077,7 @@ class _Side extends StatelessWidget {
                   AxButton.icon(
                     AxIcon.sidebar,
                     label: 'Hide the sidebar',
-                    shortcut: _ShellState.keysOf('B'),
+                    shortcut: Command.list.keys,
                     tone: AxTone.quiet,
                     iconFilled: true,
                     onPressed: onHide,
@@ -1036,13 +1095,13 @@ class _Side extends StatelessWidget {
               NavRow(
                 AxIcon.plus,
                 'New session',
-                keys: _ShellState.keysOf('N'),
+                keys: Command.start.keys,
                 selected: view == _View.start,
                 act: true,
                 onPressed: () => onStart(null),
               ),
               const SizedBox(height: 3),
-              NavRow(AxIcon.search, 'Search', keys: _ShellState.keysOf('K'), onPressed: onFind),
+              NavRow(AxIcon.search, 'Search', keys: Command.find.keys, onPressed: onFind),
             ],
           ),
         ),
@@ -1064,7 +1123,7 @@ class _Side extends StatelessWidget {
           child: NavRow(
             AxIcon.account,
             'Accounts',
-            keys: _ShellState.keysOf(','),
+            keys: Command.accounts.keys,
             selected: view == _View.accounts,
             onPressed: onAccounts,
           ),
@@ -1073,46 +1132,54 @@ class _Side extends StatelessWidget {
     );
   }
 
-  /// The sessions, by folder. A session stays where it is when it is opened, and when it works: they
-  /// stand in the order they were made in. The open one is null.
-  List<({String name, String? folder, List<SessionInfo?> sessions})> _groups() {
-    final m = store.current;
-    const unlisted = 1 << 62;
-    final all = <(String?, int, SessionInfo?)>[
-      for (final x in store.sessions) (x.workspace, x.created, x.id == m?.id ? null : x),
-    ];
-    if (m != null && !store.sessions.any((x) => x.id == m.id)) {
-      all.add((m.workspace, unlisted, null));
-    }
-    mergeSort(all, compare: (a, b) => b.$2.compareTo(a.$2));
-    final by = <String?, List<SessionInfo?>>{};
-    for (final (folder, _, x) in all) {
-      (by[folder == null || folder.isEmpty ? null : folder] ??= []).add(x);
-    }
-    final names = <String, int>{};
-    for (final f in by.keys.nonNulls) {
-      names.update(folderName(f), (n) => n + 1, ifAbsent: () => 1);
-    }
-    // Two folders of one name are told apart by where they are.
-    String called(String f) {
-      final name = folderName(f);
-      if (names[name] == 1) return name;
-      final parts = f.split(RegExp(r'[/\\]')).where((x) => x.isNotEmpty).toList();
-      return parts.length < 2
-          ? name
-          : oneLine(literal(parts.sublist(parts.length - 2).join('/')), 80);
-    }
-
-    return [
-      for (final MapEntry(key: f, value: v) in by.entries)
-        (
-          name: f == null ? (by.length == 1 ? 'Sessions' : 'No folder') : called(f),
-          folder: f,
-          sessions: v,
-        ),
-    ];
-  }
+  List<({String name, String? folder, List<SessionInfo?> sessions})> _groups() => _groupsOf(store);
 }
+
+/// The sessions, by folder. A session stays where it is when it is opened, and when it works: they
+/// stand in the order they were made in. The open one is null.
+List<({String name, String? folder, List<SessionInfo?> sessions})> _groupsOf(HostStore store) {
+  final m = store.current;
+  const unlisted = 1 << 62;
+  final all = <(String?, int, SessionInfo?)>[
+    for (final x in store.sessions) (x.workspace, x.created, x.id == m?.id ? null : x),
+  ];
+  if (m != null && !store.sessions.any((x) => x.id == m.id)) {
+    all.add((m.workspace, unlisted, null));
+  }
+  mergeSort(all, compare: (a, b) => b.$2.compareTo(a.$2));
+  final by = <String?, List<SessionInfo?>>{};
+  for (final (folder, _, x) in all) {
+    (by[folder == null || folder.isEmpty ? null : folder] ??= []).add(x);
+  }
+  final names = <String, int>{};
+  for (final f in by.keys.nonNulls) {
+    names.update(folderName(f), (n) => n + 1, ifAbsent: () => 1);
+  }
+  // Two folders of one name are told apart by where they are.
+  String called(String f) {
+    final name = folderName(f);
+    if (names[name] == 1) return name;
+    final parts = f.split(RegExp(r'[/\\]')).where((x) => x.isNotEmpty).toList();
+    return parts.length < 2
+        ? name
+        : oneLine(literal(parts.sublist(parts.length - 2).join('/')), 80);
+  }
+
+  return [
+    for (final MapEntry(key: f, value: v) in by.entries)
+      (
+        name: f == null ? (by.length == 1 ? 'Sessions' : 'No folder') : called(f),
+        folder: f,
+        sessions: v,
+      ),
+  ];
+}
+
+/// The sessions as the list has them, from the top.
+List<String> sessionOrder(HostStore store) => [
+  for (final g in _groupsOf(store))
+    for (final x in g.sessions) ?(x?.id ?? store.current?.id),
+];
 
 class _Display extends StatelessWidget {
   const _Display(
@@ -1255,10 +1322,13 @@ class _Display extends StatelessWidget {
                         ),
                         child: Text('No messages yet.', style: Ax.of(context).type.ui.ink(c.ink3)),
                       ),
-                child: TranscriptView(
-                  a,
-                  takes: true,
-                  onQuote: acts ? (q) => drafts.of(session.id, a.id).add(q) : null,
+                child: CommandArea(
+                  1,
+                  child: TranscriptView(
+                    a,
+                    takes: true,
+                    onQuote: acts ? (q) => drafts.of(session.id, a.id).add(q) : null,
+                  ),
                 ),
               ),
             ),
@@ -1278,24 +1348,27 @@ class _Display extends StatelessWidget {
                     if (acts)
                       ListenableBuilder(
                         listenable: a,
-                        builder: (context, _) => Talk(
-                          store,
-                          session,
-                          a,
-                          draft: drafts.of(session.id, a.id),
-                          live: !stale,
-                          onAgent: onAgent,
-                          onStop: switch (a.run) {
-                            final run?
-                                when !stale &&
-                                    (a.phase == AgentPhase.running ||
-                                        a.phase == AgentPhase.asking) =>
-                              () => onStop(run),
-                            _ => null,
-                          },
-                          // What is asked stays in sight beside its keys.
-                          room: box.maxHeight * .35,
-                          key: ValueKey('${session.id} ${a.id}'),
+                        builder: (context, _) => CommandArea(
+                          2,
+                          child: Talk(
+                            store,
+                            session,
+                            a,
+                            draft: drafts.of(session.id, a.id),
+                            live: !stale,
+                            onAgent: onAgent,
+                            onStop: switch (a.run) {
+                              final run?
+                                  when !stale &&
+                                      (a.phase == AgentPhase.running ||
+                                          a.phase == AgentPhase.asking) =>
+                                () => onStop(run),
+                              _ => null,
+                            },
+                            // What is asked stays in sight beside its keys.
+                            room: box.maxHeight * .35,
+                            key: ValueKey('${session.id} ${a.id}'),
+                          ),
                         ),
                       ),
                   ],
@@ -1314,21 +1387,24 @@ class _Display extends StatelessWidget {
             ? null
             : CallbackShortcuts(
                 bindings: {const SingleActivator(LogicalKeyboardKey.escape): onClose},
-                child: FocusTraversalGroup(
-                  child: a.apart
-                      ? CopyView(
-                          store,
-                          session,
-                          a,
-                          draft: drafts.of(session.id, a.id),
-                          key: ValueKey((session.id, a.id)),
-                        )
-                      : ChangesView(
-                          changes,
-                          agent: a.name,
-                          draft: drafts.of(session.id, a.id),
-                          key: ValueKey(session.id),
-                        ),
+                child: CommandArea(
+                  3,
+                  child: FocusTraversalGroup(
+                    child: a.apart
+                        ? CopyView(
+                            store,
+                            session,
+                            a,
+                            draft: drafts.of(session.id, a.id),
+                            key: ValueKey((session.id, a.id)),
+                          )
+                        : ChangesView(
+                            changes,
+                            agent: a.name,
+                            draft: drafts.of(session.id, a.id),
+                            key: ValueKey(session.id),
+                          ),
+                  ),
                 ),
               );
         return Beside(

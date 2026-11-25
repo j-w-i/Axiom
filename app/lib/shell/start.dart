@@ -9,6 +9,7 @@ import '../host/link.dart';
 import '../host/proto.dart';
 import '../patterns/model_name.dart';
 import '../transcript/safe_text.dart';
+import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
@@ -69,6 +70,7 @@ class AccessKey extends StatelessWidget {
   Widget build(BuildContext context) => AxSelect<Access>(
     label: 'Access',
     quiet: true,
+    command: Command.access,
     icon: AxIcon.shield,
     items: [
       for (final i in accessItems)

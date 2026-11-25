@@ -4,6 +4,7 @@ import 'package:axiom/patterns/models.dart';
 import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/patterns/usage.dart';
+import 'package:axiom/ui/commands.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/overlay.dart';
@@ -369,6 +370,82 @@ void main() {
       final rlo = String.fromCharCode(0x202E), esc = String.fromCharCode(0x1B);
       await show(t, req('rm ${rlo}x$esc[31m'));
       expect(find.text(r'rm \u{202E}x\u{1B}[31m'), findsOneWidget);
+    });
+
+    group('answered by key', () {
+      final all = Commands();
+      late List<String> got;
+      late StateSetter again;
+      late RequestView r;
+      Future<void> put2(WidgetTester t, RequestView first) async {
+        got = [];
+        r = first;
+        await put(
+          t,
+          CommandScope(
+            all,
+            child: SizedBox(
+              width: 800,
+              child: StatefulBuilder(
+                builder: (context, set) {
+                  again = set;
+                  final id = r.subject;
+                  return RequestBar(
+                    r,
+                    onOnce: () => got.add('once $id'),
+                    onAlways: () => got.add('always $id'),
+                    onDeny: () => got.add('deny $id'),
+                    onDenyWith: (w) => got.add('deny $w'),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        await t.pump();
+      }
+
+      testWidgets('not before it has been there long enough to be meant', (t) async {
+        await put2(t, req('one'));
+        for (final c in [Command.allow, Command.deny]) {
+          expect(all.run(c), isFalse);
+        }
+        await t.pump(AxMotion.settle);
+        all.run(Command.allow);
+        expect(got, ['once one']);
+        // What takes its place is another question: the same key again is no answer to it.
+        again(() => r = req('two'));
+        await t.pump();
+        await t.pump();
+        expect(all.run(Command.allow), isFalse);
+        expect(all.run(Command.deny), isFalse);
+        expect(got, ['once one']);
+        await t.pump(AxMotion.settle);
+        all.run(Command.deny);
+        expect(got, ['once one', 'deny two']);
+      });
+
+      testWidgets('a yes only once it has been seen to its end; never while why not is written', (
+        t,
+      ) async {
+        await put2(t, req([for (var i = 0; i < 80; i++) 'line $i'].join('\n')));
+        await t.pump(AxMotion.settle);
+        expect(all.run(Command.allow), isFalse);
+        expect(all.can(Command.deny), isTrue, reason: 'no is always possible');
+        await t.drag(
+          find.descendant(of: find.byType(RequestBar), matching: find.byType(Scrollable)),
+          const Offset(0, -5000),
+        );
+        await t.pumpAndSettle();
+        expect(all.can(Command.allow), isTrue);
+        await t.tap(find.text('Deny with reason'));
+        await t.pumpAndSettle();
+        expect(all.run(Command.allow), isFalse);
+        expect(got, isEmpty);
+        // Gone, nothing takes it.
+        await t.pumpWidget(const SizedBox());
+        expect(all.run(Command.deny), isFalse);
+      });
     });
 
     testWidgets('too long to show at once: yes waits until it has been scrolled through', (
