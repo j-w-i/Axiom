@@ -156,12 +156,13 @@ class FocusRing extends CustomPainter {
 
 bool reducedMotion(BuildContext c) => MediaQuery.maybeDisableAnimationsOf(c) ?? false;
 
-/// Lets no pointer through right after [stamp] has changed, until it has moved or a moment has
+/// Lets no pointer through right after [stamp] has changed, and with [fresh] right after it has come, until it has moved or a moment has
 /// passed: what has just come under a pointer is not what its person was about to press. The
 /// keyboard and a screen reader say what they act on, and are not held up.
 class Settle extends StatefulWidget {
-  const Settle({required this.stamp, required this.child, super.key});
+  const Settle({required this.stamp, required this.child, super.key, this.fresh = false});
   final Object? stamp;
+  final bool fresh;
   final Widget child;
   @override
   State<Settle> createState() => _SettleState();
@@ -171,6 +172,12 @@ class _SettleState extends State<Settle> {
   static const _far = 6.0;
   Timer? _timer;
   Offset? _last, _from;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.fresh) _timer = Timer(AxMotion.settle, _open);
+  }
 
   @override
   void didUpdateWidget(Settle old) {

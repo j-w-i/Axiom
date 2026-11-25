@@ -21,6 +21,7 @@ class AxEditable extends StatefulWidget {
     super.key,
     this.placeholder = '',
     this.enabled = true,
+    this.secret = false,
     this.maxLines,
     this.minLines,
     this.onSubmitted,
@@ -31,6 +32,9 @@ class AxEditable extends StatefulWidget {
   final FocusNode focusNode;
   final TextStyle style;
   final bool enabled;
+
+  /// What is typed is not shown, copied, learned or corrected.
+  final bool secret;
   final int? maxLines, minLines;
   final ValueChanged<String>? onSubmitted, onChanged;
   @override
@@ -55,6 +59,10 @@ class _AxEditableState extends State<AxEditable>
       controller: widget.controller,
       focusNode: widget.focusNode,
       readOnly: !widget.enabled,
+      obscureText: widget.secret,
+      enableSuggestions: !widget.secret,
+      autocorrect: false,
+      enableIMEPersonalizedLearning: !widget.secret,
       style: widget.style,
       strutStyle: StrutStyle.fromTextStyle(widget.style, forceStrutHeight: true),
       cursorColor: c.liveText,

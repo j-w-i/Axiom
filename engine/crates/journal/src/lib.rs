@@ -48,7 +48,7 @@ impl Error {
     }
 }
 
-const SCHEMA: i64 = 2;
+const SCHEMA: i64 = 3;
 /// How long opening waits for another process.
 const OPENING: Duration = Duration::from_secs(1);
 /// How long a read does. It needs to only while another process recovers the file.
@@ -59,6 +59,28 @@ const OPEN_TABLE: &str = "create table open(
        session text not null references session(id) on delete cascade,
        kind integer not null, id text not null, seq integer not null,
        primary key(session, kind, id)) without rowid;";
+/// Beside the events, what only the host needs: how each agent is set up, its conversation as the
+/// model has it (its own words must go back to it byte for byte), and the audit record. A message
+/// or a setup goes with its session; the audit record stays.
+const HOST_TABLES: &str = "create table agent(
+       session text not null references session(id) on delete cascade,
+       id text not null, setup text not null,
+       primary key(session, id)) without rowid;
+     create table message(
+       session text not null references session(id) on delete cascade,
+       agent text not null, n integer not null, body text not null,
+       primary key(session, agent, n)) without rowid;
+     create table pending(
+       session text not null references session(id) on delete cascade,
+       agent text not null, n integer not null, item text not null, body text not null,
+       primary key(session, agent, n)) without rowid;
+     create table frame(
+       session text not null references session(id) on delete cascade,
+       agent text not null, n integer not null, at integer not null, body text not null,
+       primary key(session, agent, n)) without rowid;
+     create table audit(seq integer primary key, body text not null);";
+/// Of what was said on an agent's wire, this much is kept: the last.
+pub const FRAMES: u64 = 2000;
 /// The planner would scan the whole session for these; `indexed by` makes it an error not to use
 /// the index.
 const FOLD: &str = "delete from event indexed by event_delta where session=? and delta_of=?";
@@ -137,9 +159,11 @@ impl Journal {
                      create index event_delta on event(session, delta_of) where delta_of is not null;",
                 )?;
                 tx.execute_batch(OPEN_TABLE)?;
-            } else {
+            }
+            if v == 1 {
                 from_1(&tx)?;
             }
+            tx.execute_batch(HOST_TABLES)?;
             tx.pragma_update(None, "user_version", SCHEMA)?;
             tx.commit()?;
         }
@@ -319,6 +343,130 @@ impl Journal {
         }
     }
 
+    /// Keeps how an agent is set up.
+    pub fn put_agent(&mut self, id: &SessionId, agent: &AgentId, setup: &str) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            j.db.prepare_cached("insert or replace into agent(session, id, setup) values(?,?,?)")?
+                .execute(params![id.0, agent.0, setup])?;
+            Ok(())
+        })
+    }
+
+    /// Lets go of an agent that was never said to be there.
+    pub fn remove_agent(&mut self, id: &SessionId, agent: &AgentId) -> Result<()> {
+        self.commit(Durability::Stream, |j| {
+            j.db.execute("delete from agent where session=? and id=?", params![id.0, agent.0])?;
+            Ok(())
+        })
+    }
+
+    /// Keeps what a person said until the agent has heard it.
+    pub fn put_pending(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        item: &ItemId,
+        body: &str,
+    ) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            j.db.prepare_cached(
+                "insert into pending(session, agent, n, item, body) values(?1, ?2,
+                   (select coalesce(max(n), 0) + 1 from pending where session=?1 and agent=?2),
+                   ?3, ?4)",
+            )?
+            .execute(params![id.0, agent.0, item.0, body])?;
+            Ok(())
+        })
+    }
+
+    /// What a person said has gone to who hears it.
+    pub fn heard(&mut self, id: &SessionId, agent: &AgentId, items: &[ItemId]) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            let mut q =
+                j.db.prepare_cached("delete from pending where session=? and agent=? and item=?")?;
+            for i in items {
+                q.execute(params![id.0, agent.0, i.0])?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Keeps what was said on an agent's wire, and forgets what is older than [`FRAMES`] of it.
+    pub fn put_frames(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        frames: &[(u64, String)],
+    ) -> Result<()> {
+        self.commit(Durability::Stream, |j| {
+            let last: u64 =
+                j.db.prepare_cached(
+                    "select coalesce(max(n), 0) from frame where session=? and agent=?",
+                )?
+                .query_row(params![id.0, agent.0], |r| r.get(0).map(as_u64))?;
+            let mut q = j.db.prepare_cached(
+                "insert into frame(session, agent, n, at, body) values(?,?,?,?,?)",
+            )?;
+            for (n, (at, body)) in (last + 1..).zip(frames) {
+                q.execute(params![id.0, agent.0, as_i64(n), as_i64(*at), body])?;
+            }
+            let old = (last + frames.len() as u64).saturating_sub(FRAMES);
+            j.db.prepare_cached("delete from frame where session=? and agent=? and n<=?")?
+                .execute(params![id.0, agent.0, as_i64(old)])?;
+            Ok(())
+        })
+    }
+
+    /// Adds to an agent's conversation. `n` is its next number, from 0: a gap or a repeat is refused.
+    /// What was `heard` with it waits no longer: both or neither.
+    pub fn put_message(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        n: u64,
+        body: &str,
+        heard: Option<&ItemId>,
+    ) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            let have =
+                j.db.prepare_cached("select count(*) from message where session=? and agent=?")?
+                    .query_row(params![id.0, agent.0], |r| r.get(0).map(as_u64))?;
+            if have != n {
+                return Err(Error::Damaged(format!("message {n} where {have} is next")));
+            }
+            j.db.prepare_cached("insert into message(session, agent, n, body) values(?,?,?,?)")?
+                .execute(params![id.0, agent.0, as_i64(n), body])?;
+            if let Some(i) = heard {
+                j.db.prepare_cached("delete from pending where session=? and agent=? and item=?")?
+                    .execute(params![id.0, agent.0, i.0])?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Adds to the audit record, on the drive before this returns. `seq` follows the last.
+    pub fn put_audit(&mut self, seq: u64, body: &str) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            let last: Option<i64> =
+                j.db.query_row("select max(seq) from audit", [], |r| r.get(0))?;
+            let next = last.map_or(1, |l| as_u64(l) + 1);
+            if next != seq {
+                return Err(Error::Damaged(format!("audit entry {seq} where {next} is next")));
+            }
+            j.db.prepare_cached("insert into audit(seq, body) values(?,?)")?
+                .execute(params![as_i64(seq), body])?;
+            Ok(())
+        })
+    }
+
+    /// The last entry of the audit record.
+    pub fn last_audit(&self) -> Result<Option<String>> {
+        Ok(self
+            .db
+            .query_row("select body from audit order by seq desc limit 1", [], |r| r.get(0))
+            .optional()?)
+    }
+
     pub fn delete(&mut self, id: &SessionId) -> Result<bool> {
         Ok(self.db.execute("delete from session where id=?", [&id.0])? > 0)
     }
@@ -352,6 +500,53 @@ impl Reader {
     /// there is no such session.
     pub fn ending(&self, id: &SessionId, at: u64) -> Result<Option<(u64, Vec<Event>)>> {
         ending(&self.db, id, at)
+    }
+    /// The agents of a session, with how they are set up.
+    pub fn agents(&self, id: &SessionId) -> Result<Vec<(AgentId, String)>> {
+        let mut q =
+            self.db.prepare_cached("select id, setup from agent where session=? order by id")?;
+        let rows = q.query_map([&id.0], |r| Ok((AgentId(r.get(0)?), r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+    /// An agent's conversation, in order.
+    pub fn messages(&self, id: &SessionId, agent: &AgentId) -> Result<Vec<String>> {
+        let mut q = self
+            .db
+            .prepare_cached("select n, body from message where session=? and agent=? order by n")?;
+        let rows = q.query_map(params![id.0, agent.0], |r| Ok((as_u64(r.get(0)?), r.get(1)?)))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (n, body) = r?;
+            if n != out.len() as u64 {
+                return Err(Error::Damaged(format!("message {} is missing", out.len())));
+            }
+            out.push(body);
+        }
+        Ok(out)
+    }
+    /// What was said on an agent's wire, as far as it is kept, in order.
+    pub fn frames(&self, id: &SessionId, agent: &AgentId) -> Result<Vec<String>> {
+        let mut q = self
+            .db
+            .prepare_cached("select body from frame where session=? and agent=? order by n")?;
+        let rows = q.query_map(params![id.0, agent.0], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// What a person said to an agent that it has not heard, in order.
+    pub fn pending(&self, id: &SessionId, agent: &AgentId) -> Result<Vec<(ItemId, String)>> {
+        let mut q = self.db.prepare_cached(
+            "select item, body from pending where session=? and agent=? order by n",
+        )?;
+        let rows = q.query_map(params![id.0, agent.0], |r| Ok((ItemId(r.get(0)?), r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+    /// The audit record after `after`, at most `most` entries.
+    pub fn audit(&self, after: u64, most: u32) -> Result<Vec<String>> {
+        let mut q =
+            self.db.prepare_cached("select body from audit where seq>? order by seq limit ?")?;
+        let rows = q.query_map(params![as_i64(after), most], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
     /// Looks through the whole file.
     pub fn check(&self) -> Result<()> {
@@ -578,6 +773,7 @@ mod tests {
                         environment: None,
                     },
                     parent: None,
+                    access: None,
                 },
                 Intent,
             ),
@@ -595,6 +791,9 @@ mod tests {
                     subject: "s".into(),
                     scope: "c".into(),
                     answerable: Answerable::Live,
+                    digest: String::new(),
+                    item: None,
+                    session: false,
                 },
                 Intent,
             ),

@@ -18,7 +18,13 @@ pub struct Fixture {
     pub paths: Paths,
 }
 pub fn fixture() -> Fixture {
-    let dir = tempfile::tempdir().unwrap();
+    // On Linux not in /tmp, which is another one inside the sandbox.
+    let dir = if cfg!(target_os = "linux") {
+        tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+    } else {
+        tempfile::tempdir()
+    }
+    .unwrap();
     let paths = Paths::new(dir.path().join("data"));
     Fixture { dir, paths }
 }

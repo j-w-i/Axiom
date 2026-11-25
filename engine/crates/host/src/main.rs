@@ -1,8 +1,13 @@
 use std::{error::Error, io::Write, process::ExitCode, time::Duration};
 
-use axiom_host::{Config, Host, HostError, paths::Paths, signal};
+use axiom_host::{Config, Host, HostError, paths::Paths, signal, vault};
 
 fn main() -> ExitCode {
+    #[cfg(unix)]
+    if std::env::args().nth(1).as_deref() == Some(axiom_spawn::reaper::ARG) {
+        axiom_spawn::reaper::run(std::io::stdin().lock());
+        return ExitCode::SUCCESS;
+    }
     let Err(e) = run() else {
         return ExitCode::SUCCESS;
     };
@@ -17,6 +22,7 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn Error>> {
     let mut args = std::env::args().skip(1);
     let mut cfg = Config::new(Paths::discover().ok_or("no data directory: set AXIOM_DATA")?);
+    cfg.vault = vault::of(&cfg.paths);
     while let Some(a) = args.next() {
         match (a.as_str(), args.next()) {
             ("--idle-exit", Some(v)) => {
@@ -30,6 +36,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     let r = rt.block_on(async {
         let stop = signal::stop()?;
         let h = Host::start(cfg)?;
+        // Before anything is started by it.
+        #[cfg(unix)]
+        axiom_spawn::reaper::start(&std::env::current_exe()?)?;
         let _ = writeln!(std::io::stdout(), "ready");
         h.serve_until(async {
             stop.await;

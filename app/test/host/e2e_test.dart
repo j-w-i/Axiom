@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:axiom/host/host_store.dart';
@@ -307,6 +308,89 @@ void main() {
       expect(pid, isNot(host!.pid));
       await l.call('host.shutdown');
       l.close();
+    });
+  });
+
+  testWidgets('an agent works, asks, and is answered, all the way to a file', (t) async {
+    await t.runAsync(() async {
+      // A provider that answers from a script.
+      final seen = <Json>[];
+      final provider = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      String chunk(Object? delta, String? end) =>
+          'data: ${json.encode({
+            'id': 'x',
+            'model': 'm',
+            'choices': [
+              {'index': 0, 'delta': delta, 'finish_reason': end},
+            ],
+          })}\n\n';
+      provider.listen((r) async {
+        seen.add(json.decode(await utf8.decodeStream(r)) as Json);
+        r.response.headers.contentType = ContentType('text', 'event-stream');
+        r.response.write(
+          seen.length == 1
+              ? chunk({
+                      'tool_calls': [
+                        {
+                          'index': 0,
+                          'id': 'c1',
+                          'type': 'function',
+                          'function': {
+                            'name': 'write',
+                            'arguments': json.encode({'path': 'made.txt', 'content': 'made'}),
+                          },
+                        },
+                      ],
+                    }, null) +
+                    chunk({}, 'tool_calls')
+              : chunk({'content': 'Done.'}, null) + chunk({}, 'stop'),
+        );
+        r.response.write('data: [DONE]\n\n');
+        await r.response.close();
+      });
+      final work = Directory('${dir.path}/w')..createSync();
+      final store = HostStore(paths: paths, binary: hostBinary, spawn: false);
+      await store.start();
+      final c = await store.connect(
+        'Fake',
+        'openai-compatible',
+        url: 'http://127.0.0.1:${provider.port}/v1',
+        secret: 'sk-e2e',
+      );
+      expect(store.connections.single.secret, isTrue);
+      final id = await store.create('S', workspace: work.path);
+      await store.open(id);
+      final agent = await store.addAgent(
+        id,
+        'Lead',
+        Execution(harness: 'axiom', model: 'm', connection: c),
+        Access.ask,
+      );
+      Future<void> until(bool Function() f) async {
+        final end = DateTime.now().add(const Duration(seconds: 20));
+        while (!f()) {
+          expect(DateTime.now().isBefore(end), isTrue, reason: 'too long');
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          await t.pump();
+        }
+      }
+
+      await store.prompt(id, agent, 'Make it.');
+      final m = store.current!;
+      // Windows has no sandbox yet, and what needs none is the same everywhere.
+      await until(() => m.requests.isNotEmpty);
+      final r = m.requests.values.single.opened;
+      expect(r.subject, contains('+made'));
+      expect(File('${work.path}/made.txt').existsSync(), isFalse);
+      expect(m.agents[agent]!.phase, AgentPhase.asking);
+      await store.answer(id, r, Answer.once);
+      await until(() => m.agents[agent]!.ended == Outcome.completed);
+      expect(File('${work.path}/made.txt').readAsStringSync(), 'made');
+      expect(m.requests, isEmpty);
+      expect(seen.last['messages'].toString(), contains('changed made.txt'));
+      await expectLater(store.answer(id, r, Answer.once), throwsA(isA<Failed>()));
+      store.dispose();
+      await provider.close(force: true);
     });
   });
 }

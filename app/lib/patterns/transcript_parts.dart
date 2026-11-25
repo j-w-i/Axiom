@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -116,7 +118,6 @@ class DiffBlock extends StatelessWidget {
   final List<DiffLine> lines;
   @override
   Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
     final add = lines.where((l) => l.kind == DiffKind.add).length;
     final rem = lines.where((l) => l.kind == DiffKind.remove).length;
     return Column(
@@ -125,66 +126,148 @@ class DiffBlock extends StatelessWidget {
       children: [
         WorkLine(icon: AxIcon.edit, name: 'Edit', detail: path, result: '+$add  −$rem'),
         const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AxRadius.key),
-          child: ColoredBox(
-            color: c.block.bottom,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final l in lines)
-                    ColoredBox(
-                      color: switch (l.kind) {
-                        DiffKind.add => c.diffAdd,
-                        DiffKind.remove => c.diffRemove,
-                        DiffKind.same => const Color(0x00000000),
-                      },
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 34,
-                            child: Text(
-                              '${l.number}',
-                              textAlign: TextAlign.right,
-                              style: t.type.codeSmall.ink(c.ink4),
-                            ),
-                          ),
-                          SizedBox(
-                            width: 22,
-                            child: Text(
-                              switch (l.kind) {
-                                DiffKind.add => '+',
-                                DiffKind.remove => '−',
-                                DiffKind.same => '',
-                              },
-                              textAlign: TextAlign.center,
-                              style: t.type.codeSmall.ink(
-                                l.kind == DiffKind.add ? c.doneText : c.faultText,
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Text.rich(
-                              highlight(literal(l.text), t.type.codeSmall, c),
-                              style: t.type.codeSmall,
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.fade,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
+        DiffLines(lines),
       ],
     );
   }
+}
+
+/// The lines of one file's change.
+class DiffLines extends StatelessWidget {
+  const DiffLines(this.lines, {super.key});
+  final List<DiffLine> lines;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AxRadius.key),
+      child: ColoredBox(
+        color: c.block.bottom,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final l in lines)
+                ColoredBox(
+                  color: switch (l.kind) {
+                    DiffKind.add => c.diffAdd,
+                    DiffKind.remove => c.diffRemove,
+                    DiffKind.same => const Color(0x00000000),
+                  },
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 34,
+                        child: Text(
+                          '${l.number}',
+                          textAlign: TextAlign.right,
+                          style: t.type.codeSmall.ink(c.ink4),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 22,
+                        child: Text(
+                          switch (l.kind) {
+                            DiffKind.add => '+',
+                            DiffKind.remove => '−',
+                            DiffKind.same => '',
+                          },
+                          textAlign: TextAlign.center,
+                          style: t.type.codeSmall.ink(
+                            l.kind == DiffKind.add ? c.doneText : c.faultText,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text.rich(
+                          highlight(literal(l.text), t.type.codeSmall, c),
+                          style: t.type.codeSmall,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.fade,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One file of a diff: its first lines, how many were added and removed in all, and how many lines
+/// are not here.
+class FileDiff {
+  FileDiff(this.path);
+  final String path;
+  final lines = <DiffLine>[];
+  int added = 0, removed = 0, left = 0;
+}
+
+/// A unified diff, file by file. How long a part is says itself, so that a removed line that begins
+/// with dashes is not taken for another file.
+/// Lines beyond [most] of one file, or [atAll] of all, are only counted.
+List<FileDiff> readDiffs(String text, {int most = 400, int atAll = 20000}) {
+  final files = <FileDiff>[];
+  FileDiff? f;
+  String? from;
+  var was = 0, now = 0, olds = 0, news = 0, shown = 0;
+  for (final l in text.split('\n')) {
+    if (olds > 0 || news > 0) {
+      final kind = switch (l.isEmpty ? ' ' : l[0]) {
+        '+' => DiffKind.add,
+        '-' => DiffKind.remove,
+        ' ' => DiffKind.same,
+        _ => null,
+      };
+      // "\ No newline at end of file".
+      if (kind == null || f == null) continue;
+      if (f.lines.length >= most || shown >= atAll) {
+        f.left++;
+      } else {
+        shown++;
+        f.lines.add(
+          DiffLine(
+            kind,
+            kind == DiffKind.remove ? was : now,
+            l.isEmpty ? '' : cutTo(l.substring(1), 1000),
+          ),
+        );
+      }
+      if (kind != DiffKind.add) {
+        was++;
+        olds--;
+      }
+      if (kind != DiffKind.remove) {
+        now++;
+        news--;
+      }
+      if (kind == DiffKind.add) f.added++;
+      if (kind == DiffKind.remove) f.removed++;
+      continue;
+    }
+    if (l.startsWith('--- ')) {
+      from = l.substring(4);
+    } else if (l.startsWith('+++ ') && from != null) {
+      final to = l.substring(4);
+      final gone = to == '/dev/null' || to.startsWith('(');
+      // Git ends a name that has spaces in it with a tab.
+      final name = gone ? from : to;
+      f = FileDiff(name.endsWith('\t') ? name.substring(0, name.length - 1) : name);
+      files.add(f);
+      from = null;
+    } else if (RegExp(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@').firstMatch(l) case final m?) {
+      was = int.parse(m[1]!);
+      olds = int.parse(m[2] ?? '1');
+      now = int.parse(m[3]!);
+      news = int.parse(m[4] ?? '1');
+    }
+  }
+  return files;
 }
 
 /// A permission request. The subject is exact, whole and spelled out: what cannot be seen is escaped,
@@ -197,9 +280,13 @@ class RequestBar extends StatefulWidget {
     required this.onAlways,
     required this.onDeny,
     super.key,
+    this.room = maxHeight,
   });
   final RequestView request;
   final VoidCallback onOnce, onAlways, onDeny;
+
+  /// How high its words may be, if that is less than [maxHeight].
+  final double room;
   static const maxHeight = 220.0;
   @override
   State<RequestBar> createState() => _RequestBarState();
@@ -257,7 +344,7 @@ class _RequestBarState extends State<RequestBar> {
     final ok = _seen ?? false;
     final agent = oneLine(literal(r.agent), 60);
     final words = ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: RequestBar.maxHeight),
+      constraints: BoxConstraints(maxHeight: math.min(RequestBar.maxHeight, widget.room)),
       child: NotificationListener<ScrollMetricsNotification>(
         onNotification: (_) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _look());
@@ -322,7 +409,8 @@ class _RequestBarState extends State<RequestBar> {
       alignment: WrapAlignment.end,
       children: [
         AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: widget.onDeny),
-        AxButton(label: oneLine(literal(r.always), 80), onPressed: ok ? widget.onAlways : null),
+        if (r.always case final a?)
+          AxButton(label: oneLine(literal(a), 80), onPressed: ok ? widget.onAlways : null),
         AxButton(label: 'Allow once', tone: AxTone.primary, onPressed: ok ? widget.onOnce : null),
       ],
     );
@@ -333,6 +421,7 @@ class _RequestBarState extends State<RequestBar> {
       explicitChildNodes: true,
       child: Settle(
         stamp: r,
+        fresh: true,
         child: Surface(
           c.plate,
           child: Stack(

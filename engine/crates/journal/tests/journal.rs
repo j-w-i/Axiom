@@ -116,6 +116,9 @@ fn asks(seq: u64, q: &str) -> Event {
             subject: "s".into(),
             scope: "c".into(),
             answerable: Answerable::Live,
+            digest: String::new(),
+            item: None,
+            session: false,
         },
     )
 }
@@ -484,4 +487,150 @@ proptest! {
         }
         prop_assert_eq!(whole.read(&s, 0, ALL).unwrap(), cut.read(&s, 0, ALL).unwrap());
     }
+}
+
+#[test]
+fn what_the_host_needs_is_kept_beside_the_events() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j");
+    let mut j = Journal::open(&p).unwrap();
+    let (s, t) = (SessionId::new(), SessionId::new());
+    for x in [&s, &t] {
+        j.create(x, "t", None, 1).unwrap();
+    }
+    let (a, b) = (AgentId("a".into()), AgentId("b".into()));
+    j.put_agent(&s, &a, "one").unwrap();
+    j.put_agent(&s, &a, "two").unwrap();
+    j.put_agent(&s, &b, "b").unwrap();
+    for (n, m) in ["m0", "m1"].iter().enumerate() {
+        j.put_message(&s, &a, n as u64, m, None).unwrap();
+    }
+    j.put_message(&s, &b, 0, "other", None).unwrap();
+    for (n, why) in [(1, "a repeat"), (3, "a gap")] {
+        assert!(j.put_message(&s, &a, n, "x", None).is_err(), "{why}");
+    }
+    assert!(j.put_message(&SessionId::new(), &a, 0, "x", None).is_err(), "no such session");
+    assert_eq!(j.last_audit().unwrap(), None);
+    j.put_audit(1, "e1").unwrap();
+    j.put_audit(2, "e2").unwrap();
+    for n in [0, 2, 4] {
+        assert!(j.put_audit(n, "x").is_err());
+    }
+    drop(j);
+    let mut j = Journal::open(&p).unwrap();
+    let r = Reader::open(&p).unwrap();
+    assert_eq!(r.agents(&s).unwrap(), [(a.clone(), "two".into()), (b.clone(), "b".into())]);
+    assert_eq!(r.messages(&s, &a).unwrap(), ["m0", "m1"]);
+    assert_eq!(r.messages(&s, &b).unwrap(), ["other"]);
+    assert!(r.messages(&t, &a).unwrap().is_empty() && r.agents(&t).unwrap().is_empty());
+    assert_eq!(r.audit(0, 10).unwrap(), ["e1", "e2"]);
+    assert_eq!(r.audit(1, 10).unwrap(), ["e2"]);
+    assert_eq!(j.last_audit().unwrap().as_deref(), Some("e2"));
+    // A message taken out from behind.
+    rusqlite::Connection::open(&p)
+        .unwrap()
+        .execute("delete from message where n=0 and agent='a'", [])
+        .unwrap();
+    assert!(r.messages(&s, &a).is_err());
+    j.delete(&s).unwrap();
+    assert!(r.messages(&s, &b).unwrap().is_empty() && r.agents(&s).unwrap().is_empty());
+    assert_eq!(r.audit(0, 10).unwrap().len(), 2, "what was done stays on record");
+}
+
+#[test]
+fn schema_2_is_brought_forward() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j.db");
+    let c = rusqlite::Connection::open(&p).unwrap();
+    c.execute_batch(
+        r#"pragma journal_mode=WAL;
+        create table session(
+          id text primary key, title text not null, workspace text,
+          created integer not null, updated integer not null, last_seq integer not null);
+        create table event(
+          session text not null references session(id) on delete cascade,
+          seq integer not null, at integer not null, delta_of text, body text not null,
+          primary key(session, seq)) without rowid;
+        create index event_delta on event(session, delta_of) where delta_of is not null;
+        create table open(
+          session text not null references session(id) on delete cascade,
+          kind integer not null, id text not null, seq integer not null,
+          primary key(session, kind, id)) without rowid;
+        insert into session values('s','T',null,1,1,2);
+        insert into event values
+          ('s',1,1,null,'{"type":"session.created","title":"T"}'),
+          ('s',2,1,null,'{"type":"run.started","run":"r","agent":"a"}');
+        insert into open values('s',2,'r',2);
+        pragma user_version=2;"#,
+    )
+    .unwrap();
+    drop(c);
+    let s = SessionId("s".into());
+    for n in 0..2 {
+        let mut j = Journal::open(&p).unwrap();
+        assert_eq!(j.read(&s, 0, ALL).unwrap().len(), 2);
+        assert!(j.session(&s).unwrap().unwrap().running);
+        j.put_message(&s, &AgentId("a".into()), n, "m", None).unwrap();
+    }
+    assert_eq!(Journal::open(&p).unwrap().recover(9).unwrap().0, 1);
+}
+
+#[test]
+fn what_was_said_waits_until_it_is_heard() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j");
+    let mut j = Journal::open(&p).unwrap();
+    let s = SessionId::new();
+    j.create(&s, "t", None, 1).unwrap();
+    let (a, b) = (AgentId("a".into()), AgentId("b".into()));
+    let i = |n: &str| ItemId(n.into());
+    for (x, t) in [("i1", "one"), ("i2", "two"), ("i3", "three")] {
+        j.put_pending(&s, &a, &i(x), t).unwrap();
+    }
+    j.put_pending(&s, &b, &i("k"), "other").unwrap();
+    let r = Reader::open(&p).unwrap();
+    let texts =
+        |a: &AgentId| r.pending(&s, a).unwrap().into_iter().map(|(_, t)| t).collect::<Vec<_>>();
+    assert_eq!(texts(&a), ["one", "two", "three"]);
+    j.put_message(&s, &a, 0, "m", Some(&i("i2"))).unwrap();
+    assert_eq!(texts(&a), ["one", "three"]);
+    // Neither, if the message is refused.
+    assert!(j.put_message(&s, &a, 5, "m", Some(&i("i1"))).is_err());
+    assert_eq!(texts(&a), ["one", "three"]);
+    j.put_pending(&s, &a, &i("i4"), "four").unwrap();
+    assert_eq!(texts(&a), ["one", "three", "four"]);
+    assert_eq!(texts(&b), ["other"]);
+    j.heard(&s, &a, &[i("i1"), i("i4"), i("nobody")]).unwrap();
+    assert_eq!((texts(&a), texts(&b)), (vec!["three".to_string()], vec!["other".to_string()]));
+    j.put_agent(&s, &a, "x").unwrap();
+    j.remove_agent(&s, &a).unwrap();
+    assert!(r.agents(&s).unwrap().is_empty());
+    j.delete(&s).unwrap();
+    assert!(texts(&a).is_empty());
+}
+
+#[test]
+fn the_last_frames_are_kept() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j.db");
+    let mut j = Journal::open(&p).unwrap();
+    let s = SessionId::new();
+    j.create(&s, "t", None, 1).unwrap();
+    let (a, b) = (AgentId("a".into()), AgentId("b".into()));
+    let r = Reader::open(&p).unwrap();
+    j.put_frames(&s, &b, &[(1, "other".into())]).unwrap();
+    let most = axiom_journal::FRAMES;
+    for n in 0..most + 10 {
+        j.put_frames(&s, &a, &[(n, format!("{n}"))]).unwrap();
+    }
+    let all = r.frames(&s, &a).unwrap();
+    assert_eq!(all.len() as u64, most);
+    assert_eq!((all[0].as_str(), all.last().unwrap().clone()), ("10", format!("{}", most + 9)));
+    let more: Vec<_> = (0..3).map(|n| (n, format!("x{n}"))).collect();
+    j.put_frames(&s, &a, &more).unwrap();
+    assert_eq!(r.frames(&s, &a).unwrap().last().unwrap(), "x2");
+    assert_eq!(r.frames(&s, &a).unwrap().len() as u64, most);
+    assert_eq!(r.frames(&s, &b).unwrap(), ["other"]);
+    j.delete(&s).unwrap();
+    assert!(r.frames(&s, &b).unwrap().is_empty());
 }

@@ -15,21 +15,40 @@ name = "axiom_host"
 name = "axiom-host"
 path = "src/main.rs"
 
+# The harness's agent that plays a script, for this crate's tests.
+[[bin]]
+name = "host-fake-agent"
+path = "../harness/tests/fake/main.rs"
+test = false
+doc = false
+
 [dependencies]
 axiom-proto.workspace = true
 axiom-journal.workspace = true
+axiom-engine.workspace = true
+axiom-harness.workspace = true
+axiom-model.workspace = true
+axiom-policy.workspace = true
+axiom-tools.workspace = true
+axiom-spawn.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+zeroize.workspace = true
 
 # One constant (O_NONBLOCK); tokio and getrandom have the crate in the tree anyway.
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
 # Unix sockets on Windows; std and tokio have none there.
 [target.'cfg(windows)'.dependencies]
 uds_windows.workspace = true
+keyring-core = "1"
+windows-native-keyring-store = { version = "1", default-features = false }
 
 [dev-dependencies]
 # Tests damage and lock the journal behind the host's back.

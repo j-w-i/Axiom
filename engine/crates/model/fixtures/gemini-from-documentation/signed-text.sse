@@ -1,0 +1,2 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"I need to calculate the risk. Let me think step-by-step...","thoughtSignature":"<Signature_C>"}]},"finishReason":"STOP"}]}
+

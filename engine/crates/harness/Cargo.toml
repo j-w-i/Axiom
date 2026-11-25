@@ -1,0 +1,28 @@
+[package]
+name = "axiom-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# An agent for the tests, which start it as they would a real one.
+[[bin]]
+name = "fake-agent"
+path = "tests/fake/main.rs"
+test = false
+doc = false
+
+[dependencies]
+axiom-policy.workspace = true
+axiom-proto.workspace = true
+axiom-spawn.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true

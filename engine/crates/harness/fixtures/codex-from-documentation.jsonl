@@ -1,0 +1,31 @@
+// The app-server over stdio.
+{"hear": {"method": "initialize", "id": 0, "params": {"clientInfo": {"name": "axiom"}}}}
+{"say": {"id": 0, "result": {"userAgent": "axiom/0.0.1", "codexHome": "/Users/me/.codex", "platformFamily": "unix", "platformOs": "macos"}}}
+{"hear": {"method": "initialized"}}
+{"hear": {"method": "model/list", "id": 1}}
+{"say": {"id": 1, "result": {"data": [{"id": "gpt-6.1-sol", "model": "gpt-6.1-sol", "displayName": "GPT-6.1 Sol", "description": "", "hidden": false, "defaultReasoningEffort": "medium", "supportedReasoningEfforts": [{"reasoningEffort": "medium", "description": "Balances speed and reasoning depth for everyday tasks"}], "inputModalities": ["text", "image"], "supportsPersonality": false, "isDefault": true}], "nextCursor": null}}}
+{"hear": {"method": "thread/start", "id": 2, "params": {"model": "gpt-6.1-sol", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user"}}}
+{"say": {"id": 2, "result": {"thread": {"id": "thr_123", "sessionId": "thr_123", "preview": "", "ephemeral": false, "modelProvider": "openai", "createdAt": 1730910000}, "model": "gpt-6.1-sol", "modelProvider": "openai", "cwd": "/Users/me/project", "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": {"type": "workspaceWrite", "writableRoots": ["/Users/me/project"], "networkAccess": false}}}}
+{"say": {"method": "thread/started", "params": {"thread": {"id": "thr_123"}}}}
+{"hear": {"method": "turn/start", "id": 3, "params": {"threadId": "thr_123", "input": [{"type": "text", "text": "Run tests"}], "effort": "medium"}}}
+{"say": {"id": 3, "result": {"turn": {"id": "turn_456", "status": "inProgress", "items": [], "error": null}}}}
+{"say": {"method": "turn/started", "params": {"threadId": "thr_123", "turn": {"id": "turn_456", "status": "inProgress", "items": []}}}}
+{"say": {"method": "turn/plan/updated", "params": {"threadId": "thr_123", "turnId": "turn_456", "explanation": null, "plan": [{"step": "Run the tests", "status": "inProgress"}]}}}
+{"say": {"method": "item/started", "params": {"threadId": "thr_123", "turnId": "turn_456", "startedAtMs": 1, "item": {"type": "reasoning", "id": "r1", "summary": [], "content": []}}}}
+{"say": {"method": "item/reasoning/summaryTextDelta", "params": {"threadId": "thr_123", "turnId": "turn_456", "itemId": "r1", "summaryIndex": 0, "delta": "Think"}}}
+{"say": {"method": "item/completed", "params": {"threadId": "thr_123", "turnId": "turn_456", "completedAtMs": 2, "item": {"type": "reasoning", "id": "r1", "summary": ["Think"], "content": []}}}}
+{"say": {"method": "item/started", "params": {"threadId": "thr_123", "turnId": "turn_456", "startedAtMs": 3, "item": {"type": "commandExecution", "id": "i1", "command": "cargo test", "cwd": "/Users/me/project", "status": "inProgress", "commandActions": []}}}}
+{"say": {"id": 90, "method": "item/commandExecution/requestApproval", "params": {"threadId": "thr_123", "turnId": "turn_456", "itemId": "i1", "startedAtMs": 4, "command": "cargo test", "cwd": "/Users/me/project", "reason": "needs network"}}}
+{"hear": {"id": 90, "result": {"decision": "accept"}}}
+{"say": {"method": "serverRequest/resolved", "params": {"threadId": "thr_123", "requestId": 90}}}
+{"say": {"method": "item/commandExecution/outputDelta", "params": {"threadId": "thr_123", "turnId": "turn_456", "itemId": "i1", "delta": "ok\n"}}}
+{"say": {"method": "item/completed", "params": {"threadId": "thr_123", "turnId": "turn_456", "completedAtMs": 5, "item": {"type": "commandExecution", "id": "i1", "command": "cargo test", "cwd": "/Users/me/project", "status": "completed", "commandActions": [], "aggregatedOutput": "ok\n", "exitCode": 0, "durationMs": 10}}}}
+{"hear": {"method": "turn/steer", "id": 4, "params": {"threadId": "thr_123", "input": [{"type": "text", "text": "Actually focus on failing tests first."}], "expectedTurnId": "turn_456"}}}
+{"say": {"id": 4, "result": {"turnId": "turn_456"}}}
+{"say": {"method": "item/started", "params": {"threadId": "thr_123", "turnId": "turn_456", "startedAtMs": 6, "item": {"type": "agentMessage", "id": "i2", "text": ""}}}}
+{"say": {"method": "item/agentMessage/delta", "params": {"threadId": "thr_123", "turnId": "turn_456", "itemId": "i2", "delta": "All "}}}
+{"say": {"method": "item/agentMessage/delta", "params": {"threadId": "thr_123", "turnId": "turn_456", "itemId": "i2", "delta": "pass."}}}
+{"say": {"method": "item/completed", "params": {"threadId": "thr_123", "turnId": "turn_456", "completedAtMs": 7, "item": {"type": "agentMessage", "id": "i2", "text": "All pass.", "phase": "final_answer"}}}}
+{"say": {"method": "thread/tokenUsage/updated", "params": {"threadId": "thr_123", "turnId": "turn_456", "tokenUsage": {"last": {"inputTokens": 100, "cachedInputTokens": 40, "outputTokens": 20, "reasoningOutputTokens": 5, "totalTokens": 120}, "total": {"inputTokens": 100, "cachedInputTokens": 40, "outputTokens": 20, "reasoningOutputTokens": 5, "totalTokens": 120}, "modelContextWindow": 400000}}}}
+{"say": {"method": "account/rateLimits/updated", "params": {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 25, "windowDurationMins": 300, "resetsAt": 1795510000}}}}}
+{"say": {"method": "turn/completed", "params": {"threadId": "thr_123", "turn": {"id": "turn_456", "status": "completed", "items": [], "error": null}}}}

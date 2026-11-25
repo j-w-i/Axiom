@@ -1,0 +1,1 @@
+{"model":"qwen2.5-0.5b-instruct-mlx","stream":true,"stream_options":{"include_usage":true},"max_tokens":40,"stop":["4"],"messages":[{"role":"user","content":"Count from 1 to 9 with spaces between."}]}

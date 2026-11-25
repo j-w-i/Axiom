@@ -5,16 +5,22 @@
 //! - every queue is bounded; a client that cannot keep up is told to resynchronise;
 //! - the listener is local, owned by one user, and needs a token (SI-20).
 
+mod agents;
+mod changes;
 pub mod client;
+pub mod connections;
+mod delegated;
 mod faults;
 mod log;
 mod net;
 mod outbox;
 pub mod paths;
+mod peers;
 mod replay;
 mod server;
 mod session;
 pub mod signal;
 mod store;
+pub mod vault;
 
 pub use server::{Config, Host, HostError};

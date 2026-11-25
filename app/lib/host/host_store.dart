@@ -165,6 +165,9 @@ class HostStore extends ChangeNotifier {
     phase = HostPhase.connected;
     problem = null;
     await refresh();
+    // Nothing that is shown depends on it.
+    unawaited(loadConnections().catchError((_) {}));
+    unawaited(loadHarnesses().catchError((_) {}));
     if (current case final c? when c.fault == null) await _follow(c);
     notifyListeners();
   }
@@ -241,6 +244,109 @@ class HostStore extends ChangeNotifier {
     notifyListeners();
     if (link != null) await _follow(current!);
   }
+
+  /// Ways to reach providers, as the host has them.
+  List<Connection> connections = const [];
+  final _models = <String, List<ModelInfo>>{};
+
+  Future<void> loadConnections() async {
+    final r = await _live.call('connection.list');
+    connections = [for (final j in r! as List<Object?>) Connection.decode(j! as Json)];
+    notifyListeners();
+  }
+
+  /// What the host can run agents with beside itself; found without running any of it.
+  List<HarnessInfo> harnesses = const [];
+
+  Future<void> loadHarnesses() async {
+    final r = await _live.call('harness.list');
+    harnesses = [for (final j in r! as List<Object?>) HarnessInfo.decode(j! as Json)];
+    notifyListeners();
+  }
+
+  /// What has been changed in a session's folder.
+  Future<Changes> changes(String session) async =>
+      Changes.decode((await _live.call('workspace.changes', {'session': session}))! as Json);
+
+  /// As a person knows it.
+  String harnessName(String id) =>
+      id == 'axiom' ? 'Axiom' : harnesses.where((h) => h.id == id).firstOrNull?.name ?? id;
+
+  /// The secret goes to the host and is not kept here.
+  Future<String> connect(String name, String provider, {String? url, String? secret}) async {
+    final r = await _live.call('connection.add', {
+      'name': name,
+      'provider': provider,
+      'url': ?url,
+      'secret': ?secret,
+    });
+    await loadConnections();
+    return (r! as Json)['connection']! as String;
+  }
+
+  Future<void> disconnect(String id) async {
+    await _live.call('connection.remove', {'connection': id});
+    _models.remove(id);
+    await loadConnections();
+  }
+
+  /// What was last heard of a connection's models; null before that.
+  List<ModelInfo>? modelsOf(String connection) => _models[connection];
+
+  Future<List<ModelInfo>> models(String connection) async {
+    final r = await _live.call('model.list', {'connection': connection});
+    final all = [for (final j in r! as List<Object?>) ModelInfo.decode(j! as Json)];
+    _models[connection] = all;
+    notifyListeners();
+    return all;
+  }
+
+  /// What a folder would have agents told; for a person to read.
+  Future<List<Instructions>> look(String path) async {
+    final r = await _live.call('workspace.look', {'path': path});
+    return [for (final j in r! as List<Object?>) Instructions.decode(j! as Json)];
+  }
+
+  Future<String> addAgent(
+    String session,
+    String name,
+    Execution x,
+    Access access, {
+    List<Instructions> instructions = const [],
+    bool trust = false,
+  }) async {
+    final r = await _live.call('agent.add', {
+      'session': session,
+      'name': name,
+      'execution': x.encode(),
+      'access': access.name,
+      'trust': trust,
+      'instructions': [for (final i in instructions) i.encode()],
+    });
+    return (r! as Json)['agent']! as String;
+  }
+
+  Future<void> setAgent(String session, String agent, {Execution? execution, Access? access}) =>
+      _live.call('agent.set', {
+        'session': session,
+        'agent': agent,
+        'execution': ?execution?.encode(),
+        'access': ?access?.name,
+      });
+
+  /// [key] names what is said: again under the same name, it is heard once.
+  Future<void> prompt(String session, String agent, String text, {String? key}) =>
+      _live.call('agent.prompt', {'session': session, 'agent': agent, 'text': text, 'key': ?key});
+
+  Future<void> answer(String session, RequestOpened r, Answer a) => _live.call('request.answer', {
+    'session': session,
+    'request': r.request,
+    'answer': a.name,
+    'digest': r.digest,
+  });
+
+  Future<void> cancel(String session, String run) =>
+      _live.call('run.cancel', {'session': session, 'run': run});
 
   Future<void> replay(String session, String path, {double speed = 1}) async =>
       _live.call('replay.start', {'session': session, 'path': path, 'speed': speed});

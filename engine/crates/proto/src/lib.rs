@@ -81,6 +81,17 @@ pub struct Execution {
     pub environment: Option<String>,
 }
 
+/// What an agent may do without asking (`axiom-policy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Access {
+    Read,
+    Ask,
+    Work,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
@@ -170,6 +181,16 @@ pub enum Body {
         execution: Execution,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent: Option<AgentId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access: Option<Access>,
+    },
+    /// What it runs on or may do is another from here on.
+    #[serde(rename = "agent.changed")]
+    AgentChanged {
+        agent: AgentId,
+        execution: Execution,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access: Option<Access>,
     },
     #[serde(rename = "agent.state")]
     AgentState { agent: AgentId, state: AgentState },
@@ -222,6 +243,16 @@ pub enum Body {
         scope: String,
         /// Whether an answer can still reach the asker.
         answerable: Answerable,
+        /// Names exactly this question. Sent back with the answer, so that what was shown is what is
+        /// answered (SI-2).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        digest: String,
+        /// The tool call it is about.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item: Option<ItemId>,
+        /// Whether it can be allowed for the rest of the session.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        session: bool,
     },
     #[serde(rename = "request.closed")]
     RequestClosed { request: RequestId, answer: String },
@@ -264,6 +295,44 @@ pub struct SessionInfo {
     pub updated: u64,
     pub last_seq: u64,
     pub running: bool,
+}
+
+/// What has been changed in a folder since its last commit.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Changes {
+    /// Git has something to do with the folder. If not, nothing else is known.
+    pub repository: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub files: Vec<Changed>,
+    /// A unified diff of them, without prefixes.
+    pub diff: String,
+    /// All of it is here.
+    pub whole: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Changed {
+    pub path: String,
+    /// `new`, `changed`, `removed` or `conflict`.
+    pub what: String,
+}
+
+/// A harness, as it was found without being run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessInfo {
+    pub id: String,
+    pub name: String,
+    /// The program, if it is there and may be started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    /// Why not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+    /// It cannot be told to ignore a folder's own settings for it.
+    pub needs_trust: bool,
+    /// What it has a mode for.
+    pub access: Vec<Access>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -315,6 +384,143 @@ pub enum Call {
     },
     #[serde(rename = "run.cancel")]
     Cancel { session: SessionId, run: RunId },
+    /// Adds an agent to a session that has a workspace. Answers with its id.
+    #[serde(rename = "agent.add")]
+    AgentAdd {
+        session: SessionId,
+        name: String,
+        /// With the harness `axiom`, `connection` and `model` are needed. Another is a program of the
+        /// person's own that signs in by itself ([`HarnessInfo`]): it has no connection.
+        execution: Execution,
+        access: Access,
+        /// The folder's own settings for such a program may take effect (SI-5).
+        #[serde(default)]
+        trust: bool,
+        /// Instructions of the workspace a person has read and wants followed, by what they were.
+        #[serde(default)]
+        instructions: Vec<Instructions>,
+    },
+    /// What has been changed in a session's folder since its last commit.
+    #[serde(rename = "workspace.changes")]
+    Changes { session: SessionId },
+    /// The harnesses this host can drive.
+    #[serde(rename = "harness.list")]
+    Harnesses {},
+    /// What a folder's owner would have agents told. For a person to read: nothing of it is followed
+    /// unless they say so.
+    #[serde(rename = "workspace.look")]
+    Look { path: String },
+    /// Changes what an agent runs on or may do, for its next run.
+    #[serde(rename = "agent.set")]
+    AgentSet {
+        session: SessionId,
+        agent: AgentId,
+        #[serde(default)]
+        execution: Option<Execution>,
+        #[serde(default)]
+        access: Option<Access>,
+    },
+    /// Says something to an agent. Starts a run, or is heard by the one that runs, before its next
+    /// step. Answers with the run.
+    #[serde(rename = "agent.prompt")]
+    Prompt {
+        session: SessionId,
+        agent: AgentId,
+        text: String,
+        /// The client's own name for it. Said twice with the same, it is said once.
+        #[serde(default)]
+        key: Option<String>,
+    },
+    /// A person's answer.
+    #[serde(rename = "request.answer")]
+    Answer {
+        session: SessionId,
+        request: RequestId,
+        answer: Answer,
+        /// The question's digest, as it was shown.
+        digest: String,
+    },
+    #[serde(rename = "connection.list")]
+    Connections {},
+    /// Adds an account, a key or a server. The secret goes to the system's store and nowhere else.
+    #[serde(rename = "connection.add")]
+    ConnectionAdd {
+        name: String,
+        provider: String,
+        /// For a server of one's own; a provider's own otherwise.
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        secret: Option<SecretText>,
+    },
+    #[serde(rename = "connection.remove")]
+    ConnectionRemove { connection: String },
+    /// What can be used through a connection. Asks the provider.
+    #[serde(rename = "model.list")]
+    Models { connection: String },
+    /// The record of what was done, after `after`.
+    #[serde(rename = "audit.read")]
+    Audit {
+        #[serde(default)]
+        after: u64,
+        #[serde(default = "two_hundred")]
+        limit: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Answer {
+    Once,
+    /// Exactly this, by this agent, as long as the host runs.
+    Session,
+    Deny,
+}
+
+/// A secret on its way to the system's store. It is not shown.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SecretText(pub String);
+impl std::fmt::Debug for SecretText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(secret)")
+    }
+}
+
+/// An account, a key or a server: one way to reach a provider. There may be several.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Connection {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Whether it has a secret.
+    pub secret: bool,
+    /// Whether that is in the system's store, and not only as long as the host runs.
+    #[serde(default)]
+    pub lasts: bool,
+}
+
+/// Words of a workspace for agents: a file, and which content of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Instructions {
+    pub path: String,
+    pub digest: String,
+    /// To be read by a person; absent where only named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// What a provider says of a model. What it does not say is not there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<u64>,
 }
 fn one() -> f64 {
     1.0
@@ -426,6 +632,7 @@ pub const KNOWN: &[&str] = &[
     "session.created",
     "session.titled",
     "agent.added",
+    "agent.changed",
     "agent.state",
     "run.started",
     "run.ended",

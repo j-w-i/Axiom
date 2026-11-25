@@ -6,7 +6,7 @@ use std::{
 };
 
 use axiom_journal::{Error, Journal, Reader, Result};
-use axiom_proto::{Event, SessionId, SessionInfo, limits};
+use axiom_proto::{AgentId, Event, ItemId, SessionId, SessionInfo, limits};
 use tokio::sync::{mpsc, oneshot};
 
 /// An append waits with others and shares their commit.
@@ -120,6 +120,63 @@ impl Store {
     }
     pub async fn sessions(&self, limit: u32, offset: u32) -> Result<Vec<SessionInfo>> {
         self.read_with(move |r| r.sessions(limit, offset)).await
+    }
+    pub async fn session(&self, id: SessionId) -> Result<Option<SessionInfo>> {
+        self.read_with(move |r| r.session(&id)).await
+    }
+    pub async fn put_agent(&self, id: SessionId, agent: AgentId, setup: String) -> Result<()> {
+        self.write(move |j| j.put_agent(&id, &agent, &setup)).await
+    }
+    pub async fn agents(&self, id: SessionId) -> Result<Vec<(AgentId, String)>> {
+        self.read_with(move |r| r.agents(&id)).await
+    }
+    pub async fn remove_agent(&self, id: SessionId, agent: AgentId) -> Result<()> {
+        self.write(move |j| j.remove_agent(&id, &agent)).await
+    }
+    pub async fn put_pending(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        item: ItemId,
+        body: String,
+    ) -> Result<()> {
+        self.write(move |j| j.put_pending(&id, &agent, &item, &body)).await
+    }
+    pub async fn heard(&self, id: SessionId, agent: AgentId, items: Vec<ItemId>) -> Result<()> {
+        self.write(move |j| j.heard(&id, &agent, &items)).await
+    }
+    pub async fn put_frames(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        frames: Vec<(u64, String)>,
+    ) -> Result<()> {
+        self.write(move |j| j.put_frames(&id, &agent, &frames)).await
+    }
+    pub async fn pending(&self, id: SessionId, agent: AgentId) -> Result<Vec<(ItemId, String)>> {
+        self.read_with(move |r| r.pending(&id, &agent)).await
+    }
+    pub async fn put_message(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        n: u64,
+        body: String,
+        heard: Option<ItemId>,
+    ) -> Result<()> {
+        self.write(move |j| j.put_message(&id, &agent, n, &body, heard.as_ref())).await
+    }
+    pub async fn messages(&self, id: SessionId, agent: AgentId) -> Result<Vec<String>> {
+        self.read_with(move |r| r.messages(&id, &agent)).await
+    }
+    pub async fn put_audit(&self, seq: u64, body: String) -> Result<()> {
+        self.write(move |j| j.put_audit(seq, &body)).await
+    }
+    pub async fn last_audit(&self) -> Result<Option<String>> {
+        self.write(|j| j.last_audit()).await
+    }
+    pub async fn audit(&self, after: u64, most: u32) -> Result<Vec<String>> {
+        self.read_with(move |r| r.audit(after, most)).await
     }
 }
 

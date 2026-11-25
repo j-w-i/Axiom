@@ -17,6 +17,10 @@ import '../ui/marks.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
+import 'changes.dart';
+import 'drafts.dart';
+import 'start.dart';
+import 'talk.dart';
 
 /// The application's window, on what the host says. Nothing here is specimen data.
 class Shell extends StatefulWidget {
@@ -29,9 +33,75 @@ class Shell extends StatefulWidget {
   State<Shell> createState() => _ShellState();
 }
 
+/// What the display shows.
+enum _View { work, start, agent, accounts }
+
 class _ShellState extends State<Shell> {
   String? _agent;
   String? _session;
+  _View _view = _View.work;
+
+  /// Of the agent's views, which.
+  int _tab = 0;
+  final _drafts = Drafts();
+  late final _start = StartDraft(widget.store);
+
+  /// Another agent for a session, while it is set up.
+  StartDraft? _more;
+
+  void _addAgent(String session) {
+    if (_more?.into != session) {
+      _more?.dispose();
+      _more = StartDraft(widget.store, into: session)
+        ..folder.text = widget.store.current?.workspace ?? '';
+    }
+    _show(_View.agent);
+  }
+
+  /// Where its person was last is where the window opens, once.
+  bool _opened = false;
+  void _begin(HostStore s) {
+    if (_opened || s.phase != HostPhase.connected) return;
+    if (s.current != null || _view != _View.work) {
+      _opened = true;
+      return;
+    }
+    final last = s.sessions.firstOrNull;
+    if (last == null) return;
+    _opened = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && s.current == null) {
+        _do('The session was not opened', () => s.open(last.id));
+      }
+    });
+  }
+
+  /// What a key was pressed for and did not come about.
+  String? _failed;
+  Timer? _forget;
+
+  void _show(_View v) => setState(() => _view = v);
+
+  void _do(String what, Future<void> Function() f) {
+    _say(null);
+    unawaited(f().catchError((Object e) => _say('$what: ${wordsOf(e)}')));
+  }
+
+  void _say(String? failed) {
+    _forget?.cancel();
+    if (!mounted) return;
+    setState(() => _failed = failed);
+    if (failed != null) _forget = Timer(const Duration(seconds: 15), () => _say(null));
+  }
+
+  @override
+  void dispose() {
+    _forget?.cancel();
+    _drafts.dispose();
+    _start.dispose();
+    _more?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +113,7 @@ class _ShellState extends State<Shell> {
         listenable: widget.store,
         builder: (context, _) {
           final s = widget.store;
+          _begin(s);
           // An agent is chosen within its session only.
           if (_session != s.current?.id) {
             _session = s.current?.id;
@@ -59,7 +130,17 @@ class _ShellState extends State<Shell> {
                     store: s,
                     inset: widget.titleInset,
                     agent: _agent,
-                    onAgent: (id) => setState(() => _agent = id),
+                    onAgent: (id) => setState(() {
+                      _agent = id;
+                      _view = _View.work;
+                    }),
+                    onAddAgent: () => _addAgent(s.current!.id),
+                    onStart: () => _show(_View.start),
+                    onAccounts: () => _show(_View.accounts),
+                    onOpen: (id) {
+                      _show(_View.work);
+                      _do('The session was not opened', () => s.open(id));
+                    },
                   ),
                 ),
               ),
@@ -98,6 +179,20 @@ class _ShellState extends State<Shell> {
                                     style: t.type.label.ink(c.faultText),
                                   ),
                                 ),
+                              ] else if (_failed case final f?) ...[
+                                const AxLamp(AgentState.failed),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Semantics(
+                                    liveRegion: true,
+                                    child: Text(
+                                      oneLine(f, 200),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.type.label.ink(c.faultText),
+                                    ),
+                                  ),
+                                ),
                               ],
                             ],
                           ),
@@ -110,6 +205,27 @@ class _ShellState extends State<Shell> {
                             c.bay,
                             radius: AxRadius.bay,
                             child: switch (s) {
+                              // Kept while the host is away: what was written is not lost.
+                              _ when _view == _View.start => StartPage(
+                                _start,
+                                onStarted: (_) => _show(_View.work),
+                                onAccounts: () => _show(_View.accounts),
+                              ),
+                              // Only while its session is the one that is open.
+                              _ when _view == _View.agent && _more?.into == s.current?.id =>
+                                StartPage(
+                                  _more!,
+                                  key: ObjectKey(_more),
+                                  onStarted: (_) => setState(() {
+                                    _agent = _more!.last;
+                                    _view = _View.work;
+                                  }),
+                                  onAccounts: () => _show(_View.accounts),
+                                ),
+                              _ when _view == _View.accounts => AccountsPage(
+                                s,
+                                onDone: () => _show(s.current == null ? _View.start : _View.work),
+                              ),
                               HostStore(phase: HostPhase.starting, current: null) => const _Word(
                                 'Starting the host',
                               ),
@@ -118,16 +234,22 @@ class _ShellState extends State<Shell> {
                                 detail: s.problem,
                               ),
                               HostStore(current: final m?) => _Display(
+                                s,
                                 m,
                                 agent: _agent,
                                 stale: stale,
-                                onAgain: () => unawaited(s.open(m.id).catchError((_) {})),
+                                drafts: _drafts,
+                                tab: _tab,
+                                onTab: (i) => setState(() => _tab = i),
+                                onAgain: () =>
+                                    _do('The session was not opened', () => s.open(m.id)),
+                                onStop: (run) =>
+                                    _do('It was not stopped', () => s.cancel(m.id, run)),
                               ),
                               _ => _Word(
                                 s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
-                                detail: s.sessions.isEmpty
-                                    ? 'This build replays recorded sessions: axiom replay SESSION '
-                                          'SCRIPT. Running agents comes with the native engine.'
+                                action: s.sessions.isEmpty
+                                    ? ('New session', () => _show(_View.start))
                                     : null,
                               ),
                             },
@@ -162,14 +284,20 @@ Provenance provenanceOf(Known k) => switch (k) {
   Known.unknown => Provenance.unknown,
 };
 
-AgentView viewOf(AgentModel a) {
+AgentView viewOf(AgentModel a, HostStore s) {
   final last = a.last;
   return AgentView(
     id: a.id,
     name: a.name,
     state: phaseOf(a.phase),
-    model: oneLine(a.execution.model ?? '', 60),
+    // What chooses its model itself is named instead.
+    model: oneLine(
+      a.execution.model ??
+          (a.execution.harness == 'axiom' ? '' : s.harnessName(a.execution.harness)),
+      60,
+    ),
     harness: a.execution.harness,
+    service: markOf(a.execution.provider, a.execution.model, a.execution.harness),
     connection: a.execution.connection ?? '',
     elapsed: '',
     context: a.context,
@@ -192,11 +320,16 @@ class _Side extends StatelessWidget {
     required this.inset,
     required this.agent,
     required this.onAgent,
+    required this.onAddAgent,
+    required this.onStart,
+    required this.onAccounts,
+    required this.onOpen,
   });
   final HostStore store;
   final double inset;
   final String? agent;
-  final ValueChanged<String> onAgent;
+  final ValueChanged<String> onAgent, onOpen;
+  final VoidCallback onStart, onAddAgent, onAccounts;
 
   static String ageOf(int ms) {
     final d = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
@@ -224,18 +357,16 @@ class _Side extends StatelessWidget {
                 const SizedBox(width: 9),
                 Expanded(child: Text('Axiom', style: t.type.uiStrong)),
                 AxButton.icon(
+                  AxIcon.web,
+                  label: 'Accounts and servers',
+                  tone: AxTone.quiet,
+                  onPressed: onAccounts,
+                ),
+                AxButton.icon(
                   AxIcon.plus,
                   label: 'New session',
                   tone: AxTone.quiet,
-                  onPressed: store.phase != HostPhase.connected
-                      ? null
-                      : () async {
-                          try {
-                            await store.open(await store.create('New session'));
-                          } on Exception {
-                            // The connection's loss is shown by the store itself.
-                          }
-                        },
+                  onPressed: onStart,
                 ),
               ],
             ),
@@ -255,10 +386,12 @@ class _Side extends StatelessWidget {
                         id: m.id,
                         title: m.title.isEmpty ? 'Session' : m.title,
                         age: '',
-                        agents: [for (final a in m.agents.values) viewOf(a)],
+                        agents: [for (final a in m.agents.values) viewOf(a, store)],
                       ),
                       selected: m.agents.containsKey(agent) ? agent : m.agents.keys.firstOrNull,
                       onSelect: onAgent,
+                      // A replay's session has nobody to work beside.
+                      onAddAgent: m.workspace == null ? null : onAddAgent,
                     ),
                   ),
                 ),
@@ -275,7 +408,7 @@ class _Side extends StatelessWidget {
               for (final s in others)
                 SessionRow(
                   SessionView(id: s.id, title: oneLine(s.title), age: ageOf(s.updated)),
-                  onOpen: () => unawaited(store.open(s.id).catchError((_) {})),
+                  onOpen: () => onOpen(s.id),
                 ),
               if (store.older)
                 Padding(
@@ -294,7 +427,22 @@ class _Side extends StatelessWidget {
 }
 
 class _Display extends StatelessWidget {
-  const _Display(this.session, {required this.agent, required this.stale, required this.onAgain});
+  const _Display(
+    this.store,
+    this.session, {
+    required this.agent,
+    required this.stale,
+    required this.drafts,
+    required this.tab,
+    required this.onTab,
+    required this.onAgain,
+    required this.onStop,
+  });
+  final HostStore store;
+  final Drafts drafts;
+  final int tab;
+  final ValueChanged<int> onTab;
+  final ValueChanged<String> onStop;
   final SessionModel session;
   final String? agent;
   final bool stale;
@@ -303,72 +451,139 @@ class _Display extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: session,
     builder: (context, _) {
-      final t = Ax.of(context), c = t.colors;
       final a = session.agents[agent] ?? session.agents.values.firstOrNull;
       if (session.fault case final f?) {
         return _Word('This session cannot be shown', detail: f, action: ('Try again', onAgain));
       }
       if (!session.loaded) return _Word(stale ? 'Waiting for the host' : 'Reading the session');
       if (a == null) return const _Word('No agent has worked here yet');
-      final x = a.execution;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          AgentBar(
-            name: a.name,
-            state: phaseOf(a.phase),
-            mark: ServiceMark.of(x.model),
-            tabs: const [('Conversation', null)],
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text(
-                    [
-                      for (final p in [x.model, x.harness, x.connection])
-                        if (p != null) oneLine(p, 60),
-                    ].join('   '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.type.label.ink(c.ink3),
-                  ),
-                ),
-                if (a.context != null) ...[
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: ContextGauge(
-                      ContextView(share: a.context, provenance: provenanceOf(a.contextKnown)),
-                      hue: ServiceMark.of(x.model)?.color(c),
-                    ),
-                  ),
-                ],
-                if (stale) ...[
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      'not live',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.label.ink(c.attentionText),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
-          Expanded(child: TranscriptView(a)),
-          if (session.requests.isNotEmpty) _Asked(session),
-        ],
-      );
+      return _work(context, a);
     },
   );
+
+  Widget _work(BuildContext context, AgentModel a) {
+    final c = Ax.of(context).colors;
+    final acts = a.access != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // The transcript between these two looks after itself.
+        ListenableBuilder(listenable: a, builder: (context, _) => _bar(context, a)),
+        ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
+        if (acts && tab == 1)
+          Expanded(child: ChangesView(store, session, key: ValueKey(session.id)))
+        else
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, box) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: TranscriptView(a)),
+                  // In a window too small for all of it, its end is in sight and the rest scrolls.
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: box.maxHeight),
+                    child: SingleChildScrollView(
+                      reverse: true,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (session.requests.values.any(
+                            (r) => !acts || r.opened.answerable != Answerable.live,
+                          ))
+                            _Asked(session, all: !acts),
+                          if (acts)
+                            ListenableBuilder(
+                              listenable: a,
+                              builder: (context, _) => Talk(
+                                store,
+                                session,
+                                a,
+                                draft: drafts.of(session.id, a.id),
+                                live: !stale,
+                                // What is asked stays in sight beside its keys.
+                                room: box.maxHeight * .35,
+                                key: ValueKey('${session.id} ${a.id}'),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _bar(BuildContext context, AgentModel a) {
+    final t = Ax.of(context), c = t.colors;
+    final x = a.execution;
+    final acts = a.access != null;
+    final run = a.run;
+    final works = a.phase == AgentPhase.running || a.phase == AgentPhase.asking;
+    return AgentBar(
+      name: a.name,
+      state: phaseOf(a.phase),
+      mark: markOf(x.provider, x.model, x.harness),
+      tabs: [('Conversation', null), if (acts) ('Changes', null)],
+      index: acts ? tab : 0,
+      onTab: onTab,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!acts)
+            Flexible(
+              child: Text(
+                [
+                  for (final p in [x.model, x.harness, x.connection])
+                    if (p != null) oneLine(p, 60),
+                ].join('   '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.label.ink(c.ink3),
+              ),
+            ),
+          if (!acts && a.context != null) ...[
+            const SizedBox(width: 10),
+            Flexible(
+              child: ContextGauge(
+                ContextView(share: a.context, provenance: provenanceOf(a.contextKnown)),
+                hue: ServiceMark.of(x.model)?.color(c),
+              ),
+            ),
+          ],
+          if (acts && works && run != null && !stale)
+            AxButton(
+              label: 'Stop',
+              icon: AxIcon.stop,
+              tone: AxTone.quiet,
+              onPressed: () => onStop(run),
+            ),
+          if (stale) ...[
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                'not live',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.label.ink(c.attentionText),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
-/// What agents of the session have asked. Nothing here can be answered yet: this build replays.
+/// What agents of the session have asked and nobody can answer here: it is history, or a replay's.
 class _Asked extends StatelessWidget {
-  const _Asked(this.session);
+  const _Asked(this.session, {required this.all});
   final SessionModel session;
+  final bool all;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
@@ -382,21 +597,22 @@ class _Asked extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               for (final r in session.requests.values)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${session.agents[r.opened.agent]?.name ?? 'An agent'} ${literal(r.opened.what)}'
-                        '${r.opened.answerable == Answerable.no ? ' (no longer waiting)' : ''}',
-                        style: t.type.label.ink(c.attentionText),
-                      ),
-                      Text(literal(r.opened.subject), style: t.type.code.ink(c.ink1)),
-                      Text(literal(r.opened.scope), style: t.type.label.ink(c.ink3)),
-                    ],
+                if (all || r.opened.answerable != Answerable.live)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${session.agents[r.opened.agent]?.name ?? 'An agent'} ${literal(r.opened.what)}'
+                          '${r.opened.answerable == Answerable.no ? ' (no longer waiting)' : ''}',
+                          style: t.type.label.ink(c.attentionText),
+                        ),
+                        Text(literal(r.opened.subject), style: t.type.code.ink(c.ink1)),
+                        Text(literal(r.opened.scope), style: t.type.label.ink(c.ink3)),
+                      ],
+                    ),
                   ),
-                ),
             ],
           ),
         ),

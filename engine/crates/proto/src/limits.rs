@@ -124,6 +124,16 @@ pub struct TooLong {
     pub max: usize,
 }
 
+impl Execution {
+    fn fit(&mut self) {
+        let Execution { harness, provider, model, connection, effort, environment } = self;
+        clip(harness, NAME);
+        for s in [provider, model, connection, effort, environment] {
+            clip_opt(s, NAME);
+        }
+    }
+}
+
 impl Body {
     /// Refuses what must not be cut: the text of a request that can be answered.
     pub fn check(&self) -> Result<(), TooLong> {
@@ -154,13 +164,9 @@ impl Body {
             Body::SessionTitled { title } => clip(title, TITLE),
             Body::AgentAdded { name, execution, .. } => {
                 clip(name, NAME);
-                let Execution { harness, provider, model, connection, effort, environment } =
-                    execution;
-                clip(harness, NAME);
-                for s in [provider, model, connection, effort, environment] {
-                    clip_opt(s, NAME);
-                }
+                execution.fit();
             }
+            Body::AgentChanged { execution, .. } => execution.fit(),
             Body::RunEnded { error, .. } => clip_opt(error, LONG),
             Body::ItemStarted { name, args, args_cut, .. } => {
                 clip(name, NAME);
@@ -251,6 +257,19 @@ mod tests {
                     environment: some(),
                 },
                 parent: None,
+                access: None,
+            },
+            Body::AgentChanged {
+                agent: a.clone(),
+                execution: Execution {
+                    harness: nul(),
+                    provider: some(),
+                    model: some(),
+                    connection: some(),
+                    effort: some(),
+                    environment: some(),
+                },
+                access: None,
             },
             Body::RunEnded { run: r.clone(), outcome: Outcome::Failed, error: some() },
             Body::ItemStarted {
@@ -277,6 +296,9 @@ mod tests {
                 subject: nul(),
                 scope: nul(),
                 answerable: Answerable::No,
+                digest: String::new(),
+                item: None,
+                session: false,
             },
             Body::RequestClosed { request: q, answer: nul() },
             Body::Unknown(json!({ "type": nul(), "x": nul() })),
@@ -365,6 +387,9 @@ mod tests {
             subject: "s".repeat(subject),
             scope: "c".repeat(scope),
             answerable,
+            digest: String::new(),
+            item: None,
+            session: false,
         };
         use Answerable::{Live, Message, No, Unknown};
         for answerable in [Live, Message, Unknown] {
