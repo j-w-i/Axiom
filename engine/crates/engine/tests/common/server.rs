@@ -28,6 +28,16 @@ impl Reply {
         self.headers.push((k.into(), v.into()));
         self
     }
+    /// Why it stopped.
+    pub fn stop(&mut self, reason: &str) {
+        for b in &mut self.body {
+            for was in ["stop", "tool_calls"] {
+                let (a, z) =
+                    (format!("finish_reason\":\"{was}\""), format!("finish_reason\":\"{reason}\""));
+                *b = b.replace(&a, &z);
+            }
+        }
+    }
     /// After what it says, nothing more comes.
     pub fn hangs(mut self) -> Self {
         self.hang = true;
@@ -66,6 +76,11 @@ pub fn text(parts: &[&str]) -> Reply {
         parts.iter().map(|p| chunk(json!({"content": p}), Value::Null)).collect();
     b.extend(ends("stop"));
     sse(b)
+}
+pub fn ends_with(reason: &str, parts: &[&str]) -> Reply {
+    let mut r = text(parts);
+    r.stop(reason);
+    r
 }
 pub fn cut(part: &str) -> Reply {
     Reply { cut: true, ..sse(vec![chunk(json!({"content": part}), Value::Null)]) }

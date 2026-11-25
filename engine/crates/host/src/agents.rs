@@ -1,12 +1,13 @@
 //! Agents of this host: how they are set up, what they run on, where they work, and who is asked.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard, PoisonError},
+    time::Duration,
 };
 
-use axiom_engine::{Agent, Context, Deed, Desk, Limits, Refused, Retries, Say, Stage, Turn, Word};
+use axiom_engine::{Agent, Context, Deed, Desk, Limits, Refused, Retries, Say, Stage, Word};
 use axiom_model::{Cache, Codec, Settings};
 use axiom_policy::{
     Access, Budget, Caps, Keep, Net, NotAnswered, Place, Policy, Profile, Reach, Tools,
@@ -14,11 +15,12 @@ use axiom_policy::{
     rules::Source,
 };
 use axiom_proto::{
-    AgentId, AgentState, Body, ErrorCode, Execution, Instructions, RunId, SessionId, WireError,
-    limits, now_ms,
+    AgentId, AgentState, Body, ErrorCode, Execution, Instructions, ItemId, RunId, SessionId,
+    WireError, limits, now_ms,
 };
 use axiom_tools::{Seen, Site};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::{
@@ -66,9 +68,22 @@ pub struct Slot {
     seen: Seen,
     /// The run it is in, and how to speak to it.
     live: Arc<tokio::sync::Mutex<Live>>,
+    keys: Mutex<VecDeque<(String, Value)>>,
 }
 
-type Live = Option<(RunId, mpsc::Sender<Word>)>;
+type Live = Option<Now>;
+
+/// The run an agent is in.
+struct Now {
+    run: RunId,
+    tx: mpsc::Sender<Word>,
+    cancel: watch::Receiver<bool>,
+    /// Something was said after a person stopped it: that begins another.
+    late: bool,
+}
+
+/// Prompts whose names are remembered.
+const KEYS: usize = 64;
 
 pub struct Agents {
     pub connections: Connections,
@@ -179,7 +194,10 @@ impl Agents {
         if m.trim().is_empty() || limits::text_len(m) > 500 {
             return Err(bad("a model's name has between 1 and 500 bytes"));
         }
-        self.connections.client(c)?;
+        let client = self.connections.client(c)?;
+        if execution.effort.is_some() && client.profile().quirks(m).effort.is_none() {
+            return Err(bad("the effort cannot be set for this provider and model"));
+        }
         let place = real(Path::new(workspace))?;
         let setup = Setup { name, execution, access, workspace: place.to_string(), instructions };
         // What could not be contained later is refused now, in words.
@@ -405,9 +423,12 @@ impl Stage for Floor {
     async fn sync(&self) -> Result<(), Refused> {
         self.session.sync().await.map(drop).map_err(|_| Refused::Closed)
     }
-    async fn remember(&self, n: u64, turn: String) -> Result<(), Refused> {
+    async fn remember(&self, n: u64, turn: String, heard: Option<ItemId>) -> Result<(), Refused> {
         let (s, a) = (self.session.id.clone(), self.agent.clone());
-        self.store.put_message(s, a, n, turn).await.map_err(|e| Refused::This(e.to_string()))
+        self.store.put_message(s, a, n, turn, heard).await.map_err(|e| Refused::This(e.to_string()))
+    }
+    async fn closed(&self) {
+        self.session.closed().await;
     }
     async fn audit(&self, deed: Deed) -> Result<(), Refused> {
         self.agents
@@ -439,12 +460,8 @@ pub async fn load(
     .await
     .map_err(internal)??;
     let kept = store.messages(id.clone(), agent.clone()).await.map_err(internal)?;
-    let (context, new) = Context::load(&kept).map_err(internal)?;
-    for (n, t) in (kept.len() as u64..).zip(&new) {
-        let t: &Turn = t;
-        let text = serde_json::to_string(t).map_err(internal)?;
-        store.put_message(id.clone(), agent.clone(), n, text).await.map_err(internal)?;
-    }
+    let context = Context::load(&kept).map_err(internal)?;
+    let waits = store.pending(id.clone(), agent.clone()).await.map_err(internal)?;
     let quirks = client.profile().quirks(&model);
     let messages = client.profile().codec == Codec::Messages;
     let settings = Settings {
@@ -456,7 +473,7 @@ pub async fn load(
         stop: Vec::new(),
         cache: if messages { Cache::Short } else { Cache::Off },
     };
-    Ok(Agent {
+    let mut a = Agent {
         id: agent.clone(),
         stage: Floor {
             agents: agents.clone(),
@@ -478,9 +495,13 @@ pub async fn load(
         limits: Limits::default(),
         fill: None,
         told: None,
+        waited: Duration::ZERO,
         retries: Retries::default(),
         inbox,
-    })
+    };
+    // What was said and not heard: before a host was gone, or a run was stopped.
+    a.note(waits).await.map_err(internal)?;
+    Ok(a)
 }
 
 /// What came of saying something to an agent.
@@ -499,8 +520,8 @@ pub struct Ear {
 }
 
 impl Ear {
-    pub fn tell(self, text: String) -> RunId {
-        self.permit.send(Word { text, shown: true });
+    pub fn tell(self, text: String, item: ItemId) -> RunId {
+        self.permit.send(Word { text, item: Some(item) });
         self.run
     }
 }
@@ -511,16 +532,41 @@ pub struct Turnstile {
 }
 
 impl Slot {
+    /// What was answered to a prompt of this name.
+    pub fn answered(&self, key: &str) -> Option<Value> {
+        let keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
+        keys.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+    }
+    pub fn remember(&self, key: String, answer: Value) {
+        let mut keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
+        keys.push_back((key, answer));
+        while keys.len() > KEYS {
+            keys.pop_front();
+        }
+    }
+
+    /// Nothing is said, and nothing begins, while this is held.
+    pub async fn hold(&self) -> Result<impl Sized + use<>, WireError> {
+        let live = self.live.clone().lock_owned().await;
+        if live.as_ref().is_some_and(|n| !n.tx.is_closed()) {
+            return Err(WireError::new(ErrorCode::Busy, "the agent is at work"));
+        }
+        Ok(live)
+    }
+
     /// A place in the run that is on, or the place for a new one.
     pub async fn speak(&self) -> Result<Spoken, WireError> {
-        let live = self.live.clone().lock_owned().await;
-        if let Some((run, tx)) = live.as_ref()
-            && !tx.is_closed()
+        let mut live = self.live.clone().lock_owned().await;
+        if let Some(now) = live.as_mut()
+            && !now.tx.is_closed()
         {
             let busy = |words: &str| WireError::new(ErrorCode::Busy, words);
-            return match tx.clone().try_reserve_owned() {
+            let late = *now.cancel.borrow();
+            let (run, reserved) = (now.run.clone(), now.tx.clone().try_reserve_owned());
+            return match reserved {
                 Ok(permit) => {
-                    Ok(Spoken::Heard(Box::new(Ear { run: run.clone(), permit, _slot: live })))
+                    now.late |= late;
+                    Ok(Spoken::Heard(Box::new(Ear { run, permit, _slot: live })))
                 }
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     Err(busy("the agent has as much to hear as it may"))
@@ -538,73 +584,43 @@ impl Slot {
         self.seen.1.end();
     }
 
-    pub async fn busy(&self) -> bool {
-        self.live.lock().await.as_ref().is_some_and(|(_, tx)| !tx.is_closed())
-    }
-
-    /// After a run: what was said too late for it. The place is free if there is nothing.
-    async fn after(&self, rx: &mut mpsc::Receiver<Word>) -> Vec<Word> {
+    /// After a run: whether something was said too late for it that is to begin another. If not,
+    /// the place is free.
+    pub async fn after(&self, rx: &mut mpsc::Receiver<Word>, stopped: bool) -> bool {
         let mut live = self.live.lock().await;
-        let mut left = Vec::new();
-        while let Ok(m) = rx.try_recv() {
-            left.push(m);
+        let mut left = 0;
+        while rx.try_recv().is_ok() {
+            left += 1;
         }
-        if left.is_empty() {
+        let late = live.as_ref().is_some_and(|n| n.late);
+        // Stopped by a person: what they had said before waits for the next time they speak.
+        if left == 0 || (stopped && !late) {
             rx.close();
             *live = None;
+            return false;
         }
-        left
+        true
     }
 
-    async fn renamed(&self, run: &RunId) {
-        if let Some((r, _)) = self.live.lock().await.as_mut() {
-            *r = run.clone();
+    pub async fn renamed(&self, run: &RunId, cancel: &watch::Receiver<bool>) {
+        if let Some(n) = self.live.lock().await.as_mut() {
+            n.run = run.clone();
+            n.cancel = cancel.clone();
+            n.late = false;
         }
     }
 
-    async fn leave(&self) {
+    pub async fn leave(&self) {
         *self.live.lock().await = None;
     }
 }
 
 impl Turnstile {
     /// A way to speak to the run that now takes the place.
-    pub fn enter(mut self, run: &RunId) -> mpsc::Receiver<Word> {
+    pub fn enter(mut self, run: &RunId, cancel: &watch::Receiver<bool>) -> mpsc::Receiver<Word> {
         let (tx, rx) = mpsc::channel(INBOX);
-        *self.slot = Some((run.clone(), tx));
+        *self.slot = Some(Now { run: run.clone(), tx, cancel: cancel.clone(), late: false });
         rx
-    }
-}
-
-/// Runs an agent until nothing is left that was said to it. `next` makes a run that can be cancelled.
-pub async fn work(
-    agent: &mut Agent<Floor>,
-    slot: &Slot,
-    first: (RunId, watch::Receiver<bool>),
-    mut next: impl FnMut() -> Result<(RunId, watch::Receiver<bool>), WireError>,
-) {
-    let (mut run, mut cancel) = first;
-    loop {
-        let cancelled = cancel.clone();
-        agent.run(run, cancel).await;
-        let stopped = *cancelled.borrow();
-        let left = slot.after(&mut agent.inbox).await;
-        if left.is_empty() {
-            return;
-        }
-        // Stopped by a person: what they said before that starts nothing, but is not forgotten.
-        let next = if stopped { None } else { next().ok() };
-        let Some(n) = next else {
-            let _ = agent.note(left).await;
-            slot.leave().await;
-            return;
-        };
-        (run, cancel) = n;
-        slot.renamed(&run).await;
-        if agent.go_on(&run, left).await.is_err() {
-            slot.leave().await;
-            return;
-        }
     }
 }
 

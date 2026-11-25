@@ -6,7 +6,7 @@ use std::{
 };
 
 use axiom_journal::{Error, Journal, Reader, Result};
-use axiom_proto::{AgentId, Event, SessionId, SessionInfo, limits};
+use axiom_proto::{AgentId, Event, ItemId, SessionId, SessionInfo, limits};
 use tokio::sync::{mpsc, oneshot};
 
 /// An append waits with others and shares their commit.
@@ -130,14 +130,30 @@ impl Store {
     pub async fn agents(&self, id: SessionId) -> Result<Vec<(AgentId, String)>> {
         self.read_with(move |r| r.agents(&id)).await
     }
+    pub async fn remove_agent(&self, id: SessionId, agent: AgentId) -> Result<()> {
+        self.write(move |j| j.remove_agent(&id, &agent)).await
+    }
+    pub async fn put_pending(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        item: ItemId,
+        body: String,
+    ) -> Result<()> {
+        self.write(move |j| j.put_pending(&id, &agent, &item, &body)).await
+    }
+    pub async fn pending(&self, id: SessionId, agent: AgentId) -> Result<Vec<(ItemId, String)>> {
+        self.read_with(move |r| r.pending(&id, &agent)).await
+    }
     pub async fn put_message(
         &self,
         id: SessionId,
         agent: AgentId,
         n: u64,
         body: String,
+        heard: Option<ItemId>,
     ) -> Result<()> {
-        self.write(move |j| j.put_message(&id, &agent, n, &body)).await
+        self.write(move |j| j.put_message(&id, &agent, n, &body, heard.as_ref())).await
     }
     pub async fn messages(&self, id: SessionId, agent: AgentId) -> Result<Vec<String>> {
         self.read_with(move |r| r.messages(&id, &agent)).await

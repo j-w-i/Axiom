@@ -18,7 +18,7 @@ pub enum Turn {
 #[derive(Debug, Clone, Default)]
 pub struct Context {
     turns: u64,
-    messages: Vec<Message>,
+    kept: Vec<Message>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -29,34 +29,22 @@ pub struct Unreadable(usize, String);
 pub const UNKNOWN: &str = "Interrupted: Axiom stopped while this was being done. It may have been done, partly or wholly. Look before doing it again.";
 
 impl Context {
-    /// As it was kept. A call whose result is missing gets one that says so: it is never run again.
-    pub fn load(kept: &[String]) -> Result<(Self, Vec<Turn>), Unreadable> {
+    /// As it was kept.
+    pub fn load(kept: &[String]) -> Result<Self, Unreadable> {
         let mut c = Self::default();
         for (n, t) in kept.iter().enumerate() {
             let turn: Turn = serde_json::from_str(t).map_err(|e| Unreadable(n, e.to_string()))?;
             c.push(&turn);
         }
-        let missing = c.unanswered();
-        let mut new = Vec::new();
-        if !missing.is_empty() {
-            let blocks = missing.into_iter().map(|id| Block::result(id, UNKNOWN, true)).collect();
-            let turn = Turn::Message(Message { role: Role::User, blocks });
-            c.push(&turn);
-            new.push(turn);
-        }
-        Ok((c, new))
+        Ok(c)
     }
 
     pub fn push(&mut self, t: &Turn) {
         self.turns += 1;
         match t {
-            Turn::Message(m) => match self.messages.last_mut() {
-                // The results of one answer's calls are one message, though each was kept alone.
-                Some(last) if results(last) && results(m) => last.blocks.extend(m.blocks.clone()),
-                _ => self.messages.push(m.clone()),
-            },
+            Turn::Message(m) => self.kept.push(m.clone()),
             Turn::Compacted { summary } => {
-                self.messages = vec![Message::user(format!(
+                self.kept = vec![Message::user(format!(
                     "The conversation so far was too long and has been summarised:\n\n{summary}"
                 ))];
             }
@@ -68,38 +56,64 @@ impl Context {
         self.turns
     }
 
-    pub fn messages(&self) -> &[Message] {
-        &self.messages
+    pub fn is_empty(&self) -> bool {
+        self.kept.is_empty()
     }
 
-    /// Calls of the last answer that have no result after it.
-    fn unanswered(&self) -> Vec<String> {
-        let Some(at) = self.messages.iter().rposition(|m| m.role == Role::Assistant) else {
-            return Vec::new();
-        };
-        let mut ids: Vec<String> = calls(&self.messages[at]);
-        for b in self.messages[at + 1..].iter().flat_map(|m| &m.blocks) {
-            if let Content::ToolResult { call, .. } = &b.content {
-                ids.retain(|i| i != call);
+    /// The conversation in the one form every provider takes, whatever was cut short: what a person
+    /// said in a row is one message, and right behind an answer's calls is one result for each, in
+    /// their order. A call whose result was never kept gets one that says so: it is not done again.
+    pub fn messages(&self) -> Vec<Message> {
+        let mut out: Vec<Message> = Vec::new();
+        let mut rest = self.kept.iter().peekable();
+        while rest.peek().is_some() {
+            let mut said: Vec<&Block> = Vec::new();
+            while let Some(m) = rest.next_if(|m| m.role == Role::User) {
+                said.extend(&m.blocks);
+            }
+            let asked = match out.last() {
+                Some(m) if m.role == Role::Assistant => calls(m),
+                _ => Vec::new(),
+            };
+            let mut blocks = answered(&asked, &said);
+            let words = said.iter().filter(|b| !matches!(b.content, Content::ToolResult { .. }));
+            blocks.extend(words.map(|b| (*b).clone()));
+            if !blocks.is_empty() {
+                out.push(Message { role: Role::User, blocks });
+            }
+            while let Some(m) = rest.next_if(|m| m.role == Role::Assistant) {
+                // One answer after another without a word between, but with calls.
+                if let Some(before) = out.last().filter(|m| m.role == Role::Assistant).map(calls)
+                    && !before.is_empty()
+                {
+                    out.push(Message { role: Role::User, blocks: answered(&before, &[]) });
+                }
+                out.push(m.clone());
             }
         }
-        ids
+        if let Some(asked) = out.last().filter(|m| m.role == Role::Assistant).map(calls)
+            && !asked.is_empty()
+        {
+            out.push(Message { role: Role::User, blocks: answered(&asked, &[]) });
+        }
+        out
     }
 }
 
-fn results(m: &Message) -> bool {
-    m.role == Role::User && m.blocks.iter().all(|b| matches!(b.content, Content::ToolResult { .. }))
+/// A result for each call.
+fn answered(asked: &[String], said: &[&Block]) -> Vec<Block> {
+    let result = |id: &String| {
+        said.iter()
+            .find(|b| matches!(&b.content, Content::ToolResult { call, .. } if call == id))
+            .map_or_else(|| Block::result(id.clone(), UNKNOWN, true), |b| (*b).clone())
+    };
+    asked.iter().map(result).collect()
 }
 
-/// The ids of every call in a message, also of those that cannot be run.
+/// The ids of the calls a message makes. Those that could not be read are none: no provider takes
+/// them back.
 fn calls(m: &Message) -> Vec<String> {
-    m.blocks
-        .iter()
-        .filter_map(|b| match &b.content {
-            Content::ToolCall(c) => Some(c.id.clone()),
-            _ => None,
-        })
-        .collect()
+    m.calls().map(|c| c.id().to_owned()).collect()
 }
 
 /// What every agent is told. The same for the same agent, so that a provider can keep it; what
@@ -156,50 +170,93 @@ mod tests {
             args: Args::Ready(Default::default()),
         }))
     }
-    fn kept(v: &[Turn]) -> Vec<String> {
-        v.iter().map(|t| serde_json::to_string(t).unwrap()).collect()
+    fn unread(id: &str) -> Block {
+        let Content::ToolCall(c) = call(id).content else { unreachable!() };
+        Block::new(Content::ToolCall(ToolCall { args: Args::Cut, ..c }))
+    }
+    fn answer(blocks: Vec<Block>) -> Turn {
+        Turn::Message(Message { role: Role::Assistant, blocks })
+    }
+    fn result(id: &str) -> Turn {
+        Turn::Message(Message { role: Role::User, blocks: vec![Block::result(id, "done", false)] })
+    }
+    fn said(t: &str) -> Turn {
+        Turn::Message(Message::user(t))
+    }
+    fn of(turns: &[Turn]) -> Vec<String> {
+        let kept: Vec<String> = turns.iter().map(|t| serde_json::to_string(t).unwrap()).collect();
+        let c = Context::load(&kept).unwrap();
+        assert_eq!(c.turns(), turns.len() as u64);
+        let shown = |b: &Block| match &b.content {
+            Content::Text { text } => format!("\"{text}\""),
+            Content::ToolCall(c) => format!("call {}", c.id),
+            Content::ToolResult { call, text, .. } if text == UNKNOWN => format!("unknown {call}"),
+            Content::ToolResult { call, .. } => format!("result {call}"),
+            _ => "?".into(),
+        };
+        c.messages()
+            .iter()
+            .map(|m| {
+                let who = if m.role == Role::User { "U" } else { "A" };
+                let all: Vec<String> = m.blocks.iter().map(shown).collect();
+                format!("{who}: {}", all.join(", "))
+            })
+            .collect()
     }
 
     #[test]
-    fn a_result_that_is_missing_is_said_to_be_unknown() {
-        let turns = [
-            Turn::Message(Message::user("go")),
-            Turn::Message(Message {
-                role: Role::Assistant,
-                blocks: vec![Block::text("x"), call("1"), call("2")],
-            }),
-            Turn::Message(Message {
-                role: Role::User,
-                blocks: vec![Block::result("1", "done", false)],
-            }),
-        ];
-        let (c, new) = Context::load(&kept(&turns)).unwrap();
-        assert_eq!(c.turns(), 4);
-        let Turn::Message(m) = &new[0] else { unreachable!() };
-        assert_eq!(m.blocks, [Block::result("2", UNKNOWN, true)]);
-        assert_eq!(c.messages().len(), 3, "both results are one message");
-        // Kept too, it is whole.
-        let mut all = turns.to_vec();
-        all.extend(new);
-        let (d, new) = Context::load(&kept(&all)).unwrap();
-        assert!(new.is_empty());
-        assert_eq!(d.messages(), c.messages());
+    fn whatever_was_cut_short_it_has_the_form_providers_take() {
+        let two = || answer(vec![Block::text("x"), call("1"), call("2")]);
+        assert_eq!(
+            of(&[said("go"), two(), result("1"), result("2"), answer(vec![Block::text("y")])]),
+            ["U: \"go\"", "A: \"x\", call 1, call 2", "U: result 1, result 2", "A: \"y\""]
+        );
+        // A result that is missing, at the end and in the middle; what was said comes after them.
+        assert_eq!(
+            of(&[said("go"), two(), result("2")]),
+            ["U: \"go\"", "A: \"x\", call 1, call 2", "U: unknown 1, result 2"]
+        );
+        assert_eq!(of(&[said("go"), two()])[2], "U: unknown 1, unknown 2");
+        assert_eq!(
+            of(&[
+                said("go"),
+                two(),
+                said("and"),
+                result("1"),
+                said("this"),
+                answer(vec![Block::text("y")])
+            ])[2],
+            "U: result 1, unknown 2, \"and\", \"this\""
+        );
+        assert_eq!(
+            of(&[said("go"), two(), answer(vec![Block::text("y")]), said("more")])[2..],
+            ["U: unknown 1, unknown 2", "A: \"y\"", "U: \"more\""]
+        );
+        // What was said in a row, results of nothing, twice the same, calls nobody could read.
+        assert_eq!(of(&[said("a"), said("b")]), ["U: \"a\", \"b\""]);
+        assert_eq!(of(&[said("a"), result("9"), said("b")]), ["U: \"a\", \"b\""]);
+        assert_eq!(
+            of(&[said("a"), two(), result("1"), result("1"), result("2")])[2],
+            "U: result 1, result 2"
+        );
+        assert_eq!(
+            of(&[said("a"), answer(vec![unread("1"), call("2")]), result("2"), said("unread")])[2],
+            "U: result 2, \"unread\""
+        );
+        assert_eq!(of(&[said("a"), answer(vec![unread("1")])]).len(), 2);
+        assert!(of(&[]).is_empty());
     }
 
     #[test]
     fn a_summary_stands_for_what_was_before_it() {
         let turns = [
-            Turn::Message(Message::user("go")),
-            Turn::Message(Message { role: Role::Assistant, blocks: vec![Block::text("done")] }),
+            said("go"),
+            answer(vec![Block::text("done")]),
             Turn::Compacted { summary: "It went.".into() },
-            Turn::Message(Message::user("more")),
+            said("more"),
         ];
-        let (c, new) = Context::load(&kept(&turns)).unwrap();
-        assert!(new.is_empty());
-        assert_eq!((c.turns(), c.messages().len()), (4, 2));
-        assert!(
-            matches!(&c.messages()[0].blocks[0].content, Content::Text { text } if text.contains("It went."))
-        );
+        let m = of(&turns);
+        assert!(m.len() == 1 && m[0].contains("It went.") && m[0].ends_with("\"more\""), "{m:?}");
     }
 
     #[test]

@@ -56,8 +56,9 @@ impl Default for Retries {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Word {
     pub text: String,
-    /// It is in the journal already, for who reads along.
-    pub shown: bool,
+    /// Where it is in the journal already, if it is: shown to who reads along, and waiting to be
+    /// heard.
+    pub item: Option<ItemId>,
 }
 
 /// An agent, ready to run.
@@ -86,6 +87,8 @@ pub struct Agent<S: Stage> {
     pub fill: Option<f64>,
     /// Another model that answered, once a person has been told.
     pub told: Option<String>,
+    /// How long this run has waited for a person: that is not its own time.
+    pub waited: Duration,
 }
 
 fn fill(r: &Reply, window: Option<u64>) -> Option<f64> {
@@ -100,6 +103,9 @@ pub struct Ended {
     pub error: Option<String>,
 }
 
+/// For a call that was stopped while a person was asked: nothing of it was begun.
+const ASKED: &str = "Not done: the run was stopped while a person was being asked.";
+
 /// A call that may be done, and why.
 struct Ready {
     step: Step,
@@ -109,8 +115,8 @@ struct Ready {
 }
 
 /// The events of something a person said.
-pub fn said(run: &RunId, agent: &AgentId, text: &str) -> Vec<Say> {
-    let item = ItemId::new();
+pub fn said(item: &ItemId, run: &RunId, agent: &AgentId, text: &str) -> Vec<Say> {
+    let item = item.clone();
     vec![
         Say::Event(Body::ItemStarted {
             item: item.clone(),
@@ -129,6 +135,8 @@ pub fn said(run: &RunId, agent: &AgentId, text: &str) -> Vec<Say> {
 /// Why a run stops before the agent is done.
 enum Halt {
     Cancelled,
+    /// Cancelled before anything of the call was begun.
+    Unbegun,
     Failed(String),
     /// What is sent is too long for the model.
     Full(String),
@@ -154,40 +162,40 @@ async fn stopped(c: &mut Cancel) {
 }
 
 impl<S: Stage> Agent<S> {
-    /// Begins a run with what a person said. It is in the journal for good when this returns.
-    pub async fn begin(&mut self, run: &RunId, prompt: String) -> Result<(), Refused> {
+    /// Begins a run, with what a person said if it is not waiting in the conversation already. It is
+    /// in the journal for good when this returns; if it cannot begin, it has ended.
+    pub async fn begin(&mut self, run: &RunId, prompt: Option<String>) -> Result<(), Refused> {
         self.stage
             .say(vec![
                 Say::Event(Body::RunStarted { run: run.clone(), agent: self.id.clone() }),
                 Say::Event(Body::AgentState { agent: self.id.clone(), state: AgentState::Running }),
             ])
             .await?;
-        match self.heard(run, prompt, false).await {
-            Ok(()) => {}
-            Err(Halt::Failed(why) | Halt::Full(why)) => return Err(Refused::This(why)),
-            Err(Halt::Cancelled | Halt::Gone) => return Err(Refused::Closed),
+        let r = match self.opening(run, prompt).await {
+            Ok(()) => return Ok(()),
+            Err(Halt::Failed(why) | Halt::Full(why)) => Refused::This(why),
+            Err(Halt::Cancelled | Halt::Unbegun | Halt::Gone) => Refused::Closed,
+        };
+        let error = Some(r.to_string());
+        let end = vec![
+            Say::Event(Body::RunEnded { run: run.clone(), outcome: Outcome::Failed, error }),
+            Say::Event(Body::AgentState { agent: self.id.clone(), state: AgentState::Failed }),
+        ];
+        let _ = self.stage.say(end).await;
+        Err(r)
+    }
+
+    async fn opening(&mut self, run: &RunId, prompt: Option<String>) -> Result<(), Halt> {
+        if let Some(p) = prompt {
+            self.heard(run, Word { text: p, item: None }).await?;
         }
         for f in std::mem::take(&mut self.not_followed) {
             let words = format!(
                 "{f} is not what you read when you said it should be followed. It is not followed."
             );
-            if self.notice(run, &words).await.is_err() {
-                return Err(Refused::Closed);
-            }
+            self.notice(run, &words).await?;
         }
-        self.stage.sync().await
-    }
-
-    /// Begins a run with what was said too late for the one before.
-    pub async fn go_on(&mut self, run: &RunId, words: Vec<Word>) -> Result<(), Refused> {
-        self.stage
-            .say(vec![
-                Say::Event(Body::RunStarted { run: run.clone(), agent: self.id.clone() }),
-                Say::Event(Body::AgentState { agent: self.id.clone(), state: AgentState::Running }),
-            ])
-            .await?;
-        self.note(words).await?;
-        self.stage.sync().await
+        Ok(self.stage.sync().await?)
     }
 
     /// Runs until the agent is done, cancelled, or cannot go on. How it ended is in the journal when
@@ -196,7 +204,7 @@ impl<S: Stage> Agent<S> {
         let r = self.go(&run, &mut cancel).await;
         // Who stops an agent stops all of it (SI-24). Otherwise what goes on is said.
         match r {
-            Err(Halt::Cancelled) => self.seen.1.end(),
+            Err(Halt::Cancelled | Halt::Unbegun) => self.seen.1.end(),
             _ => {
                 let jobs = self.seen.1.running();
                 if !jobs.is_empty() {
@@ -207,7 +215,7 @@ impl<S: Stage> Agent<S> {
         }
         let (outcome, error) = match r {
             Ok(()) => (Outcome::Completed, None),
-            Err(Halt::Cancelled) => (Outcome::Cancelled, None),
+            Err(Halt::Cancelled | Halt::Unbegun) => (Outcome::Cancelled, None),
             Err(Halt::Failed(why) | Halt::Full(why)) => (Outcome::Failed, Some(why)),
             Err(Halt::Gone) => return Ended { outcome: Outcome::Interrupted, error: None },
         };
@@ -228,7 +236,8 @@ impl<S: Stage> Agent<S> {
 
     async fn go(&mut self, run: &RunId, cancel: &mut Cancel) -> Result<(), Halt> {
         let began = Instant::now();
-        let mut output = 0;
+        let (mut output, mut unread) = (0, 0);
+        self.waited = Duration::ZERO;
         for _ in 0..self.limits.steps {
             if *cancel.borrow() {
                 return Err(Halt::Cancelled);
@@ -242,9 +251,9 @@ impl<S: Stage> Agent<S> {
                 more.push(m);
             }
             for m in more {
-                self.heard(run, m.text, m.shown).await?;
+                self.heard(run, m).await?;
             }
-            if began.elapsed() > self.limits.time {
+            if began.elapsed().saturating_sub(self.waited) > self.limits.time {
                 return Err(Halt::Failed("the run has taken as long as it may".into()));
             }
             if self.limits.output_tokens.is_some_and(|most| output >= most) {
@@ -278,9 +287,16 @@ impl<S: Stage> Agent<S> {
             let stop = reply.stop.clone();
             let message = reply.message;
             self.remember(Turn::Message(message.clone())).await?;
+            let ready = message.calls().next().is_some();
             let has_calls =
                 message.blocks.iter().any(|b| matches!(b.content, Content::ToolCall(_)));
-            if has_calls {
+            let ended = matches!(stop, Some(Stop::Refusal(_) | Stop::Other(_)));
+            if has_calls && !ended {
+                // What cannot be read is told to the model, and not for ever.
+                unread = if ready { 0 } else { unread + 1 };
+                if unread > 2 {
+                    return Err(Halt::Failed("the model's calls cannot be read".into()));
+                }
                 self.calls(run, &message, cancel).await?;
                 continue;
             }
@@ -288,7 +304,7 @@ impl<S: Stage> Agent<S> {
                 Some(Stop::EndTurn | Stop::Sequence(_) | Stop::ToolUse) | None => {
                     // What was said while it answered is heard before it is done.
                     match self.inbox.try_recv() {
-                        Ok(m) => self.heard(run, m.text, m.shown).await?,
+                        Ok(m) => self.heard(run, m).await?,
                         Err(_) => return Ok(()),
                     }
                 }
@@ -316,21 +332,22 @@ impl<S: Stage> Agent<S> {
         )))
     }
 
-    /// Takes in what a person said.
-    async fn heard(&mut self, run: &RunId, text: String, shown: bool) -> Result<(), Halt> {
-        if !shown {
-            self.stage.say(said(run, &self.id, &text)).await?;
+    /// Takes in what a person said: first for who reads along, then for the model.
+    async fn heard(&mut self, run: &RunId, w: Word) -> Result<(), Halt> {
+        if w.item.is_none() {
+            self.stage.say(said(&ItemId::new(), run, &self.id, &w.text)).await?;
+            self.stage.sync().await?;
         }
-        self.remember(Turn::Message(Message::user(text))).await
+        self.keep_turn(Turn::Message(Message::user(w.text)), w.item).await
     }
 
-    /// Takes in what was said to a run that is over: the next one knows it.
-    pub async fn note(&mut self, words: Vec<Word>) -> Result<(), Refused> {
-        for w in words {
-            match self.remember(Turn::Message(Message::user(w.text))).await {
+    /// Takes in what waits from before: a host that was gone, or a run that was stopped.
+    pub async fn note(&mut self, words: Vec<(ItemId, String)>) -> Result<(), Refused> {
+        for (item, text) in words {
+            match self.keep_turn(Turn::Message(Message::user(text)), Some(item)).await {
                 Ok(()) => {}
                 Err(Halt::Failed(why) | Halt::Full(why)) => return Err(Refused::This(why)),
-                Err(Halt::Cancelled | Halt::Gone) => return Err(Refused::Closed),
+                Err(Halt::Cancelled | Halt::Unbegun | Halt::Gone) => return Err(Refused::Closed),
             }
         }
         Ok(())
@@ -372,8 +389,12 @@ impl<S: Stage> Agent<S> {
 
     /// On the drive before anything follows from it.
     async fn remember(&mut self, t: Turn) -> Result<(), Halt> {
+        self.keep_turn(t, None).await
+    }
+
+    async fn keep_turn(&mut self, t: Turn, heard: Option<ItemId>) -> Result<(), Halt> {
         let text = serde_json::to_string(&t).map_err(|e| Halt::Failed(e.to_string()))?;
-        self.stage.remember(self.context.turns(), text).await?;
+        self.stage.remember(self.context.turns(), text, heard).await?;
         self.context.push(&t);
         Ok(())
     }
@@ -393,7 +414,7 @@ impl<S: Stage> Agent<S> {
             model: self.model.clone(),
             system: crate::context::system(&self.site, &self.instructions),
             tools,
-            messages: self.context.messages().to_vec(),
+            messages: self.context.messages(),
             settings: self.settings.clone(),
         })
     }
@@ -405,7 +426,7 @@ impl<S: Stage> Agent<S> {
         cancel: &mut Cancel,
         why: String,
     ) -> Result<(), Halt> {
-        let messages = self.context.messages().to_vec();
+        let messages = self.context.messages();
         if messages.len() < 2 {
             // There is nothing to leave out: what was said is itself too long.
             return Err(Halt::Failed(why));
@@ -496,6 +517,7 @@ impl<S: Stage> Agent<S> {
             .await?;
             tokio::select! {
                 () = tokio::time::sleep(wait) => {}
+                () = self.stage.closed() => return Err(Halt::Gone),
                 () = stopped(cancel) => return Err(Halt::Cancelled),
             }
         }
@@ -512,6 +534,7 @@ impl<S: Stage> Agent<S> {
         let mut answer = tokio::select! {
             biased;
             () = stopped(cancel) => return Err(Halt::Cancelled),
+            () = self.stage.closed() => return Err(Halt::Gone),
             a = self.client.stream(request) => match a {
                 Ok(a) => a,
                 Err(e) => return Ok(Err(e)),
@@ -532,6 +555,7 @@ impl<S: Stage> Agent<S> {
                     }
                     return self.keep(fold.finish()).await;
                 }
+                () = self.stage.closed() => return Err(Halt::Gone),
                 e = answer.next() => e,
             };
             let e = match e {
@@ -651,11 +675,17 @@ impl<S: Stage> Agent<S> {
     /// Does what the answer asks for, in its order. Every call gets a result, whatever happens.
     async fn calls(&mut self, run: &RunId, m: &Message, cancel: &mut Cancel) -> Result<(), Halt> {
         let mut halt = None;
+        let mut unread = Vec::new();
         for b in &m.blocks {
             let Content::ToolCall(c) = &b.content else { continue };
+            if halt.is_none() && *cancel.borrow() {
+                halt = Some(Halt::Cancelled);
+            }
             if halt.is_some() {
-                let not = "Not done: the run was stopped before it.";
-                self.result(&c.id, not, true).await?;
+                if c.ready().is_some() {
+                    let not = "Not done: the run was stopped before it.";
+                    self.result(&c.id, not, true).await?;
+                }
                 continue;
             }
             let item = ItemId::new();
@@ -688,6 +718,10 @@ impl<S: Stage> Agent<S> {
             let (text, failed) = match out {
                 Ok(o) => {
                     let outcome = if o.ok { Outcome::Completed } else { Outcome::Failed };
+                    let made: Vec<String> = o.detail["made"]
+                        .as_array()
+                        .map(|m| m.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+                        .unwrap_or_default();
                     let mut result = o.detail;
                     if !result.is_object() {
                         result = json!({});
@@ -699,7 +733,20 @@ impl<S: Stage> Agent<S> {
                             Say::End(item, outcome, Some(result)),
                         ])
                         .await?;
+                    if !made.is_empty() {
+                        let words = format!(
+                            "This command made {}. Other programs take orders from such files: look \
+                             at them before you open the folder elsewhere.",
+                            made.join(", ")
+                        );
+                        self.notice(run, &words).await?;
+                    }
                     (o.text, !o.ok)
+                }
+                Err(Halt::Unbegun) => {
+                    self.stage.say(vec![Say::End(item, Outcome::Cancelled, None)]).await?;
+                    halt = Some(Halt::Cancelled);
+                    (ASKED.into(), true)
                 }
                 Err(Halt::Cancelled) => {
                     self.stage.say(vec![Say::End(item, Outcome::Cancelled, None)]).await?;
@@ -713,7 +760,15 @@ impl<S: Stage> Agent<S> {
                     ("Not done: Axiom could not go on.".into(), true)
                 }
             };
-            self.result(&c.id, &text, failed).await?;
+            if c.ready().is_some() {
+                self.result(&c.id, &text, failed).await?;
+            } else {
+                unread.push(format!("Your call of {}: {text}", c.name));
+            }
+        }
+        if !unread.is_empty() {
+            // No provider takes such a call back, nor a result for it.
+            self.remember(Turn::Message(Message::user(unread.join("\n")))).await?;
         }
         halt.map_or(Ok(()), Err)
     }
@@ -770,7 +825,7 @@ impl<S: Stage> Agent<S> {
 
     /// A person's yes, or the words for the model.
     async fn ask_person(
-        &self,
+        &mut self,
         item: &ItemId,
         tool: &str,
         ask: &Ask,
@@ -813,11 +868,14 @@ impl<S: Stage> Agent<S> {
             }
         }
         self.stage.sync().await?;
+        let asked = Instant::now();
         let answer = tokio::select! {
             biased;
             () = stopped(cancel) => None,
+            () = self.stage.closed() => return Err(Halt::Gone),
             a = open.wait() => Some(a),
         };
+        self.waited += asked.elapsed();
         let cancelled = answer.is_none();
         let approval = answer.flatten();
         let words = if cancelled {
@@ -834,7 +892,7 @@ impl<S: Stage> Agent<S> {
             })])
             .await?;
         if cancelled {
-            return Err(Halt::Cancelled);
+            return Err(Halt::Unbegun);
         }
         self.state(AgentState::Running).await?;
         if approval.is_some_and(|a| self.desk.spend(a, ask)) {
@@ -875,6 +933,10 @@ impl<S: Stage> Agent<S> {
         loop {
             tokio::select! {
                 biased;
+                () = self.stage.closed(), if done.is_none() => {
+                    drop(work);
+                    return Err(Halt::Gone);
+                }
                 () = stopped(cancel), if done.is_none() => {
                     // Ends what it started.
                     drop(work);

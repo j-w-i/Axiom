@@ -83,7 +83,12 @@ impl T {
     }
     async fn prompt(&mut self, a: &AgentId, text: &str) -> Result<Value, ClientError> {
         self.c
-            .call(Call::Prompt { session: self.s.clone(), agent: a.clone(), text: text.into() })
+            .call(Call::Prompt {
+                session: self.s.clone(),
+                agent: a.clone(),
+                text: text.into(),
+                key: None,
+            })
             .await
     }
     /// Events until one that `f` takes.
@@ -549,7 +554,9 @@ async fn a_killed_host_leaves_nothing_running() {
         instructions: vec![],
     };
     let agent = AgentId(c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
-    c.call(Call::Prompt { session: session.clone(), agent, text: "go".into() }).await.unwrap();
+    c.call(Call::Prompt { session: session.clone(), agent, text: "go".into(), key: None })
+        .await
+        .unwrap();
     // It cannot be read completely, so it is asked about.
     let (request, digest) = loop {
         let m = c.next_within(LONG).await.unwrap().expect("the question");

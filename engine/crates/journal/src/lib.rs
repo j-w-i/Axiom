@@ -70,6 +70,10 @@ const HOST_TABLES: &str = "create table agent(
        session text not null references session(id) on delete cascade,
        agent text not null, n integer not null, body text not null,
        primary key(session, agent, n)) without rowid;
+     create table pending(
+       session text not null references session(id) on delete cascade,
+       agent text not null, n integer not null, item text not null, body text not null,
+       primary key(session, agent, n)) without rowid;
      create table audit(seq integer primary key, body text not null);";
 /// The planner would scan the whole session for these; `indexed by` makes it an error not to use
 /// the index.
@@ -342,13 +346,42 @@ impl Journal {
         })
     }
 
+    /// Lets go of an agent that was never said to be there.
+    pub fn remove_agent(&mut self, id: &SessionId, agent: &AgentId) -> Result<()> {
+        self.commit(Durability::Stream, |j| {
+            j.db.execute("delete from agent where session=? and id=?", params![id.0, agent.0])?;
+            Ok(())
+        })
+    }
+
+    /// Keeps what a person said until the agent has heard it.
+    pub fn put_pending(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        item: &ItemId,
+        body: &str,
+    ) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            j.db.prepare_cached(
+                "insert into pending(session, agent, n, item, body) values(?1, ?2,
+                   (select coalesce(max(n), 0) + 1 from pending where session=?1 and agent=?2),
+                   ?3, ?4)",
+            )?
+            .execute(params![id.0, agent.0, item.0, body])?;
+            Ok(())
+        })
+    }
+
     /// Adds to an agent's conversation. `n` is its next number, from 0: a gap or a repeat is refused.
+    /// What was `heard` with it waits no longer: both or neither.
     pub fn put_message(
         &mut self,
         id: &SessionId,
         agent: &AgentId,
         n: u64,
         body: &str,
+        heard: Option<&ItemId>,
     ) -> Result<()> {
         self.commit(Durability::Intent, |j| {
             let have =
@@ -359,6 +392,10 @@ impl Journal {
             }
             j.db.prepare_cached("insert into message(session, agent, n, body) values(?,?,?,?)")?
                 .execute(params![id.0, agent.0, as_i64(n), body])?;
+            if let Some(i) = heard {
+                j.db.prepare_cached("delete from pending where session=? and agent=? and item=?")?
+                    .execute(params![id.0, agent.0, i.0])?;
+            }
             Ok(())
         })
     }
@@ -442,6 +479,14 @@ impl Reader {
             out.push(body);
         }
         Ok(out)
+    }
+    /// What a person said to an agent that it has not heard, in order.
+    pub fn pending(&self, id: &SessionId, agent: &AgentId) -> Result<Vec<(ItemId, String)>> {
+        let mut q = self.db.prepare_cached(
+            "select item, body from pending where session=? and agent=? order by n",
+        )?;
+        let rows = q.query_map(params![id.0, agent.0], |r| Ok((ItemId(r.get(0)?), r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
     /// The audit record after `after`, at most `most` entries.
     pub fn audit(&self, after: u64, most: u32) -> Result<Vec<String>> {

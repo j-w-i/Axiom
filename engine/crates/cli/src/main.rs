@@ -155,6 +155,7 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
             session: SessionId(s.into()),
             agent: AgentId(agent.into()),
             text: text.into(),
+            key: None,
         },
         ["answer", s, r, digest, a] => Call::Answer {
             session: SessionId(s.into()),

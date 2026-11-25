@@ -375,7 +375,14 @@ pub enum Call {
     /// Says something to an agent. Starts a run, or is heard by the one that runs, before its next
     /// step. Answers with the run.
     #[serde(rename = "agent.prompt")]
-    Prompt { session: SessionId, agent: AgentId, text: String },
+    Prompt {
+        session: SessionId,
+        agent: AgentId,
+        text: String,
+        /// The client's own name for it. Said twice with the same, it is said once.
+        #[serde(default)]
+        key: Option<String>,
+    },
     /// A person's answer.
     #[serde(rename = "request.answer")]
     Answer {

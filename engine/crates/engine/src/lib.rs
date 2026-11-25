@@ -56,8 +56,16 @@ pub trait Stage: Send + Sync + 'static {
     fn say(&self, all: Vec<Say>) -> impl Future<Output = Result<(), Refused>> + Send;
     /// Resolves once everything said before is in the journal.
     fn sync(&self) -> impl Future<Output = Result<(), Refused>> + Send;
-    /// Resolves once the turn is on the drive.
-    fn remember(&self, n: u64, turn: String) -> impl Future<Output = Result<(), Refused>> + Send;
+    /// Resolves once the turn is on the drive. `heard` names what a person had said that is now in
+    /// it, and waits to be heard no longer: both or neither.
+    fn remember(
+        &self,
+        n: u64,
+        turn: String,
+        heard: Option<ItemId>,
+    ) -> impl Future<Output = Result<(), Refused>> + Send;
+    /// Resolves when nothing is taken any more.
+    fn closed(&self) -> impl Future<Output = ()> + Send;
     /// Resolves once the deed is in the audit record, on the drive (SI-23).
     fn audit(&self, deed: Deed) -> impl Future<Output = Result<(), Refused>> + Send;
 }

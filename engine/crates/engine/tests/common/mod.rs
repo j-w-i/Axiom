@@ -27,7 +27,11 @@ struct Kept {
     ops: usize,
     dies_at: Option<usize>,
     tool: String,
+    shut: bool,
+    no_turns: bool,
+    on_sync: Option<OnSync>,
 }
+type OnSync = Box<dyn FnMut(&[String]) + Send>;
 
 #[derive(Clone, Default)]
 pub struct Memory(Arc<Mutex<Kept>>);
@@ -48,7 +52,21 @@ impl Memory {
         self.0.lock().unwrap().dies_at = Some(k);
     }
     pub fn lives(&self) {
-        self.0.lock().unwrap().dies_at = None;
+        let mut k = self.0.lock().unwrap();
+        k.dies_at = None;
+        k.shut = false;
+    }
+    pub fn refuses_turns(&self) {
+        self.0.lock().unwrap().no_turns = true;
+    }
+    pub fn on_sync(&self, f: impl FnMut(&[String]) + Send + 'static) {
+        self.0.lock().unwrap().on_sync = Some(Box::new(f));
+    }
+    /// The session takes nothing more.
+    pub fn shut(&self) {
+        let mut k = self.0.lock().unwrap();
+        k.dies_at = Some(0);
+        k.shut = true;
     }
     pub fn all(&self) -> Vec<Say> {
         self.0.lock().unwrap().said.clone()
@@ -141,6 +159,21 @@ impl Memory {
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
     }
+    /// What each tool said.
+    pub fn said_by_tools(&self) -> Vec<String> {
+        self.texts(ItemKind::Tool)
+    }
+    /// One of the questions that have been asked.
+    pub fn request_number(&self, n: usize) -> (RequestId, String) {
+        self.all()
+            .into_iter()
+            .filter_map(|s| match s {
+                Say::Event(Body::RequestOpened { request, digest, .. }) => Some((request, digest)),
+                _ => None,
+            })
+            .nth(n)
+            .unwrap()
+    }
     /// The question, once it is asked.
     pub async fn request(&self) -> (RequestId, String, String) {
         self.until(|s| s.requests() > 0).await;
@@ -182,13 +215,28 @@ impl Stage for Memory {
         let mut k = self.op()?;
         let l = format!("sync {}", k.tool);
         k.log.push(l);
+        let log = k.log.clone();
+        if let Some(f) = &mut k.on_sync {
+            f(&log);
+        }
         Ok(())
     }
-    async fn remember(&self, n: u64, turn: String) -> Result<(), Refused> {
+    async fn remember(&self, n: u64, turn: String, _heard: Option<ItemId>) -> Result<(), Refused> {
         let mut k = self.op()?;
+        if k.no_turns {
+            return Err(Refused::This("no room".into()));
+        }
         assert_eq!(n, k.turns.len() as u64, "a gap or a repeat");
         k.turns.push(turn);
         Ok(())
+    }
+    async fn closed(&self) {
+        loop {
+            if self.0.lock().unwrap().shut {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
     }
     async fn audit(&self, deed: Deed) -> Result<(), Refused> {
         let mut k = self.op()?;
@@ -305,6 +353,7 @@ impl T {
             limits: Limits::default(),
             fill: None,
             told: None,
+            waited: Duration::ZERO,
             retries: Retries {
                 most: 3,
                 first: Duration::from_millis(1),
@@ -325,12 +374,12 @@ impl T {
     ) -> Ended {
         let id = RunId::new();
         let run = async {
-            match a.begin(&id, prompt.into()).await {
+            match a.begin(&id, Some(prompt.into())).await {
                 Ok(()) => a.run(id, cancel).await,
                 Err(_) => Ended { outcome: Outcome::Interrupted, error: None },
             }
         };
-        tokio::time::timeout(Duration::from_secs(60), run).await.expect("it ends")
+        tokio::time::timeout(Duration::from_secs(240), run).await.expect("it ends")
     }
     pub fn file(&self, s: &str) -> Option<String> {
         std::fs::read_to_string(self.root.join("w").join(s)).ok()

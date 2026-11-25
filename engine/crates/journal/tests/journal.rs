@@ -503,13 +503,13 @@ fn what_the_host_needs_is_kept_beside_the_events() {
     j.put_agent(&s, &a, "two").unwrap();
     j.put_agent(&s, &b, "b").unwrap();
     for (n, m) in ["m0", "m1"].iter().enumerate() {
-        j.put_message(&s, &a, n as u64, m).unwrap();
+        j.put_message(&s, &a, n as u64, m, None).unwrap();
     }
-    j.put_message(&s, &b, 0, "other").unwrap();
+    j.put_message(&s, &b, 0, "other", None).unwrap();
     for (n, why) in [(1, "a repeat"), (3, "a gap")] {
-        assert!(j.put_message(&s, &a, n, "x").is_err(), "{why}");
+        assert!(j.put_message(&s, &a, n, "x", None).is_err(), "{why}");
     }
-    assert!(j.put_message(&SessionId::new(), &a, 0, "x").is_err(), "no such session");
+    assert!(j.put_message(&SessionId::new(), &a, 0, "x", None).is_err(), "no such session");
     assert_eq!(j.last_audit().unwrap(), None);
     j.put_audit(1, "e1").unwrap();
     j.put_audit(2, "e2").unwrap();
@@ -570,7 +570,39 @@ fn schema_2_is_brought_forward() {
         let mut j = Journal::open(&p).unwrap();
         assert_eq!(j.read(&s, 0, ALL).unwrap().len(), 2);
         assert!(j.session(&s).unwrap().unwrap().running);
-        j.put_message(&s, &AgentId("a".into()), n, "m").unwrap();
+        j.put_message(&s, &AgentId("a".into()), n, "m", None).unwrap();
     }
     assert_eq!(Journal::open(&p).unwrap().recover(9).unwrap().0, 1);
+}
+
+#[test]
+fn what_was_said_waits_until_it_is_heard() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j");
+    let mut j = Journal::open(&p).unwrap();
+    let s = SessionId::new();
+    j.create(&s, "t", None, 1).unwrap();
+    let (a, b) = (AgentId("a".into()), AgentId("b".into()));
+    let i = |n: &str| ItemId(n.into());
+    for (x, t) in [("i1", "one"), ("i2", "two"), ("i3", "three")] {
+        j.put_pending(&s, &a, &i(x), t).unwrap();
+    }
+    j.put_pending(&s, &b, &i("k"), "other").unwrap();
+    let r = Reader::open(&p).unwrap();
+    let texts =
+        |a: &AgentId| r.pending(&s, a).unwrap().into_iter().map(|(_, t)| t).collect::<Vec<_>>();
+    assert_eq!(texts(&a), ["one", "two", "three"]);
+    j.put_message(&s, &a, 0, "m", Some(&i("i2"))).unwrap();
+    assert_eq!(texts(&a), ["one", "three"]);
+    // Neither, if the message is refused.
+    assert!(j.put_message(&s, &a, 5, "m", Some(&i("i1"))).is_err());
+    assert_eq!(texts(&a), ["one", "three"]);
+    j.put_pending(&s, &a, &i("i4"), "four").unwrap();
+    assert_eq!(texts(&a), ["one", "three", "four"]);
+    assert_eq!(texts(&b), ["other"]);
+    j.put_agent(&s, &a, "x").unwrap();
+    j.remove_agent(&s, &a).unwrap();
+    assert!(r.agents(&s).unwrap().is_empty());
+    j.delete(&s).unwrap();
+    assert!(texts(&a).is_empty());
 }

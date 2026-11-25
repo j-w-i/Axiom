@@ -142,7 +142,7 @@ async fn the_same_in_anthropics_form() {
         two.as_array().unwrap()[..one.as_array().unwrap().len()]
     );
     // A host that comes back has the same, to the byte.
-    let (c, _) = Context::load(&t.stage.turns()).unwrap();
+    let c = Context::load(&t.stage.turns()).unwrap();
     let mut again = T::again(&t, vec![anthropic(None, "Yes.", &[])]).await;
     again.profile = t.profile.clone();
     let mut b = again.agent();
@@ -262,6 +262,149 @@ async fn what_cannot_be_run_is_said_back() {
     assert!(*failed && text.contains("no tool nothing"), "{text}");
     assert!(t.stage.tools().iter().all(|t| t.1 == Outcome::Failed));
     assert!(t.stage.deeds().is_empty());
+}
+
+/// A call that cannot be read is not sent back to any provider: the model is told in words, and not
+/// for ever.
+#[tokio::test]
+async fn calls_that_cannot_be_read_are_told_and_not_for_ever() {
+    let broken = || calls(&[("c1", "read", "{\"path\":")]);
+    let t = T::new(Access::Work, vec![broken(), text(&["I see."])]).await;
+    let e = t.run(&mut t.agent(), "go").await;
+    assert_eq!(e.outcome, Outcome::Completed);
+    let r = t.server.requests();
+    let last = r[1]["messages"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["role"], "user");
+    assert!(last["content"].as_str().unwrap().contains("Your call of read"), "{last}");
+    assert_ne!(r[0]["messages"], r[1]["messages"]);
+    let t = T::new(Access::Work, (0..9).map(|_| broken()).collect()).await;
+    let e = t.run(&mut t.agent(), "go").await;
+    assert!(e.outcome == Outcome::Failed && e.error.unwrap().contains("cannot be read"));
+    assert_eq!(t.server.requests().len(), 3);
+    // One of them can: its result comes first, and the count begins again.
+    let mixed = || calls(&[("c1", "read", "{\"path\":"), ("c2", "list", "{}")]);
+    let t = T::new(Access::Work, vec![mixed(), mixed(), mixed(), mixed(), text(&["ok"])]).await;
+    assert_eq!(t.run(&mut t.agent(), "go").await.outcome, Outcome::Completed);
+    let m = t.server.requests()[1]["messages"].as_array().unwrap().clone();
+    let tail: Vec<&str> = m[m.len() - 2..].iter().map(|m| m["role"].as_str().unwrap()).collect();
+    assert_eq!(tail, ["tool", "user"]);
+    // Two with one name: one of them is done, the other told.
+    let twice = calls(&[("c1", "list", "{}"), ("c1", "read", r#"{"path":"a.txt"}"#)]);
+    let t = T::new(Access::Work, vec![twice, text(&["ok"])]).await;
+    assert_eq!(t.run(&mut t.agent(), "go").await.outcome, Outcome::Completed);
+    let m = t.server.requests()[1]["messages"].as_array().unwrap().clone();
+    assert_eq!(m.iter().filter(|m| m["role"] == "tool").count(), 1);
+}
+
+#[tokio::test]
+async fn an_answer_that_reached_its_length_goes_on() {
+    let t = T::new(Access::Work, vec![ends_with("length", &["half"]), text(&["rest"])]).await;
+    let e = t.run(&mut t.agent(), "go").await;
+    assert_eq!(e.outcome, Outcome::Completed);
+    let m = t.server.requests()[1]["messages"].as_array().unwrap().clone();
+    assert_eq!(m.last().unwrap()["content"], "Go on.");
+    assert_eq!(t.stage.texts(ItemKind::Notice).len(), 1);
+    // Inside a call: nothing of it is run.
+    let mut c = calls(&[("c1", "shell", r#"{"command":"touch made"}"#)]);
+    c.stop("length");
+    let t = T::new(Access::Work, vec![c, text(&["ok"])]).await;
+    assert_eq!(t.run(&mut t.agent(), "go").await.outcome, Outcome::Completed);
+    assert_eq!(t.file("made"), None);
+    assert!(t.server.requests()[1]["messages"].to_string().contains("Your call of shell"));
+    for (stop, words) in [("content_filter", "declined"), ("weird", "weird")] {
+        let t = T::new(Access::Work, vec![ends_with(stop, &["x"])]).await;
+        let e = t.run(&mut t.agent(), "go").await;
+        assert!(e.outcome == Outcome::Failed && e.error.unwrap().contains(words), "{stop}");
+    }
+}
+
+/// SI-23: what is about to be done is on the drive before it is done.
+#[tokio::test]
+async fn nothing_is_done_before_its_intent_is_kept() {
+    let t = T::new(
+        Access::Work,
+        vec![calls(&[("c1", "write", r#"{"path":"n.txt","content":"x"}"#)]), text(&["ok"])],
+    )
+    .await;
+    let (stage, file) = (t.stage.clone(), t.root.join("w/n.txt"));
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let s = seen.clone();
+    stage.on_sync(move |log| s.lock().unwrap().push((log.join(","), file.exists())));
+    t.run(&mut t.agent(), "go").await;
+    let seen = seen.lock().unwrap();
+    let synced = seen.iter().any(|(log, made)| log.contains("audit write") && !made);
+    assert!(synced, "a sync between the audit entry and the effect: {seen:?}");
+}
+
+#[tokio::test]
+async fn what_a_person_takes_is_not_the_runs_time() {
+    let t = T::new(
+        Access::Ask,
+        vec![
+            calls(&[("c1", "list", "{}")]),
+            calls(&[("c2", "shell", r#"{"command":"touch made"}"#)]),
+            text(&["ok"]),
+        ],
+    )
+    .await;
+    let mut a = t.agent();
+    a.limits = Limits { time: Duration::from_millis(1500), ..Limits::default() };
+    let person = async {
+        let (id, digest, _) = t.stage.request().await;
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+        t.desk.answer(&id, Answer::Once, &digest).unwrap();
+    };
+    let (e, ()) = tokio::join!(t.run(&mut a, "go"), person);
+    assert_eq!((e.outcome, e.error), (Outcome::Completed, None));
+    a.limits = Limits { time: Duration::ZERO, ..Limits::default() };
+    assert!(t.run(&mut a, "go").await.error.unwrap().contains("as long as it may"));
+}
+
+/// The session is closed under a run that waits: the run ends, and its question with it.
+#[tokio::test]
+async fn a_session_that_closes_ends_what_waits_in_it() {
+    let t =
+        T::new(Access::Ask, vec![calls(&[("c1", "shell", r#"{"command":"touch made"}"#)])]).await;
+    let mut a = t.agent();
+    let person = async {
+        let q = t.stage.request().await;
+        t.stage.shut();
+        q
+    };
+    let (e, (id, digest, _)) = tokio::join!(t.run(&mut a, "go"), person);
+    assert_eq!(e.outcome, Outcome::Interrupted);
+    assert!(t.desk.answer(&id, Answer::Once, &digest).is_err(), "nobody waits for it");
+    assert_eq!(t.file("made"), None);
+    // And under one that waits for the provider, or for a command.
+    for script in
+        [vec![text(&["x"]).hangs()], vec![calls(&[("c1", "shell", r#"{"command":"sleep 30"}"#)])]]
+    {
+        let t = T::new(Access::Work, script).await;
+        let mut a = t.agent();
+        let close = async {
+            t.stage
+                .until(|s| {
+                    s.before("audit shell", "sync shell") || !s.texts(ItemKind::Prose).is_empty()
+                })
+                .await;
+            t.stage.shut();
+        };
+        let now = Instant::now();
+        let (e, ()) = tokio::join!(t.run(&mut a, "go"), close);
+        assert_eq!(e.outcome, Outcome::Interrupted);
+        assert!(now.elapsed() < Duration::from_secs(15));
+    }
+}
+
+#[tokio::test]
+async fn a_run_that_cannot_begin_has_ended() {
+    let t = T::new(Access::Work, vec![]).await;
+    let mut a = t.agent();
+    t.stage.refuses_turns();
+    let r = a.begin(&axiom_proto::RunId::new(), Some("go".into())).await;
+    assert!(r.is_err());
+    assert_eq!(t.stage.ended(), [Outcome::Failed]);
+    assert!(a.context.is_empty());
 }
 
 #[tokio::test]
@@ -393,6 +536,9 @@ async fn stopping_withdraws_the_question() {
     assert!(t.desk.answer(&id, Answer::Once, &digest).is_err());
     assert_eq!(t.stage.answers(), ["expired"]);
     assert!(t.stage.deeds().is_empty());
+    // Nothing of it was begun, and that is what the model is told.
+    let told = format!("{:?}", a.context.messages());
+    assert!(told.contains("while a person was being asked") && !told.contains("in part"), "{told}");
 }
 
 #[tokio::test]
@@ -403,8 +549,10 @@ async fn a_person_can_speak_while_it_works() {
     )
     .await;
     let mut a = t.agent();
-    t.inbox.try_send(Word { text: "also this".into(), shown: false }).unwrap();
-    t.inbox.try_send(Word { text: "and that".into(), shown: true }).unwrap();
+    t.inbox.try_send(Word { text: "also this".into(), item: None }).unwrap();
+    t.inbox
+        .try_send(Word { text: "and that".into(), item: Some(axiom_proto::ItemId("i_9".into())) })
+        .unwrap();
     let e = t.run(&mut a, "go").await;
     assert_eq!(e.outcome, Outcome::Completed);
     assert_eq!(t.stage.texts(ItemKind::Prompt), ["go", "also this"]);
@@ -525,8 +673,7 @@ async fn a_full_window_is_made_room_in() {
     assert_eq!(t.stage.texts(ItemKind::Prose), ["Done."], "the notes are not shown as its words");
     assert!(t.stage.texts(ItemKind::Notice)[0].contains("summarised"));
     // Kept so: the next host goes on from the same.
-    let (c, new) = Context::load(&t.stage.turns()).unwrap();
-    assert!(new.is_empty());
+    let c = Context::load(&t.stage.turns()).unwrap();
     assert_eq!(c.messages(), a.context.messages());
 }
 
@@ -599,10 +746,7 @@ async fn killed_at_any_point_nothing_is_lost_and_nothing_repeated() {
         // The next host: what was kept is read, and the agent goes on.
         t.stage.lives();
         let kept = t.stage.turns();
-        let (c, new) = Context::load(&kept).unwrap();
-        for turn in new {
-            t.stage.keep(&turn);
-        }
+        let c = Context::load(&kept).unwrap();
         let next = T::again(&t, vec![text(&["I see."])]).await;
         let mut a = next.agent();
         a.context = c;
@@ -642,8 +786,7 @@ async fn turns_are_kept_as_they_were() {
     t.run(&mut a, "go").await;
     let kept = t.stage.turns();
     assert_eq!(kept.len() as u64, a.context.turns());
-    let (c, new) = Context::load(&kept).unwrap();
-    assert!(new.is_empty());
+    let c = Context::load(&kept).unwrap();
     assert_eq!(c.messages(), a.context.messages());
     for k in &kept {
         let t: Turn = serde_json::from_str(k).unwrap();
