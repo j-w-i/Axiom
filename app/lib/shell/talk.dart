@@ -357,6 +357,7 @@ class _TalkState extends State<Talk> {
                       style: t.type.small.ink(c.ink3),
                     ),
                   ),
+                  const SizedBox(width: 6),
                   AxButton(
                     label: 'Manage usage',
                     // At the plan's limit it is the main act: OpenAI asks that of whoever uses a
