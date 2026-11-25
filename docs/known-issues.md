@@ -9,7 +9,7 @@
 | K5 | Provider long-tail facts (rate-limit headers, replay flags) are unverified (`research/providers.md` §8) | M2, per provider |
 | K6 | `highlight.dart` is a one-line scanner, not a grammar | M4 |
 | K7 | Windows uses a Unix socket too (Dart ≥ 3.11 and `uds_windows`); proved by CI only. The peer's identity is not checked there and directories get no ACL of their own: keep `AXIOM_DATA` inside the user's profile | M2 security tests |
-| K8 | The macOS window (transparent title bar, traffic lights, dragging by the header) has been looked at; dragging by a hand and full screen have not | M1 exit |
+| K8 | The macOS window (transparent title bar, traffic lights, dragging by the header) has been looked at, and dragged by the owner ("it works"); full screen is not known to have been tried | M1 exit |
 | K9 | `scripts/package.sh` puts `axiom-host` and the CLI into the bundle. Built and its host run on macOS; not run on Linux or Windows | M7 |
 | K50 | The system's window for choosing a folder (`file_selector`) has not been opened on any system | K8 |
 | K12 | Markdown: quotes do not nest blocks; HTML is shown as text; a link is styled but nothing opens it yet (it will ask first) | M2 |

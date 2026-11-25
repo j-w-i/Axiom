@@ -23,7 +23,26 @@ class Composer extends StatefulWidget {
     this.onStop,
     this.enabled = true,
     this.leading = const [],
+    this.label,
+    this.header,
+    this.ready,
+    this.autofocus = false,
+    this.high = 25,
   });
+
+  /// What it is heard as, if not by its placeholder.
+  final String? label;
+
+  /// What stands over the words.
+  final Widget? header;
+
+  /// Whether it can be sent, where that is not only whether something is written: then what is
+  /// written stays until its taker clears it.
+  final bool? ready;
+  final bool autofocus;
+
+  /// How high it is with nothing in it.
+  final double high;
   final String placeholder, action;
 
   /// What is being written, if it is kept elsewhere.
@@ -54,6 +73,9 @@ class _ComposerState extends State<Composer> {
     super.initState();
     _text.addListener(_changed);
     _focus.addListener(_changed);
+    if (widget.autofocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? _focus.requestFocus() : null);
+    }
   }
 
   void _changed() => setState(() {});
@@ -82,7 +104,11 @@ class _ComposerState extends State<Composer> {
 
   Future<void> _submit() async {
     final written = _text.text, s = written.trim();
-    if (s.isEmpty || !widget.enabled) return;
+    if (!widget.enabled || !(widget.ready ?? s.isNotEmpty)) return;
+    if (widget.ready != null) {
+      await widget.onSubmit(s);
+      return;
+    }
     _text.clear();
     final taken = await widget.onSubmit(s);
     if (taken || !(mounted || widget.controller != null)) return;
@@ -105,6 +131,7 @@ class _ComposerState extends State<Composer> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
+          ?widget.header,
           Padding(
             padding: const EdgeInsets.fromLTRB(15, 12, 15, 6),
             child: Focus(
@@ -115,9 +142,9 @@ class _ComposerState extends State<Composer> {
                 behavior: HitTestBehavior.opaque,
                 onTap: _focus.requestFocus,
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 25, maxHeight: 220),
+                  constraints: BoxConstraints(minHeight: widget.high, maxHeight: 220),
                   child: AxEditable(
-                    label: widget.placeholder,
+                    label: widget.label ?? widget.placeholder,
                     placeholder: widget.placeholder,
                     controller: _text,
                     focusNode: _focus,
@@ -175,7 +202,9 @@ class _ComposerState extends State<Composer> {
                           tone: AxTone.primary,
                           round: true,
                           size: 30,
-                          onPressed: empty || !widget.enabled ? null : () => unawaited(_submit()),
+                          onPressed: (widget.ready ?? !empty) && widget.enabled
+                              ? () => unawaited(_submit())
+                              : null,
                         ),
                     ],
                   ),

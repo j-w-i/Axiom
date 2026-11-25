@@ -43,7 +43,7 @@ Built 2026-11-25 on the owner's yes to pictures (`design/system.md`, history). N
 ## The material, round 13 (`design/tactile`, on `design/flat`)
 Unitable's depth on round 12's layout, at the owner's word (2026-11-25). No verdict yet; `design/flat` is the same without it. The fifteen goldens fail here too, for the same reason. Not measured: what the outlines cost a frame on a display (K1).
 
-## Modern, rounds 14 to 17 (`design/modern`, on `design/tactile`)
+## Modern, rounds 14 to 18 (`design/modern`, on `design/tactile`)
 Built on the owner's word (2026-11-25). No verdict on 16 yet. In the pictures and not in the app, because the host has nothing for it: the plan, the terminals and the levels of use. The panel of the app holds what has changed. The fifteen goldens fail here too. Opened once in a real window with the owner's yes (2026-11-25, macOS 27 arm64, release, specimen content, 120 Hz, Impeller): scrolling, build p99 2.0 ms and raster p99 3.3 ms; everything painted again, 3.7 and 4.5 ms; the first frame 63 ms. Opened again with their yes and photographed: the buttons are on the header's line (26, where they were 16 against 33), shades show no rings. Dragging by the header reaches the system (`MoveArea`; nothing did before), shown by events sent to a real window, not by a hand. Full screen has been looked at by nobody (K8).
 
 ## Next

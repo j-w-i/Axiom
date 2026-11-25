@@ -3,6 +3,7 @@ import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/shell/find.dart';
+import 'package:axiom/shell/new_session.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/start.dart';
 import 'package:axiom/shell/window.dart';
@@ -134,7 +135,7 @@ void main() {
     // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
     s.notifyListeners();
     await t.pump();
-    expect(find.text('No sessions yet'), findsOneWidget);
+    expect(find.byType(StartPage), findsOneWidget, reason: 'one begins');
     s.dispose();
   });
 
@@ -240,7 +241,7 @@ void main() {
       ..notifyListeners();
     await t.pump();
     expect(t.takeException(), isNull);
-    expect(find.text('No sessions yet'), findsOneWidget);
+    expect(find.byType(StartPage), findsOneWidget, reason: 'one begins');
     s.dispose();
   });
 
@@ -398,10 +399,7 @@ void main() {
     // A new one in that folder.
     await t.tap(find.bySemanticsLabel('New session in you/web'));
     await t.pump();
-    final at = t.widget<AxField>(
-      find.byWidgetPredicate((w) => w is AxField && w.label == 'Folder'),
-    );
-    expect(at.controller!.text, '/you/web');
+    expect(find.bySemanticsLabel('Folder: /you/web'), findsOneWidget);
     s.dispose();
   });
 
@@ -426,7 +424,7 @@ void main() {
     await t.pump();
     expect(find.byType(StartPage), findsNothing);
     await keys(t, LogicalKeyboardKey.keyN);
-    await t.tap(find.text('Cancel'));
+    await t.tap(find.bySemanticsLabel('Cancel'));
     await t.pump();
     expect(find.byType(TranscriptView), findsOneWidget);
     await keys(t, LogicalKeyboardKey.comma);

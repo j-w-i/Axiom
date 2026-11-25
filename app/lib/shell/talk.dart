@@ -106,7 +106,6 @@ class _TalkState extends State<Talk> {
     final other = x.harness != 'axiom';
     final program = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull : null;
     final hands = x.environment == axiomTools;
-    final can = hands ? null : program?.access;
     final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
     final models = s.modelsOf(x.connection ?? '');
     final names = namesOf(models ?? const []);
@@ -138,9 +137,8 @@ class _TalkState extends State<Talk> {
           ? axiomTools
           : null,
     );
-    void set({Execution? execution, Access? access}) => unawaited(
-      _do(() => s.setAgent(widget.session.id, a.id, execution: execution, access: access)),
-    );
+    void set({Execution? execution}) =>
+        unawaited(_do(() => s.setAgent(widget.session.id, a.id, execution: execution)));
     return [
       ExecutionChoice(
         'Model',
@@ -215,16 +213,11 @@ class _TalkState extends State<Talk> {
         ExecutionChoice(
           'Tools',
           [
-            const AxMenuItem(
-              'axiom',
-              'Axiom tools',
-              detail: 'asked about and contained',
-              mark: ServiceMark.axiom,
-            ),
+            const AxMenuItem('axiom', 'Axiom tools', detail: 'sandboxed', mark: ServiceMark.axiom),
             AxMenuItem(
               '',
               'Built-in tools',
-              detail: 'outside Axiom\'s sandbox',
+              detail: 'not sandboxed',
               mark: markOf(null, null, x.harness),
               // It would not be refused only when it is started.
               enabled: !hands || (program?.access.contains(a.access) ?? false),
@@ -238,22 +231,20 @@ class _TalkState extends State<Talk> {
               : '${s.harnessName(x.harness)} then works with its own tools, outside Axiom\'s sandbox '
                     'and without Axiom\'s questions.',
         ),
-      ExecutionChoice(
-        'Access',
-        [
-          for (final i in accessItems)
-            AxMenuItem(
-              i.value.name,
-              i.label,
-              detail: i.detail,
-              enabled: can == null || can.contains(i.value),
-              why: '${s.harnessName(x.harness)} has no mode for it',
-            ),
-        ],
-        (a.access ?? Access.ask).name,
-        (v) => set(access: Access.values.byName(v)),
-      ),
     ];
+  }
+
+  Widget _access(HostStore s, AgentModel a) {
+    final x = a.execution;
+    final program = x.harness == 'axiom' || x.environment == axiomTools
+        ? null
+        : s.harnesses.where((h) => h.id == x.harness).firstOrNull;
+    return AccessKey(
+      a.access ?? Access.ask,
+      can: program?.access ?? Access.values,
+      of: s.harnessName(x.harness),
+      onChanged: (v) => unawaited(_do(() => s.setAgent(widget.session.id, a.id, access: v))),
+    );
   }
 
   @override
@@ -377,6 +368,7 @@ class _TalkState extends State<Talk> {
               onStop: widget.onStop,
               leading: [
                 ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
+                _access(s, a),
                 if (a.context != null)
                   ContextGauge(
                     ContextView(

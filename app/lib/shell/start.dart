@@ -50,6 +50,38 @@ const accessItems = [
   AxMenuItem(Access.work, 'Work without asking', detail: 'contained in the folder'),
 ];
 
+/// How much an agent may do. It is said where one writes to it.
+class AccessKey extends StatelessWidget {
+  const AccessKey(
+    this.access, {
+    required this.can,
+    required this.of,
+    required this.onChanged,
+    super.key,
+  });
+  final Access access;
+
+  /// What there is a mode for, and of which harness.
+  final List<Access> can;
+  final String of;
+  final ValueChanged<Access> onChanged;
+  @override
+  Widget build(BuildContext context) => AxSelect<Access>(
+    label: 'Access',
+    quiet: true,
+    icon: AxIcon.shield,
+    items: [
+      for (final i in accessItems)
+        if (can.contains(i.value))
+          i
+        else
+          AxMenuItem(i.value, i.label, enabled: false, why: '$of has no mode for it'),
+    ],
+    value: access,
+    onChanged: onChanged,
+  );
+}
+
 /// How hard a model is to try, where that can be said.
 const efforts = [
   AxMenuItem('', 'Default effort'),
@@ -90,8 +122,7 @@ class FormPart extends StatelessWidget {
 }
 
 class _Page extends StatelessWidget {
-  const _Page({required this.children, this.title, this.problem});
-  final String? title;
+  const _Page({required this.children, this.problem});
   final List<Widget> children;
   final String? problem;
   @override
@@ -106,10 +137,6 @@ class _Page extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (title case final w?) ...[
-                Semantics(header: true, child: Text(w, style: t.type.heading)),
-                const SizedBox(height: 18),
-              ],
               ...children,
               if (problem case final p?)
                 Semantics(
@@ -284,16 +311,12 @@ class StartDraft extends ChangeNotifier {
     problem = null;
     trust = false;
     account = null;
-    typed = false;
     model.clear();
     fit();
   });
   String? connection, problem;
   Access access = Access.ask;
   bool busy = false;
-
-  /// The model is written, not chosen.
-  bool typed = false;
 
   /// The folder's words for agents, and those of them that are to be followed.
   List<Instructions> words = const [];
@@ -313,6 +336,33 @@ class StartDraft extends ChangeNotifier {
   void change(VoidCallback f) {
     f();
     tell();
+  }
+
+  bool _recalled = false;
+
+  /// Begins as its person last worked: where, and with what. Once, and never over what they have set.
+  /// How much it may do is not taken over: that is said each time.
+  void recall() {
+    final m = store.current;
+    if (_recalled || m == null && store.sessions.isEmpty) return;
+    _recalled = true;
+    if (into == null && folder.text.isEmpty) {
+      folder.text = m?.workspace ?? recentFolders(store.sessions, most: 1).firstOrNull ?? '';
+    }
+    final x = m?.agents.values.where((a) => a.access != null).firstOrNull?.execution;
+    if (x == null || harness != 'axiom' || connection != null || model.text.isNotEmpty) return;
+    if (x.harness == 'axiom') {
+      if (!store.own.any((c) => c.id == x.connection)) return;
+      connection = x.connection;
+    } else {
+      if (!store.harnesses.any((h) => h.id == x.harness && h.program != null)) return;
+      harness = x.harness;
+      hands = x.environment == axiomTools;
+      if (store.accountsOf(harness).any((c) => c.id == x.connection)) account = x.connection;
+    }
+    model.text = x.model ?? '';
+    effort = x.effort ?? '';
+    fit();
   }
 
   void tell() {
@@ -448,402 +498,6 @@ class _Made {
   final String session, folder;
   String? agent, follows;
   Object? how;
-}
-
-/// A new piece of work: what it is, where, and who does it.
-class StartPage extends StatefulWidget {
-  const StartPage(
-    this.draft, {
-    required this.onStarted,
-    required this.onAccounts,
-    this.onCancel,
-    super.key,
-  });
-
-  /// Leaves it as it is; null where there is nothing to go back to.
-  final VoidCallback? onCancel;
-  final StartDraft draft;
-  final ValueChanged<String> onStarted;
-  final VoidCallback onAccounts;
-  @override
-  State<StartPage> createState() => _StartPageState();
-}
-
-class _StartPageState extends State<StartPage> {
-  StartDraft get d => widget.draft;
-
-  /// In the list of models: none of these.
-  static const _other = '\n';
-
-  static String _tail(String f) =>
-      f.split(RegExp(r'[/\\]')).lastWhere((x) => x.isNotEmpty, orElse: () => f);
-  static String _head(String f) {
-    final t = _tail(f);
-    return oneLine(literal(f.endsWith(t) ? f.substring(0, f.length - t.length) : f), 60);
-  }
-
-  /// The system's own window for it; nothing changes if it is left.
-  Future<void> _choose() async {
-    final f = await chooseFolder(wholePath(d.folder.text.trim()));
-    if (f != null && mounted) d.change(() => d.folder.text = f);
-  }
-
-  Future<void> _start(Connection? c) async {
-    final id = await d.start(c, () => mounted);
-    if (id != null && mounted) widget.onStarted(id);
-  }
-
-  @override
-  Widget build(BuildContext context) => CallbackShortcuts(
-    bindings: {const SingleActivator(LogicalKeyboardKey.escape): ?widget.onCancel},
-    child: _form(),
-  );
-
-  Widget _form() => ListenableBuilder(
-    listenable: Listenable.merge([d.store, d]),
-    builder: (context, _) {
-      final s = d.store;
-      final t = Ax.of(context), c = t.colors;
-      final all = s.own;
-      final chosen = all.where((x) => x.id == d.connection).firstOrNull ?? all.firstOrNull;
-      if (chosen != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => d.ask(chosen.id));
-      }
-      final models = (chosen == null ? null : s.modelsOf(chosen.id)) ?? const <ModelInfo>[];
-      final listed = models.isNotEmpty, names = namesOf(models);
-      // What is being written is not taken away when the list comes.
-      final typed =
-          d.typed || (d.model.text.isNotEmpty && !models.any((m) => m.id == d.model.text));
-      final recent = recentFolders(s.sessions);
-      final here = [
-        for (final h in s.harnesses)
-          if (h.program != null) h,
-      ];
-      // Those that most people would look for: that they are not there is said.
-      final missing = [
-        for (final h in s.harnesses)
-          if (h.program == null && const {'claude', 'codex'}.contains(h.id)) h,
-      ];
-      final other = d.delegated;
-      final adds = d.into != null;
-      bool filled(TextEditingController x) => x.text.trim().isNotEmpty;
-      final ready =
-          !d.busy &&
-          (d.harness == 'axiom'
-              ? chosen != null && filled(d.model)
-              : other != null && (d.withHands || !other.needsTrust || d.trust)) &&
-          (adds ? filled(d.name) : filled(d.say) && filled(d.folder)) &&
-          s.phase == HostPhase.connected;
-      final access = [
-        for (final i in accessItems)
-          if (other == null || d.can.contains(i.value))
-            i
-          else
-            AxMenuItem(i.value, i.label, enabled: false, why: '${other.name} has no mode for it'),
-      ];
-      final accessSelect = AxSelect<Access>(
-        label: 'Access',
-        named: false,
-        items: access,
-        value: d.access,
-        onChanged: (v) => d.change(() => d.access = v),
-      );
-      final effortSelect = AxSelect<String>(
-        label: 'Effort',
-        named: false,
-        items: efforts,
-        value: d.effort,
-        onChanged: (v) => d.change(() => d.effort = v),
-      );
-      final runsWith = AxSelect<String>(
-        label: 'Harness',
-        named: false,
-        items: [
-          const AxMenuItem(
-            'axiom',
-            'Axiom',
-            detail: 'your keys and servers',
-            mark: ServiceMark.axiom,
-          ),
-          for (final h in here)
-            AxMenuItem(
-              h.id,
-              oneLine(h.name, 40),
-              detail: 'its own sign-in',
-              mark: markOf(null, null, h.id),
-            ),
-          for (final h in missing)
-            AxMenuItem(
-              h.id,
-              oneLine(h.name, 40),
-              mark: markOf(null, null, h.id),
-              enabled: false,
-              why: h.problem != null && !h.problem!.contains('is not in any of')
-                  ? oneLine(h.problem!, 80)
-                  : 'not on this computer',
-            ),
-        ],
-        value: d.harness,
-        onChanged: d.runWith,
-      );
-      final choices = <Widget>[
-        // What is chosen of the program or the account, in one row under the words.
-        if (here.isNotEmpty || missing.isNotEmpty || d.harness != 'axiom') runsWith,
-        if (d.harness != 'axiom') ...[
-          if (s.accountsOf(d.harness).isNotEmpty)
-            AxSelect<String>(
-              label: 'Account',
-              named: false,
-              items: [
-                const AxMenuItem('', 'Default sign-in'),
-                for (final x in s.accountsOf(d.harness))
-                  AxMenuItem(x.id, oneLine(x.name, 60), mark: markOf(x.provider, null)),
-              ],
-              value: d.account ?? '',
-              onChanged: (v) => d.change(() => d.account = v.isEmpty ? null : v),
-            ),
-          if (other?.hands ?? false)
-            AxSelect<bool>(
-              label: 'Tools',
-              named: false,
-              items: [
-                const AxMenuItem(
-                  true,
-                  'Axiom tools',
-                  detail: 'asked about and contained by Axiom',
-                  mark: ServiceMark.axiom,
-                ),
-                AxMenuItem(
-                  false,
-                  'Built-in tools',
-                  detail: 'outside Axiom\'s sandbox',
-                  mark: markOf(null, null, d.harness),
-                ),
-              ],
-              value: d.hands,
-              onChanged: (v) => d.change(() {
-                d.hands = v;
-                d.fit();
-              }),
-            ),
-        ] else if (all.isEmpty)
-          AxButton(
-            label: 'Add an account or server',
-            icon: AxIcon.plus,
-            onPressed: widget.onAccounts,
-          )
-        else ...[
-          AxSelect<String>(
-            label: 'Account',
-            named: false,
-            items: [
-              for (final x in all)
-                AxMenuItem(
-                  x.id,
-                  oneLine(x.name, 60),
-                  detail: providerName(x.provider),
-                  mark: markOf(x.provider, null),
-                ),
-            ],
-            value: chosen!.id,
-            onChanged: (v) => d.change(() {
-              d.connection = v;
-              d.problem = null;
-              d.typed = false;
-              d.model.clear();
-            }),
-          ),
-          if (listed)
-            AxSelect<String>(
-              label: 'Model',
-              named: typed,
-              face: !typed && d.model.text.isEmpty ? 'Choose a model' : null,
-              items: [
-                for (final m in models) modelItem(m, names),
-                const AxMenuItem(_other, 'Other, by name'),
-              ],
-              value: typed ? _other : d.model.text,
-              onChanged: (v) => d.change(() {
-                d.typed = v == _other;
-                d.model.text = d.typed ? '' : v;
-              }),
-            ),
-        ],
-        if (d.tries) effortSelect,
-        if (d.harness != 'axiom' || all.isNotEmpty) accessSelect,
-      ];
-      final options = <Widget>[
-        if (d.harness != 'axiom' && !d.withHands)
-          OptionLine(
-            label: 'Use this folder\'s agent settings',
-            note: other == null
-                ? 'It is not on this computer any more.'
-                : other.needsTrust
-                ? '${other.name} cannot be told to ignore them. They can name programs that it starts.'
-                : 'They can name programs that it starts.',
-            value: d.trust,
-            onChanged: (v) => d.change(() => d.trust = v),
-          ),
-        if (d.access != Access.read)
-          OptionLine(
-            label: 'Work in a separate copy',
-            note: other == null || d.withHands
-                ? 'Changes stay out of your folder until you apply them.'
-                : 'Changes stay out of your folder until you apply them. It is outside Axiom\'s '
-                      'sandbox, so it starts in the copy but is not held to it.',
-            value: d.apart,
-            onChanged: (v) => d.change(() => d.apart = v),
-          ),
-        if (other == null)
-          for (final w in d.words)
-            OptionLine(
-              label: 'Follow ${w.path}',
-              note: d.open == w.path ? null : 'Instructions for agents, as they are now.',
-              value: d.follow.contains(w.path),
-              onChanged: (v) => d.change(() {
-                v ? d.follow.add(w.path) : d.follow.remove(w.path);
-                // Read first: what is followed has been shown.
-                if (v) d.open = w.path;
-              }),
-              trailing: AxButton(
-                label: d.open == w.path ? 'Hide' : 'View',
-                tone: AxTone.quiet,
-                onPressed: () => d.change(() => d.open = d.open == w.path ? null : w.path),
-              ),
-              below: d.open != w.path
-                  ? null
-                  : Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 220),
-                        child: Surface(
-                          c.block,
-                          radius: AxRadius.key,
-                          child: SingleChildScrollView(
-                            padding: const EdgeInsets.all(12),
-                            child: SizedBox(
-                              width: double.infinity,
-                              child: Text(literal(w.text), style: t.type.codeSmall.ink(c.ink2)),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-            ),
-      ];
-      final model = d.harness != 'axiom'
-          ? 'Default model'
-          : all.isNotEmpty && (!listed || typed)
-          ? 'As the provider calls it'
-          : null;
-      return _Page(
-        title: adds ? 'Add an agent' : 'What should the agent do?',
-        problem: d.problem,
-        children: [
-          if (adds)
-            FormPart(
-              'Name',
-              child: AxField(label: 'Name', controller: d.name, placeholder: 'Reviewer'),
-            ),
-          FormPart(
-            adds ? 'Task' : null,
-            note: adds ? 'Optional. You can message it later.' : null,
-            child: AxField(
-              label: 'Task',
-              controller: d.say,
-              lines: 4,
-              placeholder: adds ? '' : 'Describe the task',
-              autofocus: !adds,
-            ),
-          ),
-          if (!adds)
-            FormPart(
-              'Folder',
-              note: d.harness == 'axiom' || d.withHands
-                  ? 'The agent changes nothing outside it.'
-                  : null,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: AxField(
-                      label: 'Folder',
-                      controller: d.folder,
-                      mono: true,
-                      placeholder: '~/project',
-                    ),
-                  ),
-                  if (recent.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    AxSelect<String>(
-                      label: 'Recent folders',
-                      face: 'Recent',
-                      items: [
-                        for (final f in recent)
-                          AxMenuItem(f, oneLine(literal(_tail(f)), 60), detail: _head(f)),
-                      ],
-                      value: d.folder.text,
-                      onChanged: (v) => d.change(() => d.folder.text = v),
-                    ),
-                  ],
-                  const SizedBox(width: 8),
-                  AxButton(label: 'Choose…', icon: AxIcon.folder, size: 32, onPressed: _choose),
-                ],
-              ),
-            ),
-          FormPart(
-            null,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: choices,
-            ),
-          ),
-          if (model != null)
-            FormPart(
-              'Model',
-              child: AxField(
-                label: 'Model name',
-                controller: d.model,
-                mono: true,
-                placeholder: model,
-                onChanged: d.harness == 'axiom' ? (_) => d.typed = true : null,
-              ),
-            ),
-          if (options.isNotEmpty) ...[Card(options), const SizedBox(height: 16)],
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  d.harness == 'axiom'
-                      ? 'Sandboxed: no network, writes only in the folder.'
-                      : d.withHands
-                      ? 'Its model and your sign-in, with Axiom\'s tools and sandbox. You approve each '
-                            'start.'
-                      : 'Runs outside Axiom\'s sandbox. You approve each start.',
-                  style: t.type.label.ink(c.ink2),
-                ),
-              ),
-              const SizedBox(width: 12),
-              if (widget.onCancel case final f?) ...[
-                AxButton(label: 'Cancel', onPressed: f),
-                const SizedBox(width: 8),
-              ],
-              AxButton(
-                label: d.busy
-                    ? 'Starting'
-                    : adds
-                    ? 'Add agent'
-                    : 'Start session',
-                tone: AxTone.primary,
-                onPressed: ready ? () => unawaited(_start(chosen)) : null,
-              ),
-            ],
-          ),
-        ],
-      );
-    },
-  );
 }
 
 String providerName(String p) => switch (p) {

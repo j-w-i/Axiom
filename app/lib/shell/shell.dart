@@ -24,6 +24,7 @@ import '../ui/tokens.dart';
 import 'changes.dart';
 import 'drafts.dart';
 import 'find.dart';
+import 'new_session.dart';
 import 'start.dart';
 import 'talk.dart';
 import 'window.dart';
@@ -149,7 +150,9 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   void _back() => _show(_View.work);
 
   void _startIn(String? folder) {
-    if (folder != null) _start.folder.text = folder;
+    // Of what is open, unless something is being written already.
+    final at = folder ?? (_start.say.text.trim().isEmpty ? widget.store.current?.workspace : null);
+    if (at != null) _start.folder.text = at;
     _show(_View.start);
   }
 
@@ -165,7 +168,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     }
     switch (e.logicalKey) {
       case LogicalKeyboardKey.keyN:
-        _show(_View.start);
+        _startIn(null);
       case LogicalKeyboardKey.keyK:
         setState(() => _finding = !_finding);
       case LogicalKeyboardKey.comma:
@@ -274,6 +277,14 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
             _wanted = null;
           }
           final stale = s.phase != HostPhase.connected;
+          // With nothing to go back to, one begins.
+          final view =
+              _view == _View.work &&
+                  s.phase == HostPhase.connected &&
+                  s.current == null &&
+                  s.sessions.isEmpty
+              ? _View.start
+              : _view;
           final width = MediaQuery.sizeOf(context).width;
           final narrow = width < 860, beside = !narrow && _list;
           Widget panelKey() => ListenableBuilder(
@@ -293,7 +304,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
             store: s,
             inset: widget.titleInset,
             agent: _agent,
-            view: _view,
+            view: view,
             close: close,
             onAgent: (id) => setState(() {
               _agent = id;
@@ -307,7 +318,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
             onAnswer: _answer,
             onOpen: _open,
           );
-          final page = switch (_view) {
+          final page = switch (view) {
             _View.start => 'New session',
             _View.agent => 'New agent',
             _View.accounts => 'Accounts',
@@ -327,7 +338,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
               : _Banner(problem, inset: beside ? 20 : widget.titleInset + 12);
           final content = switch (s) {
             // Kept while the host is away: what was written is not lost.
-            _ when _view == _View.start => StartPage(
+            _ when view == _View.start => StartPage(
               _start,
               onStarted: (_) => _show(_View.work),
               onAccounts: () => _show(_View.accounts),
@@ -376,10 +387,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
               onStop: (run) => _do('It could not be stopped', () => s.cancel(m.id, run)),
               onAgent: (id) => setState(() => _agent = id),
             ),
-            _ => _Word(
-              s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
-              action: s.sessions.isEmpty ? ('New session', () => _show(_View.start)) : null,
-            ),
+            _ => _Word('Choose a session', action: ('New session', () => _startIn(null))),
           };
           final window = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -416,6 +424,11 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                                       onList: onList,
                                       onAnswer: _answer,
                                       onStart: () => _startIn(null),
+                                      onLeave: switch (_view) {
+                                        _View.start when s.current != null => _back,
+                                        _View.agent => _back,
+                                        _ => null,
+                                      },
                                       onAccounts: () => _show(_View.accounts),
                                       onFind: () => setState(() => _finding = true),
                                     ),
@@ -656,7 +669,11 @@ class _Strip extends StatelessWidget {
     required this.onStart,
     required this.onAccounts,
     required this.onFind,
+    this.onLeave,
   });
+
+  /// Leaves the page that is shown, if it can be left as it is.
+  final VoidCallback? onLeave;
   final String? problem;
 
   /// The page that is shown, if it is not a session's.
@@ -675,6 +692,8 @@ class _Strip extends StatelessWidget {
   Widget _where(AxTheme t) {
     final m = session;
     final strong = t.type.uiStrong.copyWith(fontSize: 14);
+    // It says itself what it is.
+    if (page == 'New session') return const SizedBox.shrink();
     if (page case final p? when p != 'New agent') {
       return Semantics(header: true, child: Text(p, style: strong));
     }
@@ -721,6 +740,8 @@ class _Strip extends StatelessWidget {
               const SizedBox(width: 10),
             ],
             Expanded(child: said == null ? _where(t) : failed),
+            if (onLeave case final f?)
+              AxButton.icon(AxIcon.close, label: 'Cancel', tone: AxTone.quiet, onPressed: f),
           ],
         ),
       );
@@ -785,7 +806,15 @@ class _Strip extends StatelessWidget {
             tone: AxTone.quiet,
             onPressed: onAccounts,
           ),
-          AxButton.icon(AxIcon.plus, label: 'New session', tone: AxTone.quiet, onPressed: onStart),
+          if (onLeave case final f?)
+            AxButton.icon(AxIcon.close, label: 'Cancel', tone: AxTone.quiet, onPressed: f)
+          else
+            AxButton.icon(
+              AxIcon.plus,
+              label: 'New session',
+              tone: AxTone.quiet,
+              onPressed: onStart,
+            ),
         ],
       ),
     );

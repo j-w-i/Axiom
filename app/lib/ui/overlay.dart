@@ -502,6 +502,75 @@ class _ItemsState<T> extends State<_Items<T>> {
   }
 }
 
+/// A key that says what is set and opens what it can be set to, without a ground until it is under
+/// the hand.
+class AxChip extends StatelessWidget {
+  const AxChip({
+    required this.label,
+    required this.words,
+    required this.open,
+    required this.onPressed,
+    super.key,
+    this.icon,
+    this.mark,
+    this.calls = false,
+  });
+  final String label, words;
+  final AxIcon? icon;
+  final ServiceMark? mark;
+
+  /// Something has to be set here first.
+  final bool open, calls;
+  final VoidCallback onPressed;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Pressable(
+      label: label,
+      expanded: open,
+      onPressed: onPressed,
+      builder: (context, s) {
+        final ink = open || s.hovered || calls ? c.ink1 : c.ink2;
+        return Ground(
+          open
+              ? c.selected
+              : s.hovered
+              ? c.hover
+              : null,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: t.density.control),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (mark case final m?) ...[
+                    AxServiceMark(m, size: 13),
+                    const SizedBox(width: 7),
+                  ] else if (icon case final i?) ...[
+                    AxGlyph(i, color: ink),
+                    const SizedBox(width: 7),
+                  ],
+                  Flexible(
+                    child: Text(
+                      words,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: (calls ? t.type.labelStrong : t.type.label).ink(ink),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  AxGlyph(AxIcon.down, color: c.ink3),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// A selector key: the choice, after what is being chosen where that is not plain.
 class AxSelect<T> extends StatelessWidget {
   const AxSelect({
@@ -512,7 +581,13 @@ class AxSelect<T> extends StatelessWidget {
     super.key,
     this.named = true,
     this.face,
+    this.quiet = false,
+    this.icon,
   });
+
+  /// It stands among others that have no ground of their own.
+  final bool quiet;
+  final AxIcon? icon;
 
   /// Shown in place of the choice.
   final String? face;
@@ -528,49 +603,58 @@ class AxSelect<T> extends StatelessWidget {
     final t = Ax.of(context), c = t.colors;
     final chosen = items.where((e) => e.value == value).firstOrNull;
     return AxPopover(
-      anchor: (context, open, toggle) => Pressable(
-        label: '$label: ${chosen?.label ?? 'none'}',
-        expanded: open,
-        onPressed: toggle,
-        builder: (context, s) => Surface(
-          s.pressed || open
-              ? c.keyDown
-              : s.hovered
-              ? c.keyHover
-              : c.key,
-          radius: AxRadius.key,
-          child: ConstrainedBox(
-            // Taller with larger text.
-            constraints: BoxConstraints(minHeight: t.density.control),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (chosen?.mark case final m? when face == null) ...[
-                    AxServiceMark(m, size: 13),
-                    const SizedBox(width: 8),
-                  ],
-                  if (named && face == null) ...[
-                    Text(label, style: t.type.label.ink(c.ink3)),
-                    const SizedBox(width: 6),
-                  ],
-                  Flexible(
-                    child: Text(
-                      face ?? chosen?.label ?? 'None',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.labelStrong,
+      anchor: (context, open, toggle) => quiet
+          ? AxChip(
+              label: '$label: ${chosen?.label ?? 'none'}',
+              words: face ?? chosen?.label ?? 'None',
+              icon: icon,
+              mark: chosen?.mark,
+              open: open,
+              onPressed: toggle,
+            )
+          : Pressable(
+              label: '$label: ${chosen?.label ?? 'none'}',
+              expanded: open,
+              onPressed: toggle,
+              builder: (context, s) => Surface(
+                s.pressed || open
+                    ? c.keyDown
+                    : s.hovered
+                    ? c.keyHover
+                    : c.key,
+                radius: AxRadius.key,
+                child: ConstrainedBox(
+                  // Taller with larger text.
+                  constraints: BoxConstraints(minHeight: t.density.control),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (chosen?.mark case final m? when face == null) ...[
+                          AxServiceMark(m, size: 13),
+                          const SizedBox(width: 8),
+                        ],
+                        if (named && face == null) ...[
+                          Text(label, style: t.type.label.ink(c.ink3)),
+                          const SizedBox(width: 6),
+                        ],
+                        Flexible(
+                          child: Text(
+                            face ?? chosen?.label ?? 'None',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.type.labelStrong,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        AxGlyph(AxIcon.down, color: c.ink3),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  AxGlyph(AxIcon.down, color: c.ink3),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
-      ),
       panel: (context, close) => AxMenu<T>(
         label: label,
         items: items,

@@ -13,6 +13,7 @@ import '../patterns/usage.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
+import '../ui/overlay.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'specimen.dart' as s;
@@ -52,7 +53,6 @@ class _WorkbenchState extends State<Workbench> {
         ('Harness', s.harnessesForGpt),
         ('Account', s.otherConnections[_choice['Model']] ?? s.connections),
         ('Effort', s.efforts),
-        ('Access', s.access),
       ])
         ExecutionChoice(
           k,
@@ -301,6 +301,14 @@ class _WorkbenchState extends State<Workbench> {
                 action: 'Queue',
                 leading: [
                   ExecutionKey(choices, of: id),
+                  AxSelect<String>(
+                    label: 'Access',
+                    quiet: true,
+                    icon: AxIcon.shield,
+                    items: s.access,
+                    value: _choice['Access']!,
+                    onChanged: (v) => setState(() => _choice['Access'] = v),
+                  ),
                   const ContextGauge(s.contextView),
                 ],
                 onAttach: () {},
