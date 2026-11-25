@@ -566,6 +566,8 @@ async fn a_prompt_of_one_name_is_heard_once() {
     assert_eq!(t.prompt_named(&a, "second;", Some("k2")).await.unwrap(), q);
     assert_eq!((v["queued"].as_bool(), q["queued"].as_bool()), (Some(false), Some(true)));
     let run = RunId(v["run"].as_str().unwrap().into());
+    // Stopped when it has been asked, not before: then what hangs would be the next one's answer.
+    t.until(|b| matches!(b, Body::ItemStarted { kind: ItemKind::Prose, .. }).then_some(())).await;
     t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
     t.ended().await;
     t.server.add(text(&["ok"]));
