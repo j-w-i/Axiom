@@ -46,7 +46,11 @@ async fn writes_nowhere_else() {
         "echo x > ~/new",
     ] {
         let o = f.sh(s).await;
-        assert!(!o.ok(), "{s}: {o:?}");
+        // On Linux the temporary folder, where this test has its own, is another one inside: what is
+        // written there goes nowhere.
+        let private =
+            cfg!(target_os = "linux") && !["lib/l", "hard", "etc"].iter().any(|w| s.contains(w));
+        assert!(private || !o.ok(), "{s}: {o:?}");
     }
     assert_eq!(f.read("out/f").as_deref(), Some("outside"));
     assert_eq!(f.read("home/lib/l").as_deref(), Some("lib"));
@@ -201,7 +205,9 @@ async fn others_are_out_of_reach() {
     let f = fixture();
     let mut victim = std::process::Command::new("sleep").arg("60").spawn().unwrap();
     let o = f.sh(&format!("kill -9 {} && echo killed; kill -0 1 && echo seen", victim.id())).await;
-    assert!(!o.out.contains("killed") && !o.out.contains("seen"), "{o:?}");
+    assert!(!o.out.contains("killed"), "{o:?}");
+    // On Linux the first process is the sandbox's own.
+    assert!(cfg!(target_os = "linux") || !o.out.contains("seen"), "{o:?}");
     assert!(victim.try_wait().unwrap().is_none());
     victim.kill().unwrap();
     victim.wait().unwrap();

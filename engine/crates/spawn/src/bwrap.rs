@@ -77,6 +77,8 @@ pub fn wrap(job: &Job, real: &Real) -> Result<(OsString, Vec<OsString>), SpawnEr
             Ok(_) | Err(_) => {}
         }
     }
+    // The folders that only lead to what is mounted: nothing is kept in them.
+    add(&[&"--remount-ro", &"/"]);
     add(&[&"--chdir", &job.cwd.as_path(), &"--", &job.program.as_path()]);
     a.extend(job.args.iter().map(OsString::from));
     Ok((OsString::from(*bwrap), a))

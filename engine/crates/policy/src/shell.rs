@@ -331,6 +331,7 @@ fn finish(all: &mut Vec<Words>, words: &mut Words) -> Result<(), NotAnalysable> 
 mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
     use super::*;
+    #[cfg(unix)]
     use proptest::prelude::*;
 
     fn words(s: &str) -> Vec<Vec<String>> {

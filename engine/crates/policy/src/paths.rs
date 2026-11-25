@@ -283,6 +283,7 @@ pub fn review_name(name: &str) -> bool {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
     use super::*;
+    #[cfg(unix)]
     use proptest::prelude::*;
 
     #[cfg(unix)]
