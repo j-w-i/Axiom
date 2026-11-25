@@ -8,11 +8,13 @@ import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'unix_server.dart';
+
 /// A host that misbehaves on purpose. The real one drives e2e_test.dart.
 class FakeHost {
   FakeHost._(this.dir, this.server);
   final Directory dir;
-  final ServerSocket server;
+  final UnixServer server;
   int follows = 0;
   List<Object> sessions = [];
   int created = 0, connections = 0;
@@ -29,14 +31,11 @@ class FakeHost {
   /// What to write when a session is followed, after its answer; null answers nothing at all.
   Iterable<Object>? Function(String session) onFollow = (_) => const [];
 
-  static Future<FakeHost> start() async {
+  static Future<FakeHost> start({bool? relayed}) async {
     final dir = Directory.systemTemp.createTempSync('af');
     Directory('${dir.path}/run').createSync();
     final path = '${dir.path}/run/s';
-    final server = await ServerSocket.bind(
-      InternetAddress(path, type: InternetAddressType.unix),
-      0,
-    );
+    final server = await UnixServer.bind(path, relayed: relayed);
     File('${dir.path}/run/endpoint').writeAsStringSync(path);
     File('${dir.path}/run/token').writeAsStringSync('t');
     final h = FakeHost._(dir, server);
@@ -382,5 +381,34 @@ void main() {
     }
     expect(got, 40000);
     l.close();
+  });
+
+  testWidgets('a relayed host is as any other', (t) async {
+    await t.runAsync(() async {
+      final r = await FakeHost.start(relayed: true);
+      r.onFollow = (s) => [
+        events([
+          for (var i = 1; i < 400; i++)
+            event(i, {'type': 'item.delta', 'item': 'none', 'text': 'x' * 2000}),
+        ]),
+        {'session': s, 'fault': 'the end'},
+      ];
+      final s = HostStore(paths: HostPaths(r.dir.path), binary: null, spawn: false);
+      await s.start();
+      expect(s.phase, HostPhase.connected);
+      await s.open('x');
+      final end = DateTime.now().add(const Duration(seconds: 10));
+      while (s.current!.seq < 399 && DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect([s.current!.seq, s.current!.fault], [399, 'the end']);
+      r.last!.destroy();
+      while (s.phase == HostPhase.connected && DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(s.phase, HostPhase.unreachable);
+      s.dispose();
+      await r.stop();
+    });
   });
 }

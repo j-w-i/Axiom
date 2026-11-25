@@ -8,6 +8,8 @@ import 'package:axiom/host/session_model.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'unix_server.dart';
+
 /// Through the real host process. `scripts/check.sh` builds it first; without it this fails.
 final hostBinary = File('../engine/target/debug/axiom-host${Platform.isWindows ? '.exe' : ''}')
     .absolute
@@ -122,10 +124,7 @@ void main() {
   });
 
   test('a host that does not answer is given up on', () async {
-    final silent = await ServerSocket.bind(
-      InternetAddress('${dir.path}/silent.sock', type: InternetAddressType.unix),
-      0,
-    );
+    final silent = await UnixServer.bind('${dir.path}/silent.sock');
     final sw = Stopwatch()..start();
     await expectLater(
       HostLink.connect(
