@@ -19,6 +19,9 @@ class FakeHost {
 
   /// The answer to `host.status`; null answers nothing at all.
   Json? status = {'result': <String, Object?>{}};
+
+  /// Answers nothing at all any more, and does not say so.
+  bool dead = false;
   final listed = <Object?>[];
   final asked = <String>[];
   Socket? last;
@@ -44,6 +47,7 @@ class FakeHost {
       s.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen((l) {
         final m = json.decode(l) as Json;
         final id = m['id'];
+        if (h.dead) return;
         h.asked.add(m['method']! as String);
         void say(Object o) => s.write('${json.encode(o)}\n');
         switch (m['method']) {
@@ -93,8 +97,16 @@ void main() {
   setUp(() async => h = await FakeHost.start());
   tearDown(() => h.stop());
 
-  HostStore store({Duration every = const Duration(seconds: 20)}) =>
-      HostStore(paths: HostPaths(h.dir.path), binary: null, spawn: false, listEvery: every);
+  HostStore store({
+    Duration every = const Duration(seconds: 20),
+    Duration patience = const Duration(seconds: 30),
+  }) => HostStore(
+    paths: HostPaths(h.dir.path),
+    binary: null,
+    spawn: false,
+    listEvery: every,
+    patience: patience,
+  );
 
   Json event(int seq, Json body) => {'seq': seq, 'at': 1, 'body': body};
   Json events(List<Json> e) => {'session': 'x', 'events': e};
@@ -208,6 +220,31 @@ void main() {
       await s.start();
       await Future<void>.delayed(const Duration(milliseconds: 400));
       expect(h.listed.length, greaterThan(2));
+      s.dispose();
+    });
+  });
+
+  testWidgets('a host that is silent is asked again on another connection', (t) async {
+    await t.runAsync(() async {
+      final s = store(
+        every: const Duration(milliseconds: 60),
+        patience: const Duration(milliseconds: 200),
+      );
+      await s.start();
+      final phases = <HostPhase>{};
+      s.addListener(() => phases.add(s.phase));
+      h.dead = true;
+      final end = DateTime.now().add(const Duration(seconds: 10));
+      while (!phases.contains(HostPhase.unreachable) && DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(phases, contains(HostPhase.unreachable));
+      expect(s.problem, contains('did not answer'));
+      h.dead = false;
+      while (s.phase != HostPhase.connected && DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect([s.phase, h.connections > 1], [HostPhase.connected, true]);
       s.dispose();
     });
   });

@@ -106,8 +106,11 @@ class HostLink {
     return l;
   }
 
-  Future<Object?> call(String method, [Json params = const {}]) =>
-      _call(method, params, const Duration(seconds: 30));
+  Future<Object?> call(
+    String method, [
+    Json params = const {},
+    Duration within = const Duration(seconds: 30),
+  ]) => _call(method, params, within);
 
   Future<Object?> _call(String method, Json params, Duration timeout, {String? fence}) {
     if (_closed.isCompleted) return Future.error(const LinkClosed('the host is gone'));

@@ -47,7 +47,11 @@ class HostStore extends ChangeNotifier {
     required this.binary,
     this.spawn = true,
     this.listEvery = const Duration(seconds: 20),
+    this.patience = const Duration(seconds: 30),
   });
+
+  /// How long a host that is there may take to list its sessions.
+  final Duration patience;
 
   /// Other windows and the command line make sessions too, and ages go on.
   final Duration listEvery;
@@ -150,7 +154,7 @@ class HostStore extends ChangeNotifier {
     _list?.cancel();
     _list = Timer.periodic(listEvery, (_) {
       if (_link != null && SchedulerBinding.instance.framesEnabled) {
-        unawaited(refresh().catchError((_) {}));
+        unawaited(_still(link));
       }
     });
     unawaited(
@@ -179,11 +183,23 @@ class HostStore extends ChangeNotifier {
     }
   }
 
+  /// A connection can be dead without an end to it (Windows): a host that does not answer is asked
+  /// again on another.
+  Future<void> _still(HostLink link) async {
+    try {
+      await refresh();
+    } on LinkClosed catch (e) {
+      if (!_disposed && identical(link, _link)) _unreachable(e.why);
+    } on Object {
+      // It answered; what it said is not this one's business.
+    }
+  }
+
   HostLink get _live => _link ?? (throw const LinkClosed('the host is not answering'));
 
   Future<void> refresh() async {
     final link = _live;
-    final r = await link.call('session.list', {'limit': listed});
+    final r = await link.call('session.list', {'limit': listed}, patience);
     sessions = [for (final j in r! as List<Object?>) SessionInfo.decode(j! as Json)];
     older = sessions.length >= listed;
     notifyListeners();
