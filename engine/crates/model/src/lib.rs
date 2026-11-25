@@ -8,6 +8,7 @@
 pub mod chatgpt;
 pub mod codec;
 pub mod error;
+pub mod eventstream;
 mod fold;
 pub mod profile;
 mod secret;

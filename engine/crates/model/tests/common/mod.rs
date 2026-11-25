@@ -1,6 +1,8 @@
 //! What the tests share: fixtures, decoding them, and a server that behaves as badly as told.
 #![allow(dead_code)]
 
+pub mod amazon;
+
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
