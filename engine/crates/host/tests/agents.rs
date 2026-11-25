@@ -291,19 +291,12 @@ async fn what_is_said_too_late_for_a_run_begins_another() {
         t.prompt(&a, &format!("said number {n};")).await.unwrap();
         t.server.add(text(&["more"]));
     }
-    let mut heard = Vec::new();
-    while heard.len() < 6 {
-        let (_, all) = t.until(|b| matches!(b, Body::ItemEnded { .. }).then_some(())).await;
-        heard.extend(texts(&all, ItemKind::Prompt));
-        let more = t.until(|b| matches!(b, Body::RunEnded { .. }).then_some(())).await.1;
-        let joined = [all, more].concat();
-        heard = [heard, texts(&joined, ItemKind::Prompt)].concat();
-        heard.dedup();
-        if t.server.requests().last().is_some_and(|r| {
-            (0..6).all(|n| r["messages"].to_string().contains(&format!("said number {n};")))
-        }) {
-            break;
-        }
+    let all: Vec<String> = (0..6).map(|n| format!("said number {n};")).collect();
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    let now = std::time::Instant::now();
+    while t.sent(&all).contains(&0) {
+        assert!(now.elapsed() < Duration::from_secs(30), "{:?}", t.sent(&all));
+        t.c.next_within(Duration::from_millis(50)).await.unwrap();
     }
     let last = t.server.requests().last().unwrap()["messages"].to_string();
     for n in 0..6 {
