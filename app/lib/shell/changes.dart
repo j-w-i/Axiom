@@ -232,10 +232,10 @@ class _FileRow extends StatelessWidget {
       expanded: open,
       onPressed: lines.isEmpty ? null : onOpen,
       builder: (_, s) => Padding(
-        padding: const EdgeInsets.fromLTRB(6, 7, 6, 7),
+        padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
         child: Row(
           children: [
-            AxGlyph(open ? AxIcon.down : AxIcon.right, size: 9, color: c.ink4),
+            AxGlyph(open ? AxIcon.down : AxIcon.right, size: 9, color: s.hovered ? c.ink1 : c.ink4),
             const SizedBox(width: 9),
             Expanded(
               child: Row(
@@ -245,7 +245,7 @@ class _FileRow extends StatelessWidget {
                       name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: t.type.codeSmall.ink(s.hovered ? c.ink1 : c.ink2),
+                      style: t.type.code.ink(c.ink1),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -262,7 +262,7 @@ class _FileRow extends StatelessWidget {
               const SizedBox(width: 8),
               Text('−$remove', style: t.type.small.ink(c.faultText)),
             ],
-            if (lines.isEmpty) Text('not shown', style: t.type.small.ink(c.ink4)),
+            if (lines.isEmpty) Text('not shown', style: t.type.small.ink(c.ink3)),
           ],
         ),
       ),
@@ -295,7 +295,7 @@ class _FileRow extends StatelessWidget {
         for (final (note, look) in notes)
           Padding(
             padding: const EdgeInsets.fromLTRB(50, 0, 6, 5),
-            child: Text(visible(note), style: t.type.small.ink(look ? c.attentionText : c.ink3)),
+            child: Text(visible(note), style: t.type.label.ink(look ? c.attentionText : c.ink3)),
           ),
         if (open)
           Padding(
@@ -676,7 +676,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
                         : 'The folder gets what is chosen, as it is shown.',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: t.type.small.ink(c.ink3),
+                    style: t.type.label.ink(c.ink3),
                   ),
                 ),
                 const SizedBox(width: 12),

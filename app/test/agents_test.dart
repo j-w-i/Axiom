@@ -9,6 +9,7 @@ import 'package:axiom/patterns/execution.dart';
 import 'package:axiom/patterns/models.dart';
 import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
+import 'package:axiom/shell/changes.dart';
 import 'package:axiom/shell/drafts.dart';
 import 'package:axiom/shell/outside.dart';
 import 'package:axiom/shell/shell.dart';
@@ -1568,13 +1569,21 @@ void main() {
         'It runs when someone builds, tests or installs.',
         'Also changed by Ben.',
         'It cannot be shown: too large, or not text.',
-        'Not listed: 2 that git ignores and only the copy has. 1 could not be copied or listed.',
       ]) {
         expect(find.text(words), findsOneWidget, reason: words);
       }
       expect(find.textContaining('Ada has not looked at yours yet'), findsOneWidget);
       expect(find.textContaining('was here', findRichText: true), findsWidgets);
       await snap(t, 'copy');
+      // The last line is under the edge.
+      final list = find.descendant(of: find.byType(CopyView), matching: find.byType(ListView));
+      await t.drag(list, const Offset(0, -400));
+      await settled(t);
+      const last =
+          'Not listed: 2 that git ignores and only the copy has. 1 could not be copied or listed.';
+      expect(find.text(last), findsOneWidget);
+      await t.drag(list, const Offset(0, 400));
+      await settled(t);
       await press(t, find.bySemanticsLabel('Bring in Makefile'));
       await press(t, find.bySemanticsLabel('Bring in gone.txt'));
       await press(t, find.bySemanticsLabel('Bring in both.txt'));
