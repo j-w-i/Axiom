@@ -1,0 +1,39 @@
+name: Windows hang
+on:
+  push: { branches: [diag/windows-hang] }
+permissions: { contents: read }
+jobs:
+  engine:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: engine }
+      - run: cargo test -p axiom-host --locked --no-run
+        working-directory: engine
+      - shell: pwsh
+        run: ./diag.ps1 engine
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: engine-log, path: diag-*.log }
+  app:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: engine }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: 3.50.0, cache: true }
+      - run: cargo build -p axiom-host --locked
+        working-directory: engine
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app
+      - shell: pwsh
+        run: ./diag.ps1 app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: app-log, path: diag-*.log }
