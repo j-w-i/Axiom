@@ -6,8 +6,9 @@ import 'package:flutter/widgets.dart';
 import 'app.dart';
 import 'host/host_store.dart';
 import 'shell/shell.dart';
+import 'ui/surface.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final paths = HostPaths.discover();
   if (paths == null) {
@@ -19,5 +20,6 @@ void main() {
     binary: Platform.environment['AXIOM_HOST'] ?? HostStore.findBinary(),
   );
   unawaited(store.start());
-  runApp(AxiomApp(home: Shell(store, titleInset: Platform.isMacOS ? 58 : 0)));
+  await Shades.load();
+  runApp(AxiomApp(home: Shell(store, titleInset: Platform.isMacOS ? 72 : 0)));
 }

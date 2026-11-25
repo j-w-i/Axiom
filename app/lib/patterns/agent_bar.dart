@@ -17,7 +17,7 @@ class AgentBar extends StatelessWidget {
     this.lead,
     this.where,
     this.inset = 20,
-    this.height = 50,
+    this.height = 44,
   });
   final String name;
   final AgentState state;
@@ -34,9 +34,10 @@ class AgentBar extends StatelessWidget {
     final words = MediaQuery.textScalerOf(context).scale(13) * 1.4;
     return LayoutBuilder(
       builder: (context, box) => SizedBox(
-        height: math.max(height, math.max(words, t.density.control) + 16),
+        height: math.max(height, math.max(words, t.density.control) + 12),
         child: Padding(
-          padding: EdgeInsets.only(left: inset, right: 12),
+          // On the line of the window's own buttons.
+          padding: EdgeInsets.only(left: inset, right: 12, bottom: 8),
           child: Row(
             children: [
               Expanded(

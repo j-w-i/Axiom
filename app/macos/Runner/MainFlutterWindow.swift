@@ -14,9 +14,23 @@ class MainFlutterWindow: NSWindow {
     self.titlebarAppearsTransparent = true
     self.styleMask.insert(.fullSizeContentView)
     self.isMovableByWindowBackground = false
+    // Nothing is in it: with it the system sets its buttons 26 from the top, on the header's line.
+    setBar()
+    let told = NotificationCenter.default
+    told.addObserver(
+      forName: NSWindow.willEnterFullScreenNotification, object: self, queue: .main
+    ) { [weak self] _ in self?.toolbar = nil }
+    told.addObserver(
+      forName: NSWindow.didExitFullScreenNotification, object: self, queue: .main
+    ) { [weak self] _ in self?.setBar() }
     self.setFrameAutosaveName("Axiom")
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     super.awakeFromNib()
+  }
+
+  private func setBar() {
+    toolbar = NSToolbar(identifier: "header")
+    toolbarStyle = .unified
   }
 }
