@@ -298,13 +298,19 @@ class CopyView extends StatefulWidget {
 
 class _CopyViewState extends State<CopyView> {
   CopyChanges? _all;
-  Map<String, FileDiff> _diffs = const {};
+  Map<String, FileDiff?> _diffs = const {};
   String? _problem, _said;
   bool _busy = false, _again = false, _leaving = false, _wasAtWork = false;
   final _shut = <String>{};
+  final _scroll = ScrollController();
 
-  /// Chosen or not against what is usual.
-  final _other = <String>{};
+  /// What is said stands first.
+  void _up() {
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+  }
+
+  /// What its person has chosen or not, of what they were shown then.
+  final _picked = <(String, String?, bool), bool>{};
 
   bool get _atWork =>
       widget.agent.phase == AgentPhase.running || widget.agent.phase == AgentPhase.asking;
@@ -320,6 +326,7 @@ class _CopyViewState extends State<CopyView> {
   @override
   void dispose() {
     widget.agent.removeListener(_changed);
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -342,54 +349,73 @@ class _CopyViewState extends State<CopyView> {
       _problem = null;
       _leaving = false;
     });
+    String? wrong;
     try {
       await f();
+    } on Object catch (e) {
+      wrong = wordsOf(e);
+    }
+    // Also after what went wrong: what is shown is what there is.
+    try {
       do {
         _again = false;
         final c = await widget.store.copyChanges(widget.session.id, widget.agent.id);
         if (!mounted) return;
         setState(() {
           _all = c;
-          _diffs = {for (final d in readDiffs(c.diff, most: 600)) d.path: d};
+          _diffs = {
+            for (final f in c.files)
+              if (f.diff case final d?) f.path: readDiffs(d, most: 600).firstOrNull,
+          };
+          final now = {for (final f in c.files) (f.path, f.digest, f.run)};
+          _picked.removeWhere((k, _) => !now.contains(k));
         });
       } while (_again);
     } on Object catch (e) {
-      if (mounted) setState(() => _problem = wordsOf(e));
+      wrong ??= wordsOf(e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _problem = wrong;
+        });
+        if (wrong != null) _up();
+      }
     }
   }
 
-  /// What runs when someone builds is chosen by hand.
-  bool _chosen(CopyFile f) => f.can && (!f.runs != _other.contains(f.path));
+  /// What somebody should look at first is chosen by hand.
+  bool _chosen(CopyFile f) => f.can && (_picked[(f.path, f.digest, f.run)] ?? f.plain);
 
   static String _files(int n) => n == 1 ? '1 file' : '$n files';
 
   void _tell(Moved m, String done) {
     if (!mounted) return;
-    _other.clear();
+    _picked.clear();
+    _up();
     setState(() {
-      _said = m.done.isEmpty ? null : '$done ${_files(m.done.length)}.';
-      if (m.left.isNotEmpty) {
-        _said = [
-          ?_said,
-          for (final (path, why) in m.left.take(5)) '${literal(path)}: $why.',
-          if (m.left.length > 5) 'And ${m.left.length - 5} more.',
-        ].join('\n');
-      }
+      _said = [
+        if (m.done.isNotEmpty) '$done ${_files(m.done.length)}.',
+        ..._left(m.left),
+      ].join('\n');
     });
   }
+
+  static List<String> _left(List<(String, String)> left) => [
+    for (final (path, why) in left.take(5)) '${literal(path)}: $why.',
+    if (left.length > 5) 'And ${left.length - 5} more.',
+  ];
 
   Future<void> _bring(List<CopyFile> files) => _do(() async {
     _tell(await widget.store.bringIn(widget.session.id, widget.agent.id, files), 'Brought in');
   });
 
-  Future<void> _back() => _do(() async {
-    _tell(await widget.store.putBack(widget.session.id, widget.agent.id), 'Put back');
+  Future<void> _back(String id) => _do(() async {
+    _tell(await widget.store.putBack(widget.session.id, widget.agent.id, id), 'Put back');
   });
 
   Future<void> _renew() => _do(() async {
-    final (taken, say) = await widget.store.renewCopy(widget.session.id, widget.agent.id);
+    final (taken, say, left) = await widget.store.renewCopy(widget.session.id, widget.agent.id);
     if (say != null) {
       final was = widget.draft.text.text.trimRight();
       final all = was.isEmpty ? say : '$was\n\n$say';
@@ -401,11 +427,14 @@ class _CopyViewState extends State<CopyView> {
     if (!mounted) return;
     setState(() {
       _said = [
-        taken == 0 ? 'Nothing was taken over.' : 'Took over ${_files(taken)}.',
-        if (say != null)
-          'Some have been changed in both. What to tell ${widget.agent.name} is written where you '
-              'speak to it; nothing is sent yet.',
-      ].join(' ');
+        [
+          taken == 0 ? 'Nothing was taken over.' : 'Took over ${_files(taken)}.',
+          if (say != null)
+            'Some have been changed in both. What to tell ${widget.agent.name} is written where you '
+                'speak to it; nothing is sent yet.',
+        ].join(' '),
+        ..._left(left),
+      ].join('\n');
     });
   });
 
@@ -429,8 +458,18 @@ class _CopyViewState extends State<CopyView> {
         : !made
         ? '${widget.agent.name} works in a copy of the folder. It is made when you first speak to it.'
         : files.isEmpty
-        ? 'The folder has all of it.'
+        ? (all.ignored + all.odd > 0
+              ? 'The folder has all that can be listed.'
+              : 'The folder has all of it.')
         : null;
+    final only = <String>[
+      if (all != null && !all.whole)
+        'more than ${_files(files.length)}'
+      else if (files.isNotEmpty)
+        _files(files.length),
+      if ((all?.ignored ?? 0) > 0) '${all!.ignored} that git ignores',
+      if ((all?.odd ?? 0) > 0) '${all!.odd} that cannot be listed',
+    ];
     final quiet = _busy || _atWork;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -461,7 +500,12 @@ class _CopyViewState extends State<CopyView> {
                     AxButton(
                       label: 'Throw it away',
                       tone: AxTone.quiet,
-                      onPressed: quiet ? null : () => setState(() => _leaving = true),
+                      onPressed: quiet
+                          ? null
+                          : () {
+                              setState(() => _leaving = true);
+                              _up();
+                            },
                     ),
                   AxButton(
                     label: _busy ? 'Looking' : 'Look again',
@@ -474,88 +518,7 @@ class _CopyViewState extends State<CopyView> {
           ),
         ),
         ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
-        if (_leaving)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 10, 18, 4),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  files.isEmpty
-                      ? 'The folder has all that was changed in it.'
-                      : '${_files(files.length)} that only it has would be lost.',
-                  style: t.type.ui.ink(files.isEmpty ? c.ink2 : c.attentionText),
-                ),
-                AxButton(
-                  label: 'Keep it',
-                  tone: AxTone.quiet,
-                  autofocus: true,
-                  onPressed: () => setState(() => _leaving = false),
-                ),
-                AxButton(
-                  label: 'Throw the copy away',
-                  onPressed: quiet ? null : () => unawaited(_remove(files.isNotEmpty)),
-                ),
-              ],
-            ),
-          ),
-        if (_problem case final p? when all != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
-            child: Text(visible(p), style: t.type.ui.ink(c.faultText)),
-          ),
-        if (_said != null || (all?.back ?? 0) > 0)
-          Semantics(
-            liveRegion: true,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 10, 18, 0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(visible(_said ?? ''), style: t.type.ui.ink(c.ink2)),
-                    ),
-                  ),
-                  if (all?.back case final n? when n > 0)
-                    AxButton(
-                      label: 'Put back ${_files(n)}',
-                      tone: AxTone.quiet,
-                      onPressed: _busy ? null : () => unawaited(_back()),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        Expanded(
-          child: words != null
-              ? Align(
-                  alignment: Alignment.topLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
-                    child: Text(
-                      visible(words),
-                      style: t.type.ui.ink(_problem != null && all == null ? c.faultText : c.ink3),
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(18, 8, 24, 24),
-                  itemCount: files.length + (all!.whole ? 0 : 1),
-                  itemBuilder: (context, i) => i == files.length
-                      ? Padding(
-                          padding: const EdgeInsets.fromLTRB(6, 10, 0, 0),
-                          child: Text(
-                            'There is more than can be shown here.',
-                            style: t.type.label.ink(c.ink3),
-                          ),
-                        )
-                      : _file(files[i]),
-                ),
-        ),
+        Expanded(child: _list(context, all, files, words, only)),
         if (files.isNotEmpty) ...[
           ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
           Padding(
@@ -586,6 +549,122 @@ class _CopyViewState extends State<CopyView> {
     );
   }
 
+  /// All of it goes by when there is little room.
+  Widget _list(
+    BuildContext context,
+    CopyChanges? all,
+    List<CopyFile> files,
+    String? words,
+    List<String> only,
+  ) {
+    final t = Ax.of(context), c = t.colors;
+    final quiet = _busy || _atWork;
+    final head = <Widget>[
+      if (_leaving)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 10, 18, 4),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                [
+                  only.isEmpty
+                      ? 'The folder has all that was changed in it.'
+                      : 'Only it has these, and they would be lost: ${only.join(', ')}.',
+                  if (all?.back != null) 'What was brought in last could not be put back any more.',
+                ].join(' '),
+                style: t.type.ui.ink(only.isEmpty ? c.ink2 : c.attentionText),
+              ),
+              AxButton(
+                label: 'Keep it',
+                tone: AxTone.quiet,
+                autofocus: true,
+                onPressed: () => setState(() => _leaving = false),
+              ),
+              AxButton(
+                label: 'Throw the copy away',
+                onPressed: quiet ? null : () => unawaited(_remove(only.isNotEmpty)),
+              ),
+            ],
+          ),
+        ),
+      if (_problem case final p? when all != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
+          child: Text(visible(p), style: t.type.ui.ink(c.faultText)),
+        ),
+      if (_said != null || all?.back != null)
+        Semantics(
+          liveRegion: true,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 10, 18, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(visible(_said ?? ''), style: t.type.ui.ink(c.ink2)),
+                  ),
+                ),
+                if (all?.back case (final id, final n))
+                  AxButton(
+                    label: 'Put back ${_files(n)}',
+                    tone: AxTone.quiet,
+                    onPressed: _busy ? null : () => unawaited(_back(id)),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      if (words != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+          child: Text(
+            visible(words),
+            style: t.type.ui.ink(_problem != null && all == null ? c.faultText : c.ink3),
+          ),
+        )
+      else
+        const SizedBox(height: 8),
+    ];
+    final tail = <Widget>[
+      if (words == null && !all!.whole)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
+          child: Text('There is more than can be shown here.', style: t.type.label.ink(c.ink3)),
+        ),
+      if (all != null && all.ignored + all.odd > 0)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+          child: Text(
+            [
+              if (all.ignored > 0)
+                'Not listed: ${all.ignored} that git ignores and only the copy has.',
+              if (all.odd > 0) '${all.odd} could not be copied or listed.',
+            ].join(' '),
+            style: t.type.small.ink(c.ink3),
+          ),
+        ),
+      const SizedBox(height: 16),
+    ];
+    final n = words == null ? files.length : 0;
+    return ListView.builder(
+      controller: _scroll,
+      itemCount: head.length + n + tail.length,
+      itemBuilder: (context, i) => i < head.length
+          ? head[i]
+          : i < head.length + n
+          ? Padding(
+              padding: const EdgeInsets.only(left: 18, right: 24),
+              child: _file(files[i - head.length]),
+            )
+          : tail[i - head.length - n],
+    );
+  }
+
   Widget _file(CopyFile f) {
     final name = oneLine(literal(f.path), 300);
     return _FileRow(
@@ -603,15 +682,20 @@ class _CopyViewState extends State<CopyView> {
           value: _chosen(f),
           onChanged: !f.can || _busy
               ? null
-              : (_) => setState(() {
-                  _other.contains(f.path) ? _other.remove(f.path) : _other.add(f.path);
-                }),
+              : (v) => setState(() => _picked[(f.path, f.digest, f.run)] = v),
         ),
       ),
       notes: [
         if (f.never case final why?) ('Never brought in: $why.', false),
         if (f.clash && f.never == null)
           ('The folder\'s own has changed too. Bring the copy up to date first.', true),
+        if (f.unsettled && f.can)
+          (
+            'You have both changed it, and ${widget.agent.name} has not looked at yours yet. What '
+                'bringing it in would undo is shown here.',
+            true,
+          ),
+        if (f.diff == null && f.can) ('It cannot be shown: too large, or not text.', true),
         if (f.runs && f.can) ('It runs when someone builds, tests or installs.', true),
         if (f.others.isNotEmpty)
           ('Also changed by ${f.others.map((o) => oneLine(o, 40)).join(', ')}.', true),

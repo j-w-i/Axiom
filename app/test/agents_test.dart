@@ -80,10 +80,11 @@ class Asked extends HostStore {
   Future<Moved> bringIn(String session, String agent, List<CopyFile> files) =>
       _do(['bring', for (final f in files) (f.path, f.digest)], moved);
   @override
-  Future<Moved> putBack(String session, String agent) => _do(['back', session, agent], moved);
-  (int, String?) renewed = (0, null);
+  Future<Moved> putBack(String session, String agent, String back) =>
+      _do(['back', session, agent, back], moved);
+  (int, String?, List<(String, String)>) renewed = (0, null, const []);
   @override
-  Future<(int, String?)> renewCopy(String session, String agent) =>
+  Future<(int, String?, List<(String, String)>)> renewCopy(String session, String agent) =>
       _do(['renew', session, agent], renewed);
   @override
   Future<void> removeCopy(String session, String agent, {required bool lose}) =>
@@ -1186,20 +1187,28 @@ void main() {
   });
 
   group('an agent that works in a copy', () {
+    const some = '--- x\n+++ x\n@@ -1 +1 @@\n-old\n+fresh\n';
     const files = [
-      CopyFile('lib/cache.dart', 'changed', digest: 'd1'),
-      CopyFile('Makefile', 'changed', digest: 'd2', runs: true),
+      CopyFile(
+        'lib/cache.dart',
+        'changed',
+        digest: 'd1',
+        there: 'f1',
+        diff: '--- lib/cache.dart\n+++ lib/cache.dart\n@@ -1 +1 @@\n-old\n+fresh\n',
+      ),
+      CopyFile('Makefile', 'changed', digest: 'd2', there: 'f2', runs: true, diff: some),
       CopyFile('both.txt', 'changed', digest: 'd3', clash: true, others: ['Ben']),
       CopyFile('.envrc', 'new', digest: 'd4', never: 'a shell runs what is written there'),
-      CopyFile('gone.txt', 'removed'),
+      CopyFile(
+        'gone.txt',
+        'removed',
+        there: 'f5',
+        diff: '--- gone.txt\n+++ (removed)\n@@ -1 +0,0 @@\n-was here\n',
+      ),
+      CopyFile('logo.png', 'changed', digest: 'd6', there: 'f6'),
+      CopyFile('told.txt', 'changed', digest: 'd7', there: 'f7', unsettled: true, diff: some),
     ];
-    const all = CopyChanges(
-      made: true,
-      files: files,
-      diff:
-          '--- lib/cache.dart\n+++ lib/cache.dart\n@@ -1 +1 @@\n-old\n+fresh\n'
-          '--- gone.txt\n+++ (removed)\n@@ -1 +0,0 @@\n-was here\n',
-    );
+    const all = CopyChanges(made: true, files: files, ignored: 2, odd: 1);
     Future<Asked> shown(WidgetTester t, {CopyChanges copy = all}) async {
       final s = await shell(t, session: working());
       s.copy = copy;
@@ -1223,13 +1232,15 @@ void main() {
       expect(s.calls, [
         ['copy', 's', 'b'],
       ]);
-      expect(find.text('5 files in its own copy'), findsOneWidget);
+      expect(find.text('7 files in its own copy'), findsOneWidget);
       for (final (f, on, can) in [
         ('lib/cache.dart', true, true),
         ('Makefile', false, true),
         ('both.txt', false, false),
         ('.envrc', false, false),
         ('gone.txt', true, true),
+        ('logo.png', false, true),
+        ('told.txt', false, true),
       ]) {
         expect((box(t, f).value, box(t, f).onChanged != null), (on, can), reason: f);
       }
@@ -1238,9 +1249,12 @@ void main() {
         'The folder\'s own has changed too. Bring the copy up to date first.',
         'It runs when someone builds, tests or installs.',
         'Also changed by Ben.',
+        'It cannot be shown: too large, or not text.',
+        'Not listed: 2 that git ignores and only the copy has. 1 could not be copied or listed.',
       ]) {
         expect(find.text(words), findsOneWidget, reason: words);
       }
+      expect(find.textContaining('Ada has not looked at yours yet'), findsOneWidget);
       expect(find.textContaining('was here', findRichText: true), findsWidgets);
       await snap(t, 'copy');
       await press(t, find.bySemanticsLabel('Bring in Makefile'));
@@ -1252,7 +1266,7 @@ void main() {
           ['lib/cache.dart'],
           [('Makefile', 'it is not what was shown any more')],
         )
-        ..copy = const CopyChanges(made: true, back: 1);
+        ..copy = const CopyChanges(made: true, back: ('q1', 1));
       await press(t, find.text('Bring in 2 files'));
       expect(s.calls, [
         ['bring', ('lib/cache.dart', 'd1'), ('Makefile', 'd2')],
@@ -1266,17 +1280,39 @@ void main() {
         ..moved = const Moved(['lib/cache.dart'], [])
         ..copy = all;
       await press(t, find.text('Put back 1 file'));
+      expect(s.calls, contains(equals(['back', 's', 'b', 'q1'])));
       expect(find.textContaining('Put back 1 file.'), findsOneWidget);
       // As usual again: what was chosen was for the last time.
       expect((box(t, 'Makefile').value, box(t, 'gone.txt').value), (false, true));
+      // What was chosen was chosen of what was shown: another content has not been.
+      box(t, 'Makefile').onChanged!(true);
+      box(t, 'lib/cache.dart').onChanged!(false);
+      await settled(t);
+      expect((box(t, 'Makefile').value, box(t, 'lib/cache.dart').value), (true, false));
+      await press(t, find.text('Look again'));
+      expect((box(t, 'Makefile').value, box(t, 'lib/cache.dart').value), (true, false));
+      s.copy = const CopyChanges(
+        made: true,
+        files: [
+          CopyFile('lib/cache.dart', 'changed', digest: 'd1', there: 'f1', runs: true, diff: some),
+          CopyFile('Makefile', 'changed', digest: 'other', there: 'f2', runs: true, diff: some),
+        ],
+      );
+      await press(t, find.text('Look again'));
+      expect((box(t, 'Makefile').value, box(t, 'lib/cache.dart').value), (false, false));
     });
 
     testWidgets('it is brought up to date, and told of clashes by its person', (t) async {
       final s = await shown(t);
-      s.renewed = (2, 'The project has changed: both.txt.');
+      s.renewed = (
+        2,
+        'The project has changed: both.txt.',
+        const [('out/x', 'something is in the way')],
+      );
       await press(t, find.text('Bring it up to date'));
       expect(find.textContaining('Took over 2 files.'), findsOneWidget);
       expect(find.textContaining('nothing is sent yet'), findsOneWidget);
+      expect(find.textContaining('out/x: something is in the way.'), findsOneWidget);
       expect(s.calls.where((c) => c.first == 'prompt'), isEmpty);
       await t.tap(find.text('Conversation').last);
       await settled(t);
@@ -1286,7 +1322,13 @@ void main() {
     testWidgets('it is thrown away with a second word, and never while it is worked in', (t) async {
       final s = await shown(t);
       await press(t, find.text('Throw it away'));
-      expect(find.text('5 files that only it has would be lost.'), findsOneWidget);
+      expect(
+        find.text(
+          'Only it has these, and they would be lost: 7 files, 2 that git ignores, 1 that cannot be '
+          'listed.',
+        ),
+        findsOneWidget,
+      );
       await snap(t, 'copy-throw-away');
       await press(t, find.text('Keep it'));
       expect(s.calls.where((c) => c.first == 'throw away'), isEmpty);
@@ -1295,12 +1337,27 @@ void main() {
       await press(t, find.text('Throw the copy away'));
       expect(s.calls.where((c) => c.first == 'throw away').single, ['throw away', 's', 'b', true]);
       expect(find.textContaining('It is made when you first speak to it.'), findsOneWidget);
-      s
-        ..copy = const CopyChanges(made: true)
-        ..failure = null;
+      s.copy = const CopyChanges(made: true, ignored: 3);
+      await press(t, find.text('Look again'));
+      expect(find.text('The folder has all that can be listed.'), findsOneWidget);
+      await press(t, find.text('Throw it away'));
+      expect(find.textContaining('would be lost: 3 that git ignores.'), findsOneWidget);
+      await press(t, find.text('Keep it'));
+      s.copy = const CopyChanges(made: true, whole: false, files: files);
       await press(t, find.text('Look again'));
       await press(t, find.text('Throw it away'));
-      expect(find.text('The folder has all that was changed in it.'), findsOneWidget);
+      expect(find.textContaining('would be lost: more than 7 files.'), findsOneWidget);
+      await press(t, find.text('Keep it'));
+      s.copy = const CopyChanges(made: true, back: ('q1', 2));
+      await press(t, find.text('Look again'));
+      await press(t, find.text('Throw it away'));
+      expect(
+        find.text(
+          'The folder has all that was changed in it. What was brought in last could not be put back '
+          'any more.',
+        ),
+        findsOneWidget,
+      );
       await press(t, find.text('Throw the copy away'));
       expect(s.calls.where((c) => c.first == 'throw away').last.last, isFalse);
       // At work.
@@ -1325,9 +1382,20 @@ void main() {
       expect(s.calls, [
         ['copy', 's', 'b'],
       ]);
-      s.failure = const Failed(1, 'internal', 'the copy is elsewhere now');
+      s
+        ..failure = const Failed(1, 'internal', 'the copy is elsewhere now')
+        ..calls.clear();
       await press(t, find.text('Look again'));
       expect(find.text('the copy is elsewhere now'), findsOneWidget);
+      // What went wrong is said, and what there is now is looked at all the same.
+      s
+        ..failsAt = 'bring'
+        ..calls.clear()
+        ..copy = const CopyChanges(made: true, files: [CopyFile('now.txt', 'new', digest: 'd')]);
+      await press(t, find.textContaining('Bring in 2 files'));
+      expect(s.calls.map((c) => c.first), ['bring', 'copy']);
+      expect(find.text('the copy is elsewhere now'), findsOneWidget);
+      expect(find.text('now.txt'), findsOneWidget);
     });
 
     testWidgets('is set up so beside others, and by choice', (t) async {
@@ -1354,7 +1422,7 @@ void main() {
 
     testWidgets('fits a small window', (t) async {
       final s = Asked()
-        ..copy = const CopyChanges(made: true, files: files, back: 3)
+        ..copy = const CopyChanges(made: true, files: files, ignored: 2, back: ('q1', 3))
         ..current = (SessionModel('s')
           ..apply(const [
             Event(1, 1, SessionCreated('Fix the cache', '/w')),

@@ -281,26 +281,25 @@ class HostStore extends ChangeNotifier {
     (await _live.call('copy.bring', {
           'session': session,
           'agent': agent,
-          'files': [
-            for (final f in files) {'path': f.path, 'digest': ?f.digest},
-          ],
+          'files': [for (final f in files) f.encode()],
         }, _long))!
         as Json,
     'brought',
   );
 
-  /// Puts back what was there before the last that was brought in.
-  Future<Moved> putBack(String session, String agent) async => Moved.decode(
-    (await _live.call('copy.back', {'session': session, 'agent': agent}, _long))! as Json,
+  /// Puts back what was there before the last that was brought in, as it was named.
+  Future<Moved> putBack(String session, String agent, String back) async => Moved.decode(
+    (await _live.call('copy.back', {'session': session, 'agent': agent, 'back': back}, _long))!
+        as Json,
     'back',
   );
 
-  /// Takes over what has changed in the folder: how many files, and what its agent should be told
-  /// of those both have changed.
-  Future<(int, String?)> renewCopy(String session, String agent) async {
+  /// Takes over what has changed in the folder: how many files, what its agent should be told of
+  /// those both have changed, and what was not taken over, with why.
+  Future<(int, String?, List<(String, String)>)> renewCopy(String session, String agent) async {
     final r = await _live.call('copy.renew', {'session': session, 'agent': agent}, _long);
     final j = r! as Json;
-    return (j['taken']! as int, j['say'] as String?);
+    return (j['taken']! as int, j['say'] as String?, Moved.leftOf(j));
   }
 
   /// Throws the copy away; [lose]: with what was changed in it.
