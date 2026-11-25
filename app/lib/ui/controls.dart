@@ -404,6 +404,7 @@ class AxField extends StatefulWidget {
     this.error,
     this.enabled = true,
     this.secret = false,
+    this.sunken = false,
     this.leading,
     this.onSubmitted,
     this.onChanged,
@@ -418,6 +419,9 @@ class AxField extends StatefulWidget {
   final FocusNode? focusNode;
   final int lines;
   final bool mono, enabled, secret;
+
+  /// On a card, which is as light as a field.
+  final bool sunken;
   final Widget? leading;
   final ValueChanged<String>? onSubmitted, onChanged;
   @override
@@ -461,7 +465,11 @@ class _AxFieldState extends State<AxField> {
           child: ListenableBuilder(
             listenable: _f,
             builder: (_, child) => Surface(
-              widget.enabled ? c.field : c.keyDown,
+              !widget.enabled
+                  ? c.keyDown
+                  : widget.sunken
+                  ? c.track
+                  : c.field,
               radius: AxRadius.key,
               ring: bad
                   ? c.fault

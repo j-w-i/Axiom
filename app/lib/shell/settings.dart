@@ -158,6 +158,7 @@ class _CodeFontState extends State<_CodeFont> {
     controller: _name,
     focusNode: _focus,
     mono: true,
+    sunken: true,
     onSubmitted: (_) => _take(),
   );
 }
