@@ -26,7 +26,7 @@
 | K23 | The client lists the last 1 000 sessions | M4 |
 | K24 | Running lamps turn, so a frame is drawn on every refresh while an agent runs (6 paints of 12 × 10 px, nothing rebuilt); one scrolled just out of sight still counts. Reduced motion stops it | M2: measure power |
 | K25 | A table being written costs up to 20 ms per frame in a debug build near its cut at 4 000 characters | M2 |
-| K26 | Icons and lamps do not grow with the text | M2 accessibility |
+| K26 | Lamps do not grow with the text; icons do, and in a key of fixed size only as far as it has room | M2 accessibility |
 | K27 | 64 clients that follow and never read hold about 8 MiB each | M7 soak |
 | K28 | If the journal's file is moved away the host stops, and the endings of what ran are lost | accepted |
 | K29 | A write lock held by another program during a stop costs up to 10 s, and endings may then be unwritten | accepted |

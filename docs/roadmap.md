@@ -28,7 +28,8 @@ Order: policy+spawn → Anthropic Messages codec → Chat codec (local servers) 
 - sandbox: macOS and Linux escape suite passes; Windows states honestly that it is uncontained
 - permissions: SI-1…SI-16 each have a test; compaction, branching, resume; `axiom` CLI can do everything the GUI can
 - connections: several accounts per provider; secrets only in the OS store; none in logs, argv, env or journal (canary test)
-- talking and reading: earlier prompts with ↑ (W-1), find in the conversation (W-2), copy a message (W-3), quote (W-4), one table of commands and keys (W-5), compact now (W-6), settings (W-14), CLI for scripts (W-16), drop or open a folder (W-17); branching as a person uses it (W-54)
+- [x] talking and reading: earlier prompts with ↑ (W-1), find in the conversation (W-2), copy a message (W-3), quote (W-4), one table of commands and keys (W-5), compact now (W-6), settings (W-14, in part), CLI for scripts (W-16), open a folder from a terminal (W-17, in part)
+- [ ] branching as a person uses it (W-54); dropping a folder on the window (W-17); of settings: zoom, code font, notifications, what the limits are (W-14)
 
 ## M3 Delegated harnesses ← M2 policy, spawn
 - ACP client (v1, v2), Codex app-server, Claude stream-json, Copilot; each replayed from recorded frames and driven once by hand with the owner's consent
