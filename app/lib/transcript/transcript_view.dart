@@ -1261,7 +1261,19 @@ class ToolRow extends StatelessWidget {
     _ => AxIcon.more,
   };
 
-  static String _detail(Object? args) {
+  /// The files a call has changed, as its result says.
+  static List<String> patched(ItemModel i) {
+    final r = i.result;
+    final diff = r is Map ? r['diff'] : null;
+    if (diff is! String) return const [];
+    // A diff may be long, and what it is asked for is drawn often.
+    return _patched[r as Object] ??= [for (final f in readDiffs(diff, atAll: 0)) f.path];
+  }
+
+  static final _patched = Expando<List<String>>();
+
+  /// What a call is about, in a word or a line.
+  static String detailOf(Object? args) {
     if (args is! Map) return '${args ?? ''}';
     if (args['do'] case final String todo) {
       final rest = [args['name'], args['text'] ?? args['command']].nonNulls.join(': ');
@@ -1284,7 +1296,7 @@ class ToolRow extends StatelessWidget {
         child: Text(visible(item.plain), style: t.type.ui.ink(c.ink3)),
       );
     }
-    final detail = _detail(args);
+    final detail = detailOf(args);
     final shown = item.argsCut > 0
         ? '${_bytes(item.argsCut)} of arguments, not kept'
         : oneLine(literal(cutTo(detail, 800)), 400);

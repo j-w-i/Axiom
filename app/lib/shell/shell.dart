@@ -320,8 +320,67 @@ Provenance provenanceOf(Known k) => switch (k) {
   Known.unknown => Provenance.unknown,
 };
 
-AgentView viewOf(AgentModel a, HostStore s) {
+/// What a tool is doing, and what it did, as a person would say it.
+(String, String)? _verbs(String tool) => switch (tool.toLowerCase()) {
+  'read' || 'notebookread' => ('Reading', 'Read'),
+  'edit' ||
+  'write' ||
+  'multiedit' ||
+  'notebookedit' ||
+  'patch' ||
+  'apply_patch' => ('Editing', 'Edited'),
+  'search' || 'glob' || 'list' || 'grep' || 'ls' || 'find' => ('Searching', 'Searched'),
+  'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => ('Running', 'Ran'),
+  'fetch' || 'webfetch' || 'websearch' => ('Fetching', 'Fetched'),
+  'delegate' || 'agent' || 'task' => ('Working with another agent', 'Worked with another agent'),
+  _ => null,
+};
+
+String _upper(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
+/// What a call is doing: never by the tool's own name alone, if it is one that is known.
+String toolWords(ItemModel i) {
+  final tool = i.name.toLowerCase();
+  final verbs = _verbs(tool);
+  final verb = verbs == null
+      ? _upper(oneLine(literal(i.name), 40))
+      : i.open
+      ? verbs.$1
+      : verbs.$2;
+  if (const {'delegate', 'agent', 'task'}.contains(tool)) return verb;
+  String about;
+  if (const {'patch', 'apply_patch'}.contains(tool)) {
+    final n = ToolRow.patched(i).length;
+    about = n == 0 ? '' : (n == 1 ? '1 file' : '$n files');
+  } else {
+    about = ToolRow.detailOf(i.args).trim();
+    if (!about.contains(' ') && about.contains('/')) {
+      about = about.split('/').lastWhere((x) => x.isNotEmpty, orElse: () => about);
+    }
+    about = oneLine(literal(about), 40);
+  }
+  return about.isEmpty ? verb : '$verb $about';
+}
+
+/// The second line of an agent's row: what it wants, how it ended, or what it is doing.
+ActivityView? _activity(AgentModel a, HostStore s) {
+  final asks = s.current?.requests.values
+      .where((r) => r.opened.agent == a.id && r.opened.answerable == Answerable.live)
+      .firstOrNull;
+  if (asks != null) {
+    return ActivityView(AxIcon.shield, _upper(oneLine(literal(asks.opened.what), 60)));
+  }
   final last = a.last;
+  if (last == null) return null;
+  return ActivityView(last.rich ? AxIcon.think : ToolRow.iconOf(last.name), switch (last.kind) {
+    ItemKind.tool => toolWords(last),
+    ItemKind.reasoning => 'Thinking',
+    ItemKind.prompt => 'Reading the request',
+    _ => last.open ? 'Writing' : 'Wrote an answer',
+  }, failed: last.outcome == Outcome.failed);
+}
+
+AgentView viewOf(AgentModel a, HostStore s) {
   return AgentView(
     id: a.id,
     name: a.name,
@@ -338,15 +397,7 @@ AgentView viewOf(AgentModel a, HostStore s) {
     elapsed: '',
     context: a.context,
     contextProvenance: provenanceOf(a.contextKnown),
-    recent: [
-      if (last != null)
-        ActivityView(last.rich ? AxIcon.think : ToolRow.iconOf(last.name), switch (last.kind) {
-          ItemKind.tool => last.name,
-          ItemKind.reasoning => 'Thinking',
-          ItemKind.prompt => 'Reading the request',
-          _ => last.open ? 'Writing' : 'Wrote an answer',
-        }, failed: last.outcome == Outcome.failed),
-    ],
+    recent: [?_activity(a, s)],
   );
 }
 

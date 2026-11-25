@@ -7,6 +7,7 @@ import 'package:axiom/host/session_model.dart';
 import 'package:axiom/patterns/context_gauge.dart';
 import 'package:axiom/patterns/execution.dart';
 import 'package:axiom/patterns/models.dart';
+import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/shell/drafts.dart';
 import 'package:axiom/shell/outside.dart';
@@ -400,6 +401,9 @@ void main() {
     expect(find.text('1 more after this'), findsOneWidget);
     expect(find.text('cargo test'), findsWidgets);
     await settled(t);
+    final row = find.byType(AgentRow);
+    expect(find.descendant(of: row, matching: find.text('Asks to run a command')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('shell')), findsNothing);
     await snap(t, 'asked');
     await t.tap(find.text('Allow once'));
     await settled(t);
@@ -550,6 +554,10 @@ void main() {
     expect(find.text('b.txt'), findsOneWidget);
     expect(find.textContaining('two', findRichText: true), findsOneWidget);
     expect(find.textContaining(r'\u{202E}', findRichText: true), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(AgentRow), matching: find.text('Edited 2 files')),
+      findsOneWidget,
+    );
     await snap(t, 'diff');
   });
 
@@ -1188,6 +1196,49 @@ void main() {
     expect(find.text('Its own model'), findsWidgets);
     expect(find.text('Its own sign-in'), findsWidgets);
     expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
+  });
+
+  test('what a tool is doing is said in words', () {
+    final m = SessionModel('s')
+      ..apply([
+        const Event(1, 1, SessionCreated('T', '/w')),
+        const Event(2, 2, AgentAdded('a', 'A', x, null)),
+      ]);
+    var n = 2;
+    String words(String tool, Object? args, {bool open = false, Object? result}) {
+      final id = 'i${++n}';
+      m.apply([
+        Event(n, n, ItemStarted(id, 'r', 'a', ItemKind.tool, tool, args)),
+        if (!open) Event(++n, n, ItemEnded(id, Outcome.completed, '', result)),
+      ]);
+      return toolWords(m.agents['a']!.items.last);
+    }
+
+    for (final (tool, args, open, said) in [
+      ('shell', {'command': 'cargo test -q'}, true, 'Running cargo test -q'),
+      ('Bash', {'command': 'cargo test -q'}, false, 'Ran cargo test -q'),
+      ('read', {'path': 'lib/src/cache.dart'}, false, 'Read cache.dart'),
+      ('Edit', {'file_path': '/w/lib/cache.dart'}, true, 'Editing cache.dart'),
+      ('grep', {'pattern': 'a/b c'}, false, 'Searched a/b c'),
+      ('fetch', {'url': 'https://example.com/a/b'}, false, 'Fetched b'),
+      ('agent', {'do': 'tell', 'name': 'Ada'}, true, 'Working with another agent'),
+      ('patch', {'patch': '*** Begin'}, true, 'Editing'),
+      ('weird_tool', {'x': 'y'}, false, 'Weird_tool y'),
+      ('list', <String, Object?>{}, false, 'Searched'),
+    ]) {
+      expect(words(tool, args, open: open), said, reason: tool);
+    }
+    const diff = '--- a.txt\n+++ a.txt\n@@ -1 +1 @@\n-a\n+b\n';
+    expect(words('patch', {'patch': 'x'}, result: {'diff': diff}), 'Edited 1 file');
+    expect(
+      words(
+        'apply_patch',
+        {'patch': 'x'},
+        result: {'diff': diff + diff.replaceAll('a.txt', 'b.txt')},
+      ),
+      'Edited 2 files',
+    );
+    expect(words('shell', {'command': 'x' * 400}).length, lessThan(60));
   });
 
   testWidgets('a no can say why, and is never a yes by that', (t) async {
