@@ -370,6 +370,9 @@ ActivityView? _activity(AgentModel a, HostStore s) {
   if (asks != null) {
     return ActivityView(AxIcon.shield, _upper(oneLine(literal(asks.opened.what), 60)));
   }
+  if (a.ended == Outcome.failed) {
+    return const ActivityView(AxIcon.warn, 'Stopped with an error', failed: true);
+  }
   final last = a.last;
   if (last == null) return null;
   return ActivityView(last.rich ? AxIcon.think : ToolRow.iconOf(last.name), switch (last.kind) {
@@ -380,11 +383,15 @@ ActivityView? _activity(AgentModel a, HostStore s) {
   }, failed: last.outcome == Outcome.failed);
 }
 
+/// A run that failed is seen as that, whatever its agent could do next.
+AgentState stateOf(AgentModel a) =>
+    a.ended == Outcome.failed ? AgentState.failed : phaseOf(a.phase);
+
 AgentView viewOf(AgentModel a, HostStore s) {
   return AgentView(
     id: a.id,
     name: a.name,
-    state: phaseOf(a.phase),
+    state: stateOf(a),
     // What chooses its model itself is named instead.
     model: oneLine(
       a.execution.model ??
@@ -697,7 +704,7 @@ class _Display extends StatelessWidget {
     final works = a.phase == AgentPhase.running || a.phase == AgentPhase.asking;
     return AgentBar(
       name: a.name,
-      state: phaseOf(a.phase),
+      state: stateOf(a),
       mark: markOf(x.provider, x.model, x.harness),
       tabs: [('Conversation', null), if (acts) ('Changes', null)],
       index: acts ? tab : 0,

@@ -16,6 +16,7 @@ import 'package:axiom/shell/start.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/overlay.dart';
+import 'package:axiom/ui/status.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -897,6 +898,13 @@ void main() {
       await snap(t, 'plan-used-up');
       expect(manage, findsOneWidget);
       expect(t.widget<AxButton>(manage).tone, AxTone.primary);
+      // Seen as failed wherever the agent is, and said once.
+      expect(find.text('Stopped with an error'), findsOneWidget);
+      expect(find.textContaining('You have reached your usage limit'), findsOneWidget);
+      expect(
+        t.widgetList<AxLamp>(find.byType(AxLamp)).where((l) => l.state == AgentState.failed),
+        hasLength(2),
+      );
     });
 
     test('only OpenAI\'s own pages are opened', () async {
