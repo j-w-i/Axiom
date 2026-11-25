@@ -24,11 +24,13 @@ fn prepare(t: &T) {
         ("src/math.py", "def add(a, b):\n    return a - b\n"),
         ("src/use.py", "from math_helpers import fetch_total\n\nprint(fetch_total([1, 2]))\n"),
         ("src/math_helpers.py", "def fetch_total(xs):\n    return sum(xs)\n"),
-        ("notes.txt", "the answer is kept in src\nMAGIC = 7319\n"),
+        ("notes.txt", NOTES),
     ] {
         std::fs::write(w.join(f), c).unwrap();
     }
 }
+const NOTES: &str = "the answer is kept in src\nMAGIC = 7319\n";
+
 fn said(t: &T, what: &str) -> bool {
     t.stage.texts(ItemKind::Prose).iter().any(|s| s.contains(what))
 }
@@ -104,12 +106,29 @@ const TASKS: &[Task] = &[
     },
     Task {
         name: "run and tell",
-        ask: "Run the command `python3 -c \"print(6*7)\"` and tell me what it prints.",
-        done: |t| said(t, "42"),
+        ask: "Run the command `python3 -c \"print(sum(open('notes.txt','rb').read()))\"` and tell me what it prints.",
+        // Not to be known without running it.
+        done: |t| {
+            let sum: u32 = NOTES.bytes().map(u32::from).sum();
+            t.stage.tools().iter().any(|(n, o)| n == "shell" && *o == Outcome::Completed)
+                && said(t, &sum.to_string())
+        },
         script: || {
             vec![
-                anthropic(None, "", &[("t1", "shell", r#"{"command":"python3 -c 'print(6*7)'"}"#)]),
-                anthropic(None, "It prints 42.", &[]),
+                anthropic(
+                    None,
+                    "",
+                    &[(
+                        "t1",
+                        "shell",
+                        r#"{"command":"python3 -c \"print(sum(open('notes.txt','rb').read()))\""}"#,
+                    )],
+                ),
+                anthropic(
+                    None,
+                    &format!("It prints {}.", NOTES.bytes().map(u32::from).sum::<u32>()),
+                    &[],
+                ),
             ]
         },
     },

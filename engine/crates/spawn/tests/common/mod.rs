@@ -87,6 +87,7 @@ impl Fixture {
             read: Reach::of([self.at("home/w"), self.at("home/lib")]),
             write: Reach::of([self.at("home/w")]),
             net: Net::none(),
+            web: false,
             run: true,
             tools: Tools::All,
             budget: Budget::default(),

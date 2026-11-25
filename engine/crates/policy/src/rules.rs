@@ -283,11 +283,17 @@ impl Policy {
                 self.files(Tool::Write, p, workspace, d, why)
             }
             Action::Fetch(h) => {
-                if !caps.net.covers(h) {
-                    return Verdict::new(Deny, "the host is not one this agent may reach");
-                }
-                let base = if access == Access::Ask { Ask } else { Allow };
-                let mut v = Verdict::new(base, "the host is one this agent may reach");
+                let mut v = match caps.net.covers(h) {
+                    true if access == Access::Ask => {
+                        Verdict::new(Ask, "this agent asks before each address")
+                    }
+                    true => Verdict::new(Allow, "the host is one this agent may reach"),
+                    // What an address holds reaches whoever answers it.
+                    false if caps.web => Verdict::new(Ask, "it reaches a host on the web"),
+                    false => {
+                        return Verdict::new(Deny, "the host is not one this agent may reach");
+                    }
+                };
                 let hit = self.rules.iter().filter(|r| r.0.tool == Tool::Fetch);
                 strictest(&mut v, hit.filter(|r| r.0.hosts.iter().any(|x| x.covers(h))));
                 v

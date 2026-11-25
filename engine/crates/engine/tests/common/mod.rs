@@ -333,6 +333,7 @@ impl T {
                     read: Reach::of([p("w"), p("tmp")]),
                     write: Reach::of([p("w")]),
                     net: Net::none(),
+                    web: false,
                     run: true,
                     tools: Tools::All,
                     budget: Budget::default(),

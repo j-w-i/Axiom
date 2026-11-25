@@ -845,6 +845,7 @@ impl<S: Stage> Agent<S> {
             "shell" => "asks to run a command",
             "write" | "edit" | "patch" => "asks to change files",
             "read" | "list" | "glob" | "search" => "asks to look at files",
+            "fetch" => "asks to read from the web",
             _ => "asks to use a tool",
         };
         let opened = self

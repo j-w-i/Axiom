@@ -260,6 +260,7 @@ impl Agents {
                 read: Reach::of([workspace.clone(), scratch.clone()]),
                 write,
                 net: Net::none(),
+                web: true,
                 run: true,
                 tools: Tools::All,
                 budget: Budget::default(),

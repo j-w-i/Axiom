@@ -319,6 +319,8 @@ pub struct Caps {
     pub read: Reach,
     pub write: Reach,
     pub net: Net,
+    /// Whether it may ask to fetch from hosts beside these, each address anew.
+    pub web: bool,
     /// Whether it may start processes (always contained).
     pub run: bool,
     pub tools: Tools,
@@ -331,6 +333,7 @@ impl Default for Caps {
             read: Reach::none(),
             write: Reach::none(),
             net: Net::none(),
+            web: false,
             run: false,
             tools: Tools::none(),
             budget: Budget {
@@ -350,6 +353,7 @@ impl Caps {
             read: self.read.meet(&o.read),
             write: self.write.meet(&o.write),
             net: self.net.meet(&o.net),
+            web: self.web && o.web,
             run: self.run && o.run,
             tools: self.tools.meet(&o.tools),
             budget: self.budget.meet(&o.budget),
@@ -360,6 +364,7 @@ impl Caps {
         self.read.within(&o.read)
             && self.write.within(&o.write)
             && self.net.within(&o.net)
+            && (!self.web || o.web)
             && (!self.run || o.run)
             && self.tools.within(&o.tools)
             && self.budget.within(&o.budget)
@@ -404,13 +409,15 @@ mod tests {
             prop::collection::vec(place(), 0..4),
             prop::collection::vec(host(), 0..4),
             any::<bool>(),
+            any::<bool>(),
             prop::option::of(prop::collection::btree_set("[a-c]", 0..3)),
             (limit(), limit(), limit(), limit(), limit()),
         )
-            .prop_map(|(r, w, n, run, t, b)| Caps {
+            .prop_map(|(r, w, n, web, run, t, b)| Caps {
                 read: Reach::of(r),
                 write: Reach::of(w),
                 net: Net::of(n),
+                web,
                 run,
                 tools: t.map_or(Tools::All, Tools::Only),
                 budget: Budget {

@@ -52,6 +52,7 @@ fn t(access: Access) -> T {
             read: Reach::of([p("home/w"), p("tmp")]),
             write: Reach::of([p("home/w")]),
             net: Net::none(),
+            web: false,
             run: true,
             tools: Tools::All,
             budget: Budget::default(),
@@ -499,7 +500,10 @@ async fn real_programs_work_in_the_sandbox() {
 fn what_is_offered() {
     let s = specs();
     let names: Vec<&str> = s.iter().map(|s| s.name).collect();
-    assert_eq!(names, ["read", "write", "edit", "patch", "list", "glob", "search", "shell", "job"]);
+    assert_eq!(
+        names,
+        ["read", "write", "edit", "patch", "list", "glob", "search", "shell", "job", "fetch"]
+    );
     let mut digests: Vec<String> = s.iter().map(schema_digest).collect();
     assert_eq!(digests, specs().iter().map(schema_digest).collect::<Vec<_>>());
     digests.sort();
@@ -760,4 +764,36 @@ async fn who_holds_the_output_open_is_not_waited_for() {
     let o = t.run("shell", json!({ "command": script })).await;
     assert!(o.text.contains("done"), "{}", o.text);
     assert!(now.elapsed() < Duration::from_secs(8), "{:?}", now.elapsed());
+}
+
+/// SI-13: nothing is reached that was not judged, and who may not ask does not.
+#[tokio::test]
+async fn what_may_be_fetched() {
+    use Decision::{Allow, Ask, Deny};
+    let mut t = t(Access::Work);
+    let url = |u: &str| json!({ "url": u });
+    assert_eq!(t.decision("fetch", url("https://docs.rs/x")), Deny, "no web at all");
+    t.site.caps.web = true;
+    assert_eq!(t.decision("fetch", url("https://docs.rs/x")), Ask);
+    let Plan::Ask(ask, step, _) = t.plan("fetch", url("https://DOCS.rs/a/../x?q=é#p")) else {
+        panic!()
+    };
+    // What is asked about is what is sent, to the byte.
+    assert_eq!(ask.subject, "https://docs.rs/x?q=%C3%A9");
+    assert!(ask.scope.contains("docs.rs") && step.changes());
+    for bad in ["http://docs.rs/", "https://127.0.0.1/", "https://localhost/", "https://a@b.io/"] {
+        assert_eq!(t.decision("fetch", url(bad)), Deny, "{bad}");
+    }
+    t.site.caps.net = Net::of([axiom_policy::Host::parse("docs.rs").unwrap()]);
+    assert_eq!(t.decision("fetch", url("https://docs.rs/x")), Allow);
+    assert_eq!(t.decision("fetch", url("https://docs.rs:8443/x")), Ask);
+    assert_eq!(t.decision("fetch", url("https://docs.rs.evil.io/x")), Ask);
+    t.site.access = Access::Ask;
+    assert_eq!(t.decision("fetch", url("https://docs.rs/x")), Ask);
+    t.site.access = Access::Work;
+    let rules = "version=1\n[[rule]]\nid='n'\ntool='fetch'\nhosts=['*.evil.io']\ndecision='deny'\n[[rule]]\nid='y'\ntool='fetch'\nhosts=['crates.io']\ndecision='allow'";
+    t.site.policy = Policy::parse(rules, Source::Person).unwrap();
+    assert_eq!(t.decision("fetch", url("https://docs.rs.evil.io/x")), Deny);
+    assert_eq!(t.decision("fetch", url("https://crates.io/x")), Allow);
+    assert_eq!(t.decision("fetch", url("https://static.crates.io/x")), Ask);
 }
