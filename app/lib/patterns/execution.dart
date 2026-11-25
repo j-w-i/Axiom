@@ -43,8 +43,23 @@ class ExecutionChoice {
 /// The agent's execution as one key: what it runs on, and everything about it when opened. [choices]
 /// begin with the model and the harness, which the key names.
 class ExecutionKey extends StatelessWidget {
-  const ExecutionKey(this.choices, {required this.of, super.key, this.onOpen});
+  const ExecutionKey(
+    this.choices, {
+    required this.of,
+    super.key,
+    this.onOpen,
+    this.words,
+    this.mark,
+    this.panel,
+    this.width = 440,
+  });
   final List<ExecutionChoice> choices;
+
+  /// What it says, and what it opens, in place of [choices].
+  final List<String>? words;
+  final ServiceMark? mark;
+  final Widget Function(BuildContext, VoidCallback close)? panel;
+  final double width;
 
   /// When somebody is about to look.
   final VoidCallback? onOpen;
@@ -55,13 +70,16 @@ class ExecutionKey extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    final words = [
-      choices.first.item?.label ?? 'Choose a ${choices.first.label.toLowerCase()}',
-      for (final ch in choices.skip(1).take(1)) ?ch.item?.label,
-    ];
+    final mark = panel == null ? choices.first.item?.mark : this.mark;
+    final words =
+        this.words ??
+        [
+          choices.first.item?.label ?? 'Choose a ${choices.first.label.toLowerCase()}',
+          for (final ch in choices.skip(1).take(1)) ?ch.item?.label,
+        ];
     return AxPopover(
       key: ValueKey(of),
-      width: 440,
+      width: width,
       anchor: (context, open, toggle) => OnCommand(
         Command.model,
         () {
@@ -91,7 +109,7 @@ class ExecutionKey extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (choices.first.item?.mark case final m?) ...[
+                    if (mark case final m?) ...[
                       AxServiceMark(m, size: 13),
                       const SizedBox(width: 7),
                     ],
@@ -105,7 +123,7 @@ class ExecutionKey extends StatelessWidget {
                             ),
                             if (words.length > 1)
                               TextSpan(
-                                text: '   ${words[1]}',
+                                text: '   ${words.skip(1).join('   ')}',
                                 style: TextStyle(color: c.ink3),
                               ),
                           ],
@@ -129,7 +147,7 @@ class ExecutionKey extends StatelessWidget {
           ),
         ),
       ),
-      panel: (context, close) => ExecutionPanel(choices),
+      panel: panel ?? (context, close) => ExecutionPanel(choices),
     );
   }
 }

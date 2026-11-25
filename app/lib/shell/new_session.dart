@@ -7,7 +7,6 @@ import '../host/host_store.dart';
 import '../host/proto.dart';
 import '../patterns/composer.dart';
 import '../patterns/execution.dart';
-import '../patterns/model_name.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
@@ -18,12 +17,10 @@ import '../ui/prefs.dart';
 import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
+import 'model_picker.dart';
 import 'offers.dart';
 import 'outside.dart';
 import 'start.dart';
-
-/// Among models: goes to where it is said which are offered.
-const _manage = '\u0000';
 
 /// A conversation that has not begun: where it is written, what it runs on and where it works. What
 /// is sent begins it. The same for another agent of a session.
@@ -106,7 +103,7 @@ class _StartPageState extends State<StartPage> {
         ? 'That harness is not on this computer any more.'
         : !adds && !filled(d.folder)
         ? 'Choose a folder to begin.'
-        : !own && other!.needsTrust && !d.withHands && !d.trust
+        : !own && other!.needsTrust && !d.trust
         ? '${other.name} cannot ignore the folder\'s own settings: allow them to begin.'
         : adds && !filled(d.name)
         ? 'Name it to begin.'
@@ -116,9 +113,6 @@ class _StartPageState extends State<StartPage> {
         : missing ??
               (own
                   ? 'Sandboxed: no network, writes only in the folder.'
-                  : d.withHands
-                  ? 'Its model and your sign-in, with Axiom\'s tools and sandbox. You approve each '
-                        'start.'
                   : 'Runs outside Axiom\'s sandbox. You approve each start.');
     final ready = missing == null && !d.busy && (adds || filled(d.say));
     final page = Column(
@@ -175,7 +169,25 @@ class _StartPageState extends State<StartPage> {
                 tone: AxTone.quiet,
                 onPressed: widget.onAccounts,
               ),
-            if (_choices(chosen) case final x when x.isNotEmpty) ExecutionKey(x, of: d),
+            if (sourcesOf(s).isNotEmpty)
+              ModelKey(
+                s,
+                Running(
+                  harness: d.harness,
+                  connection: d.on,
+                  model: d.model.text.trim(),
+                  effort: d.effort,
+                  thinking: d.thinking,
+                  speed: d.speed,
+                ),
+                of: d,
+                onModel: d.choose,
+                onEffort: (v) => d.change(() => d.effort = v),
+                onThinking: (v) => d.change(() => d.thinking = v),
+                onSpeed: (v) => d.change(() => d.speed = v),
+                advanced: [if (PrefsScope.of(context).harnesses) _harness()],
+                onModels: widget.onAccounts,
+              ),
             if (!own || all.isNotEmpty)
               AccessKey(
                 d.access,
@@ -209,7 +221,7 @@ class _StartPageState extends State<StartPage> {
                     AxMenuItem(
                       true,
                       'In a separate copy',
-                      detail: own || d.withHands
+                      detail: own
                           ? 'changes wait until you apply them'
                           : 'it starts there, but is not held to it',
                     ),
@@ -217,7 +229,7 @@ class _StartPageState extends State<StartPage> {
                   value: d.apart,
                   onChanged: (v) => d.change(() => d.apart = v),
                 ),
-              if (own ? d.words.isNotEmpty : !d.withHands) _WordsKey(d),
+              if (!own || d.words.isNotEmpty) _WordsKey(d),
             ],
           ),
         ),
@@ -267,10 +279,9 @@ class _StartPageState extends State<StartPage> {
     );
   }
 
-  /// What it runs on, as where an agent is spoken to.
-  List<ExecutionChoice> _choices(Connection? chosen) {
+  /// Which program it is, for those who choose that themselves.
+  ExecutionChoice _harness() {
     final s = d.store;
-    final own = d.harness == 'axiom', other = d.delegated;
     final here = [
       for (final h in s.harnesses)
         if (h.program != null) h,
@@ -280,129 +291,31 @@ class _StartPageState extends State<StartPage> {
       for (final h in s.harnesses)
         if (h.program == null && const {'claude', 'codex'}.contains(h.id)) h,
     ];
-    final prefs = PrefsScope.of(context);
-    final model = d.model.text.trim(), now = offerKey(d.harness, d.on, model);
-    final offers = arranged(offersOf(s), prefs, chosen: now);
-    final items = offerItems(offers, prefs);
-    final accounts = own ? s.own : s.accountsOf(d.harness);
-    return [
-      if (!own || chosen != null)
-        ExecutionChoice(
-          'Model',
-          [
-            if (!own)
-              AxMenuItem(
-                offerKey(d.harness, d.on, ''),
-                'Default model',
-                mark: markOf(null, null, d.harness),
-              ),
-            ...items,
-            if (items.isNotEmpty)
-              const AxMenuItem(_manage, 'Choose which are offered', icon: AxIcon.list),
-          ],
-          now,
-          (v) {
-            if (v == _manage) return widget.onAccounts();
-            final o = offers.where((o) => o.key == v).firstOrNull;
-            o == null ? d.change(() => d.model.clear()) : d.choose(o);
-          },
-          write: (v) => d.change(() {
-            d.model.text = v;
-            d.fitModel();
-          }),
-          written: model.isEmpty || offers.any((o) => o.key == now)
-              ? null
-              : AxMenuItem(
-                  model,
-                  oneLine(modelName(model), 60),
-                  mark: markOf(own ? chosen?.provider : null, model, d.harness),
-                ),
-        ),
-      if (here.isNotEmpty || missing.isNotEmpty || !own)
-        ExecutionChoice(
-          'Harness',
-          [
-            const AxMenuItem(
-              'axiom',
-              'Axiom',
-              detail: 'your keys and servers',
-              mark: ServiceMark.axiom,
-            ),
-            for (final h in here)
-              AxMenuItem(
-                h.id,
-                oneLine(h.name, 40),
-                detail: h.own ? 'your own' : 'its own sign-in',
-                mark: markOf(null, null, h.id),
-              ),
-            for (final h in missing)
-              AxMenuItem(
-                h.id,
-                oneLine(h.name, 40),
-                mark: markOf(null, null, h.id),
-                enabled: false,
-                why: h.problem != null && !h.problem!.contains('is not in any of')
-                    ? oneLine(h.problem!, 80)
-                    : 'not on this computer',
-              ),
-          ],
-          d.harness,
-          d.runWith,
-        ),
-      if (accounts.isNotEmpty)
-        ExecutionChoice(
-          'Account',
-          [
-            if (!own) const AxMenuItem('', 'Default sign-in'),
-            for (final x in accounts)
-              AxMenuItem(
-                x.id,
-                oneLine(x.name, 60),
-                detail: own ? providerName(x.provider) : null,
-                mark: markOf(x.provider, null),
-              ),
-          ],
-          own ? chosen!.id : d.account ?? '',
-          (v) => d.change(() {
-            if (!own) {
-              d.account = v.isEmpty ? null : v;
-              return;
-            }
-            d.connection = v;
-            d.problem = null;
-            d.model.clear();
-          }),
-        ),
-      if (other?.hands ?? false)
-        ExecutionChoice(
-          'Tools',
-          [
-            const AxMenuItem('axiom', 'Axiom tools', detail: 'sandboxed', mark: ServiceMark.axiom),
-            AxMenuItem(
-              '',
-              'Built-in tools',
-              detail: 'not sandboxed',
-              mark: markOf(null, null, d.harness),
-            ),
-          ],
-          d.hands ? 'axiom' : '',
-          (v) => d.change(() {
-            d.hands = v.isNotEmpty;
-            d.fit();
-          }),
-        ),
-      ...tellable(
-        d.info,
-        efforts: d.efforts,
-        effort: d.effort,
-        thinking: d.thinking,
-        speed: d.speed,
-        program: !own,
-        onEffort: (v) => d.change(() => d.effort = v),
-        onThinking: (v) => d.change(() => d.thinking = v),
-        onSpeed: (v) => d.change(() => d.speed = v),
-      ),
-    ];
+    return ExecutionChoice(
+      'Harness',
+      [
+        const AxMenuItem('axiom', 'Axiom', detail: 'your accounts', mark: ServiceMark.axiom),
+        for (final h in here)
+          AxMenuItem(
+            h.id,
+            oneLine(h.name, 40),
+            detail: h.own ? 'your own' : 'its own sign-in',
+            mark: markOf(null, null, h.id),
+          ),
+        for (final h in missing)
+          AxMenuItem(
+            h.id,
+            oneLine(h.name, 40),
+            mark: markOf(null, null, h.id),
+            enabled: false,
+            why: h.problem != null && !h.problem!.contains('is not in any of')
+                ? oneLine(h.problem!, 80)
+                : 'not on this computer',
+          ),
+      ],
+      d.harness,
+      d.runWith,
+    );
   }
 }
 

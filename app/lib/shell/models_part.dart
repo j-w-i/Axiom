@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../host/host_store.dart';
-import '../patterns/model_name.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
 import '../ui/marks.dart';
@@ -71,13 +70,19 @@ class _ModelsPartState extends State<ModelsPart> {
       final t = Ax.of(context), c = t.colors;
       final p = PrefsScope.of(context), all = PrefsScope.maybeOf(context);
       final words = _words.text.toLowerCase().split(' ').where((w) => w.isNotEmpty).toList();
-      final offers = [...arranged(offersOf(s), p.copyWith(hidden: const []))];
+      final offers = [
+        for (final x in sourcesOf(s))
+          for (final o in x.models)
+            if (!o.byDefault) (x, o),
+      ];
+      offers.sort((a, b) {
+        int rank(Offer o) => p.favourites.contains(o.key) ? 0 : 1;
+        return rank(a.$2).compareTo(rank(b.$2));
+      });
       final fit = [
-        for (final o in offers)
-          if (words.every(
-            '${modelName(o.model.id, o.model.name)} ${o.model.id} ${o.of}'.toLowerCase().contains,
-          ))
-            o,
+        for (final (x, o) in offers)
+          if (words.every('${o.name} ${o.model.id} ${x.name} ${x.note}'.toLowerCase().contains))
+            (x, o),
       ];
       final shown = fit.take(ModelsPart.most).toList();
       return Column(
@@ -111,7 +116,7 @@ class _ModelsPartState extends State<ModelsPart> {
           ],
           if (shown.isNotEmpty)
             Card([
-              for (final o in shown)
+              for (final (x, o) in shown)
                 Row(
                   key: ValueKey(o.key),
                   children: [
@@ -125,17 +130,22 @@ class _ModelsPartState extends State<ModelsPart> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            oneLine(modelName(o.model.id, o.model.name), 80),
+                            oneLine(o.name, 80),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: t.type.uiMedium.ink(p.hidden.contains(o.key) ? c.ink3 : c.ink1),
                           ),
                           Text(
                             [
-                              oneLine(o.of, 40),
+                              oneLine(
+                                x.connection != null && x.harness != 'axiom'
+                                    ? '${x.name}, ${x.note}'
+                                    : x.name,
+                                40,
+                              ),
                               oneLine(o.model.id, 60),
-                              if (o.model.context case final n?) contextName(n),
-                              switch (o.at) {
+                              if (o.model.context case final n?) '${contextName(n)} context',
+                              switch (x.at) {
                                 null => null,
                                 0 => 'as documented',
                                 final at => 'listed ${_day(at)}',
@@ -150,7 +160,7 @@ class _ModelsPartState extends State<ModelsPart> {
                     ),
                     const SizedBox(width: 10),
                     AxSelect<_How>(
-                      label: oneLine(modelName(o.model.id, o.model.name), 60),
+                      label: oneLine(o.name, 60),
                       named: false,
                       items: const [
                         AxMenuItem(_How.favourite, 'Favourite', detail: 'comes first'),

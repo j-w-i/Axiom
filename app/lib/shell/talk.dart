@@ -8,18 +8,17 @@ import '../host/session_model.dart';
 import '../patterns/composer.dart';
 import '../patterns/context_gauge.dart';
 import '../patterns/execution.dart';
-import '../patterns/model_name.dart';
 import '../patterns/models.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
-import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/prefs.dart';
 import '../ui/status.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'model_picker.dart';
 import 'offers.dart';
 import 'outside.dart';
 import 'plan.dart';
@@ -62,10 +61,6 @@ class Talk extends StatefulWidget {
   @override
   State<Talk> createState() => _TalkState();
 }
-
-const _anew =
-    'The other account does not know this conversation: it begins anew there. Nothing is sent from '
-    'one account to the other.';
 
 class _TalkState extends State<Talk> {
   /// Answered from here, until the host says it is closed: not answered twice.
@@ -194,167 +189,81 @@ class _TalkState extends State<Talk> {
     );
   }
 
-  List<ExecutionChoice> _choices(HostStore s, AgentModel a) {
-    final x = a.execution;
-    final other = x.harness != 'axiom';
-    final program = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull : null;
-    final hands = x.environment == axiomTools;
-    final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
-    final prefs = PrefsScope.of(context);
-    final now = offerKey(x.harness, x.connection, x.model ?? '');
-    final offers = arranged(offersOf(s, harness: x.harness), prefs, chosen: now);
-    final has = offers.any((o) => o.key == now);
-    final info = infoOf(s, x.harness, x.connection, x.model ?? '');
-    final efforts =
-        info?.efforts ?? ((program?.effort ?? false) ? const ['low', 'medium', 'high'] : const []);
-    Execution with_({
-      String? model,
-      String? connection,
-      String? provider,
-      bool? axioms,
-      String? effort,
-      (bool?,)? thinking,
-      String? speed,
-    }) => Execution(
+  Widget _model(BuildContext context, HostStore s, AgentModel a) {
+    final x = a.execution, other = x.harness != 'axiom';
+    Execution with_({Offer? to, String? effort, (bool?,)? thinking, String? speed}) => Execution(
       harness: x.harness,
-      provider: provider ?? x.provider,
-      model: model ?? x.model,
-      connection: connection == null
-          ? x.connection
-          : connection.isEmpty
-          ? null
-          : connection,
-      effort: effort == null
-          ? x.effort
-          : effort.isEmpty
-          ? null
-          : effort,
-      environment: axioms == null
-          ? x.environment
-          : axioms
-          ? axiomTools
-          : null,
+      provider: to == null ? x.provider : to.provider,
+      model: to == null ? x.model : (to.byDefault ? null : to.model.id),
+      connection: to == null ? x.connection : to.connection,
+      effort: effort == null ? x.effort : (effort.isEmpty ? null : effort),
+      environment: x.environment,
       thinking: thinking == null ? x.thinking : thinking.$1,
       speed: speed == null ? x.speed : (speed.isEmpty ? null : speed),
     );
-
-    /// What cannot be said to the new model is not said to it.
-    Execution to(Offer o) => with_(
-      model: o.model.id,
-      connection: o.connection ?? '',
-      provider: o.provider,
-      effort: o.model.efforts.contains(x.effort) ? null : '',
-      thinking: o.model.thinking ? null : (null,),
-      speed: o.model.speeds.contains(x.speed) ? null : '',
-    );
-    void set({Execution? execution}) =>
-        unawaited(_do(() => s.setAgent(widget.session.id, a.id, execution: execution)));
-    return [
-      ExecutionChoice(
-        'Model',
-        [
-          if (other && x.model == null)
-            AxMenuItem(now, 'Default model', mark: markOf(null, null, x.harness)),
-          if (!has && x.model != null)
-            AxMenuItem(
-              now,
-              oneLine(modelName(x.model!), 60),
-              mark: markOf(x.provider, x.model, x.harness),
-            ),
-          ...offerItems(offers, prefs),
-        ],
-        now,
-        (v) {
-          final o = offers.where((o) => o.key == v).firstOrNull;
-          if (o == null) return;
-          set(execution: to(o));
-          final all = PrefsScope.maybeOf(context);
-          all?.value = all.value.using(v);
-        },
-        cost: (v) {
-          final o = offers.where((o) => o.key == v).firstOrNull;
-          return a.items.isEmpty
-              ? null
-              : other && o?.connection != x.connection
-              ? _anew
-              : 'The whole conversation has to be read again, none of it from the cache. Reasoning '
-                    'this model kept is not carried over.';
-        },
-      ),
-      ...tellable(
-        info,
-        efforts: efforts,
+    Future<bool> set(Execution e) => _do(() => s.setAgent(widget.session.id, a.id, execution: e));
+    return ModelKey(
+      s,
+      Running(
+        harness: x.harness,
+        connection: x.connection,
+        model: x.model ?? '',
         effort: x.effort ?? '',
         thinking: x.thinking,
         speed: x.speed ?? '',
-        program: other,
-        onEffort: (v) => set(execution: with_(effort: v)),
-        onThinking: (v) => set(execution: with_(thinking: (v,))),
-        onSpeed: (v) => set(execution: with_(speed: v)),
       ),
-      ExecutionChoice(
-        'Harness',
-        [
-          AxMenuItem(
-            x.harness,
-            oneLine(s.harnessName(x.harness), 40),
-            mark: markOf(null, null, x.harness),
+      of: a.id,
+      keeps: true,
+      onOpen: _look,
+      onModel: (o) {
+        // What cannot be said to the new one is not said to it.
+        final m = o.model;
+        unawaited(
+          set(
+            with_(
+              to: o,
+              effort: m.efforts.contains(x.effort) ? null : '',
+              thinking: m.thinking ? null : (null,),
+              speed: m.speeds.contains(x.speed) ? null : '',
+            ),
           ),
-        ],
-        x.harness,
-        (_) {},
-      ),
-      ExecutionChoice(
-        'Account',
-        [
-          if (other) const AxMenuItem('', 'Default sign-in'),
-          if (connection == null && x.connection != null)
-            AxMenuItem(x.connection!, 'Removed', enabled: false, why: 'add it again'),
-          for (final c in other ? s.accountsOf(x.harness) : s.own)
-            AxMenuItem(
-              c.id,
-              oneLine(c.name, 60),
-              detail: providerName(c.provider),
-              mark: markOf(c.provider, null),
-              enabled: other || c.provider == x.provider,
-              why: other || c.provider == x.provider
-                  ? null
-                  : 'another provider: choose its model first',
-            ),
-        ],
-        x.connection ?? '',
-        (v) => set(execution: with_(connection: v)),
-        // What was said stays with the account it was said on.
-        cost: (_) => !other || a.items.isEmpty ? null : _anew,
-      ),
-      if (program?.hands ?? hands)
-        ExecutionChoice(
-          'Tools',
-          [
-            const AxMenuItem('axiom', 'Axiom tools', detail: 'sandboxed', mark: ServiceMark.axiom),
-            AxMenuItem(
-              '',
-              'Built-in tools',
-              detail: 'not sandboxed',
-              mark: markOf(null, null, x.harness),
-              // It would not be refused only when it is started.
-              enabled: !hands || (program?.access.contains(a.access) ?? false),
-              why: 'it has no mode for this access',
-            ),
-          ],
-          hands ? 'axiom' : '',
-          (v) => set(execution: with_(axioms: v.isNotEmpty)),
-          cost: (v) => v.isNotEmpty
-              ? null
-              : '${s.harnessName(x.harness)} then works with its own tools, outside Axiom\'s sandbox '
-                    'and without Axiom\'s questions.',
-        ),
-    ];
+        );
+        final all = PrefsScope.maybeOf(context);
+        all?.value = all.value.using(o.key);
+      },
+      costs: (o) => a.items.isEmpty
+          ? null
+          : other && o.connection != x.connection
+          // What was said stays with the account it was said on.
+          ? 'The other account does not know this conversation: it begins anew there. Nothing is '
+                'sent from one account to the other.'
+          : 'The whole conversation has to be read again, none of it from the cache. Reasoning '
+                'this model kept is not carried over.',
+      onEffort: (v) => unawaited(set(with_(effort: v))),
+      onThinking: (v) => unawaited(set(with_(thinking: (v,)))),
+      onSpeed: (v) => unawaited(set(with_(speed: v))),
+      advanced: [
+        if (PrefsScope.of(context).harnesses)
+          ExecutionChoice(
+            'Harness',
+            [
+              AxMenuItem(
+                x.harness,
+                oneLine(s.harnessName(x.harness), 40),
+                detail: 'an agent keeps its harness',
+                mark: markOf(null, null, x.harness),
+              ),
+            ],
+            x.harness,
+            (_) {},
+          ),
+      ],
+    );
   }
 
   Widget _access(HostStore s, AgentModel a) {
     final x = a.execution;
-    final program = x.harness == 'axiom' || x.environment == axiomTools
+    final program = x.harness == 'axiom'
         ? null
         : s.harnesses.where((h) => h.id == x.harness).firstOrNull;
     return AccessKey(
@@ -515,7 +424,7 @@ class _TalkState extends State<Talk> {
                 if (branch != null)
                   _branchFiles(context, branch)
                 else ...[
-                  ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
+                  _model(context, s, a),
                   _access(s, a),
                   if (a.context != null)
                     ContextGauge(

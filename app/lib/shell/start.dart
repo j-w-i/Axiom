@@ -285,16 +285,12 @@ class StartDraft extends ChangeNotifier {
   /// The folder's own settings for that may take effect.
   bool trust = false;
 
-  /// Of a program: Axiom's tools in place of its own, where it can be told so.
-  bool hands = true;
-  bool get withHands => hands && (delegated?.hands ?? false);
-
   /// What it may be, as it is set up now.
-  List<Access> get can => withHands ? Access.values : delegated?.access ?? Access.values;
+  List<Access> get can => delegated?.access ?? Access.values;
 
-  /// It is to hand in a plan first. Of Axiom's own, or with Axiom's tools.
+  /// It is to hand in a plan first. Of Axiom's own.
   bool plan = false;
-  bool get plans => harness == 'axiom' || withHands;
+  bool get plans => harness == 'axiom';
 
   void fit() {
     plan = plan && plans;
@@ -404,7 +400,6 @@ class StartDraft extends ChangeNotifier {
     } else {
       if (!store.harnesses.any((h) => h.id == x.harness && h.program != null)) return;
       harness = x.harness;
-      hands = x.environment == axiomTools;
       if (store.accountsOf(harness).any((c) => c.id == x.connection)) account = x.connection;
     }
     model.text = x.model ?? '';
@@ -483,7 +478,6 @@ class StartDraft extends ChangeNotifier {
         model: written.isEmpty ? null : written,
         connection: other ? account : c!.id,
         effort: efforts.contains(effort) ? effort : null,
-        environment: withHands ? axiomTools : null,
         thinking: (info?.thinking ?? false) ? thinking : null,
         speed: (info?.speeds.contains(speed) ?? false) ? speed : null,
       );

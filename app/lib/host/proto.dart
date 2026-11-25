@@ -316,9 +316,6 @@ class Waits {
   final int at;
 }
 
-/// The environment in which what an agent does is done by Axiom, whatever its harness.
-const axiomTools = 'axiom';
-
 /// A program of the person's own that the host can drive.
 class HarnessInfo {
   const HarnessInfo(
@@ -329,7 +326,6 @@ class HarnessInfo {
     this.needsTrust = false,
     this.access = const [],
     this.accounts,
-    this.hands = false,
     this.effort = false,
     this.own = false,
   });
@@ -340,7 +336,6 @@ class HarnessInfo {
       problem = j['problem'] as String?,
       needsTrust = j['needs_trust'] as bool? ?? true,
       accounts = j['accounts'] as String?,
-      hands = j['hands'] as bool? ?? false,
       effort = j['effort'] as bool? ?? false,
       own = j['own'] as bool? ?? false,
       access = [
@@ -357,9 +352,6 @@ class HarnessInfo {
 
   /// It can be told how hard to try.
   final bool effort;
-
-  /// Axiom's tools can stand in place of its own: the environment [axiomTools].
-  final bool hands;
 
   /// What an account of it beside the first is called as a provider, if there can be any.
   final String? accounts;

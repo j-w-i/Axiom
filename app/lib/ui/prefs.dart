@@ -15,6 +15,7 @@ class Prefs {
     this.density = AxDensity.regular,
     this.code = '',
     this.enterSends = true,
+    this.harnesses = false,
     this.favourites = const [],
     this.hidden = const [],
     this.used = const [],
@@ -40,6 +41,7 @@ class Prefs {
       density: of(AxDensity.values, j['density'], AxDensity.regular),
       code: j['code'] is String ? family(j['code'] as String) : '',
       enterSends: j['enterSends'] is bool ? j['enterSends'] as bool : true,
+      harnesses: j['harnesses'] is bool && j['harnesses'] as bool,
       favourites: names(j['favourites'], most),
       hidden: names(j['hidden'], most),
       used: names(j['used'], lately),
@@ -70,6 +72,9 @@ class Prefs {
   /// sends.
   final bool enterSends;
 
+  /// The harness is a choice of its own, beside the model.
+  final bool harnesses;
+
   /// Models, by the names they are kept by: those that come first, those that are not offered, and
   /// those that were chosen last.
   final List<String> favourites, hidden, used;
@@ -93,6 +98,7 @@ class Prefs {
     AxDensity? density,
     String? code,
     bool? enterSends,
+    bool? harnesses,
     List<String>? favourites,
     List<String>? hidden,
     List<String>? used,
@@ -103,6 +109,7 @@ class Prefs {
     density: density ?? this.density,
     code: code ?? this.code,
     enterSends: enterSends ?? this.enterSends,
+    harnesses: harnesses ?? this.harnesses,
     favourites: favourites ?? this.favourites,
     hidden: hidden ?? this.hidden,
     used: used ?? this.used,
@@ -121,6 +128,7 @@ class Prefs {
     'density': density.name,
     'code': code,
     'enterSends': enterSends,
+    'harnesses': harnesses,
     'favourites': favourites,
     'hidden': hidden,
     'used': used,
@@ -135,6 +143,7 @@ class Prefs {
       other.density == density &&
       other.code == code &&
       other.enterSends == enterSends &&
+      other.harnesses == harnesses &&
       listEquals(other.favourites, favourites) &&
       listEquals(other.hidden, hidden) &&
       listEquals(other.used, used);
@@ -146,6 +155,7 @@ class Prefs {
     density,
     code,
     enterSends,
+    harnesses,
     Object.hashAll(favourites),
     Object.hashAll(hidden),
     Object.hashAll(used),

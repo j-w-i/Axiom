@@ -118,6 +118,20 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
       ]),
+      const SizedBox(height: 24),
+      Semantics(header: true, child: Text('Advanced', style: t.type.title)),
+      const SizedBox(height: 12),
+      Card([
+        row(
+          'Choose the harness',
+          'Which program runs an agent, beside its model. Otherwise it follows from the model.',
+          AxSwitch(
+            label: 'Choose the harness',
+            value: p.harnesses,
+            onChanged: (v) => set(p.copyWith(harnesses: v)),
+          ),
+        ),
+      ]),
       if (limits case final f?) ...[const SizedBox(height: 18), _Limits(f)],
     ]);
   }

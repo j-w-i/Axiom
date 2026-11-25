@@ -12,6 +12,7 @@ import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/shell/changes.dart';
 import 'package:axiom/shell/drafts.dart';
+import 'package:axiom/shell/model_picker.dart';
 import 'package:axiom/shell/offers.dart';
 import 'package:axiom/shell/outside.dart';
 import 'package:axiom/shell/shell.dart';
@@ -23,6 +24,7 @@ import 'package:axiom/ui/editable.dart';
 import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/prefs.dart';
+import 'package:axiom/ui/press.dart';
 import 'package:axiom/ui/status.dart';
 import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
@@ -350,18 +352,29 @@ void main() {
     await settled(t);
   }
 
-  /// Opens a part of what it runs on.
+  Future<void> leave(WidgetTester t) async {
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settled(t);
+  }
+
+  /// Opens what it runs on; of the advanced, the one part.
   Future<void> part(WidgetTester t, String label) async {
-    if (find.byType(ExecutionPanel).evaluate().isEmpty) {
+    if (find.byType(ModelPicker).evaluate().isEmpty) {
       await press(t, find.byType(ExecutionKey));
     }
+    if (label != 'Harness') return;
     final head = find.bySemanticsLabel(RegExp('^$label: '));
     if (t.getSemantics(head).flagsCollection.isExpanded != Tristate.isTrue) await press(t, head);
   }
 
-  Future<void> leave(WidgetTester t) async {
-    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+  /// A model that is in no list.
+  Future<void> named(WidgetTester t, String model) async {
+    await part(t, 'Model');
+    await t.enterText(field('Search models'), model);
     await settled(t);
+    await t.pump(AxMotion.settle);
+    await press(t, find.bySemanticsLabel('Use $model'));
+    await leave(t);
   }
 
   /// Chooses a part of what it runs on.
@@ -376,12 +389,15 @@ void main() {
     SessionModel? session,
     bool accounts = true,
     Size size = const Size(1100, 760),
+    bool harnesses = false,
   }) async {
     final s = Asked()
       ..current = session
       ..connections = accounts ? const [key, Connection('c2', 'Here', 'lm-studio')] : const [];
     addTearDown(s.dispose);
-    await mount(t, Shell(s), size: size, dpr: 1);
+    final prefs = ValueNotifier(Prefs(harnesses: harnesses));
+    addTearDown(prefs.dispose);
+    await mount(t, PrefsScope(prefs, child: Shell(s)), size: size, dpr: 1);
     return s;
   }
 
@@ -506,9 +522,7 @@ void main() {
     await settled(t);
     await t.enterText(field('Task'), 'x');
     await folder(t, '/w');
-    await part(t, 'Model');
-    await t.enterText(field('Model name'), 'm');
-    await leave(t);
+    await named(t, 'zz-own');
     s.failure = const Failed(1, 'bad_request', '/w: not a folder');
     await t.ensureVisible(find.bySemanticsLabel('Start session'));
     await t.tap(find.bySemanticsLabel('Start session'));
@@ -630,12 +644,11 @@ void main() {
     await settled(t);
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
-    await t.tap(find.bySemanticsLabel('Model: Opus 5.5'));
-    await settled(t);
     await t.tap(find.bySemanticsLabel('GPT-5.6').last);
     await settled(t);
     expect(s.calls, isEmpty);
     expect(find.textContaining('has to be read again'), findsOneWidget);
+    await t.pump(AxMotion.settle);
     await t.tap(find.text('Change to GPT-5.6'));
     await settled(t);
     expect(s.calls, [
@@ -1144,7 +1157,7 @@ void main() {
   });
 
   testWidgets('a session can run with a program of the person\'s own', (t) async {
-    final s = await shell(t, accounts: false);
+    final s = await shell(t, accounts: false, harnesses: true);
     s.harnesses = harnesses;
     await press(t, find.bySemanticsLabel('New session').first);
     expect(find.text('Add an account or server'), findsOneWidget);
@@ -1180,83 +1193,6 @@ void main() {
     'claude-code',
     signIn: "CLAUDE_CONFIG_DIR='/data/accounts/c9' claude auth login",
   );
-
-  const handy = [
-    HarnessInfo(
-      'claude',
-      'Claude Code',
-      program: '/usr/local/bin/claude',
-      access: [Access.read, Access.work],
-      hands: true,
-    ),
-  ];
-
-  testWidgets('a program can work with Axiom\'s tools in place of its own', (t) async {
-    final s = await shell(t);
-    s.harnesses = handy;
-    await press(t, find.bySemanticsLabel('New session').first);
-    await runs(t, 'Harness', 'Claude Code');
-    // Contained by Axiom unless its person says otherwise, and with every access.
-    await part(t, 'Tools');
-    expect(find.bySemanticsLabel('Tools: Axiom tools'), findsOneWidget);
-    await snap(t, 'start-hands');
-    await leave(t);
-    expect(find.bySemanticsLabel('Access: Ask first'), findsOneWidget);
-    final settings = find.bySemanticsLabel(RegExp('^Folder settings'));
-    expect(settings, findsNothing, reason: 'the folder\'s settings have no say');
-    await runs(t, 'Tools', 'Built-in tools');
-    expect(find.bySemanticsLabel('Access: Read only'), findsOneWidget, reason: 'it cannot ask');
-    expect(settings, findsOneWidget);
-    await runs(t, 'Tools', 'Axiom tools');
-    await t.enterText(field('Task'), 'Do it.');
-    await folder(t, '/w');
-    await settled(t);
-    s.calls.clear();
-    await press(t, find.bySemanticsLabel('Start session'));
-    expect(s.calls.where((c) => c.first == 'add').single, [
-      'add',
-      's_new',
-      'Lead',
-      ('claude', false),
-      'axiom',
-      null,
-      Access.read,
-    ]);
-  });
-
-  testWidgets('giving a program its own tools says what that means', (t) async {
-    final s = await shell(t, session: working());
-    s.harnesses = handy;
-    void set(Access access) {
-      const x = Execution(harness: 'claude', environment: 'axiom');
-      s.current!.apply([
-        Event(s.current!.seq + 1, 9, const AgentStateChanged('a', AgentPhase.done)),
-        Event(s.current!.seq + 2, 9, AgentChanged('a', x, access)),
-      ]);
-      s.notifyListeners();
-    }
-
-    set(Access.ask);
-    await settled(t);
-    await t.tap(find.byType(ExecutionKey));
-    await settled(t);
-    await press(t, find.bySemanticsLabel('Tools: Axiom tools'));
-    expect(find.text('it has no mode for this access'), findsOneWidget);
-    await t.sendKeyEvent(LogicalKeyboardKey.escape);
-    await settled(t);
-    set(Access.work);
-    await settled(t);
-    await t.tap(find.byType(ExecutionKey));
-    await settled(t);
-    await press(t, find.bySemanticsLabel('Tools: Axiom tools'));
-    await press(t, find.bySemanticsLabel('Built-in tools').last);
-    expect(find.textContaining('outside Axiom\'s sandbox and without'), findsOneWidget);
-    await t.pump(AxMotion.settle);
-    await press(t, find.text('Change to Built-in tools'));
-    expect(s.calls, [
-      ['set', 's', 'a', null, null, null],
-    ]);
-  });
 
   group('programs', () {
     Future<Asked> page(WidgetTester t, {List<ProgramInfo> said = const []}) async {
@@ -1412,17 +1348,12 @@ void main() {
     await press(t, find.text('Keep'));
     // It is one to choose for its program, and not for Axiom's own loop.
     await press(t, find.bySemanticsLabel('New session').first);
-    await part(t, 'Account');
-    expect(find.bySemanticsLabel('Account: Mine'), findsOneWidget);
-    expect(find.bySemanticsLabel('Work'), findsNothing);
+    await part(t, 'Model');
+    // Of the program twice, for each of its accounts, and of the other program.
+    expect(find.bySemanticsLabel('Default model'), findsNWidgets(3));
+    expect(find.text('Claude Code   Work', findRichText: true), findsOneWidget);
+    await press(t, find.bySemanticsLabel('Default model').at(1));
     await leave(t);
-    await runs(t, 'Harness', 'Goose');
-    await part(t, 'Harness');
-    expect(find.bySemanticsLabel(RegExp('^Account: ')), findsNothing, reason: 'it has one account');
-    await runs(t, 'Harness', 'Claude Code');
-    await part(t, 'Account');
-    expect(find.bySemanticsLabel('Account: Default sign-in'), findsOneWidget);
-    await runs(t, 'Account', 'Work');
     await t.enterText(field('Task'), 'Do it.');
     await folder(t, '/w');
     await settled(t);
@@ -1454,18 +1385,17 @@ void main() {
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
     expect(s.calls, isEmpty, reason: 'it lists no models');
-    await press(t, find.bySemanticsLabel('Account: Work'));
-    await press(t, find.bySemanticsLabel('Default sign-in').last);
+    await press(t, find.bySemanticsLabel('Default model').first);
     expect(find.textContaining('begins anew there'), findsOneWidget);
     await t.pump(AxMotion.settle);
-    await press(t, find.text('Change to Default sign-in'));
+    await press(t, find.text('Change to Default model'));
     expect(s.calls, [
       ['set', 's', 'a', null, null, null],
     ]);
   });
 
   testWidgets('what cannot ignore a folder\'s settings needs a yes to them', (t) async {
-    final s = await shell(t);
+    final s = await shell(t, harnesses: true);
     s.harnesses = harnesses;
     await press(t, find.bySemanticsLabel('New session').first);
     await t.enterText(field('Task'), 'Do it.');
@@ -1482,10 +1412,8 @@ void main() {
       await leave(t);
     }
 
-    await part(t, 'Model');
-    await t.enterText(field('Model name'), 'gpt-5.6');
-    await leave(t);
-    expect(find.bySemanticsLabel(RegExp('^Runs on GPT-5.6, Goose')), findsOneWidget);
+    await named(t, 'own-model');
+    expect(find.bySemanticsLabel(RegExp('^Runs on own-model, Goose')), findsOneWidget);
     await allow();
     expect(start().onPressed, isNotNull);
     // Another has not been said yes for.
@@ -1506,7 +1434,7 @@ void main() {
   });
 
   testWidgets('another agent joins a session', (t) async {
-    final s = await shell(t, session: working());
+    final s = await shell(t, session: working(), harnesses: true);
     s
       ..harnesses = harnesses
       ..words = const {
@@ -1555,7 +1483,6 @@ void main() {
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
     expect(find.text('Default model'), findsWidgets);
-    expect(find.text('Default sign-in'), findsWidgets);
     expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
   });
 
@@ -1636,8 +1563,7 @@ void main() {
     ];
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
-    await press(t, find.bySemanticsLabel('Effort: Default effort'));
-    await press(t, find.bySemanticsLabel('High effort').last);
+    await press(t, find.bySemanticsLabel('High').last);
     expect(s.calls.last, ['set', 's', 'a', 'claude-opus-5-5', 'c1', 'high', null]);
     // A new one, and with a model that takes none.
     await t.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -1648,7 +1574,7 @@ void main() {
     // As was worked last, except how much it may do.
     expect(find.bySemanticsLabel(RegExp('^Runs on Opus 5.5')), findsOneWidget);
     expect(find.bySemanticsLabel('Access: Ask first'), findsOneWidget);
-    await runs(t, 'Effort', 'Low effort');
+    await runs(t, 'Effort', 'Low');
     await press(t, find.bySemanticsLabel('Start session'));
     expect(s.calls.firstWhere((c) => c.first == 'add'), contains('effort low'));
     await press(t, find.bySemanticsLabel('New session').first);
@@ -2341,24 +2267,30 @@ void main() {
       final (s, prefs) = await begin(t);
       await press(t, find.bySemanticsLabel('New session').first);
       await part(t, 'Model');
-      expect(find.bySemanticsLabel('Opus 5.5'), findsWidgets);
-      expect(find.bySemanticsLabel('A: B'), findsWidgets);
-      expect(find.bySemanticsLabel('Opus'), findsWidgets, reason: 'of the program');
+      for (final there in ['Opus 5.5', 'A: B', 'Opus']) {
+        expect(find.bySemanticsLabel(there), findsWidgets, reason: there);
+      }
       for (final gone in ['gone', 'GPT-gone', 'gpt-gone']) {
         expect(find.bySemanticsLabel(gone), findsNothing);
       }
-      // Whose it is, and how much it takes.
-      expect(find.text('Mine · 1M context'), findsOneWidget);
-      expect(find.text('Claude Code'), findsWidgets);
+      // Whose they are, and how much one takes; nothing to write a name into beside the search.
+      expect(find.text('Mine   Anthropic API', findRichText: true), findsOneWidget);
+      expect(find.text('Claude Code', findRichText: true), findsWidgets);
+      expect(find.text('1M'), findsOneWidget);
+      expect(find.byType(AxField), findsNothing);
+      expect(find.bySemanticsLabel(RegExp('^Harness: ')), findsNothing, reason: 'it follows');
       await snap(t, 'models-offered');
+      await t.enterText(field('Search models'), 'work b');
+      await settled(t);
+      expect(find.bySemanticsLabel('Opus 5.5'), findsNothing);
+      await t.pump(AxMotion.settle);
       await press(t, find.bySemanticsLabel('A: B').last);
-      await leave(t);
-      expect(find.bySemanticsLabel(RegExp('Runs on A: B, Axiom')), findsOneWidget);
       // As its provider calls it.
-      await part(t, 'Effort');
-      expect(find.bySemanticsLabel('No reasoning'), findsOneWidget);
-      await press(t, find.bySemanticsLabel('Maximum effort').last);
+      expect(find.bySemanticsLabel('None'), findsOneWidget);
+      await press(t, find.bySemanticsLabel('Max').last);
+      await snap(t, 'models-chosen');
       await leave(t);
+      expect(find.bySemanticsLabel(RegExp('Runs on A: B, Work, Max')), findsOneWidget);
       await t.enterText(field('Task'), 'go');
       await folder(t, '/w');
       await press(t, find.bySemanticsLabel('Start session'));
@@ -2379,17 +2311,18 @@ void main() {
       await press(t, find.bySemanticsLabel('New session').first);
       await part(t, 'Model');
       await press(t, find.bySemanticsLabel('Opus').last);
-      await leave(t);
-      expect(find.bySemanticsLabel(RegExp('Runs on Opus, Claude Code')), findsOneWidget);
-      await part(t, 'Effort');
-      expect(find.bySemanticsLabel('Low effort'), findsNothing, reason: 'it does not say so');
-      await leave(t);
+      expect(find.bySemanticsLabel('Low'), findsNothing, reason: 'it does not say so');
       // Fast has a price, which is said before it is chosen.
-      await part(t, 'Speed');
       await press(t, find.bySemanticsLabel('Fast').last);
       expect(find.textContaining('usage credits'), findsOneWidget);
+      await snap(t, 'models-asked');
+      await t.pump(AxMotion.settle);
+      await press(t, find.text('Keep it'));
+      await press(t, find.bySemanticsLabel('Fast').last);
+      await t.pump(AxMotion.settle);
       await press(t, find.text('Change to Fast'));
       await leave(t);
+      expect(find.bySemanticsLabel(RegExp('Runs on Opus, Claude Code, Fast')), findsOneWidget);
       await t.enterText(field('Task'), 'go');
       await folder(t, '/w');
       await press(t, find.bySemanticsLabel('Start session'));
@@ -2399,9 +2332,12 @@ void main() {
     testWidgets('what one can be told is told it, and not another', (t) async {
       final (s, _) = await begin(t);
       await press(t, find.bySemanticsLabel('New session').first);
-      await runs(t, 'Model', 'Opus 5.5');
-      await runs(t, 'Effort', 'Extra high effort');
-      await runs(t, 'Thinking', 'Does not think');
+      await part(t, 'Model');
+      await press(t, find.bySemanticsLabel('Opus 5.5').last);
+      await press(t, find.bySemanticsLabel('X-high').last);
+      await press(t, find.bySemanticsLabel('Off').last);
+      await snap(t, 'models-told');
+      await leave(t);
       await t.enterText(field('Task'), 'go');
       await folder(t, '/w');
       await press(t, find.bySemanticsLabel('Start session'));
@@ -2411,10 +2347,11 @@ void main() {
       );
       s.calls.clear();
       await press(t, find.bySemanticsLabel('New session').first);
-      await runs(t, 'Model', 'Opus 5.5');
-      await runs(t, 'Effort', 'Extra high effort');
-      await runs(t, 'Model', 'claude-old');
-      expect(find.bySemanticsLabel(RegExp('^Effort: ')), findsNothing);
+      await part(t, 'Model');
+      await press(t, find.bySemanticsLabel('X-high').last);
+      await press(t, find.bySemanticsLabel('claude-old').last);
+      expect(find.bySemanticsLabel('Effort'), findsNothing);
+      await leave(t);
       await t.enterText(field('Task'), 'again');
       await settled(t);
       await press(t, find.bySemanticsLabel('Start session'));
@@ -2424,54 +2361,90 @@ void main() {
 
     testWidgets('one that is in no list is asked about, and nobody else is', (t) async {
       final (s, _) = await begin(t);
-      s.told = const ModelInfo('mine', efforts: ['high']);
+      s.told = const ModelInfo('zz-mine', efforts: ['high']);
       await press(t, find.bySemanticsLabel('New session').first);
-      await part(t, 'Model');
-      await t.enterText(field('Model name'), 'mine');
+      await named(t, 'zz-mine');
       await t.pump(const Duration(seconds: 1));
       await settled(t);
-      expect(s.calls.last, ['about', 'c1', 'mine']);
-      expect(find.bySemanticsLabel(RegExp('^Effort: ')), findsOneWidget);
+      expect(s.calls.last, ['about', 'c1', 'zz-mine']);
+      await part(t, 'Model');
+      expect(find.bySemanticsLabel('High'), findsOneWidget);
     });
 
     testWidgets('an agent goes on with one of another account', (t) async {
       final (s, prefs) = await begin(t, session: working());
+      s.current!.apply([
+        Event(
+          s.current!.seq + 1,
+          9,
+          const AgentChanged(
+            'a',
+            Execution(
+              harness: 'axiom',
+              provider: 'anthropic',
+              model: 'claude-opus-5-5',
+              connection: 'c1',
+              effort: 'xhigh',
+              thinking: false,
+              speed: 'fast',
+            ),
+            Access.ask,
+          ),
+        ),
+      ]);
+      await settled(t);
       await part(t, 'Model');
       expect(find.bySemanticsLabel('Opus'), findsNothing, reason: 'it keeps its harness');
       await press(t, find.bySemanticsLabel('A: B').last);
       expect(find.textContaining('read again'), findsOneWidget);
+      await t.pump(AxMotion.settle);
       await press(t, find.text('Change to A: B'));
+      // What cannot be said to the new one is not said to it.
       expect(s.calls.last, ['set', 's', 'a', 'a/b', 'c7', null]);
       expect(prefs.value.used, ['axiom\nc7\na/b']);
     });
 
     testWidgets('come as their person has them', (t) async {
       final (s, prefs) = await begin(t);
-      await press(t, find.bySemanticsLabel('Accounts').first);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await part(t, 'Model');
+      // A star, by hand or by key.
+      await t.pump(AxMotion.settle);
+      Finder row(String name) =>
+          find.ancestor(of: find.text(name), matching: find.byType(Pressable));
+      await press(
+        t,
+        find.descendant(
+          of: row('A: B').first,
+          matching: find.byWidgetPredicate((w) => w is AxButton),
+        ),
+      );
+      expect(prefs.value.favourites, ['axiom\nc7\na/b']);
+      expect(find.text('Favourites', findRichText: true), findsOneWidget);
+      expect(
+        t.getTopLeft(find.bySemanticsLabel('A: B').first).dy,
+        lessThan(t.getTopLeft(find.bySemanticsLabel('Opus 5.5').first).dy),
+      );
+      await snap(t, 'models-favourite');
+      // To where it is said which are offered.
+      await press(t, find.bySemanticsLabel('Manage models'));
+      expect(find.text('Models'), findsOneWidget);
       expect(find.textContaining('as documented'), findsOneWidget);
-      expect(find.textContaining('listed 1970-01-01'), findsWidgets);
       Future<void> set(String model, String how) async {
         await press(t, find.bySemanticsLabel(RegExp('^$model: ')));
         await press(t, find.bySemanticsLabel(how).last);
       }
 
-      await set('A: B', 'Favourite');
+      await set('A: B', 'Offered');
       await set('claude-old', 'Hidden');
       await snap(t, 'models-set');
-      expect(prefs.value.favourites, ['axiom\nc7\na/b']);
+      expect(prefs.value.favourites, isEmpty);
       expect(prefs.value.hidden, ['axiom\nc1\nclaude-old']);
       await press(t, find.bySemanticsLabel('New session').first);
       await part(t, 'Model');
       expect(find.bySemanticsLabel('claude-old'), findsNothing);
-      final top = t.getTopLeft(find.bySemanticsLabel('A: B').last).dy;
-      expect(top, lessThan(t.getTopLeft(find.bySemanticsLabel('Opus 5.5').last).dy));
-      // And from there back to where it is said.
-      await press(t, find.bySemanticsLabel('Choose which are offered').last);
-      expect(find.text('Models'), findsOneWidget);
-      await set('A: B', 'Offered');
-      await set('claude-old', 'Offered');
-      expect(prefs.value.favourites, isEmpty);
-      expect(prefs.value.hidden, isEmpty);
+      await leave(t);
+      await press(t, find.bySemanticsLabel('Accounts').first);
       s.calls.clear();
       await press(t, find.widgetWithText(AxButton, 'Refresh'));
       expect(s.calls, [
@@ -2480,23 +2453,42 @@ void main() {
       ]);
     });
 
-    test('favourites, then the last used, then the rest', () {
-      Offer o(String id) => Offer('axiom', 'c', null, ModelInfo(id), 'C', null);
+    testWidgets('the harness is a choice only for those who want it', (t) async {
+      final (s, prefs) = await begin(t);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await part(t, 'Model');
+      expect(find.bySemanticsLabel(RegExp('^Harness: ')), findsNothing);
+      await leave(t);
+      await press(t, find.bySemanticsLabel('Settings').first);
+      expect(find.text('Advanced'), findsOneWidget);
+      await press(t, find.bySemanticsLabel('Choose the harness').last);
+      expect(prefs.value.harnesses, isTrue);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await part(t, 'Harness');
+      await snap(t, 'models-advanced');
+      await press(t, find.bySemanticsLabel('Goose').last);
+      await leave(t);
+      expect(find.bySemanticsLabel(RegExp('Runs on Default model, Goose')), findsOneWidget);
+      expect(s.calls.where((c) => c.first == 'add'), isEmpty);
+    });
+
+    test('the last used, then the rest', () {
+      Offer o(String id) => Offer('axiom', 'c', null, ModelInfo(id));
       final all = [
         for (final id in ['a', 'b', 'c', 'd', 'e']) o(id),
       ];
       String k(String id) => offerKey('axiom', 'c', id);
-      final p = Prefs(favourites: [k('d')], used: [k('c'), k('b')], hidden: [k('a'), k('e')]);
+      final p = Prefs(used: [k('c'), k('b')], hidden: [k('a'), k('e')]);
       List<String> ids(String? chosen) => [
         for (final o in arranged(all, p, chosen: chosen)) o.model.id,
       ];
-      expect(ids(null), ['d', 'c', 'b']);
-      expect(ids(k('a')), ['d', 'c', 'b', 'a'], reason: 'what is chosen is there');
+      expect(ids(null), ['c', 'b', 'd']);
+      expect(ids(k('a')), ['c', 'b', 'a', 'd'], reason: 'what is chosen is there');
       expect([for (final o in arranged(all, const Prefs())) o.model.id], ['a', 'b', 'c', 'd', 'e']);
-      expect(contextName(1000000), '1M context');
-      expect(contextName(1048576), '1M context');
-      expect(contextName(1500000), '1.5M context');
-      expect(contextName(200000), '200K context');
+      expect(contextName(1000000), '1M');
+      expect(contextName(1048576), '1M');
+      expect(contextName(1500000), '1.5M');
+      expect(contextName(200000), '200K');
     });
   });
 
@@ -2533,7 +2525,9 @@ void main() {
       await press(t, find.bySemanticsLabel('New session').first);
       await press(t, find.bySemanticsLabel('Access: Ask first'));
       await press(t, find.bySemanticsLabel('Plan first').last);
-      await runs(t, 'Harness', 'Goose');
+      await part(t, 'Model');
+      await press(t, find.bySemanticsLabel('Default model').last);
+      await leave(t);
       expect(find.bySemanticsLabel('Access: Plan first'), findsNothing);
       await press(t, find.bySemanticsLabel(RegExp('^Access: ')));
       expect(find.bySemanticsLabel('Plan first'), findsNothing);
@@ -2550,7 +2544,11 @@ void main() {
         e(const ItemEnded('p9', Outcome.completed, '## First\n\n1. Make `n.txt`.', null)),
       ]);
       await settled(t);
-      expect(find.text('Plan ready'), findsNothing, reason: 'it is still at work');
+      expect(
+        find.textContaining('Plan ready', findRichText: true),
+        findsNothing,
+        reason: 'it is still at work',
+      );
       m.apply([e(RunEnded(run, Outcome.completed, null))]);
       await settled(t);
       await t.pump(const Duration(seconds: 1));
@@ -2610,8 +2608,11 @@ void main() {
       await press(t, find.bySemanticsLabel('Access: Plan first'));
       await press(t, find.bySemanticsLabel('Ask first').last);
       expect(s.calls.last, ['set', 's', 'a', null, null, Access.ask]);
-      await press(t, find.bySemanticsLabel('Access: Plan first'));
+      m.apply([Event(n, n++, const AgentChanged('a', x, Access.ask))]);
+      await settled(t);
+      await press(t, find.bySemanticsLabel('Access: Ask first'));
       await press(t, find.bySemanticsLabel('Plan first').last);
+      expect(s.calls.last, ['set', 's', 'a', null, null, null, 'plan']);
     });
   });
 
@@ -2916,11 +2917,11 @@ void main() {
       ..gate = gate;
     await press(t, find.bySemanticsLabel('New session').first);
     await part(t, 'Model');
-    await t.enterText(field('Model name'), 'my-own');
+    await t.enterText(field('Search models'), 'my-own');
     gate.complete();
     await settled(t);
-    expect(find.bySemanticsLabel('Model: my-own'), findsOneWidget);
-    expect(t.widget<EditableText>(field('Model name')).controller.text, 'my-own');
+    expect(find.bySemanticsLabel('Use my-own'), findsOneWidget);
+    expect(t.widget<EditableText>(field('Search models')).controller.text, 'my-own');
   });
 
   testWidgets('a provider that lists nothing: its model is written', (t) async {
@@ -2928,7 +2929,9 @@ void main() {
     s.known = const [];
     await press(t, find.bySemanticsLabel('New session').first);
     await part(t, 'Model');
-    expect(field('Model name'), findsOneWidget);
+    expect(find.bySemanticsLabel('List its models'), findsWidgets);
+    await named(t, 'zz-mine');
+    expect(find.bySemanticsLabel(RegExp('^Runs on zz-mine')), findsOneWidget);
     expect(find.byType(AccessKey), findsOneWidget);
   });
 
@@ -2940,8 +2943,6 @@ void main() {
     expect(s.calls, [
       ['models', 'c1'],
     ]);
-    await t.tap(find.text('Model'));
-    await settled(t);
     expect(find.text('GPT-5.6'), findsWidgets);
     await t.sendKeyEvent(LogicalKeyboardKey.escape);
     await settled(t);
