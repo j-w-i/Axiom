@@ -283,12 +283,25 @@ class HostStore extends ChangeNotifier {
     return all;
   }
 
-  Future<String> addAgent(String session, String name, Execution x, Access access) async {
+  /// What a folder would have agents told; for a person to read.
+  Future<List<Instructions>> look(String path) async {
+    final r = await _live.call('workspace.look', {'path': path});
+    return [for (final j in r! as List<Object?>) Instructions.decode(j! as Json)];
+  }
+
+  Future<String> addAgent(
+    String session,
+    String name,
+    Execution x,
+    Access access, {
+    List<Instructions> instructions = const [],
+  }) async {
     final r = await _live.call('agent.add', {
       'session': session,
       'name': name,
       'execution': x.encode(),
       'access': access.name,
+      'instructions': [for (final i in instructions) i.encode()],
     });
     return (r! as Json)['agent']! as String;
   }

@@ -11,6 +11,7 @@ import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
 import '../ui/overlay.dart';
+import '../ui/surface.dart';
 import '../ui/tokens.dart';
 
 /// What the host said, in a sentence.
@@ -144,6 +145,12 @@ class _StartPageState extends State<StartPage> {
   /// In the list of models: none of these.
   static const _other = '\n';
 
+  /// The folder's words for agents, and those of them that are to be followed.
+  List<Instructions> _words = const [];
+  final _follow = <String>{};
+  String? _looked, _open;
+  Timer? _soon;
+
   /// Made already, if a later step failed: it is used, not made again.
   String? _session;
   String? _sessionFolder;
@@ -154,10 +161,35 @@ class _StartPageState extends State<StartPage> {
     for (final c in [_say, _folder, _model]) {
       c.addListener(() => setState(() {}));
     }
+    _folder.addListener(_folderNamed);
+  }
+
+  /// Looks into the folder a moment after it has been named.
+  void _folderNamed() {
+    final path = wholePath(_folder.text.trim());
+    if (path == _looked) return;
+    _looked = path;
+    _soon?.cancel();
+    if (_words.isNotEmpty || _follow.isNotEmpty) {
+      // What was said of another folder's does not hold for this one's.
+      _words = const [];
+      _follow.clear();
+      _open = null;
+    }
+    if (path.isEmpty) return;
+    _soon = Timer(const Duration(milliseconds: 400), () async {
+      try {
+        final w = await widget.store.look(path);
+        if (mounted && _looked == path) setState(() => _words = w);
+      } on Object {
+        // Not a folder yet; starting says so.
+      }
+    });
   }
 
   @override
   void dispose() {
+    _soon?.cancel();
     _say.dispose();
     _folder.dispose();
     _model.dispose();
@@ -206,7 +238,16 @@ class _StartPageState extends State<StartPage> {
         model: _model.text.trim(),
         connection: c.id,
       );
-      final agent = await s.addAgent(id, 'Lead', x, _access);
+      final agent = await s.addAgent(
+        id,
+        'Lead',
+        x,
+        _access,
+        instructions: [
+          for (final w in _words)
+            if (_follow.contains(w.path)) w,
+        ],
+      );
       await s.open(id);
       await s.prompt(id, agent, text);
       if (mounted) widget.onStarted(id);
@@ -266,6 +307,57 @@ class _StartPageState extends State<StartPage> {
               ],
             ),
           ),
+          for (final w in _words)
+            FormPart(
+              null,
+              note: _open == w.path
+                  ? null
+                  : 'Its words for agents. Followed only as they are now, and only if you say so.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      AxCheck(
+                        label: 'Follow ${w.path}',
+                        value: _follow.contains(w.path),
+                        onChanged: (v) => setState(() {
+                          v ? _follow.add(w.path) : _follow.remove(w.path);
+                          // Read first: what is followed has been shown.
+                          if (v) _open = w.path;
+                        }),
+                      ),
+                      AxButton(
+                        label: _open == w.path ? 'Hide it' : 'Read it',
+                        tone: AxTone.quiet,
+                        onPressed: () => setState(() => _open = _open == w.path ? null : w.path),
+                      ),
+                    ],
+                  ),
+                  if (_open == w.path)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 220),
+                        child: Surface(
+                          c.block,
+                          radius: AxRadius.key,
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: Text(literal(w.text), style: t.type.codeSmall.ink(c.ink2)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           if (all.isEmpty)
             FormPart(
               'Account',

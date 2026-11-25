@@ -35,8 +35,25 @@ class Asked extends HostStore {
   Future<String> create(String title, {String? workspace}) =>
       _do(['create', title, workspace], 's_new');
   @override
-  Future<String> addAgent(String session, String name, Execution x, Access access) =>
-      _do(['add', session, name, x.connection, x.model, access], 'a_new');
+  Future<String> addAgent(
+    String session,
+    String name,
+    Execution x,
+    Access access, {
+    List<Instructions> instructions = const [],
+  }) => _do([
+    'add',
+    session,
+    name,
+    x.connection,
+    x.model,
+    access,
+    for (final i in instructions) i.digest,
+  ], 'a_new');
+  Map<String, List<Instructions>> words = const {};
+  @override
+  Future<List<Instructions>> look(String path) async =>
+      words[path] ?? (throw const Failed(1, 'bad', 'x'));
   @override
   Future<void> open(String id) => _do(['open', id], null);
   @override
@@ -170,6 +187,57 @@ void main() {
       ['prompt', 's_new', 'a_new', 'Make the cache forget.\nAll of it.'],
     ]);
     expect(find.byType(StartPage), findsNothing);
+  });
+
+  testWidgets('a project\'s words for agents are followed only if a person says so', (t) async {
+    final s = await shell(t);
+    s.words = const {
+      '/p': [Instructions('AGENTS.md', 'd1', 'Use tabs.\nAlways.')],
+      '/q': [Instructions('AGENTS.md', 'd2', 'Other.')],
+    };
+    await t.tap(find.bySemanticsLabel('New session').first);
+    await settled(t);
+    Finder field(String l) => find.descendant(
+      of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
+      matching: find.byType(EditableText),
+    );
+    Future<void> folder(String p) async {
+      await t.enterText(field('Folder'), p);
+      await settled(t);
+    }
+
+    await folder('/none');
+    expect(find.textContaining('Follow'), findsNothing);
+    await folder('/p');
+    expect(find.textContaining('Use tabs'), findsNothing);
+    await t.tap(find.text('Follow AGENTS.md'));
+    await settled(t);
+    expect(find.textContaining('Use tabs'), findsOneWidget, reason: 'what is followed is shown');
+    await snap(t, 'instructions');
+    // Another folder's are other words.
+    await folder('/q');
+    expect(t.widget<AxCheck>(find.byType(AxCheck)).value, isFalse);
+    await folder('/p');
+    await t.tap(find.text('Follow AGENTS.md'));
+    await settled(t);
+    await t.enterText(field('What should be done'), 'x');
+    await t.ensureVisible(find.bySemanticsLabel('Model: none'));
+    await t.tap(find.bySemanticsLabel('Model: none'));
+    await settled(t);
+    await t.tap(find.bySemanticsLabel('gpt-5.6').last);
+    await settled(t);
+    await t.ensureVisible(find.text('Start'));
+    await t.tap(find.text('Start'));
+    await settled(t);
+    expect(s.calls.firstWhere((c) => c.first == 'add'), [
+      'add',
+      's_new',
+      'Lead',
+      'c1',
+      'gpt-5.6',
+      Access.ask,
+      'd1',
+    ]);
   });
 
   testWidgets('a folder is chosen again, and ~ is home', (t) async {

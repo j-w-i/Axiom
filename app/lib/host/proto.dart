@@ -79,6 +79,19 @@ class Connection {
   final bool secret, lasts;
 }
 
+/// Words of a folder for agents: a file, and which content of it.
+class Instructions {
+  const Instructions(this.path, this.digest, this.text);
+  Instructions.decode(Json j)
+    : path = j['path']! as String,
+      digest = j['digest']! as String,
+      text = j['text'] as String? ?? '';
+  final String path, digest, text;
+
+  /// Named, for the host: it reads them itself.
+  Json encode() => {'path': path, 'digest': digest};
+}
+
 /// What a provider says of a model.
 class ModelInfo {
   const ModelInfo(this.id, {this.name, this.context});
