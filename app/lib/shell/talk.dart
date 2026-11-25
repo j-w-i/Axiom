@@ -281,14 +281,6 @@ class _TalkState extends State<Talk> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (asked.length > 1)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                    child: Text(
-                      '${asked.length - 1} more after this',
-                      style: t.type.label.ink(c.attentionText),
-                    ),
-                  ),
                 RequestBar(
                   key: ValueKey(first.request),
                   RequestView(
@@ -298,6 +290,7 @@ class _TalkState extends State<Talk> {
                     scope: first.scope,
                     always: first.session ? 'Allow this for the session' : null,
                     id: first.request,
+                  waiting: asked.length - 1,
                   ),
                   room: widget.room,
                   onOnce: () => _answer(first, Answer.once),

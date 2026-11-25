@@ -304,7 +304,11 @@ class RequestBar extends StatefulWidget {
     super.key,
     this.room = maxHeight,
     this.onDenyWith,
+    this.waiting = 0,
   });
+
+  /// How many others wait after it. Not part of the request: another count is the same question.
+  final int waiting;
 
   /// No, and why.
   final ValueChanged<String>? onDenyWith;
@@ -422,6 +426,10 @@ class _RequestBarState extends State<RequestBar> {
                         const AxLamp(AgentState.asking),
                         const SizedBox(width: 9),
                         Expanded(child: Text('$agent ${literal(r.what)}', style: t.type.uiStrong)),
+                        if (widget.waiting > 0) ...[
+                          const SizedBox(width: 12),
+                          Text('${widget.waiting} more waiting', style: t.type.small.ink(c.ink3)),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 3),
@@ -462,26 +470,42 @@ class _RequestBarState extends State<RequestBar> {
         ],
       ],
     );
+    Widget group(List<Widget> all) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final (i, k) in all.indexed) ...[
+          if (i > 0) const SizedBox(width: 6),
+          Flexible(child: k),
+        ],
+      ],
+    );
+    // If they break, then between no and yes: the main answer is never left alone.
     final keys = Wrap(
-      spacing: 6,
+      spacing: 8,
       runSpacing: 6,
       alignment: WrapAlignment.end,
       children: [
-        if (widget.onDenyWith != null)
-          _says
-              ? AxButton(label: 'Back', tone: AxTone.quiet, onPressed: () => _say(false))
-              : AxButton(label: 'Say why not', tone: AxTone.quiet, onPressed: () => _say(true)),
-        AxButton(
-          label: 'Deny',
-          tone: _says ? AxTone.key : AxTone.quiet,
-          onPressed: _says ? _denyWith : widget.onDeny,
-        ),
-        if (_says)
-          const SizedBox.shrink()
-        else if (r.always case final a?)
-          AxButton(label: oneLine(literal(a), 80), onPressed: ok ? widget.onAlways : null),
+        group([
+          if (widget.onDenyWith != null)
+            _says
+                ? AxButton(label: 'Back', tone: AxTone.quiet, onPressed: () => _say(false))
+                : AxButton(label: 'Say why not', tone: AxTone.quiet, onPressed: () => _say(true)),
+          AxButton(
+            label: 'Deny',
+            tone: _says ? AxTone.key : AxTone.quiet,
+            onPressed: _says ? _denyWith : widget.onDeny,
+          ),
+        ]),
         if (!_says)
-          AxButton(label: 'Allow once', tone: AxTone.primary, onPressed: ok ? widget.onOnce : null),
+          group([
+            if (r.always case final a?)
+              AxButton(label: oneLine(literal(a), 80), onPressed: ok ? widget.onAlways : null),
+            AxButton(
+              label: 'Allow once',
+              tone: AxTone.primary,
+              onPressed: ok ? widget.onOnce : null,
+            ),
+          ]),
       ],
     );
     return Semantics(
@@ -499,7 +523,7 @@ class _RequestBarState extends State<RequestBar> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
                 child: LayoutBuilder(
-                  builder: (context, box) => box.maxWidth < 620
+                  builder: (context, box) => box.maxWidth < 720
                       ? Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           mainAxisSize: MainAxisSize.min,
@@ -514,7 +538,7 @@ class _RequestBarState extends State<RequestBar> {
                             Expanded(child: body),
                             const SizedBox(width: 16),
                             ConstrainedBox(
-                              constraints: BoxConstraints(maxWidth: box.maxWidth * .5),
+                              constraints: BoxConstraints(maxWidth: box.maxWidth - 240),
                               child: keys,
                             ),
                           ],

@@ -398,7 +398,7 @@ void main() {
   testWidgets('a question is answered once, with what it showed', (t) async {
     final s = await shell(t, session: working(asks: true));
     expect(find.byType(RequestBar), findsOneWidget);
-    expect(find.text('1 more after this'), findsOneWidget);
+    expect(find.text('1 more waiting'), findsOneWidget);
     expect(find.text('cargo test'), findsWidgets);
     await settled(t);
     final row = find.byType(AgentRow);
