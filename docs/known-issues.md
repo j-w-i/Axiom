@@ -5,7 +5,7 @@
 | K1 | Display-bound frame benchmarks (10 panes, 50 k blocks) not run; need CI or the owner's consent | M1 exit |
 | K2 | Linux and Windows have compiled only in CI; nobody has looked at the app there | M1 exit |
 | K3 | Anthropic's written position on orchestrators is not obtained (decision 0007) | owner, before M3 ships |
-| K4 | Windows has no verified sandbox backend (decision 0008) | M2 spike |
+| K4 | Windows has no verified sandbox backend (decision 0008): commands are refused there; reading and changing files works | M2 spike |
 | K5 | Provider long-tail facts (rate-limit headers, replay flags) are unverified (`research/providers.md` §8) | M2, per provider |
 | K6 | `highlight.dart` is a one-line scanner, not a grammar | M4 |
 | K7 | Windows uses a Unix socket too (Dart ≥ 3.11 and `uds_windows`); proved by CI only. The peer's identity is not checked there and directories get no ACL of their own: keep `AXIOM_DATA` inside the user's profile | M2 security tests |
@@ -32,3 +32,10 @@
 | K29 | A write lock held by another program during a stop costs up to 10 s, and endings may then be unwritten | accepted |
 | K30 | Engine, third review pass: a refused event leaves a replay's run open, a second lock soon after an exhausted outage fails at once, U+2060–U+206F count as emoji in the CLI's prose; four behaviours have no test (connection cap, growing script, lock inode, runtime shutdown limit) | M2 |
 | K31 | On Windows `flutter test` has hung on every run since `b63bdbf`, the commit that added `fake_host_test.dart`; unnoticed because a job cut off at its limit leaves no log and is not counted as failing. Cause not yet known; a hanging test now names itself | before merging M1 |
+| K32 | The independent security review of M2 has not been done: the reviewing agent was stopped by its provider's safeguards before it began. Until it is, take the sandbox as tested by its author only | before M2 ends |
+| K33 | Linux: a protected name that does not exist yet can be made by a command; it is told to the person afterwards. No seccomp filter yet | M2 |
+| K34 | macOS: a process that closes every file it got, loses its parent and leaves its group between two looks outlives its command. It stays contained | accepted |
+| K35 | What a person says to a running agent is kept only when the agent hears it: a host that is killed before that loses it, though the app had said it was queued | M2 |
+| K36 | A connection to LM Studio may be answered by another model than was asked for (it says so only in the stream); the app does not compare them yet | M2 |
+| K37 | A provider that sends keep-alive comments for ever holds an answer open: only silence has a limit | M2 |
+| K38 | macOS: a build that is not signed is another program to the keychain each time it is made, so its keys have to be added again. It never asks | signed builds, M7 |
