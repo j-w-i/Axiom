@@ -18,11 +18,15 @@ class AgentView {
     this.contextProvenance = Provenance.measured,
     this.recent = const [],
     this.filesChanged = 0,
+    this.service,
   });
+
+  /// Whose it is, where its model's name does not say so.
+  final ServiceMark? service;
   final String id, name, model, harness, connection, elapsed;
   final AgentState state;
 
-  ServiceMark? get mark => ServiceMark.of(model);
+  ServiceMark? get mark => service ?? ServiceMark.of(model);
 
   /// 0–1 of the context window, or null when the harness does not say.
   final double? context;

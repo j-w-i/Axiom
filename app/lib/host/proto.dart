@@ -92,6 +92,36 @@ class Instructions {
   Json encode() => {'path': path, 'digest': digest};
 }
 
+/// A program of the person's own that the host can drive.
+class HarnessInfo {
+  const HarnessInfo(
+    this.id,
+    this.name, {
+    this.program,
+    this.problem,
+    this.needsTrust = false,
+    this.access = const [],
+  });
+  HarnessInfo.decode(Json j)
+    : id = j['id']! as String,
+      name = j['name']! as String,
+      program = j['program'] as String?,
+      problem = j['problem'] as String?,
+      needsTrust = j['needs_trust'] as bool? ?? true,
+      access = [
+        for (final a in j['access'] as List<Object?>? ?? const [])
+          _enum(Access.values, a, Access.unknown),
+      ];
+  final String id, name;
+
+  /// Null if it is not there or may not be started; then [problem] says why.
+  final String? program, problem;
+
+  /// It cannot be told to ignore a folder's own settings for it.
+  final bool needsTrust;
+  final List<Access> access;
+}
+
 /// What a provider says of a model.
 class ModelInfo {
   const ModelInfo(this.id, {this.name, this.context});

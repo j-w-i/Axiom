@@ -22,8 +22,16 @@ String wordsOf(Object e) => switch (e) {
   _ => '$e',
 };
 
-ServiceMark? markOf(String? provider, String? model) =>
+ServiceMark? markOf(String? provider, String? model, [String? harness]) =>
     ServiceMark.of(model) ??
+    switch (harness) {
+      'claude' => ServiceMark.claudecode,
+      'codex' => ServiceMark.codex,
+      'agy' => ServiceMark.antigravity,
+      'agent' => ServiceMark.cursor,
+      final h? when h != 'axiom' => ServiceMark.of(h),
+      _ => null,
+    } ??
     switch (provider) {
       'anthropic' => ServiceMark.claude,
       'openai' => ServiceMark.openai,
@@ -135,15 +143,40 @@ List<String> recentFolders(List<SessionInfo> sessions, {int most = 8}) {
 /// What a person is setting up, and how far it has come. It outlives the page: adding an account on
 /// the way, or looking at another session, loses nothing.
 class StartDraft extends ChangeNotifier {
-  StartDraft(this.store) {
-    for (final c in [say, folder, model]) {
+  StartDraft(this.store, {this.into}) {
+    for (final c in [say, folder, model, name]) {
       c.addListener(notifyListeners);
     }
     folder.addListener(_folderNamed);
   }
   final HostStore store;
+
+  /// The session it is to be another agent of; null: a session of its own.
+  final String? into;
   final say = TextEditingController(), folder = TextEditingController();
-  final model = TextEditingController();
+  final model = TextEditingController(), name = TextEditingController();
+
+  /// What it runs with.
+  String harness = 'axiom';
+
+  /// The folder's own settings for that may take effect.
+  bool trust = false;
+
+  HarnessInfo? get delegated =>
+      harness == 'axiom' ? null : store.harnesses.where((h) => h.id == harness).firstOrNull;
+
+  void runWith(String id) => change(() {
+    harness = id;
+    problem = null;
+    trust = false;
+    typed = false;
+    model.clear();
+    final can = delegated?.access ?? Access.values;
+    // The least it has a mode for, if not the one that is chosen.
+    if (!can.contains(access)) {
+      access = [Access.ask, Access.read, Access.work].where(can.contains).firstOrNull ?? access;
+    }
+  });
   String? connection, problem;
   Access access = Access.ask;
   bool busy = false;
@@ -162,6 +195,9 @@ class StartDraft extends ChangeNotifier {
   /// Made already, if a later step failed: used, not made again.
   _Made? _made;
   final _prompt = Draft();
+
+  /// The agent that was made last.
+  String? last;
 
   void change(VoidCallback f) {
     f();
@@ -212,32 +248,41 @@ class StartDraft extends ChangeNotifier {
   }
 
   /// Where it works, if it does now. [shown]: whether its person still waits for it.
-  Future<String?> start(Connection c, bool Function() shown) async {
+  Future<String?> start(Connection? c, bool Function() shown) async {
     change(() {
       busy = true;
       problem = null;
     });
     try {
       final text = say.text.trim(), where = wholePath(folder.text.trim());
+      final other = harness != 'axiom', written = model.text.trim();
       final x = Execution(
-        harness: 'axiom',
-        provider: c.provider,
-        model: model.text.trim(),
-        connection: c.id,
+        harness: harness,
+        provider: other ? null : c!.provider,
+        model: written.isEmpty ? null : written,
+        connection: other ? null : c!.id,
       );
       final followed = [
         for (final w in words)
-          if (follow.contains(w.path)) w,
+          if (!other && follow.contains(w.path)) w,
       ];
-      final as = [for (final w in followed) '${w.path} ${w.digest}'].join('\n');
+      final as = [harness, '$trust', for (final w in followed) '${w.path} ${w.digest}'].join('\n');
       var m = _made;
       if (m == null || m.folder != where || (m.agent != null && m.follows != as)) {
-        m = _Made(await store.create(oneLine(text, 80), workspace: where), where);
+        final session = into ?? await store.create(oneLine(text, 80), workspace: where);
+        m = _Made(session, where);
         _made = m;
       }
       final how = (x.provider, x.model, x.connection, access);
       if (m.agent == null) {
-        m.agent = await store.addAgent(m.session, 'Lead', x, access, instructions: followed);
+        m.agent = await store.addAgent(
+          m.session,
+          into == null ? 'Lead' : name.text.trim(),
+          x,
+          access,
+          instructions: followed,
+          trust: other && trust,
+        );
         m
           ..how = how
           ..follows = as;
@@ -245,11 +290,15 @@ class StartDraft extends ChangeNotifier {
         await store.setAgent(m.session, m.agent!, execution: x, access: access);
         m.how = how;
       }
-      if (shown()) await store.open(m.session);
-      await store.prompt(m.session, m.agent!, text, key: _prompt.keyFor('${m.session} $text'));
+      if (shown() && into == null) await store.open(m.session);
+      if (text.isNotEmpty) {
+        await store.prompt(m.session, m.agent!, text, key: _prompt.keyFor('${m.session} $text'));
+      }
+      last = m.agent;
       _made = null;
       _prompt.heard();
       say.clear();
+      name.clear();
       follow.clear();
       open = null;
       return m.session;
@@ -269,6 +318,7 @@ class StartDraft extends ChangeNotifier {
     say.dispose();
     folder.dispose();
     model.dispose();
+    name.dispose();
     _prompt.dispose();
     super.dispose();
   }
@@ -304,7 +354,7 @@ class _StartPageState extends State<StartPage> {
     return oneLine(literal(f.endsWith(t) ? f.substring(0, f.length - t.length) : f), 60);
   }
 
-  Future<void> _start(Connection c) async {
+  Future<void> _start(Connection? c) async {
     final id = await d.start(c, () => mounted);
     if (id != null && mounted) widget.onStarted(id);
   }
@@ -326,98 +376,183 @@ class _StartPageState extends State<StartPage> {
       final typed =
           d.typed || (d.model.text.isNotEmpty && !models.any((m) => m.id == d.model.text));
       final recent = recentFolders(s.sessions);
+      final here = [
+        for (final h in s.harnesses)
+          if (h.program != null) h,
+      ];
+      final other = d.delegated;
+      final adds = d.into != null;
+      bool filled(TextEditingController x) => x.text.trim().isNotEmpty;
       final ready =
           !d.busy &&
-          chosen != null &&
-          [d.say, d.folder, d.model].every((x) => x.text.trim().isNotEmpty) &&
+          (d.harness == 'axiom'
+              ? chosen != null && filled(d.model)
+              : other != null && (!other.needsTrust || d.trust)) &&
+          (adds ? filled(d.name) : filled(d.say) && filled(d.folder)) &&
           s.phase == HostPhase.connected;
+      final access = [
+        for (final i in accessItems)
+          if (other == null || other.access.contains(i.value))
+            i
+          else
+            AxMenuItem(i.value, i.label, enabled: false, why: '${other.name} has no mode for it'),
+      ];
+      final accessSelect = AxSelect<Access>(
+        label: 'Access',
+        items: access,
+        value: d.access,
+        onChanged: (v) => d.change(() => d.access = v),
+      );
+      final runsWith = AxSelect<String>(
+        label: 'Runs with',
+        items: [
+          const AxMenuItem(
+            'axiom',
+            'Axiom',
+            detail: 'your keys and servers',
+            mark: ServiceMark.axiom,
+          ),
+          for (final h in here)
+            AxMenuItem(
+              h.id,
+              oneLine(h.name, 40),
+              detail: 'its own sign-in',
+              mark: markOf(null, null, h.id),
+            ),
+        ],
+        value: d.harness,
+        onChanged: d.runWith,
+      );
       return _Page(
-        title: 'New session',
+        title: adds ? 'New agent' : 'New session',
         problem: d.problem,
         children: [
+          if (adds)
+            FormPart(
+              'Name',
+              child: AxField(label: 'Name', controller: d.name, placeholder: 'Reviewer'),
+            ),
           FormPart(
             'What should be done',
+            note: adds ? 'It can also be told later.' : null,
             child: AxField(label: 'What should be done', controller: d.say, lines: 4),
           ),
-          FormPart(
-            'Folder',
-            note: 'The whole path. The agent changes nothing outside it.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AxField(
-                  label: 'Folder',
-                  controller: d.folder,
-                  mono: true,
-                  placeholder: '~/project',
-                ),
-                if (recent.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  AxSelect<String>(
-                    label: 'Recent folders',
-                    items: [
-                      for (final f in recent)
-                        AxMenuItem(f, oneLine(literal(_tail(f)), 60), detail: _head(f)),
-                    ],
-                    value: d.folder.text,
-                    onChanged: (v) => d.change(() => d.folder.text = v),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          for (final w in d.words)
+          if (!adds)
             FormPart(
-              null,
-              note: d.open == w.path
-                  ? null
-                  : 'Its words for agents. Followed only as they are now, and only if you say so.',
+              'Folder',
+              note: 'The whole path. The agent changes nothing outside it.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      AxCheck(
-                        label: 'Follow ${w.path}',
-                        value: d.follow.contains(w.path),
-                        onChanged: (v) => d.change(() {
-                          v ? d.follow.add(w.path) : d.follow.remove(w.path);
-                          // Read first: what is followed has been shown.
-                          if (v) d.open = w.path;
-                        }),
-                      ),
-                      AxButton(
-                        label: d.open == w.path ? 'Hide it' : 'Read it',
-                        tone: AxTone.quiet,
-                        onPressed: () => d.change(() => d.open = d.open == w.path ? null : w.path),
-                      ),
-                    ],
+                  AxField(
+                    label: 'Folder',
+                    controller: d.folder,
+                    mono: true,
+                    placeholder: '~/project',
                   ),
-                  if (d.open == w.path)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 220),
-                        child: Surface(
-                          c.block,
-                          radius: AxRadius.key,
-                          child: SingleChildScrollView(
-                            padding: const EdgeInsets.all(12),
-                            child: SizedBox(
-                              width: double.infinity,
-                              child: Text(literal(w.text), style: t.type.codeSmall.ink(c.ink2)),
+                  if (recent.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    AxSelect<String>(
+                      label: 'Recent folders',
+                      items: [
+                        for (final f in recent)
+                          AxMenuItem(f, oneLine(literal(_tail(f)), 60), detail: _head(f)),
+                      ],
+                      value: d.folder.text,
+                      onChanged: (v) => d.change(() => d.folder.text = v),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          if (other == null)
+            for (final w in d.words)
+              FormPart(
+                null,
+                note: d.open == w.path ? null : 'Its words for agents. Followed only as they are now, and only if you say so.',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        AxCheck(
+                          label: 'Follow ${w.path}',
+                          value: d.follow.contains(w.path),
+                          onChanged: (v) => d.change(() {
+                            v ? d.follow.add(w.path) : d.follow.remove(w.path);
+                            // Read first: what is followed has been shown.
+                            if (v) d.open = w.path;
+                          }),
+                        ),
+                        AxButton(
+                          label: d.open == w.path ? 'Hide it' : 'Read it',
+                          tone: AxTone.quiet,
+                          onPressed: () =>
+                              d.change(() => d.open = d.open == w.path ? null : w.path),
+                        ),
+                      ],
+                    ),
+                    if (d.open == w.path)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 220),
+                          child: Surface(
+                            c.block,
+                            radius: AxRadius.key,
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: Text(literal(w.text), style: t.type.codeSmall.ink(c.ink2)),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
+              ),
+          if (here.isNotEmpty || d.harness != 'axiom')
+            FormPart(
+              null,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [runsWith, if (d.harness != 'axiom') accessSelect],
               ),
             ),
-          if (all.isEmpty)
+          if (d.harness != 'axiom') ...[
+            FormPart(
+              'Model',
+              child: AxField(
+                label: 'Model name',
+                controller: d.model,
+                mono: true,
+                placeholder: 'Its own choice',
+              ),
+            ),
+            FormPart(
+              null,
+              note: other == null
+                  ? 'It is not on this computer any more.'
+                  : other.needsTrust
+                  ? '${other.name} cannot be told to ignore what the folder says. Those settings can '
+                        'name programs that it starts.'
+                  : 'Those settings can name programs that it starts.',
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: AxCheck(
+                  label: 'Let the folder\'s own settings for it take effect',
+                  value: d.trust,
+                  onChanged: (v) => d.change(() => d.trust = v),
+                ),
+              ),
+            ),
+          ] else if (all.isEmpty)
             FormPart(
               'Account',
               child: Align(
@@ -470,12 +605,7 @@ class _StartPageState extends State<StartPage> {
                         d.model.text = d.typed ? '' : v;
                       }),
                     ),
-                  AxSelect<Access>(
-                    label: 'Access',
-                    items: accessItems,
-                    value: d.access,
-                    onChanged: (v) => d.change(() => d.access = v),
-                  ),
+                  accessSelect,
                   AxButton(label: 'Accounts', tone: AxTone.quiet, onPressed: widget.onAccounts),
                 ],
               ),
@@ -495,15 +625,21 @@ class _StartPageState extends State<StartPage> {
           Row(
             children: [
               AxButton(
-                label: d.busy ? 'Starting' : 'Start',
-                icon: AxIcon.play,
+                label: d.busy
+                    ? 'Starting'
+                    : adds
+                    ? 'Add'
+                    : 'Start',
+                icon: adds ? AxIcon.plus : AxIcon.play,
                 tone: AxTone.primary,
                 onPressed: ready ? () => unawaited(_start(chosen)) : null,
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Commands run contained: no network, writing only in the folder.',
+                  d.harness == 'axiom'
+                      ? 'Commands run contained: no network, writing only in the folder.'
+                      : 'It runs outside Axiom\'s sandbox. You are asked before it is started.',
                   style: t.type.small.ink(c.ink3),
                 ),
               ),

@@ -90,6 +90,8 @@ class _TalkState extends State<Talk> {
 
   List<ExecutionChoice> _choices(HostStore s, AgentModel a) {
     final x = a.execution;
+    final other = x.harness != 'axiom';
+    final can = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull?.access : null;
     final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
     final models = s.modelsOf(x.connection ?? '');
     final has = models?.any((m) => m.id == x.model) ?? false;
@@ -108,8 +110,14 @@ class _TalkState extends State<Talk> {
       ExecutionChoice(
         'Model',
         [
+          if (other && x.model == null)
+            AxMenuItem('', 'Its own model', mark: markOf(null, null, x.harness)),
           if (!has && x.model != null)
-            AxMenuItem(x.model!, oneLine(x.model!, 60), mark: markOf(x.provider, x.model)),
+            AxMenuItem(
+              x.model!,
+              oneLine(x.model!, 60),
+              mark: markOf(x.provider, x.model, x.harness),
+            ),
           for (final m in models ?? const <ModelInfo>[])
             AxMenuItem(m.id, oneLine(m.name ?? m.id, 60), mark: ServiceMark.of(m.id)),
         ],
@@ -122,16 +130,23 @@ class _TalkState extends State<Talk> {
       ),
       ExecutionChoice(
         'Harness',
-        [AxMenuItem(x.harness, x.harness == 'axiom' ? 'Axiom' : oneLine(x.harness, 40))],
+        [
+          AxMenuItem(
+            x.harness,
+            oneLine(s.harnessName(x.harness), 40),
+            mark: markOf(null, null, x.harness),
+          ),
+        ],
         x.harness,
         (_) {},
       ),
       ExecutionChoice(
         'Account',
         [
+          if (other) const AxMenuItem('', 'Its own sign-in'),
           if (connection == null && x.connection != null)
             AxMenuItem(x.connection!, 'Removed', enabled: false, why: 'add it again'),
-          for (final c in s.connections)
+          for (final c in other ? const <Connection>[] : s.connections)
             AxMenuItem(
               c.id,
               oneLine(c.name, 60),
@@ -146,7 +161,16 @@ class _TalkState extends State<Talk> {
       ),
       ExecutionChoice(
         'Access',
-        [for (final i in accessItems) AxMenuItem(i.value.name, i.label, detail: i.detail)],
+        [
+          for (final i in accessItems)
+            AxMenuItem(
+              i.value.name,
+              i.label,
+              detail: i.detail,
+              enabled: can == null || can.contains(i.value),
+              why: '${s.harnessName(x.harness)} has no mode for it',
+            ),
+        ],
         (a.access ?? Access.ask).name,
         (v) => set(access: Access.values.byName(v)),
       ),
@@ -247,7 +271,7 @@ class _TalkState extends State<Talk> {
                     Known.unknown => Provenance.unknown,
                   },
                 ),
-                hue: markOf(a.execution.provider, a.execution.model)?.color(c),
+                hue: markOf(a.execution.provider, a.execution.model, a.execution.harness)?.color(c),
               ),
           ],
           controller: widget.draft.text,

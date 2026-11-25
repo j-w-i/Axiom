@@ -167,6 +167,7 @@ class HostStore extends ChangeNotifier {
     await refresh();
     // Nothing that is shown depends on it.
     unawaited(loadConnections().catchError((_) {}));
+    unawaited(loadHarnesses().catchError((_) {}));
     if (current case final c? when c.fault == null) await _follow(c);
     notifyListeners();
   }
@@ -254,6 +255,19 @@ class HostStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// What the host can run agents with beside itself; found without running any of it.
+  List<HarnessInfo> harnesses = const [];
+
+  Future<void> loadHarnesses() async {
+    final r = await _live.call('harness.list');
+    harnesses = [for (final j in r! as List<Object?>) HarnessInfo.decode(j! as Json)];
+    notifyListeners();
+  }
+
+  /// As a person knows it.
+  String harnessName(String id) =>
+      id == 'axiom' ? 'Axiom' : harnesses.where((h) => h.id == id).firstOrNull?.name ?? id;
+
   /// The secret goes to the host and is not kept here.
   Future<String> connect(String name, String provider, {String? url, String? secret}) async {
     final r = await _live.call('connection.add', {
@@ -295,12 +309,14 @@ class HostStore extends ChangeNotifier {
     Execution x,
     Access access, {
     List<Instructions> instructions = const [],
+    bool trust = false,
   }) async {
     final r = await _live.call('agent.add', {
       'session': session,
       'name': name,
       'execution': x.encode(),
       'access': access.name,
+      'trust': trust,
       'instructions': [for (final i in instructions) i.encode()],
     });
     return (r! as Json)['agent']! as String;

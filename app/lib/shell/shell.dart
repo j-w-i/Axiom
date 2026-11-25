@@ -33,7 +33,7 @@ class Shell extends StatefulWidget {
 }
 
 /// What the display shows.
-enum _View { work, start, accounts }
+enum _View { work, start, agent, accounts }
 
 class _ShellState extends State<Shell> {
   String? _agent;
@@ -41,6 +41,18 @@ class _ShellState extends State<Shell> {
   _View _view = _View.work;
   final _drafts = Drafts();
   late final _start = StartDraft(widget.store);
+
+  /// Another agent for a session, while it is set up.
+  StartDraft? _more;
+
+  void _addAgent(String session) {
+    if (_more?.into != session) {
+      _more?.dispose();
+      _more = StartDraft(widget.store, into: session)
+        ..folder.text = widget.store.current?.workspace ?? '';
+    }
+    _show(_View.agent);
+  }
 
   /// What a key was pressed for and did not come about.
   String? _failed;
@@ -65,6 +77,7 @@ class _ShellState extends State<Shell> {
     _forget?.cancel();
     _drafts.dispose();
     _start.dispose();
+    _more?.dispose();
     super.dispose();
   }
 
@@ -98,6 +111,7 @@ class _ShellState extends State<Shell> {
                       _agent = id;
                       _view = _View.work;
                     }),
+                    onAddAgent: () => _addAgent(s.current!.id),
                     onStart: () => _show(_View.start),
                     onAccounts: () => _show(_View.accounts),
                     onOpen: (id) {
@@ -174,6 +188,17 @@ class _ShellState extends State<Shell> {
                                 onStarted: (_) => _show(_View.work),
                                 onAccounts: () => _show(_View.accounts),
                               ),
+                              // Only while its session is the one that is open.
+                              _ when _view == _View.agent && _more?.into == s.current?.id =>
+                                StartPage(
+                                  _more!,
+                                  key: ObjectKey(_more),
+                                  onStarted: (_) => setState(() {
+                                    _agent = _more!.last;
+                                    _view = _View.work;
+                                  }),
+                                  onAccounts: () => _show(_View.accounts),
+                                ),
                               _ when _view == _View.accounts => AccountsPage(
                                 s,
                                 onDone: () => _show(s.current == null ? _View.start : _View.work),
@@ -234,14 +259,20 @@ Provenance provenanceOf(Known k) => switch (k) {
   Known.unknown => Provenance.unknown,
 };
 
-AgentView viewOf(AgentModel a) {
+AgentView viewOf(AgentModel a, HostStore s) {
   final last = a.last;
   return AgentView(
     id: a.id,
     name: a.name,
     state: phaseOf(a.phase),
-    model: oneLine(a.execution.model ?? '', 60),
+    // What chooses its model itself is named instead.
+    model: oneLine(
+      a.execution.model ??
+          (a.execution.harness == 'axiom' ? '' : s.harnessName(a.execution.harness)),
+      60,
+    ),
     harness: a.execution.harness,
+    service: markOf(a.execution.provider, a.execution.model, a.execution.harness),
     connection: a.execution.connection ?? '',
     elapsed: '',
     context: a.context,
@@ -264,6 +295,7 @@ class _Side extends StatelessWidget {
     required this.inset,
     required this.agent,
     required this.onAgent,
+    required this.onAddAgent,
     required this.onStart,
     required this.onAccounts,
     required this.onOpen,
@@ -272,7 +304,7 @@ class _Side extends StatelessWidget {
   final double inset;
   final String? agent;
   final ValueChanged<String> onAgent, onOpen;
-  final VoidCallback onStart, onAccounts;
+  final VoidCallback onStart, onAddAgent, onAccounts;
 
   static String ageOf(int ms) {
     final d = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
@@ -329,10 +361,12 @@ class _Side extends StatelessWidget {
                         id: m.id,
                         title: m.title.isEmpty ? 'Session' : m.title,
                         age: '',
-                        agents: [for (final a in m.agents.values) viewOf(a)],
+                        agents: [for (final a in m.agents.values) viewOf(a, store)],
                       ),
                       selected: m.agents.containsKey(agent) ? agent : m.agents.keys.firstOrNull,
                       onSelect: onAgent,
+                      // A replay's session has nobody to work beside.
+                      onAddAgent: m.workspace == null ? null : onAddAgent,
                     ),
                   ),
                 ),
@@ -461,7 +495,7 @@ class _Display extends StatelessWidget {
     return AgentBar(
       name: a.name,
       state: phaseOf(a.phase),
-      mark: ServiceMark.of(x.model),
+      mark: markOf(x.provider, x.model, x.harness),
       tabs: const [('Conversation', null)],
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

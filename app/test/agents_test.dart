@@ -54,11 +54,12 @@ class Asked extends HostStore {
     Execution x,
     Access access, {
     List<Instructions> instructions = const [],
+    bool trust = false,
   }) => _do([
     'add',
     session,
     name,
-    x.connection,
+    if (x.harness != 'axiom') (x.harness, trust) else x.connection,
     x.model,
     access,
     for (final i in instructions) i.digest,
@@ -625,6 +626,128 @@ void main() {
     await press(t, find.bySemanticsLabel('Model: none'));
     await press(t, find.bySemanticsLabel('gpt-5.6').last);
   }
+
+  const harnesses = [
+    HarnessInfo(
+      'claude',
+      'Claude Code',
+      program: '/usr/local/bin/claude',
+      access: [Access.read, Access.work],
+    ),
+    HarnessInfo(
+      'goose',
+      'Goose',
+      program: '/usr/local/bin/goose',
+      needsTrust: true,
+      access: [Access.ask],
+    ),
+    HarnessInfo('codex', 'Codex', problem: 'not there'),
+  ];
+
+  testWidgets('a session can run with a program of the person\'s own', (t) async {
+    final s = await shell(t, accounts: false);
+    s.harnesses = harnesses;
+    await press(t, find.bySemanticsLabel('New session').first);
+    expect(find.text('Add an account or a server'), findsOneWidget);
+    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    expect(find.bySemanticsLabel('Codex'), findsNothing, reason: 'it is not there');
+    await press(t, find.bySemanticsLabel('Claude Code').last);
+    // No account is needed, and what it has no mode for is not offered.
+    expect(find.text('Add an account or a server'), findsNothing);
+    expect(find.bySemanticsLabel('Access: Only look'), findsOneWidget, reason: 'the least');
+    await press(t, find.bySemanticsLabel('Access: Only look'));
+    expect(find.text('Claude Code has no mode for it'), findsOneWidget);
+    await press(t, find.bySemanticsLabel('Work in the folder').last);
+    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Folder'), '/w');
+    await settled(t);
+    await snap(t, 'start-harness');
+    await press(t, find.text('Start'));
+    expect(s.calls, [
+      ['create', 'Do it.', '/w'],
+      ['add', 's_new', 'Lead', ('claude', false), null, Access.work],
+      ['open', 's_new'],
+      ['prompt', 's_new', 'a_new', 'Do it.'],
+    ]);
+  });
+
+  testWidgets('what cannot ignore a folder\'s settings needs a yes to them', (t) async {
+    final s = await shell(t);
+    s.harnesses = harnesses;
+    await press(t, find.bySemanticsLabel('New session').first);
+    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Folder'), '/w');
+    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    await press(t, find.bySemanticsLabel('Goose').last);
+    AxButton start() => t.widget<AxButton>(find.widgetWithText(AxButton, 'Start'));
+    expect(start().onPressed, isNull);
+    await t.enterText(field('Model name'), 'gpt-5.6');
+    await press(t, find.byType(AxCheck));
+    expect(start().onPressed, isNotNull);
+    // Another has not been said yes for.
+    await press(t, find.bySemanticsLabel('Runs with: Goose'));
+    await press(t, find.bySemanticsLabel('Claude Code').last);
+    expect(t.widget<AxCheck>(find.byType(AxCheck)).value, isFalse);
+    expect(
+      t
+          .widget<AxField>(find.byWidgetPredicate((w) => w is AxField && w.label == 'Model name'))
+          .controller!
+          .text,
+      isEmpty,
+    );
+    await press(t, find.bySemanticsLabel('Runs with: Claude Code'));
+    await press(t, find.bySemanticsLabel('Goose').last);
+    await press(t, find.byType(AxCheck));
+    await press(t, find.text('Start'));
+    expect(s.calls.where((c) => c.first == 'add').single, [
+      'add',
+      's_new',
+      'Lead',
+      ('goose', true),
+      null,
+      Access.ask,
+    ]);
+  });
+
+  testWidgets('another agent joins a session', (t) async {
+    final s = await shell(t, session: working());
+    s
+      ..harnesses = harnesses
+      ..words = const {
+        '/w': [Instructions('AGENTS.md', 'd1', 'Use tabs.')],
+      };
+    await press(t, find.bySemanticsLabel('Add an agent to Fix the cache'));
+    expect(find.text('New agent'), findsOneWidget);
+    expect(field('Folder'), findsNothing, reason: 'it is the session\'s');
+    expect(find.text('Follow AGENTS.md'), findsOneWidget);
+    await t.enterText(field('Name'), 'Reviewer');
+    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    await press(t, find.bySemanticsLabel('Claude Code').last);
+    await snap(t, 'add-agent');
+    s.calls.clear();
+    // It need not be told anything yet. While it is set up the other goes on.
+    await press(t, find.text('Add'));
+    expect(s.calls, [
+      ['add', 's', 'Reviewer', ('claude', false), null, Access.read],
+    ]);
+    expect(find.byType(StartPage), findsNothing);
+    s.current!.apply([
+      const Event(
+        91,
+        91,
+        AgentAdded('a_new', 'Reviewer', Execution(harness: 'claude'), null, access: Access.read),
+      ),
+    ]);
+    await settled(t);
+    // It is the one that is shown.
+    expect(find.text('Say something to Reviewer'), findsOneWidget);
+    await snap(t, 'two-agents');
+    await t.tap(find.byType(ExecutionKey));
+    await settled(t);
+    expect(find.text('Its own model'), findsWidgets);
+    expect(find.text('Its own sign-in'), findsWidgets);
+    expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
+  });
 
   testWidgets('a double click answers one question, not the next as well', (t) async {
     final s = await shell(t, session: working(asks: true));
