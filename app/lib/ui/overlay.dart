@@ -48,6 +48,22 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
   @override
   void didChangeMetrics() => close();
 
+  (Size, TextScaler, AxDensity)? _room;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final room = (
+      MediaQuery.sizeOf(context),
+      MediaQuery.textScalerOf(context),
+      Ax.of(context).density,
+    );
+    // Everything was made larger or smaller, which the system does not tell.
+    if (_room != null && _room != room) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? close() : null);
+    }
+    _room = room;
+  }
+
   void toggle() => _ctl.isShowing ? close() : open();
   void open() {
     final box = context.findRenderObject()! as RenderBox;

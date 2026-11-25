@@ -24,11 +24,11 @@ use crate::{
 pub const TOOL: &str = "agent";
 
 /// Agents above one another, at most.
-const DEEPEST: usize = 3;
+pub const DEEPEST: usize = 3;
 /// Runs an agent has begun that it has not been told the end of.
-const OWED: usize = 16;
+pub const OWED: usize = 16;
 /// What one agent tells another, bytes.
-const TEXT: usize = 64 * 1024;
+pub const TEXT: usize = 64 * 1024;
 /// Of an answer, what is passed on.
 const ANSWER: usize = 24 * 1024;
 const LONGEST: u64 = 900;

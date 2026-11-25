@@ -63,6 +63,39 @@ void main() {
     expect([over.result, over.resultCut, done.resultCut], [null, 400000, 0]);
   });
 
+  test('the limits of the host arrive, with words for how much', () {
+    final all = [
+      for (final j in (messages[7] as Answered).result! as List<Object?>)
+        HostLimit.decode(j! as Json),
+    ];
+    expect(
+      [for (final l in all) (l.of, l.what, l.amount)],
+      [
+        ('A run', 'Steps', '200'),
+        ('A run', 'Output tokens', 'No limit'),
+        ('Files', 'One file', '1 KiB'),
+        ('Files', 'One command', '10 minutes'),
+      ],
+    );
+    for (final (most, unit, want) in [
+      (0, 'bytes', '0'),
+      (999, 'count', '999'),
+      (1000, 'count', '1\u{a0}000'),
+      (1234567, 'parsecs', '1\u{a0}234\u{a0}567'),
+      (500, 'bytes', '500 B'),
+      (1536, 'bytes', '1536 B'),
+      (8 << 20, 'bytes', '8 MiB'),
+      (16 << 30, 'bytes', '16 GiB'),
+      (1, 'seconds', '1 second'),
+      (90, 'seconds', '90 seconds'),
+      (3600, 'seconds', '1 hour'),
+      (4 * 3600, 'seconds', '4 hours'),
+    ]) {
+      final l = HostLimit.decode({'of': 'x', 'what': 'y', 'most': most, 'unit': unit});
+      expect(l.amount, want);
+    }
+  });
+
   test('what is newer or malformed keeps its place', () {
     for (final j in [
       {'type': 'x.new', 'a': 1},

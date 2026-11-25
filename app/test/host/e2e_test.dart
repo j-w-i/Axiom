@@ -94,6 +94,16 @@ void main() {
     l.close();
   });
 
+  test('the host tells what it keeps everything to', () async {
+    final s = HostStore(paths: paths, binary: null, spawn: false);
+    await s.start();
+    final all = await s.limits();
+    expect(all.length, greaterThan(15));
+    expect(all.firstWhere((l) => l.what == 'Agents in a session').most, greaterThan(1));
+    expect(all.any((l) => l.unit == LimitUnit.unknown), isFalse);
+    s.dispose();
+  });
+
   test('a wrong token and a missing host are errors with words', () async {
     await expectLater(
       HostLink.connect(endpoint: File(paths.endpointFile).readAsStringSync(), token: 'no'),

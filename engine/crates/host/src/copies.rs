@@ -18,7 +18,7 @@ use axiom_proto::{
 };
 use axiom_tools::{
     Site,
-    copy::{self, Files, From, Is, Most, Seen, Taking, Was, What, alike},
+    copy::{self, Files, From, Is, Seen, Taking, Was, What, alike},
     points::{self, Delta},
 };
 use serde::{Deserialize, Serialize};
@@ -42,8 +42,8 @@ const FILES: usize = 2000;
 const NAMES: usize = 200;
 /// Of one agent's copy: at how many points of its conversation it is kept, how much that may come to,
 /// and how long one may take.
-const POINTS: usize = 50;
-const KEPT: u64 = 256 * 1024 * 1024;
+pub const POINTS: usize = 50;
+pub const KEPT: u64 = 256 * 1024 * 1024;
 const TAKES: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn internal(words: impl std::fmt::Display) -> WireError {
@@ -398,7 +398,7 @@ pub async fn ready(
             let own = a.copies.own(&folder, &s, &ag, true)?;
             let may = |p: &Place| site.reads(p);
             let from = From { folder: &own.folder, tracked: &tracked, may: &may, stop };
-            match copy::make(&from, &own.copy, Most::default()) {
+            match copy::make(&from, &own.copy, crate::limits::copied()) {
                 Ok((files, odd)) => {
                     own.keep(&Known { files, odd, ..Known::default() })?;
                     Ok(own.copy.to_string())
@@ -514,7 +514,7 @@ pub async fn again(
         }
         let new = a.copies.own(own.folder.as_str(), &s, &to, true)?;
         let from = points::Sources { store: &own.points, copy: &own.copy, folder: &own.folder };
-        let made = points::again(&files, &from, &new.copy, Most::default(), stop);
+        let made = points::again(&files, &from, &new.copy, crate::limits::copied(), stop);
         let kept = made.map_err(words).and_then(|made| {
             // What counted as copied then counts so now.
             let counted = |(path, is): (String, Is)| {
@@ -867,7 +867,7 @@ pub async fn renew(
         let beside = a.beside(&agent)?;
         let may = |p: &Place| site.reads(p);
         let from = From { folder: &own.folder, tracked: &tracked, may: &may, stop };
-        let news = copy::news(&from, &own.copy, &mut known.files, Most::default()).map_err(words)?;
+        let news = copy::news(&from, &own.copy, &mut known.files, crate::limits::copied()).map_err(words)?;
         let mut not: Vec<Value> = news.left.iter().map(|(p, w)| left(p, w.as_str())).collect();
         // On record before it is done: what is taken over is the folder's, and nobody's change.
         known.taking = news.taking;

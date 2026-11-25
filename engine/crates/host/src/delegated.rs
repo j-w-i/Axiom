@@ -32,7 +32,7 @@ use crate::agents::{Floor, Grant, Setup, Slot};
 
 /// A program that has nothing to do for this long is ended; it goes on where it was when it is
 /// spoken to.
-const IDLE: Duration = Duration::from_secs(60 * 60);
+pub const IDLE: Duration = Duration::from_secs(60 * 60);
 
 /// A harness this host can drive.
 pub struct Known {

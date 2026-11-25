@@ -261,3 +261,26 @@ async fn a_folder_is_shown_in_the_windows_and_nothing_begins() {
     let all = f.client().await.call(Call::list()).await.unwrap();
     assert!(all.as_array().unwrap().is_empty(), "nothing has begun");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_limits_are_told_in_words_and_as_json() {
+    let f = fixture();
+    let told = f.client().await.call(Call::Limits {}).await.unwrap();
+    let o = f.run(&["--json", "limits"]);
+    assert_eq!(o.status.code(), Some(0));
+    let text = clean(&o.stdout);
+    assert_eq!(text.lines().count(), 1);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap(), told);
+    let o = f.run(&["limits"]);
+    assert_eq!(o.status.code(), Some(0));
+    let text = clean(&o.stdout);
+    for l in told.as_array().unwrap() {
+        let what = l["what"].as_str().unwrap();
+        assert_eq!(text.matches(&format!("\n  {what} ")).count(), 1, "{what} in {text}");
+        assert!(format!("\n{text}").contains(&format!("\n{}\n", l["of"].as_str().unwrap())));
+    }
+    let line = |what: &str| text.lines().find(|l| l.contains(what)).unwrap().to_owned();
+    assert!(line("Output tokens").ends_with("  no limit"));
+    assert!(line("An agent's copy of a folder").ends_with(" GiB"));
+    assert_eq!(f.run(&["limits", "more"]).status.code(), Some(1));
+}

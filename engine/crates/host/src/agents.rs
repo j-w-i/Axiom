@@ -8,9 +8,7 @@ use std::{
     time::Duration,
 };
 
-use axiom_engine::{
-    Agent, Context, Deed, Desk, Ended, Limits, Other, Refused, Retries, Say, Stage, Word,
-};
+use axiom_engine::{Agent, Context, Deed, Desk, Ended, Other, Refused, Retries, Say, Stage, Word};
 use axiom_model::{Cache, Codec, Settings};
 use axiom_policy::{
     Access, Budget, Caps, Keep, Net, NotAnswered, Place, Policy, Profile, Reach, Tools,
@@ -84,14 +82,14 @@ pub struct Apart {
 /// Files whose words are for agents, as they are named in the top folder of a workspace.
 const FOR_AGENTS: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 /// Longer ones are not followed.
-const INSTRUCTIONS: u64 = 64 * 1024;
+pub const INSTRUCTIONS: u64 = 64 * 1024;
 
 /// Of why a person said no.
 const WORDS: usize = 4096;
 /// Agents of one session.
-const MOST: usize = 64;
+pub const MOST: usize = 64;
 /// What may wait for an agent that is at work.
-const INBOX: usize = 32;
+pub const INBOX: usize = 32;
 /// How long what an agent began may take to end.
 const STILL: Duration = Duration::from_secs(15);
 /// Sessions whose agents are remembered beyond what the journal has.
@@ -899,7 +897,7 @@ impl Worker {
                 user: user()?,
                 tmp: site.scratch.clone(),
                 written,
-                limits: axiom_harness::Limits::default(),
+                limits: crate::limits::program(),
             };
             Ok::<_, WireError>((known, site_of, access, site.workspace, words))
         })
@@ -1060,7 +1058,7 @@ pub async fn load(
         stage: floor,
         instructions,
         not_followed: not,
-        limits: Limits::default(),
+        limits: crate::limits::run(),
         fill: None,
         told: None,
         waited: Duration::ZERO,

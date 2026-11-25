@@ -87,7 +87,7 @@ fn secret_of(t: &Text) -> Secret {
 }
 
 /// Most connections.
-const MOST: usize = 200;
+pub const MOST: usize = 200;
 const NAME: usize = 200;
 const SECRET: usize = 16 * 1024;
 

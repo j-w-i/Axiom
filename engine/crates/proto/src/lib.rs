@@ -481,6 +481,28 @@ pub struct HarnessInfo {
     pub accounts: Option<String>,
 }
 
+/// A limit the host keeps, in words for a person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Limit {
+    /// What it is a limit of; those of one kind come together.
+    pub of: String,
+    pub what: String,
+    /// Absent: there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub most: Option<u64>,
+    pub unit: Unit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unit {
+    Count,
+    Bytes,
+    Seconds,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params")]
 pub enum Call {
@@ -495,6 +517,9 @@ pub enum Call {
     Peer { tool: String, args: serde_json::Value },
     #[serde(rename = "host.status")]
     Status {},
+    /// The limits this host keeps: an array of [`Limit`].
+    #[serde(rename = "host.limits")]
+    Limits {},
     /// Stops the host if nothing runs, or always with `force`.
     #[serde(rename = "host.shutdown")]
     Shutdown {

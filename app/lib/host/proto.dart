@@ -364,6 +364,44 @@ class ModelInfo {
   final int? context;
 }
 
+enum LimitUnit { count, bytes, seconds, unknown }
+
+/// A limit the host keeps: of what, and what it limits, in its own words.
+class HostLimit {
+  const HostLimit(this.of, this.what, this.most, this.unit);
+  HostLimit.decode(Json j)
+    : of = j['of']! as String,
+      what = j['what']! as String,
+      most = j['most'] as int?,
+      unit = _enum(LimitUnit.values, j['unit'], LimitUnit.unknown);
+  final String of, what;
+
+  /// Null: there is none.
+  final int? most;
+  final LimitUnit unit;
+
+  /// In the largest unit it is a whole number of.
+  String get amount {
+    final n = most;
+    if (n == null) return 'No limit';
+    String? whole(List<(int, String)> of) {
+      for (final (size, name) in of) {
+        if (n == 0 || n % size != 0) continue;
+        final k = n ~/ size;
+        return name.endsWith('B') || k == 1 ? '$k $name' : '$k ${name}s';
+      }
+      return null;
+    }
+
+    final named = switch (unit) {
+      LimitUnit.bytes => whole([(1 << 30, 'GiB'), (1 << 20, 'MiB'), (1 << 10, 'KiB'), (1, 'B')]),
+      LimitUnit.seconds => whole([(3600, 'hour'), (60, 'minute'), (1, 'second')]),
+      LimitUnit.count || LimitUnit.unknown => null,
+    };
+    return named ?? '$n'.replaceAllMapped(RegExp(r'\B(?=(\d{3})+$)'), (_) => '\u{a0}');
+  }
+}
+
 class Usage {
   Usage.decode(Json j)
     : input = j['input'] as int?,

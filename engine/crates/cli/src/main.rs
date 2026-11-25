@@ -9,8 +9,8 @@ use std::{
 
 use axiom_host::{client::Client, paths::Paths, signal};
 use axiom_proto::{
-    Access, AgentId, Answer, Answerable, Body, Call, Event, Execution, ItemId, ItemKind, Message,
-    Outcome, RequestId, RunId, SecretText, SessionId,
+    Access, AgentId, Answer, Answerable, Body, Call, Event, Execution, ItemId, ItemKind, Limit,
+    Message, Outcome, RequestId, RunId, SecretText, SessionId, Unit,
 };
 use plain::{block, json, line};
 use serde_json::Value;
@@ -19,6 +19,7 @@ mod plain;
 
 const USAGE: &str = "usage: axiom [--json] COMMAND      --json: one line for each answer or event
   axiom status
+  axiom limits                                  what the host keeps everything to
   axiom sessions
   axiom waiting                                 what waits for a person
   axiom new TITLE [WORKSPACE]
@@ -130,6 +131,7 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
     }
     let call = match args[..] {
         ["status"] => Call::Status {},
+        ["limits"] => Call::Limits {},
         ["sessions"] => Call::list(),
         ["waiting"] => Call::Waiting {},
         ["new", title] => Call::SessionCreate { title: title.into(), workspace: None },
@@ -232,9 +234,13 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
     }
     let follow = matches!(call, Call::Follow { .. });
     let opens = matches!(call, Call::Open { .. });
+    let told = matches!(call, Call::Limits {});
     let answer = c.call(call).await?;
     if opens && answer["windows"] == 0 {
         return Err("no window is open".into());
+    }
+    if told && !compact {
+        return limits(serde_json::from_value(answer)?);
     }
     if !follow {
         return print(&answer, compact);
@@ -271,6 +277,50 @@ async fn sessions(c: &mut Client) -> Result<Vec<Value>, Error> {
             _ => return Ok(all),
         }
     }
+}
+
+/// In words, under what they are limits of.
+fn limits(all: Vec<Limit>) -> Result<u8, Error> {
+    let mut out = io::stdout().lock();
+    let mut of = None;
+    for l in all {
+        if of.as_ref() != Some(&l.of) {
+            writeln!(out, "{}{}", if of.is_some() { "\n" } else { "" }, line(&l.of))?;
+        }
+        writeln!(out, "  {:<58}  {}", line(&l.what), amount(l.most, l.unit))?;
+        of = Some(l.of);
+    }
+    out.flush()?;
+    Ok(0)
+}
+
+fn amount(most: Option<u64>, unit: Unit) -> String {
+    let Some(n) = most else { return "no limit".into() };
+    let in_whole = |of: &[(u64, &str)]| {
+        let (size, name) = of.iter().find(|(s, _)| n > 0 && n.is_multiple_of(*s)).copied()?;
+        let n = n / size;
+        Some(if name.ends_with('B') {
+            format!("{n} {name}")
+        } else {
+            format!("{n} {name}{}", if n == 1 { "" } else { "s" })
+        })
+    };
+    let named = match unit {
+        Unit::Bytes => in_whole(&[(1 << 30, "GiB"), (1 << 20, "MiB"), (1 << 10, "KiB"), (1, "B")]),
+        Unit::Seconds => in_whole(&[(3600, "hour"), (60, "minute"), (1, "second")]),
+        Unit::Count | Unit::Unknown => None,
+    };
+    named.unwrap_or_else(|| {
+        let digits = n.to_string();
+        let mut s = String::new();
+        for (i, c) in digits.chars().enumerate() {
+            if i > 0 && (digits.len() - i).is_multiple_of(3) {
+                s.push(' ');
+            }
+            s.push(c);
+        }
+        s
+    })
 }
 
 fn print(v: &Value, compact: bool) -> Result<u8, Error> {
@@ -519,6 +569,33 @@ mod tests {
         // What was shown and is not so any more stays, and the truth follows.
         let cut = screen(vec![delta("né\n[more is not kept]"), end("né\n[9 more bytes]")]);
         assert_eq!(cut, "né\n[more is not kept]\n[9 more bytes]\n");
+    }
+
+    #[test]
+    fn amounts_are_in_the_largest_whole_unit() {
+        use Unit::{Bytes, Count, Seconds, Unknown};
+        for (most, unit, want) in [
+            (None, Count, "no limit"),
+            (None, Bytes, "no limit"),
+            (Some(0), Bytes, "0"),
+            (Some(8), Count, "8"),
+            (Some(999), Count, "999"),
+            (Some(1000), Count, "1 000"),
+            (Some(100_000), Count, "100 000"),
+            (Some(1_234_567), Unknown, "1 234 567"),
+            (Some(500), Bytes, "500 B"),
+            (Some(1536), Bytes, "1536 B"),
+            (Some(64 << 10), Bytes, "64 KiB"),
+            (Some(8 << 20), Bytes, "8 MiB"),
+            (Some(16 << 30), Bytes, "16 GiB"),
+            (Some(1), Seconds, "1 second"),
+            (Some(90), Seconds, "90 seconds"),
+            (Some(600), Seconds, "10 minutes"),
+            (Some(3600), Seconds, "1 hour"),
+            (Some(4 * 3600), Seconds, "4 hours"),
+        ] {
+            assert_eq!(amount(most, unit), want);
+        }
     }
 
     #[test]

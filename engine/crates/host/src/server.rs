@@ -107,11 +107,11 @@ fn home() -> Option<PathBuf> {
 /// Connections that have not shown the token. One more closes the oldest.
 const STRANGERS: usize = 32;
 /// Connections that have.
-const CLIENTS: usize = 64;
+pub(crate) const CLIENTS: usize = 64;
 /// All of them, with those that are being closed. More wait to be accepted.
 const CONNECTIONS: usize = 128;
 /// Runs at once.
-const RUNS: usize = 128;
+pub(crate) const RUNS: usize = 128;
 /// How many times in a row it may fail to look after its files.
 const LOOKS: u32 = 10;
 /// Bytes read ahead of a request that is being answered.
@@ -1273,7 +1273,7 @@ enum Opening {
 }
 
 /// Runs of an agent that others' ends may begin, one after another, with no person in between.
-const WAKES: u32 = 8;
+pub(crate) const WAKES: u32 = 8;
 /// Ends that come together are told together.
 const TOGETHER: Duration = Duration::from_millis(300);
 
@@ -1660,6 +1660,9 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 status["damaged"] = d.as_str().into();
             }
             Ok(status)
+        }
+        Call::Limits {} => {
+            serde_json::to_value(crate::limits::kept()).map_err(|e| internal(e.to_string()))
         }
         Call::Shutdown { force } => {
             if !st.close(force) {

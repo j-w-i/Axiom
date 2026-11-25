@@ -346,7 +346,8 @@ class CodeTiles extends SingleChildRenderObjectWidget {
     final out = <TextRange>[];
     for (final r in words.children ?? const <InlineSpan>[]) {
       final n = (r as TextSpan).text?.length ?? 0;
-      if (r.style?.fontFamily != null && r.style!.fontFamily != words.style?.fontFamily) {
+      // Only code has a family of its own, be it that of the words.
+      if (r.style?.fontFamily != null) {
         out.add(TextRange(start: at, end: at + n));
       }
       at += n;
