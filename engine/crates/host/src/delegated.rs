@@ -285,6 +285,7 @@ impl Worker {
             events: live.events,
             containment: launch.containment,
             ready: false,
+            resumes: false,
             run: None,
             items: HashMap::new(),
             asked: JoinSet::new(),
@@ -294,9 +295,17 @@ impl Worker {
             limit: None,
             early: None,
         };
+        if self.setup.began && self.setup.resume.is_none() {
+            let words = format!(
+                "{} cannot go on with what was said before: it begins anew.",
+                self.known.name
+            );
+            self.floor.notice(run, &words).await?;
+        }
+        self.setup.began = true;
+        self.floor.began().await;
         tokio::spawn(attempt.stay(rx));
         *self.slot.attempt.lock().await = Some(tx.clone());
-        let _ = run;
         Ok(tx)
     }
 
@@ -369,6 +378,7 @@ struct Attempt {
     events: Events,
     containment: Containment,
     ready: bool,
+    resumes: bool,
     run: Option<RunId>,
     /// By the program's own names.
     items: HashMap<String, Open>,
@@ -485,6 +495,13 @@ impl Attempt {
         self.opened(cancel).await?;
         let mut done = Done { outcome: Outcome::Completed, stop: String::new(), error: None };
         while !words.is_empty() && done.outcome == Outcome::Completed && !*cancel.borrow() {
+            while let Ok(w) = inbox.try_recv() {
+                if let Some(item) = w.item
+                    && noted.insert(item.clone())
+                {
+                    words.push((item, w.text));
+                }
+            }
             if !self.give(&mut words).await? {
                 return Err(Stop::Failed(format!("{} takes nothing now", self.name)));
             }
@@ -639,7 +656,7 @@ impl Attempt {
     async fn tell(&mut self, e: Event) -> Result<(), Stop> {
         match e {
             Event::Ready(r) => self.is_ready(*r).await?,
-            Event::Session(s) => self.floor.resume(s).await,
+            Event::Session(s) if self.resumes => self.floor.resume(Some(s)).await,
             Event::Say(s) => {
                 let kind = match s.kind {
                     Kind::Prose => ItemKind::Prose,
@@ -742,6 +759,7 @@ impl Attempt {
                 }
             }
             Event::Began { .. }
+            | Event::Session(_)
             | Event::Notice { .. }
             | Event::Unknown { .. }
             | Event::Done(_)
@@ -752,7 +770,9 @@ impl Attempt {
 
     async fn is_ready(&mut self, r: Ready) -> Result<(), Stop> {
         self.ready = true;
-        self.floor.resume(r.session).await;
+        self.resumes = r.caps.resume;
+        // Otherwise it begins anew when its program has ended, and says so.
+        self.floor.resume(r.caps.resume.then_some(r.session)).await;
         if let (Some(is), Some(asked)) = (&r.model, &self.model)
             && is != asked
         {
@@ -838,11 +858,7 @@ impl Attempt {
             return Ok(());
         }
         self.begin_item(&item, ItemKind::Notice, String::new(), None, 0).await?;
-        let say = vec![
-            Say::Text(item.clone(), text.to_owned()),
-            Say::End(item, Outcome::Completed, None),
-        ];
-        Ok(self.floor.say(say).await?)
+        Ok(self.floor.say(noted(item, text)).await?)
     }
 
     /// What it asks goes to a person, whole, and once: what "always" would be is the program's own.
@@ -929,6 +945,28 @@ impl From<Refused> for Stop {
             Refused::Closed => Stop::Closed,
             Refused::This(why) => Stop::Failed(why),
         }
+    }
+}
+
+fn noted(item: ItemId, text: &str) -> Vec<Say> {
+    vec![Say::Text(item.clone(), text.to_owned()), Say::End(item, Outcome::Completed, None)]
+}
+
+impl Floor {
+    async fn notice(&self, run: &RunId, text: &str) -> Result<(), Refused> {
+        let item = ItemId::new();
+        let body = Body::ItemStarted {
+            item: item.clone(),
+            run: run.clone(),
+            agent: self.agent.clone(),
+            kind: ItemKind::Notice,
+            name: String::new(),
+            args: None,
+            args_cut: 0,
+        };
+        let mut say = vec![Say::Event(body)];
+        say.extend(noted(item, text));
+        self.say(say).await
     }
 }
 

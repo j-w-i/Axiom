@@ -401,6 +401,8 @@ impl Host {
             }
         })
         .await;
+        // What runs between runs: it ends, and lets its session go.
+        st.agents.end().await;
         // The last answers and events reach whoever still reads.
         st.over.send_replace(true);
         while connections.join_next().await.is_some() {}
@@ -1117,8 +1119,17 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let a = st.agents.clone();
             let written = a.written(&st.store).await?;
             let setup = blocking(move || {
-                let resume = None;
-                let s = Setup { name, execution, access, workspace, instructions, trust, resume };
+                let (resume, began) = (None, false);
+                let s = Setup {
+                    name,
+                    execution,
+                    access,
+                    workspace,
+                    instructions,
+                    trust,
+                    resume,
+                    began,
+                };
                 a.setup(s, &written)
             })
             .await??;

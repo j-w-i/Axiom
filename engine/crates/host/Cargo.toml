@@ -15,6 +15,13 @@ name = "axiom_host"
 name = "axiom-host"
 path = "src/main.rs"
 
+# The harness's agent that plays a script, for this crate's tests.
+[[bin]]
+name = "host-fake-agent"
+path = "../harness/tests/fake/main.rs"
+test = false
+doc = false
+
 [dependencies]
 axiom-proto.workspace = true
 axiom-journal.workspace = true

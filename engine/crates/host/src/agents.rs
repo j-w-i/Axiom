@@ -49,6 +49,9 @@ pub struct Setup {
     /// Of a delegated agent: what to go on with.
     #[serde(default)]
     pub resume: Option<String>,
+    /// Of a delegated agent: its program has run.
+    #[serde(default)]
+    pub began: bool,
 }
 
 /// Files whose words are for agents, as they are named in the top folder of a workspace.
@@ -194,7 +197,7 @@ impl Agents {
 
     /// Checks what an agent is to be, and says it as it will be kept.
     pub fn setup(&self, s: Setup, written: &Reach) -> Result<Setup, WireError> {
-        let Setup { name, execution, access, workspace, instructions, trust, resume } = s;
+        let Setup { name, execution, access, workspace, instructions, trust, resume, began } = s;
         let workspace = workspace.as_str();
         let known =
             |i: &Instructions| FOR_AGENTS.contains(&i.path.as_str()) && i.digest.len() <= 128;
@@ -217,7 +220,8 @@ impl Agents {
             }
             let workspace = real(Path::new(workspace))?.to_string();
             let execution = Execution { provider: None, ..execution };
-            let setup = Setup { name, execution, access, workspace, instructions, trust, resume };
+            let setup =
+                Setup { name, execution, access, workspace, instructions, trust, resume, began };
             let site = self.site(&setup, &AgentId("check".into()), false)?;
             let path = self.programs(&site.path)?;
             known
@@ -244,6 +248,7 @@ impl Agents {
             instructions,
             trust: false,
             resume: None,
+            began: false,
         };
         // What could not be contained later is refused now, in words.
         let site = self.site(&setup, &AgentId("check".into()), false)?;
@@ -255,6 +260,15 @@ impl Agents {
         )
         .map_err(|e| bad(e.to_string()))?;
         Ok(setup)
+    }
+
+    /// Programs of delegated agents end.
+    pub async fn end(&self) {
+        let slots: Vec<Arc<Slot>> =
+            self.parties().values().flat_map(|p| p.agents.values().cloned()).collect();
+        for s in slots {
+            *s.attempt.lock().await = None;
+        }
     }
 
     /// Where programs of the person's own are looked for.
@@ -534,14 +548,21 @@ impl Floor {
         self.store.heard(s, a, items).await.map_err(|e| Refused::This(e.to_string()))
     }
     /// Keeps what a delegated agent is to be gone on with. If that fails it begins anew, some day.
-    pub async fn resume(&self, with: String) {
+    pub async fn resume(&self, with: Option<String>) {
+        self.keep(|s| s.resume = with).await;
+    }
+    pub async fn began(&self) {
+        self.keep(|s| s.began = true).await;
+    }
+    async fn keep(&self, f: impl FnOnce(&mut Setup)) {
         let Ok(all) = self.store.agents(self.session.id.clone()).await else { return };
         let Some((_, text)) = all.into_iter().find(|(a, _)| *a == self.agent) else { return };
         let Ok(mut s) = serde_json::from_str::<Setup>(&text) else { return };
-        if s.resume.as_ref() == Some(&with) {
+        let was = s.clone();
+        f(&mut s);
+        if s == was {
             return;
         }
-        s.resume = Some(with);
         if let Ok(text) = serde_json::to_string(&s) {
             let _ = self.store.put_agent(self.session.id.clone(), self.agent.clone(), text).await;
         }
