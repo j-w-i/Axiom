@@ -493,6 +493,41 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('room can be made in a conversation that can act and is not at work', (t) async {
+    for (final (access, works, can) in [
+      (Access.ask, false, true),
+      (Access.ask, true, false),
+      (null, false, false),
+    ]) {
+      final m = SessionModel('s')
+        ..apply([
+          const Event(1, 1, SessionCreated('T', '/w')),
+          Event(
+            2,
+            2,
+            AgentAdded('a', 'Lead', const Execution(harness: 'axiom'), null, access: access),
+          ),
+          const Event(3, 3, RunStarted('r', 'a')),
+          const Event(4, 4, ItemStarted('i', 'r', 'a', ItemKind.prose, '', null)),
+          const Event(5, 5, ItemEnded('i', Outcome.completed, 'x', null)),
+          if (!works) const Event(6, 6, RunEnded('r', Outcome.completed, null)),
+        ]);
+      final s = store()
+        ..phase = HostPhase.connected
+        ..current = m;
+      await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+      await keys(t, LogicalKeyboardKey.keyK);
+      await t.enterText(
+        find.descendant(of: find.byType(SearchBox), matching: find.byType(EditableText)),
+        'summarise',
+      );
+      await t.pump();
+      expect(find.textContaining('Summarise the'), can ? findsOneWidget : findsNothing);
+      await t.pumpWidget(const SizedBox());
+      s.dispose();
+    }
+  });
+
   testWidgets('everything can be found, and gone to by the keyboard', (t) async {
     final opened = <String>[];
     final s = Opens(opened)

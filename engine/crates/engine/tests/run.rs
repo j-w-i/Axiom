@@ -756,6 +756,31 @@ async fn a_full_window_is_made_room_in() {
 }
 
 #[tokio::test]
+async fn room_is_made_because_a_person_asks() {
+    let t = T::new(Access::Work, vec![text(&["Hello."]), text(&["Kept: hello."]), text(&["On."])])
+        .await;
+    let mut a = t.agent();
+    // Before anything was said there is nothing to summarise, and nobody is asked to.
+    a.compact = true;
+    let e = t.run_unsaid(&mut a).await;
+    assert_eq!((e.outcome, t.server.requests().len()), (Outcome::Failed, 0), "{e:?}");
+    assert_eq!(t.run(&mut a, "Say hello.").await.outcome, Outcome::Completed);
+    a.compact = true;
+    let e = t.run_unsaid(&mut a).await;
+    assert_eq!((e.outcome, e.error), (Outcome::Completed, None));
+    assert_eq!(t.server.requests().len(), 2, "it is summarised, and nothing is answered");
+    let said = t.stage.texts(ItemKind::Notice).pop().unwrap();
+    assert!(said.contains("a person asked") && said.ends_with("Kept: hello."), "{said}");
+    assert!(format!("{:?}", a.context.messages()[0]).contains("Kept: hello."));
+    // Once: the next run answers, from what was kept.
+    assert_eq!(t.run(&mut a, "Go on.").await.outcome, Outcome::Completed);
+    let sent = t.server.requests()[2]["messages"].to_string();
+    assert!(sent.contains("Kept: hello.") && sent.contains("Go on."), "{sent}");
+    let c = Context::load(&t.stage.turns()).unwrap();
+    assert_eq!(c.messages(), a.context.messages());
+}
+
+#[tokio::test]
 async fn what_is_too_long_is_summarised_once_and_then_fails() {
     let long = || {
         status(

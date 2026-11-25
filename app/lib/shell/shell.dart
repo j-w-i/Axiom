@@ -233,6 +233,17 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
           detail: oneLine(m.title, 60),
           icon: AxIcon.plus,
         ),
+      if (m.agents[_agent] ?? m.agents.values.firstOrNull case final a?
+          when a.access != null &&
+              a.execution.harness == 'axiom' &&
+              a.run == null &&
+              a.last != null)
+        Found(
+          'Summarise the conversation to make room',
+          () => _do('The conversation was not summarised', () => widget.store.compact(m.id, a.id)),
+          detail: oneLine(literal(a.name), 40),
+          icon: AxIcon.list,
+        ),
       for (final a in m.agents.values)
         Found(
           oneLine(literal(a.name), 40),

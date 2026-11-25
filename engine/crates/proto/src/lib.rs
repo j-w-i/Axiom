@@ -585,6 +585,10 @@ pub enum Call {
         #[serde(default)]
         key: Option<String>,
     },
+    /// Summarises an agent's conversation now, to make room. Only between runs, only for an agent of
+    /// Axiom's own, and only when nothing waits to be heard. Answers with the run that does it.
+    #[serde(rename = "agent.compact")]
+    Compact { session: SessionId, agent: AgentId },
     /// A person's answer.
     #[serde(rename = "request.answer")]
     Answer {

@@ -903,6 +903,12 @@ impl Worker {
         })))
     }
 
+    /// Its next run only makes room in its conversation.
+    pub fn compacts(&mut self) {
+        if let Self::Native(a) = self {
+            a.compact = true;
+        }
+    }
     pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
         match self {
             Self::Native(a) => a.begin(run, prompt).await,
@@ -1036,6 +1042,7 @@ pub async fn load(
         told: None,
         waited: Duration::ZERO,
         noted: Default::default(),
+        compact: false,
         retries: Retries::default(),
         inbox,
     };

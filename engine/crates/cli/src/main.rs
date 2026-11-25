@@ -31,6 +31,7 @@ const USAGE: &str = "usage:
   axiom agent SESSION NAME CONNECTION MODEL read|ask|work
   axiom set SESSION AGENT read|ask|work
   axiom say SESSION AGENT TEXT
+  axiom compact SESSION AGENT
   axiom answer SESSION REQUEST DIGEST once|session|deny
   axiom cancel SESSION RUN
   axiom audit [AFTER]
@@ -155,6 +156,9 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
             execution: None,
             access: Some(access(a)?),
         },
+        ["compact", s, agent] => {
+            Call::Compact { session: SessionId(s.into()), agent: AgentId(agent.into()) }
+        }
         ["say", s, agent, text] => Call::Prompt {
             session: SessionId(s.into()),
             agent: AgentId(agent.into()),

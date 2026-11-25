@@ -488,6 +488,11 @@ class HostStore extends ChangeNotifier {
         'access': ?access?.name,
       });
 
+  /// Summarises an agent's conversation now, to make room in it.
+  Future<void> compact(String session, String agent) async {
+    await _live.call('agent.compact', {'session': session, 'agent': agent});
+  }
+
   /// [key] names what is said: again under the same name, it is heard once.
   Future<void> prompt(String session, String agent, String text, {String? key}) =>
       _live.call('agent.prompt', {

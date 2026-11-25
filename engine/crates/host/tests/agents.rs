@@ -354,6 +354,58 @@ async fn what_was_not_heard_when_the_host_went_is_heard_after() {
     assert_eq!(t.sent(&["first;", "second;", "third;"]), [1, 1, 1]);
 }
 
+#[tokio::test]
+async fn room_is_made_between_runs_when_nothing_waits() {
+    let mut t = T::new(vec![text(&["one"]), text(&["Kept."])]).await;
+    let a = t.agent(Access::Work).await;
+    let call = Call::Compact { session: t.s.clone(), agent: a.clone() };
+    t.prompt(&a, "first;").await.unwrap();
+    assert_eq!(t.ended().await.0, Outcome::Completed);
+    // Its place is free again, soon.
+    let mut r = t.c.call(call.clone()).await;
+    for _ in 0..100 {
+        if r.is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        r = t.c.call(call.clone()).await;
+    }
+    r.unwrap();
+    let (o, e, all) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None));
+    let kept = all.iter().any(
+        |b| matches!(b, Body::ItemEnded { text, .. } if text.contains("summarised") && text.ends_with("Kept.")),
+    );
+    assert!(kept, "{all:#?}");
+    // Not while it works.
+    t.server.add(text(&["thinking"]).hangs());
+    let v = loop {
+        match t.prompt(&a, "second;").await {
+            Ok(v) if v["queued"] == false => break v,
+            _ => tokio::time::sleep(Duration::from_millis(20)).await,
+        }
+    };
+    let e = t.c.call(call.clone()).await.unwrap_err().to_string();
+    assert!(e.contains("at work"), "{e}");
+    // Nor while something waits: that is to be answered.
+    t.prompt(&a, "third;").await.unwrap();
+    let run = RunId(v["run"].as_str().unwrap().into());
+    t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
+    assert_eq!(t.ended().await.0, Outcome::Cancelled);
+    let e = loop {
+        let e = t.c.call(call.clone()).await.unwrap_err().to_string();
+        if !e.contains("at work") {
+            break e;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert!(e.contains("waits to be heard"), "{e}");
+    t.server.add(text(&["ok"]));
+    t.prompt(&a, "fourth;").await.unwrap();
+    while t.ended().await.0 != Outcome::Completed {}
+    assert_eq!(t.sent(&["third;", "fourth;"]), [1, 1], "it was heard, and answered");
+}
+
 /// A client that did not see the answer says it again under the same name.
 #[tokio::test]
 async fn a_prompt_of_one_name_is_heard_once() {
