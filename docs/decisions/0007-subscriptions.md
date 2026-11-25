@@ -4,4 +4,5 @@ Axiom launches the vendor's unmodified binary and never sees a token (Claude, Go
 **Evidence.** `research/subscription-auth.md`, dated quotations and verdicts. **Confidence.** Claude: medium; the delegation verdict rests on the published legal page.
 **Open, owner's action.** Written confirmation from Anthropic before launch; OpenAI's interest form if Axiom is ever paid or hosted.
 **Multiple accounts (PR-4).** Any number may be linked. Axiom does not rotate between them to evade a limit; a person or their own rule chooses, where the terms allow.
+**Considered and refused, 2026-11-25.** Calling a vendor's API with the login of its own client, under that client's id and headers (as some plugins do): it misrepresents the client, which Anthropic's policy of 2026-11-12 bans and its servers have blocked, and it risks the person's account. Instead the unmodified program is the loop, and Axiom its hands: its own tools off, Axiom's in their place (`--tools ""`, documented).
 **Revisit.** Monthly; policies are data with a date and a restrict-only remote switch.

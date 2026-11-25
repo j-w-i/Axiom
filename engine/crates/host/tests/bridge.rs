@@ -299,6 +299,9 @@ async fn its_key_opens_one_tool_and_dies_with_it() {
     }
     let v = c.call(Call::Peer { tool: "agent".into(), args: json!({"do": "list"}) }).await.unwrap();
     assert_eq!(v["ok"], true);
+    // Another tool is not among what it opens, whatever its arguments would be for that one.
+    let e = c.call(Call::Peer { tool: "shell".into(), args: json!({"do": "list"}) }).await;
+    assert!(e.unwrap_err().to_string().contains("opens nothing else"));
     // A client has no such tool, and a wrong key opens nothing.
     assert!(
         t.c.call(Call::Peer { tool: "agent".into(), args: json!({"do": "list"}) }).await.is_err()
@@ -565,8 +568,16 @@ async fn its_tools_are_axioms_and_so_is_what_holds_them_back() {
 async fn it_is_stopped_with_what_it_does() {
     let (mut t, _, run) = with_hands(Access::Work).await;
     let (mut b, args) = t.mcp().await;
-    b.tool(1, "job", json!({"do": "start", "command": "sleep 60"})).await;
+    let mark = format!("8{:05}", std::process::id() % 100_000);
+    let alive = || {
+        let o = std::process::Command::new("/bin/ps").args(["-axo", "args="]).output().unwrap();
+        String::from_utf8_lossy(&o.stdout).lines().any(|l| l.ends_with(&format!("sleep {mark}")))
+    };
+    b.tool(1, "job", json!({"do": "start", "command": format!("sleep {mark}")})).await;
     assert!(b.told(1).await.1);
+    while !alive() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     b.tool(2, "shell", json!({"command": "echo begun; sleep 60; touch late"})).await;
     t.until(|b| matches!(b, Body::ItemDelta { text, .. } if text.contains("begun")).then_some(()))
         .await;
@@ -583,17 +594,25 @@ async fn it_is_stopped_with_what_it_does() {
     assert!(!ok && said.contains("Not done") || said.contains("Stopped"), "{said}");
     assert!(now.elapsed() < Duration::from_secs(20));
     assert!(t.file("late").is_none());
+    // Also what ran in the background.
+    let now = std::time::Instant::now();
+    while alive() {
+        assert!(now.elapsed() < Duration::from_secs(10), "a job runs on");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let mut refused = false;
     for _ in 0..200 {
         b.tool(3, "write", json!({"path": "after.txt", "content": "x"})).await;
         let (said, ok) = b.told(3).await;
         if !ok {
             assert!(said.contains("in no run"), "{said}");
+            refused = true;
             break;
         }
         std::fs::remove_file(t.f.dir.path().join("w/after.txt")).unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(t.file("after.txt").is_none());
+    assert!(refused && t.file("after.txt").is_none());
     let words = args.iter().position(|a| a == "--append-system-prompt-file").unwrap();
     assert!(std::path::Path::new(&args[words + 1]).exists());
     // With the program, its words go.

@@ -1,6 +1,7 @@
 //! The real Claude Code, once, by hand and with its owner's yes: it works on their account. Nothing
 //! else starts it. `AXIOM_LIVE_CLAUDE=yes cargo test -p axiom-host --test live -- --ignored`; with
-//! `AXIOM_LIVE_PROGRAMS=DIR` a program in that folder is used instead, to try this out.
+//! `AXIOM_LIVE_PROGRAMS=DIR` a program in that folder is used instead, to try this out; with
+//! `AXIOM_LIVE_TOOLS=axiom` it works with Axiom's tools in place of its own.
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stdout)]
 
@@ -12,7 +13,7 @@ use axiom_proto::*;
 mod common;
 use common::*;
 
-const SAYS: &str = "Make a file named made.txt that holds the one line: made. Then run the command `cat made.txt`. Then call the tool agent of the server axiom with do set to list. Then say in one sentence what each of the three gave.";
+const SAYS: &str = "Make a file named made.txt that holds the one line: made. Then run the command `cat made.txt`. Then call the tool agent (of the server axiom) with do set to list. Then say in one sentence what each of the three gave.";
 
 #[tokio::test]
 #[ignore = "starts the real Claude Code, on its owner's account"]
@@ -37,7 +38,7 @@ async fn claude_code_works_once() {
         model: std::env::var("AXIOM_LIVE_MODEL").ok(),
         connection: None,
         effort: None,
-        environment: None,
+        environment: std::env::var("AXIOM_LIVE_TOOLS").ok(),
     };
     let add = |name: &str| Call::AgentAdd {
         session: s.clone(),
