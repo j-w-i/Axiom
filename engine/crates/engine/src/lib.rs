@@ -111,6 +111,12 @@ pub trait Stage: Send + Sync + 'static {
         turn: String,
         heard: Option<ItemId>,
     ) -> impl Future<Output = Result<bool, Refused>> + Send;
+    /// The conversation can be branched at `item`: a branch has the first `n` turns, `with` the item
+    /// in them or not. What is not kept of this cannot be branched from, and that is all.
+    fn mark(&self, item: &ItemId, n: u64, with: bool) -> impl Future<Output = ()> + Send {
+        let _ = (item, n, with);
+        async {}
+    }
     /// Resolves when nothing is taken any more.
     fn closed(&self) -> impl Future<Output = ()> + Send;
     /// Resolves once the deed is in the audit record, on the drive (SI-23).

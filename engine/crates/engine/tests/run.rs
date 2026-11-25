@@ -401,7 +401,9 @@ async fn a_run_that_cannot_begin_has_ended() {
     let t = T::new(Access::Work, vec![]).await;
     let mut a = t.agent();
     t.stage.refuses_turns();
-    let r = a.begin(&axiom_proto::RunId::new(), Some(axiom_engine::Word::new("go".into()))).await;
+    let r = a
+        .begin(&axiom_proto::RunId::new(), vec![], Some(axiom_engine::Word::new("go".into())))
+        .await;
     assert!(r.is_err());
     assert_eq!(t.stage.ended(), [Outcome::Failed]);
     assert!(a.context.is_empty());
@@ -562,6 +564,64 @@ async fn a_person_can_speak_while_it_works() {
     assert_eq!(t.stage.texts(ItemKind::Prompt), ["go", "also this"]);
     let sent = t.server.requests()[0]["messages"].to_string();
     assert!(sent.contains("also this") && sent.contains("and that"), "{sent}");
+}
+
+/// Where a run began with a person's words and where it ended with an answer, and nowhere else.
+#[tokio::test]
+async fn it_can_be_branched_between_runs() {
+    let t = T::new(
+        Access::Work,
+        vec![calls(&[("c", "list", "{}")]), text(&["one"]), text(&["two"]), text(&["three"])],
+    )
+    .await;
+    let mut a = t.agent();
+    let inbox = t.inbox.clone();
+    let mut sent = false;
+    t.stage.on_turn(move || {
+        if !std::mem::replace(&mut sent, true) {
+            inbox.try_send(word("meanwhile", "i_1")).unwrap();
+        }
+    });
+    t.run(&mut a, "go").await;
+    let turns = t.stage.turns().len() as u64;
+    let prompts = t.stage.ids(ItemKind::Prompt);
+    let prose = t.stage.ids(ItemKind::Prose);
+    let (begins, ends) = ((prompts[0].clone(), 0, false), (prose[0].clone(), turns, true));
+    assert_eq!(t.stage.cuts(), [begins.clone(), ends.clone()]);
+    // Another agent's word begins no branch of a person's.
+    let word = Word { shown: Some(("B".into(), "x".into())), ..Word::new("from B".into()) };
+    let id = axiom_proto::RunId::new();
+    a.begin(&id, vec![], Some(word)).await.unwrap();
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+    a.run(id, rx).await;
+    let prose = t.stage.ids(ItemKind::Prose);
+    let second = (prose[1].clone(), turns + 2, true);
+    assert_eq!(t.stage.cuts(), [begins, ends, second]);
+}
+
+/// What has not come to its end has none.
+#[tokio::test]
+async fn an_answer_that_is_not_one_is_no_place() {
+    for (script, places) in [
+        (vec![text(&["half"]).hangs()], 1),
+        (vec![status(400, "no")], 1),
+        // Words, and then an answer without any.
+        (vec![calls(&[("c", "list", "{}")]), ends_with("stop", &[])], 1),
+        (vec![text(&["all"])], 2),
+    ] {
+        let t = T::new(Access::Work, script).await;
+        let mut a = t.agent();
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        let stage = t.stage.clone();
+        let stop = tokio::spawn(async move {
+            stage.until(|s| !s.ids(ItemKind::Prose).is_empty()).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let _ = tx.send(true);
+        });
+        t.run_with(&mut a, "go", rx).await;
+        stop.abort();
+        assert_eq!(t.stage.cuts().len(), places, "{:?}", t.stage.log());
+    }
 }
 
 /// What a person says and takes back.

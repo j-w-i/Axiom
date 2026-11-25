@@ -26,7 +26,7 @@ use crate::{
     agents::{self, Agents, Apart, Finished, Holder, Setup, Spoken, Switch, Told},
     changes,
     connections::{Connections, MemoryVault, Vault},
-    copies,
+    copies::{self, Then},
     faults::{Access, Faults},
     log,
     net::{self, Boxed, Listener},
@@ -1077,16 +1077,18 @@ fn slow(c: &Call) -> bool {
             | Call::CopyBack { .. }
             | Call::CopyRenew { .. }
             | Call::CopyRemove { .. }
+            | Call::BranchLook { .. }
+            | Call::Branch { .. }
             | Call::ConnectionAdd { .. }
             | Call::ConnectionRemove { .. }
     )
 }
 
-/// What is said to an agent whose copy of the folder is still to be made.
+/// What is said to an agent whose copy of the folder is made, or looked through, first.
 async fn copies_first(st: &Arc<State>, c: &Call) -> bool {
     let Call::Prompt { session, agent, .. } = c else { return false };
     let s = setup(st, session, agent).await;
-    s.is_ok_and(|s| s.apart.is_some_and(|a| !a.made))
+    s.is_ok_and(|s| s.apart.is_some())
 }
 
 /// Most bytes of a client's own name for a prompt.
@@ -1136,6 +1138,128 @@ async fn prompt(
     let word = axiom_engine::Word { text, item: None, shown };
     let run = start(st, session, agent, turnstile, Opening::Said { word, key, chain }).await?;
     Ok(json!({ "run": run, "queued": false }))
+}
+
+/// Where a conversation is to be branched.
+struct Place {
+    setup: Setup,
+    /// How many turns a branch has, and whether what it is branched at is in them.
+    n: u64,
+    with: bool,
+    /// Whose files those turns were about, and between which of its turns they are the same.
+    files: copies::Then,
+    /// What they were is kept.
+    kept: bool,
+    /// They are what they are now.
+    now: bool,
+}
+
+async fn place(
+    st: &Arc<State>,
+    session: &SessionId,
+    agent: &AgentId,
+    item: &ItemId,
+) -> Result<Place, WireError> {
+    let no = |e: axiom_journal::Error| internal(e.to_string());
+    let of = setup(st, session, agent).await?;
+    if of.execution.harness != "axiom" {
+        return Err(agents::bad(
+            "its program keeps its own conversation, and cannot go back in it",
+        ));
+    }
+    let n = st.store.cut(session.clone(), agent.clone(), item.clone()).await.map_err(no)?;
+    let (n, with) = n.ok_or_else(|| agents::bad("the conversation cannot be branched here"))?;
+    // Whose turns they are: a branch's first ones are the other's, and so are their files.
+    let (mut who, mut whose) = (agent.clone(), of.clone());
+    let mut kept = false;
+    let mut at;
+    loop {
+        let all = st.store.messages(session.clone(), who.clone()).await.map_err(no)?;
+        at = (axiom_engine::context::since(&all, n).map_err(|e| internal(e.to_string()))?, n);
+        let total = all.len() as u64;
+        if whose.apart.is_some() {
+            kept = copies::has_point(&st.agents, session, &who, &whose, at).await?;
+        }
+        let now = n == total && whose.apart.as_ref().is_some_and(|a| a.made);
+        match whose.from.clone().filter(|f| !kept && !now && n <= f.turns) {
+            Some(f) => {
+                whose = setup(st, session, &f.agent).await?;
+                who = f.agent;
+            }
+            None => {
+                let files = copies::Then { agent: who, setup: whose, at };
+                return Ok(Place {
+                    setup: of,
+                    n,
+                    with,
+                    files,
+                    kept: kept || now,
+                    now: now && !kept,
+                });
+            }
+        }
+    }
+}
+
+async fn branch(
+    st: Arc<State>,
+    session: SessionId,
+    agent: AgentId,
+    item: ItemId,
+    name: String,
+    files: bool,
+) -> Result<Value, WireError> {
+    let p = place(&st, &session, &agent, &item).await?;
+    if agents::full(stored(&st, &session).await?.len()) {
+        return Err(agents::bad("the session has as many agents as it may"));
+    }
+    if files && !p.kept {
+        return Err(agents::bad("what its files were there is not kept"));
+    }
+    let a = st.agents.clone();
+    let written = a.written(&st.store).await?;
+    let mut new = p.setup.clone();
+    new.name = name;
+    new.from = Some(agents::Origin { agent: agent.clone(), turns: p.n });
+    if let Some(apart) = &mut new.apart {
+        apart.made = false;
+        new.workspace.clone_from(&apart.folder);
+    }
+    let mut new = blocking(move || a.setup(new, &written)).await??;
+    let to = AgentId::new();
+    let folder = new.folder().to_owned();
+    if files {
+        let slot = st.agents.slot(&session, &p.files.agent);
+        // As it is now, if nothing of it is at work.
+        let _held = if p.now { Some(slot.hold().await?) } else { None };
+        if p.now {
+            let Then { agent, setup, .. } = &p.files;
+            if !copies::point(&st.agents, &session, agent, setup, p.n).await? {
+                return Err(agents::bad("what its files are cannot be kept"));
+            }
+        }
+        new.workspace = copies::again(&st.agents, &st.store, &session, p.files, &to).await?;
+        if let Some(apart) = &mut new.apart {
+            apart.made = true;
+        }
+    }
+    let made = async {
+        let text = serde_json::to_string(&new).map_err(|e| internal(e.to_string()))?;
+        let kept = st.store.branch(session.clone(), agent.clone(), p.n, to.clone(), text).await;
+        kept.map_err(|e| internal(e.to_string()))?;
+        let from = Branched { agent, item, with: p.with };
+        if let Err(e) = said(&st, &session, agents::added(&to, &new, Some(from))).await {
+            // Nobody knows of it.
+            let _ = st.store.remove_agent(session.clone(), to.clone()).await;
+            return Err(e);
+        }
+        Ok(json!({ "agent": to }))
+    };
+    let r = made.await;
+    if r.is_err() && files {
+        copies::unmake(&st.agents, &session, &to, &folder).await;
+    }
+    r
 }
 
 /// Why a run begins.
@@ -1303,6 +1427,14 @@ async fn start(
             }
             let (a, c) = (&st.agents, cancel.clone());
             setup = copies::ready(a, &st.store, &session, &agent, setup.clone(), c).await?;
+            // What its files are, for who goes back to before this.
+            if setup.apart.is_some() && setup.execution.harness == "axiom" && !compact {
+                let n = st.store.turns(session.clone(), agent.clone()).await;
+                let n = n.map_err(|e| internal(e.to_string()))?;
+                if let Err(e) = copies::point(&st.agents, &session, &agent, &setup, n).await {
+                    log::note(format!("keeping what a copy is: {}", e.message));
+                }
+            }
             // What is taken in here is answered: nothing is while room is made.
             let owed =
                 if compact { Vec::new() } else { collect(&st, &session, &agent, &slot).await? };
@@ -1315,10 +1447,11 @@ async fn start(
             if compact {
                 a.compacts();
             }
-            a.begin(&run, word).await.map_err(refused)?;
-            for (item, by, show) in owed {
-                said(&st, &session, axiom_engine::said(&item, &run, &agent, &show, &by)).await?;
-            }
+            // In the order in which it is told.
+            let owed = owed
+                .into_iter()
+                .flat_map(|(item, by, show)| axiom_engine::said(&item, &run, &agent, &show, &by));
+            a.begin(&run, owed.collect(), word).await.map_err(refused)?;
             Ok(a)
         };
         let mut a = match begin.await {
@@ -1369,7 +1502,7 @@ async fn start(
                     break;
                 }
             };
-            if a.begin(&run, None).await.is_err() {
+            if a.begin(&run, Vec::new(), None).await.is_err() {
                 slot.leave().await;
                 break;
             }
@@ -1631,13 +1764,14 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                     resume,
                     began,
                     apart,
+                    from: None,
                 };
                 a.setup(s, &written)
             })
             .await??;
             let agent = AgentId::new();
             keep(st, &session, &agent, &setup).await?;
-            if let Err(e) = said(st, &session, agents::added(&agent, &setup)).await {
+            if let Err(e) = said(st, &session, agents::added(&agent, &setup, None)).await {
                 // Nobody knows of it.
                 let _ = st.store.remove_agent(session, agent).await;
                 return Err(e);
@@ -1763,6 +1897,14 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let windows = st.open.receiver_count();
             st.open.send_replace(path);
             Ok(json!({ "windows": windows }))
+        }
+        Call::BranchLook { session, agent, item } => {
+            let p = place(st, &session, &agent, &item).await?;
+            let info = BranchInfo { apart: p.setup.apart.is_some(), files: p.kept };
+            serde_json::to_value(info).map_err(|e| internal(e.to_string()))
+        }
+        Call::Branch { session, agent, item, name, files } => {
+            to_its_end(st, move |st| branch(st, session, agent, item, name, files)).await
         }
         Call::Compact { session, agent } => {
             if setup(st, &session, &agent).await?.execution.harness != "axiom" {

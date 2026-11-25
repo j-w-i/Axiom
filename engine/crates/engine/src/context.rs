@@ -125,6 +125,24 @@ impl Context {
     }
 }
 
+/// Of the first `n` turns, how many come before what was last said to the agent: from there to the
+/// end nothing was done.
+pub fn since(kept: &[String], n: u64) -> Result<u64, Unreadable> {
+    let mut lo = usize::try_from(n).unwrap_or(usize::MAX).min(kept.len());
+    while let Some(text) = lo.checked_sub(1).and_then(|i| kept.get(i)) {
+        let t: Turn = serde_json::from_str(text).map_err(|e| Unreadable(lo - 1, e.to_string()))?;
+        match t {
+            Turn::Message(m) if m.role == Role::User && is_said(&m) => lo -= 1,
+            _ => break,
+        }
+    }
+    Ok(lo as u64)
+}
+
+fn is_said(m: &Message) -> bool {
+    m.blocks.iter().all(|b| matches!(b.content, Content::Text { .. }))
+}
+
 /// A result for each call.
 fn answered(asked: &[String], said: &[&Block]) -> Vec<Block> {
     let result = |id: &String| {

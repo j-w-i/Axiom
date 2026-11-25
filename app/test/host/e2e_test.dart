@@ -432,6 +432,24 @@ void main() {
       expect(m.requests, isEmpty);
       expect(seen.last['messages'].toString(), contains('changed made.txt'));
       await expectLater(store.answer(id, r, Answer.once), throwsA(isA<Failed>()));
+
+      // Said differently, the conversation begins anew in a branch; from the answer on it goes on.
+      final places = m.agents[agent]!.items.where(m.agents[agent]!.canBranch).toList();
+      expect(places.map((i) => i.plain), ['Make it.', 'Done.']);
+      expect((await store.lookBranch(id, agent, places.first.id)).apart, isFalse);
+      final other = await store.branch(id, agent, places.first.id, 'Lead 2');
+      final after = await store.branch(id, agent, places.last.id, 'Lead 3');
+      await until(() => m.agents.length == 3);
+      expect(m.agents[other]!.items.map((i) => i.plain), ['Branched from Lead']);
+      expect(m.agents[after]!.items.length, m.agents[agent]!.items.length + 1);
+      for (final (a, turns) in [(other, 1), (after, 5)]) {
+        await store.prompt(id, a, 'Make another.');
+        await until(() => m.agents[a]!.ended == Outcome.completed);
+        final sent = seen.last['messages']! as List;
+        expect(sent.where((x) => (x as Json)['role'] != 'system').length, turns);
+      }
+      final tool = m.agents[agent]!.items.firstWhere((i) => i.kind == ItemKind.tool);
+      await expectLater(store.lookBranch(id, agent, tool.id), throwsA(isA<Failed>()));
       store.dispose();
       await provider.close(force: true);
     });

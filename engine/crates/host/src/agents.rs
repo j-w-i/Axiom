@@ -18,8 +18,8 @@ use axiom_policy::{
     rules::Source,
 };
 use axiom_proto::{
-    AgentId, AgentState, Body, ErrorCode, Execution, HarnessInfo, Instructions, ItemId, Outcome,
-    RunId, SessionId, WireError, limits, now_ms,
+    AgentId, AgentState, Body, Branched, ErrorCode, Execution, HarnessInfo, Instructions, ItemId,
+    Outcome, RunId, SessionId, WireError, limits, now_ms,
 };
 use axiom_tools::{Output, Seen, Site, Spec};
 use serde::{Deserialize, Serialize};
@@ -60,6 +60,17 @@ pub struct Setup {
     /// It works in a copy of the folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apart: Option<Apart>,
+    /// Its conversation began as another's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Origin>,
+}
+
+/// Whose conversation, and how many turns of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Origin {
+    pub agent: AgentId,
+    pub turns: u64,
 }
 
 /// Of which folder, and whether there is one yet: then that is its workspace.
@@ -339,7 +350,7 @@ impl Agents {
     /// Checks what an agent is to be, and says it as it will be kept.
     pub fn setup(&self, s: Setup, written: &Reach) -> Result<Setup, WireError> {
         let Setup { name, execution, access, workspace, instructions, trust, .. } = s;
-        let (resume, began, apart) = (s.resume, s.began, s.apart);
+        let (resume, began, apart, from) = (s.resume, s.began, s.apart, s.from);
         let workspace = workspace.as_str();
         let known =
             |i: &Instructions| FOR_AGENTS.contains(&i.path.as_str()) && i.digest.len() <= 128;
@@ -380,6 +391,7 @@ impl Agents {
                 resume,
                 began,
                 apart,
+                from,
             };
             let site = self.site(&setup, &AgentId("check".into()), false)?;
             let path = self.programs(&site.path)?;
@@ -409,6 +421,7 @@ impl Agents {
             resume: None,
             began: false,
             apart,
+            from,
         };
         // What could not be contained later is refused now, in words.
         let site = self.site(&setup, &AgentId("check".into()), false)?;
@@ -441,6 +454,7 @@ impl Agents {
             resume: None,
             began: false,
             apart: None,
+            from: None,
         };
         self.site(&s, who, true)
     }
@@ -768,6 +782,10 @@ impl Stage for Floor {
         let (s, a) = (self.session.id.clone(), self.agent.clone());
         self.store.put_message(s, a, n, turn, heard).await.map_err(|e| Refused::This(e.to_string()))
     }
+    async fn mark(&self, item: &ItemId, n: u64, with: bool) {
+        let (s, a) = (self.session.id.clone(), self.agent.clone());
+        let _ = self.store.put_cut(s, a, item.clone(), n, with).await;
+    }
     async fn closed(&self) {
         self.session.closed().await;
     }
@@ -909,10 +927,15 @@ impl Worker {
             a.compact = true;
         }
     }
-    pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
+    pub async fn begin(
+        &mut self,
+        run: &RunId,
+        before: Vec<Say>,
+        prompt: Option<Word>,
+    ) -> Result<(), Refused> {
         match self {
-            Self::Native(a) => a.begin(run, prompt).await,
-            Self::Delegated(w) => w.begin(run, prompt).await,
+            Self::Native(a) => a.begin(run, before, prompt).await,
+            Self::Delegated(w) => w.begin(run, before, prompt).await,
         }
     }
 
@@ -1041,6 +1064,7 @@ pub async fn load(
         fill: None,
         told: None,
         waited: Duration::ZERO,
+        last_words: None,
         noted: Default::default(),
         compact: false,
         retries: Retries::default(),
@@ -1268,7 +1292,7 @@ impl Turnstile {
 }
 
 /// The events that make an agent known.
-pub fn added(agent: &AgentId, s: &Setup) -> Vec<Say> {
+pub fn added(agent: &AgentId, s: &Setup, from: Option<Branched>) -> Vec<Say> {
     vec![
         Say::Event(Body::AgentAdded {
             agent: agent.clone(),
@@ -1277,6 +1301,7 @@ pub fn added(agent: &AgentId, s: &Setup) -> Vec<Say> {
             parent: None,
             access: Some(s.access),
             apart: s.apart.is_some(),
+            from: from.map(Box::new),
         }),
         Say::Event(Body::AgentState { agent: agent.clone(), state: AgentState::Waiting }),
     ]

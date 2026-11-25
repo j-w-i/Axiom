@@ -133,6 +133,37 @@ impl Store {
     pub async fn remove_agent(&self, id: SessionId, agent: AgentId) -> Result<()> {
         self.write(move |j| j.remove_agent(&id, &agent)).await
     }
+    pub async fn put_cut(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        item: ItemId,
+        n: u64,
+        with: bool,
+    ) -> Result<()> {
+        self.write(move |j| j.put_cut(&id, &agent, &item, n, with)).await
+    }
+    pub async fn cut(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        item: ItemId,
+    ) -> Result<Option<(u64, bool)>> {
+        self.read_with(move |r| r.cut(&id, &agent, &item)).await
+    }
+    pub async fn turns(&self, id: SessionId, agent: AgentId) -> Result<u64> {
+        self.read_with(move |r| r.turns(&id, &agent)).await
+    }
+    pub async fn branch(
+        &self,
+        id: SessionId,
+        from: AgentId,
+        n: u64,
+        to: AgentId,
+        setup: String,
+    ) -> Result<()> {
+        self.write(move |j| j.branch(&id, &from, n, &to, &setup)).await
+    }
     pub async fn put_pending(
         &self,
         id: SessionId,

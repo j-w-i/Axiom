@@ -24,7 +24,9 @@ void main() {
   test('every field arrives', () {
     final b = {for (final e in (messages[0] as Events).events) e.body.runtimeType: e.body};
     final added = b[AgentAdded]! as AgentAdded;
-    expect([added.name, added.parent], ['Lead', 'a_0']);
+    expect([added.name, added.parent, added.apart], ['Lead', 'a_0', true]);
+    final from = added.from!;
+    expect([from.agent, from.item, from.kept], ['a_0', 'i_0', true]);
     final x = added.execution;
     expect(
       [x.harness, x.provider, x.model, x.connection, x.effort, x.environment],

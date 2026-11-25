@@ -29,6 +29,8 @@ struct Kept {
     tool: String,
     shut: bool,
     no_turns: bool,
+    /// Where it can be branched.
+    cuts: Vec<(ItemId, u64, bool)>,
     /// What its person has taken back.
     taken: Vec<ItemId>,
     on_sync: Option<OnSync>,
@@ -88,6 +90,9 @@ impl Memory {
     pub fn keep(&self, t: &Turn) {
         self.0.lock().unwrap().turns.push(serde_json::to_string(t).unwrap());
     }
+    pub fn cuts(&self) -> Vec<(ItemId, u64, bool)> {
+        self.0.lock().unwrap().cuts.clone()
+    }
     pub fn deeds(&self) -> Vec<Deed> {
         self.0.lock().unwrap().deeds.clone()
     }
@@ -109,6 +114,9 @@ impl Memory {
                 _ => None,
             })
             .collect()
+    }
+    pub fn ids(&self, kind: ItemKind) -> Vec<ItemId> {
+        self.items(kind).into_iter().map(|i| i.0).collect()
     }
     pub fn texts(&self, kind: ItemKind) -> Vec<String> {
         let all = self.all();
@@ -247,6 +255,11 @@ impl Stage for Memory {
         }
         Ok(true)
     }
+    async fn mark(&self, item: &ItemId, n: u64, with: bool) {
+        if let Ok(mut k) = self.op() {
+            k.cuts.push((item.clone(), n, with));
+        }
+    }
     async fn closed(&self) {
         loop {
             if self.0.lock().unwrap().shut {
@@ -372,6 +385,7 @@ impl T {
             fill: None,
             told: None,
             waited: Duration::ZERO,
+            last_words: None,
             noted: Default::default(),
             compact: false,
             retries: Retries {
@@ -390,7 +404,7 @@ impl T {
     pub async fn run_unsaid(&self, a: &mut Agent<Memory>) -> Ended {
         let (_tx, rx) = watch::channel(false);
         let id = RunId::new();
-        a.begin(&id, None).await.unwrap();
+        a.begin(&id, vec![], None).await.unwrap();
         let run = a.run(id, rx);
         tokio::time::timeout(Duration::from_secs(60), run).await.expect("it ends")
     }
@@ -402,7 +416,7 @@ impl T {
     ) -> Ended {
         let id = RunId::new();
         let run = async {
-            match a.begin(&id, Some(axiom_engine::Word::new(prompt.into()))).await {
+            match a.begin(&id, vec![], Some(axiom_engine::Word::new(prompt.into()))).await {
                 Ok(()) => a.run(id, cancel).await,
                 Err(_) => Ended { outcome: Outcome::Interrupted, error: None },
             }

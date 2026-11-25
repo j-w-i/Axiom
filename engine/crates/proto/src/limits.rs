@@ -259,6 +259,7 @@ mod tests {
                 parent: None,
                 access: None,
                 apart: false,
+                from: None,
             },
             Body::AgentChanged {
                 agent: a.clone(),

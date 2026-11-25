@@ -184,15 +184,28 @@ impl From<Refused> for Halt {
 
 impl Worker {
     /// As [`axiom_engine::Agent::begin`].
-    pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
+    pub async fn begin(
+        &mut self,
+        run: &RunId,
+        before: Vec<Say>,
+        prompt: Option<Word>,
+    ) -> Result<(), Refused> {
         self.floor.say(begun(&self.floor, run)).await?;
-        let Err(r) = self.opening(run, prompt).await else { return Ok(()) };
+        let Err(r) = self.opening(run, before, prompt).await else { return Ok(()) };
         let error = Some(r.to_string());
         let _ = self.floor.say(ended(&self.floor, run, Outcome::Failed, error)).await;
         Err(r)
     }
 
-    async fn opening(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
+    async fn opening(
+        &mut self,
+        run: &RunId,
+        before: Vec<Say>,
+        prompt: Option<Word>,
+    ) -> Result<(), Refused> {
+        if !before.is_empty() {
+            self.floor.say(before).await?;
+        }
         if let Some(Word { text, shown, .. }) = prompt {
             let item = ItemId::new();
             let (by, show) = match &shown {

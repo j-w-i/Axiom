@@ -473,6 +473,18 @@ async fn it_is_held_for_one_that_failed() {
     let run = t.prompt(&lead, "go on").await;
     assert_eq!(t.end_of(&run).await, Outcome::Completed);
     assert_eq!((heard(&lead, "the answer"), heard(&lead, "go on")), (1, 1));
+    // It is shown in the order in which it is told.
+    let names: Vec<&str> = t
+        .log
+        .iter()
+        .filter_map(|b| match b {
+            Body::ItemStarted { kind: ItemKind::Prompt, agent, name, .. } if *agent == lead.id => {
+                Some(name.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, ["", "Slow", ""]);
     t.still().await;
     assert_eq!(runs(&t, &lead), 2);
     // Stopped by a person, it is owed nothing more.

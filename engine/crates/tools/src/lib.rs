@@ -21,6 +21,7 @@ pub mod copy;
 pub mod edit;
 pub mod fs;
 pub mod jobs;
+pub mod points;
 pub mod shell;
 pub mod text;
 pub mod walk;

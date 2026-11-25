@@ -48,7 +48,7 @@ impl Error {
     }
 }
 
-const SCHEMA: i64 = 4;
+const SCHEMA: i64 = 5;
 /// How long opening waits for another process.
 const OPENING: Duration = Duration::from_secs(1);
 /// How long a read does. It needs to only while another process recovers the file.
@@ -92,6 +92,12 @@ const OWED_TABLES: &str = "create table owed(
        session text not null references session(id) on delete cascade,
        agent text not null, kind text not null, words text not null, at integer not null,
        primary key(session, agent)) without rowid;";
+/// Where a conversation can be branched from: what was said there, and how many turns come before
+/// the next.
+const CUT_TABLE: &str = "create table cut(
+       session text not null references session(id) on delete cascade,
+       agent text not null, item text not null, n integer not null, kept integer not null,
+       primary key(session, agent, item)) without rowid;";
 /// Of what was said on an agent's wire, this much is kept: the last.
 pub const FRAMES: u64 = 2000;
 /// The planner would scan the whole session for these; `indexed by` makes it an error not to use
@@ -189,7 +195,10 @@ impl Journal {
             if v < 3 {
                 tx.execute_batch(HOST_TABLES)?;
             }
-            tx.execute_batch(OWED_TABLES)?;
+            if v < 4 {
+                tx.execute_batch(OWED_TABLES)?;
+            }
+            tx.execute_batch(CUT_TABLE)?;
             tx.pragma_update(None, "user_version", SCHEMA)?;
             tx.commit()?;
         }
@@ -382,6 +391,63 @@ impl Journal {
     pub fn remove_agent(&mut self, id: &SessionId, agent: &AgentId) -> Result<()> {
         self.commit(Durability::Stream, |j| {
             j.db.execute("delete from agent where session=? and id=?", params![id.0, agent.0])?;
+            // Of a branch.
+            j.db.execute(
+                "delete from message where session=? and agent=?",
+                params![id.0, agent.0],
+            )?;
+            j.db.execute("delete from cut where session=? and agent=?", params![id.0, agent.0])?;
+            Ok(())
+        })
+    }
+
+    /// A conversation can be branched at `item`: then it has the first `n` turns, with the item in
+    /// them or not.
+    pub fn put_cut(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        item: &ItemId,
+        n: u64,
+        with: bool,
+    ) -> Result<()> {
+        self.commit(Durability::Stream, |j| {
+            j.db.prepare_cached(
+                "insert or replace into cut(session, agent, item, n, kept) values(?,?,?,?,?)",
+            )?
+            .execute(params![id.0, agent.0, item.0, as_i64(n), with])?;
+            Ok(())
+        })
+    }
+
+    /// Keeps a new agent whose conversation is the first `n` turns of another's, with the places in
+    /// them where that can be branched again. All of it or nothing.
+    pub fn branch(
+        &mut self,
+        id: &SessionId,
+        from: &AgentId,
+        n: u64,
+        to: &AgentId,
+        setup: &str,
+    ) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            j.db.prepare_cached("insert into agent(session, id, setup) values(?,?,?)")?
+                .execute(params![id.0, to.0, setup])?;
+            let turns =
+                j.db.prepare_cached(
+                    "insert into message(session, agent, n, body)
+                     select session, ?, n, body from message where session=? and agent=? and n<?",
+                )?
+                .execute(params![to.0, id.0, from.0, as_i64(n)])?;
+            if turns as u64 != n {
+                return Err(Error::Damaged(format!("{n} turns are to be there, and {turns} are")));
+            }
+            j.db.prepare_cached(
+                "insert into cut(session, agent, item, n, kept)
+                 select session, ?1, item, n, kept from cut
+                 where session=?2 and agent=?3 and (n<?4 or (n=?4 and kept))",
+            )?
+            .execute(params![to.0, id.0, from.0, as_i64(n)])?;
             Ok(())
         })
     }
@@ -695,6 +761,25 @@ impl Reader {
         }
         Ok(out)
     }
+    /// How many turns an agent's conversation has.
+    pub fn turns(&self, id: &SessionId, agent: &AgentId) -> Result<u64> {
+        let mut q =
+            self.db.prepare_cached("select count(*) from message where session=? and agent=?")?;
+        Ok(q.query_row(params![id.0, agent.0], |r| r.get(0).map(as_u64))?)
+    }
+    /// How many turns a branch at `item` has, and whether the item is in them, if there can be one.
+    pub fn cut(
+        &self,
+        id: &SessionId,
+        agent: &AgentId,
+        item: &ItemId,
+    ) -> Result<Option<(u64, bool)>> {
+        let mut q = self
+            .db
+            .prepare_cached("select n, kept from cut where session=? and agent=? and item=?")?;
+        Ok(q.query_row(params![id.0, agent.0, item.0], |r| Ok((as_u64(r.get(0)?), r.get(1)?)))
+            .optional()?)
+    }
     /// What was said on an agent's wire, as far as it is kept, in order.
     pub fn frames(&self, id: &SessionId, agent: &AgentId) -> Result<Vec<String>> {
         let mut q = self
@@ -983,6 +1068,7 @@ mod tests {
                     parent: None,
                     access: None,
                     apart: false,
+                    from: None,
                 },
                 Intent,
             ),

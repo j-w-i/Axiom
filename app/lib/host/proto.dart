@@ -393,6 +393,14 @@ sealed class Body {
           j['parent'] as String?,
           access: j['access'] == null ? null : _enum(Access.values, j['access'], Access.unknown),
           apart: j['apart'] as bool? ?? false,
+          from: switch (j['from']) {
+            final Json f => Branched(
+              f['agent']! as String,
+              f['item']! as String,
+              kept: f['with'] as bool? ?? false,
+            ),
+            _ => null,
+          },
         ),
         'agent.changed' => AgentChanged(
           j['agent']! as String,
@@ -478,6 +486,22 @@ class SessionTitled extends Body {
   final String title;
 }
 
+/// Where a branch begins: with another's items up to one, which is [kept] with them or not.
+class Branched {
+  const Branched(this.agent, this.item, {this.kept = false});
+  final String agent, item;
+  final bool kept;
+}
+
+/// Whether there can be a branch, and what of.
+class BranchInfo {
+  const BranchInfo({required this.apart, this.files = false});
+  BranchInfo.decode(Json j) : this(apart: j['apart']! as bool, files: j['files'] as bool? ?? false);
+
+  /// It would work in a copy of its own; what the files were there is kept.
+  final bool apart, files;
+}
+
 class AgentAdded extends Body {
   const AgentAdded(
     this.agent,
@@ -486,10 +510,14 @@ class AgentAdded extends Body {
     this.parent, {
     this.access,
     this.apart = false,
+    this.from,
   });
 
   /// It works in a copy of the folder of its own.
   final bool apart;
+
+  /// It goes on from another's conversation.
+  final Branched? from;
   final String agent, name;
   final Execution execution;
   final String? parent;

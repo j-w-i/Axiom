@@ -491,6 +491,32 @@ class HostStore extends ChangeNotifier {
         'access': ?access?.name,
       });
 
+  /// Whether a conversation can be branched at an item.
+  Future<BranchInfo> lookBranch(String session, String agent, String item) async {
+    final r = await _live.call('branch.look', {'session': session, 'agent': agent, 'item': item});
+    return BranchInfo.decode(r! as Json);
+  }
+
+  /// Adds an agent that begins with another's conversation as it was at an item; with the files of its
+  /// copy as they were, if so.
+  Future<String> branch(
+    String session,
+    String agent,
+    String item,
+    String name, {
+    bool files = false,
+  }) async {
+    final r = await _live.call('agent.branch', {
+      'session': session,
+      'agent': agent,
+      'item': item,
+      'name': name,
+      'files': files,
+      // A copy is made.
+    }, _long);
+    return (r! as Json)['agent']! as String;
+  }
+
   /// Summarises an agent's conversation now, to make room in it.
   Future<void> compact(String session, String agent) async {
     await _live.call('agent.compact', {'session': session, 'agent': agent});

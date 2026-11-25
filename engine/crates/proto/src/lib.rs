@@ -159,6 +159,26 @@ pub struct Usage {
     pub context: Option<f64>,
 }
 
+/// Where a branch begins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Branched {
+    pub agent: AgentId,
+    pub item: ItemId,
+    /// The item is the last of it; otherwise it is the first that is not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with: bool,
+}
+
+/// Whether there can be a branch, and what of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchInfo {
+    /// It would work in a copy of its own.
+    pub apart: bool,
+    /// What the files were there is kept.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub files: bool,
+}
+
 fn none(n: &u64) -> bool {
     *n == 0
 }
@@ -186,6 +206,9 @@ pub enum Body {
         /// It works in a copy of the folder of its own.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         apart: bool,
+        /// It goes on from another's conversation, whose items are its own up to there.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Box<Branched>>,
     },
     /// What it runs on or may do is another from here on.
     #[serde(rename = "agent.changed")]
@@ -584,6 +607,21 @@ pub enum Call {
         /// The client's own name for it. Said twice with the same, it is said once.
         #[serde(default)]
         key: Option<String>,
+    },
+    /// Whether a conversation can be branched at an item, and whether the files there are kept.
+    #[serde(rename = "branch.look")]
+    BranchLook { session: SessionId, agent: AgentId, item: ItemId },
+    /// Adds an agent that begins with another's conversation, as it was before what a person said
+    /// (`item`, a prompt that began a run), or after an answer that ended one. `files`: with the
+    /// files of its copy as they were. Nothing is said to it. Answers with its id.
+    #[serde(rename = "agent.branch")]
+    Branch {
+        session: SessionId,
+        agent: AgentId,
+        item: ItemId,
+        name: String,
+        #[serde(default)]
+        files: bool,
     },
     /// Summarises an agent's conversation now, to make room. Only between runs, only for an agent of
     /// Axiom's own, and only when nothing waits to be heard. Answers with the run that does it.

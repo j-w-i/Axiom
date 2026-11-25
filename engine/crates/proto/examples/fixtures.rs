@@ -26,6 +26,11 @@ fn main() -> Result<(), serde_json::Error> {
             parent: Some(AgentId("a_0".into())),
             access: Some(Access::Ask),
             apart: true,
+            from: Some(Box::new(Branched {
+                agent: AgentId("a_0".into()),
+                item: ItemId("i_0".into()),
+                with: true,
+            })),
         },
         Body::AgentChanged {
             agent: a.clone(),

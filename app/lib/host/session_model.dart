@@ -99,6 +99,42 @@ class AgentModel extends ChangeNotifier {
   String? error;
   final List<ItemModel> items = [];
 
+  /// Where its conversation can be branched: what a person said that began a run, and the last answer
+  /// of one that was completed. Not of a program: it keeps its own conversation.
+  final _places = <ItemModel>{};
+  bool canBranch(ItemModel i) => execution.harness == 'axiom' && _places.contains(i);
+
+  void _begins(ItemModel i) {
+    if (i.kind != ItemKind.prompt || i.name.isNotEmpty) return;
+    // What others have come to may be told with it.
+    final before = items.reversed.where((o) => o.kind != ItemKind.prompt || o.name.isEmpty);
+    if (before.firstOrNull?.run != i.run) _places.add(i);
+  }
+
+  void _answered(String run) {
+    for (final i in items.reversed) {
+      if (i.run != run) return;
+      if (i.kind == ItemKind.prose) {
+        _places.add(i);
+        return;
+      }
+    }
+  }
+
+  /// It goes on from another's conversation: those items are its own too.
+  void _goesOn(AgentModel of, Branched from) {
+    final at = of.items.indexWhere((i) => i.id == from.item);
+    if (at < 0) return;
+    items.addAll(of.items.take(from.kept ? at + 1 : at));
+    _places.addAll(items.where(of._places.contains));
+    last = items.lastOrNull;
+    items.add(
+      ItemModel('$id from', id, '', ItemKind.notice, '', null)
+        ..outcome = Outcome.completed
+        .._ended = 'Branched from ${of.name}',
+    );
+  }
+
   /// What its person has said to it, the last first, the same only once in a row.
   List<String> get said {
     final all = <String>[];
@@ -181,16 +217,13 @@ class SessionModel extends ChangeNotifier {
         :final parent,
         :final access,
         :final apart,
+        :final from,
       ):
-        agents[agent] = AgentModel(
-          agent,
-          name,
-          execution,
-          parent,
-          e.at,
-          access: access,
-          apart: apart,
-        );
+        final a = AgentModel(agent, name, execution, parent, e.at, access: access, apart: apart);
+        if (from != null) {
+          if (agents[from.agent] case final of?) a._goesOn(of, from);
+        }
+        agents[agent] = a;
         return true;
       case AgentChanged(:final agent, :final execution, :final access):
         if (agents[agent] case final a?) {
@@ -218,6 +251,7 @@ class SessionModel extends ChangeNotifier {
         return true;
       case RunEnded(:final run, :final outcome, :final error):
         if (agents[_runs.remove(run)] case final a?) {
+          if (outcome == Outcome.completed) a._answered(run);
           a
             ..run = null
             ..ended = outcome
@@ -249,6 +283,7 @@ class SessionModel extends ChangeNotifier {
         }
         final i = ItemModel(item, agent, run, kind, name, args, argsCut: argsCut);
         _open[item] = i;
+        a._begins(i);
         a.items.add(i);
         a.last = i;
         touched.add(a);

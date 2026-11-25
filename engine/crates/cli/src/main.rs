@@ -9,8 +9,8 @@ use std::{
 
 use axiom_host::{client::Client, paths::Paths, signal};
 use axiom_proto::{
-    Access, AgentId, Answer, Answerable, Body, Call, Event, Execution, ItemKind, Message, Outcome,
-    RequestId, RunId, SecretText, SessionId,
+    Access, AgentId, Answer, Answerable, Body, Call, Event, Execution, ItemId, ItemKind, Message,
+    Outcome, RequestId, RunId, SecretText, SessionId,
 };
 use plain::{block, json, line};
 use serde_json::Value;
@@ -34,6 +34,9 @@ const USAGE: &str = "usage: axiom [--json] COMMAND      --json: one line for eac
                                                 0 done, 2 failed or cut short,
                                                 3 a person is asked; 1 as ever
   axiom compact SESSION AGENT
+  axiom branch [--files] SESSION AGENT ITEM NAME    another agent, from before a prompt or after an
+                                                answer on; --files: with its copy's files then.
+                                                Items: axiom --json follow SESSION
   axiom open FOLDER                             in the window, ready for a new session
   axiom answer SESSION REQUEST DIGEST once|session|deny
   axiom cancel SESSION RUN
@@ -121,6 +124,10 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
     if wait {
         args.remove(1);
     }
+    let files = args.starts_with(&["branch", "--files"]);
+    if files {
+        args.remove(1);
+    }
     let call = match args[..] {
         ["status"] => Call::Status {},
         ["sessions"] => Call::list(),
@@ -176,6 +183,13 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
         ["compact", s, agent] => {
             Call::Compact { session: SessionId(s.into()), agent: AgentId(agent.into()) }
         }
+        ["branch", s, agent, item, name] => Call::Branch {
+            session: SessionId(s.into()),
+            agent: AgentId(agent.into()),
+            item: ItemId(item.into()),
+            name: name.into(),
+            files,
+        },
         ["say", s, agent, text] => Call::Prompt {
             session: SessionId(s.into()),
             agent: AgentId(agent.into()),
