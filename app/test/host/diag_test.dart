@@ -23,8 +23,8 @@ Future<(Directory, ServerSocket)> host({required bool resync}) async {
     s.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen((l) {
       final m = json.decode(l) as Map<String, Object?>;
       say('got ${m['method']}');
-      s.write('${json.encode({'id': m['id'], 'result': <String, Object?>{}})}\n');
-      if (m['method'] == 'session.list') return;
+      final list = m['method'] == 'session.list';
+      s.write('${json.encode({'id': m['id'], 'result': list ? const <Object?>[] : <String, Object?>{}})}\n');
       if (resync && m['method'] == 'session.follow') {
         s.write('${json.encode({'session': 'x', 'resync': 7})}\n');
       }
