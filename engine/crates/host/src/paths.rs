@@ -20,6 +20,11 @@ impl Paths {
         var("AXIOM_DATA").or_else(usual).map(Self::new)
     }
 
+    /// Whether this is the platform's own place for application data.
+    pub fn usual(&self) -> bool {
+        usual().as_deref() == Some(&*self.data)
+    }
+
     /// Where agents' temporary folders go. Not where the data is: that is kept from them. In the
     /// platform's place for what may be lost, or, if the data directory was chosen, beside it.
     pub fn scratch(&self) -> PathBuf {
@@ -34,7 +39,7 @@ impl Paths {
                     .map(|h| h.join("axiom/scratch"))
             }
         };
-        if usual().as_deref() == Some(&*self.data)
+        if self.usual()
             && let Some(c) = caches()
         {
             return c;

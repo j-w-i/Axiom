@@ -56,18 +56,27 @@ class Execution {
 
 /// An account, a key or a server: one way to reach a provider.
 class Connection {
-  const Connection(this.id, this.name, this.provider, {this.url, this.secret = false});
+  const Connection(
+    this.id,
+    this.name,
+    this.provider, {
+    this.url,
+    this.secret = false,
+    this.lasts = false,
+  });
   Connection.decode(Json j)
     : id = j['id']! as String,
       name = j['name']! as String,
       provider = j['provider']! as String,
       url = j['url'] as String?,
-      secret = j['secret'] as bool? ?? false;
+      secret = j['secret'] as bool? ?? false,
+      lasts = j['lasts'] as bool? ?? false;
   final String id, name, provider;
   final String? url;
 
-  /// Whether it has a secret in the system's store. The secret itself never comes back.
-  final bool secret;
+  /// Whether it has a secret, and whether the system keeps it when the host stops. The secret itself
+  /// never comes back.
+  final bool secret, lasts;
 }
 
 /// What a provider says of a model.

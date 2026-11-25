@@ -430,7 +430,11 @@ class _AccountsPageState extends State<AccountsPage> {
                           [
                             providerName(x.provider),
                             if (x.url case final u?) oneLine(u, 60),
-                            x.secret ? 'has a key' : 'no key',
+                            switch (x) {
+                              Connection(lasts: true) => 'key in the system\'s store',
+                              Connection(secret: true) => 'key until the host stops',
+                              _ => 'no key',
+                            },
                           ].join(' · '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -511,8 +515,8 @@ class _AccountsPageState extends State<AccountsPage> {
             FormPart(
               'Key',
               note: anthropic
-                  ? 'An API key from the Anthropic console. Kept until Axiom\'s host stops.'
-                  : 'If the server needs one. Kept until Axiom\'s host stops.',
+                  ? 'An API key from the Anthropic console. It goes to the system\'s store.'
+                  : 'If the server needs one. It goes to the system\'s store.',
               child: AxField(label: 'Key', controller: _key, secret: true, mono: true),
             ),
           Row(

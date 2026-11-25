@@ -23,6 +23,10 @@ pub trait Vault: Send + Sync {
     fn put(&self, id: &str, secret: &Text) -> Result<(), String>;
     fn get(&self, id: &str) -> Result<Option<Text>, String>;
     fn remove(&self, id: &str) -> Result<(), String>;
+    /// Whether a secret is still there after the host has stopped.
+    fn lasts(&self) -> bool {
+        false
+    }
 }
 
 /// Keeps secrets as long as the host runs.
@@ -119,6 +123,7 @@ impl Connections {
             provider: k.provider.clone(),
             url: k.url.clone(),
             secret: k.secret,
+            lasts: k.secret && self.vault.lasts(),
         };
         self.lock().iter().map(shown).collect()
     }

@@ -433,8 +433,11 @@ pub struct Connection {
     pub provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    /// Whether it has a secret in the system's store.
+    /// Whether it has a secret.
     pub secret: bool,
+    /// Whether that is in the system's store, and not only as long as the host runs.
+    #[serde(default)]
+    pub lasts: bool,
 }
 
 /// What a provider says of a model. What it does not say is not there.

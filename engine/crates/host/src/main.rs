@@ -1,6 +1,6 @@
 use std::{error::Error, io::Write, process::ExitCode, time::Duration};
 
-use axiom_host::{Config, Host, HostError, paths::Paths, signal};
+use axiom_host::{Config, Host, HostError, paths::Paths, signal, vault};
 
 fn main() -> ExitCode {
     let Err(e) = run() else {
@@ -17,6 +17,7 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn Error>> {
     let mut args = std::env::args().skip(1);
     let mut cfg = Config::new(Paths::discover().ok_or("no data directory: set AXIOM_DATA")?);
+    cfg.vault = vault::of(&cfg.paths);
     while let Some(a) = args.next() {
         match (a.as_str(), args.next()) {
             ("--idle-exit", Some(v)) => {

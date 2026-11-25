@@ -32,9 +32,14 @@ zeroize.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
 # Unix sockets on Windows; std and tokio have none there.
 [target.'cfg(windows)'.dependencies]
 uds_windows.workspace = true
+keyring-core = "1"
+windows-native-keyring-store = { version = "1", default-features = false }
 
 [dev-dependencies]
 # Tests damage and lock the journal behind the host's back.

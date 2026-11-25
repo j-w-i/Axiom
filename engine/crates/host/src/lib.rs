@@ -18,5 +18,6 @@ mod server;
 mod session;
 pub mod signal;
 mod store;
+pub mod vault;
 
 pub use server::{Config, Host, HostError};
