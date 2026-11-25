@@ -16,17 +16,16 @@ Widget _ground(
   required bool selected,
   required bool hovered,
   required Widget child,
-}) => DecoratedBox(
-  decoration: BoxDecoration(
-    color: selected
-        ? c.selected
-        : hovered
-        ? c.hover
-        : null,
-    borderRadius: BorderRadius.circular(AxRadius.key),
-  ),
-  child: child,
-);
+  bool key = false,
+}) => selected || key
+    ? Surface(selected ? c.slab : c.ghost, radius: AxRadius.key, child: child)
+    : DecoratedBox(
+        decoration: BoxDecoration(
+          color: hovered ? c.hover : null,
+          borderRadius: BorderRadius.circular(AxRadius.key),
+        ),
+        child: child,
+      );
 
 /// Somewhere to go: what it is and the keys that go there.
 class NavRow extends StatelessWidget {
@@ -37,7 +36,11 @@ class NavRow extends StatelessWidget {
     super.key,
     this.keys,
     this.selected = false,
+    this.act = false,
   });
+
+  /// It begins something, and is a key at rest too.
+  final bool act;
   final AxIcon icon;
   final String label;
   final String? keys;
@@ -55,8 +58,9 @@ class NavRow extends StatelessWidget {
         c,
         selected: selected,
         hovered: s.hovered,
+        key: act,
         child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: t.density.row),
+          constraints: BoxConstraints(minHeight: t.density.row + (act ? 4 : 2)),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Row(
@@ -361,23 +365,15 @@ class _Mark extends StatelessWidget {
   );
 }
 
-/// What the session means to do: its parts, how they stand and whose they are.
-class PlanView extends StatelessWidget {
-  const PlanView(this.tasks, {super.key});
-  final List<TaskView> tasks;
-  @override
-  Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
-    final done = tasks.where((k) => k.state == TaskState.done).length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        PanelHeading('Plan', Text('$done of ${tasks.length}', style: t.type.small.ink(c.ink3))),
-        for (final k in tasks) TaskRow(k),
-      ],
-    );
-  }
+/// What the session means to do: how far it is, its parts, how they stand and whose they are.
+(String, Widget?, List<Widget>) planGroup(BuildContext context, List<TaskView> tasks) {
+  final t = Ax.of(context);
+  final done = tasks.where((k) => k.state == TaskState.done).length;
+  return (
+    'Plan',
+    Text('$done of ${tasks.length}', style: t.type.small.ink(t.colors.ink3)),
+    [for (final k in tasks) TaskRow(k)],
+  );
 }
 
 /// What a part of the panel beside the conversation is.
@@ -389,7 +385,7 @@ class PanelHeading extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 5),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
       child: Row(
         children: [
           Expanded(
@@ -419,12 +415,13 @@ class TaskRow extends StatelessWidget {
       TaskState.blocked => (AxGlyph(AxIcon.warn, size: 13, color: c.attentionText), 'blocked'),
     };
     return Semantics(
+      container: true,
       label: '${task.title}, $word${task.owner == null ? '' : ', ${task.owner}'}',
       excludeSemantics: true,
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 28),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
               _Mark(mark, t.type.ui),
@@ -442,7 +439,7 @@ class TaskRow extends StatelessWidget {
               ),
               if (task.owner != null && task.state != TaskState.done) ...[
                 const SizedBox(width: 8),
-                Text(task.owner!, style: t.type.small.ink(c.ink4)),
+                Text(task.owner!, style: t.type.small.ink(c.ink3)),
               ],
             ],
           ),
@@ -585,21 +582,31 @@ class NeedsRow extends StatelessWidget {
   }
 }
 
-/// A part beside the conversation, with the hairline that parts them.
+/// A part beside the conversation, with the groove that parts them. Each group is one raised surface.
 class SidePanel extends StatelessWidget {
-  const SidePanel({required this.children, super.key});
-  final List<Widget> children;
-  static const width = 284.0;
+  const SidePanel({required this.groups, super.key});
+
+  /// What each is called, what stands at the end of its name, and its rows.
+  final List<(String, Widget?, List<Widget>)> groups;
+  static const width = 296.0;
   @override
   Widget build(BuildContext context) => SizedBox(
     width: width,
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(4, 6, 12, 16),
       children: [
-        const Hairline(vertical: true),
-        Expanded(
-          child: ListView(padding: const EdgeInsets.only(top: 4, bottom: 16), children: children),
-        ),
+        for (final (name, trailing, rows) in groups) ...[
+          PanelHeading(name, trailing),
+          Surface(
+            Ax.of(context).colors.plate,
+            radius: AxRadius.card,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
       ],
     ),
   );
@@ -621,7 +628,7 @@ class ChangedRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
       child: Pressable(
         label: '$path, $added added, $removed removed',
         onPressed: onOpen,
@@ -632,7 +639,7 @@ class ChangedRow extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 28),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 7),
               child: Row(
                 children: [
                   Expanded(

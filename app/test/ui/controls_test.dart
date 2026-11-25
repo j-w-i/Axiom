@@ -141,7 +141,7 @@ void main() {
         ];
         expect(borders, hasLength(!on && outlined ? 1 : 0), reason: '$tone, $on');
         for (final b in borders) {
-          expect(b, Border.all(color: AxColors.dark.hairline));
+          expect(b, Border.all(color: AxColors.dark.field.bezel));
         }
       }
     }
@@ -912,8 +912,42 @@ void main() {
     expect(paused, ['lead']);
   });
 
+  testWidgets('the thumb of a trough is under what is chosen, and slides there', (t) async {
+    var i = 0;
+    Future<void> show({required bool still}) => put(
+      t,
+      StatefulBuilder(
+        builder: (_, set) => AxTabs(
+          tabs: const [('Conversation', null), ('Changes', '3'), ('Terminal', null)],
+          index: i,
+          onChanged: (x) => set(() => i = x),
+        ),
+      ),
+      still: still,
+    );
+    await show(still: true);
+    await t.tap(find.text('Terminal'));
+    await t.pump();
+    expect(i, 2);
+    expect(t.binding.hasScheduledFrame, isFalse, reason: 'reduced motion jumps');
+    await show(still: false);
+    await t.tap(find.text('Conversation'));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 16));
+    expect(i, 0, reason: 'chosen at once');
+    expect(t.binding.hasScheduledFrame, isTrue, reason: 'and on its way');
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+  });
+
   testWidgets('a plan says how far it is, and how each part stands', (t) async {
-    await put(t, SizedBox(width: 284, child: PlanView(s.session.tasks)));
+    await put(
+      t,
+      SizedBox(
+        height: 500,
+        child: Builder(builder: (c) => SidePanel(groups: [planGroup(c, s.session.tasks)])),
+      ),
+    );
     expect(find.byType(TaskRow), findsNWidgets(7));
     expect(find.text('4 of 7'), findsOneWidget);
     expect(find.bySemanticsLabel('Single-flight guard, active, Builder'), findsOneWidget);

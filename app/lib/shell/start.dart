@@ -136,18 +136,16 @@ class _Page extends StatelessWidget {
   }
 }
 
-/// Lines of one kind in a card, a hairline between them.
+/// Lines of one kind on one raised surface, a groove between them.
 class Card extends StatelessWidget {
   const Card(this.lines, {super.key});
   final List<Widget> lines;
   @override
   Widget build(BuildContext context) {
     final c = Ax.of(context).colors;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: c.plate.border),
-        borderRadius: BorderRadius.circular(AxRadius.card),
-      ),
+    return Surface(
+      c.plate,
+      radius: AxRadius.card,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -720,7 +718,7 @@ class _StartPageState extends State<StartPage> {
                         constraints: const BoxConstraints(maxHeight: 220),
                         child: Surface(
                           c.block,
-                          radius: AxRadius.block,
+                          radius: AxRadius.key,
                           child: SingleChildScrollView(
                             padding: const EdgeInsets.all(12),
                             child: SizedBox(

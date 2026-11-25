@@ -366,13 +366,11 @@ class _Tag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: c.key.border),
-        borderRadius: BorderRadius.circular(AxRadius.tick),
-      ),
+    return Surface(
+      c.ghost,
+      radius: AxRadius.tick,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Text(word, style: t.type.caption.ink(c.ink3)),
       ),
     );

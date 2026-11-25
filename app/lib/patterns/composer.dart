@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
+import '../ui/surface.dart';
 import '../ui/tokens.dart';
 
 /// Where an agent is written to: one card, with how the agent runs under the words. Enter sends,
@@ -90,18 +91,16 @@ class _ComposerState extends State<Composer> {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: c.plate.fill,
-        border: Border.all(color: _focus.hasFocus ? c.idle : c.plate.border),
-        borderRadius: BorderRadius.circular(AxRadius.card),
-      ),
+    return Surface(
+      c.written,
+      radius: AxRadius.card,
+      ring: _focus.hasFocus ? c.writtenFocus : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 11, 14, 6),
+            padding: const EdgeInsets.fromLTRB(17, 14, 17, 6),
             child: Focus(
               canRequestFocus: false,
               skipTraversal: true,
@@ -123,7 +122,7 @@ class _ComposerState extends State<Composer> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(6, 2, 8, 8),
+            padding: const EdgeInsets.fromLTRB(9, 2, 11, 11),
             child: Row(
               children: [
                 Expanded(
@@ -147,6 +146,8 @@ class _ComposerState extends State<Composer> {
                   AxIcon.up,
                   label: widget.action,
                   tone: AxTone.primary,
+                  round: true,
+                  size: 30,
                   onPressed: _text.text.trim().isEmpty || !widget.enabled
                       ? null
                       : () => unawaited(_submit()),

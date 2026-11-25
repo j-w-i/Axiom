@@ -75,11 +75,21 @@ void main() {
         ]) {
           check(n, k, chosen);
         }
-        for (final (n, s) in [('key', c.key), ('keyHover', c.keyHover), ('keyDown', c.keyDown)]) {
+        for (final (n, s) in [
+          ('key', c.key),
+          ('keyHover', c.keyHover),
+          ('keyDown', c.keyDown),
+          ('slab', c.slab),
+          ('track', c.track),
+          ('field', c.field),
+          ('written', c.written),
+        ]) {
           check('ink1', c.ink1, [(n, s.fill)]);
           check('ink3', c.ink3, [(n, s.fill)]);
         }
-        check('placeholder', c.ink3, [('plate', c.plate.fill)]);
+        check('placeholder', c.ink3, [('field', c.field.fill), ('written', c.written.fill)]);
+        check('attention', c.attentionText, [('slab', c.slab.fill)]);
+        check('fault', c.faultText, [('slab', c.slab.fill)]);
         for (final s in [c.primary, c.primaryHover, c.primaryDown]) {
           check('onPrimary', c.onPrimary, [('primary', s.fill)]);
         }
@@ -133,11 +143,34 @@ void main() {
         expect(bad, isEmpty, reason: bad.join('\n'));
       });
 
-      test('only what floats casts a shadow', () {
-        for (final s in [c.chassis, c.plate, c.bay, c.block, c.key, c.keyHover, c.primary]) {
-          expect(s.shadows, isEmpty);
+      test('depth is a tone, a lit edge and a contact shade', () {
+        double l(SurfaceSpec s) => lum(s.fill);
+        // Recessed: a tone below the ground, and nothing else.
+        for (final s in [c.track, c.block, c.keyDown]) {
+          expect((s.lip.a, s.shade.a, s.shadows.isEmpty), (0, 0, true));
+        }
+        expect(l(c.track), lessThan(l(c.bay)));
+        expect(l(c.block), lessThan(l(c.bay)));
+        // Raised: a tone above what it stands on, lit and shaded.
+        for (final s in [c.plate, c.slab, c.key, c.keyHover, c.written]) {
+          expect(s.raised && s.shade.a > 0, isTrue);
+          expect(l(s), greaterThan(l(c.bay)));
+        }
+        // Grounds are flat.
+        for (final s in [c.bay, c.chassis]) {
+          expect((s.lip.a, s.shade.a, s.border.a), (0, 0, 0));
+        }
+        // Soft shades are the light theme's; what floats has one in both.
+        if (c.brightness == Brightness.dark) {
+          for (final s in [c.plate, c.slab, c.key, c.written]) {
+            expect(s.shadows, isEmpty);
+          }
         }
         expect(c.overlay.shadows, isNotEmpty);
+        // No edge has a hue.
+        for (final k in [c.plate.lip, c.plate.shade, c.written.bezel, c.field.bezel]) {
+          expect((k.r - k.b).abs(), lessThan(.06));
+        }
       });
 
       // The owner's choices: aqua B (2026-11-25), and keys without a hue (round 12, A).

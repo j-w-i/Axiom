@@ -547,7 +547,7 @@ class AxSelect<T> extends StatelessWidget {
             // Taller with larger text.
             constraints: BoxConstraints(minHeight: t.density.control),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 9),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

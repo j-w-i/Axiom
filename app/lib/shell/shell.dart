@@ -913,8 +913,10 @@ class _Side extends StatelessWidget {
                 'New session',
                 keys: _ShellState.keysOf('N'),
                 selected: view == _View.start,
+                act: true,
                 onPressed: () => onStart(null),
               ),
+              const SizedBox(height: 3),
               NavRow(AxIcon.search, 'Search', keys: _ShellState.keysOf('K'), onPressed: onFind),
             ],
           ),
@@ -1224,15 +1226,20 @@ class _PanelState extends State<_Panel> {
       if (files.isEmpty) return const SizedBox.shrink();
       int sum(int Function(FileDiff) of) => files.fold(0, (n, f) => n + of(f.$2));
       return SidePanel(
-        children: [
-          PanelHeading('Changed files', ChangedBy(sum((f) => f.added), sum((f) => f.removed))),
-          for (final (f, d) in files)
-            ChangedRow(
-              oneLine(literal(f.path), 300),
-              added: d.added,
-              removed: d.removed,
-              onOpen: widget.onOpen,
-            ),
+        groups: [
+          (
+            'Changed files',
+            ChangedBy(sum((f) => f.added), sum((f) => f.removed)),
+            [
+              for (final (f, d) in files)
+                ChangedRow(
+                  oneLine(literal(f.path), 300),
+                  added: d.added,
+                  removed: d.removed,
+                  onOpen: widget.onOpen,
+                ),
+            ],
+          ),
         ],
       );
     },

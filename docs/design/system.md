@@ -2,11 +2,13 @@
 
 Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: `flutter test` writes `app/build/shots/` (offscreen).
 
-**The idea.** A professional desktop application: flat, near-neutral charcoal, what people know from other tools where they expect it, aqua only where something runs or has the keyboard, a service's hue where something is its own.
+**The idea.** A professional desktop application in the material of the owner's Unitable (its design system, Temporal Tactility, at the owner's word, 2026-11-25): near-neutral charcoal, depth from tones and one lit edge, what people know from other tools where they expect it, aqua only where something runs or has the keyboard, a service's hue where something is its own.
 
 ## Rules
-1. **Containment is spent, not given.** A surface may hold another only if the person acts on it as a unit (a key, a request, the composer, a menu, a group of options). Lists, selectors and activity are text on the ground they belong to.
-2. **Flat.** Grounds are the chassis (the sidebar) and the bay (everything else); a hairline parts them. A card is one tone up with a hairline round it. Only what floats casts a shadow (tested). No gradient, lit edge, inset, bevel, gloss or glow. (Rounds 1–11 had them; the owner: "it looks a bit like a toy and less of a professional desktop application".)
+1. **Containment is spent, not given.** A surface may hold another only if the person acts on it as a unit (a key, a request, the composer, a menu, a group of rows). Surfaces do not nest deeper than a card on a ground and a control or a trough on the card.
+2. **Raised can be pressed or written into, or is what is chosen; recessed holds something; the rest is ground.** Two grounds: the chassis (the sidebar) and the bay. Raised: a tone above, 1 px of light on the upper edge, 1 px of contact shade, and a soft shade in the light theme only. Recessed (troughs, code, what is asked to be run, a held key): a tone below and nothing else. Written into: raised or not, in a ring (2 px a field, 3 px the composer), which turns aqua (field) or brightens (composer) with the keyboard. Tests check all of it. No gradient, bevel, glass, blur, glow or outline round what is raised. Only what floats casts a large shadow.
+2a. **Corners are continuous and concentric**: an inner corner is as much less round as it stands in.
+2b. **From Unitable and not here**, because they are of a timetable or a phone: the track at true scale, the now line, hatched time, stakes, rulers, category colours, the one large answer, the bottom bar and its mark, cards from the bottom, wheels, haptics, targets of 44. Nor its near-black and springs that overshoot: the owner rejected those in v1 (FL-DS-002).
 3. **Four inks that recede from each other** (tested): words, quieter words, notes, and, on the grounds only, marks and ages.
 4. **Aqua is what runs and what has the keyboard**, and nothing else: not code, not icons, not keys. Keys have no hue; the main act is the lightest thing there is (dark theme) or the darkest (light). The owner's choice of three. Amber asks, red failed, green done; each state has its own shape (tested).
 4a. **Things take the hue of the service they belong to.** Its mark, its level, its check, the hover of its menu item. What is selected has one neutral fill, whoever it belongs to. Icons of work have no hue; a failed one is red. Code, diffs and states are in colour. How full a context is, is neutral. Marks identify a service really in use (`THIRD_PARTY.md`); unknown models get none.
@@ -21,20 +23,21 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 9. **Things sit inside what owns them.** Sessions under their folder, in the order they were made: opening one or working in it moves nothing. Agents under their session. An agent's views beside its name. What an agent asks is asked in its own conversation, and elsewhere only pointed to. Model, harness, account, effort and access behind one key where the agent is spoken to, next to how full its context is. Choosing a model or a harness says what that costs and waits for a yes. What the session plans and has changed is in a panel at the right, which can be put away and is not there when empty.
 9a. **Every page has a way back**: Cancel or Done, and Escape. What is shown is what is selected in the sidebar, and nothing else is.
 9b. **The words other tools use**: Refresh, Discard, Apply, Update, Cancel, Remove, Comment. Not "look again", "throw away", "bring in".
-10. **Motion** is springs (`snap`, `glide`) that can be interrupted; nothing waits for them; reduced motion jumps. Only a running lamp moves by itself.
+10. **Motion** answers a press: springs (`snap`, `slide`, `glide`) that can be interrupted; nothing waits for them; reduced motion jumps. Only a running lamp moves by itself.
 
 ## Roles
 | Role | Use | Treatment |
 |------|-----|-----------|
-| `chassis` | the sidebar | one tone above the bay |
-| `bay` | everything else | the ground |
-| `plate` | a request, the composer, text fields | one tone up, hairline |
-| `block` | code, what was asked | one tone up, no outline |
-| `key` / `keyDown` / `primary` | keys, held ones, the main act | fill, hairline / fill |
-| `overlay` | menus, search | fill, hairline, shadow |
-| `selected` / `hover` | rows, tabs, quiet keys | a veil |
+| `chassis`, `bay` | the sidebar; everything else | grounds, flat |
+| `track`, `block` | troughs; code, diffs, a command that is asked about | recessed |
+| `plate` | a request, what was asked, a group of rows | raised |
+| `slab` | what is chosen: a row, the thumb of a trough | raised |
+| `key` / `keyDown` / `primary` | keys, held ones, the main act | raised / recessed / ink |
+| `ghost` | a key of little weight, a tag | a veil with a lit edge |
+| `field`, `written` | a field; the composer | in a ring |
+| `overlay` | menus, search | raised, floating |
 
-Radii: check 4, control 6, code 8, card 10. Controls are 28 high, icon keys square. Type 10.5–19. Density compact/regular/roomy changes control height (24/28/32), never type size.
+Radii: check 5, control 8, code 10, card 13. Controls are 28 high, icon keys square, the act of the composer round. A held key gives 3 %. Type 10.5–19. Density compact/regular/roomy changes control height (24/28/32), never type size.
 States for every control: rest, hover, held, engaged, focused (keyboard ring), disabled (a main act and a key keep a hairline outline with grey words; a quiet key is flat words), loading, error.
 Keys of the window: new session N, search K, accounts comma, sidebar B, with ⌘ on macOS and Ctrl elsewhere.
 
@@ -55,3 +58,4 @@ Keys of the window: new session N, search K, accounts comma, sidebar B, with ⌘
 | 10 | aqua, option B of three, with dark words on keys; every corner 2 rounder, then 1 back (asked for on buttons) (`img/round10-*.png`) | accepted by the owner, 2026-11-25 |
 | 11 | Fable's review, steps 1–16 (`spec-fable.md`): what agents do in words, failure seen as failure, whole rows, one line of answers, a narrow window; graphite selection, outlines for main acts that cannot be pressed, less amber, the folder and Accounts in the strip | 2026-11-25, from pictures: B for D1, D3, D4, D5; D2 (long runs) as it was |
 | 12 | flat surfaces, neutral keys, Inter, sessions by folder as a tree, one-column conversation, panel at the right, requests where their agent is, ordinary words | asked for by the owner 2026-11-25 ("a bit like a toy"; confusing; placement, colour and shapes off). From pictures: "definitely much better, and yes I like A" (neutral keys). Reverses: two columns (7), colours by kind of work (6), plan in the session's panel (5), key radius 5 and aqua keys (10), raised materials (1–11) |
+| 13 | Unitable's depth on the layout of round 12: tones, lit edge and contact shade, troughs with a thumb that slides, rings round what is written into, continuous corners (`design/tactile`) | asked for by the owner 2026-11-25; rendered, no verdict yet |

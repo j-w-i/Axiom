@@ -777,7 +777,7 @@ class _BlockViewState extends State<BlockView> {
         constraints: const BoxConstraints(maxWidth: _measure),
         child: CodeTiles(
           words: words,
-          color: widget.voice == ItemKind.prompt ? c.bay.fill : c.codeTile,
+          color: c.codeTile,
           child: Text.rich(words, style: s),
         ),
       );
@@ -935,22 +935,25 @@ class _Voice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = Ax.of(context).colors;
+    final inner = SizedBox(
+      width: fits ? null : double.infinity,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(14, opens ? pad : gap, 14, closes ? pad : 0),
+        child: child,
+      ),
+    );
+    if (opens && closes) return Surface(c.plate, radius: AxRadius.card, child: inner);
+    // Parts of one tile, each a row of its own: they make one shape, without its edges.
     const r = Radius.circular(AxRadius.card);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: c.block.fill,
+        color: c.plate.fill,
         borderRadius: BorderRadius.vertical(
           top: opens ? r : Radius.zero,
           bottom: closes ? r : Radius.zero,
         ),
       ),
-      child: SizedBox(
-        width: fits ? null : double.infinity,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(14, opens ? pad : gap, 14, closes ? pad : 0),
-          child: child,
-        ),
-      ),
+      child: inner,
     );
   }
 }

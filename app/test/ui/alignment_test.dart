@@ -50,7 +50,7 @@ void main() {
             children: [
               SessionPanel(session: s.session, selected: 'builder', onSelect: (_) {}),
               for (final o in s.otherSessions) SessionRow(o, onOpen: () {}),
-              PlanView(s.session.tasks),
+              for (final k in s.session.tasks) TaskRow(k),
             ],
           ),
         ),

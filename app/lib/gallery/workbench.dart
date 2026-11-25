@@ -167,16 +167,20 @@ class _WorkbenchState extends State<Workbench> {
                             Expanded(child: _talk(choices, agent.name, agent.id)),
                             if (box.maxWidth >= 1180)
                               SidePanel(
-                                children: [
-                                  PlanView(s.session.tasks),
-                                  const SizedBox(height: 8),
-                                  const PanelHeading('Changed files', ChangedBy(57, 2)),
-                                  for (final (path, a, r) in const [
-                                    ('src/auth/refresh.ts', 7, 2),
-                                    ('src/auth/inflight.ts', 31, 0),
-                                    ('test/refresh.test.ts', 19, 0),
-                                  ])
-                                    ChangedRow(path, added: a, removed: r, onOpen: () {}),
+                                groups: [
+                                  planGroup(context, s.session.tasks),
+                                  (
+                                    'Changed files',
+                                    const ChangedBy(57, 2),
+                                    [
+                                      for (final (path, a, r) in const [
+                                        ('src/auth/refresh.ts', 7, 2),
+                                        ('src/auth/inflight.ts', 31, 0),
+                                        ('test/refresh.test.ts', 19, 0),
+                                      ])
+                                        ChangedRow(path, added: a, removed: r, onOpen: () {}),
+                                    ],
+                                  ),
                                 ],
                               ),
                           ],
@@ -269,7 +273,8 @@ class _Side extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
           child: Column(
             children: [
-              NavRow(AxIcon.plus, 'New session', keys: '⌘N', onPressed: () {}),
+              NavRow(AxIcon.plus, 'New session', keys: '⌘N', act: true, onPressed: () {}),
+              const SizedBox(height: 3),
               NavRow(AxIcon.search, 'Search', keys: '⌘K', onPressed: () {}),
             ],
           ),

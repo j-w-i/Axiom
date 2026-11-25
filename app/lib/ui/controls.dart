@@ -26,7 +26,7 @@ class AxButton extends StatelessWidget {
     this.shortcut,
     this.autofocus = false,
     this.focusNode,
-  });
+  }) : round = false;
   const AxButton.icon(
     AxIcon this.icon, {
     required this.label,
@@ -40,7 +40,11 @@ class AxButton extends StatelessWidget {
     this.shortcut,
     this.autofocus = false,
     this.focusNode,
+    this.round = false,
   }) : iconOnly = true;
+
+  /// The one act of a surface that is written into.
+  final bool round;
   final FocusNode? focusNode;
   final String label;
   final AxIcon? icon;
@@ -61,6 +65,7 @@ class AxButton extends StatelessWidget {
       onPressed: onPressed,
       focusNode: focusNode,
       autofocus: autofocus,
+      radius: round ? h / 2 : AxRadius.key,
       builder: (context, s) {
         final ink = !s.enabled
             ? c.idle
@@ -116,8 +121,8 @@ class AxButton extends StatelessWidget {
               ? body
               : DecoratedBox(
                   decoration: BoxDecoration(
-                    border: Border.all(color: c.hairline),
-                    borderRadius: BorderRadius.circular(AxRadius.key),
+                    border: Border.all(color: c.field.bezel),
+                    borderRadius: BorderRadius.circular(round ? h / 2 : AxRadius.key),
                   ),
                   child: body,
                 );
@@ -135,7 +140,13 @@ class AxButton extends StatelessWidget {
             child: body,
           );
         }
-        return Surface(spec, radius: AxRadius.key, child: body);
+        // It gives a little under the hand.
+        return SpringTo(
+          target: s.pressed ? 1 : 0,
+          spring: AxMotion.snap,
+          builder: (_, v, child) => Transform.scale(scale: 1 - .03 * v, child: child),
+          child: Surface(spec, radius: round ? h / 2 : AxRadius.key, child: body),
+        );
       },
     );
   }
@@ -172,53 +183,42 @@ class AxSegments<T> extends StatelessWidget {
           const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _step(-1),
           const SingleActivator(LogicalKeyboardKey.arrowRight): () => _step(1),
         },
-        child: Surface(
-          t.colors.keyDown,
-          radius: AxRadius.key + 2,
-          child: Padding(
-            padding: const EdgeInsets.all(2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final (i, (v, name, icon)) in items.indexed) ...[
-                  if (i > 0) const SizedBox(width: 2),
-                  Pressable(
-                    label: name,
-                    selected: v == value,
-                    onPressed: () => onChanged(v),
-                    builder: (context, s) {
-                      final on = v == value;
-                      final ink = on
-                          ? t.colors.ink1
-                          : s.hovered
-                          ? t.colors.ink2
-                          : t.colors.ink3;
-                      final child = SizedBox(
-                        height: t.density.control - 4,
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: icon == null ? 10 : 8),
-                          child: Center(
-                            widthFactor: 1,
-                            child: icon == null
-                                ? Text(name, style: t.type.labelStrong.ink(ink))
-                                : AxGlyph(icon, size: 13, color: ink),
-                          ),
-                        ),
-                      );
-                      return on ? Surface(t.colors.key, radius: AxRadius.key, child: child) : child;
-                    },
-                  ),
-                ],
-              ],
-            ),
-          ),
+        child: Trough(
+          index: items.indexWhere((e) => e.$1 == value),
+          children: [
+            for (final (v, name, icon) in items)
+              Pressable(
+                label: name,
+                selected: v == value,
+                onPressed: () => onChanged(v),
+                builder: (context, s) {
+                  final ink = v == value
+                      ? t.colors.ink1
+                      : s.hovered
+                      ? t.colors.ink2
+                      : t.colors.ink3;
+                  return SizedBox(
+                    height: t.density.control - 4,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: icon == null ? 11 : 8),
+                      child: Center(
+                        widthFactor: 1,
+                        child: icon == null
+                            ? Text(name, style: t.type.labelStrong.ink(ink))
+                            : AxGlyph(icon, size: 14, color: ink),
+                      ),
+                    ),
+                  );
+                },
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Tabs. The one that is chosen is filled; choosing moves nothing.
+/// Tabs: a trough, and a raised thumb under the one that is chosen. Choosing moves nothing else.
 class AxTabs extends StatelessWidget {
   const AxTabs({required this.tabs, required this.index, required this.onChanged, super.key});
 
@@ -235,8 +235,8 @@ class AxTabs extends StatelessWidget {
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () => to(index - 1),
         const SingleActivator(LogicalKeyboardKey.arrowRight): () => to(index + 1),
       },
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Trough(
+        index: index,
         children: [
           for (final (i, (name, count)) in tabs.indexed)
             Pressable(
@@ -245,39 +245,29 @@ class AxTabs extends StatelessWidget {
               onPressed: () => onChanged(i),
               builder: (context, s) {
                 final on = i == index;
-                return DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: on
-                        ? t.colors.selected
-                        : s.hovered
-                        ? t.colors.hover
-                        : null,
-                    borderRadius: BorderRadius.circular(AxRadius.key),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minHeight: t.density.control),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Text(
-                            name,
-                            style: t.type.labelStrong.ink(
-                              on
-                                  ? t.colors.ink1
-                                  : s.hovered
-                                  ? t.colors.ink2
-                                  : t.colors.ink3,
-                            ),
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 11),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: t.density.control - 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Text(
+                          name,
+                          style: t.type.labelStrong.ink(
+                            on
+                                ? t.colors.ink1
+                                : s.hovered
+                                ? t.colors.ink2
+                                : t.colors.ink3,
                           ),
-                          if (count != null) ...[
-                            const SizedBox(width: 5),
-                            Text(count, style: t.type.small.ink(t.colors.ink3)),
-                          ],
+                        ),
+                        if (count != null) ...[
+                          const SizedBox(width: 5),
+                          Text(count, style: t.type.small.ink(t.colors.ink3)),
                         ],
-                      ),
+                      ],
                     ),
                   ),
                 );
@@ -307,7 +297,7 @@ class AxSwitch extends StatelessWidget {
         width: 32,
         height: 18,
         child: Surface(
-          value && s.enabled ? c.primary : c.keyDown,
+          value && s.enabled ? c.primary : c.track,
           radius: 9,
           child: SpringTo(
             target: value ? 1 : 0,
@@ -318,7 +308,7 @@ class AxSwitch extends StatelessWidget {
               child: SizedBox(
                 width: 14,
                 child: Surface(
-                  value && s.enabled ? c.bay : c.keyHover,
+                  value && s.enabled ? c.track : c.keyHover,
                   radius: 7,
                   child: const SizedBox.expand(),
                 ),
@@ -360,7 +350,7 @@ class AxCheck extends StatelessWidget {
             dimension: 16,
             child: value
                 ? Surface(
-                    s.enabled ? c.primary : c.keyDown,
+                    s.enabled ? c.primary : c.ghost,
                     radius: AxRadius.tick,
                     child: Center(
                       child: AxGlyph(
@@ -372,10 +362,10 @@ class AxCheck extends StatelessWidget {
                   )
                 : DecoratedBox(
                     decoration: BoxDecoration(
-                      color: s.enabled ? c.bay.fill : null,
+                      color: s.enabled ? c.track.fill : null,
                       border: Border.all(
                         color: !s.enabled
-                            ? c.hairline
+                            ? c.field.bezel
                             : s.hovered
                             ? c.ink2
                             : c.idle,
@@ -461,51 +451,47 @@ class _AxFieldState extends State<AxField> {
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.enabled ? () => _f.requestFocus() : null,
-          child: Surface(
-            widget.enabled ? c.plate : c.keyDown,
-            radius: AxRadius.key,
-            child: ListenableBuilder(
-              listenable: _f,
-              builder: (_, child) => DecoratedBox(
-                position: DecorationPosition.foreground,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AxRadius.key),
-                  border: _f.hasFocus || bad
-                      ? Border.all(color: bad ? c.fault : c.focus, width: 1.5)
-                      : null,
+          child: ListenableBuilder(
+            listenable: _f,
+            builder: (_, child) => Surface(
+              widget.enabled ? c.field : c.keyDown,
+              radius: AxRadius.key - (widget.enabled ? c.field.ring : 0),
+              ring: bad
+                  ? c.fault
+                  : _f.hasFocus
+                  ? c.focus
+                  : null,
+              child: child,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: t.density.control + 2),
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: t.density.pad + 3,
+                  vertical: widget.lines > 1 ? 7 : 0,
                 ),
-                child: child,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: t.density.control),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: t.density.pad + 1,
-                    vertical: widget.lines > 1 ? 7 : 0,
-                  ),
-                  child: Row(
-                    crossAxisAlignment: widget.lines > 1
-                        ? CrossAxisAlignment.start
-                        : CrossAxisAlignment.center,
-                    children: [
-                      if (widget.leading != null) ...[widget.leading!, const SizedBox(width: 7)],
-                      Expanded(
-                        child: AxEditable(
-                          label: widget.label,
-                          placeholder: widget.placeholder,
-                          controller: _c,
-                          focusNode: _f,
-                          style: style,
-                          enabled: widget.enabled,
-                          secret: widget.secret,
-                          maxLines: widget.lines == 1 ? 1 : null,
-                          minLines: widget.lines,
-                          onSubmitted: widget.onSubmitted,
-                          onChanged: widget.onChanged,
-                        ),
+                child: Row(
+                  crossAxisAlignment: widget.lines > 1
+                      ? CrossAxisAlignment.start
+                      : CrossAxisAlignment.center,
+                  children: [
+                    if (widget.leading != null) ...[widget.leading!, const SizedBox(width: 7)],
+                    Expanded(
+                      child: AxEditable(
+                        label: widget.label,
+                        placeholder: widget.placeholder,
+                        controller: _c,
+                        focusNode: _f,
+                        style: style,
+                        enabled: widget.enabled,
+                        secret: widget.secret,
+                        maxLines: widget.lines == 1 ? 1 : null,
+                        minLines: widget.lines,
+                        onSubmitted: widget.onSubmitted,
+                        onChanged: widget.onChanged,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),

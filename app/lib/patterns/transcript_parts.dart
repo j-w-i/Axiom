@@ -201,8 +201,8 @@ class DiffLines extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AxRadius.block),
+    return ClipPath(
+      clipper: const ContinuousClip(AxRadius.block),
       child: ColoredBox(
         color: c.block.fill,
         child: Padding(
@@ -432,11 +432,9 @@ class _RequestBarState extends State<RequestBar> {
                       ],
                     ),
                     const SizedBox(height: 9),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: c.bay.fill,
-                        borderRadius: BorderRadius.circular(AxRadius.key),
-                      ),
+                    Surface(
+                      c.block,
+                      radius: AxRadius.key,
                       child: SizedBox(
                         width: double.infinity,
                         child: Padding(

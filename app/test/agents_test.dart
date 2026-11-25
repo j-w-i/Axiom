@@ -20,6 +20,7 @@ import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/overlay.dart';
 import 'package:axiom/ui/status.dart';
+import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -1228,15 +1229,15 @@ void main() {
     expect(find.text('No messages yet.'), findsOneWidget);
     expect(find.byType(TranscriptView), findsNothing);
     await snap(t, 'two-agents');
-    // What is selected has one fill, whoever it belongs to.
-    Iterable<Color> fills(Type of) => t
-        .widgetList<DecoratedBox>(
-          find.descendant(of: find.byType(of), matching: find.byType(DecoratedBox)),
-        )
-        .map((b) => (b.decoration as BoxDecoration).color)
-        .nonNulls;
-    expect(fills(AgentRow), [AxColors.dark.selected]);
-    expect(fills(AxTabs), [AxColors.dark.selected]);
+    // What is selected is one raised slab, whoever it belongs to.
+    expect(
+      t
+          .widgetList<Surface>(
+            find.descendant(of: find.byType(AgentRow), matching: find.byType(Surface)),
+          )
+          .map((x) => x.spec),
+      [AxColors.dark.slab],
+    );
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
     expect(find.text('Default model'), findsWidgets);

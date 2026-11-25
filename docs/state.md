@@ -40,6 +40,9 @@ Steps 1–16 are done on `design/fable-spec`; the owner chose B for D1, D3, D4 a
 ## The look, round 12 (`design/flat`)
 Built 2026-11-25 on the owner's yes to pictures (`design/system.md`, history). Not merged. The fifteen goldens are of the round before and fail; they are recorded again only when the owner has seen the app's own pictures (`app/build/shots`). In the pictures and not in the app, because the host has nothing for it: a plan, levels of use per service in the header, a terminal, renaming and removing sessions. The folder window (`file_selector`, by the Flutter team, BSD: a person had to type a whole path) has been opened by nobody. `spec-fable.md` is older than this and describes what was before.
 
+## The material, round 13 (`design/tactile`, on `design/flat`)
+Unitable's depth on round 12's layout, at the owner's word (2026-11-25). No verdict yet; `design/flat` is the same without it. The fifteen goldens fail here too, for the same reason. Not measured: what the outlines cost a frame on a display (K1).
+
 ## Next
 1. Owner: say whether a real window may be opened once, when convenient, to check chrome and frame times.
 2. Owner: say whether the real Claude Code or Codex on this computer may be started once, to see a delegated agent work (K40).
