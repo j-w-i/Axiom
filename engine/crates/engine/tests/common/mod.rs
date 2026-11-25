@@ -355,6 +355,7 @@ impl T {
             fill: None,
             told: None,
             waited: Duration::ZERO,
+            noted: Default::default(),
             retries: Retries {
                 most: 3,
                 first: Duration::from_millis(1),

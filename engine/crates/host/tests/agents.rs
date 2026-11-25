@@ -423,6 +423,28 @@ async fn a_workspace_that_leads_elsewhere_is_not_worked_in() {
     assert_eq!(t.ended().await.0, Outcome::Completed);
 }
 
+/// SI-10: what an agent has put in the place of its own folder is not what it may write.
+#[tokio::test]
+async fn an_agents_own_folder_is_not_a_link() {
+    let mut t = T::new(vec![text(&["ok"])]).await;
+    let a = t.agent(Access::Work).await;
+    t.prompt(&a, "go").await.unwrap();
+    t.ended().await;
+    let own = t.f.paths.scratch().join(&a.0);
+    std::fs::remove_dir(&own).unwrap();
+    std::os::unix::fs::symlink(t.f.dir.path(), &own).unwrap();
+    let mut e = t.prompt(&a, "go").await;
+    // Its place may not be free yet.
+    for _ in 0..100 {
+        match e {
+            Ok(_) => e = t.prompt(&a, "go").await,
+            Err(_) => break,
+        }
+    }
+    let e = e.unwrap_err();
+    assert!(e.to_string().contains("not a directory"), "{e}");
+}
+
 #[tokio::test]
 async fn an_agent_nobody_was_told_of_is_not_there() {
     let mut t = T::new(vec![]).await;

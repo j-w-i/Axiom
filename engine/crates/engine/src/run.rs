@@ -1,6 +1,7 @@
 //! One run: from what a person said until the agent has nothing more to do.
 
 use std::{
+    collections::HashSet,
     pin::Pin,
     time::{Duration, Instant},
 };
@@ -83,6 +84,8 @@ pub struct Agent<S: Stage> {
     pub retries: Retries,
     /// What a person says meanwhile.
     pub inbox: mpsc::Receiver<Word>,
+    /// Taken in from what waited: it may be in the inbox as well.
+    pub noted: HashSet<ItemId>,
     /// Share of the window in use, as the last answer had it.
     pub fill: Option<f64>,
     /// Another model that answered, once a person has been told.
@@ -334,6 +337,9 @@ impl<S: Stage> Agent<S> {
 
     /// Takes in what a person said: first for who reads along, then for the model.
     async fn heard(&mut self, run: &RunId, w: Word) -> Result<(), Halt> {
+        if w.item.as_ref().is_some_and(|i| self.noted.remove(i)) {
+            return Ok(());
+        }
         if w.item.is_none() {
             self.stage.say(said(&ItemId::new(), run, &self.id, &w.text)).await?;
             self.stage.sync().await?;
@@ -344,6 +350,7 @@ impl<S: Stage> Agent<S> {
     /// Takes in what waits from before: a host that was gone, or a run that was stopped.
     pub async fn note(&mut self, words: Vec<(ItemId, String)>) -> Result<(), Refused> {
         for (item, text) in words {
+            self.noted.insert(item.clone());
             match self.keep_turn(Turn::Message(Message::user(text)), Some(item)).await {
                 Ok(()) => {}
                 Err(Halt::Failed(why) | Halt::Full(why)) => return Err(Refused::This(why)),

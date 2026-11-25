@@ -244,13 +244,18 @@ impl Agents {
             }
         }
         let keep = Keep::new(home.clone(), own);
-        let dir = self.scratch.join(plain(&agent.0));
-        if make {
-            private_dir(&self.scratch).map_err(internal)?;
-            private_dir(&dir).map_err(internal)?;
-        }
+        // By its long name, on a system where folders have two.
+        private_dir(&self.scratch).map_err(internal)?;
         let scratch =
-            if make { real(&dir)? } else { Place::new(&dir).map_err(|e| bad(e.to_string()))? };
+            real(&self.scratch)?.join(&plain(&agent.0)).map_err(|e| bad(e.to_string()))?;
+        if make {
+            private_dir(scratch.as_path()).map_err(internal)?;
+            // The agent writes there, and could have put a link in its place: what it may write
+            // would be what that leads to.
+            if real(scratch.as_path())? != scratch {
+                return Err(bad("the agent's own folder leads elsewhere"));
+            }
+        }
         let (path, system) = axiom_tools::system(&home);
         let write =
             if access == Access::Read { Reach::none() } else { Reach::of([workspace.clone()]) };
@@ -508,6 +513,7 @@ pub async fn load(
         fill: None,
         told: None,
         waited: Duration::ZERO,
+        noted: Default::default(),
         retries: Retries::default(),
         inbox,
     };
