@@ -757,3 +757,42 @@ async fn what_it_began_has_ended_first() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(t.copied(&a, "tick"), was, "it writes no more");
 }
+
+/// A host that is asked to stop does not do so in the middle of it.
+#[tokio::test]
+async fn it_is_not_stopped_in_the_middle() {
+    let mut t = T::new(vec![]).await;
+    t.write("a.txt", "old\n");
+    let a = t.agent("Builder", Access::Work, true).await;
+    t.does(&a, "echo agent > a.txt").await;
+    let files: Vec<CopySeen> = t.changes(&a).await.files.into_iter().map(seen).collect();
+    // What it puts on record first has to wait.
+    let db = rusqlite::Connection::open(t.f.paths.journal()).unwrap();
+    db.execute_batch("begin immediate").unwrap();
+    let mut other = t.f.client().await;
+    let (session, agent) = (t.s.clone(), a.clone());
+    let bring = tokio::spawn(async move {
+        let call = Call::CopyBring { session, agent, files };
+        other.call(call).await
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!bring.is_finished());
+    let e = refused(t.c.call(Call::Shutdown { force: false }).await);
+    assert_eq!(e.code, ErrorCode::Busy);
+    // Told to stop all the same, it ends this first.
+    t.c.call(Call::Shutdown { force: true }).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(t.f.paths.token().exists(), "it is there still");
+    db.execute_batch("rollback").unwrap();
+    for _ in 0..500 {
+        if !t.f.paths.token().exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(!t.f.paths.token().exists());
+    assert_eq!(t.file("a.txt").as_deref(), Some("agent\n"));
+    let _ = bring.await;
+    let (_, v) = record_of(&saved(&records(&t)));
+    assert_eq!(v["last"]["items"][0]["path"], "a.txt");
+}
