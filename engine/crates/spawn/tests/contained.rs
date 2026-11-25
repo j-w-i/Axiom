@@ -85,6 +85,27 @@ async fn reads_no_secret_and_nothing_of_axiom() {
     assert!(o.out.starts_with("lib") && !o.out.contains("SECRET"), "{o:?}");
 }
 
+/// Not even where all around it may be read. (What may be written never holds it: `BadProfile`.)
+#[tokio::test]
+async fn what_is_kept_is_not_run() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = fixture();
+    for (from, to) in [("/bin/echo", "home/.ssh/echo"), ("/bin/echo", "home/lib/echo")] {
+        std::fs::copy(from, f.dir.path().join(to)).unwrap();
+    }
+    let prog = f.dir.path().join("home/.ssh/prog");
+    std::fs::write(&prog, "#!/bin/sh\necho ran\n").unwrap();
+    std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let caps = Caps { read: Reach::of([f.at("home")]), ..f.caps() };
+    let wide = Profile::of(&caps, &f.keep(), &system(), &f.at("tmp")).unwrap();
+    let o = run(f.job("../lib/echo ran", wide.clone())).await.unwrap();
+    assert_eq!(o.out, "ran\n", "{o:?}");
+    for s in ["../.ssh/prog", "sh ../.ssh/prog", "../.ssh/echo ran", "exec ../.ssh/echo ran"] {
+        let o = run(f.job(s, wide.clone())).await.unwrap();
+        assert!(!o.ok() && !o.out.contains("ran"), "{s}: {o:?}");
+    }
+}
+
 #[tokio::test]
 async fn what_is_protected_is_not_written() {
     let f = fixture();
