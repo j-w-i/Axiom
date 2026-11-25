@@ -1,6 +1,6 @@
 # State (handover)
 
-Updated 2026-11-25. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), installed programs and signing in with ChatGPT (j-w-i/Axiom#16), copies for agents (j-w-i/Axiom#18), what needs a person (j-w-i/Axiom#19).
+Updated 2026-11-25. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), installed programs and signing in with ChatGPT (j-w-i/Axiom#16), copies for agents (j-w-i/Axiom#18), what needs a person (j-w-i/Axiom#19), results that reach who asked (j-w-i/Axiom#20), the design spec's steps 1–16 (j-w-i/Axiom#21).
 
 ## Where things stand
 - **M0**: done except the owner's reading of decisions 0006 (Google plans via Antigravity; Gemini CLI's consumer tier has ended) and 0007 (subscription lanes; written confirmation from Anthropic before launch).
@@ -35,7 +35,10 @@ Updated 2026-11-25. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), ins
 The real window has not been opened since the owner asked for none (K8); frame times on a display with many panes (K1); anything on Linux or Windows beyond CI; accessibility with a real screen reader.
 
 ## The design spec (`design/spec-fable.md`)
-Steps 1–16 are done on `design/fable-spec`; the owner chose B for D1, D3, D4 and D5 (2026-11-25). D2 stays as it is: step 17 is not built, and in `workbench-dark` it would have changed nothing (no run there is over four calls). One departure: at a ChatGPT plan's limit "Manage usage" is the primary key, as OpenAI's own page for whoever uses a plan asks; the spec says never. Eleven goldens were recorded again with the owner's yes (2026-11-25). From steps 3 and 4: `controls-*` (the empty box, step 4), `workbench-*` and `execution-dark` ("Deny" is 2 px further left, step 3; with it seven pixels of one letter in the sidebar's "web-store" in the wider ones, which come and go with where "Deny" stands and with nothing else). From steps 13 to 15: the subject of a request in `ink1`, the fill of the selected row and tab, the outline of a disabled key (`status-*` too, for its selected row).
+Steps 1–16 are done; the owner chose B for D1, D3, D4 and D5 (2026-11-25). D2 stays as it is: step 17 is not built, and in `workbench-dark` it would have changed nothing (no run there is over four calls). One departure: at a ChatGPT plan's limit "Manage usage" is the primary key, as OpenAI's own page for whoever uses a plan asks; the spec says never. Eleven goldens were recorded again with the owner's yes (2026-11-25). From steps 3 and 4: `controls-*` (the empty box, step 4), `workbench-*` and `execution-dark` ("Deny" is 2 px further left, step 3; with it seven pixels of one letter in the sidebar's "web-store" in the wider ones, which come and go with where "Deny" stands and with nothing else). From steps 13 to 15: the subject of a request in `ink1`, the fill of the selected row and tab, the outline of a disabled key (`status-*` too, for its selected row).
+
+## In progress: what was said and not heard (`m5/unheard`)
+Number 5 of `research/t3code-comparison.md`. Done: in the journal what waits is taken back or heard and never both (`take_back`, `heard`, `put_message`); the loop and the delegated programs tell nobody what was taken back and do not wait for an answer to it. Not done: the call a client takes it back with, the event that says what waits and what does not any more, the run that would begin (`Slot::after`) for something that is no longer there, what other agents have said (not a person's to take back), changing it, and all of the client. Nothing of it can be reached yet, and the two engine changes have no test of their own yet.
 
 ## Next
 1. Owner: say whether a real window may be opened once, when convenient, to check chrome and frame times.
