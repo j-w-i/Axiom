@@ -1,20 +1,24 @@
-name: Windows hang
+name: Windows app hang
 on:
-  push: { branches: [diag/windows-hang] }
+  push: { branches: [diag/windows-app] }
 permissions: { contents: read }
 jobs:
-  engine:
+  app:
+    name: ${{ matrix.test }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ["a history that keeps changing is given up on, in words", "told again and again that it is behind, it slows down", "a fault ends the session here and nothing follows by itself", "a damaged journal and a list that was cut are known", "the list is asked for again by itself", "what arrived is kept when the connection is lost", "trying a failed session again begins it anew", "much text is applied in slices", "closing with data in flight raises nothing", "what is not consumed stops the reading, and consuming resumes it", "a host whose status is nothing is still a host", "a host whose status is an error is still a host"]
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: engine }
-      - run: cargo test -p axiom-host --locked --no-run
-        working-directory: engine
-      - shell: pwsh
-        run: ./diag.ps1 engine
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: engine-log, path: diag-*.log }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: 3.50.0, cache: true }
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app
+      - name: the test
+        shell: bash
+        working-directory: app
+        timeout-minutes: 3
+        run: flutter test --reporter expanded --plain-name "${{ matrix.test }}" test/host/fake_host_test.dart
