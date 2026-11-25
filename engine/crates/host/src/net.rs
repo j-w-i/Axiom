@@ -200,7 +200,7 @@ mod windows {
             if self.0 < 50 {
                 std::thread::yield_now();
             } else {
-                let ms = Duration::from_millis(1 << (self.0 - 50).min(10) / 3);
+                let ms = Duration::from_millis(1 << ((self.0 - 50).min(10) / 3));
                 std::thread::sleep(ms.min(Self::LONGEST));
             }
             self.0 = self.0.saturating_add(1);
