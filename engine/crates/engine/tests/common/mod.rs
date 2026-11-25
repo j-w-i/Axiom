@@ -32,7 +32,9 @@ struct Kept {
     /// What its person has taken back.
     taken: Vec<ItemId>,
     on_sync: Option<OnSync>,
+    on_turn: Option<OnTurn>,
 }
+type OnTurn = Box<dyn FnMut() + Send>;
 type OnSync = Box<dyn FnMut(&[String]) + Send>;
 
 #[derive(Clone, Default)]
@@ -63,6 +65,10 @@ impl Memory {
     }
     pub fn take_back(&self, item: ItemId) {
         self.0.lock().unwrap().taken.push(item);
+    }
+    /// Runs when a turn is kept.
+    pub fn on_turn(&self, f: impl FnMut() + Send + 'static) {
+        self.0.lock().unwrap().on_turn = Some(Box::new(f));
     }
     pub fn on_sync(&self, f: impl FnMut(&[String]) + Send + 'static) {
         self.0.lock().unwrap().on_sync = Some(Box::new(f));
@@ -236,6 +242,9 @@ impl Stage for Memory {
             return Ok(false);
         }
         k.turns.push(turn);
+        if let Some(f) = &mut k.on_turn {
+            f();
+        }
         Ok(true)
     }
     async fn closed(&self) {

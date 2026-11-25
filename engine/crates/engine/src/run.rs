@@ -89,7 +89,7 @@ pub struct Agent<S: Stage> {
     pub retries: Retries,
     /// What a person says meanwhile.
     pub inbox: mpsc::Receiver<Word>,
-    /// Taken in from what waited: it may be in the inbox as well.
+    /// Taken in from what waited, or taken back by then: it may be in the inbox as well.
     pub noted: HashSet<ItemId>,
     /// Share of the window in use, as the last answer had it.
     pub fill: Option<f64>,
@@ -340,8 +340,9 @@ impl<S: Stage> Agent<S> {
     /// Takes in what a person said: first for who reads along, then for the model. Not what has been
     /// taken back meanwhile: whether there is something to answer.
     async fn heard(&mut self, run: &RunId, w: Word) -> Result<bool, Halt> {
+        // It was taken in before the first answer, or taken back: that has been answered.
         if w.item.as_ref().is_some_and(|i| self.noted.remove(i)) {
-            return Ok(true);
+            return Ok(false);
         }
         if w.item.is_none() {
             let (by, text) = match &w.shown {
