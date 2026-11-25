@@ -172,7 +172,6 @@ impl Tree {
         // it. Nobody holding the mark any more is the proof that none did.
         while began.elapsed() < most {
             self.look();
-            #[cfg(target_os = "macos")]
             for p in self.mark.iter().flat_map(sys::holding) {
                 if let Some(at) = sys::started(p) {
                     self.known.insert(p, at);
@@ -311,6 +310,23 @@ mod sys {
 
     pub fn started(pid: i32) -> Option<u64> {
         stat(pid).filter(|s| !matches!(s.0, 'Z' | 'X')).map(|s| s.2)
+    }
+
+    /// This user's processes that hold the other end of the mark.
+    pub fn holding(mark: &std::os::unix::io::OwnedFd) -> Vec<i32> {
+        use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
+        // Both ends of a pipe are one file.
+        let ours = std::fs::metadata(format!("/proc/self/fd/{}", mark.as_raw_fd()));
+        let Ok(want) = ours.map(|m| format!("pipe:[{}]", m.ino())) else { return Vec::new() };
+        let me = i32::try_from(std::process::id()).unwrap_or(0);
+        let pids = std::fs::read_dir("/proc").into_iter().flatten();
+        pids.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
+            .filter(|p| *p != me)
+            .filter(|p| {
+                std::fs::read_link(format!("/proc/{p}/fd/{}", super::MARK))
+                    .is_ok_and(|l| l.as_os_str() == want.as_str())
+            })
+            .collect()
     }
 
     /// Who has started whom, read once.

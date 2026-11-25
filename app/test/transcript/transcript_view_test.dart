@@ -5,6 +5,7 @@ import 'package:axiom/transcript/safe_text.dart';
 import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/press.dart';
+import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/tokens.dart';
 
 import 'dart:io';

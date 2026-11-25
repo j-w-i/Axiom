@@ -11,7 +11,8 @@ use crate::{
 };
 
 pub fn place(s: &str) -> Place {
-    Place::new(std::env::temp_dir().join(s)).unwrap()
+    // Nothing is looked for there.
+    Place::new(std::path::Path::new(if cfg!(windows) { r"C:\t" } else { "/t" }).join(s)).unwrap()
 }
 
 pub fn site() -> Site {
