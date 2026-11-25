@@ -172,6 +172,39 @@ void main() {
     expect(find.byType(StartPage), findsNothing);
   });
 
+  testWidgets('a folder is chosen again, and ~ is home', (t) async {
+    Json info(String id, String? w) => {
+      'id': id,
+      'title': 'T',
+      'workspace': w,
+      'created': 1,
+      'updated': 1,
+      'last_seq': 1,
+      'running': false,
+    };
+    final s = Asked()
+      ..connections = const [key]
+      ..sessions = [
+        for (final (i, w) in ['/a/one', null, '/a/one', '/b/two'].indexed)
+          SessionInfo.decode(info('$i', w)),
+      ];
+    addTearDown(s.dispose);
+    expect(recentFolders(s.sessions), ['/a/one', '/b/two']);
+    expect(recentFolders(s.sessions, most: 1), ['/a/one']);
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    await t.tap(find.bySemanticsLabel('New session').first);
+    await settled(t);
+    await t.tap(find.bySemanticsLabel(RegExp('^Recent folders')));
+    await settled(t);
+    await t.tap(find.bySemanticsLabel(RegExp('^two')).last);
+    await settled(t);
+    expect(find.text('/b/two'), findsOneWidget);
+    expect(wholePath('/x/~/y'), '/x/~/y');
+    expect(wholePath('~x'), '~x');
+    expect(wholePath('~/x'), isNot(startsWith('~')));
+    expect(wholePath('~/x'), endsWith('/x'));
+  });
+
   testWidgets('what fails is said, keeps what was written, and is not made twice', (t) async {
     final s = await shell(t);
     await t.tap(find.bySemanticsLabel('New session').first);

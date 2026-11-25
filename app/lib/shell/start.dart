@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
@@ -105,6 +106,23 @@ class _Page extends StatelessWidget {
   }
 }
 
+/// `~` as a shell has it. Everything else is the host's to judge.
+String wholePath(String p) {
+  final home = Platform.environment[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
+  if (home == null || !(p == '~' || p.startsWith('~/') || p.startsWith(r'~\'))) return p;
+  return home + p.substring(1);
+}
+
+/// Folders that sessions are about, the last used first.
+List<String> recentFolders(List<SessionInfo> sessions, {int most = 8}) {
+  final out = <String>{};
+  for (final s in sessions) {
+    if (s.workspace case final w? when w.isNotEmpty) out.add(w);
+    if (out.length >= most) break;
+  }
+  return out.toList();
+}
+
 /// A new piece of work: what it is, where, and who does it.
 class StartPage extends StatefulWidget {
   const StartPage(this.store, {required this.onStarted, required this.onAccounts, super.key});
@@ -162,6 +180,13 @@ class _StartPageState extends State<StartPage> {
     );
   }
 
+  static String _tail(String f) =>
+      f.split(RegExp(r'[/\\]')).lastWhere((x) => x.isNotEmpty, orElse: () => f);
+  static String _head(String f) {
+    final t = _tail(f);
+    return oneLine(literal(f.endsWith(t) ? f.substring(0, f.length - t.length) : f), 60);
+  }
+
   Future<void> _start(Connection c) async {
     setState(() {
       _busy = true;
@@ -169,7 +194,7 @@ class _StartPageState extends State<StartPage> {
     });
     final s = widget.store;
     try {
-      final text = _say.text.trim(), folder = _folder.text.trim();
+      final text = _say.text.trim(), folder = wholePath(_folder.text.trim());
       if (_session == null || _sessionFolder != folder) {
         _session = await s.create(oneLine(text, 80), workspace: folder);
         _sessionFolder = folder;
@@ -205,6 +230,7 @@ class _StartPageState extends State<StartPage> {
       }
       final models = (chosen == null ? null : s.modelsOf(chosen.id)) ?? const <ModelInfo>[];
       final listed = models.isNotEmpty;
+      final recent = recentFolders(s.sessions);
       final ready =
           !_busy &&
           chosen != null &&
@@ -221,11 +247,23 @@ class _StartPageState extends State<StartPage> {
           FormPart(
             'Folder',
             note: 'The whole path. The agent changes nothing outside it.',
-            child: AxField(
-              label: 'Folder',
-              controller: _folder,
-              mono: true,
-              placeholder: '/Users/you/project',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AxField(label: 'Folder', controller: _folder, mono: true, placeholder: '~/project'),
+                if (recent.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  AxSelect<String>(
+                    label: 'Recent folders',
+                    items: [
+                      for (final f in recent)
+                        AxMenuItem(f, oneLine(literal(_tail(f)), 60), detail: _head(f)),
+                    ],
+                    value: _folder.text,
+                    onChanged: (v) => setState(() => _folder.text = v),
+                  ),
+                ],
+              ],
             ),
           ),
           if (all.isEmpty)
