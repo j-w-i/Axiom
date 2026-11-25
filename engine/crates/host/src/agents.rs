@@ -1087,11 +1087,15 @@ pub enum Spoken {
 pub struct Ear {
     pub run: RunId,
     permit: mpsc::OwnedPermit<Word>,
-    _slot: tokio::sync::OwnedMutexGuard<Live>,
+    slot: tokio::sync::OwnedMutexGuard<Live>,
 }
 
 impl Ear {
-    pub fn tell(self, text: String, item: ItemId) -> RunId {
+    pub fn tell(mut self, text: String, item: ItemId) -> RunId {
+        // Only what is said counts as said: whoever merely looks for room says nothing.
+        if let Some(now) = self.slot.as_mut() {
+            now.late |= *now.cancel.borrow();
+        }
         self.permit.send(Word { text, item: Some(item), shown: None });
         self.run
     }
@@ -1133,18 +1137,14 @@ impl Slot {
 
     /// A place in the run that is on, or the place for a new one.
     pub async fn speak(&self) -> Result<Spoken, WireError> {
-        let mut live = self.live.clone().lock_owned().await;
-        if let Some(now) = live.as_mut()
+        let live = self.live.clone().lock_owned().await;
+        if let Some(now) = live.as_ref()
             && !now.tx.is_closed()
         {
             let busy = |words: &str| WireError::new(ErrorCode::Busy, words);
-            let late = *now.cancel.borrow();
             let (run, reserved) = (now.run.clone(), now.tx.clone().try_reserve_owned());
             return match reserved {
-                Ok(permit) => {
-                    now.late |= late;
-                    Ok(Spoken::Heard(Box::new(Ear { run, permit, _slot: live })))
-                }
+                Ok(permit) => Ok(Spoken::Heard(Box::new(Ear { run, permit, slot: live }))),
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     Err(busy("the agent has as much to hear as it may"))
                 }
@@ -1322,6 +1322,25 @@ pub fn full(n: usize) -> bool {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// What waited when a person stopped it waits until they speak, and not until something looks for
+    /// room.
+    #[tokio::test]
+    async fn looking_for_room_is_not_speaking() {
+        for (speaks, goes_on) in [(false, false), (true, true)] {
+            let slot = Slot::default();
+            let (tx, mut rx) = mpsc::channel(4);
+            let (_stop, cancel) = watch::channel(true);
+            tx.send(Word::new("before".into())).await.unwrap();
+            *slot.live.lock().await = Some(Now { run: RunId::new(), tx, cancel, late: false });
+            match slot.speak().await {
+                Ok(Spoken::Heard(ear)) if speaks => drop(ear.tell("x".into(), ItemId::new())),
+                Ok(Spoken::Heard(ear)) => drop(ear),
+                _ => unreachable!(),
+            }
+            assert_eq!(slot.after(&mut rx, true).await, goes_on);
+        }
+    }
 
     /// Two slots of one agent would be two runs of it.
     #[tokio::test]
