@@ -54,6 +54,24 @@ class _ShellState extends State<Shell> {
     _show(_View.agent);
   }
 
+  /// Where its person was last is where the window opens, once.
+  bool _opened = false;
+  void _begin(HostStore s) {
+    if (_opened || s.phase != HostPhase.connected) return;
+    if (s.current != null || _view != _View.work) {
+      _opened = true;
+      return;
+    }
+    final last = s.sessions.firstOrNull;
+    if (last == null) return;
+    _opened = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && s.current == null) {
+        _do('The session was not opened', () => s.open(last.id));
+      }
+    });
+  }
+
   /// What a key was pressed for and did not come about.
   String? _failed;
   Timer? _forget;
@@ -91,6 +109,7 @@ class _ShellState extends State<Shell> {
         listenable: widget.store,
         builder: (context, _) {
           final s = widget.store;
+          _begin(s);
           // An agent is chosen within its session only.
           if (_session != s.current?.id) {
             _session = s.current?.id;

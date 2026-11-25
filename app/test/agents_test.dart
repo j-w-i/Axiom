@@ -749,6 +749,30 @@ void main() {
     expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
   });
 
+  testWidgets('the window opens where its person was last, once', (t) async {
+    final s = Asked()
+      ..sessions = [
+        for (final (id, title, at) in const [('s2', 'Newer', 9), ('s1', 'Older', 2)])
+          SessionInfo.decode({
+            'id': id,
+            'title': title,
+            'created': 1,
+            'updated': at,
+            'last_seq': 1,
+            'running': false,
+          }),
+      ];
+    addTearDown(s.dispose);
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    await settled(t);
+    expect(s.calls, [
+      ['open', 's2'],
+    ]);
+    await press(t, find.text('Older'));
+    expect(s.calls.last, ['open', 's1']);
+    expect(s.calls.length, 2);
+  });
+
   testWidgets('a double click answers one question, not the next as well', (t) async {
     final s = await shell(t, session: working(asks: true));
     await settled(t);
