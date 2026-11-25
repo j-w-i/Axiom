@@ -21,7 +21,13 @@ struct T {
 }
 
 fn t(access: Access) -> T {
-    let d = tempfile::tempdir().unwrap();
+    // On Linux not in /tmp, which is another one inside the sandbox.
+    let d = if cfg!(target_os = "linux") {
+        tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+    } else {
+        tempfile::tempdir()
+    }
+    .unwrap();
     let root = std::fs::canonicalize(d.path()).unwrap();
     for x in ["home/.ssh", "home/w/src", "home/w/.git", "own", "out", "tmp"] {
         std::fs::create_dir_all(root.join(x)).unwrap();

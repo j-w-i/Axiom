@@ -46,10 +46,8 @@ async fn writes_nowhere_else() {
         "echo x > ~/new",
     ] {
         let o = f.sh(s).await;
-        // On Linux the temporary folder, where this test has its own, is another one inside: what is
-        // written there goes nowhere.
-        let private =
-            cfg!(target_os = "linux") && !["lib/l", "hard", "etc"].iter().any(|w| s.contains(w));
+        // On Linux /tmp is another one inside: what is written there goes nowhere.
+        let private = cfg!(target_os = "linux") && s.contains("/tmp/");
         assert!(private || !o.ok(), "{s}: {o:?}");
     }
     assert_eq!(f.read("out/f").as_deref(), Some("outside"));

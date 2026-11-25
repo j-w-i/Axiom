@@ -233,7 +233,13 @@ impl T {
         }
     }
     pub async fn new(access: Access, script: Vec<Reply>) -> Self {
-        let d = tempfile::tempdir().unwrap();
+        // On Linux not in /tmp, which is another one inside the sandbox.
+        let d = if cfg!(target_os = "linux") {
+            tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        } else {
+            tempfile::tempdir()
+        }
+        .unwrap();
         for x in ["w", "tmp", "home", "own"] {
             std::fs::create_dir(d.path().join(x)).unwrap();
         }

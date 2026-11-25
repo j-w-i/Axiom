@@ -19,7 +19,13 @@ pub fn p(s: impl AsRef<Path>) -> Place {
 
 /// A home with a secret, a workspace with a repository, Axiom's own folder, and a folder outside.
 pub fn fixture() -> Fixture {
-    let dir = tempfile::tempdir().unwrap();
+    // On Linux not in /tmp, which is another one inside the sandbox.
+    let dir = if cfg!(target_os = "linux") {
+        tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+    } else {
+        tempfile::tempdir()
+    }
+    .unwrap();
     let d = dir.path();
     for x in [
         "home/.ssh",
