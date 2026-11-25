@@ -9,7 +9,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use axiom_engine::{Agent, Context, Deed, Desk, Ended, Limits, Refused, Retries, Say, Stage, Turn};
+use axiom_engine::{
+    Agent, Context, Deed, Desk, Ended, Limits, Refused, Retries, Say, Stage, Turn, Word,
+};
 use axiom_model::{Client, Endpoint, Options, Profile, Settings};
 use axiom_policy::{Access, Budget, Caps, Keep, Net, Place, Policy, Reach, Tools};
 use axiom_proto::{AgentId, Body, ItemId, ItemKind, Outcome, RequestId, RunId};
@@ -202,8 +204,8 @@ pub struct T {
     pub server: Server,
     pub stage: Memory,
     pub desk: Desk,
-    pub inbox: mpsc::Sender<String>,
-    rx: Mutex<Option<mpsc::Receiver<String>>>,
+    pub inbox: mpsc::Sender<Word>,
+    rx: Mutex<Option<mpsc::Receiver<Word>>>,
     access: Access,
     profile: Profile,
 }
@@ -289,6 +291,7 @@ impl T {
             instructions: String::new(),
             limits: Limits::default(),
             fill: None,
+            told: None,
             retries: Retries {
                 most: 3,
                 first: Duration::from_millis(1),

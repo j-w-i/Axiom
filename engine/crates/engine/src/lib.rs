@@ -15,7 +15,7 @@ mod run;
 
 pub use context::{Context, Turn};
 pub use desk::Desk;
-pub use run::{Agent, Ended, Limits, Retries};
+pub use run::{Agent, Ended, Limits, Retries, Word, said};
 
 /// What is said to the session.
 #[derive(Debug, Clone, PartialEq)]

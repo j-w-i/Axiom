@@ -879,8 +879,13 @@ async fn prompt(
 ) -> Result<Value, WireError> {
     let setup = setup(st, &session, &agent).await?;
     let slot = st.agents.slot(&session, &agent);
-    let turnstile = match slot.speak(&text).await? {
-        Spoken::Queued(run) => return Ok(json!({ "run": run, "queued": true })),
+    let turnstile = match slot.speak().await? {
+        Spoken::Heard(ear) => {
+            // It is in the journal before it is said to be heard.
+            said(st, &session, axiom_engine::said(&ear.run, &agent, &text)).await?;
+            let run = ear.tell(text);
+            return Ok(json!({ "run": run, "queued": true }));
+        }
         Spoken::Start(t) => t,
     };
     let s = st.open(&session).await?;

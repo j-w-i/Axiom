@@ -8,7 +8,7 @@ use common::*;
 
 use std::time::{Duration, Instant};
 
-use axiom_engine::{Context, Limits, Say, Turn};
+use axiom_engine::{Context, Limits, Say, Turn, Word};
 use axiom_model::{Content, Role};
 use axiom_policy::{Access, Answer};
 use axiom_proto::{Body, ItemKind, Outcome};
@@ -294,11 +294,25 @@ async fn a_person_can_speak_while_it_works() {
     )
     .await;
     let mut a = t.agent();
-    t.inbox.try_send("also this".into()).unwrap();
+    t.inbox.try_send(Word { text: "also this".into(), shown: false }).unwrap();
+    t.inbox.try_send(Word { text: "and that".into(), shown: true }).unwrap();
     let e = t.run(&mut a, "go").await;
     assert_eq!(e.outcome, Outcome::Completed);
     assert_eq!(t.stage.texts(ItemKind::Prompt), ["go", "also this"]);
-    assert!(t.server.requests()[0]["messages"].to_string().contains("also this"));
+    let sent = t.server.requests()[0]["messages"].to_string();
+    assert!(sent.contains("also this") && sent.contains("and that"), "{sent}");
+}
+
+#[tokio::test]
+async fn another_model_that_answers_is_named() {
+    for (asked, told) in [("m", 0), ("M-2026-01-01", 0), ("lab/m", 0), ("other", 1)] {
+        let t = T::new(Access::Work, vec![calls(&[("c1", "list", "{}")]), text(&["ok"])]).await;
+        let mut a = t.agent();
+        a.model = asked.into();
+        t.run(&mut a, "go").await;
+        let n = t.stage.texts(ItemKind::Notice);
+        assert_eq!(n.len(), told, "{asked}: {n:?}");
+    }
 }
 
 #[tokio::test]

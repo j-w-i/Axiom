@@ -52,6 +52,14 @@ impl Default for Retries {
     }
 }
 
+/// What a person said to an agent that is at work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Word {
+    pub text: String,
+    /// It is in the journal already, for who reads along.
+    pub shown: bool,
+}
+
 /// An agent, ready to run.
 pub struct Agent<S: Stage> {
     pub id: AgentId,
@@ -71,9 +79,11 @@ pub struct Agent<S: Stage> {
     pub limits: Limits,
     pub retries: Retries,
     /// What a person says meanwhile.
-    pub inbox: mpsc::Receiver<String>,
+    pub inbox: mpsc::Receiver<Word>,
     /// Share of the window in use, as the last answer had it.
     pub fill: Option<f64>,
+    /// Another model that answered, once a person has been told.
+    pub told: Option<String>,
 }
 
 fn fill(r: &Reply, window: Option<u64>) -> Option<f64> {
@@ -94,6 +104,24 @@ struct Ready {
     verdict: Verdict,
     /// The question a person answered, and the digest of what they saw.
     answered: Option<(RequestId, String)>,
+}
+
+/// The events of something a person said.
+pub fn said(run: &RunId, agent: &AgentId, text: &str) -> Vec<Say> {
+    let item = ItemId::new();
+    vec![
+        Say::Event(Body::ItemStarted {
+            item: item.clone(),
+            run: run.clone(),
+            agent: agent.clone(),
+            kind: ItemKind::Prompt,
+            name: String::new(),
+            args: None,
+            args_cut: 0,
+        }),
+        Say::Text(item.clone(), text.to_owned()),
+        Say::End(item, Outcome::Completed, None),
+    ]
 }
 
 /// Why a run stops before the agent is done.
@@ -132,11 +160,23 @@ impl<S: Stage> Agent<S> {
                 Say::Event(Body::AgentState { agent: self.id.clone(), state: AgentState::Running }),
             ])
             .await?;
-        match self.heard(run, prompt).await {
+        match self.heard(run, prompt, false).await {
             Ok(()) => self.stage.sync().await,
             Err(Halt::Failed(why) | Halt::Full(why)) => Err(Refused::This(why)),
             Err(Halt::Cancelled | Halt::Gone) => Err(Refused::Closed),
         }
+    }
+
+    /// Begins a run with what was said too late for the one before.
+    pub async fn go_on(&mut self, run: &RunId, words: Vec<Word>) -> Result<(), Refused> {
+        self.stage
+            .say(vec![
+                Say::Event(Body::RunStarted { run: run.clone(), agent: self.id.clone() }),
+                Say::Event(Body::AgentState { agent: self.id.clone(), state: AgentState::Running }),
+            ])
+            .await?;
+        self.note(words).await?;
+        self.stage.sync().await
     }
 
     /// Runs until the agent is done, cancelled, or cannot go on. How it ended is in the journal when
@@ -180,7 +220,7 @@ impl<S: Stage> Agent<S> {
                 more.push(m);
             }
             for m in more {
-                self.heard(run, m).await?;
+                self.heard(run, m.text, m.shown).await?;
             }
             if began.elapsed() > self.limits.time {
                 return Err(Halt::Failed("the run has taken as long as it may".into()));
@@ -200,6 +240,7 @@ impl<S: Stage> Agent<S> {
                 r => r?,
             };
             output += reply.usage.output.unwrap_or(0);
+            self.compare(run, &reply).await?;
             self.usage(&reply).await?;
             self.fill = fill(&reply, self.window);
             if reply.stop == Some(Stop::ContextFull) {
@@ -225,7 +266,7 @@ impl<S: Stage> Agent<S> {
                 Some(Stop::EndTurn | Stop::Sequence(_) | Stop::ToolUse) | None => {
                     // What was said while it answered is heard before it is done.
                     match self.inbox.try_recv() {
-                        Ok(m) => self.heard(run, m).await?,
+                        Ok(m) => self.heard(run, m.text, m.shown).await?,
                         Err(_) => return Ok(()),
                     }
                 }
@@ -254,16 +295,23 @@ impl<S: Stage> Agent<S> {
     }
 
     /// Takes in what a person said.
-    async fn heard(&mut self, run: &RunId, text: String) -> Result<(), Halt> {
-        let item = ItemId::new();
-        self.stage
-            .say(vec![
-                Say::Event(self.item(run, &item, ItemKind::Prompt, "", None)),
-                Say::Text(item.clone(), text.clone()),
-                Say::End(item, Outcome::Completed, None),
-            ])
-            .await?;
+    async fn heard(&mut self, run: &RunId, text: String, shown: bool) -> Result<(), Halt> {
+        if !shown {
+            self.stage.say(said(run, &self.id, &text)).await?;
+        }
         self.remember(Turn::Message(Message::user(text))).await
+    }
+
+    /// Takes in what was said to a run that is over: the next one knows it.
+    pub async fn note(&mut self, words: Vec<Word>) -> Result<(), Refused> {
+        for w in words {
+            match self.remember(Turn::Message(Message::user(w.text))).await {
+                Ok(()) => {}
+                Err(Halt::Failed(why) | Halt::Full(why)) => return Err(Refused::This(why)),
+                Err(Halt::Cancelled | Halt::Gone) => return Err(Refused::Closed),
+            }
+        }
+        Ok(())
     }
 
     async fn notice(&self, run: &RunId, text: &str) -> Result<(), Halt> {
@@ -544,6 +592,20 @@ impl<S: Stage> Agent<S> {
             _ => return Ok(()),
         };
         Ok(self.stage.say(say).await?)
+    }
+
+    /// Some servers let a model they have answer for one they have not, and say so nowhere else. A
+    /// name that only says which version of the model it is is the same one.
+    async fn compare(&mut self, run: &RunId, r: &Reply) -> Result<(), Halt> {
+        let Some(is) = r.model.as_deref().filter(|m| !m.is_empty()) else { return Ok(()) };
+        let (a, b) = (is.to_lowercase(), self.model.to_lowercase());
+        let tail = |s: &str| s.rsplit('/').next().unwrap_or(s).to_owned();
+        let (a, b) = (tail(&a), tail(&b));
+        if a.starts_with(&b) || b.starts_with(&a) || self.told.as_deref() == Some(is) {
+            return Ok(());
+        }
+        self.told = Some(is.to_owned());
+        self.notice(run, &format!("{is} answers, not {}, which was asked for.", self.model)).await
     }
 
     async fn usage(&self, r: &Reply) -> Result<(), Halt> {

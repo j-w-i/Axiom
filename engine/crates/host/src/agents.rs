@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
-use axiom_engine::{Agent, Context, Deed, Desk, Limits, Refused, Retries, Say, Stage, Turn};
+use axiom_engine::{Agent, Context, Deed, Desk, Limits, Refused, Retries, Say, Stage, Turn, Word};
 use axiom_model::{Cache, Codec, Settings};
 use axiom_policy::{
     Access, Budget, Caps, Keep, Net, NotAnswered, Place, Policy, Profile, Reach, Tools,
@@ -59,7 +59,7 @@ pub struct Slot {
     live: Arc<tokio::sync::Mutex<Live>>,
 }
 
-type Live = Option<(RunId, mpsc::Sender<String>)>;
+type Live = Option<(RunId, mpsc::Sender<Word>)>;
 
 pub struct Agents {
     pub connections: Connections,
@@ -373,7 +373,7 @@ pub async fn load(
     session: Session,
     agent: &AgentId,
     setup: &Setup,
-    inbox: mpsc::Receiver<String>,
+    inbox: mpsc::Receiver<Word>,
 ) -> Result<Agent<Floor>, WireError> {
     let id = session.id.clone();
     let connection = setup.execution.connection.clone().unwrap_or_default();
@@ -423,6 +423,7 @@ pub async fn load(
         instructions: String::new(),
         limits: Limits::default(),
         fill: None,
+        told: None,
         retries: Retries::default(),
         inbox,
     })
@@ -430,10 +431,24 @@ pub async fn load(
 
 /// What came of saying something to an agent.
 pub enum Spoken {
-    /// Heard by the run that is on.
-    Queued(RunId),
+    /// To be heard by the run that is on.
+    Heard(Box<Ear>),
     /// A run is to be started, and speaks for itself through this.
     Start(Box<Turnstile>),
+}
+
+/// Room for one more thing to be said to a run. The run does not end while this is held.
+pub struct Ear {
+    pub run: RunId,
+    permit: mpsc::OwnedPermit<Word>,
+    _slot: tokio::sync::OwnedMutexGuard<Live>,
+}
+
+impl Ear {
+    pub fn tell(self, text: String) -> RunId {
+        self.permit.send(Word { text, shown: true });
+        self.run
+    }
 }
 
 /// Holds an agent's place until its run begins or cannot.
@@ -442,20 +457,22 @@ pub struct Turnstile {
 }
 
 impl Slot {
-    /// Says it to the run that is on, or takes the place for a new one.
-    pub async fn speak(&self, text: &str) -> Result<Spoken, WireError> {
+    /// A place in the run that is on, or the place for a new one.
+    pub async fn speak(&self) -> Result<Spoken, WireError> {
         let live = self.live.clone().lock_owned().await;
         if let Some((run, tx)) = live.as_ref()
             && !tx.is_closed()
         {
-            return match tx.try_send(text.to_owned()) {
-                Ok(()) => Ok(Spoken::Queued(run.clone())),
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    Err(WireError::new(ErrorCode::Busy, "the agent has as much to hear as it may"))
+            let busy = |words: &str| WireError::new(ErrorCode::Busy, words);
+            return match tx.clone().try_reserve_owned() {
+                Ok(permit) => {
+                    Ok(Spoken::Heard(Box::new(Ear { run: run.clone(), permit, _slot: live })))
                 }
-                // It ends this moment; what comes next waits for it.
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    Err(busy("the agent has as much to hear as it may"))
+                }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
-                    Err(WireError::new(ErrorCode::Busy, "the agent is ending a run; say it again"))
+                    Err(busy("the agent is ending a run; say it again"))
                 }
             };
         }
@@ -467,7 +484,7 @@ impl Slot {
     }
 
     /// After a run: what was said too late for it. The place is free if there is nothing.
-    async fn after(&self, rx: &mut mpsc::Receiver<String>) -> Vec<String> {
+    async fn after(&self, rx: &mut mpsc::Receiver<Word>) -> Vec<Word> {
         let mut live = self.live.lock().await;
         let mut left = Vec::new();
         while let Ok(m) = rx.try_recv() {
@@ -493,7 +510,7 @@ impl Slot {
 
 impl Turnstile {
     /// A way to speak to the run that now takes the place.
-    pub fn enter(mut self, run: &RunId) -> mpsc::Receiver<String> {
+    pub fn enter(mut self, run: &RunId) -> mpsc::Receiver<Word> {
         let (tx, rx) = mpsc::channel(INBOX);
         *self.slot = Some((run.clone(), tx));
         rx
@@ -512,20 +529,20 @@ pub async fn work(
         let cancelled = cancel.clone();
         agent.run(run, cancel).await;
         let stopped = *cancelled.borrow();
-        let mut left = slot.after(&mut agent.inbox).await;
-        // Stopped by a person: what they said before that was for the run they stopped.
-        if left.is_empty() || stopped {
-            slot.leave().await;
+        let left = slot.after(&mut agent.inbox).await;
+        if left.is_empty() {
             return;
         }
-        let Ok(n) = next() else {
+        // Stopped by a person: what they said before that starts nothing, but is not forgotten.
+        let next = if stopped { None } else { next().ok() };
+        let Some(n) = next else {
+            let _ = agent.note(left).await;
             slot.leave().await;
             return;
         };
         (run, cancel) = n;
         slot.renamed(&run).await;
-        let text = std::mem::take(&mut left).join("\n\n");
-        if agent.begin(&run, text).await.is_err() {
+        if agent.go_on(&run, left).await.is_err() {
             slot.leave().await;
             return;
         }
