@@ -168,7 +168,16 @@ pub fn journal(f: &Fixture) -> axiom_journal::Reader {
     axiom_journal::Reader::open(&f.paths.journal()).unwrap()
 }
 pub fn history(f: &Fixture, s: &SessionId) -> Vec<Body> {
-    let all = journal(f).read(s, 0, usize::MAX).unwrap();
+    // A host that has ended may still be putting its file in order, for as long as the disk takes.
+    let until = std::time::Instant::now() + LONG;
+    let all = loop {
+        match journal(f).read(s, 0, usize::MAX) {
+            Err(e) if e.busy() && std::time::Instant::now() < until => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            r => break r.unwrap(),
+        }
+    };
     all.into_iter().map(|e| e.body).collect()
 }
 pub fn refused(r: Result<serde_json::Value, axiom_host::client::ClientError>) -> WireError {
