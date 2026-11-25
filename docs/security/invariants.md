@@ -4,7 +4,7 @@ Of `threat-model.md` §6. "Not yet" means that nothing in this build could break
 
 | SI | Test |
 |----|------|
-| 1 | `policy/caps.rs` `meet_is_the_greatest_lower_bound`, `no_descendant_has_more`; `host/tests/peers.rs` `who_may_do_more_is_only_told_with_a_yes`, `a_delegated_agent_is_told_with_a_yes` |
+| 1 | `policy/caps.rs` `meet_is_the_greatest_lower_bound`, `no_descendant_has_more`; `host/tests/peers.rs` `who_may_do_more_is_only_told_with_a_yes`, `a_delegated_agent_is_told_with_a_yes`; `host/tests/bridge.rs` (the same through a program's own tool, and what its key does not open) |
 | 2 | `policy/request.rs`, `engine/desk.rs`, `engine/tests/run.rs` `a_person_is_asked_and_their_answer_counts`, `host/tests/agents.rs` `a_person_is_asked_through_the_socket` |
 | 3 | `host/tests/agents.rs` `the_secret_is_nowhere_but_in_the_vault_and_the_request`, `spawn/tests/contained.rs` `nothing_is_inherited`, `model/secret.rs` and `model/tests/transport.rs` (a canary over every error path) |
 | 4 | `model/secret.rs`, `model/tests/transport.rs` (redirects, other origins) |

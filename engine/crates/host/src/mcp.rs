@@ -207,6 +207,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn there_is_one_tool() {
+        let way = Way { data: "/nonexistent".into(), grant: "x".into() };
+        assert_eq!(
+            super::call(&way, "shell", json!({})).await,
+            ("there is no such tool".into(), false)
+        );
+        // A host that is not there is said to the model, not the end of it.
+        let (words, ok) = super::call(&way, "agent", json!({})).await;
+        assert!(!ok && words.starts_with("Not done"), "{words}");
+    }
+
+    #[tokio::test]
     async fn a_line_without_an_end_is_the_end() {
         let all = said(&"x".repeat(LINE as usize + 10)).await;
         assert!(all.is_empty());

@@ -723,5 +723,6 @@ fn it_is_given_a_server_where_it_may_act() {
     // None of the folder's own comes with it.
     let s = Start { tools, trust: Trust::Withheld, ..start(Access::Work) };
     let l = Harness::Claude(Prompts::Refused).launch(&s).unwrap();
-    assert!(l.args.iter().any(|a| a == "--strict-mcp-config"));
+    let at = l.args.iter().position(|a| a == "--setting-sources").unwrap();
+    assert_eq!(l.args[at + 1], "user");
 }

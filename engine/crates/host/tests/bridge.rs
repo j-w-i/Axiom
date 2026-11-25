@@ -29,7 +29,9 @@ impl T {
             std::fs::create_dir(f.dir.path().join(d)).unwrap();
         }
         let fake = env!("CARGO_BIN_EXE_host-fake-agent");
-        std::fs::copy(fake, f.dir.path().join("bin/goose")).unwrap();
+        for name in ["goose", "agy"] {
+            std::fs::copy(fake, f.dir.path().join("bin").join(name)).unwrap();
+        }
         let lines: String = script.iter().map(|v| format!("{v}\n")).collect();
         std::fs::write(f.dir.path().join("bin/script.jsonl"), lines).unwrap();
         let mut c = Config::new(f.paths.clone());
@@ -245,6 +247,10 @@ async fn a_program_gives_others_work_and_is_told_what_came_of_it() {
     assert_eq!(b.hear().await["result"]["isError"], false);
     let (said, _) = b.call(6, json!({"do": "wait"})).await;
     assert!(said.contains("Built."), "{said}");
+    // What may not be done is not, and nobody is asked: its terms want a person's own words.
+    t.add("Google", "agy", Access::Ask, None).await;
+    let (said, ok) = b.call(8, json!({"do": "tell", "name": "Google", "text": "x"})).await;
+    assert!(!ok && said.contains("a person's own words"), "{said}");
     // Not asked any more, it is not asked about any more.
     b.ask(7, json!({"do": "tell", "name": "Builder", "text": "More."})).await;
     let (id, digest, _) = t.question().await;

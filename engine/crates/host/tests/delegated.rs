@@ -578,7 +578,16 @@ async fn a_second_account_is_kept_apart() {
         }
         _ => panic!(),
     };
+    let call = Call::ConnectionAdd {
+        name: "Here".into(),
+        provider: "lm-studio".into(),
+        url: None,
+        secret: None,
+    };
+    let v = t.c.call(call).await.unwrap();
+    let here = v["connection"].as_str().unwrap();
     for (harness, access, c, why) in [
+        ("claude", Access::Work, here, "not one of that program"),
         ("goose", Access::Ask, work.as_str(), "one account"),
         ("claude", Access::Work, "c_none", "no such account"),
     ] {
