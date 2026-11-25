@@ -628,10 +628,6 @@ pub struct HarnessInfo {
     /// It can be told how hard to try (`low`, `medium`, `high`).
     #[serde(default)]
     pub effort: bool,
-    /// Axiom's tools can stand in place of its own (the environment `axiom`): then it is asked about
-    /// and contained as Axiom's own agents are, and has every mode of access.
-    #[serde(default)]
-    pub hands: bool,
     /// What an account of it beside the first is called as a provider, if there can be any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounts: Option<String>,
@@ -782,8 +778,7 @@ pub enum Call {
         /// gets into the folder by `copy.bring` only.
         #[serde(default)]
         apart: bool,
-        /// It is to hand in a plan first, with the access `read`. Of Axiom's own, or a program with
-        /// Axiom's tools in place of its own.
+        /// It is to hand in a plan first, with the access `read`. Of Axiom's own.
         #[serde(default, skip_serializing_if = "not")]
         plan: bool,
     },

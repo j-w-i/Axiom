@@ -35,7 +35,6 @@ const OURS: &[&str] = &[
     "TERM",
     "PWD",
     "OLDPWD",
-    "ENABLE_TOOL_SEARCH",
     "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",

@@ -1,7 +1,7 @@
-//! What an installed program is given of Axiom: the `agent` tool, or all the tools an agent of Axiom's
-//! has, as a Model Context Protocol server on its standard streams. It is this program, started by that
-//! one; it holds a key that opens these for one agent, and only while its attempt lives. Whatever is asked of it is judged by the
-//! host, as a call of Axiom's own agents is.
+//! What an installed program is given of Axiom: the `agent` tool, as a Model Context Protocol server on
+//! its standard streams. It is this program, started by that one; it holds a key that opens it for one
+//! agent, and only while its attempt lives. Whatever is asked of it is judged by the host, as a call of
+//! Axiom's own agents is. What a program does with its own tools, it is given no other for (0017).
 
 use std::{collections::HashMap, path::Path, sync::Arc};
 

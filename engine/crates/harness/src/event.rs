@@ -402,8 +402,6 @@ pub enum Error {
     NotPassed(String),
     #[error("this program cannot be told how fast to be")]
     NoSpeed,
-    #[error("this program's own tools cannot be taken away")]
-    NoHands,
     #[error("this program does not say how several accounts of it are kept apart")]
     OneAccount,
     #[error("this harness may only be started by a person")]

@@ -157,14 +157,11 @@ pub struct Finished {
     pub text: String,
 }
 
-/// Who holds a key, and what it opens: the tool `agent`, or all an agent of Axiom's has.
+/// Who holds a key, which opens the tool `agent`.
 #[derive(Debug, Clone)]
 pub struct Holder {
     pub session: SessionId,
     pub agent: AgentId,
-    pub all: bool,
-    /// And the one that hands in a plan.
-    pub plan: bool,
 }
 
 /// A key that is good until this is dropped.
@@ -172,16 +169,12 @@ pub struct Grant {
     agents: Arc<Agents>,
     key: String,
     pub file: PathBuf,
-    /// What the program's model is told.
-    pub words: Option<PathBuf>,
 }
 impl Drop for Grant {
     fn drop(&mut self) {
         let mut all = self.agents.grants.lock().unwrap_or_else(PoisonError::into_inner);
         all.remove(&self.key);
-        for f in [Some(&self.file), self.words.as_ref()].into_iter().flatten() {
-            let _ = std::fs::remove_file(f);
-        }
+        let _ = std::fs::remove_file(&self.file);
     }
 }
 
@@ -210,15 +203,7 @@ impl Setup {
     pub fn folder(&self) -> &str {
         self.apart.as_ref().map_or(&self.workspace, |a| &a.folder)
     }
-
-    /// A program of the person's own that works with Axiom's tools in place of its own.
-    pub fn hands(&self) -> bool {
-        self.execution.environment.as_deref() == Some(AXIOM)
-    }
 }
-
-/// The environment in which what an agent does is done by Axiom.
-pub const AXIOM: &str = "axiom";
 
 impl Slot {
     /// Nobody uses it, or is about to, and nothing runs in it.
@@ -393,12 +378,12 @@ impl Agents {
             if !instructions.is_empty() {
                 return Err(bad("this harness reads the folder's words for agents by itself"));
             }
-            match execution.environment.as_deref() {
-                None => {}
-                Some(AXIOM) if known.harness.takes_hands() && self.bridge.is_some() => {}
-                _ => return Err(bad("this harness has no such environment")),
+            if execution.environment.is_some() {
+                // One that was set up to work with Axiom's tools in place of its own (decision 0017)
+                // is not started with its own instead: it would be held back by something else.
+                return Err(bad("a program works with its own tools only; add another agent"));
             }
-            if plan && execution.environment.as_deref() != Some(AXIOM) {
+            if plan {
                 return Err(bad("this harness cannot be asked for a plan first"));
             }
             let workspace = real(Path::new(workspace))?.to_string();
@@ -671,8 +656,6 @@ impl Agents {
         s: &SessionId,
         a: &AgentId,
         scratch: &Place,
-        (all, plan): (bool, bool),
-        words: Option<&str>,
     ) -> Result<Grant, String> {
         let mut b = [0u8; 32];
         axiom_proto::random(&mut b)?;
@@ -684,15 +667,8 @@ impl Agents {
         self.grants
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(key.clone(), Holder { session: s.clone(), agent: a.clone(), all, plan });
-        // Whatever goes wrong from here on, the key and its file go again.
-        let mut grant = Grant { agents: self.clone(), key, file, words: None };
-        if let Some(w) = words {
-            let f = grant.file.with_extension("md");
-            private_file(&f, w).map_err(|e| e.to_string())?;
-            grant.words = Some(f);
-        }
-        Ok(grant)
+            .insert(key.clone(), Holder { session: s.clone(), agent: a.clone() });
+        Ok(Grant { agents: self.clone(), key, file })
     }
 
     /// Whose key it is.
@@ -946,21 +922,17 @@ impl Worker {
         let waits = store.pending(session.id.clone(), agent.clone()).await.map_err(internal)?;
         let written = agents.written(store).await?;
         let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
-        let (known, how, site, access, workspace, words) = tokio::task::spawn_blocking(move || {
+        let (known, how, site, access, workspace) = tokio::task::spawn_blocking(move || {
             let known = a.programs.known_as(&s.execution.harness).ok_or_else(|| {
                 bad("this host does not know the agent's harness: its program was removed")
             })?;
+            if s.execution.environment.is_some() {
+                return Err(bad("a program works with its own tools only; add another agent"));
+            }
             let site = a.site(&s, &ag, true)?;
             let mut path = a.looked_in(&site.path)?;
             let how = a.how(&s)?;
             let access = site.access;
-            let mut told = HANDS.to_owned();
-            for (so, words) in [(s.apart.is_some(), copies::WORDS), (s.plan, planning::WORDS)] {
-                if so {
-                    told = format!("{told}\n\n{words}");
-                }
-            }
-            let words = s.hands().then(|| axiom_engine::context::system(&site, &told));
             let program = known
                 .check(&s, &how, access, site.workspace.clone(), &path, &written)
                 .map_err(bad)?;
@@ -987,7 +959,7 @@ impl Worker {
                 written,
                 limits: crate::limits::program(),
             };
-            Ok::<_, WireError>((known, how, site_of, access, site.workspace, words))
+            Ok::<_, WireError>((known, how, site_of, access, site.workspace))
         })
         .await
         .map_err(internal)??;
@@ -1002,7 +974,6 @@ impl Worker {
             access,
             workspace,
             bridge: agents.bridge.clone(),
-            words,
             inbox,
             waits,
         })))
@@ -1049,26 +1020,6 @@ impl Worker {
             }
         }
     }
-}
-
-/// For a model whose program describes other tools than it has.
-const HANDS: &str = "Your only tools are those of the server axiom (read, write, edit, patch, list, glob, search, shell, job, fetch, agent, todo). What is said elsewhere of other tools does not apply: you have none of them. A call may wait for a person's answer.";
-
-/// Where an agent works, and under whom.
-pub async fn site_of(
-    agents: &Arc<Agents>,
-    setup: &Setup,
-    agent: &AgentId,
-    slot: &Slot,
-) -> Result<Site, WireError> {
-    let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
-    let mut site =
-        tokio::task::spawn_blocking(move || a.site(&s, &ag, true)).await.map_err(internal)??;
-    let chain = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
-    if !chain.is_empty() {
-        site.chain.clone_from(&chain);
-    }
-    Ok(site)
 }
 
 /// The person's name on this computer.
@@ -1320,10 +1271,6 @@ impl Slot {
     /// Of a delegated agent: its program runs.
     pub async fn has_program(&self) -> bool {
         self.attempt.lock().await.as_ref().is_some_and(|a| !a.is_closed())
-    }
-
-    pub fn seen(&self) -> Seen {
-        self.seen.clone()
     }
 
     /// Whether it is in a run.

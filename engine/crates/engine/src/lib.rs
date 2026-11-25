@@ -17,7 +17,7 @@ mod run;
 
 pub use context::{Context, Turn};
 pub use desk::Desk;
-pub use hands::{Hands, said_no};
+pub use hands::said_no;
 pub use run::{Agent, Ended, Limits, Retries, Word, said};
 
 /// What is said to the session.
