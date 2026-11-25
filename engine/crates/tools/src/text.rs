@@ -92,6 +92,32 @@ pub fn plain(b: &[u8]) -> String {
     out
 }
 
+/// [`plain`] for output that comes in pieces: whole lines as soon as they are there.
+#[derive(Debug, Default)]
+pub struct Lines {
+    rest: Vec<u8>,
+}
+
+impl Lines {
+    /// A line that does not end is shown in parts of this size.
+    const LONG: usize = 64 * 1024;
+
+    pub fn add(&mut self, b: &[u8]) -> String {
+        self.rest.extend_from_slice(b);
+        let end = match self.rest.iter().rposition(|b| *b == b'\n') {
+            Some(i) => i + 1,
+            None if self.rest.len() > Self::LONG => self.rest.len(),
+            None => return String::new(),
+        };
+        let rest = self.rest.split_off(end);
+        plain(&std::mem::replace(&mut self.rest, rest))
+    }
+
+    pub fn end(&mut self) -> String {
+        plain(&std::mem::take(&mut self.rest))
+    }
+}
+
 /// The beginning and the end of what does not fit.
 #[derive(Debug)]
 pub struct Ends {
@@ -241,6 +267,21 @@ mod tests {
             }
             prop_assert_eq!(one.text(), many.text());
             prop_assert_eq!(one.cut(), data.len().saturating_sub(50) as u64);
+        }
+
+        #[test]
+        fn lines_do_not_depend_on_pieces(data in "([a-c]|\n|\r|\u{1b}\\[3[0-9]m|é){0,40}", cuts in prop::collection::vec(0usize..60, 0..6)) {
+            let data = data.as_bytes();
+            let mut cuts: Vec<usize> = cuts.into_iter().map(|c| c.min(data.len())).collect();
+            cuts.extend([0, data.len()]);
+            cuts.sort_unstable();
+            let mut l = Lines::default();
+            let mut out = String::new();
+            for w in cuts.windows(2) {
+                out += &l.add(&data[w[0]..w[1]]);
+            }
+            out += &l.end();
+            prop_assert_eq!(out, plain(data));
         }
 
         #[test]

@@ -6,9 +6,15 @@ use std::time::{Duration, Instant};
 use axiom_policy::{Place, Profile};
 use axiom_spawn::{Contain, Env, Job, spawn};
 use serde_json::json;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::mpsc,
+};
 
-use crate::{Output, text::Ends};
+use crate::{
+    Output,
+    text::{Ends, Lines},
+};
 
 #[derive(Debug)]
 pub struct Command {
@@ -31,7 +37,7 @@ fn bash() -> &'static str {
 }
 
 impl Command {
-    pub async fn run(self, mut heard: impl FnMut(&[u8]) + Send) -> Output {
+    pub async fn run(self, heard: mpsc::Sender<String>) -> Output {
         let program = match Place::new(bash()) {
             Ok(p) => p,
             Err(e) => return Output::bad(e),
@@ -60,6 +66,7 @@ impl Command {
             return Output::bad("not run: it has no output");
         };
         let mut ends = Ends::new(HEAD, TAIL);
+        let mut lines = Lines::default();
         let mut spool = Spool::new(&self.scratch).await;
         let (mut a, mut b) = (vec![0; 16 * 1024], vec![0; 16 * 1024]);
         let (mut out_open, mut err_open) = (true, true);
@@ -96,8 +103,12 @@ impl Command {
             };
             if let Some(bytes) = n.filter(|b| !b.is_empty()) {
                 ends.add(bytes);
-                heard(bytes);
+                let l = lines.add(bytes);
                 spool.add(bytes).await;
+                // Who shows it may be behind: then the command waits. Who has left does not count.
+                if !l.is_empty() {
+                    let _ = heard.send(l).await;
+                }
             }
         }
         let took = began.elapsed();
@@ -119,38 +130,46 @@ impl Command {
             ]
             .iter()
             .any(|w| text.contains(w));
+        let mut notes = String::new();
         match spool.file() {
-            Some(f) if ends.cut() > 0 => text += &format!("(all of it: {f})\n"),
+            Some(f) if ends.cut() > 0 => notes += &format!("(all of it: {f})\n"),
             Some(f) => {
                 let _ = tokio::fs::remove_file(f).await;
             }
             None => {}
         }
         for m in &e.made {
-            text += &format!(
+            notes += &format!(
                 "(it made {}, which other programs take orders from: a person has been told)\n",
                 m.display()
             );
         }
         match (timed_out, e.code, e.signal) {
             (true, ..) => {
-                text += &format!("(ended after {} s: it took too long)\n", self.limit.as_secs())
+                notes += &format!("(ended after {} s: it took too long)\n", self.limit.as_secs())
             }
             (_, Some(0), _) => {}
-            (_, Some(c), _) => text += &format!("(exit {c})\n"),
-            (_, None, Some(s)) => text += &format!("(ended by signal {s})\n"),
-            _ => text += "(ended)\n",
+            (_, Some(c), _) => notes += &format!("(exit {c})\n"),
+            (_, None, Some(s)) => notes += &format!("(ended by signal {s})\n"),
+            _ => notes += "(ended)\n",
         }
         if blocked {
             text +=
                 "(the sandbox may have prevented this: no network, writing only where allowed)\n";
         }
-        if text.is_empty() {
-            text.push_str("(no output)\n");
+        if text.is_empty() && notes.is_empty() {
+            notes.push_str("(no output)\n");
         }
+        let mut rest = lines.end();
+        if !rest.is_empty() && !rest.ends_with('\n') {
+            rest.push('\n');
+        }
+        rest += &notes;
+        text += &notes;
         Output {
             ok: e.code == Some(0) && !timed_out,
             text,
+            rest: Some(rest),
             detail: json!({
                 "exit": e.code, "signal": e.signal, "timed_out": timed_out, "left": e.left,
                 "made": e.made.iter().map(|m| m.display().to_string()).collect::<Vec<_>>(),

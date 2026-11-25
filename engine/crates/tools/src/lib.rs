@@ -15,6 +15,7 @@ use axiom_policy::{
 use axiom_proto::AgentId;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tokio::sync::mpsc;
 
 pub mod edit;
 pub mod fs;
@@ -198,16 +199,18 @@ pub struct Output {
     pub ok: bool,
     /// For the model.
     pub text: String,
+    /// For the person, after what was shown as it came; `None`: what the model gets.
+    pub rest: Option<String>,
     /// For the person: `diff`, `exit`, `took`.
     pub detail: Value,
 }
 
 impl Output {
     fn ok(text: String) -> Self {
-        Self { ok: true, text, detail: Value::Null }
+        Self { ok: true, text, rest: None, detail: Value::Null }
     }
     fn bad(text: impl ToString) -> Self {
-        Self { ok: false, text: text.to_string(), detail: Value::Null }
+        Self { ok: false, text: text.to_string(), rest: None, detail: Value::Null }
     }
 }
 
@@ -618,9 +621,9 @@ impl Step {
         matches!(self.0, Op::Change(_) | Op::Shell(_))
     }
 
-    /// Does it. Dropping the future ends what it started. `heard` gets a command's output as it
+    /// Does it. Dropping the future ends what it started. `heard` gets a command's output, plain, as it
     /// comes.
-    pub async fn run(self, site: &Site, seen: &Seen, heard: impl FnMut(&[u8]) + Send) -> Output {
+    pub async fn run(self, site: &Site, seen: &Seen, heard: mpsc::Sender<String>) -> Output {
         match self.0 {
             Op::Shell(c) => c.run(heard).await,
             op => {
@@ -741,6 +744,7 @@ fn make(all: Vec<Change>, site: &Site, seen: &Seen) -> Output {
     Output {
         ok: true,
         text: format!("changed {}\n", names.join(", ")),
+        rest: None,
         detail: json!({"diff": shown}),
     }
 }

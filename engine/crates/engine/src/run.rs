@@ -88,6 +88,14 @@ pub struct Ended {
     pub error: Option<String>,
 }
 
+/// A call that may be done, and why.
+struct Ready {
+    step: Step,
+    verdict: Verdict,
+    /// The question a person answered, and the digest of what they saw.
+    answered: Option<(RequestId, String)>,
+}
+
 /// Why a run stops before the agent is done.
 enum Halt {
     Cancelled,
@@ -581,7 +589,12 @@ impl<S: Stage> Agent<S> {
                         Args::Broken(why) => why.clone(),
                         _ => "the answer ended inside it".into(),
                     };
-                    Ok(Output { ok: false, text: format!("Not done: {why}."), detail: Value::Null })
+                    Ok(Output {
+                        ok: false,
+                        text: format!("Not done: {why}."),
+                        rest: None,
+                        detail: Value::Null,
+                    })
                 }
                 Some(call) => {
                     let args = Value::Object(call.args().clone());
@@ -598,7 +611,7 @@ impl<S: Stage> Agent<S> {
                     result["ok"] = o.ok.into();
                     self.stage
                         .say(vec![
-                            Say::Text(item.clone(), o.text.clone()),
+                            Say::Text(item.clone(), o.rest.unwrap_or_else(|| o.text.clone())),
                             Say::End(item, outcome, Some(result)),
                         ])
                         .await?;
@@ -645,6 +658,7 @@ impl<S: Stage> Agent<S> {
                 return Ok(Output {
                     ok: false,
                     text: format!("Not done: {why}."),
+                    rest: None,
                     detail: Value::Null,
                 });
             }
@@ -656,13 +670,18 @@ impl<S: Stage> Agent<S> {
                     match self.ask_person(item, tool, &ask, cancel).await? {
                         Ok(id) => (step, verdict, Some((id, ask.digest()))),
                         Err(why) => {
-                            return Ok(Output { ok: false, text: why, detail: Value::Null });
+                            return Ok(Output {
+                                ok: false,
+                                text: why,
+                                rest: None,
+                                detail: Value::Null,
+                            });
                         }
                     }
                 }
             }
         };
-        self.perform(tool, args, step, verdict, answered, cancel).await
+        self.perform(item, tool, args, Ready { step, verdict, answered }, cancel).await
     }
 
     /// A person's yes, or the words for the model.
@@ -742,11 +761,10 @@ impl<S: Stage> Agent<S> {
 
     async fn perform(
         &mut self,
+        item: &ItemId,
         tool: &str,
         args: &Value,
-        step: Step,
-        verdict: Verdict,
-        answered: Option<(RequestId, String)>,
+        Ready { step, verdict, answered }: Ready,
         cancel: &mut Cancel,
     ) -> Result<Output, Halt> {
         if step.changes() {
@@ -764,16 +782,28 @@ impl<S: Stage> Agent<S> {
         }
         self.stage.sync().await?;
         let (site, seen) = (self.site.clone(), self.seen.clone());
+        let (heard, mut hears) = mpsc::channel(16);
         let mut work: Pin<Box<dyn Future<Output = Output> + Send>> =
-            Box::pin(async move { step.run(&site, &seen, |_| {}).await });
-        tokio::select! {
-            biased;
-            () = stopped(cancel) => {
-                // Ends what it started.
-                drop(work);
-                Err(Halt::Cancelled)
+            Box::pin(async move { step.run(&site, &seen, heard).await });
+        // What comes after the work has ended is still said before its end.
+        let mut done = None;
+        let mut open = true;
+        loop {
+            tokio::select! {
+                biased;
+                () = stopped(cancel), if done.is_none() => {
+                    // Ends what it started.
+                    drop(work);
+                    return Err(Halt::Cancelled);
+                }
+                more = hears.recv(), if open => match more {
+                    Some(t) => self.stage.say(vec![Say::Text(item.clone(), t)]).await?,
+                    None => open = false,
+                },
+                o = &mut work, if done.is_none() => done = Some(o),
+                else => break,
             }
-            o = &mut work => Ok(o),
         }
+        done.ok_or_else(|| Halt::Failed("the tool failed".into()))
     }
 }

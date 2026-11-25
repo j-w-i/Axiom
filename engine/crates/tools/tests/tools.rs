@@ -61,6 +61,11 @@ fn t(access: Access) -> T {
     T { _d: d, site, seen: Seen::default(), root }
 }
 
+/// Nobody listens.
+fn quiet() -> tokio::sync::mpsc::Sender<String> {
+    tokio::sync::mpsc::channel(1).0
+}
+
 impl T {
     fn plan(&self, tool: &str, v: Value) -> Plan {
         plan(tool, &v, &self.site, &self.seen)
@@ -68,8 +73,10 @@ impl T {
     /// Planned and done, as if a person said yes to everything.
     async fn run(&self, tool: &str, v: Value) -> Output {
         match self.plan(tool, v) {
-            Plan::No(why) => Output { ok: false, text: format!("NO {why}"), detail: Value::Null },
-            Plan::Go(s, _) | Plan::Ask(_, s, _) => s.run(&self.site, &self.seen, |_| {}).await,
+            Plan::No(why) => {
+                Output { ok: false, text: format!("NO {why}"), rest: None, detail: Value::Null }
+            }
+            Plan::Go(s, _) | Plan::Ask(_, s, _) => s.run(&self.site, &self.seen, quiet()).await,
         }
     }
     fn file(&self, s: &str) -> Option<String> {
@@ -157,7 +164,7 @@ async fn between_the_question_and_the_yes() {
         "{ask:?}"
     );
     std::fs::write(t.root.join("home/w/a.txt"), "one\ntwo\nmore\n").unwrap();
-    let o = step.run(&t.site, &t.seen, |_| {}).await;
+    let o = step.run(&t.site, &t.seen, quiet()).await;
     assert!(!o.ok && o.text.contains("changed meanwhile"), "{o:?}");
     assert_eq!(t.file("a.txt").as_deref(), Some("one\ntwo\nmore\n"));
     // A new file that someone else made meanwhile.
@@ -165,7 +172,7 @@ async fn between_the_question_and_the_yes() {
         panic!()
     };
     std::fs::write(t.root.join("home/w/n.txt"), "theirs").unwrap();
-    assert!(!step.run(&t.site, &t.seen, |_| {}).await.ok);
+    assert!(!step.run(&t.site, &t.seen, quiet()).await.ok);
     assert_eq!(t.file("n.txt").as_deref(), Some("theirs"));
     // A folder that became a link out.
     let Plan::Ask(_, step, _) = t.plan("write", json!({"path": "src/n/m.txt", "content": "mine"}))
@@ -174,7 +181,7 @@ async fn between_the_question_and_the_yes() {
     };
     std::fs::rename(t.root.join("home/w/src"), t.root.join("home/w/src2")).unwrap();
     std::os::unix::fs::symlink(t.root.join("out"), t.root.join("home/w/src")).unwrap();
-    assert!(!step.run(&t.site, &t.seen, |_| {}).await.ok);
+    assert!(!step.run(&t.site, &t.seen, quiet()).await.ok);
     assert_eq!(std::fs::read_dir(t.root.join("out")).unwrap().count(), 1);
 }
 
@@ -255,7 +262,7 @@ async fn patches_are_whole() {
     let Plan::Go(step, _) = t.plan("patch", json!({"patch": "*** Begin Patch\n*** Update File: a.txt\n-one\n+1\n*** Add File: first\n+x\n*** Update File: locked/f\n-x\n+y\n*** End Patch"})) else { panic!() };
     std::fs::set_permissions(t.root.join("home/w/locked"), std::fs::Permissions::from_mode(0o555))
         .unwrap();
-    let o = step.run(&t.site, &t.seen, |_| {}).await;
+    let o = step.run(&t.site, &t.seen, quiet()).await;
     std::fs::set_permissions(t.root.join("home/w/locked"), std::fs::Permissions::from_mode(0o755))
         .unwrap();
     assert!(!o.ok && o.text.contains("nothing was changed"), "{o:?}");
@@ -283,7 +290,7 @@ async fn looking() {
     else {
         panic!()
     };
-    let o = s.run(&wide, &t.seen, |_| {}).await;
+    let o = s.run(&wide, &t.seen, quiet()).await;
     assert!(o.text.contains("out/f:1:outside") && !o.text.contains("SECRET"), "{o:?}");
 }
 
@@ -353,14 +360,9 @@ async fn output_is_heard_as_it_comes_and_dropping_ends_it() {
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     let (site, seen) = (t.site.clone(), t.seen.clone());
-    let job = tokio::spawn(async move {
-        step.run(&site, &seen, move |b| {
-            let _ = tx.try_send(b.to_vec());
-        })
-        .await
-    });
+    let job = tokio::spawn(async move { step.run(&site, &seen, tx).await });
     let heard = tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.unwrap().unwrap();
-    assert_eq!(heard, b"up\n");
+    assert_eq!(heard, "up\n");
     job.abort();
     let now = Instant::now();
     loop {
@@ -370,6 +372,44 @@ async fn output_is_heard_as_it_comes_and_dropping_ends_it() {
         }
         assert!(now.elapsed() < Duration::from_secs(5), "it still runs");
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// What is shown as it comes and what is added at the end are the whole of it, once.
+#[tokio::test]
+async fn what_is_shown_is_whole() {
+    let t = t(Access::Work);
+    for (c, whole) in [
+        ("printf 'a\\nb'", "a\nb\n"),
+        ("seq 1 30000", ""),
+        ("echo x; exit 2", "x\n(exit 2)\n"),
+        ("true", "(no output)\n"),
+    ] {
+        let (Plan::Go(step, _) | Plan::Ask(_, step, _)) = t.plan("shell", json!({ "command": c }))
+        else {
+            panic!("{c}")
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(2);
+        let listen = async {
+            let mut all = String::new();
+            while let Some(s) = rx.recv().await {
+                all += &s;
+            }
+            all
+        };
+        let (o, mut all) = tokio::join!(step.run(&t.site, &t.seen, tx), listen);
+        all += &o.rest.unwrap();
+        if whole.is_empty() {
+            assert_eq!(
+                all.lines().filter(|l| l.parse::<u32>().is_ok()).count(),
+                30_000,
+                "nothing is left out"
+            );
+            assert!(o.text.len() < 60_000);
+        } else {
+            assert_eq!(all, whole, "{c}");
+            assert_eq!(o.text, whole, "{c}");
+        }
     }
 }
 
