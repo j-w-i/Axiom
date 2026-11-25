@@ -19,6 +19,7 @@ use tokio::sync::mpsc;
 
 pub mod edit;
 pub mod fs;
+pub mod jobs;
 pub mod shell;
 pub mod text;
 pub mod walk;
@@ -66,9 +67,9 @@ impl Site {
     }
 }
 
-/// What this agent has read, so that it changes only what it knows.
+/// What this agent has read, so that it changes only what it knows; and what it has running.
 #[derive(Debug, Clone, Default)]
-pub struct Seen(Arc<Mutex<BTreeMap<Place, String>>>);
+pub struct Seen(Arc<Mutex<BTreeMap<Place, String>>>, pub jobs::Jobs);
 
 impl Seen {
     fn add(&self, p: &Place, digest: &str) {
@@ -149,6 +150,18 @@ pub fn specs() -> Vec<Spec> {
             json!({"command": s("The command."), "cwd": path(), "seconds": n("Ended after this long (120, at most 600).")}),
             &["command"],
         ),
+        spec(
+            "job",
+            "Runs commands that go on in the background, as a server or a watcher: start one, read what it has said since it was last read, stop it, or list them. They end with the agent.",
+            json!({
+                "do": {"type": "string", "enum": ["start", "read", "stop", "list"]},
+                "command": s("For start."),
+                "cwd": path(),
+                "id": n("For read and stop."),
+                "wait": n("For read: seconds to wait until something is said (at most 30)."),
+            }),
+            &["do"],
+        ),
     ]
 }
 
@@ -181,6 +194,10 @@ enum Op {
     Glob { spot: Spot, pattern: String },
     Search { spot: Spot, pattern: String, only: Option<String>, around: usize },
     Shell(shell::Command),
+    JobStart(shell::Command),
+    JobRead(u32, Duration),
+    JobStop(u32),
+    JobList,
 }
 
 #[derive(Debug)]
@@ -255,6 +272,20 @@ args!(PatchArgs { patch: String });
 args!(ListArgs { path: String = "here" });
 args!(GlobArgs { pattern: String, path: String = "here" });
 args!(SearchArgs { pattern: String, path: String = "here", only: Option<String> = "none", around: usize = "zero" });
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JobArgs {
+    #[serde(rename = "do")]
+    todo: String,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default = "here")]
+    cwd: String,
+    #[serde(default)]
+    id: Option<u32>,
+    #[serde(default)]
+    wait: u64,
+}
 args!(ShellArgs { command: String, cwd: String = "here", seconds: u64 = "two_minutes" });
 
 fn args<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, String> {
@@ -348,7 +379,26 @@ fn understand(tool: &str, v: &Value, site: &Site, seen: &Seen) -> Result<Plan, S
         }
         "shell" => {
             let a: ShellArgs = args(v)?;
-            run(site, a)
+            run(site, a, "shell", Op::Shell)
+        }
+        "job" => {
+            let a: JobArgs = args(v)?;
+            let go = |op| {
+                let v = Verdict::allowed("it is its own");
+                Ok(Plan::Go(Step(op), v))
+            };
+            let id = || a.id.ok_or("say which: id");
+            match a.todo.as_str() {
+                "start" => {
+                    let command = a.command.clone().ok_or("say what: command")?;
+                    let a = ShellArgs { command, cwd: a.cwd.clone(), seconds: 600 };
+                    run(site, a, "job", Op::JobStart)
+                }
+                "read" => go(Op::JobRead(id()?, Duration::from_secs(a.wait.min(30)))),
+                "stop" => go(Op::JobStop(id()?)),
+                "list" => go(Op::JobList),
+                _ => Err("do is start, read, stop or list".into()),
+            }
         }
         _ => Err(format!("there is no tool {tool}")),
     }
@@ -547,7 +597,12 @@ fn diff(c: &Change) -> String {
     text::diff(&c.shown, before.as_deref(), c.after.as_deref())
 }
 
-fn run(site: &Site, a: ShellArgs) -> Result<Plan, String> {
+fn run(
+    site: &Site,
+    a: ShellArgs,
+    tool: &str,
+    op: impl FnOnce(shell::Command) -> Op,
+) -> Result<Plan, String> {
     if a.command.trim().is_empty() {
         return Err("the command is empty".into());
     }
@@ -584,7 +639,7 @@ fn run(site: &Site, a: ShellArgs) -> Result<Plan, String> {
         path: site.path.clone(),
         scratch: site.scratch.clone(),
     };
-    Ok(settle("shell", site, Step(Op::Shell(c)), verdict, a.command, scope))
+    Ok(settle(tool, site, Step(op(c)), verdict, a.command, scope))
 }
 
 fn settle(
@@ -618,7 +673,7 @@ fn settle(
 impl Step {
     /// Whether it may change something: what must be on record before it is done.
     pub fn changes(&self) -> bool {
-        matches!(self.0, Op::Change(_) | Op::Shell(_))
+        matches!(self.0, Op::Change(_) | Op::Shell(_) | Op::JobStart(_))
     }
 
     /// Does it. Dropping the future ends what it started. `heard` gets a command's output, plain, as it
@@ -626,6 +681,10 @@ impl Step {
     pub async fn run(self, site: &Site, seen: &Seen, heard: mpsc::Sender<String>) -> Output {
         match self.0 {
             Op::Shell(c) => c.run(heard).await,
+            Op::JobStart(c) => seen.1.start(c),
+            Op::JobRead(id, wait) => seen.1.read(id, wait).await,
+            Op::JobStop(id) => seen.1.stop(id),
+            Op::JobList => seen.1.list(),
             op => {
                 // Files are read and written off the runtime's own threads.
                 let (site, seen) = (site.clone(), seen.clone());
@@ -686,7 +745,9 @@ fn files(op: Op, site: &Site, seen: &Seen, stop: &AtomicBool) -> Output {
             within(&spot, &|l| l.search(&pattern, only.as_deref(), around, FOUND))
         }
         Op::Change(all) => make(all, site, seen),
-        Op::Shell(_) => Output::bad("the tool failed"),
+        Op::Shell(_) | Op::JobStart(_) | Op::JobRead(..) | Op::JobStop(_) | Op::JobList => {
+            Output::bad("the tool failed")
+        }
     }
 }
 

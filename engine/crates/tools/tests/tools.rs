@@ -499,12 +499,95 @@ async fn real_programs_work_in_the_sandbox() {
 fn what_is_offered() {
     let s = specs();
     let names: Vec<&str> = s.iter().map(|s| s.name).collect();
-    assert_eq!(names, ["read", "write", "edit", "patch", "list", "glob", "search", "shell"]);
+    assert_eq!(names, ["read", "write", "edit", "patch", "list", "glob", "search", "shell", "job"]);
     let mut digests: Vec<String> = s.iter().map(schema_digest).collect();
     assert_eq!(digests, specs().iter().map(schema_digest).collect::<Vec<_>>());
     digests.sort();
     digests.dedup();
     assert_eq!(digests.len(), s.len());
     let size: usize = s.iter().map(|s| s.schema.to_string().len() + s.description.len()).sum();
-    assert!(size < 4500, "what every request carries: {size} bytes");
+    assert!(size < 5500, "what every request carries: {size} bytes");
+}
+
+#[tokio::test]
+async fn jobs_go_on_and_are_read() {
+    let t = t(Access::Work);
+    let m = format!("7{:05}", std::process::id() % 100_000);
+    let job = |v: Value| t.run("job", v);
+    let o =
+        job(json!({"do": "start", "command": format!("echo up && sleep {m} && echo late")})).await;
+    assert!(o.ok && o.text.starts_with("job 1 runs"), "{o:?}");
+    let o = job(json!({"do": "read", "id": 1, "wait": 20})).await;
+    assert_eq!(o.text, "up\n(job 1: it runs)\n");
+    let o = job(json!({"do": "read", "id": 1})).await;
+    assert_eq!(o.text, "(job 1: it runs)\n", "nothing twice");
+    assert!(job(json!({"do": "list"})).await.text.starts_with("1: echo up"));
+    assert!(job(json!({"do": "stop", "id": 1})).await.ok);
+    let mut last = String::new();
+    for _ in 0..100 {
+        last = job(json!({"do": "read", "id": 1})).await.text;
+        if last.contains("ended") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(last.contains("ended"), "{last}");
+    let runs = || {
+        let o = std::process::Command::new("ps").args(["-axo", "args="]).output().unwrap();
+        String::from_utf8_lossy(&o.stdout).lines().any(|l| l.ends_with(&format!("sleep {m}")))
+    };
+    assert!(!runs());
+    // One that ends by itself, and one whose agent goes.
+    job(json!({"do": "start", "command": "echo x && false"})).await;
+    let mut all = String::new();
+    for _ in 0..100 {
+        all += &job(json!({"do": "read", "id": 2, "wait": 1})).await.text;
+        if all.contains("exit 1") {
+            break;
+        }
+    }
+    assert!(all.starts_with("x\n") && all.contains("ended: exit 1"), "{all}");
+    job(json!({"do": "start", "command": format!("sleep {m}")})).await;
+    let now = Instant::now();
+    while !runs() && now.elapsed() < Duration::from_secs(10) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    t.seen.1.end();
+    let now = Instant::now();
+    while runs() {
+        assert!(now.elapsed() < Duration::from_secs(10));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // Bounded, and what it says too.
+    job(json!({"do": "start", "command": "seq 1 100000"})).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let o = job(json!({"do": "read", "id": 4})).await;
+    assert!(
+        o.text.len() < 80_000 && o.text.contains("not read in time") && o.text.contains("100000"),
+        "{}",
+        o.text.len()
+    );
+    for _ in 0..8 {
+        job(json!({"do": "start", "command": "sleep 30"})).await;
+    }
+    assert!(
+        job(json!({"do": "start", "command": "sleep 30"})).await.text.contains("there are 8 jobs")
+    );
+    for bad in [
+        json!({}),
+        json!({"do": "x"}),
+        json!({"do": "start"}),
+        json!({"do": "read"}),
+        json!({"do": "read", "id": 99}),
+        json!({"do": "stop", "id": 99}),
+    ] {
+        assert!(!job(bad.clone()).await.ok, "{bad}");
+    }
+    // Judged as any command.
+    let ask = self::t(Access::Ask);
+    assert_eq!(ask.decision("job", json!({"do": "start", "command": "ls"})), Decision::Ask);
+    assert_eq!(ask.decision("job", json!({"do": "list"})), Decision::Allow);
+    let o = t.run("job", json!({"do": "start", "command": "touch ../out-of-it"})).await;
+    assert!(!o.ok || !t.root.join("home/out-of-it").exists());
+    t.seen.1.end();
 }

@@ -479,6 +479,11 @@ impl Slot {
         Ok(Spoken::Start(Box::new(Turnstile { slot: live })))
     }
 
+    /// What it has running began as what it was.
+    pub fn changed(&self) {
+        self.seen.1.end();
+    }
+
     pub async fn busy(&self) -> bool {
         self.live.lock().await.as_ref().is_some_and(|(_, tx)| !tx.is_closed())
     }

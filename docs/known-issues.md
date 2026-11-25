@@ -35,7 +35,9 @@
 | K32 | The independent security review of M2 has not been done: the reviewing agent was stopped by its provider's safeguards before it began. Until it is, take the sandbox as tested by its author only | before M2 ends |
 | K33 | Linux: a protected name that does not exist yet can be made by a command; it is told to the person afterwards. No seccomp filter yet | M2 |
 | K34 | macOS: a process that closes every file it got, loses its parent and leaves its group between two looks outlives its command. It stays contained | accepted |
-| K35 | What a person says to a running agent is kept only when the agent hears it: a host that is killed before that loses it, though the app had said it was queued | M2 |
+| K35 | What a person says to a running agent is in the journal at once, but in the model's conversation only when the agent hears it: after a host that is killed in between it is shown and the model does not know it | M2 |
 | K36 | A connection to LM Studio may be answered by another model than was asked for (it says so only in the stream); the app does not compare them yet | M2 |
 | K37 | A provider that sends keep-alive comments for ever holds an answer open: only silence has a limit | M2 |
 | K38 | macOS: a build that is not signed is another program to the keychain each time it is made, so its keys have to be added again. It never asks | signed builds, M7 |
+| K39 | A folder below one that is protected by name (`.claude/worktrees/x`, say) cannot be a workspace an agent writes to | M5, Axiom's own worktrees |
+| K40 | macOS: a host that is killed leaves the commands it had started running; they stay contained | M2 |

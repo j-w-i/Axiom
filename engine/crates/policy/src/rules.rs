@@ -66,6 +66,10 @@ pub struct Verdict {
 }
 
 impl Verdict {
+    /// For what needs no judging.
+    pub fn allowed(why: &str) -> Self {
+        Self::new(Decision::Allow, why)
+    }
     fn new(decision: Decision, why: impl Into<String>) -> Self {
         Self { decision, run_in: RunIn::ReadOnly, rules: Vec::new(), why: why.into() }
     }

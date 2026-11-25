@@ -183,6 +183,17 @@ impl<S: Stage> Agent<S> {
     /// this returns.
     pub async fn run(&mut self, run: RunId, mut cancel: Cancel) -> Ended {
         let r = self.go(&run, &mut cancel).await;
+        // Who stops an agent stops all of it (SI-24). Otherwise what goes on is said.
+        match r {
+            Err(Halt::Cancelled) => self.seen.1.end(),
+            _ => {
+                let jobs = self.seen.1.running();
+                if !jobs.is_empty() {
+                    let words = format!("Still running in the background: {}", jobs.join("; "));
+                    let _ = self.notice(&run, &words).await;
+                }
+            }
+        }
         let (outcome, error) = match r {
             Ok(()) => (Outcome::Completed, None),
             Err(Halt::Cancelled) => (Outcome::Cancelled, None),

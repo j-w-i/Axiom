@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use axiom_policy::{Place, Profile};
-use axiom_spawn::{Contain, Env, Job, spawn};
+use axiom_spawn::{Contain, Env, Job, Running, spawn};
 use serde_json::json;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -37,11 +37,9 @@ fn bash() -> &'static str {
 }
 
 impl Command {
-    pub async fn run(self, heard: mpsc::Sender<String>) -> Output {
-        let program = match Place::new(bash()) {
-            Ok(p) => p,
-            Err(e) => return Output::bad(e),
-        };
+    /// Starts it, contained.
+    pub fn start(&self) -> Result<Running, String> {
+        let program = Place::new(bash()).map_err(|e| e.to_string())?;
         let mut env = Env::new(&self.path, &self.home, &self.scratch);
         if let Some(user) =
             self.home.name().chars().all(|c| c.is_ascii_graphic()).then(|| self.home.name())
@@ -52,15 +50,19 @@ impl Command {
         let job = Job {
             program,
             args: ["--noprofile", "--norc", "-c", &self.command].map(String::from).into(),
-            cwd: self.cwd,
+            cwd: self.cwd.clone(),
             env,
             stdin: false,
-            contain: Contain::Sandbox(self.profile),
+            contain: Contain::Sandbox(self.profile.clone()),
         };
+        spawn(job).map_err(|e| format!("not run: {e}"))
+    }
+
+    pub async fn run(self, heard: mpsc::Sender<String>) -> Output {
         let began = Instant::now();
-        let mut p = match spawn(job) {
+        let mut p = match self.start() {
             Ok(p) => p,
-            Err(e) => return Output::bad(format!("not run: {e}")),
+            Err(e) => return Output::bad(e),
         };
         let (Some(mut out), Some(mut err)) = (p.stdout.take(), p.stderr.take()) else {
             return Output::bad("not run: it has no output");

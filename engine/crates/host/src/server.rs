@@ -1051,6 +1051,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             keep(st, &session, &agent, &setup).await?;
             // What was allowed was allowed to it as it was.
             st.agents.desk(&session).forget();
+            st.agents.slot(&session, &agent).changed();
             said(st, &session, agents::changed(&agent, &setup)).await?;
             Ok(json!({}))
         }

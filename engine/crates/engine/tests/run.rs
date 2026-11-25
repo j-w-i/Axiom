@@ -27,7 +27,7 @@ async fn an_answer_is_said_and_kept() {
     assert_eq!(r.len(), 1);
     assert_eq!(r[0]["model"], "m");
     assert!(r[0]["messages"][0]["content"].as_str().unwrap().contains("sandbox"));
-    assert_eq!(r[0]["tools"].as_array().unwrap().len(), 8);
+    assert_eq!(r[0]["tools"].as_array().unwrap().len(), 9);
     assert!(t.stage.ended().contains(&Outcome::Completed));
     // It goes on from there.
     t.server.add(text(&["Again."]));
@@ -301,6 +301,40 @@ async fn a_person_can_speak_while_it_works() {
     assert_eq!(t.stage.texts(ItemKind::Prompt), ["go", "also this"]);
     let sent = t.server.requests()[0]["messages"].to_string();
     assert!(sent.contains("also this") && sent.contains("and that"), "{sent}");
+}
+
+#[tokio::test]
+async fn what_goes_on_in_the_background_is_said_and_ends_when_stopped() {
+    let m = format!("8{:05}", std::process::id() % 100_000);
+    let start = format!(r#"{{"do":"start","command":"sleep {m}"}}"#);
+    let t = T::new(
+        Access::Work,
+        vec![calls(&[("c1", "job", &start)]), text(&["ok"]), text(&["x"]).hangs()],
+    )
+    .await;
+    let mut a = t.agent();
+    t.run(&mut a, "go").await;
+    assert!(t.stage.texts(ItemKind::Notice)[0].contains(&format!("1: sleep {m}")));
+    assert_eq!(t.stage.deeds().len(), 1);
+    let runs = || {
+        let o = std::process::Command::new("ps").args(["-axo", "args="]).output().unwrap();
+        String::from_utf8_lossy(&o.stdout).lines().any(|l| l.ends_with(&format!("sleep {m}")))
+    };
+    let now = Instant::now();
+    while !runs() && now.elapsed() < Duration::from_secs(10) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let person = async {
+        t.stage.until(|s| s.texts(ItemKind::Prose).len() > 1).await;
+        tx.send(true).unwrap();
+    };
+    tokio::join!(t.run_with(&mut a, "go on", rx), person);
+    let now = Instant::now();
+    while runs() {
+        assert!(now.elapsed() < Duration::from_secs(10));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 #[tokio::test]
