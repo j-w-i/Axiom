@@ -128,6 +128,7 @@ impl Acp {
             loading: false,
             ready: false,
             options: vec![],
+            unasked: None,
             modes: vec![],
             todo: VecDeque::new(),
             active: false,
@@ -141,9 +142,12 @@ impl Acp {
 
 #[derive(Debug)]
 enum Want {
-    Initialize { again: bool },
+    Initialize {
+        again: bool,
+    },
     Session,
-    Set(Set),
+    /// With `true`, its answer must say what is so now.
+    Set(Set, bool),
     Prompt,
     Other,
 }
@@ -201,6 +205,8 @@ pub(crate) struct Client {
     loading: bool,
     ready: bool,
     options: Vec<Opt>,
+    /// A switch that is on, by which it would not ask.
+    unasked: Option<String>,
     modes: Vec<String>,
     todo: VecDeque<Set>,
     /// Version 2: at work, by its own account.
@@ -324,8 +330,8 @@ impl Client {
             (Want::Session, Err(f)) => {
                 o.end(Why::Refused, format!("it would not open the session: {}", f.message));
             }
-            (Want::Set(s), Ok(v)) => self.was_set(&s, &v, o),
-            (Want::Set(s), Err(f)) => {
+            (Want::Set(s, says), Ok(v)) => self.was_set(&s, says, &v, o),
+            (Want::Set(s, _), Err(f)) => {
                 o.end(Why::Refused, format!("it would not be set to {}: {}", s.value(), f.message));
             }
             (Want::Prompt, Ok(v)) if self.version == 1 => {
@@ -423,7 +429,14 @@ impl Client {
     fn read_options(&mut self, v: &Value) {
         let key = if self.version == 1 { "/id" } else { "/configId" };
         let mut all = vec![];
+        self.unasked = None;
         for c in list(v, "/configOptions").iter().take(64) {
+            if c.pointer("/currentValue") == Some(&json!(true)) {
+                let words = [key, "/name", "/description"].map(|k| text(c, k).unwrap_or_default());
+                if words.iter().any(|w| loose(w)) {
+                    self.unasked = Some(words[1].to_owned());
+                }
+            }
             let (Some(cid), Some(current)) = (id(c, key), id(c, "/currentValue")) else { continue };
             let groups = list(c, "/options").iter().flat_map(|x| match list(x, "/options") {
                 [] => std::slice::from_ref(x),
@@ -455,21 +468,21 @@ impl Client {
             if self.version != 1 {
                 params["type"] = json!("id");
             }
-            self.calls.call("session/set_config_option", params, Want::Set(set), o);
+            self.calls.call("session/set_config_option", params, Want::Set(set, true), o);
         } else if let Set::Mode(m) = &set
             && self.modes.contains(m)
         {
             let params = json!({"sessionId": session, "modeId": m});
-            self.calls.call("session/set_mode", params, Want::Set(set), o);
+            self.calls.call("session/set_mode", params, Want::Set(set, false), o);
         } else {
             let why = if matches!(set, Set::Mode(_)) { Why::Boundary } else { Why::Refused };
             o.end(why, format!("it has no {} {}", set.what(), set.value()));
         }
     }
 
-    fn was_set(&mut self, s: &Set, v: &Value, o: &mut Out) {
-        // `session/set_mode` answers with nothing. The other says what is so now.
-        if has(v, "/configOptions") {
+    fn was_set(&mut self, s: &Set, says: bool, v: &Value, o: &mut Out) {
+        // `session/set_mode` answers with nothing.
+        if says {
             self.read_options(v);
             let now = self.option(s.category()).map(|c| c.current.clone());
             if now.as_ref() != Some(s.value()) {
@@ -482,6 +495,17 @@ impl Client {
 
     fn is_ready(&mut self, o: &mut Out) {
         let Some(session) = self.session.clone() else { return };
+        // Setting the one may have changed the other.
+        let now = self.option("mode").map(|m| &m.current);
+        if let (Some(m), Some(now)) = (&self.mode, now)
+            && m != now
+            && !self.modes.contains(m)
+        {
+            return o.end(Why::Boundary, format!("it did not keep the mode {m}"));
+        }
+        if let Some(u) = &self.unasked {
+            return o.end(Why::Boundary, format!("it is set not to ask: {u}"));
+        }
         self.ready = true;
         o.event(Event::Ready(Box::new(Ready {
             session,
@@ -678,6 +702,9 @@ impl Client {
     fn changed(&mut self, u: &Value, o: &mut Out) {
         if has(u, "/configOptions") {
             self.read_options(u);
+        }
+        if let Some(u) = self.unasked.as_ref().filter(|_| self.ready) {
+            return o.end(Why::Boundary, format!("it was set not to ask: {u}"));
         }
         let now = owned(u, "/currentModeId").or(self.option("mode").map(|m| m.current.clone()));
         let Some(now) = now else { return };

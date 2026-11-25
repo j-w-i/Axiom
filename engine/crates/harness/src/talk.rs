@@ -98,6 +98,7 @@ const LOOSE: &[&str] = &[
     "bypass",
     "fullaccess",
     "skippermission",
+    "skipconfirmation",
     "autoapprove",
     "fullauto",
     "alwaysapprove",
