@@ -69,17 +69,17 @@ class FormPart extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (label case final l?) ...[
             ExcludeSemantics(child: Text(l, style: t.type.label.ink(c.ink2))),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
           ],
           child,
           if (note case final n?) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(n, style: t.type.label.ink(c.ink3)),
           ],
         ],
@@ -97,7 +97,7 @@ class _Page extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 40, 24, 32),
+      padding: const EdgeInsets.fromLTRB(28, 48, 28, 40),
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
@@ -107,7 +107,7 @@ class _Page extends StatelessWidget {
             children: [
               if (title case final w?) ...[
                 Semantics(header: true, child: Text(w, style: t.type.heading)),
-                const SizedBox(height: 18),
+                const SizedBox(height: 22),
               ],
               ...children,
               if (problem case final p?)
@@ -151,7 +151,7 @@ class Card extends StatelessWidget {
         children: [
           for (final (i, l) in lines.indexed) ...[
             if (i > 0) const Hairline(),
-            Padding(padding: const EdgeInsets.fromLTRB(14, 10, 12, 10), child: l),
+            Padding(padding: const EdgeInsets.fromLTRB(18, 14, 14, 14), child: l),
           ],
         ],
       ),
@@ -190,7 +190,7 @@ class OptionLine extends StatelessWidget {
                   AxCheck(label: label, value: value, onChanged: onChanged),
                   if (note case final n?)
                     Padding(
-                      padding: const EdgeInsets.only(left: 24, top: 1),
+                      padding: const EdgeInsets.only(left: 26, top: 2),
                       child: Text(n, style: t.type.label.ink(c.ink3)),
                     ),
                 ],
@@ -773,7 +773,7 @@ class _StartPageState extends State<StartPage> {
                     ),
                   ),
                   if (recent.isNotEmpty) ...[
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     AxSelect<String>(
                       label: 'Recent folders',
                       face: 'Recent',
@@ -785,16 +785,16 @@ class _StartPageState extends State<StartPage> {
                       onChanged: (v) => d.change(() => d.folder.text = v),
                     ),
                   ],
-                  const SizedBox(width: 6),
-                  AxButton(label: 'Choose…', icon: AxIcon.folder, onPressed: _choose),
+                  const SizedBox(width: 8),
+                  AxButton(label: 'Choose…', icon: AxIcon.folder, size: 36, onPressed: _choose),
                 ],
               ),
             ),
           FormPart(
             null,
             child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
+              spacing: 8,
+              runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: choices,
             ),
@@ -827,7 +827,7 @@ class _StartPageState extends State<StartPage> {
               const SizedBox(width: 12),
               if (widget.onCancel case final f?) ...[
                 AxButton(label: 'Cancel', onPressed: f),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
               ],
               AxButton(
                 label: d.busy
@@ -1006,7 +1006,7 @@ class _AccountsPageState extends State<AccountsPage> {
                             autofocus: true,
                             onPressed: () => setState(() => _leaving = null),
                           ),
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 8),
                           AxButton(
                             label: 'Remove ${oneLine(x.name, 30)}',
                             onPressed: _busy
@@ -1138,7 +1138,7 @@ class _AccountsPageState extends State<AccountsPage> {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               AxButton(label: 'Done', onPressed: widget.onDone),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               if (plan)
                 AxButton(
                   label: 'Continue with ChatGPT',
@@ -1287,7 +1287,7 @@ class _SignInState extends State<_SignIn> {
                 ),
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             AxButton(
               label: _copied ? 'Copied' : 'Copy',
               onPressed: () async {

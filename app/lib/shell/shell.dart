@@ -16,7 +16,6 @@ import '../transcript/safe_text.dart';
 import '../transcript/transcript_view.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
-import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
@@ -233,7 +232,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return ColoredBox(
-      color: c.bay.fill,
+      color: c.chassis.fill,
       child: ListenableBuilder(
         listenable: widget.store,
         builder: (context, _) {
@@ -276,114 +275,128 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
             _View.accounts => 'Accounts',
             _View.work => null,
           };
+          final problem = switch (s) {
+            _ when stale && s.phase != HostPhase.starting =>
+              s.binary == null && s.current == null
+                  ? 'axiom-host was not found beside the application'
+                  : 'The host is not answering. Trying again.',
+            HostStore(:final damaged?) => 'The journal is damaged: ${oneLine(damaged, 200)}',
+            _ => _failed == null ? null : oneLine(_failed!, 200),
+          };
+          final onList = beside || narrow ? null : () => setState(() => _list = true);
           final window = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (beside) ...[
+              if (beside)
                 SizedBox(
-                  width: width < 1080 ? 224 : 260,
-                  child: ColoredBox(
-                    color: c.chassis.fill,
-                    child: FocusTraversalGroup(child: side()),
-                  ),
+                  width: width < 1080 ? 232 : 272,
+                  child: FocusTraversalGroup(child: side()),
                 ),
-                const Hairline(vertical: true),
-              ],
               Expanded(
                 // Kept when the window is made wider or narrower.
                 key: const ValueKey('display'),
                 child: FocusTraversalGroup(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        height: 44,
-                        child: _Strip(
-                          problem: switch (s) {
-                            _ when stale && s.phase != HostPhase.starting =>
-                              s.binary == null && s.current == null
-                                  ? 'axiom-host was not found beside the application'
-                                  : 'The host is not answering. Trying again.',
-                            HostStore(:final damaged?) =>
-                              'The journal is damaged: ${oneLine(damaged, 200)}',
-                            _ => _failed == null ? null : oneLine(_failed!, 200),
-                          },
-                          page: page,
-                          session: s.current,
-                          inset: beside ? 0 : widget.titleInset,
-                          needs: s.needs,
-                          list: narrow ? side : null,
-                          onList: beside || narrow ? null : () => setState(() => _list = true),
-                          panel: roomy && page == null && s.current?.workspace != null
-                              ? _panel
-                              : null,
-                          onPanel: () => setState(() => _panel = !_panel),
-                          onAnswer: _answer,
-                          onStart: () => _startIn(null),
-                          onAccounts: () => _show(_View.accounts),
-                          onFind: () => setState(() => _finding = true),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(beside ? 0 : 8, 8, 8, 8),
+                    child: Surface(
+                      c.canvas,
+                      radius: AxRadius.canvas,
+                      // What scrolls is cut where the canvas ends.
+                      child: ClipPath(
+                        clipper: const ContinuousClip(AxRadius.canvas),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (!narrow)
+                              if (problem case final p?)
+                                _Banner(p, inset: beside ? 20 : widget.titleInset + 12),
+                            if (narrow || page != null || s.current == null)
+                              SizedBox(
+                                height: narrow ? 48 : 56,
+                                child: _Strip(
+                                  problem: narrow ? problem : null,
+                                  page: page,
+                                  session: s.current,
+                                  inset: beside ? 0 : widget.titleInset,
+                                  needs: s.needs,
+                                  list: narrow ? side : null,
+                                  onList: onList,
+                                  onAnswer: _answer,
+                                  onStart: () => _startIn(null),
+                                  onAccounts: () => _show(_View.accounts),
+                                  onFind: () => setState(() => _finding = true),
+                                ),
+                              ),
+                            Expanded(
+                              child: switch (s) {
+                                // Kept while the host is away: what was written is not lost.
+                                _ when _view == _View.start => StartPage(
+                                  _start,
+                                  onStarted: (_) => _show(_View.work),
+                                  onAccounts: () => _show(_View.accounts),
+                                  onCancel: s.current == null ? null : _back,
+                                ),
+                                // Only while its session is the one that is open.
+                                _ when _view == _View.agent && _more?.into == s.current?.id =>
+                                  StartPage(
+                                    _more!,
+                                    key: ObjectKey(_more),
+                                    onStarted: (_) => setState(() {
+                                      _agent = _more!.last;
+                                      _view = _View.work;
+                                    }),
+                                    onAccounts: () => _show(_View.accounts),
+                                    onCancel: _back,
+                                  ),
+                                _ when _view == _View.accounts => AccountsPage(
+                                  s,
+                                  onDone: () => _show(s.current == null ? _View.start : _View.work),
+                                ),
+                                HostStore(phase: HostPhase.starting, current: null) => const _Word(
+                                  'Starting the host',
+                                ),
+                                HostStore(phase: HostPhase.unreachable, current: null) => _Word(
+                                  'The host is not answering',
+                                  detail: s.problem,
+                                ),
+                                HostStore(current: final m?) => _Display(
+                                  s,
+                                  m,
+                                  agent: _agent,
+                                  stale: stale,
+                                  drafts: _drafts,
+                                  changes: _changesOf(m),
+                                  panel: roomy && _panel,
+                                  onPanel: roomy && m.workspace != null
+                                      ? () => setState(() => _panel = !_panel)
+                                      : null,
+                                  onList: onList,
+                                  inset: beside ? 20 : widget.titleInset + 12,
+                                  alone: !beside && !narrow,
+                                  small: narrow,
+                                  tab: _tab,
+                                  onTab: (i) => setState(() => _tab = i),
+                                  onAgain: () =>
+                                      _do('The session could not be opened', () => s.open(m.id)),
+                                  onStop: (run) =>
+                                      _do('It could not be stopped', () => s.cancel(m.id, run)),
+                                  onAgent: (id) => setState(() {
+                                    _agent = id;
+                                    _tab = 0;
+                                  }),
+                                ),
+                                _ => _Word(
+                                  s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
+                                  action: s.sessions.isEmpty
+                                      ? ('New session', () => _show(_View.start))
+                                      : null,
+                                ),
+                              },
+                            ),
+                          ],
                         ),
                       ),
-                      if (page != null) const Hairline(),
-                      Expanded(
-                        child: switch (s) {
-                          // Kept while the host is away: what was written is not lost.
-                          _ when _view == _View.start => StartPage(
-                            _start,
-                            onStarted: (_) => _show(_View.work),
-                            onAccounts: () => _show(_View.accounts),
-                            onCancel: s.current == null ? null : _back,
-                          ),
-                          // Only while its session is the one that is open.
-                          _ when _view == _View.agent && _more?.into == s.current?.id => StartPage(
-                            _more!,
-                            key: ObjectKey(_more),
-                            onStarted: (_) => setState(() {
-                              _agent = _more!.last;
-                              _view = _View.work;
-                            }),
-                            onAccounts: () => _show(_View.accounts),
-                            onCancel: _back,
-                          ),
-                          _ when _view == _View.accounts => AccountsPage(
-                            s,
-                            onDone: () => _show(s.current == null ? _View.start : _View.work),
-                          ),
-                          HostStore(phase: HostPhase.starting, current: null) => const _Word(
-                            'Starting the host',
-                          ),
-                          HostStore(phase: HostPhase.unreachable, current: null) => _Word(
-                            'The host is not answering',
-                            detail: s.problem,
-                          ),
-                          HostStore(current: final m?) => _Display(
-                            s,
-                            m,
-                            agent: _agent,
-                            stale: stale,
-                            drafts: _drafts,
-                            changes: _changesOf(m),
-                            panel: roomy && _panel,
-                            tab: _tab,
-                            onTab: (i) => setState(() => _tab = i),
-                            onAgain: () =>
-                                _do('The session could not be opened', () => s.open(m.id)),
-                            onStop: (run) =>
-                                _do('It could not be stopped', () => s.cancel(m.id, run)),
-                            onAgent: (id) => setState(() {
-                              _agent = id;
-                              _tab = 0;
-                            }),
-                          ),
-                          _ => _Word(
-                            s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
-                            action: s.sessions.isEmpty
-                                ? ('New session', () => _show(_View.start))
-                                : null,
-                          ),
-                        },
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -513,6 +526,87 @@ AgentView viewOf(AgentModel a, HostStore s) {
   );
 }
 
+/// Where one is: the folder, the session, and what stands in front of it.
+class Where extends StatelessWidget {
+  const Where(this.session, {super.key, this.then, this.quiet = false});
+  final SessionModel session;
+  final String? then;
+
+  /// Beside something that is more to the point.
+  final bool quiet;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors, m = session;
+    return ListenableBuilder(
+      listenable: m,
+      builder: (_, _) {
+        final at = m.workspace;
+        final last = quiet ? t.type.ui.ink(c.ink3) : t.type.uiStrong.copyWith(fontSize: 14);
+        Widget between() => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7),
+          child: ExcludeSemantics(child: Text('/', style: t.type.ui.ink(c.ink4))),
+        );
+        Widget part(String words, TextStyle style) => Flexible(
+          child: Text(words, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+        );
+        return Row(
+          mainAxisSize: quiet ? MainAxisSize.min : MainAxisSize.max,
+          children: [
+            if (at != null) ...[
+              Flexible(
+                child: Semantics(
+                  label: 'Folder $at',
+                  excludeSemantics: true,
+                  child: Text(
+                    folderName(at),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.type.ui.ink(c.ink3),
+                  ),
+                ),
+              ),
+              between(),
+            ],
+            part(m.title.isEmpty ? 'Session' : oneLine(m.title, 120), last),
+            if (then case final p?) ...[between(), part(p, last)],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// What has failed, over everything else.
+class _Banner extends StatelessWidget {
+  const _Banner(this.words, {required this.inset});
+  final String words;
+  final double inset;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(inset, 14, 20, 0),
+      child: Row(
+        children: [
+          const AxLamp(AgentState.failed),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                words,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.label.ink(c.faultText),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// What stands over the display: where one is, or what has failed, and, where the window is too narrow
 /// for the list beside it, the way to the list.
 class _Strip extends StatelessWidget {
@@ -524,8 +618,6 @@ class _Strip extends StatelessWidget {
     required this.needs,
     required this.list,
     required this.onList,
-    required this.panel,
-    required this.onPanel,
     required this.onAnswer,
     required this.onStart,
     required this.onAccounts,
@@ -543,53 +635,17 @@ class _Strip extends StatelessWidget {
   /// Brings back the list, where it was put away.
   final VoidCallback? onList;
 
-  /// Whether the panel is shown; null where there is none.
-  final bool? panel;
-  final VoidCallback onPanel;
   final ValueChanged<Waits> onAnswer;
   final VoidCallback onStart, onAccounts, onFind;
 
   Widget _where(AxTheme t) {
-    final c = t.colors, m = session;
-    final strong = t.type.uiStrong;
+    final m = session;
+    final strong = t.type.uiStrong.copyWith(fontSize: 14);
     if (page case final p? when p != 'New agent') {
       return Semantics(header: true, child: Text(p, style: strong));
     }
     if (m == null) return const SizedBox.shrink();
-    return ListenableBuilder(
-      listenable: m,
-      builder: (_, _) {
-        final at = m.workspace;
-        Widget between() => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: ExcludeSemantics(child: Text('/', style: t.type.ui.ink(c.ink4))),
-        );
-        Widget part(String words, TextStyle style) => Flexible(
-          child: Text(words, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
-        );
-        return Row(
-          children: [
-            if (at != null) ...[
-              Flexible(
-                child: Semantics(
-                  label: 'Folder $at',
-                  excludeSemantics: true,
-                  child: Text(
-                    folderName(at),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.type.ui.ink(c.ink3),
-                  ),
-                ),
-              ),
-              between(),
-            ],
-            part(m.title.isEmpty ? 'Session' : oneLine(m.title, 120), strong),
-            if (page case final p?) ...[between(), part(p, strong)],
-          ],
-        );
-      },
-    );
+    return Where(m, then: page);
   }
 
   @override
@@ -618,7 +674,7 @@ class _Strip extends StatelessWidget {
     final open = list;
     if (open == null) {
       return Padding(
-        padding: EdgeInsets.only(left: onList == null ? 20 : inset + 12, right: 12),
+        padding: EdgeInsets.only(left: onList == null ? 24 : inset + 12, right: 14),
         child: Row(
           children: [
             if (onList case final f?) ...[
@@ -631,15 +687,6 @@ class _Strip extends StatelessWidget {
               const SizedBox(width: 10),
             ],
             Expanded(child: said == null ? _where(t) : failed),
-            if (panel case final p?) ...[
-              const SizedBox(width: 8),
-              AxButton.icon(
-                AxIcon.panel,
-                label: p ? 'Hide the panel' : 'Show the panel',
-                tone: AxTone.quiet,
-                onPressed: onPanel,
-              ),
-            ],
           ],
         ),
       );
@@ -838,15 +885,14 @@ class _Side extends StatelessWidget {
       for (final g in groups) ...[
         SideHeading(
           g.name,
-          icon: g.folder == null ? null : AxIcon.folder,
           spoken: g.folder == null ? null : 'Folder ${g.folder}',
-          trailing: g.folder == null
+          act: g.folder == null
               ? null
               : AxButton.icon(
                   AxIcon.plus,
                   label: 'New session in ${g.name}',
                   tone: AxTone.quiet,
-                  size: 24,
+                  size: 28,
                   onPressed: () => _then(() => onStart(g.folder)),
                 ),
         ),
@@ -884,14 +930,15 @@ class _Side extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 44,
+          height: 64,
           child: Padding(
-            padding: EdgeInsets.only(left: inset == 0 ? 16 : inset + 20, right: 8),
+            // On the line of what stands on the canvas.
+            padding: EdgeInsets.only(top: 8, left: inset == 0 ? 20 : inset + 20, right: 10),
             child: Row(
               children: [
-                const AxMark(size: 16),
-                const SizedBox(width: 8),
-                Expanded(child: Text('Axiom', style: t.type.uiStrong)),
+                const AxMark(size: 18),
+                const SizedBox(width: 9),
+                Expanded(child: Text('Axiom', style: t.type.uiStrong.copyWith(fontSize: 14))),
                 AxButton.icon(
                   AxIcon.sidebar,
                   label: 'Hide the sidebar',
@@ -904,7 +951,7 @@ class _Side extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -922,11 +969,10 @@ class _Side extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 12), children: list),
+          child: ListView(padding: const EdgeInsets.fromLTRB(10, 0, 10, 12), children: list),
         ),
-        const Hairline(),
         Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 12),
           child: NavRow(
             AxIcon.settings,
             'Accounts',
@@ -994,7 +1040,19 @@ class _Display extends StatelessWidget {
     required this.onAgent,
     required this.changes,
     required this.panel,
+    required this.onPanel,
+    required this.onList,
+    required this.inset,
+    required this.alone,
+    required this.small,
   });
+
+  /// Shows the panel or puts it away; null where there is no room for one.
+  final VoidCallback? onPanel, onList;
+  final double inset;
+
+  /// The list is put away, so where one is has to be said; the window is small, and it is said above.
+  final bool alone, small;
   final FolderChanges changes;
 
   /// There is room for the panel, and it is wanted.
@@ -1015,12 +1073,45 @@ class _Display extends StatelessWidget {
     builder: (context, _) {
       final a = session.agents[agent] ?? session.agents.values.firstOrNull;
       if (session.fault case final f?) {
-        return _Word('This session cannot be shown', detail: f, action: ('Try again', onAgain));
+        return _bare(
+          _Word('This session cannot be shown', detail: f, action: ('Try again', onAgain)),
+        );
       }
-      if (!session.loaded) return _Word(stale ? 'Waiting for the host' : 'Reading the session');
-      if (a == null) return const _Word('No agent has worked here yet');
+      if (!session.loaded) {
+        return _bare(_Word(stale ? 'Waiting for the host' : 'Reading the session'));
+      }
+      if (a == null) return _bare(const _Word('No agent has worked here yet'));
       return _work(context, a);
     },
+  );
+
+  /// With nothing to show: the way back to the list stays.
+  Widget _bare(Widget word) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (!small)
+        SizedBox(
+          height: 56,
+          child: Padding(
+            padding: EdgeInsets.only(left: inset, right: 14),
+            child: Row(
+              children: [
+                if (onList case final f?) ...[
+                  AxButton.icon(
+                    AxIcon.sidebar,
+                    label: 'Show the sidebar',
+                    tone: AxTone.quiet,
+                    onPressed: f,
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(child: Where(session)),
+              ],
+            ),
+          ),
+        ),
+      Expanded(child: word),
+    ],
   );
 
   /// Somebody looks: the window has their attention.
@@ -1044,7 +1135,6 @@ class _Display extends StatelessWidget {
           listenable: Listenable.merge([a, changes]),
           builder: (context, _) => _bar(context, a),
         ),
-        const Hairline(),
         if (acts && tab == 1)
           Expanded(
             child: a.apart
@@ -1153,6 +1243,20 @@ class _Display extends StatelessWidget {
       ],
       index: acts ? tab : 0,
       onTab: onTab,
+      inset: small ? 20 : inset,
+      height: small ? 46 : 56,
+      lead: onList == null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: AxButton.icon(
+                AxIcon.sidebar,
+                label: 'Show the sidebar',
+                tone: AxTone.quiet,
+                onPressed: onList,
+              ),
+            ),
+      where: alone ? Where(session, quiet: true) : null,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1173,12 +1277,13 @@ class _Display extends StatelessWidget {
             Flexible(
               child: ContextGauge(
                 ContextView(share: a.context, provenance: provenanceOf(a.contextKnown)),
-                hue: ServiceMark.of(x.model)?.color(c),
               ),
             ),
           ],
           if (acts && works && run != null && !stale)
-            AxButton(label: 'Stop', icon: AxIcon.stop, onPressed: () => onStop(run)),
+            Flexible(
+              child: AxButton(label: 'Stop', icon: AxIcon.stop, onPressed: () => onStop(run)),
+            ),
           if (stale) ...[
             const SizedBox(width: 10),
             Flexible(
@@ -1188,6 +1293,15 @@ class _Display extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: t.type.label.ink(c.attentionText),
               ),
+            ),
+          ],
+          if (onPanel case final f? when acts && !a.apart) ...[
+            const SizedBox(width: 6),
+            AxButton.icon(
+              AxIcon.panel,
+              label: panel ? 'Hide the panel' : 'Show the panel',
+              tone: AxTone.quiet,
+              onPressed: f,
             ),
           ],
         ],

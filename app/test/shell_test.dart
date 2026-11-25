@@ -50,7 +50,7 @@ void main() {
       ..phase = HostPhase.connected
       ..current = recorded();
     await mount(t, Shell(s), size: const Size(1100, 700));
-    expect(find.text('Double token rotation'), findsNWidgets(2), reason: 'in the list, and where');
+    expect(find.text('Double token rotation'), findsOneWidget, reason: 'said once');
     expect(find.text('Builder'), findsWidgets);
     expect(find.text('Opus 5.5   replay'), findsOneWidget, reason: 'a replay is called one');
     expect(find.text('220 lines'), findsOneWidget);
@@ -122,13 +122,13 @@ void main() {
     s.dispose();
   });
 
-  testWidgets('the window\'s name and where one is share a line', (t) async {
+  testWidgets('the window\'s name and what it shows share a line', (t) async {
     final s = store()
       ..phase = HostPhase.connected
       ..current = recorded();
     await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
     final a = t.getCenter(find.text('Axiom')).dy;
-    final b = t.getCenter(find.text('Double token rotation').last).dy;
+    final b = t.getCenter(find.text('Builder').last).dy;
     expect((a - b).abs(), lessThan(1.1));
     s.dispose();
   });
@@ -187,7 +187,7 @@ void main() {
     // Once round: in the left pane until it is left, and back in it only at the end.
     final changes = [
       for (var k = 1; k < xs.length; k++)
-        if ((xs[k] < 260) != (xs[k - 1] < 260)) k,
+        if ((xs[k] < 272) != (xs[k - 1] < 272)) k,
     ];
     expect(changes.length, lessThanOrEqualTo(40 ~/ 14 * 2));
     expect(changes.first, greaterThan(10), reason: '$xs');
@@ -218,16 +218,25 @@ void main() {
     ]) {
       final s = store()
         ..phase = HostPhase.connected
-        ..current = (SessionModel('s')..apply([Event(1, 1, SessionCreated('Work', path))]));
+        ..current = (SessionModel('s')
+          ..apply([
+            Event(1, 1, SessionCreated('Work', path)),
+            const Event(2, 2, AgentAdded('a', 'Ada', x, null, access: Access.ask)),
+          ]));
       await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
-      // Over its sessions in the list, and over the display.
-      expect(find.text(last), findsAtLeast(2), reason: path);
-      expect(find.bySemanticsLabel('Folder $path'), findsNWidgets(2));
+      // Over its sessions in the list; over the display once the list is put away.
+      expect(find.bySemanticsLabel('Folder $path'), findsOneWidget);
+      expect(find.text(last), findsOneWidget, reason: path);
+      await t.tap(find.bySemanticsLabel('Hide the sidebar'));
+      await t.pump();
+      expect(find.bySemanticsLabel('Folder $path'), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
+      await t.tap(find.bySemanticsLabel('Show the sidebar'));
+      await t.pump();
       s
         ..damaged = 'row 3'
         ..notifyListeners();
       await t.pump();
-      expect(find.bySemanticsLabel('Folder $path'), findsOneWidget);
       expect(find.textContaining('The journal is damaged'), findsOneWidget);
       s.dispose();
     }
@@ -290,7 +299,7 @@ void main() {
     expect(find.text('2 asking'), findsOneWidget);
     expect(find.bySemanticsLabel('2 asking, open the first'), findsOneWidget);
     // Wider, the list is beside it again, at 224 and at 264.
-    for (final (width, left) in [(860.0, 225.0), (1079.0, 225.0), (1080.0, 261.0)]) {
+    for (final (width, left) in [(860.0, 232.0), (1079.0, 232.0), (1080.0, 272.0)]) {
       await mount(t, Shell(s, titleInset: 58), size: Size(width, 520));
       expect(find.byWidgetPredicate((w) => w is AxButton && w.label == 'Sessions'), findsNothing);
       expect(find.text('Other work'), findsWidgets);
@@ -390,7 +399,7 @@ void main() {
     await t.pump();
     await keys(t, LogicalKeyboardKey.keyB);
     expect(find.byType(SessionPanel), findsNothing);
-    expect(t.getRect(find.byType(TranscriptView)).left, lessThan(1));
+    expect(t.getRect(find.byType(TranscriptView)).left, lessThan(9));
     await t.tap(find.bySemanticsLabel('Show the sidebar'));
     await t.pump();
     expect(find.byType(SessionPanel), findsOneWidget);

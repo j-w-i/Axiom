@@ -370,12 +370,16 @@ class TranscriptViewState extends State<TranscriptView> {
       key: ObjectKey(rows[k]),
       child: MetaData(
         metaData: rows[k],
-        child: _RowView(
-          rows,
-          k,
-          onLink: widget.onLink,
-          opened: _opened.contains,
-          onToggle: _toggle,
+        child: Padding(
+          // Clear of where what scrolls goes out of sight.
+          padding: EdgeInsets.only(top: k == 0 ? 16 : 0),
+          child: _RowView(
+            rows,
+            k,
+            onLink: widget.onLink,
+            opened: _opened.contains,
+            onToggle: _toggle,
+          ),
         ),
       ),
     );
@@ -439,7 +443,7 @@ class TranscriptViewState extends State<TranscriptView> {
                       ),
                     ),
                     SliverPadding(
-                      padding: side.copyWith(bottom: 20),
+                      padding: side.copyWith(bottom: 28),
                       sliver: SliverToBoxAdapter(
                         child: ListenableBuilder(
                           listenable: a,
@@ -451,6 +455,8 @@ class TranscriptViewState extends State<TranscriptView> {
                 ),
               ),
             ),
+            const Positioned(top: 0, left: 0, right: 0, child: Fade(up: true)),
+            const Positioned(bottom: 0, left: 0, right: 0, child: Fade(up: false)),
             if (!_atEnd)
               Positioned(
                 right: 20,
@@ -763,7 +769,7 @@ class _BlockViewState extends State<BlockView> {
       _ => c.ink1,
     };
     final base = t.type.prose.ink(ink);
-    final code = t.type.code.copyWith(height: base.height, color: c.codeInline, fontSize: 12.5);
+    final code = t.type.code.copyWith(height: base.height, color: c.codeInline, fontSize: 13);
     Widget text(TextStyle s, {bool header = false}) {
       final words = inlineSpan(
         b.text,
@@ -837,7 +843,7 @@ class _BlockViewState extends State<BlockView> {
     final top = b.continues
         ? 0.0
         : widget.opens
-        ? (widget.afterTool ? 14.0 : 18.0)
+        ? (widget.afterTool ? 18.0 : 22.0)
         : b.kind == BlockKind.heading
         ? 20.0
         : b.kind == BlockKind.item
@@ -931,14 +937,14 @@ class _Voice extends StatelessWidget {
   final Widget child;
   final bool opens, closes;
   final double gap;
-  static const pad = 10.0;
+  static const pad = 12.0;
   @override
   Widget build(BuildContext context) {
     final c = Ax.of(context).colors;
     final inner = SizedBox(
       width: fits ? null : double.infinity,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(14, opens ? pad : gap, 14, closes ? pad : 0),
+        padding: EdgeInsets.fromLTRB(16, opens ? pad : gap, 16, closes ? pad : 0),
         child: child,
       ),
     );
@@ -1058,10 +1064,10 @@ class _CodeBlockState extends State<CodeBlock> {
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   padding: EdgeInsets.fromLTRB(
-                    14,
-                    b.continues ? 0 : 10,
-                    14,
-                    widget.goesOn ? 0 : 10,
+                    18,
+                    b.continues ? 0 : 15,
+                    18,
+                    widget.goesOn ? 0 : 15,
                   ),
                   child: Text.rich(
                     TextSpan(
@@ -1090,7 +1096,7 @@ class _CodeBlockState extends State<CodeBlock> {
                   onFocusChange: (v) => setState(() => _within = v),
                   child: Opacity(
                     opacity: _over || _within ? 1 : 0,
-                    child: AxButton(label: _copied ? 'Copied' : 'Copy', size: 22, onPressed: _copy),
+                    child: AxButton(label: _copied ? 'Copied' : 'Copy', size: 28, onPressed: _copy),
                   ),
                 ),
               ),

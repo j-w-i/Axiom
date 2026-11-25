@@ -39,15 +39,15 @@ class WorkLine extends StatelessWidget {
       label: '$name $detail $result',
       excludeSemantics: true,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 26),
+        constraints: const BoxConstraints(minHeight: 28),
         child: LayoutBuilder(
           builder: (context, box) => Row(
             children: [
               SizedBox(
-                width: 24,
+                width: 26,
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: AxGlyph(icon, size: 15, color: failed ? c.faultText : c.ink3),
+                  child: AxGlyph(icon, size: 16, color: failed ? c.faultText : c.ink3),
                 ),
               ),
               ConstrainedBox(
@@ -423,7 +423,7 @@ class _RequestBarState extends State<RequestBar> {
                     Row(
                       children: [
                         const AxLamp(AgentState.asking),
-                        const SizedBox(width: 9),
+                        const SizedBox(width: 10),
                         Expanded(child: Text('$agent ${literal(r.what)}', style: t.type.uiStrong)),
                         if (widget.waiting > 0) ...[
                           const SizedBox(width: 12),
@@ -431,14 +431,14 @@ class _RequestBarState extends State<RequestBar> {
                         ],
                       ],
                     ),
-                    const SizedBox(height: 9),
+                    const SizedBox(height: 12),
                     Surface(
                       c.block,
                       radius: AxRadius.key,
                       child: SizedBox(
                         width: double.infinity,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
                           child: Text(literal(r.subject), style: t.type.code),
                         ),
                       ),
@@ -529,13 +529,13 @@ class _RequestBarState extends State<RequestBar> {
           c.plate,
           radius: AxRadius.card,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+            padding: const EdgeInsets.fromLTRB(18, 16, 14, 14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
                 body,
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 Align(alignment: Alignment.centerRight, child: keys),
               ],
             ),

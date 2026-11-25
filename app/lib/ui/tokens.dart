@@ -1,9 +1,9 @@
 /// Every visual constant in Axiom. Nothing outside this file names a colour, a duration or a spring
 /// (test/ui/tokens_test.dart enforces it and checks contrast in both themes).
 ///
-/// The language: near-neutral charcoal in five tones. What can be pressed or written into is raised by
-/// a tone, a lit edge and a contact shade; what holds something is recessed by a tone. Aqua only for
-/// what runs or has the keyboard.
+/// The language: near-neutral charcoal in a few tones, close to each other. What can be pressed or
+/// written into is raised by a tone and soft light; what holds something is recessed by a tone. Nothing
+/// is drawn round, and nothing is ruled off. Aqua only for what runs or has the keyboard.
 library;
 
 import 'dart:math' as math;
@@ -19,27 +19,18 @@ class SurfaceSpec {
     this.fill, {
     this.border = const Color(0x00000000),
     this.lip = const Color(0x00000000),
-    this.shade = const Color(0x00000000),
-    this.bezel = const Color(0x00000000),
-    this.ring = 0,
     this.shadows = const [],
   });
   final Color fill;
 
-  /// A hairline round it: only what floats, or can be pressed no more, has one.
+  /// A hairline round it: in the light theme, and of what floats.
   final Color border;
 
-  /// What a raised part has: light on its upper edge, and its shade where it touches the ground.
-  final Color lip, shade;
+  /// The light that falls on a raised part: strongest at its upper edge, gone before the lower.
+  final Color lip;
 
-  /// What is written into stands in a ring, [ring] wide.
-  final Color bezel;
-  final double ring;
-
-  /// Soft shades: of raised parts in the light theme, and of what floats.
+  /// Soft, and never a line.
   final List<BoxShadow> shadows;
-
-  bool get raised => lip.a > 0;
 }
 
 @immutable
@@ -76,7 +67,7 @@ class AxColors {
     required this.ghost,
     required this.field,
     required this.written,
-    required this.writtenFocus,
+    required this.canvas,
     required this.key,
     required this.keyHover,
     required this.keyDown,
@@ -115,9 +106,8 @@ class AxColors {
   /// A trough; what is chosen in it or in a list; a key of little weight; what is written into.
   final SurfaceSpec track, slab, ghost, field;
 
-  /// Where an agent is written to: raised, in a wide ring, which brightens while it has the keyboard.
-  final SurfaceSpec written;
-  final Color writtenFocus;
+  /// Where an agent is written to. What the window shows, on the chassis.
+  final SurfaceSpec written, canvas;
   final SurfaceSpec key, keyHover, keyDown, primary, primaryHover, primaryDown;
   final SurfaceSpec overlay;
   final Color diffAdd, diffRemove;
@@ -135,11 +125,11 @@ class AxColors {
 
   static const dark = AxColors(
     brightness: Brightness.dark,
-    ink1: Color(0xFFF2F3F5),
-    ink2: Color(0xFFC2C5CA),
-    ink3: Color(0xFFA6AAB1),
-    ink4: Color(0xFF8F939B),
-    onPrimary: Color(0xFF151619),
+    ink1: Color(0xFFF1F2F4),
+    ink2: Color(0xFFC4C7CC),
+    ink3: Color(0xFFA4A8AF),
+    ink4: Color(0xFF8E9299),
+    onPrimary: Color(0xFF131417),
     live: Color(0xFF35C3F3),
     liveText: Color(0xFF86DCFB),
     attention: Color(0xFFE2AA52),
@@ -151,40 +141,68 @@ class AxColors {
     idle: Color(0xFF8C9098),
     focus: Color(0xFF55CDF6),
     selection: Color(0x6620A9DB),
-    hairline: Color(0xFF0C0D0F),
-    selected: Color(0x13FFFFFF),
-    hover: Color(0x0AFFFFFF),
-    meterTrack: Color(0x24FFFFFF),
+    hairline: Color(0x0DFFFFFF),
+    selected: Color(0x12FFFFFF),
+    hover: Color(0x0BFFFFFF),
+    meterTrack: Color(0x1FFFFFFF),
     meterFill: Color(0xFFA8ACB4),
-    chassis: SurfaceSpec(Color(0xFF1B1C1F)),
-    plate: SurfaceSpec(Color(0xFF212226), lip: Color(0x17FFFFFF), shade: Color(0x99000000)),
-    bay: SurfaceSpec(Color(0xFF151619)),
-    block: SurfaceSpec(Color(0xFF0D0E10)),
-    track: SurfaceSpec(Color(0xFF0D0E10)),
-    slab: SurfaceSpec(Color(0xFF2C2D32), lip: Color(0x17FFFFFF), shade: Color(0x99000000)),
-    ghost: SurfaceSpec(Color(0x0DFFFFFF), lip: Color(0x0FFFFFFF)),
-    field: SurfaceSpec(Color(0xFF1C1D20), bezel: Color(0xFF2B2C30), ring: 2),
-    written: SurfaceSpec(
-      Color(0xFF212226),
-      lip: Color(0x17FFFFFF),
-      shade: Color(0x66000000),
-      bezel: Color(0xFF2B2C30),
-      ring: 3,
+    chassis: SurfaceSpec(Color(0xFF131417)),
+    bay: SurfaceSpec(Color(0xFF1A1B1E)),
+    canvas: SurfaceSpec(
+      Color(0xFF1A1B1E),
+      shadows: [BoxShadow(color: Color(0x33000000), blurRadius: 10, offset: Offset(0, 2))],
     ),
-    writtenFocus: Color(0xFF3C3E44),
-    key: SurfaceSpec(Color(0xFF2E2F34), lip: Color(0x17FFFFFF), shade: Color(0x99000000)),
-    keyHover: SurfaceSpec(Color(0xFF37383E), lip: Color(0x17FFFFFF), shade: Color(0x99000000)),
-    keyDown: SurfaceSpec(Color(0xFF17181B)),
-    primary: SurfaceSpec(Color(0xFFEDEEF0), shade: Color(0x99000000)),
-    primaryHover: SurfaceSpec(Color(0xFFFFFFFF), shade: Color(0x99000000)),
+    plate: SurfaceSpec(
+      Color(0xFF242529),
+      lip: Color(0x07FFFFFF),
+      shadows: [
+        BoxShadow(color: Color(0x29000000), blurRadius: 2, offset: Offset(0, 1)),
+        BoxShadow(color: Color(0x1F000000), blurRadius: 14, offset: Offset(0, 4)),
+      ],
+    ),
+    block: SurfaceSpec(Color(0xFF131417)),
+    track: SurfaceSpec(Color(0xFF121316)),
+    slab: SurfaceSpec(
+      Color(0xFF2D2E33),
+      lip: Color(0x0AFFFFFF),
+      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
+    ),
+    ghost: SurfaceSpec(Color(0x0BFFFFFF)),
+    field: SurfaceSpec(Color(0xFF242529)),
+    written: SurfaceSpec(
+      Color(0xFF27282C),
+      shadows: [
+        BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 2)),
+        BoxShadow(color: Color(0x3D000000), blurRadius: 40, offset: Offset(0, 14)),
+      ],
+    ),
+    key: SurfaceSpec(
+      Color(0xFF303237),
+      lip: Color(0x0CFFFFFF),
+      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
+    ),
+    keyHover: SurfaceSpec(
+      Color(0xFF393B41),
+      lip: Color(0x17FFFFFF),
+      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
+    ),
+    keyDown: SurfaceSpec(Color(0xFF212226)),
+    primary: SurfaceSpec(
+      Color(0xFFEDEEF0),
+      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
+    ),
+    primaryHover: SurfaceSpec(
+      Color(0xFFFFFFFF),
+      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
+    ),
     primaryDown: SurfaceSpec(Color(0xFFC9CBCF)),
     overlay: SurfaceSpec(
-      Color(0xFF26272B),
-      lip: Color(0x1FFFFFFF),
-      border: Color(0x73000000),
+      Color(0xFF2A2B30),
+      lip: Color(0x17FFFFFF),
+      border: Color(0x0FFFFFFF),
       shadows: [
-        BoxShadow(color: Color(0x73000000), blurRadius: 32, offset: Offset(0, 12)),
-        BoxShadow(color: Color(0x40000000), blurRadius: 4, offset: Offset(0, 1)),
+        BoxShadow(color: Color(0x66000000), blurRadius: 48, offset: Offset(0, 16)),
+        BoxShadow(color: Color(0x40000000), blurRadius: 8, offset: Offset(0, 2)),
       ],
     ),
     diffAdd: Color(0x264DB585),
@@ -197,7 +215,7 @@ class AxColors {
     codeNumber: Color(0xFFEBBC72),
     codeComment: Color(0xFFA0A4AC),
     codeInline: Color(0xFFDADCE0),
-    codeTile: Color(0xFF0D0E10),
+    codeTile: Color(0xFF121316),
     services: {
       ServiceMark.anthropic: Color(0xFFE08A66),
       ServiceMark.claude: Color(0xFFE08A66),
@@ -235,7 +253,7 @@ class AxColors {
     ink1: Color(0xFF0D0E10),
     ink2: Color(0xFF43474D),
     ink3: Color(0xFF53575E),
-    ink4: Color(0xFF5E626A),
+    ink4: Color(0xFF5F636B),
     onPrimary: Color(0xFFFFFFFF),
     live: Color(0xFF08709C),
     liveText: Color(0xFF06587B),
@@ -248,61 +266,72 @@ class AxColors {
     idle: Color(0xFF6B7078),
     focus: Color(0xFF0874A2),
     selection: Color(0x4D35B9E6),
-    hairline: Color(0x1A0D0E10),
-    selected: Color(0x140D0E10),
+    hairline: Color(0x120D0E10),
+    selected: Color(0x0F0D0E10),
     hover: Color(0x0A0D0E10),
-    meterTrack: Color(0x1F0D0E10),
+    meterTrack: Color(0x1A0D0E10),
     meterFill: Color(0xFF60646C),
-    chassis: SurfaceSpec(Color(0xFFE9EAED)),
+    chassis: SurfaceSpec(Color(0xFFECEDF0)),
+    bay: SurfaceSpec(Color(0xFFFBFBFC)),
+    canvas: SurfaceSpec(
+      Color(0xFFFBFBFC),
+      shadows: [
+        BoxShadow(color: Color(0x140D0E10), blurRadius: 4, offset: Offset(0, 1)),
+        BoxShadow(color: Color(0x0D0D0E10), blurRadius: 18, offset: Offset(0, 4)),
+      ],
+    ),
     plate: SurfaceSpec(
       Color(0xFFFFFFFF),
-      lip: Color(0xC0FFFFFF),
-      shade: Color(0x1F0D0E10),
-      shadows: [BoxShadow(color: Color(0x140D0E10), blurRadius: 5, offset: Offset(0, 2))],
+      border: Color(0x0F0D0E10),
+      shadows: [
+        BoxShadow(color: Color(0x0A0D0E10), blurRadius: 2, offset: Offset(0, 1)),
+        BoxShadow(color: Color(0x0D0D0E10), blurRadius: 16, offset: Offset(0, 4)),
+      ],
     ),
-    bay: SurfaceSpec(Color(0xFFF2F3F5)),
-    block: SurfaceSpec(Color(0xFFE6E8EC)),
-    track: SurfaceSpec(Color(0xFFE0E2E7)),
+    block: SurfaceSpec(Color(0xFFF1F2F4)),
+    track: SurfaceSpec(Color(0xFFEBECEF)),
     slab: SurfaceSpec(
       Color(0xFFFFFFFF),
-      lip: Color(0xC0FFFFFF),
-      shade: Color(0x1F0D0E10),
-      shadows: [BoxShadow(color: Color(0x140D0E10), blurRadius: 5, offset: Offset(0, 2))],
+      shadows: [
+        BoxShadow(color: Color(0x1A0D0E10), blurRadius: 3, offset: Offset(0, 1)),
+        BoxShadow(color: Color(0x0A0D0E10), blurRadius: 8, offset: Offset(0, 2)),
+      ],
     ),
-    ghost: SurfaceSpec(Color(0x0B0D0E10), lip: Color(0x80FFFFFF)),
-    field: SurfaceSpec(Color(0xFFFFFFFF), bezel: Color(0xFFD6D9DF), ring: 2),
+    ghost: SurfaceSpec(Color(0x0A0D0E10)),
+    field: SurfaceSpec(Color(0xFFF0F1F3)),
     written: SurfaceSpec(
       Color(0xFFFFFFFF),
-      lip: Color(0xC0FFFFFF),
-      shade: Color(0x1F0D0E10),
-      bezel: Color(0xFFDADDE3),
-      ring: 3,
-      shadows: [BoxShadow(color: Color(0x140D0E10), blurRadius: 8, offset: Offset(0, 3))],
+      shadows: [
+        BoxShadow(color: Color(0x0F0D0E10), blurRadius: 8, offset: Offset(0, 2)),
+        BoxShadow(color: Color(0x170D0E10), blurRadius: 40, offset: Offset(0, 14)),
+      ],
     ),
-    writtenFocus: Color(0xFFC6CAD2),
     key: SurfaceSpec(
-      Color(0xFFF6F7F9),
-      lip: Color(0xC0FFFFFF),
-      shade: Color(0x1F0D0E10),
-      shadows: [BoxShadow(color: Color(0x140D0E10), blurRadius: 5, offset: Offset(0, 2))],
+      Color(0xFFFFFFFF),
+      border: Color(0x170D0E10),
+      shadows: [BoxShadow(color: Color(0x170D0E10), blurRadius: 3, offset: Offset(0, 1))],
     ),
     keyHover: SurfaceSpec(
-      Color(0xFFFFFFFF),
-      lip: Color(0xC0FFFFFF),
-      shade: Color(0x1F0D0E10),
-      shadows: [BoxShadow(color: Color(0x140D0E10), blurRadius: 5, offset: Offset(0, 2))],
+      Color(0xFFF5F6F7),
+      border: Color(0x1F0D0E10),
+      shadows: [BoxShadow(color: Color(0x170D0E10), blurRadius: 3, offset: Offset(0, 1))],
     ),
-    keyDown: SurfaceSpec(Color(0xFFDDDFE4)),
-    primary: SurfaceSpec(Color(0xFF1B1C1F), shade: Color(0x1F0D0E10)),
-    primaryHover: SurfaceSpec(Color(0xFF34363B), shade: Color(0x1F0D0E10)),
+    keyDown: SurfaceSpec(Color(0xFFE6E7EA)),
+    primary: SurfaceSpec(
+      Color(0xFF1B1C1F),
+      shadows: [BoxShadow(color: Color(0x170D0E10), blurRadius: 3, offset: Offset(0, 1))],
+    ),
+    primaryHover: SurfaceSpec(
+      Color(0xFF34363B),
+      shadows: [BoxShadow(color: Color(0x170D0E10), blurRadius: 3, offset: Offset(0, 1))],
+    ),
     primaryDown: SurfaceSpec(Color(0xFF0D0E10)),
     overlay: SurfaceSpec(
       Color(0xFFFFFFFF),
-      lip: Color(0xC0FFFFFF),
-      border: Color(0x1A0D0E10),
+      border: Color(0x140D0E10),
       shadows: [
-        BoxShadow(color: Color(0x2E0D0E10), blurRadius: 32, offset: Offset(0, 12)),
-        BoxShadow(color: Color(0x1A0D0E10), blurRadius: 4, offset: Offset(0, 1)),
+        BoxShadow(color: Color(0x240D0E10), blurRadius: 48, offset: Offset(0, 16)),
+        BoxShadow(color: Color(0x140D0E10), blurRadius: 8, offset: Offset(0, 2)),
       ],
     ),
     diffAdd: Color(0x222F8A5C),
@@ -315,7 +344,7 @@ class AxColors {
     codeNumber: Color(0xFF7F4F08),
     codeComment: Color(0xFF5A5E66),
     codeInline: Color(0xFF2A2C30),
-    codeTile: Color(0xFFE0E2E7),
+    codeTile: Color(0xFFECEDF0),
     services: {
       ServiceMark.anthropic: Color(0xFFAD4F2B),
       ServiceMark.claude: Color(0xFFAD4F2B),
@@ -361,7 +390,7 @@ class AxType {
     color: _ink,
     letterSpacing: tracking,
     leadingDistribution: TextLeadingDistribution.even,
-    fontVariations: [FontVariation('wght', weight), const FontVariation('opsz', 14)],
+    fontVariations: [FontVariation('wght', weight), FontVariation('opsz', size.clamp(14, 32))],
     decoration: TextDecoration.none,
   );
 
@@ -378,24 +407,24 @@ class AxType {
   );
 
   /// Long reading. Measure is capped by the transcript.
-  TextStyle get prose => _w(14, 400, 1.6);
-  TextStyle get title => _w(15, 600, 1.35);
-  TextStyle get heading => _w(19, 600, 1.3, tracking: -.2);
-  TextStyle get ui => _w(13, 400, 1.4);
-  TextStyle get uiMedium => _w(13, 500, 1.4);
-  TextStyle get uiStrong => _w(13, 600, 1.4);
-  TextStyle get label => _w(12.5, 400, 1.4);
-  TextStyle get labelStrong => _w(12.5, 500, 1.4);
-  TextStyle get small => _w(11.5, 400, 1.4);
-  TextStyle get smallStrong => _w(11.5, 500, 1.4);
-  TextStyle get caption => _w(10.5, 500, 1.2);
-  TextStyle get code => _m(12, 1.6);
-  TextStyle get codeSmall => _m(11.5, 1.55);
+  TextStyle get prose => _w(14.5, 400, 1.62, tracking: -.05);
+  TextStyle get title => _w(16, 600, 1.35, tracking: -.16);
+  TextStyle get heading => _w(22, 600, 1.25, tracking: -.44);
+  TextStyle get ui => _w(13.5, 400, 1.4, tracking: -.06);
+  TextStyle get uiMedium => _w(13.5, 500, 1.4, tracking: -.06);
+  TextStyle get uiStrong => _w(13.5, 600, 1.4, tracking: -.08);
+  TextStyle get label => _w(13, 400, 1.4, tracking: -.04);
+  TextStyle get labelStrong => _w(13, 500, 1.4, tracking: -.04);
+  TextStyle get small => _w(12, 400, 1.4);
+  TextStyle get smallStrong => _w(12, 500, 1.4);
+  TextStyle get caption => _w(11, 500, 1.2);
+  TextStyle get code => _m(12.5, 1.65);
+  TextStyle get codeSmall => _m(12, 1.6);
 }
 
 abstract final class AxSpace {
   /// The conversation, what is asked in it and where it is written: one column.
-  static const double column = 720, gutter = 24;
+  static const double column = 740, gutter = 28;
 
   /// What stands beside that column, in [width].
   static double beside(double width) => math.max(gutter, (width - column) / 2);
@@ -404,14 +433,14 @@ abstract final class AxSpace {
 /// A control, a tile of code, a card or what floats. Corners are continuous, and what is inside is as
 /// much less round as it stands in from its holder.
 abstract final class AxRadius {
-  static const double tick = 5, key = 8, block = 10, card = 13;
+  static const double tick = 6, key = 10, block = 14, card = 18, canvas = 16, written = 24;
 }
 
 /// Control sizes. Density changes height and padding, never type size.
 enum AxDensity {
-  compact(24, 24, 7),
-  regular(28, 28, 9),
-  roomy(32, 32, 11);
+  compact(28, 28, 10),
+  regular(32, 32, 12),
+  roomy(36, 36, 14);
 
   const AxDensity(this.control, this.row, this.pad);
   final double control, row, pad;
@@ -439,6 +468,9 @@ abstract final class AxMotion {
     stiffness: 520,
     ratio: .86,
   );
+
+  /// How long a ground takes to come under the hand.
+  static const Duration fade = Duration(milliseconds: 110);
   static const Duration hoverDelay = Duration(milliseconds: 450);
 
   /// How long something new under a resting pointer cannot be pressed: a double click.

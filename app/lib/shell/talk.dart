@@ -288,7 +288,7 @@ class _TalkState extends State<Talk> {
           AxSpace.beside(box.maxWidth),
           0,
           AxSpace.beside(box.maxWidth),
-          16,
+          20,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -365,7 +365,7 @@ class _TalkState extends State<Talk> {
             Composer(
               key: ValueKey(a.id),
               placeholder: works
-                  ? 'Message ${a.name}. It is sent before the next step.'
+                  ? 'Message ${a.name}. Sent before its next step'
                   : 'Message ${a.name}',
               action: works ? 'Queue' : 'Send',
               enabled: widget.live,
@@ -382,11 +382,6 @@ class _TalkState extends State<Talk> {
                         Known.unknown => Provenance.unknown,
                       },
                     ),
-                    hue: markOf(
-                      a.execution.provider,
-                      a.execution.model,
-                      a.execution.harness,
-                    )?.color(c),
                   ),
                 if (plan)
                   Row(

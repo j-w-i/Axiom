@@ -74,61 +74,53 @@ class _WorkbenchState extends State<Workbench> {
     ];
     final mark = agent.id == 'builder' ? choices.first.item?.mark : agent.mark;
     return ColoredBox(
-      color: c.bay.fill,
+      color: c.chassis.fill,
       child: LayoutBuilder(
         builder: (context, box) {
           final wide = box.maxWidth >= 860;
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (wide) ...[
+              if (wide)
                 SizedBox(
-                  width: box.maxWidth >= 1080 ? 260 : 224,
-                  child: ColoredBox(
-                    color: c.chassis.fill,
-                    child: FocusTraversalGroup(
-                      child: _Side(
-                        inset: widget.titleInset,
-                        selected: _agent,
-                        onSelect: (id) => setState(() => _agent = id),
-                      ),
+                  width: box.maxWidth >= 1080 ? 272 : 232,
+                  child: FocusTraversalGroup(
+                    child: _Side(
+                      inset: widget.titleInset,
+                      selected: _agent,
+                      onSelect: (id) => setState(() => _agent = id),
                     ),
                   ),
                 ),
-                const Hairline(vertical: true),
-              ],
               Expanded(
                 child: FocusTraversalGroup(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        height: 44,
-                        child: Row(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(wide ? 0 : 8, 8, 8, 8),
+                    child: Surface(
+                      c.canvas,
+                      radius: AxRadius.canvas,
+                      child: ClipPath(
+                        clipper: const ContinuousClip(AxRadius.canvas),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            SizedBox(width: wide ? 20 : widget.titleInset + 12),
-                            Expanded(
-                              flex: 2,
-                              child: Text.rich(
-                                TextSpan(
-                                  children: [
-                                    TextSpan(text: 'web-store', style: t.type.ui.ink(c.ink3)),
-                                    TextSpan(text: '  /  ', style: t.type.ui.ink(c.ink4)),
-                                    TextSpan(text: s.session.title),
-                                  ],
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: t.type.uiStrong,
-                              ),
-                            ),
-                            if (box.maxWidth >= 1000)
-                              Expanded(
-                                flex: 3,
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    for (final v in s.services.take(box.maxWidth >= 1300 ? 3 : 2))
+                            AgentBar(
+                              name: agent.name,
+                              state: agent.state,
+                              mark: mark,
+                              inset: wide ? 24 : widget.titleInset + 12,
+                              tabs: const [
+                                ('Conversation', null),
+                                ('Changes', '3'),
+                                ('Terminal', null),
+                              ],
+                              index: _tab,
+                              onTab: (i) => setState(() => _tab = i),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (box.maxWidth >= 1080)
+                                    for (final v in s.services)
                                       Flexible(
                                         child: UsageKey(
                                           s.ServiceViewX(v).withActive(_active[v.name]!),
@@ -136,57 +128,54 @@ class _WorkbenchState extends State<Workbench> {
                                           onLink: () {},
                                         ),
                                       ),
-                                  ],
-                                ),
-                              ),
-                            const SizedBox(width: 4),
-                            AxButton.icon(
-                              AxIcon.panel,
-                              label: 'Hide the panel',
-                              tone: AxTone.quiet,
-                              onPressed: () {},
-                            ),
-                            const SizedBox(width: 12),
-                          ],
-                        ),
-                      ),
-                      AgentBar(
-                        name: agent.name,
-                        state: agent.state,
-                        mark: mark,
-                        tabs: const [('Conversation', null), ('Changes', '3'), ('Terminal', null)],
-                        index: _tab,
-                        onTab: (i) => setState(() => _tab = i),
-                        trailing: AxButton(label: 'Stop', icon: AxIcon.stop, onPressed: () {}),
-                      ),
-                      const Hairline(),
-                      Expanded(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(child: _talk(choices, agent.name, agent.id)),
-                            if (box.maxWidth >= 1180)
-                              SidePanel(
-                                groups: [
-                                  planGroup(context, s.session.tasks),
-                                  (
-                                    'Changed files',
-                                    const ChangedBy(57, 2),
-                                    [
-                                      for (final (path, a, r) in const [
-                                        ('src/auth/refresh.ts', 7, 2),
-                                        ('src/auth/inflight.ts', 31, 0),
-                                        ('test/refresh.test.ts', 19, 0),
-                                      ])
-                                        ChangedRow(path, added: a, removed: r, onOpen: () {}),
-                                    ],
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: AxButton(
+                                      label: 'Stop',
+                                      icon: AxIcon.stop,
+                                      onPressed: () {},
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  AxButton.icon(
+                                    AxIcon.panel,
+                                    label: 'Hide the panel',
+                                    tone: AxTone.quiet,
+                                    onPressed: () {},
                                   ),
                                 ],
                               ),
+                            ),
+                            Expanded(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(child: _talk(choices, agent.name, agent.id)),
+                                  if (box.maxWidth >= 1180)
+                                    SidePanel(
+                                      groups: [
+                                        planGroup(context, s.session.tasks),
+                                        (
+                                          'Changed files',
+                                          const ChangedBy(57, 2),
+                                          [
+                                            for (final (path, a, r) in const [
+                                              ('src/auth/refresh.ts', 7, 2),
+                                              ('src/auth/inflight.ts', 31, 0),
+                                              ('test/refresh.test.ts', 19, 0),
+                                            ])
+                                              ChangedRow(path, added: a, removed: r, onOpen: () {}),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -207,7 +196,7 @@ class _WorkbenchState extends State<Workbench> {
             AxSpace.beside(box.maxWidth),
             0,
             AxSpace.beside(box.maxWidth),
-            16,
+            20,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -222,7 +211,7 @@ class _WorkbenchState extends State<Workbench> {
                 const SizedBox(height: 10),
               ],
               Composer(
-                placeholder: 'Message $name. It is sent before the next step.',
+                placeholder: 'Message $name',
                 action: 'Queue',
                 leading: [
                   ExecutionKey(choices, of: id),
@@ -251,14 +240,14 @@ class _Side extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 44,
+          height: 64,
           child: Padding(
-            padding: EdgeInsets.only(left: inset, right: 8),
+            padding: EdgeInsets.only(top: 8, left: inset, right: 10),
             child: Row(
               children: [
-                const AxMark(size: 16),
-                const SizedBox(width: 8),
-                Expanded(child: Text('Axiom', style: t.type.uiStrong)),
+                const AxMark(size: 18),
+                const SizedBox(width: 9),
+                Expanded(child: Text('Axiom', style: t.type.uiStrong.copyWith(fontSize: 14))),
                 AxButton.icon(
                   AxIcon.sidebar,
                   label: 'Hide the sidebar',
@@ -270,7 +259,7 @@ class _Side extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
           child: Column(
             children: [
               NavRow(AxIcon.plus, 'New session', keys: '⌘N', act: true, onPressed: () {}),
@@ -281,7 +270,7 @@ class _Side extends StatelessWidget {
         ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
             children: [
               const SideHeading('Needs you'),
               NeedsRow(
@@ -294,12 +283,11 @@ class _Side extends StatelessWidget {
               ),
               SideHeading(
                 'web-store',
-                icon: AxIcon.folder,
-                trailing: AxButton.icon(
+                act: AxButton.icon(
                   AxIcon.plus,
                   label: 'New session in web-store',
                   tone: AxTone.quiet,
-                  size: 24,
+                  size: 28,
                   onPressed: () {},
                 ),
               ),
@@ -315,9 +303,8 @@ class _Side extends StatelessWidget {
             ],
           ),
         ),
-        const Hairline(),
         Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 12),
           child: NavRow(AxIcon.settings, 'Accounts', keys: '⌘,', onPressed: () {}),
         ),
       ],

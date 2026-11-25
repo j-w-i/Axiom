@@ -1434,7 +1434,7 @@ void main() {
       await press(t, find.text('Lead asks to run a command'));
       expect(s.calls, isEmpty, reason: 'it is open already');
       expect(find.byType(AccountsPage), findsNothing);
-      expect(find.text('Message Lead. It is sent before the next step.'), findsWidgets);
+      expect(find.text('Message Lead. Sent before its next step'), findsWidgets);
       expect(find.byType(RequestBar), findsOneWidget);
       // In another session: that is opened, and its agent is the one that is shown.
       await press(t, find.text('Ada asks to write a file'));

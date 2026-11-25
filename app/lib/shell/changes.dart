@@ -162,7 +162,6 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
             ],
           ),
         ),
-        const Hairline(),
         if (problem != null && all != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
@@ -351,7 +350,7 @@ class _FileRow extends StatelessWidget {
               ],
             ),
           ),
-        const Hairline(),
+        const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Hairline()),
       ],
     );
   }
@@ -742,7 +741,6 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
             ],
           ),
         ),
-        const Hairline(),
         Expanded(child: _list(context, all, files, words, only)),
         if (files.isNotEmpty && _atWork) ...[
           const Hairline(),

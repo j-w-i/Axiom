@@ -143,32 +143,32 @@ void main() {
         expect(bad, isEmpty, reason: bad.join('\n'));
       });
 
-      test('depth is a tone, a lit edge and a contact shade', () {
+      test('depth is a tone and soft light, and nothing is drawn round', () {
         double l(SurfaceSpec s) => lum(s.fill);
         // Recessed: a tone below the ground, and nothing else.
-        for (final s in [c.track, c.block, c.keyDown]) {
-          expect((s.lip.a, s.shade.a, s.shadows.isEmpty), (0, 0, true));
+        for (final s in [c.track, c.block]) {
+          expect((s.lip.a, s.border.a, s.shadows.isEmpty), (0, 0, true));
+          expect(l(s), lessThan(l(c.bay)));
         }
-        expect(l(c.track), lessThan(l(c.bay)));
-        expect(l(c.block), lessThan(l(c.bay)));
-        // Raised: a tone above what it stands on, lit and shaded.
-        for (final s in [c.plate, c.slab, c.key, c.keyHover, c.written]) {
-          expect(s.raised && s.shade.a > 0, isTrue);
-          expect(l(s), greaterThan(l(c.bay)));
+        // Raised: a tone above what it stands on, in a soft shade.
+        for (final s in [c.plate, c.key, c.keyHover, c.written]) {
+          expect(s.shadows, isNotEmpty);
         }
-        // Grounds are flat.
-        for (final s in [c.bay, c.chassis]) {
-          expect((s.lip.a, s.shade.a, s.border.a), (0, 0, 0));
-        }
-        // Soft shades are the light theme's; what floats has one in both.
-        if (c.brightness == Brightness.dark) {
-          for (final s in [c.plate, c.slab, c.key, c.written]) {
-            expect(s.shadows, isEmpty);
+        expect(l(c.plate), greaterThan(l(c.bay)));
+        expect(l(c.written), greaterThan(l(c.bay)));
+        expect(l(c.slab), greaterThan(l(c.track)));
+        expect(l(c.canvas), greaterThan(l(c.chassis)));
+        // Where an agent is written to has no edge of any kind.
+        expect((c.written.lip.a, c.written.border.a), (0, 0));
+        // Light on an upper edge is faint; no shade is a line.
+        for (final s in [c.plate, c.slab, c.key, c.written, c.overlay, c.canvas, c.primary]) {
+          expect(s.lip.a, lessThan(.1));
+          for (final x in s.shadows) {
+            expect(x.blurRadius, greaterThanOrEqualTo(2));
           }
         }
-        expect(c.overlay.shadows, isNotEmpty);
         // No edge has a hue.
-        for (final k in [c.plate.lip, c.plate.shade, c.written.bezel, c.field.bezel]) {
+        for (final k in [c.plate.lip, c.plate.border, c.key.border, c.overlay.border]) {
           expect((k.r - k.b).abs(), lessThan(.06));
         }
       });

@@ -141,7 +141,7 @@ void main() {
         ];
         expect(borders, hasLength(!on && outlined ? 1 : 0), reason: '$tone, $on');
         for (final b in borders) {
-          expect(b, Border.all(color: AxColors.dark.field.bezel));
+          expect(b, Border.all(color: AxColors.dark.meterTrack));
         }
       }
     }
@@ -999,8 +999,8 @@ void main() {
       );
       sizes.add(t.getSize(find.byType(AxButton)).height);
       final p = t.renderObject<RenderParagraph>(find.text('Run'));
-      expect(p.text.style!.fontSize, 12.5);
+      expect(p.text.style!.fontSize, 13);
     }
-    expect(sizes, [24, 28, 32]);
+    expect(sizes, [28, 32, 36]);
   });
 }

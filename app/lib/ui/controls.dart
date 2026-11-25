@@ -93,8 +93,8 @@ class AxButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null)
-              AxGlyph(icon!, size: iconOnly ? 15 : 14, color: ink, filled: iconFilled),
-            if (icon != null && !iconOnly) const SizedBox(width: 6),
+              AxGlyph(icon!, size: iconOnly ? 17 : 15, color: ink, filled: iconFilled),
+            if (icon != null && !iconOnly) const SizedBox(width: 7),
             if (!iconOnly)
               Flexible(
                 child: Text(
@@ -111,7 +111,7 @@ class AxButton extends StatelessWidget {
           height: h,
           width: width ?? (iconOnly ? h : null),
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: iconOnly ? 0 : t.density.pad + 2),
+            padding: EdgeInsets.symmetric(horizontal: iconOnly ? 0 : t.density.pad + 1),
             child: Center(widthFactor: 1, child: row),
           ),
         );
@@ -119,24 +119,23 @@ class AxButton extends StatelessWidget {
           // A main act keeps its place while it cannot be pressed.
           return tone == AxTone.quiet
               ? body
+              : round
+              ? Ground(c.selected, radius: h / 2, child: body)
               : DecoratedBox(
                   decoration: BoxDecoration(
-                    border: Border.all(color: c.field.bezel),
+                    border: Border.all(color: c.meterTrack),
                     borderRadius: BorderRadius.circular(round ? h / 2 : AxRadius.key),
                   ),
                   child: body,
                 );
         }
         if (tone == AxTone.quiet) {
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              color: s.pressed || engaged
-                  ? c.selected
-                  : s.hovered
-                  ? c.hover
-                  : null,
-              borderRadius: BorderRadius.circular(AxRadius.key),
-            ),
+          return Ground(
+            s.pressed || engaged
+                ? c.selected
+                : s.hovered
+                ? c.hover
+                : null,
             child: body,
           );
         }
@@ -246,7 +245,7 @@ class AxTabs extends StatelessWidget {
               builder: (context, s) {
                 final on = i == index;
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 11),
+                  padding: const EdgeInsets.symmetric(horizontal: 13),
                   child: ConstrainedBox(
                     constraints: BoxConstraints(minHeight: t.density.control - 4),
                     child: Row(
@@ -347,7 +346,7 @@ class AxCheck extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox.square(
-            dimension: 16,
+            dimension: 18,
             child: value
                 ? Surface(
                     s.enabled ? c.primary : c.ghost,
@@ -355,7 +354,7 @@ class AxCheck extends StatelessWidget {
                     child: Center(
                       child: AxGlyph(
                         AxIcon.check,
-                        size: 12,
+                        size: 14,
                         color: s.enabled ? c.onPrimary : c.idle,
                       ),
                     ),
@@ -365,7 +364,7 @@ class AxCheck extends StatelessWidget {
                       color: s.enabled ? c.track.fill : null,
                       border: Border.all(
                         color: !s.enabled
-                            ? c.field.bezel
+                            ? c.meterTrack
                             : s.hovered
                             ? c.ink2
                             : c.idle,
@@ -455,7 +454,7 @@ class _AxFieldState extends State<AxField> {
             listenable: _f,
             builder: (_, child) => Surface(
               widget.enabled ? c.field : c.keyDown,
-              radius: AxRadius.key - (widget.enabled ? c.field.ring : 0),
+              radius: AxRadius.key,
               ring: bad
                   ? c.fault
                   : _f.hasFocus
@@ -464,11 +463,11 @@ class _AxFieldState extends State<AxField> {
               child: child,
             ),
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: t.density.control + 2),
+              constraints: BoxConstraints(minHeight: t.density.control + 4),
               child: Padding(
                 padding: EdgeInsets.symmetric(
-                  horizontal: t.density.pad + 3,
-                  vertical: widget.lines > 1 ? 7 : 0,
+                  horizontal: t.density.pad,
+                  vertical: widget.lines > 1 ? 10 : 0,
                 ),
                 child: Row(
                   crossAxisAlignment: widget.lines > 1

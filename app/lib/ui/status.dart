@@ -39,7 +39,7 @@ enum AgentState {
 }
 
 /// A state lamp. Each state has its own shape, so colour is never alone: running is a ring with an
-/// arc that goes round, asking a diamond, waiting a ring, paused two bars, done a check, failed a
+/// arc that goes round, asking a full dot, waiting a ring, paused two bars, done a check, failed a
 /// cross. The word is always in the semantics.
 class AxLamp extends StatefulWidget {
   const AxLamp(this.state, {super.key, this.turns = true});
@@ -111,17 +111,9 @@ class _LampPainter extends CustomPainter {
         c.drawCircle(at, 3.9, line..color = color.withValues(alpha: .3));
         c.drawArc(ring, (t.value * 2 - .5) * math.pi, math.pi * .75, false, line..color = color);
       case AgentState.asking:
-        c.drawPath(
-          Path()..addPolygon([
-            at.translate(0, -4.4),
-            at.translate(4.4, 0),
-            at.translate(0, 4.4),
-            at.translate(-4.4, 0),
-          ], true),
-          p..strokeJoin = StrokeJoin.round,
-        );
+        c.drawCircle(at, 3.7, p);
       case AgentState.waiting:
-        c.drawCircle(at, 3.6, line..strokeWidth = 1.3);
+        c.drawCircle(at, 3.2, line..strokeWidth = 1.3);
       case AgentState.paused:
         for (final x in [2.5, 7.0]) {
           c.drawRRect(
@@ -241,4 +233,74 @@ class _MeterPainter extends CustomPainter {
   @override
   bool shouldRepaint(_MeterPainter o) =>
       o.v != v || o.dashed != dashed || o.hot != hot || o.track != track || o.vertical != vertical;
+}
+
+/// A level as a ring, where there is room for a figure and not for a bar. Dashed when estimated, empty
+/// when unknown.
+class AxRing extends StatelessWidget {
+  const AxRing({
+    required this.label,
+    required this.value,
+    super.key,
+    this.provenance = Provenance.measured,
+    this.size = 15,
+    this.warnAt = .85,
+    this.color,
+  });
+  final String label;
+  final double? value;
+  final Provenance provenance;
+  final double size, warnAt;
+  final Color? color;
+  @override
+  Widget build(BuildContext context) {
+    final c = Ax.of(context).colors;
+    final v = provenance == Provenance.unknown ? null : value?.clamp(0, 1).toDouble();
+    return Semantics(
+      label: label,
+      value: v == null ? 'not available' : '${(v * 100).round()}%, ${provenance.words}',
+      child: CustomPaint(
+        size: Size.square(size),
+        painter: _RingPainter(
+          v,
+          provenance == Provenance.estimated,
+          c.meterTrack,
+          v != null && v >= warnAt ? c.attention : color ?? c.meterFill,
+        ),
+      ),
+    );
+  }
+}
+
+class _RingPainter extends CustomPainter {
+  const _RingPainter(this.v, this.dashed, this.track, this.fill);
+  final double? v;
+  final bool dashed;
+  final Color track, fill;
+  @override
+  void paint(Canvas c, Size s) {
+    const w = 2.2;
+    final r = Rect.fromCircle(center: s.center(Offset.zero), radius: (s.shortestSide - w) / 2);
+    final p = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w
+      ..strokeCap = StrokeCap.round;
+    c.drawArc(r, 0, math.pi * 2, false, p..color = track);
+    final x = v;
+    if (x == null || x <= 0) return;
+    p.color = fill;
+    if (!dashed) {
+      c.drawArc(r, -math.pi / 2, math.pi * 2 * x, false, p);
+      return;
+    }
+    p.strokeCap = StrokeCap.butt;
+    const step = math.pi / 6;
+    for (var a = 0.0; a < math.pi * 2 * x; a += step) {
+      c.drawArc(r, -math.pi / 2 + a, math.min(step * .6, math.pi * 2 * x - a), false, p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter o) =>
+      o.v != v || o.dashed != dashed || o.track != track || o.fill != fill;
 }

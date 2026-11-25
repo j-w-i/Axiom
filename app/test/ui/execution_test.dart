@@ -352,7 +352,7 @@ void main() {
   testWidgets('a panel that grows stays on the side it opened on', (t) async {
     await mount(
       t,
-      const Align(alignment: Alignment(-1, .05), child: Owner()),
+      const Align(alignment: Alignment(-1, -.4), child: Owner()),
       size: const Size(900, 600),
       dpr: 1,
     );
@@ -468,17 +468,9 @@ void main() {
       expect(find.text('58k'), findsOneWidget, reason: 'what is free');
     });
 
-    testWidgets('its level has the hue of its service', (t) async {
-      const hue = Color(0xFF123456);
-      await mount(
-        t,
-        const Align(
-          alignment: Alignment.bottomLeft,
-          child: ContextGauge(ContextView(share: .4, provenance: Provenance.reported), hue: hue),
-        ),
-        dpr: 1,
-      );
-      expect(t.widget<AxMeter>(find.byType(AxMeter)).color, hue);
+    testWidgets('its level is neutral: how full it is belongs to no service', (t) async {
+      await show(t, const ContextView(share: .4, provenance: Provenance.reported));
+      expect(t.widget<AxRing>(find.byType(AxRing)).color, isNull);
     });
 
     testWidgets('an unknown level is not a number', (t) async {

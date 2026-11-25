@@ -29,7 +29,7 @@ class _GalleryState extends State<Gallery> {
       child: MediaQuery(
         data: MediaQuery.of(context).copyWith(disableAnimations: _still ? true : null),
         child: Surface(
-          theme.colors.chassis,
+          theme.colors.bay,
           radius: 0,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

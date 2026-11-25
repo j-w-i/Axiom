@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui show Gradient;
 
 import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart';
@@ -29,36 +30,33 @@ Path continuous(Rect r, double radius) {
 
 /// The outlines of one shape, made once for a size.
 class _Shape {
-  _Shape(this.size, this.radius, this.ring)
-    : outer = ring > 0 ? continuous(Offset.zero & size, radius + ring) : null,
-      face = continuous((Offset.zero & size).deflate(ring), radius);
+  _Shape(this.size, this.radius)
+    : face = continuous(Offset.zero & size, radius),
+      edge = continuous((Offset.zero & size).deflate(.5), radius - .5);
   final Size size;
-  final double radius, ring;
-  final Path face;
-  final Path? outer;
-  late final Path lip = Path.combine(
-    PathOperation.difference,
-    face,
-    face.shift(const Offset(0, 1)),
-  );
-  late final Path foot = Path.combine(
-    PathOperation.difference,
-    face.shift(const Offset(0, 1)),
-    face,
-  );
-  late final Path edge = continuous((Offset.zero & size).deflate(ring + .5), radius - .5);
+  final double radius;
+  final Path face, edge;
+  Color? _lip;
+  Shader? _light;
+
+  /// Strongest at the upper edge, gone by the middle.
+  Shader light(Color lip) {
+    if (_lip == lip) return _light!;
+    _lip = lip;
+    return _light = ui.Gradient.linear(Offset.zero, Offset(0, math.min(size.height, 40)), [
+      lip,
+      lip.withValues(alpha: 0),
+    ]);
+  }
 }
 
-/// Paints a [SurfaceSpec]. Raised, from below: a soft shade (light theme), a contact shade, the fill,
-/// a lit top edge. Recessed: the fill. Written into: a ring round it.
+/// Paints a [SurfaceSpec]: its soft shades, its fill and the light that falls on it.
 class Surface extends SingleChildRenderObjectWidget {
   const Surface(this.spec, {super.key, this.radius = AxRadius.key, this.ring, super.child});
   final SurfaceSpec spec;
-
-  /// Of the face. What has a ring is as much rounder outside.
   final double radius;
 
-  /// The colour of the ring, if it is not the spec's: what has the keyboard, what is wrong.
+  /// Round what has the keyboard, or what is wrong.
   final Color? ring;
 
   @override
@@ -99,9 +97,7 @@ class RenderSurface extends RenderProxyBox {
   @override
   void paint(PaintingContext context, Offset offset) {
     var m = _made;
-    if (m == null || m.size != size || m.radius != _radius || m.ring != _spec.ring) {
-      m = _made = _Shape(size, _radius, _spec.ring);
-    }
+    if (m == null || m.size != size || m.radius != _radius) m = _made = _Shape(size, _radius);
     final c = context.canvas..save();
     c.translate(offset.dx, offset.dy);
     paintSurface(c, m, _spec, _ring);
@@ -114,29 +110,30 @@ void paintSurface(Canvas c, Object shape, SurfaceSpec spec, Color? ring) {
   final m = shape as _Shape;
   for (final s in spec.shadows) {
     c.drawPath(
-      (m.outer ?? m.face).shift(s.offset),
+      m.face.shift(s.offset),
       Paint()
         ..color = s.color
         ..maskFilter = debugDisableShadows ? null : MaskFilter.blur(BlurStyle.normal, s.blurSigma),
     );
   }
-  if (m.outer case final o?) c.drawPath(o, Paint()..color = ring ?? spec.bezel);
-  if (spec.shade.a > 0) c.drawPath(m.foot, Paint()..color = spec.shade);
   c.drawPath(m.face, Paint()..color = spec.fill);
-  if (spec.border.a > 0) {
+  Paint line() => Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1;
+  if (spec.border.a > 0) c.drawPath(m.edge, line()..color = spec.border);
+  if (spec.lip.a > .01) c.drawPath(m.edge, line()..shader = m.light(spec.lip));
+  if (ring != null) {
     c.drawPath(
       m.edge,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = spec.border,
+      line()
+        ..strokeWidth = 1.5
+        ..color = ring,
     );
   }
-  if (spec.lip.a > 0) c.drawPath(m.lip, Paint()..color = spec.lip);
 }
 
 /// A shape to paint with [paintSurface].
-Object surfaceShape(Size size, double radius) => _Shape(size, radius, 0);
+Object surfaceShape(Size size, double radius) => _Shape(size, radius);
 
 /// Clips to the outline of a surface.
 class ContinuousClip extends CustomClipper<Path> {
@@ -148,7 +145,7 @@ class ContinuousClip extends CustomClipper<Path> {
   bool shouldReclip(ContinuousClip o) => o.radius != radius;
 }
 
-/// A groove between two parts of one tone.
+/// A hairline between rows of one kind. Parts of the window are told apart by tone and room.
 class Hairline extends StatelessWidget {
   const Hairline({super.key, this.vertical = false});
   final bool vertical;
@@ -285,5 +282,49 @@ class _RenderSliding extends RenderFlex {
       c.restore();
     }
     super.paint(context, offset);
+  }
+}
+
+/// A ground that comes and goes under the hand.
+class Ground extends StatelessWidget {
+  const Ground(this.color, {required this.child, super.key, this.radius = AxRadius.key});
+  final Color? color;
+  final double radius;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: (MediaQuery.maybeDisableAnimationsOf(context) ?? false)
+        ? Duration.zero
+        : AxMotion.fade,
+    decoration: BoxDecoration(
+      color: color ?? Ax.of(context).colors.hover.withValues(alpha: 0),
+      borderRadius: BorderRadius.circular(radius),
+    ),
+    child: child,
+  );
+}
+
+/// What scrolls goes out of sight gradually.
+class Fade extends StatelessWidget {
+  const Fade({required this.up, super.key, this.height = 28});
+
+  /// At the upper edge.
+  final bool up;
+  final double height;
+  @override
+  Widget build(BuildContext context) {
+    final c = Ax.of(context).colors.bay.fill;
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: up ? Alignment.topCenter : Alignment.bottomCenter,
+            end: up ? Alignment.bottomCenter : Alignment.topCenter,
+            colors: [c, c.withValues(alpha: 0)],
+          ),
+        ),
+        child: SizedBox(height: height, width: double.infinity),
+      ),
+    );
   }
 }

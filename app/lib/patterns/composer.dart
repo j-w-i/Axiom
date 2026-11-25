@@ -93,14 +93,13 @@ class _ComposerState extends State<Composer> {
     final t = Ax.of(context), c = t.colors;
     return Surface(
       c.written,
-      radius: AxRadius.card,
-      ring: _focus.hasFocus ? c.writtenFocus : null,
+      radius: AxRadius.written,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(17, 14, 17, 6),
+            padding: const EdgeInsets.fromLTRB(18, 15, 18, 8),
             child: Focus(
               canRequestFocus: false,
               skipTraversal: true,
@@ -122,7 +121,7 @@ class _ComposerState extends State<Composer> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(9, 2, 11, 11),
+            padding: const EdgeInsets.fromLTRB(9, 2, 10, 10),
             child: Row(
               children: [
                 Expanded(
@@ -147,7 +146,7 @@ class _ComposerState extends State<Composer> {
                   label: widget.action,
                   tone: AxTone.primary,
                   round: true,
-                  size: 30,
+                  size: 34,
                   onPressed: _text.text.trim().isEmpty || !widget.enabled
                       ? null
                       : () => unawaited(_submit()),

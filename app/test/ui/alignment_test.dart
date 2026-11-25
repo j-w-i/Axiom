@@ -80,7 +80,10 @@ void main() {
     ], 'owners');
     // An agent's two lines begin where each other does.
     oneLine([
-      for (final x in [find.text('Lead'), find.textContaining('Reading review notes')])
+      for (final x in [
+        find.textContaining('Lead  ', findRichText: true).first,
+        find.textContaining('Reading review notes', findRichText: true).first,
+      ])
         t.getTopLeft(x).dx,
     ], 'lines');
   });
@@ -123,6 +126,6 @@ void main() {
       find.descendant(of: find.text('Answer'), matching: find.byType(RichText)),
     );
     const capHeight = .727; // Inter
-    expect(glyph, closeTo(b - 12.5 * capHeight / 2, .75));
+    expect(glyph, closeTo(b - 13 * capHeight / 2, .75));
   });
 }

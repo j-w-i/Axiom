@@ -101,7 +101,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
                     Ax.of(context).colors.overlay,
                     radius: AxRadius.card,
                     child: Padding(
-                      padding: const EdgeInsets.all(5),
+                      padding: const EdgeInsets.all(7),
                       // However much there is, it stays in the window and scrolls.
                       child: SingleChildScrollView(child: widget.panel(context, close)),
                     ),

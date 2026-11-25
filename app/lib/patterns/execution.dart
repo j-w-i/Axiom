@@ -45,7 +45,7 @@ class ExecutionKey extends StatelessWidget {
     final words = [for (final ch in choices.take(2)) ?ch.item?.label];
     return AxPopover(
       key: ValueKey(of),
-      width: 400,
+      width: 440,
       anchor: (context, open, toggle) => Pressable(
         label: 'Runs on ${words.join(', ')}. Change',
         expanded: open,

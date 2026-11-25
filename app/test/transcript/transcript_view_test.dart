@@ -186,7 +186,7 @@ void main() {
       ..end('t', '', {'summary': '20 lines'})
       ..open('q')
       ..end('q', 'It is fine. ${'So it is. ' * 60}');
-    for (final (width, left) in [(1200.0, 240.0), (700.0, 24.0)]) {
+    for (final (width, left) in [(1200.0, 230.0), (700.0, 28.0)]) {
       await mount(t, TranscriptView(f.agent), size: Size(width, 700), dpr: 1);
       Rect of(String x) => t.getRect(find.text(x, findRichText: true));
       final words = of('I will read the file.'), work = of('a.dart');
@@ -198,7 +198,7 @@ void main() {
       expect(long.right, lessThanOrEqualTo(width - left + 1));
       // What was asked is at the right, as wide as its words.
       final tile = of('Do it.');
-      expect(tile.right, closeTo(width - left - 14, 1));
+      expect(tile.right, closeTo(width - left - 16, 1));
       expect(tile.width, lessThan(60));
     }
   });
@@ -445,7 +445,7 @@ void main() {
       await mount(t, TranscriptView(f.agent, key: UniqueKey()), dpr: 1);
       final a = t.getRect(find.text(last, findRichText: true));
       final b = t.getRect(find.text('a.dart'));
-      expect(b.top - a.bottom, inInclusiveRange(2, 22), reason: last);
+      expect(b.top - a.bottom, inInclusiveRange(2, 24), reason: last);
     }
   });
 

@@ -45,9 +45,8 @@ String tokens(int n) {
 
 /// How full the context window is: a level, a figure and, when opened, what fills it.
 class ContextGauge extends StatelessWidget {
-  const ContextGauge(this.view, {super.key, this.hue});
+  const ContextGauge(this.view, {super.key});
   final ContextView view;
-  final Color? hue;
 
   @override
   Widget build(BuildContext context) {
@@ -88,26 +87,16 @@ class ContextGauge extends StatelessWidget {
           return true;
         }
 
-        final meter = fits(9 + 92);
-        final small = !meter && fits(9 + 40);
-        final label = fits(9 + wide('Context', quiet));
+        final ring = fits(8 + 16);
+        final label = fits(8 + wide('Context', quiet));
         final more = amount != null && fits(8 + wide(amount, quiet));
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (label) ...[Text('Context', style: quiet), const SizedBox(width: 9)],
-            if (meter || small) ...[
-              SizedBox(
-                width: meter ? 92 : 40,
-                child: AxMeter(
-                  label: 'Context used',
-                  value: share,
-                  provenance: v.provenance,
-                  thickness: 5,
-                  color: hue,
-                ),
-              ),
-              const SizedBox(width: 9),
+            if (label) ...[Text('Context', style: quiet), const SizedBox(width: 8)],
+            if (ring) ...[
+              AxRing(label: 'Context used', value: share, provenance: v.provenance, size: 16),
+              const SizedBox(width: 8),
             ],
             Flexible(
               child: Text(percent, maxLines: 1, overflow: TextOverflow.ellipsis, style: strong),
@@ -133,7 +122,11 @@ class ContextGauge extends StatelessWidget {
         onPressed: toggle,
         builder: (_, s) => DecoratedBox(
           decoration: BoxDecoration(
-            color: open || s.hovered ? c.tinted(hue) : null,
+            color: open
+                ? c.selected
+                : s.hovered
+                ? c.hover
+                : null,
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
           child: ConstrainedBox(
