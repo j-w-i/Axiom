@@ -30,7 +30,16 @@ class SurfaceSpec {
   final Color lip;
 
   /// Soft, and never a line.
-  final List<BoxShadow> shadows;
+  final List<Shade> shadows;
+}
+
+/// A soft shade. [ground]: how light what it falls on is, so that its steps can be hidden.
+@immutable
+class Shade {
+  const Shade(this.color, this.blur, this.y, this.ground);
+  final Color color;
+  final double blur, y, ground;
+  double get sigma => blur * .5;
 }
 
 @immutable
@@ -148,62 +157,44 @@ class AxColors {
     meterFill: Color(0xFFA8ACB4),
     chassis: SurfaceSpec(Color(0xFF131417)),
     bay: SurfaceSpec(Color(0xFF1A1B1E)),
-    canvas: SurfaceSpec(
-      Color(0xFF1A1B1E),
-      shadows: [BoxShadow(color: Color(0x33000000), blurRadius: 10, offset: Offset(0, 2))],
-    ),
+    canvas: SurfaceSpec(Color(0xFF1A1B1E), shadows: [Shade(Color(0x33000000), 10, 2, .1)]),
     plate: SurfaceSpec(
       Color(0xFF242529),
       lip: Color(0x07FFFFFF),
-      shadows: [
-        BoxShadow(color: Color(0x29000000), blurRadius: 2, offset: Offset(0, 1)),
-        BoxShadow(color: Color(0x1F000000), blurRadius: 14, offset: Offset(0, 4)),
-      ],
+      shadows: [Shade(Color(0x29000000), 2, 1, .1), Shade(Color(0x1F000000), 14, 4, .1)],
     ),
     block: SurfaceSpec(Color(0xFF131417)),
     track: SurfaceSpec(Color(0xFF121316)),
     slab: SurfaceSpec(
       Color(0xFF2D2E33),
       lip: Color(0x0AFFFFFF),
-      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
+      shadows: [Shade(Color(0x2E000000), 3, 1, .1)],
     ),
     ghost: SurfaceSpec(Color(0x0BFFFFFF)),
     field: SurfaceSpec(Color(0xFF242529)),
     written: SurfaceSpec(
       Color(0xFF27282C),
-      shadows: [
-        BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 2)),
-        BoxShadow(color: Color(0x3D000000), blurRadius: 40, offset: Offset(0, 14)),
-      ],
+      shadows: [Shade(Color(0x33000000), 4, 1, .1), Shade(Color(0x42000000), 20, 5, .1)],
     ),
     key: SurfaceSpec(
       Color(0xFF303237),
       lip: Color(0x0CFFFFFF),
-      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
+      shadows: [Shade(Color(0x2E000000), 3, 1, .1)],
     ),
     keyHover: SurfaceSpec(
       Color(0xFF393B41),
       lip: Color(0x17FFFFFF),
-      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
+      shadows: [Shade(Color(0x2E000000), 3, 1, .1)],
     ),
     keyDown: SurfaceSpec(Color(0xFF212226)),
-    primary: SurfaceSpec(
-      Color(0xFFEDEEF0),
-      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
-    ),
-    primaryHover: SurfaceSpec(
-      Color(0xFFFFFFFF),
-      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))],
-    ),
+    primary: SurfaceSpec(Color(0xFFEDEEF0), shadows: [Shade(Color(0x2E000000), 3, 1, .1)]),
+    primaryHover: SurfaceSpec(Color(0xFFFFFFFF), shadows: [Shade(Color(0x2E000000), 3, 1, .1)]),
     primaryDown: SurfaceSpec(Color(0xFFC9CBCF)),
     overlay: SurfaceSpec(
       Color(0xFF2A2B30),
       lip: Color(0x17FFFFFF),
       border: Color(0x0FFFFFFF),
-      shadows: [
-        BoxShadow(color: Color(0x66000000), blurRadius: 48, offset: Offset(0, 16)),
-        BoxShadow(color: Color(0x40000000), blurRadius: 8, offset: Offset(0, 2)),
-      ],
+      shadows: [Shade(Color(0x66000000), 48, 16, .1), Shade(Color(0x40000000), 8, 2, .1)],
     ),
     diffAdd: Color(0x264DB585),
     diffRemove: Color(0x2AE5645B),
@@ -275,64 +266,43 @@ class AxColors {
     bay: SurfaceSpec(Color(0xFFFBFBFC)),
     canvas: SurfaceSpec(
       Color(0xFFFBFBFC),
-      shadows: [
-        BoxShadow(color: Color(0x140D0E10), blurRadius: 4, offset: Offset(0, 1)),
-        BoxShadow(color: Color(0x0D0D0E10), blurRadius: 18, offset: Offset(0, 4)),
-      ],
+      shadows: [Shade(Color(0x140D0E10), 4, 1, .97), Shade(Color(0x0D0D0E10), 18, 4, .97)],
     ),
     plate: SurfaceSpec(
       Color(0xFFFFFFFF),
       border: Color(0x0F0D0E10),
-      shadows: [
-        BoxShadow(color: Color(0x0A0D0E10), blurRadius: 2, offset: Offset(0, 1)),
-        BoxShadow(color: Color(0x0D0D0E10), blurRadius: 16, offset: Offset(0, 4)),
-      ],
+      shadows: [Shade(Color(0x0A0D0E10), 2, 1, .97), Shade(Color(0x0D0D0E10), 16, 4, .97)],
     ),
     block: SurfaceSpec(Color(0xFFF1F2F4)),
     track: SurfaceSpec(Color(0xFFEBECEF)),
     slab: SurfaceSpec(
       Color(0xFFFFFFFF),
-      shadows: [
-        BoxShadow(color: Color(0x1A0D0E10), blurRadius: 3, offset: Offset(0, 1)),
-        BoxShadow(color: Color(0x0A0D0E10), blurRadius: 8, offset: Offset(0, 2)),
-      ],
+      shadows: [Shade(Color(0x1A0D0E10), 3, 1, .97), Shade(Color(0x0A0D0E10), 8, 2, .97)],
     ),
     ghost: SurfaceSpec(Color(0x0A0D0E10)),
     field: SurfaceSpec(Color(0xFFF0F1F3)),
     written: SurfaceSpec(
       Color(0xFFFFFFFF),
-      shadows: [
-        BoxShadow(color: Color(0x0F0D0E10), blurRadius: 8, offset: Offset(0, 2)),
-        BoxShadow(color: Color(0x170D0E10), blurRadius: 40, offset: Offset(0, 14)),
-      ],
+      shadows: [Shade(Color(0x0F0D0E10), 4, 1, .97), Shade(Color(0x140D0E10), 20, 5, .97)],
     ),
     key: SurfaceSpec(
       Color(0xFFFFFFFF),
       border: Color(0x170D0E10),
-      shadows: [BoxShadow(color: Color(0x170D0E10), blurRadius: 3, offset: Offset(0, 1))],
+      shadows: [Shade(Color(0x170D0E10), 3, 1, .97)],
     ),
     keyHover: SurfaceSpec(
       Color(0xFFF5F6F7),
       border: Color(0x1F0D0E10),
-      shadows: [BoxShadow(color: Color(0x170D0E10), blurRadius: 3, offset: Offset(0, 1))],
+      shadows: [Shade(Color(0x170D0E10), 3, 1, .97)],
     ),
     keyDown: SurfaceSpec(Color(0xFFE6E7EA)),
-    primary: SurfaceSpec(
-      Color(0xFF1B1C1F),
-      shadows: [BoxShadow(color: Color(0x170D0E10), blurRadius: 3, offset: Offset(0, 1))],
-    ),
-    primaryHover: SurfaceSpec(
-      Color(0xFF34363B),
-      shadows: [BoxShadow(color: Color(0x170D0E10), blurRadius: 3, offset: Offset(0, 1))],
-    ),
+    primary: SurfaceSpec(Color(0xFF1B1C1F), shadows: [Shade(Color(0x170D0E10), 3, 1, .97)]),
+    primaryHover: SurfaceSpec(Color(0xFF34363B), shadows: [Shade(Color(0x170D0E10), 3, 1, .97)]),
     primaryDown: SurfaceSpec(Color(0xFF0D0E10)),
     overlay: SurfaceSpec(
       Color(0xFFFFFFFF),
       border: Color(0x140D0E10),
-      shadows: [
-        BoxShadow(color: Color(0x240D0E10), blurRadius: 48, offset: Offset(0, 16)),
-        BoxShadow(color: Color(0x140D0E10), blurRadius: 8, offset: Offset(0, 2)),
-      ],
+      shadows: [Shade(Color(0x240D0E10), 48, 16, .97), Shade(Color(0x140D0E10), 8, 2, .97)],
     ),
     diffAdd: Color(0x222F8A5C),
     diffRemove: Color(0x1FCB453D),

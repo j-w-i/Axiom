@@ -1,5 +1,5 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui show Gradient;
+import 'dart:ui' as ui show FragmentProgram, FragmentShader, Gradient;
 
 import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart';
@@ -109,12 +109,7 @@ class RenderSurface extends RenderProxyBox {
 void paintSurface(Canvas c, Object shape, SurfaceSpec spec, Color? ring) {
   final m = shape as _Shape;
   for (final s in spec.shadows) {
-    c.drawPath(
-      m.face.shift(s.offset),
-      Paint()
-        ..color = s.color
-        ..maskFilter = debugDisableShadows ? null : MaskFilter.blur(BlurStyle.normal, s.blurSigma),
-    );
+    _shade(c, m, s);
   }
   c.drawPath(m.face, Paint()..color = spec.fill);
   Paint line() => Paint()
@@ -130,6 +125,52 @@ void paintSurface(Canvas c, Object shape, SurfaceSpec spec, Color? ring) {
         ..color = ring,
     );
   }
+}
+
+/// What shades are drawn with. Until it is there, and where it cannot be, they are plain blurs.
+abstract final class Shades {
+  static ui.FragmentShader? _shader;
+  static Future<void> load() async {
+    try {
+      _shader ??= (await ui.FragmentProgram.fromAsset('shaders/shade.frag')).fragmentShader();
+    } on Object catch (e) {
+      debugPrint('shades are plain: $e');
+    }
+  }
+}
+
+void _shade(Canvas c, _Shape m, Shade s) {
+  final shader = Shades._shader;
+  if (shader == null || debugDisableShadows) {
+    c.drawPath(
+      m.face.shift(Offset(0, s.y)),
+      Paint()
+        ..color = s.color
+        ..maskFilter = debugDisableShadows ? null : MaskFilter.blur(BlurStyle.normal, s.sigma),
+    );
+    return;
+  }
+  final box = (Offset.zero & m.size).translate(0, s.y);
+  shader
+    ..setFloat(0, box.left)
+    ..setFloat(1, box.top)
+    ..setFloat(2, box.right)
+    ..setFloat(3, box.bottom)
+    ..setFloat(4, math.min(m.radius, m.size.shortestSide / 2))
+    ..setFloat(5, math.max(s.sigma, .5))
+    ..setFloat(6, s.color.r)
+    ..setFloat(7, s.color.g)
+    ..setFloat(8, s.color.b)
+    ..setFloat(9, s.color.a)
+    ..setFloat(10, 1 / (255 * s.ground));
+  // What it is set to is taken when it is drawn, so one is enough.
+  // Nor is anything drawn where the face will be.
+  final r = math.min(m.radius, m.size.shortestSide / 2);
+  c.drawDRRect(
+    RRect.fromRectXY(box.inflate(s.sigma * 3 + 1), 0, 0),
+    RRect.fromRectXY((Offset.zero & m.size).deflate(math.min(2, m.size.shortestSide / 4)), r, r),
+    Paint()..shader = shader,
+  );
 }
 
 /// A shape to paint with [paintSurface].

@@ -164,7 +164,7 @@ void main() {
         for (final s in [c.plate, c.slab, c.key, c.written, c.overlay, c.canvas, c.primary]) {
           expect(s.lip.a, lessThan(.1));
           for (final x in s.shadows) {
-            expect(x.blurRadius, greaterThanOrEqualTo(2));
+            expect(x.blur, greaterThanOrEqualTo(2));
           }
         }
         // No edge has a hue.

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +33,7 @@ Future<void> mount(
   t.view.physicalSize = size * dpr;
   addTearDown(t.view.reset);
   await t.runAsync(loadFonts);
+  await t.runAsync(Shades.load);
   await t.pumpWidget(
     RepaintBoundary(
       key: stage,

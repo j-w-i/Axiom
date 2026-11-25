@@ -8,7 +8,11 @@ import 'sheets.dart';
 import 'workbench.dart';
 
 /// The component gallery: `flutter run -t lib/gallery/main.dart` (opens a window).
-void main() => runApp(const AxiomApp(home: Gallery()));
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Shades.load();
+  runApp(const AxiomApp(home: Gallery()));
+}
 
 class Gallery extends StatefulWidget {
   const Gallery({super.key});
