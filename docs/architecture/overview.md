@@ -43,8 +43,11 @@ computed from declared capabilities and explained in the menu, never silently re
 
 State changes are **events** in an append-only journal, committed in one transaction with the
 projections they change (decision 0004): the session's row and what is open in it. Anything shown can be
-rebuilt by replay. Planned (M2, with the first effects): an outbox of the effects an event orders, in the
-same transaction. Until then nothing has effects.
+rebuilt by replay. Before an effect its intent is on the drive: the tool call's event, and its entry in the
+audit record (a chain: each entry holds the digest of the one before). The conversation as the model has it
+is kept turn by turn beside the events, each result alone. A host that is killed goes on from that: a call
+without a result is told to the model as unknown, and never done again. There is no outbox: nothing is
+ordered that has not been begun.
 
 ## Crates (engine/)
 
@@ -54,9 +57,9 @@ same transaction. Until then nothing has effects.
 | `axiom-journal` | SQLite event store, projections, recovery | proto |
 | `axiom-policy` | capabilities, rules, grants, audit | proto |
 | `axiom-spawn` | the only way to start a process; sandbox profiles, process trees | policy |
-| `axiom-model` | codecs, transports, quirk profiles, usage, catalogue (M2) | proto |
-| `axiom-tools` | native tools (M2) | spawn, policy |
-| `axiom-engine` | native loop: context, compaction, scheduling (M2) | model, tools, journal |
+| `axiom-model` | codecs, transports, quirk profiles, usage | – |
+| `axiom-tools` | native tools: planned, judged, then done exactly so | spawn, policy, proto |
+| `axiom-engine` | native loop: context, compaction, asking a person | model, tools, policy, proto |
 | `axiom-harness` | adapter contract, ACP client, native adapters (M3) | spawn, proto |
 | `axiom-orchestra` | delegation, tasks, worktrees (M5) | engine, harness |
 | `axiom-host` | sockets, subscriptions, lifecycle | all |
@@ -70,8 +73,8 @@ Source → item delta in memory → coalesced (per item, ≤ 33 ms) → journal 
 Each subscriber has a byte budget (8 MiB); one that falls behind is told to resynchronise: it follows again
 from the last event it has, and reads the journal at its own pace. Nothing is buffered without limit.
 There are no snapshots: a new client reads the history, in which ended items' deltas are folded into
-their text. Planned (M2): process output as a separate channel, delivered only while something displays
-it, of which the journal keeps a bounded head and tail and a file the full text.
+their text. Of a command's output the journal keeps its beginning and its end, and a file in the agent's
+scratch folder all of it up to 32 MiB; it is shown when the command ends.
 In the client one isolate reads and decodes, the UI isolate applies a batch per frame, and the
 transcript lays out only visible blocks (decision 0010).
 
