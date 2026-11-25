@@ -396,6 +396,8 @@ pub enum Error {
     BadValue(&'static str, String),
     #[error("{0:?} would switch off what holds it back")]
     Unsafe(String),
+    #[error("{0:?} is not passed on to this program: it could change what holds it back")]
+    NotPassed(String),
     #[error("this program's own tools cannot be taken away")]
     NoHands,
     #[error("this program does not say how several accounts of it are kept apart")]

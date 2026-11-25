@@ -321,6 +321,7 @@ class HarnessInfo {
     this.accounts,
     this.hands = false,
     this.effort = false,
+    this.own = false,
   });
   HarnessInfo.decode(Json j)
     : id = j['id']! as String,
@@ -331,6 +332,7 @@ class HarnessInfo {
       accounts = j['accounts'] as String?,
       hands = j['hands'] as bool? ?? false,
       effort = j['effort'] as bool? ?? false,
+      own = j['own'] as bool? ?? false,
       access = [
         for (final a in j['access'] as List<Object?>? ?? const [])
           _enum(Access.values, a, Access.unknown),
@@ -339,6 +341,9 @@ class HarnessInfo {
 
   /// Null if it is not there or may not be started; then [problem] says why.
   final String? program, problem;
+
+  /// Its person added it themself.
+  final bool own;
 
   /// It can be told how hard to try.
   final bool effort;
@@ -352,6 +357,53 @@ class HarnessInfo {
   /// It cannot be told to ignore a folder's own settings for it.
   final bool needsTrust;
   final List<Access> access;
+}
+
+/// How a program is started, as its person has said it, of it or of one account of it.
+class ProgramInfo {
+  const ProgramInfo(
+    this.harness, {
+    this.account,
+    this.name,
+    this.path,
+    this.args = const [],
+    this.vars = const [],
+  });
+  ProgramInfo.decode(Json j)
+    : harness = j['harness']! as String,
+      account = j['account'] as String?,
+      name = j['name'] as String?,
+      path = j['path'] as String?,
+      args = [for (final a in j['args'] as List<Object?>? ?? const []) a! as String],
+      vars = [for (final v in j['vars'] as List<Object?>? ?? const []) VarInfo.decode(v! as Json)];
+  final String harness;
+  final String? account, name, path;
+  final List<String> args;
+  final List<VarInfo> vars;
+}
+
+class VarInfo {
+  const VarInfo(this.name, {this.value, this.lasts = false});
+  VarInfo.decode(Json j)
+    : name = j['name']! as String,
+      value = j['value'] as String?,
+      lasts = j['lasts'] as bool? ?? false;
+  final String name;
+
+  /// Null: it is a secret, and not shown.
+  final String? value;
+
+  /// It is there when the host has been restarted.
+  final bool lasts;
+}
+
+/// A variable a program is to be given; without a value, the secret that is there stays.
+class VarSet {
+  const VarSet(this.name, {this.value, this.secret = false});
+  final String name;
+  final String? value;
+  final bool secret;
+  Json encode() => {'name': name, 'value': ?value, 'secret': secret};
 }
 
 /// What a provider says of a model.

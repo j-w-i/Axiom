@@ -44,6 +44,15 @@ impl MemoryVault {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
+#[cfg(test)]
+impl MemoryVault {
+    pub fn count(&self) -> usize {
+        self.lock().len()
+    }
+    pub fn clear(&self) {
+        self.lock().clear();
+    }
+}
 impl Vault for MemoryVault {
     fn put(&self, id: &str, secret: &Text) -> Result<(), String> {
         self.lock().insert(id.into(), secret.clone());

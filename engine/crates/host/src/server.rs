@@ -32,7 +32,9 @@ use crate::{
     net::{self, Boxed, Listener},
     outbox::{Follower, Outbox},
     paths::{Lock, Paths, Same, private_dir, private_file},
-    peers, replay,
+    peers,
+    programs::{Programs, Said},
+    replay,
     session::{Joined, Opened, Refused, Say, Session, encode, lines},
     signin::Signins,
     store::Store,
@@ -309,7 +311,7 @@ impl Host {
             p,
             cfg.home.clone(),
             cfg.scratch.clone(),
-            cfg.programs.clone(),
+            Programs::open(&p.data.join("programs.json"), cfg.vault.clone(), cfg.programs.clone())?,
             cfg.bridge.clone(),
             listener.path(),
         );
@@ -1071,6 +1073,8 @@ fn slow(c: &Call) -> bool {
         Call::Models { .. }
             | Call::Look { .. }
             | Call::Harnesses {}
+            | Call::ProgramSet { .. }
+            | Call::ProgramRemove { .. }
             | Call::Changes { .. }
             | Call::CopyChanges { .. }
             | Call::CopyBring { .. }
@@ -1860,6 +1864,21 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let all = blocking(move || a.harnesses(&written)).await??;
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
         }
+        Call::Programs {} => {
+            serde_json::to_value(st.agents.programs.list()).map_err(|e| internal(e.to_string()))
+        }
+        Call::ProgramSet { harness, account, name, path, args, vars } => {
+            let a = st.agents.clone();
+            let written = a.written(&st.store).await?;
+            let said = Said { harness, account, name, path, args, vars };
+            let harness = blocking(move || a.program(said, &written)).await??;
+            Ok(json!({ "harness": harness }))
+        }
+        Call::ProgramRemove { harness, account } => {
+            let a = st.agents.clone();
+            blocking(move || a.programs.remove(&harness, account.as_deref())).await??;
+            Ok(json!({}))
+        }
         Call::Look { path } => {
             let a = st.agents.clone();
             let all = blocking(move || a.look(&path)).await??;
@@ -1963,8 +1982,10 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
         }
         Call::ConnectionRemove { connection } => {
             // To its end, also when who asked is gone.
-            let leave = tokio::spawn(st.agents.connections.clone().leave(connection));
+            let leave = tokio::spawn(st.agents.connections.clone().leave(connection.clone()));
             let ended = leave.await.map_err(|e| internal(e.to_string()))??;
+            let a = st.agents.clone();
+            blocking(move || a.programs.forget(&connection)).await??;
             Ok(ended.map_or_else(|| json!({}), |e| json!({ "ended": e })))
         }
         Call::SigninBegin { connection } => {

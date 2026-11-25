@@ -180,6 +180,29 @@ class Asked extends HostStore {
   }
 
   @override
+  Future<void> loadPrograms() async {}
+  @override
+  Future<String> setProgram({
+    required List<String> args,
+    required List<VarSet> vars,
+    String? harness,
+    String? account,
+    String? name,
+    String? path,
+  }) => _do([
+    'program',
+    harness,
+    account,
+    name,
+    path,
+    args,
+    for (final v in vars) (v.name, v.value, v.secret),
+  ], harness ?? 'p_1');
+  @override
+  Future<void> removeProgram(String harness, {String? account}) =>
+      _do(['remove program', harness, account], null);
+
+  @override
   Future<bool?> disconnect(String id) async {
     await _do(['disconnect', id], null);
     connections = connections.where((c) => c.id != id).toList();
@@ -1198,6 +1221,128 @@ void main() {
     expect(s.calls, [
       ['set', 's', 'a', null, null, null],
     ]);
+  });
+
+  group('programs', () {
+    Future<Asked> page(WidgetTester t, {List<ProgramInfo> said = const []}) async {
+      final s = await shell(t, size: const Size(1100, 1500));
+      s
+        ..harnesses = harnesses
+        ..programs = said;
+      await press(t, find.bySemanticsLabel('Accounts').first);
+      s.calls.clear();
+      return s;
+    }
+
+    testWidgets('one of their own is added', (t) async {
+      final s = await page(t);
+      await press(t, find.bySemanticsLabel(RegExp('^Add a program')));
+      await press(t, find.bySemanticsLabel('One of your own').last);
+      expect(find.textContaining('it can only ask first'), findsOneWidget);
+      AxButton add() => t.widget(find.widgetWithText(AxButton, 'Add program'));
+      expect(add().onPressed, isNull, reason: 'it has neither name nor place');
+      await t.enterText(field('Program name'), 'Kiro');
+      files = (at) async => '/opt/kiro/bin/kiro';
+      await press(t, find.text('Choose…'));
+      await t.enterText(field('Arguments'), 'acp\n\n --quiet \n');
+      await settled(t);
+      await snap(t, 'programs-own');
+      s.failure = const Failed(1, 'bad_request', 'another program has this name');
+      await press(t, find.widgetWithText(AxButton, 'Add program'));
+      expect(find.text('another program has this name'), findsOneWidget);
+      s.failure = null;
+      await press(t, find.widgetWithText(AxButton, 'Add program'));
+      expect(s.calls.last, [
+        'program',
+        null,
+        null,
+        'Kiro',
+        '/opt/kiro/bin/kiro',
+        ['acp', '--quiet'],
+      ]);
+      expect(field('Program name'), findsNothing, reason: 'it is done');
+    });
+
+    testWidgets('how a known one is started, with what stays secret', (t) async {
+      final s = await page(
+        t,
+        said: const [
+          ProgramInfo(
+            'claude',
+            vars: [
+              VarInfo('AWS_REGION', value: 'eu-west-1'),
+              VarInfo('X_TOKEN'),
+            ],
+          ),
+        ],
+      );
+      expect(find.textContaining('2 variables'), findsOneWidget);
+      await press(t, find.widgetWithText(AxButton, 'Edit').first);
+      expect(field('Program name'), findsNothing, reason: 'it has its own');
+      await press(t, find.widgetWithText(AxButton, 'Add a variable'));
+      await t.enterText(field('Variable').last, 'AWS_BEARER_TOKEN_BEDROCK');
+      await settled(t);
+      // Its name says what it is: it is not read over a shoulder.
+      expect(t.widget<EditableText>(field('Value').last).obscureText, isTrue);
+      expect(t.widget<AxCheck>(find.byType(AxCheck).last).onChanged, isNull);
+      await t.enterText(field('Value').last, 'abcdefgh');
+      await press(t, find.widgetWithText(AxButton, 'Add a variable'));
+      await t.enterText(field('Variable').last, 'MODE');
+      await t.enterText(field('Value').last, 'x');
+      await settled(t);
+      await snap(t, 'programs-known');
+      await press(t, find.widgetWithText(AxButton, 'Save'));
+      expect(s.calls.last, [
+        'program',
+        'claude',
+        null,
+        null,
+        null,
+        <String>[],
+        ('AWS_REGION', 'eu-west-1', false),
+        // Not touched, so kept.
+        ('X_TOKEN', null, true),
+        ('AWS_BEARER_TOKEN_BEDROCK', 'abcdefgh', true),
+        ('MODE', 'x', false),
+      ]);
+    });
+
+    testWidgets('of one account, and back to how it was', (t) async {
+      final s = await page(
+        t,
+        said: const [
+          ProgramInfo('claude', account: 'c9', args: ['--max-turns=9']),
+        ],
+      );
+      s.connections = [key, work];
+      s.notifyListeners();
+      await settled(t);
+      await press(t, find.widgetWithText(AxButton, 'Edit').first);
+      expect(find.widgetWithText(AxButton, 'Reset'), findsNothing);
+      await press(t, find.bySemanticsLabel('For: Every account'));
+      await press(t, find.bySemanticsLabel(work.name).last);
+      expect(find.text('--max-turns=9'), findsOneWidget);
+      await press(t, find.widgetWithText(AxButton, 'Reset'));
+      expect(s.calls.last, ['remove program', 'claude', 'c9']);
+    });
+
+    testWidgets('one of their own is removed when that is meant', (t) async {
+      final s = await page(t);
+      s.harnesses = const [
+        HarnessInfo('p_1', 'Kiro', program: '/opt/kiro', access: [Access.ask], own: true),
+      ];
+      s.notifyListeners();
+      await settled(t);
+      await press(t, find.widgetWithText(AxButton, 'Remove').last);
+      expect(s.calls, isEmpty);
+      await press(t, find.widgetWithText(AxButton, 'Keep'));
+      await press(t, find.widgetWithText(AxButton, 'Remove').last);
+      await press(t, find.widgetWithText(AxButton, 'Remove Kiro'));
+      expect(s.calls.last, ['remove program', 'p_1', null]);
+      // What it was is still said where it was used.
+      s.harnesses = const [];
+      expect(s.harnessName('p_1'), 'a program that was removed');
+    });
   });
 
   testWidgets('a program can have several accounts', (t) async {

@@ -30,6 +30,7 @@ use crate::{
     delegated, mcp,
     paths::{Paths, private_dir, private_file},
     peers,
+    programs::{How, Programs, Said},
     session::{self, Session},
     store::Store,
 };
@@ -253,7 +254,7 @@ pub struct Agents {
     home: Option<PathBuf>,
     own: Vec<PathBuf>,
     scratch: PathBuf,
-    programs: Option<Vec<PathBuf>>,
+    pub programs: Programs,
     rules: PathBuf,
     pub copies: Copies,
 }
@@ -271,7 +272,7 @@ impl Agents {
         paths: &Paths,
         home: Option<PathBuf>,
         scratch: PathBuf,
-        programs: Option<Vec<PathBuf>>,
+        programs: Programs,
         bridge: Option<PathBuf>,
         endpoint: &str,
     ) -> Self {
@@ -361,7 +362,9 @@ impl Agents {
             return Err(bad("an agent's name has between 1 and 200 bytes"));
         }
         if execution.harness != "axiom" {
-            let known = delegated::known_as(&execution.harness)
+            let known = self
+                .programs
+                .known_as(&execution.harness)
                 .ok_or_else(|| bad("this host does not know the harness"))?;
             if let Some(c) = &execution.connection {
                 if connections::provider_of(&execution.harness).is_none() {
@@ -392,9 +395,10 @@ impl Agents {
                 from,
             };
             let site = self.site(&setup, &AgentId("check".into()), false)?;
-            let path = self.programs(&site.path)?;
+            let path = self.looked_in(&site.path)?;
+            let how = self.how(&setup)?;
             known
-                .check(&setup, site.access, site.workspace.clone(), &path, written)
+                .check(&setup, &how, site.access, site.workspace.clone(), &path, written)
                 .map_err(bad)?;
             return Ok(setup);
         }
@@ -467,8 +471,8 @@ impl Agents {
     }
 
     /// Where programs of the person's own are looked for.
-    fn programs(&self, usual: &[Place]) -> Result<Vec<Place>, WireError> {
-        match &self.programs {
+    fn looked_in(&self, usual: &[Place]) -> Result<Vec<Place>, WireError> {
+        match &self.programs.looked_in {
             Some(p) => p.iter().map(|p| real(p)).collect(),
             None => Ok(usual.to_vec()),
         }
@@ -486,8 +490,23 @@ impl Agents {
 
     pub fn harnesses(&self, written: &Reach) -> Result<Vec<HarnessInfo>, WireError> {
         let home = self.home.as_deref().ok_or_else(|| bad("there is no home folder"))?;
-        let path = self.programs(&axiom_tools::system(&real(home)?).0)?;
-        Ok(delegated::known().iter().map(|k| k.info(&path, written)).collect())
+        let path = self.looked_in(&axiom_tools::system(&real(home)?).0)?;
+        let one =
+            |k: delegated::Known| Ok(k.info(&self.programs.how(&k.id, None)?, &path, written));
+        self.programs.known().into_iter().map(one).collect()
+    }
+
+    /// What a person says of how a program is started.
+    pub fn program(&self, s: Said, written: &Reach) -> Result<String, WireError> {
+        if let (Some(a), Some(h)) = (&s.account, &s.harness) {
+            self.connections.account(a, h)?;
+        }
+        self.programs.set(s, written)
+    }
+
+    /// How an agent's program is started.
+    fn how(&self, s: &Setup) -> Result<How, WireError> {
+        self.programs.how(&s.execution.harness, s.execution.connection.as_deref())
     }
 
     /// Where an agent works and what it may. `make`: with its scratch folder.
@@ -872,19 +891,30 @@ impl Worker {
         let waits = store.pending(session.id.clone(), agent.clone()).await.map_err(internal)?;
         let written = agents.written(store).await?;
         let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
-        let (known, site, access, workspace, words) = tokio::task::spawn_blocking(move || {
-            let known = delegated::known_as(&s.execution.harness)
-                .ok_or_else(|| bad("this host does not know the agent's harness"))?;
+        let (known, how, site, access, workspace, words) = tokio::task::spawn_blocking(move || {
+            let known = a.programs.known_as(&s.execution.harness).ok_or_else(|| {
+                bad("this host does not know the agent's harness: its program was removed")
+            })?;
             let site = a.site(&s, &ag, true)?;
-            let path = a.programs(&site.path)?;
+            let mut path = a.looked_in(&site.path)?;
+            let how = a.how(&s)?;
             let access = site.access;
             let told = match s.apart {
                 Some(_) => format!("{HANDS}\n\n{}", copies::WORDS),
                 None => HANDS.to_owned(),
             };
             let words = s.hands().then(|| axiom_engine::context::system(&site, &told));
-            let program =
-                known.check(&s, access, site.workspace.clone(), &path, &written).map_err(bad)?;
+            let program = known
+                .check(&s, &how, access, site.workspace.clone(), &path, &written)
+                .map_err(bad)?;
+            if let Some(p) = &how.path {
+                // What it starts itself often lies beside it.
+                let beside =
+                    axiom_harness::find::beside(p, &written).map_err(|e| bad(e.to_string()))?;
+                path.retain(|p| *p != beside);
+                path.insert(0, beside);
+            }
+            let vars = a.programs.vars(&how)?;
             let config = match &s.execution.connection {
                 Some(c) => Some(real(&a.connections.account(c, &s.execution.harness)?)?),
                 None => None,
@@ -892,6 +922,7 @@ impl Worker {
             let site_of = axiom_harness::Site {
                 program,
                 config,
+                vars,
                 path,
                 home: site.keep.home().clone(),
                 user: user()?,
@@ -899,7 +930,7 @@ impl Worker {
                 written,
                 limits: crate::limits::program(),
             };
-            Ok::<_, WireError>((known, site_of, access, site.workspace, words))
+            Ok::<_, WireError>((known, how, site_of, access, site.workspace, words))
         })
         .await
         .map_err(internal)??;
@@ -909,6 +940,7 @@ impl Worker {
             slot: agents.slot(&session.id, agent),
             setup: setup.clone(),
             known,
+            how,
             site,
             access,
             workspace,

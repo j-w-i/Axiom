@@ -20,6 +20,7 @@ mod outbox;
 pub mod paths;
 mod peers;
 mod plan;
+pub mod programs;
 mod replay;
 mod server;
 mod session;

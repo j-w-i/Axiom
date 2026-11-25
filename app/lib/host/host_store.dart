@@ -310,6 +310,45 @@ class HostStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// What has been said of how programs are started.
+  List<ProgramInfo> programs = const [];
+
+  Future<void> loadPrograms() async {
+    final r = await _live.call('program.list');
+    programs = [for (final j in r! as List<Object?>) ProgramInfo.decode(j! as Json)];
+    notifyListeners();
+  }
+
+  /// Says how a program is started; without [harness], adds one. Secrets go to the host and are not
+  /// kept here.
+  Future<String> setProgram({
+    required List<String> args,
+    required List<VarSet> vars,
+    String? harness,
+    String? account,
+    String? name,
+    String? path,
+  }) async {
+    final r = await _live.call('program.set', {
+      'harness': ?harness,
+      'account': ?account,
+      'name': ?name,
+      'path': ?path,
+      'args': args,
+      'vars': [for (final v in vars) v.encode()],
+    });
+    await loadPrograms();
+    await loadHarnesses();
+    return (r! as Json)['harness']! as String;
+  }
+
+  /// Takes away one its person added, or what was said of another.
+  Future<void> removeProgram(String harness, {String? account}) async {
+    await _live.call('program.remove', {'harness': harness, 'account': ?account});
+    await loadPrograms();
+    await loadHarnesses();
+  }
+
   /// What has been changed in a session's folder.
   Future<Changes> changes(String session) async =>
       Changes.decode((await _live.call('workspace.changes', {'session': session}))! as Json);
@@ -368,8 +407,10 @@ class HostStore extends ChangeNotifier {
   }
 
   /// As a person knows it.
-  String harnessName(String id) =>
-      id == 'axiom' ? 'Axiom' : harnesses.where((h) => h.id == id).firstOrNull?.name ?? id;
+  String harnessName(String id) => id == 'axiom'
+      ? 'Axiom'
+      : harnesses.where((h) => h.id == id).firstOrNull?.name ??
+            (id.startsWith('p_') ? 'a program that was removed' : id);
 
   /// The secret goes to the host and is not kept here.
   Future<String> connect(String name, String provider, {String? url, String? secret}) async {

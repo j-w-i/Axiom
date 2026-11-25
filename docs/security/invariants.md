@@ -6,9 +6,9 @@ Of `threat-model.md` §6. "Not yet" means that nothing in this build could break
 |----|------|
 | 1 | `policy/caps.rs` `meet_is_the_greatest_lower_bound`, `no_descendant_has_more`; `host/tests/copies.rs` `telling_one_that_works_in_the_folder_is_asked_about`; `host/tests/peers.rs` `who_may_do_more_is_only_told_with_a_yes`, `a_delegated_agent_is_told_with_a_yes`; `host/tests/bridge.rs` (the same through a program's own tool, and what its key does not open; with Axiom's tools in place of its own, questions, sandbox, record and stop) |
 | 2 | `policy/request.rs`, `engine/desk.rs`, `engine/tests/run.rs` `a_person_is_asked_and_their_answer_counts`, `host/tests/agents.rs` `a_person_is_asked_through_the_socket` |
-| 3 | `host/tests/agents.rs` `the_secret_is_nowhere_but_in_the_vault_and_the_request`, `spawn/tests/contained.rs` `nothing_is_inherited`, `model/secret.rs` and `model/tests/transport.rs` (a canary over every error path), `host/tests/signin.rs` (the same for what a sign-in gives) |
+| 3 | `host/tests/delegated.rs` `how_a_program_is_started`, `host/programs.rs` `secrets_are_in_the_vault_and_nowhere_else`, `harness/vars.rs` `a_secret_is_taken_out`; `host/tests/agents.rs` `the_secret_is_nowhere_but_in_the_vault_and_the_request`, `spawn/tests/contained.rs` `nothing_is_inherited`, `model/secret.rs` and `model/tests/transport.rs` (a canary over every error path), `host/tests/signin.rs` (the same for what a sign-in gives) |
 | 4 | `model/secret.rs`, `model/tests/transport.rs` (redirects, other origins) |
-| 5 | `policy/rules.rs` `a_workspace_only_narrows`, `host/tests/agents.rs` `what_an_agent_may_not_be` |
+| 5 | `host/programs.rs` `what_could_have_been_put_there_is_not_taken`; `policy/rules.rs` `a_workspace_only_narrows`, `host/tests/agents.rs` `what_an_agent_may_not_be` |
 | 6 | `harness` (trust withheld: started only if it can be told to ignore the folder, `host/tests/delegated.rs`); of a workspace the host itself reads its narrowing rules only |
 | 7 | `spawn/tests/only_path.rs`, `policy/request.rs` `outside_every_sandbox_is_its_own_question_and_once` |
 | 8 | `spawn/tests/contained.rs` `what_cannot_be_contained_is_not_started` |

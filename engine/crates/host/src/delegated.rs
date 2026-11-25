@@ -12,8 +12,8 @@ use std::{
 use axiom_engine::{Deed, Ended, FROM_AGENT, Refused, Say, Stage, Word, said};
 use axiom_harness::{
     Answer, By, ChoiceKind, Diff, Done, Error, Event, Events, Frame, Frames, Gone, Handle, Harness,
-    KNOWN, Kind, Level, Lost, Program, Prompts, Question, Ready, Server, Settled, Site, Start,
-    Trust, Why, find,
+    KNOWN, Kind, Level, Lost, NotFound, Program, Prompts, Question, Ready, Server, Settled, Site,
+    Start, Trust, Why, find, find::take,
 };
 use axiom_policy::{
     Access, Approval, Ask, Place, Reach, Unsandboxed, audit::Containment, rules::Decision,
@@ -28,41 +28,52 @@ use tokio::{
     task::{AbortHandle, JoinSet},
 };
 
-use crate::agents::{Floor, Grant, Setup, Slot};
+use crate::{
+    agents::{Floor, Grant, Setup, Slot},
+    programs::How,
+};
 
 /// A program that has nothing to do for this long is ended; it goes on where it was when it is
 /// spoken to.
 pub const IDLE: Duration = Duration::from_secs(60 * 60);
 
 /// A harness this host can drive.
+#[derive(Debug, Clone)]
 pub struct Known {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub program: &'static str,
+    pub id: String,
+    pub name: String,
+    /// What it is looked for by. One of the person's own is where they say.
+    pub program: String,
     pub harness: Harness,
+    /// The person added it.
+    pub own: bool,
 }
 
 pub fn known() -> Vec<Known> {
     let mut all = vec![
         Known {
-            id: "claude",
-            name: "Claude Code",
-            program: "claude",
+            id: "claude".into(),
+            name: "Claude Code".into(),
+            program: "claude".into(),
             harness: Harness::Claude(Prompts::Refused),
+            own: false,
         },
-        Known { id: "codex", name: "Codex", program: "codex", harness: Harness::Codex },
+        Known {
+            id: "codex".into(),
+            name: "Codex".into(),
+            program: "codex".into(),
+            harness: Harness::Codex,
+            own: false,
+        },
     ];
     all.extend(KNOWN.iter().map(|k| Known {
-        id: k.program,
-        name: k.name,
-        program: k.program,
+        id: k.program.into(),
+        name: k.name.into(),
+        program: k.program.into(),
         harness: Harness::Acp(k.acp()),
+        own: false,
     }));
     all
-}
-
-pub fn known_as(id: &str) -> Option<Known> {
-    known().into_iter().find(|k| k.id == id)
 }
 
 /// Axiom's own, as it is named to a program.
@@ -84,12 +95,21 @@ impl Known {
             tools: None,
             hands: false,
             system: None,
+            extra: Vec::new(),
+        }
+    }
+
+    /// Where it is: where its person says, or where programs are looked for.
+    fn find(&self, how: &How, path: &[Place], written: &Reach) -> Result<Program, NotFound> {
+        match &how.path {
+            Some(p) => take(p, written),
+            None => find(&self.program, path, written),
         }
     }
 
     /// What it is and may be, found without running it.
-    pub fn info(&self, path: &[Place], written: &Reach) -> HarnessInfo {
-        let program = find(self.program, path, written);
+    pub fn info(&self, how: &How, path: &[Place], written: &Reach) -> HarnessInfo {
+        let program = self.find(how, path, written);
         let here = path.first().cloned();
         let access = |trust| {
             [
@@ -106,14 +126,15 @@ impl Known {
         };
         let (trusted, not) = (access(true), access(false));
         HarnessInfo {
-            id: self.id.into(),
-            name: self.name.into(),
+            id: self.id.clone(),
+            name: self.name.clone(),
+            own: self.own,
             program: program.as_ref().ok().map(|p| p.place().to_string()),
             problem: program.err().map(|e| e.to_string()),
             needs_trust: not.is_empty(),
             hands: self.harness.takes_hands(),
             effort: self.harness.takes_effort(),
-            accounts: crate::connections::provider_of(self.id).map(str::to_owned),
+            accounts: crate::connections::provider_of(&self.id).map(str::to_owned),
             access: trusted,
         }
     }
@@ -122,13 +143,15 @@ impl Known {
     pub fn check(
         &self,
         s: &Setup,
+        how: &How,
         access: Access,
         workspace: Place,
         path: &[Place],
         written: &Reach,
     ) -> Result<Program, String> {
-        let program = find(self.program, path, written).map_err(|e| e.to_string())?;
+        let program = self.find(how, path, written).map_err(|e| e.to_string())?;
         let start = Start {
+            extra: how.args.clone(),
             model: s.execution.model.clone(),
             effort: s.execution.effort.clone(),
             hands: s.hands(),
@@ -155,6 +178,7 @@ pub struct Worker {
     pub slot: Arc<Slot>,
     pub setup: Setup,
     pub known: Known,
+    pub how: How,
     pub site: Site,
     pub access: Access,
     pub workspace: Place,
@@ -281,6 +305,7 @@ impl Worker {
             tools: None,
             hands: self.setup.hands(),
             system: None,
+            extra: self.how.args.clone(),
         };
         // A key for it alone, gone with its attempt. Without one it works all the same, unless it has
         // nothing else to work with.
@@ -299,7 +324,8 @@ impl Worker {
         }
         let failed = |e: Error| Halt::Failed(e.to_string());
         let launch = self.known.harness.launch(&start).map_err(failed)?;
-        let subject = command(self.site.program.place(), &launch.args);
+        let given = self.how.shown();
+        let subject = command(&given, self.site.program.place(), &launch.args);
         let ask = Ask {
             chain: vec![self.floor.agent.clone()],
             workspace: self.workspace.to_string(),
@@ -312,6 +338,7 @@ impl Worker {
                 self.setup.trust,
                 self.site.config.as_ref(),
                 start.hands,
+                &given,
             ),
             unsandboxed: true,
         };
@@ -339,8 +366,8 @@ impl Worker {
         let attempt = Attempt {
             floor: self.floor.clone(),
             desk: self.desk.clone(),
-            name: self.known.name,
-            id: self.known.id,
+            name: self.known.name.clone(),
+            id: self.known.id.clone(),
             workspace: self.workspace.to_string(),
             handle: live.handle,
             events: live.events,
@@ -442,8 +469,8 @@ pub struct Turn {
 struct Attempt {
     floor: Floor,
     desk: axiom_engine::Desk,
-    name: &'static str,
-    id: &'static str,
+    name: String,
+    id: String,
     workspace: String,
     handle: Handle,
     events: Events,
@@ -832,7 +859,7 @@ impl Attempt {
                 let usage = Usage { context: share.or(s.usage.context), ..s.usage };
                 let provenance = s.provenance.unwrap_or(Provenance::Reported);
                 let on = UsedOn {
-                    harness: self.id.into(),
+                    harness: self.id.clone(),
                     lane: Lane::Program,
                     provider: None,
                     connection: self.connection.clone(),
@@ -1147,7 +1174,7 @@ fn opened(f: &Floor, id: &RequestId, ask: &Ask, what: &str) -> Vec<Say> {
 }
 
 /// As a person would write it in a shell.
-fn command(program: &Place, args: &[String]) -> String {
+fn command(given: &[(String, Option<String>)], program: &Place, args: &[String]) -> String {
     let quoted = |a: &str| {
         let plain = |c: char| c.is_ascii_alphanumeric() || "-_=./,:@%+".contains(c);
         if !a.is_empty() && a.chars().all(plain) {
@@ -1156,14 +1183,22 @@ fn command(program: &Place, args: &[String]) -> String {
             format!("'{}'", a.replace('\'', "'\\''"))
         }
     };
-    std::iter::once(program.as_str())
-        .chain(args.iter().map(String::as_str))
-        .map(quoted)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let given = given.iter().map(|(n, v)| match v {
+        Some(v) => format!("{n}={}", quoted(v)),
+        None => format!("{n}=(secret)"),
+    });
+    let words = std::iter::once(program.as_str()).chain(args.iter().map(String::as_str));
+    given.chain(words.map(quoted)).collect::<Vec<_>>().join(" ")
 }
 
-fn scope(k: &Known, c: Containment, trust: bool, account: Option<&Place>, hands: bool) -> String {
+fn scope(
+    k: &Known,
+    c: Containment,
+    trust: bool,
+    account: Option<&Place>,
+    hands: bool,
+    given: &[(String, Option<String>)],
+) -> String {
     let held = match c {
         _ if hands => {
             "it has no tools of its own: what it does, it does with Axiom's, judged, asked \
@@ -1179,8 +1214,14 @@ fn scope(k: &Known, c: Containment, trust: bool, account: Option<&Place>, hands:
         "The folder's own settings for it are ignored."
     };
     let account = account.map(|a| format!(" Its account is kept in {a}.")).unwrap_or_default();
+    let secrets: Vec<&str> = given.iter().filter(|g| g.1.is_none()).map(|g| g.0.as_str()).collect();
+    let secrets = match secrets.as_slice() {
+        [] => String::new(),
+        all => format!(" It is given what you keep as {}.", all.join(", ")),
+    };
+    let sign_in = if k.own { "It" } else { "It signs in by itself, and" };
     format!(
-        "Outside Axiom's sandbox; {held}. It signs in by itself, and reaches the network. {folder}{account}"
+        "Outside Axiom's sandbox; {held}. {sign_in} reaches the network. {folder}{account}{secrets}"
     )
 }
 

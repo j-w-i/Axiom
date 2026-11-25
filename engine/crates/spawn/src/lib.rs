@@ -43,10 +43,75 @@ pub enum Contain {
 }
 
 /// A whole environment.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Env {
     vars: Vec<(String, String)>,
+    /// Of these the value is not shown.
+    secret: Vec<String>,
 }
+
+impl std::fmt::Debug for Env {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let shown = self.vars.iter().map(|(k, v)| {
+            (k.as_str(), if self.secret.contains(k) { "(secret)" } else { v.as_str() })
+        });
+        f.debug_list().entries(shown).finish()
+    }
+}
+
+/// What makes a loader, an interpreter or a shell run or read something, by what a name begins with.
+const LOADS: &[&str] = &[
+    "LD_",
+    "DYLD_",
+    "BASH_",
+    "MALLOC_",
+    "__",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "NODE_REPL",
+    "NODE_TLS",
+    "NPM_CONFIG",
+    "BUN_",
+    "DENO_",
+    "PYTHON",
+    "PERL",
+    "RUBY",
+    "JAVA_TOOL",
+    "_JAVA",
+    "JDK_JAVA",
+    "CLASSPATH",
+    "DOTNET_",
+    "CORECLR_",
+    "COR_",
+    "GCONV_",
+    "GLIBC_",
+    "LOCPATH",
+    "NLSPATH",
+    "LUA_",
+    "PHP",
+    "ELECTRON_",
+    "GIT_",
+    "SSH_",
+    "OPENSSL_",
+    "SUDO_",
+    "TERMINFO",
+];
+const LOADERS: &[&str] = &[
+    "ENV",
+    "IFS",
+    "SHELLOPTS",
+    "PS4",
+    "PROMPT_COMMAND",
+    "ZDOTDIR",
+    "SHELL",
+    "EDITOR",
+    "VISUAL",
+    "PAGER",
+    "BROWSER",
+    "HOSTALIASES",
+    "RES_OPTIONS",
+    "LOCALDOMAIN",
+];
 
 impl Env {
     /// `path` is where programs are found; `home` and `tmp` as they are.
@@ -66,7 +131,8 @@ impl Env {
             ("GIT_CONFIG_GLOBAL", "/dev/null".into()),
             ("CI", "1".into()),
         ];
-        Self { vars: vars.into_iter().map(|(k, v)| (k.to_string(), v)).collect() }
+        let vars = vars.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        Self { vars, secret: Vec::new() }
     }
 
     /// For a program of a person's own that signs in by itself (an agent harness): what it needs to
@@ -88,22 +154,48 @@ impl Env {
             ("LANG", "en_US.UTF-8".into()),
             ("TMPDIR", tmp.to_string()),
         ];
-        Ok(Self { vars: vars.into_iter().map(|(k, v)| (k.to_string(), v)).collect() })
+        let vars = vars.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        Ok(Self { vars, secret: Vec::new() })
     }
 
-    /// Sets one more. Names that make a loader or a shell run something are refused.
+    /// Whether a person may set it: it makes no loader, interpreter or shell run or read something.
+    pub fn may(name: &str) -> bool {
+        let upper = name.to_ascii_uppercase();
+        plain(name)
+            && name.len() <= 128
+            && !LOADS.iter().any(|p| upper.starts_with(p))
+            && !LOADERS.contains(&upper.as_str())
+    }
+
+    /// Sets one more, of Axiom's own. Names that make a loader or a shell run something are refused.
     pub fn set(&mut self, name: &str, value: &str) -> Result<(), SpawnError> {
-        let plain =
-            !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
         let loaded = ["LD_", "DYLD_", "BASH_", "MALLOC_", "__"].iter().any(|p| name.starts_with(p))
             || matches!(name, "ENV" | "IFS" | "SHELLOPTS" | "PS4" | "PROMPT_COMMAND" | "ZDOTDIR");
-        if !plain || loaded || value.contains('\0') {
+        if !plain(name) || loaded || value.contains('\0') {
             return Err(SpawnError::Env(name.to_owned()));
         }
         self.vars.retain(|(k, _)| k != name);
+        self.secret.retain(|k| k != name);
         self.vars.push((name.to_owned(), value.to_owned()));
         Ok(())
     }
+
+    /// Sets one a person says, if they may. A secret one is not shown.
+    pub fn set_said(&mut self, name: &str, value: &str, secret: bool) -> Result<(), SpawnError> {
+        if !Self::may(name) {
+            return Err(SpawnError::Env(name.to_owned()));
+        }
+        self.set(name, value)?;
+        if secret {
+            self.secret.push(name.to_owned());
+        }
+        Ok(())
+    }
+}
+
+fn plain(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 #[derive(Debug, thiserror::Error)]

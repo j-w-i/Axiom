@@ -23,6 +23,7 @@ mod rpc;
 mod talk;
 #[cfg(test)]
 mod test;
+pub mod vars;
 
 pub use acp::{Acp, KNOWN, Known};
 pub use claude::Prompts;
@@ -30,6 +31,7 @@ pub use drive::{Events, Handle, Limits, MOST_LINE, MOST_PROMPT, MOST_SUBJECT};
 pub use event::*;
 pub use find::{NotFound, Program, find};
 pub use frames::{Frame, Frames, Lost, Way};
+pub use vars::Var;
 
 use talk::{Talk, loose, plain};
 
@@ -59,6 +61,8 @@ pub struct Site {
     /// Where the program keeps what is its own, if that is another place than usual: an account
     /// beside the person's first ([`Harness::accounts`]).
     pub config: Option<Place>,
+    /// What else its person says it is given.
+    pub vars: Vec<Var>,
     pub limits: Limits,
 }
 
@@ -90,6 +94,8 @@ pub struct Start {
     pub hands: bool,
     /// Words for the model, in a file of the host's: what it works with and where.
     pub system: Option<Place>,
+    /// Further arguments its person wants it started with.
+    pub extra: Vec<String>,
 }
 
 /// A Model Context Protocol server on standard streams.
@@ -134,15 +140,29 @@ impl Harness {
         if self.person_only() && s.by != By::Person {
             return Err(Error::PersonOnly);
         }
-        let l = match self {
+        if let Some(a) = s.extra.iter().find(|a| vars::argument(a).is_some()) {
+            return Err(Error::Unsafe(a.clone()));
+        }
+        self.passes(&s.extra)?;
+        let mut l = match self {
             Harness::Acp(a) => a.launch(s)?,
             Harness::Codex => codex::launch(s)?,
             Harness::Claude(p) => claude::launch(*p, s)?,
         };
+        l.args.extend(s.extra.iter().cloned());
         // Whatever came to be in it (T34).
         match l.args.iter().find(|a| loose(a)) {
             Some(a) => Err(Error::Unsafe(a.clone())),
             None => Ok(l),
+        }
+    }
+
+    /// Whether these further arguments are passed on to it.
+    pub fn passes(&self, extra: &[String]) -> Result<(), Error> {
+        match self {
+            Harness::Acp(_) => Ok(()),
+            Harness::Codex => codex::passes(extra),
+            Harness::Claude(_) => claude::passes(extra),
         }
     }
 
@@ -204,6 +224,7 @@ impl Harness {
             read_only: true,
             person_only: true,
             probed: Some(tx),
+            hide: vars::Hide::of(&site.vars),
         };
         let (_handle, mut events) = drive::drive(given).ok_or(Error::NoPipe)?;
         let mut words = None;
@@ -231,6 +252,14 @@ impl Harness {
                 return Err(Error::Inside(p.clone()));
             }
         }
+        // What they name is trusted as the program is.
+        for p in site.vars.iter().flat_map(|v| std::env::split_paths(&v.value)) {
+            if let Ok(p) = Place::new(p)
+                && find::inside(&p, &written)
+            {
+                return Err(Error::Inside(p));
+            }
+        }
         let read_only = s.access == Access::Read;
         let (cwd, hands) = (s.workspace.clone(), s.hands);
         let talk: Box<dyn Talk> = match self {
@@ -246,6 +275,7 @@ impl Harness {
             read_only,
             person_only: self.person_only(),
             probed: None,
+            hide: vars::Hide::of(&site.vars),
         };
         let (handle, events) = drive::drive(given).ok_or(Error::NoPipe)?;
         Ok(Live { handle, events, containment: l.containment })
@@ -262,6 +292,17 @@ fn run(
     token: Unsandboxed,
 ) -> Result<Running, Error> {
     let mut env = Env::harness(&site.path, &site.home, &site.user, &site.tmp)?;
+    for v in &site.vars {
+        if vars::refused(&v.name).is_some() {
+            return Err(Error::Spawn(axiom_spawn::SpawnError::Env(v.name.clone())));
+        }
+        env.set_said(&v.name, &v.value, v.secret)?;
+    }
+    if matches!(harness, Harness::Claude(_)) && site.vars.iter().any(|v| v.secret) {
+        // Then it keeps them from the commands it runs (code.claude.com/docs/en/env-vars, read
+        // 2026-11-26).
+        env.set("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1")?;
+    }
     if let Some(c) = &site.config {
         // Nothing would keep it apart: it is not started as if something did.
         let name = harness.accounts().ok_or(Error::OneAccount)?;

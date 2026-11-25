@@ -51,6 +51,9 @@ impl T {
     }
     async fn restart(&mut self) {
         self.c.call(Call::Shutdown { force: true }).await.unwrap();
+        self.restart_after_stop().await;
+    }
+    async fn restart_after_stop(&mut self) {
         for _ in 0..1000 {
             if !self.f.paths.token().exists() {
                 break;
@@ -749,4 +752,168 @@ async fn a_second_account_is_kept_apart() {
     // Removed here, it is still the person's: what the program keeps there is not touched.
     t.c.call(Call::ConnectionRemove { connection: work }).await.unwrap();
     assert!(dir.is_dir());
+}
+
+/// One that nobody here knows: added, started, asked about, removed (decision 0016).
+#[tokio::test]
+async fn a_program_of_the_persons_own() {
+    let mut t = T::new(&acp(&[
+        hear("go"),
+        ask(5, "make"),
+        answered(5, "yes"),
+        words("Done."),
+        end(2, "end_turn"),
+    ]))
+    .await;
+    let dir = t.f.dir.path().join("mine");
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::copy(FAKE, dir.join("agent-x")).unwrap();
+    std::fs::rename(t.f.dir.path().join("bin/script.jsonl"), dir.join("script.jsonl")).unwrap();
+    let set = |path: String| Call::ProgramSet {
+        harness: None,
+        account: None,
+        name: Some("Agent X".into()),
+        path: Some(path),
+        args: vec!["serve".into(), "--acp".into()],
+        vars: vec![],
+    };
+    // Not from the folder (SI-5, SI-22).
+    std::fs::copy(FAKE, t.f.dir.path().join("w/agent-x")).unwrap();
+    let e = t.c.call(set(t.at("w/agent-x"))).await.unwrap_err().to_string();
+    assert!(e.contains("inside what an agent may write"), "{e}");
+    let v = t.c.call(set(t.at("mine/agent-x"))).await.unwrap();
+    let id = v["harness"].as_str().unwrap().to_owned();
+    let list = |v: Value| -> Vec<HarnessInfo> { serde_json::from_value(v).unwrap() };
+    let all = list(t.c.call(Call::Harnesses {}).await.unwrap());
+    let h = all.iter().find(|h| h.id == id).unwrap();
+    assert_eq!((h.name.as_str(), h.own, h.needs_trust), ("Agent X", true, true));
+    assert_eq!(h.program.as_deref(), Some(t.at("mine/agent-x").as_str()));
+    // Nothing is known of its modes: it asks first, and that is all.
+    assert_eq!(h.access, [Access::Ask]);
+    assert!(!dir.join("seen.json").exists(), "it has not been run");
+    let e = t.c.call(t.add(&id, Access::Work, true)).await.unwrap_err().to_string();
+    assert!(e.contains("no mode"), "{e}");
+    let a = t.agent(&id, Access::Ask).await;
+    t.prompt(&a, "go").await;
+    let (subject, scope) = t.allow_start().await;
+    assert_eq!(subject, format!("{} serve --acp", t.at("mine/agent-x")));
+    assert!(scope.contains("nothing holds it back") && !scope.contains("signs in"), "{scope}");
+    let (id_, digest, subject, _) = t.question().await;
+    assert!(subject.contains("make"));
+    t.answer(id_, Answer::Once, digest).await;
+    let (o, e, _) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None));
+    let seen: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("seen.json")).unwrap()).unwrap();
+    assert_eq!(seen["args"], json!(["serve", "--acp"]));
+    // What it starts lies beside it: looked for there first.
+    let path = seen["env"]["PATH"].as_str().unwrap();
+    assert!(path.starts_with(&format!("{}:", t.at("mine"))), "{path}");
+    assert_eq!(t.audit().await[0].tool, format!("harness/{id}"));
+    // It is there after a restart, and not when it was removed.
+    t.restart().await;
+    let call = Call::ProgramRemove { harness: id.clone(), account: None };
+    t.c.call(call.clone()).await.unwrap();
+    assert!(t.c.call(call).await.is_err());
+    let all = list(t.c.call(Call::Harnesses {}).await.unwrap());
+    assert!(all.iter().all(|h| h.id != id));
+    let (session, agent) = (t.s.clone(), a);
+    let e = t.c.call(Call::Prompt { session, agent, text: "x".into(), key: None }).await;
+    assert!(e.unwrap_err().to_string().contains("was removed"));
+}
+
+/// Where it is, with what arguments and with what variables; a secret is in its environment and
+/// nowhere else (SI-3).
+#[tokio::test]
+async fn how_a_program_is_started() {
+    const CANARY: &str = "bedrock-canary-5561";
+    // It says what it was given: that is not kept either.
+    let mut said = turn("go", "One.");
+    said[2]["say"]["message"]["content"][0]["text"] = json!(format!("key {CANARY}."));
+    said.insert(2, json!({"say": {"type": "nonsense", "text": CANARY}}));
+    let mut t = T::new(&claude(&said)).await;
+    let dir = t.f.dir.path().join("nvm");
+    std::fs::create_dir(&dir).unwrap();
+    for name in ["claude", "script.jsonl"] {
+        std::fs::rename(t.f.dir.path().join("bin").join(name), dir.join(name)).unwrap();
+    }
+    let var = |name: &str, value: &str| VarSet {
+        name: name.into(),
+        value: Some(SecretText(value.into())),
+        secret: false,
+    };
+    let set = |path: Option<String>, vars| Call::ProgramSet {
+        harness: Some("claude".into()),
+        account: None,
+        name: None,
+        path,
+        args: vec!["--max-turns".into(), "9".into()],
+        vars,
+    };
+    // It is nowhere a program is looked for.
+    let e = t.c.call(t.add("claude", Access::Work, false)).await.unwrap_err().to_string();
+    assert!(e.contains("not in any of the folders"), "{e}");
+    let vars = vec![
+        var("CLAUDE_CODE_USE_BEDROCK", "1"),
+        var("AWS_REGION", "eu-west-1"),
+        var("AWS_BEARER_TOKEN_BEDROCK", CANARY),
+    ];
+    t.c.call(set(Some(t.at("nvm/claude")), vars)).await.unwrap();
+    let v = t.c.call(Call::Programs {}).await.unwrap();
+    assert!(!v.to_string().contains(CANARY));
+    let all: Vec<ProgramInfo> = serde_json::from_value(v).unwrap();
+    let secret = &all[0].vars[2];
+    assert_eq!((secret.name.as_str(), &secret.value), ("AWS_BEARER_TOKEN_BEDROCK", &None));
+    let call = t.add("claude", Access::Work, false);
+    let a = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
+    t.prompt(&a, "go").await;
+    let (subject, scope) = t.allow_start().await;
+    let begins = format!(
+        "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=eu-west-1 AWS_BEARER_TOKEN_BEDROCK=(secret) {} -p",
+        t.at("nvm/claude")
+    );
+    assert!(subject.starts_with(&begins) && subject.ends_with("--max-turns 9"), "{subject}");
+    assert!(scope.contains("what you keep as AWS_BEARER_TOKEN_BEDROCK"), "{scope}");
+    let (o, e, all) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None));
+    assert_eq!(texts(&all, ItemKind::Prose), ["key (secret)."]);
+    let seen: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("seen.json")).unwrap()).unwrap();
+    assert_eq!(seen["env"]["AWS_BEARER_TOKEN_BEDROCK"], CANARY);
+    assert_eq!(seen["env"]["AWS_REGION"], "eu-west-1");
+    // It keeps them from the commands it runs.
+    assert_eq!(seen["env"]["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"], "1");
+    assert!(!seen["args"].to_string().contains(CANARY));
+    let log = t.audit().await;
+    assert!(log[0].subject.contains("AWS_BEARER_TOKEN_BEDROCK=(secret)"));
+    // Not in the journal, the record, a file, or what is told; and frames were kept.
+    t.c.call(Call::Shutdown { force: true }).await.unwrap();
+    let mut looked = 0;
+    let mut folders = vec![t.f.paths.data.clone()];
+    while let Some(f) = folders.pop() {
+        for e in std::fs::read_dir(f).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                folders.push(p);
+            } else if let Ok(b) = std::fs::read(&p) {
+                looked += 1;
+                let has = b.windows(CANARY.len()).any(|w| w == CANARY.as_bytes());
+                assert!(!has, "{}", p.display());
+            }
+        }
+    }
+    assert!(looked > 2);
+    let db = rusqlite::Connection::open(t.f.paths.journal()).unwrap();
+    let n: i64 = db
+        .query_row("select count(*) from frame where body like '%(secret)%'", [], |r| r.get(0))
+        .unwrap();
+    assert!(n >= 2, "{n}");
+    // A path into what agents write to is not handed to it.
+    t.restart_after_stop().await;
+    let vars = vec![var("GOOGLE_APPLICATION_CREDENTIALS", &t.at("w/key.json"))];
+    t.c.call(set(Some(t.at("nvm/claude")), vars)).await.unwrap();
+    t.prompt(&a, "again").await;
+    t.allow_start().await;
+    let (o, e, _) = t.ended().await;
+    assert!(o == Outcome::Failed && e.unwrap().contains("inside what an agent may write"));
 }

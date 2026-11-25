@@ -591,6 +591,51 @@ pub struct HarnessInfo {
     /// What an account of it beside the first is called as a provider, if there can be any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounts: Option<String>,
+    /// The person added it themself.
+    #[serde(default, skip_serializing_if = "not")]
+    pub own: bool,
+}
+
+/// How a program is started, as its person has said it, of it or of one account of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgramInfo {
+    /// [`HarnessInfo::id`].
+    pub harness: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// Of one the person added themself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Absent: it is looked for by its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub vars: Vec<VarInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VarInfo {
+    pub name: String,
+    /// Absent: it is a secret, and not shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// Whether it is there when the host has been restarted.
+    #[serde(default)]
+    pub lasts: bool,
+}
+
+/// A variable a program is to be given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VarSet {
+    pub name: String,
+    /// Absent: the secret that is there stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<SecretText>,
+    /// It goes to the system's store. One whose name says that it is a secret does in any case.
+    #[serde(default)]
+    pub secret: bool,
 }
 
 /// A limit the host keeps, in words for a person.
@@ -720,6 +765,34 @@ pub enum Call {
     /// The harnesses this host can drive.
     #[serde(rename = "harness.list")]
     Harnesses {},
+    /// What has been said of how programs are started: an array of [`ProgramInfo`].
+    #[serde(rename = "program.list")]
+    Programs {},
+    /// Says how a program, or one account of it, is started; without `harness`, adds one that speaks
+    /// ACP, with a name and a path. All of it is said anew. Answers with the harness. It is true of
+    /// the next start.
+    #[serde(rename = "program.set")]
+    ProgramSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        harness: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        vars: Vec<VarSet>,
+    },
+    /// Takes away one the person added, or what was said of another.
+    #[serde(rename = "program.remove")]
+    ProgramRemove {
+        harness: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+    },
     /// What a folder's owner would have agents told. For a person to read: nothing of it is followed
     /// unless they say so.
     #[serde(rename = "workspace.look")]

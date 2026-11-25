@@ -302,7 +302,7 @@ class _StartPageState extends State<StartPage> {
               AxMenuItem(
                 h.id,
                 oneLine(h.name, 40),
-                detail: 'its own sign-in',
+                detail: h.own ? 'your own' : 'its own sign-in',
                 mark: markOf(null, null, h.id),
               ),
             for (final h in missing)

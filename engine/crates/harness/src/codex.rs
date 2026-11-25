@@ -18,6 +18,7 @@ use crate::{
     event::*,
     rpc::{Calls, Fault, Msg, NO_METHOD, read},
     talk::{Keep, Out, Talk, Word, has, id, list, owned, text},
+    vars::only,
 };
 
 pub(crate) const ARGS: [&str; 1] = ["app-server"];
@@ -30,6 +31,21 @@ fn sandbox(a: Access) -> (&'static str, &'static str) {
         Access::Read | Access::Ask => ("read-only", "readOnly"),
         Access::Work => ("workspace-write", "workspaceWrite"),
     }
+}
+
+/// learn.chatgpt.com/docs/config-file/config-reference, read 2026-11-26: how it answers and how much it
+/// reads, and nothing it may do.
+pub(crate) fn passes(extra: &[String]) -> Result<(), Error> {
+    let keys = [
+        "model_verbosity",
+        "model_reasoning_summary",
+        "model_context_window",
+        "model_auto_compact_token_limit",
+        "tool_output_token_limit",
+        "service_tier",
+    ];
+    let known = |_: &str, v: &str| v.split_once('=').is_some_and(|(k, _)| keys.contains(&k));
+    only(extra, &["-c", "--config"], known).map_err(Error::NotPassed)
 }
 
 pub(crate) fn launch(s: &Start) -> Result<Launch, Error> {

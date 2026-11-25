@@ -21,6 +21,7 @@ use crate::{
     Server, Start, Trust,
     event::*,
     talk::{Keep, Out, Talk, Word, has, id, list, loose, owned, text},
+    vars::only,
 };
 
 /// Who answers when Claude Code asks.
@@ -136,6 +137,12 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
     }
     chosen(&mut args, s)?;
     Ok(Launch { args, containment })
+}
+
+/// code.claude.com/docs/en/cli-reference, read 2026-11-26: none of these changes what it may do.
+pub(crate) fn passes(extra: &[String]) -> Result<(), Error> {
+    let flags = ["--fallback-model", "--max-turns", "--max-budget-usd", "--betas"];
+    only(extra, &flags, |_, _| true).map_err(Error::NotPassed)
 }
 
 /// What a person chose, and the session to go on with.

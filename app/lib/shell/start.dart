@@ -18,6 +18,7 @@ import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
 import 'outside.dart';
+import 'programs.dart';
 
 /// What the host said, in a sentence.
 String wordsOf(Object e) => switch (e) {
@@ -838,6 +839,8 @@ class _AccountsPageState extends State<AccountsPage> {
               ),
           ],
         ),
+        const SizedBox(height: 28),
+        ProgramsPart(widget.store),
       ]);
     },
   );
