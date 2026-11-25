@@ -38,6 +38,7 @@ class FakeHost {
     File('${dir.path}/run/token').writeAsStringSync('t');
     final h = FakeHost._(dir, server);
     server.listen((s) {
+      stderr.writeln('${DateTime.now().toIso8601String()} accepted');
       h.connections++;
       h.last = s;
       s.done.ignore();
@@ -45,6 +46,7 @@ class FakeHost {
         final m = json.decode(l) as Json;
         final id = m['id'];
         h.asked.add(m['method']! as String);
+        stderr.writeln('${DateTime.now().toIso8601String()} got ${m['method']}');
         void say(Object o) => s.write('${json.encode(o)}\n');
         switch (m['method']) {
           case 'session.follow':
@@ -73,8 +75,11 @@ class FakeHost {
   }
 
   Future<void> stop() async {
+    stderr.writeln('${DateTime.now().toIso8601String()} closing');
     await server.close();
+    stderr.writeln('${DateTime.now().toIso8601String()} closed');
     dir.deleteSync(recursive: true);
+    stderr.writeln('${DateTime.now().toIso8601String()} deleted');
   }
 }
 
@@ -126,6 +131,7 @@ void main() {
   testWidgets('told again and again that it is behind, it slows down', (t) async {
     await t.runAsync(() async {
       final s = await follow(t, 7, const Duration(seconds: 4));
+      stderr.writeln('${DateTime.now().toIso8601String()} followed ${h.follows}');
       expect(h.follows, lessThan(12));
       expect(s.phase, HostPhase.connected);
       s.dispose();
