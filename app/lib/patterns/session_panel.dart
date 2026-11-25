@@ -196,10 +196,7 @@ class _AgentRowState extends State<AgentRow> {
                         ? LinearGradient(
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
-                            colors: [
-                              for (final k in [c.rowSelectedTop, c.rowSelectedBottom])
-                                c.selected(k, hue),
-                            ],
+                            colors: [c.rowSelectedTop, c.rowSelectedBottom],
                           )
                         : null,
                     color: !widget.selected && s.hovered ? c.tinted(hue) : null,

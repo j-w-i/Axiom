@@ -32,14 +32,13 @@ class AgentBar extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       final t = Ax.of(context), c = t.colors;
-      final hue = mark?.color(c);
       final words = MediaQuery.textScalerOf(context).scale(13) * 1.35;
       final wide = box.maxWidth.isFinite ? math.min(260.0, box.maxWidth * .42) : 260.0;
       final views = tabs.isEmpty
           ? const SizedBox.shrink()
           : SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: AxTabs(tabs: tabs, index: index, hue: hue, onChanged: onTab ?? (_) {}),
+              child: AxTabs(tabs: tabs, index: index, onChanged: onTab ?? (_) {}),
             );
       return SizedBox(
         height: math.max(40, math.max(words, t.density.control.toDouble()) + 12),

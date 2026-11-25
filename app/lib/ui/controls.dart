@@ -209,16 +209,8 @@ class AxSegments<T> extends StatelessWidget {
 
 /// Tabs on a display. The active one carries its mark, so the mark always fits it.
 class AxTabs extends StatelessWidget {
-  const AxTabs({
-    required this.tabs,
-    required this.index,
-    required this.onChanged,
-    super.key,
-    this.hue,
-  });
+  const AxTabs({required this.tabs, required this.index, required this.onChanged, super.key});
 
-  /// The hue of what the tabs belong to.
-  final Color? hue;
   final List<(String, String?)> tabs;
   final int index;
   final ValueChanged<int> onChanged;
@@ -244,7 +236,7 @@ class AxTabs extends StatelessWidget {
                 final on = i == index;
                 return DecoratedBox(
                   decoration: BoxDecoration(
-                    color: on ? t.colors.tinted(hue) : null,
+                    color: on ? t.colors.tabSelected : null,
                     borderRadius: BorderRadius.circular(AxRadius.key),
                   ),
                   child: Padding(

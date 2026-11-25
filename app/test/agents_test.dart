@@ -1225,6 +1225,25 @@ void main() {
     expect(find.text('Nothing has been said to Reviewer yet.'), findsOneWidget);
     expect(find.byType(TranscriptView), findsNothing);
     await snap(t, 'two-agents');
+    // What is selected is graphite, whoever it belongs to.
+    final fills = [
+      for (final b in t.widgetList<DecoratedBox>(
+        find.descendant(of: find.byType(AgentRow), matching: find.byType(DecoratedBox)),
+      ))
+        if (b.decoration case BoxDecoration(:final LinearGradient gradient)) gradient.colors,
+    ];
+    expect(fills, [
+      [AxColors.dark.rowSelectedTop, AxColors.dark.rowSelectedBottom],
+    ]);
+    expect(
+      t
+          .widgetList<DecoratedBox>(
+            find.descendant(of: find.byType(AxTabs), matching: find.byType(DecoratedBox)),
+          )
+          .map((b) => (b.decoration as BoxDecoration).color)
+          .nonNulls,
+      [AxColors.dark.tabSelected],
+    );
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
     expect(find.text('Its own model'), findsWidgets);
