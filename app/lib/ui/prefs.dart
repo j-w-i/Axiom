@@ -12,6 +12,7 @@ class Prefs {
     this.text = 1,
     this.zoom = 1,
     this.density = AxDensity.regular,
+    this.code = '',
     this.enterSends = true,
   });
 
@@ -27,6 +28,7 @@ class Prefs {
       text: at(sizes, j['text']),
       zoom: at(zooms, j['zoom']),
       density: of(AxDensity.values, j['density'], AxDensity.regular),
+      code: j['code'] is String ? family(j['code'] as String) : '',
       enterSends: j['enterSends'] is bool ? j['enterSends'] as bool : true,
     );
   }
@@ -42,18 +44,34 @@ class Prefs {
   static const zooms = [.8, .9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
   final AxDensity density;
 
+  /// The family of code, diffs, paths and commands; empty: the one that is shipped.
+  final String code;
+
+  /// What can be a family's name.
+  static String family(String s) {
+    final name = s.trim();
+    return name.length > 100 || name.contains(RegExp(r'[\x00-\x1f\x7f]')) ? '' : name;
+  }
+
   /// Enter sends and Shift+Enter breaks the line; or Enter breaks it, and with Control or Command it
   /// sends.
   final bool enterSends;
 
-  Prefs copyWith({Look? look, double? text, double? zoom, AxDensity? density, bool? enterSends}) =>
-      Prefs(
-        look: look ?? this.look,
-        text: text ?? this.text,
-        zoom: zoom ?? this.zoom,
-        density: density ?? this.density,
-        enterSends: enterSends ?? this.enterSends,
-      );
+  Prefs copyWith({
+    Look? look,
+    double? text,
+    double? zoom,
+    AxDensity? density,
+    String? code,
+    bool? enterSends,
+  }) => Prefs(
+    look: look ?? this.look,
+    text: text ?? this.text,
+    zoom: zoom ?? this.zoom,
+    density: density ?? this.density,
+    code: code ?? this.code,
+    enterSends: enterSends ?? this.enterSends,
+  );
 
   /// The next one up or down, as far as there is one.
   Prefs sized(int by) => copyWith(text: _by(sizes, text, by));
@@ -66,6 +84,7 @@ class Prefs {
     'text': text,
     'zoom': zoom,
     'density': density.name,
+    'code': code,
     'enterSends': enterSends,
   };
 
@@ -76,9 +95,10 @@ class Prefs {
       other.text == text &&
       other.zoom == zoom &&
       other.density == density &&
+      other.code == code &&
       other.enterSends == enterSends;
   @override
-  int get hashCode => Object.hash(look, text, zoom, density, enterSends);
+  int get hashCode => Object.hash(look, text, zoom, density, code, enterSends);
 }
 
 /// Where they can be changed from anywhere in the window.

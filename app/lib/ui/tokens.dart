@@ -350,13 +350,18 @@ class AxColors {
   );
 }
 
-/// Text styles. Inter carries words; JetBrains Mono carries code, paths and commands.
+/// Text styles. Inter carries words; JetBrains Mono carries code, paths and commands, or the family its
+/// person named for them.
 class AxType {
-  const AxType(this._ink);
+  const AxType(this._ink, [this._code = '']);
   final Color _ink;
+  final String _code;
+
+  /// The families that are shipped.
+  static const words = 'Inter', literals = 'JetBrains Mono';
 
   TextStyle _w(double size, double weight, double height, {double tracking = 0}) => TextStyle(
-    fontFamily: 'Inter',
+    fontFamily: words,
     fontSize: size,
     height: height,
     color: _ink,
@@ -368,7 +373,9 @@ class AxType {
 
   /// No ligatures: what is shown of a literal is its characters.
   TextStyle _m(double size, double height) => TextStyle(
-    fontFamily: 'JetBrains Mono',
+    fontFamily: _code.isEmpty ? literals : _code,
+    // What it has no letters for is shown in the one that is shipped.
+    fontFamilyFallback: _code.isEmpty ? null : const [literals],
     fontSize: size,
     height: height,
     color: _ink,
@@ -458,15 +465,18 @@ abstract final class AxMotion {
 
 @immutable
 class AxTheme {
-  const AxTheme({this.colors = AxColors.dark, this.density = AxDensity.regular});
+  const AxTheme({this.colors = AxColors.dark, this.density = AxDensity.regular, this.code = ''});
   final AxColors colors;
   final AxDensity density;
-  AxType get type => AxType(colors.ink1);
+
+  /// The family of literals; empty: the one that is shipped.
+  final String code;
+  AxType get type => AxType(colors.ink1, code);
   @override
   bool operator ==(Object other) =>
-      other is AxTheme && other.colors == colors && other.density == density;
+      other is AxTheme && other.colors == colors && other.density == density && other.code == code;
   @override
-  int get hashCode => Object.hash(colors, density);
+  int get hashCode => Object.hash(colors, density, code);
 }
 
 class Ax extends InheritedWidget {

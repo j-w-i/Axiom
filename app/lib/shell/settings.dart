@@ -1,7 +1,9 @@
 import 'package:flutter/widgets.dart';
 
+import '../transcript/safe_text.dart';
 import '../ui/commands.dart';
 import '../ui/controls.dart';
+import '../ui/fonts.dart';
 import '../ui/overlay.dart';
 import '../ui/prefs.dart';
 import '../ui/tokens.dart';
@@ -83,6 +85,21 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
         row(
+          'Code font',
+          p.code.isEmpty
+              ? 'Of code, diffs, paths and commands. Any that is installed.'
+              : hasFamily(p.code)
+              ? 'Of code, diffs, paths and commands.'
+              : '${oneLine(literal(p.code), 60)} is not installed. ${AxType.literals} is used.',
+          SizedBox(
+            width: 170,
+            child: _CodeFont(
+              value: p.code,
+              onChanged: (v) => set(p.copyWith(code: v)),
+            ),
+          ),
+        ),
+        row(
           'Send with Enter',
           p.enterSends
               ? 'Shift+Enter starts a new line.'
@@ -96,4 +113,51 @@ class SettingsPage extends StatelessWidget {
       ]),
     ]);
   }
+}
+
+/// Taken when it is written, and not letter by letter.
+class _CodeFont extends StatefulWidget {
+  const _CodeFont({required this.value, required this.onChanged});
+  final String value;
+  final ValueChanged<String> onChanged;
+  @override
+  State<_CodeFont> createState() => _CodeFontState();
+}
+
+class _CodeFontState extends State<_CodeFont> {
+  late final _name = TextEditingController(text: widget.value);
+  final _focus = FocusNode(debugLabel: 'code font');
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() {
+      if (!_focus.hasFocus) _take();
+    });
+  }
+
+  void _take() {
+    final name = Prefs.family(_name.text);
+    if (name != widget.value) widget.onChanged(name);
+  }
+
+  @override
+  void dispose() {
+    // The page was left from the middle of it. Nothing is told while the window is being built.
+    final name = Prefs.family(_name.text), told = widget.onChanged;
+    if (name != widget.value) WidgetsBinding.instance.addPostFrameCallback((_) => told(name));
+    _focus.dispose();
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AxField(
+    label: 'Code font',
+    placeholder: AxType.literals,
+    controller: _name,
+    focusNode: _focus,
+    mono: true,
+    onSubmitted: (_) => _take(),
+  );
 }

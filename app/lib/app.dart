@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import 'ui/fonts.dart';
 import 'ui/prefs.dart';
 import 'ui/tokens.dart';
 import 'ui/zoom.dart';
@@ -24,6 +25,13 @@ class _AxiomAppState extends State<AxiomApp> {
     super.dispose();
   }
 
+  /// The named family, if it is installed. Looked for when it is named, and not with every frame.
+  (String, bool)? _looked;
+  String _family(String name) {
+    if (_looked?.$1 != name) _looked = (name, hasFamily(name));
+    return _looked!.$2 ? name : '';
+  }
+
   @override
   Widget build(BuildContext context) => PrefsScope(
     _prefs,
@@ -46,7 +54,11 @@ class _AxiomAppState extends State<AxiomApp> {
         return MediaQuery(
           data: p.text == 1 ? m : m.copyWith(textScaler: TextScaler.linear(scale)),
           child: Ax(
-            theme: AxTheme(colors: light ? AxColors.light : AxColors.dark, density: p.density),
+            theme: AxTheme(
+              colors: light ? AxColors.light : AxColors.dark,
+              density: p.density,
+              code: _family(p.code),
+            ),
             child: Zoom(p.zoom, child: child!),
           ),
         );
