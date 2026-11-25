@@ -5,22 +5,27 @@ permissions: { contents: read }
 jobs:
   app:
     runs-on: windows-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with: { channel: stable, flutter-version: 3.50.0, cache: true }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: engine }
+      - run: cargo build -p axiom-host --locked
+        working-directory: engine
       - run: flutter pub get --enforce-lockfile
         working-directory: app
       - name: start
         shell: pwsh
         working-directory: app
         run: |
-          $p = Start-Process cmd.exe -ArgumentList '/c','flutter test --reporter expanded --plain-name "told again" test/host/fake_host_test.dart > ..\out.log 2>&1' -PassThru -WindowStyle Hidden
+          $p = Start-Process cmd.exe -ArgumentList '/c','flutter test --reporter expanded > ..\out.log 2>&1' -PassThru -WindowStyle Hidden
           "started $($p.Id)"
       - name: wait
         shell: pwsh
-        run: Start-Sleep 75; Get-Content out.log
+        run: Start-Sleep 120; Get-Content out.log -Tail 40
       - uses: actions/upload-artifact@v4
         with: { name: app-out, path: out.log }
       - name: processes
