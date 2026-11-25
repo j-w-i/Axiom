@@ -1024,17 +1024,24 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             begun.await.map_err(|_| internal("the run did not start"))??;
             Ok(json!({ "run": run, "agent": agent }))
         }
-        Call::AgentAdd { session, name, execution, access } => {
+        Call::AgentAdd { session, name, execution, access, instructions } => {
             let workspace = workspace(st, &session).await?;
             if agents::full(stored(st, &session).await?.len()) {
                 return Err(agents::bad("the session has as many agents as it may"));
             }
             let a = st.agents.clone();
-            let setup = blocking(move || a.setup(name, execution, access, &workspace)).await??;
+            let setup =
+                blocking(move || a.setup(name, execution, access, &workspace, instructions))
+                    .await??;
             let agent = AgentId::new();
             keep(st, &session, &agent, &setup).await?;
             said(st, &session, agents::added(&agent, &setup)).await?;
             Ok(json!({ "agent": agent }))
+        }
+        Call::Look { path } => {
+            let a = st.agents.clone();
+            let all = blocking(move || a.look(&path)).await??;
+            serde_json::to_value(all).map_err(|e| internal(e.to_string()))
         }
         Call::AgentSet { session, agent, execution, access } => {
             let mut setup = setup(st, &session, &agent).await?;
@@ -1045,7 +1052,13 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             setup.access = access.unwrap_or(setup.access);
             let a = st.agents.clone();
             let setup = blocking(move || {
-                a.setup(setup.name, setup.execution, setup.access, &setup.workspace)
+                a.setup(
+                    setup.name,
+                    setup.execution,
+                    setup.access,
+                    &setup.workspace,
+                    setup.instructions,
+                )
             })
             .await??;
             keep(st, &session, &agent, &setup).await?;

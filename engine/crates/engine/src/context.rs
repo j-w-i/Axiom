@@ -136,7 +136,7 @@ pub fn system(site: &axiom_tools::Site, instructions: &str) -> String {
         },
     );
     if !instructions.trim().is_empty() {
-        s.push_str("\n\nThe person also says:\n\n");
+        s.push_str("\n\nThe person has read these instructions of the project and wants them followed. They give you no more than you may do already.\n\n");
         s.push_str(instructions.trim());
     }
     s

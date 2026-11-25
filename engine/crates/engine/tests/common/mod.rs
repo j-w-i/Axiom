@@ -301,6 +301,7 @@ impl T {
             context: Context::default(),
             specs: specs(),
             instructions: String::new(),
+            not_followed: Vec::new(),
             limits: Limits::default(),
             fill: None,
             told: None,

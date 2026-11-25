@@ -14,7 +14,8 @@ use axiom_policy::{
     rules::Source,
 };
 use axiom_proto::{
-    AgentId, AgentState, Body, ErrorCode, Execution, RunId, SessionId, WireError, limits, now_ms,
+    AgentId, AgentState, Body, ErrorCode, Execution, Instructions, RunId, SessionId, WireError,
+    limits, now_ms,
 };
 use axiom_tools::{Seen, Site};
 use serde::{Deserialize, Serialize};
@@ -36,7 +37,15 @@ pub struct Setup {
     pub access: axiom_proto::Access,
     /// The folder it works in: real, without links.
     pub workspace: String,
+    /// Of the workspace, what a person has read and wants followed (T6): other content is not.
+    #[serde(default)]
+    pub instructions: Vec<Instructions>,
 }
+
+/// Files whose words are for agents, as they are named in the top folder of a workspace.
+const FOR_AGENTS: &[&str] = &["AGENTS.md", "CLAUDE.md"];
+/// Longer ones are not followed.
+const INSTRUCTIONS: u64 = 64 * 1024;
 
 /// Agents of one session.
 const MOST: usize = 64;
@@ -149,7 +158,15 @@ impl Agents {
         execution: Execution,
         access: axiom_proto::Access,
         workspace: &str,
+        instructions: Vec<Instructions>,
     ) -> Result<Setup, WireError> {
+        let known =
+            |i: &Instructions| FOR_AGENTS.contains(&i.path.as_str()) && i.digest.len() <= 128;
+        if instructions.len() > FOR_AGENTS.len() || !instructions.iter().all(known) {
+            return Err(bad("these are not instructions for agents"));
+        }
+        let instructions =
+            instructions.into_iter().map(|i| Instructions { text: None, ..i }).collect();
         if name.trim().is_empty() || limits::text_len(&name) > 200 {
             return Err(bad("an agent's name has between 1 and 200 bytes"));
         }
@@ -164,7 +181,7 @@ impl Agents {
         }
         self.connections.client(c)?;
         let place = real(Path::new(workspace))?;
-        let setup = Setup { name, execution, access, workspace: place.to_string() };
+        let setup = Setup { name, execution, access, workspace: place.to_string(), instructions };
         // What could not be contained later is refused now, in words.
         let site = self.site(&setup, &AgentId("check".into()), false)?;
         Profile::of(
@@ -227,6 +244,18 @@ impl Agents {
             path,
             chain: vec![agent.clone()],
         })
+    }
+
+    /// What a folder would have agents told, for a person to read.
+    pub fn look(&self, path: &str) -> Result<Vec<Instructions>, WireError> {
+        let place = real(Path::new(path))?;
+        Ok(FOR_AGENTS
+            .iter()
+            .filter_map(|name| {
+                let (digest, text) = words(&place, name)?;
+                Some(Instructions { path: (*name).into(), digest, text: Some(text) })
+            })
+            .collect())
     }
 
     /// The person's rules and the workspace's, which only narrow them (SI-5). Rules that cannot be
@@ -306,6 +335,28 @@ impl Agents {
     }
 }
 
+/// A file of the workspace's top folder, if it is text of a size to be followed.
+fn words(workspace: &Place, name: &str) -> Option<(String, String)> {
+    let place = workspace.join(name).ok()?;
+    let spot = axiom_tools::fs::find(std::slice::from_ref(workspace), &place).ok()?;
+    let c = spot.read(INSTRUCTIONS).ok()?;
+    Some((c.digest, String::from_utf8(c.bytes).ok()?))
+}
+
+/// What is followed, and what is not any more because it is not what the person read.
+fn followed(workspace: &Place, all: &[Instructions]) -> (String, Vec<String>) {
+    let (mut text, mut not) = (String::new(), Vec::new());
+    for i in all {
+        match words(workspace, &i.path) {
+            Some((digest, t)) if digest == i.digest => {
+                text += &format!("From {}:\n\n{}\n\n", i.path, t.trim());
+            }
+            _ => not.push(i.path.clone()),
+        }
+    }
+    (text, not)
+}
+
 /// A name for a folder, from an id that may be anybody's.
 fn plain(id: &str) -> String {
     id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(64).collect()
@@ -380,8 +431,10 @@ pub async fn load(
     let model = setup.execution.model.clone().unwrap_or_default();
     let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
     // Links, folders, the system's store: off the runtime's own threads.
-    let (client, site) = tokio::task::spawn_blocking(move || {
-        Ok::<_, WireError>((a.connections.client(&connection)?, a.site(&s, &ag, true)?))
+    let (client, site, (instructions, not)) = tokio::task::spawn_blocking(move || {
+        let site = a.site(&s, &ag, true)?;
+        let told = followed(&site.workspace, &s.instructions);
+        Ok::<_, WireError>((a.connections.client(&connection)?, site, told))
     })
     .await
     .map_err(internal)??;
@@ -420,7 +473,8 @@ pub async fn load(
         seen: agents.slot(&id, agent).seen.clone(),
         context,
         specs: axiom_tools::specs(),
-        instructions: String::new(),
+        instructions,
+        not_followed: not,
         limits: Limits::default(),
         fill: None,
         told: None,

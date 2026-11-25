@@ -354,7 +354,14 @@ pub enum Call {
         /// `harness` is `axiom`; `connection` and `model` are needed.
         execution: Execution,
         access: Access,
+        /// Instructions of the workspace a person has read and wants followed, by what they were.
+        #[serde(default)]
+        instructions: Vec<Instructions>,
     },
+    /// What a folder's owner would have agents told. For a person to read: nothing of it is followed
+    /// unless they say so.
+    #[serde(rename = "workspace.look")]
+    Look { path: String },
     /// Changes what an agent runs on or may do, for its next run.
     #[serde(rename = "agent.set")]
     AgentSet {
@@ -438,6 +445,16 @@ pub struct Connection {
     /// Whether that is in the system's store, and not only as long as the host runs.
     #[serde(default)]
     pub lasts: bool,
+}
+
+/// Words of a workspace for agents: a file, and which content of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Instructions {
+    pub path: String,
+    pub digest: String,
+    /// To be read by a person; absent where only named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 /// What a provider says of a model. What it does not say is not there.

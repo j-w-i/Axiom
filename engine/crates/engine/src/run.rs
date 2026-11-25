@@ -76,6 +76,8 @@ pub struct Agent<S: Stage> {
     pub specs: Vec<Spec>,
     /// Said by the person of this agent's work, beside what Axiom says.
     pub instructions: String,
+    /// Files of the workspace that were to be followed and are not what the person read.
+    pub not_followed: Vec<String>,
     pub limits: Limits,
     pub retries: Retries,
     /// What a person says meanwhile.
@@ -161,10 +163,19 @@ impl<S: Stage> Agent<S> {
             ])
             .await?;
         match self.heard(run, prompt, false).await {
-            Ok(()) => self.stage.sync().await,
-            Err(Halt::Failed(why) | Halt::Full(why)) => Err(Refused::This(why)),
-            Err(Halt::Cancelled | Halt::Gone) => Err(Refused::Closed),
+            Ok(()) => {}
+            Err(Halt::Failed(why) | Halt::Full(why)) => return Err(Refused::This(why)),
+            Err(Halt::Cancelled | Halt::Gone) => return Err(Refused::Closed),
         }
+        for f in std::mem::take(&mut self.not_followed) {
+            let words = format!(
+                "{f} is not what you read when you said it should be followed. It is not followed."
+            );
+            if self.notice(run, &words).await.is_err() {
+                return Err(Refused::Closed);
+            }
+        }
+        self.stage.sync().await
     }
 
     /// Begins a run with what was said too late for the one before.
