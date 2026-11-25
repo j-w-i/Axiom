@@ -1234,7 +1234,7 @@ class ToolRow extends StatelessWidget {
     'read' => AxIcon.file,
     'edit' || 'write' || 'patch' => AxIcon.edit,
     'search' || 'glob' || 'list' => AxIcon.search,
-    'shell' || 'test' => AxIcon.terminal,
+    'shell' || 'test' || 'job' => AxIcon.terminal,
     'fetch' => AxIcon.web,
     'delegate' => AxIcon.delegate,
     _ => AxIcon.more,
