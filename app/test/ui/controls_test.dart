@@ -791,6 +791,101 @@ void main() {
       expect(sent, ['one', 'two']);
     });
 
+    group('earlier prompts', () {
+      var all = <String>[];
+      late TextEditingController words;
+      Future<void> put3(WidgetTester t) async {
+        words = TextEditingController();
+        addTearDown(words.dispose);
+        await put(
+          t,
+          SizedBox(
+            width: 600,
+            child: Composer(
+              placeholder: 'Say',
+              action: 'Send',
+              controller: words,
+              earlier: () => all,
+              onSubmit: (_) => true,
+            ),
+          ),
+        );
+        await t.tap(find.byType(EditableText));
+        await t.pump();
+      }
+
+      Future<void> up(WidgetTester t) => t.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      Future<void> down(WidgetTester t) => t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+
+      testWidgets('come back with ↑, and ↓ past the newest gives the empty box back', (t) async {
+        all = ['third\nof two lines', 'second', 'first'];
+        await put3(t);
+        await down(t);
+        expect(words.text, '');
+        for (final s in [...all, all.last]) {
+          await up(t);
+          expect(words.text, s);
+        }
+        for (final s in [all[1], all[0], '', '']) {
+          await down(t);
+          expect(words.text, s);
+        }
+        await up(t);
+        expect(words.text, all[0]);
+      });
+
+      testWidgets('never take the place of what is written or was touched', (t) async {
+        all = ['two\nlines', 'one'];
+        await put3(t);
+        for (final s in ['mine', ' ']) {
+          await t.enterText(find.byType(EditableText), s);
+          await t.pump();
+          await up(t);
+          await down(t);
+          expect(words.text, s);
+        }
+        words.clear();
+        await t.pump();
+        await up(t);
+        expect(words.text, 'two\nlines');
+        await t.pump();
+        // Where the caret was moved, the keys move the caret.
+        await t.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+        final at = words.selection;
+        await up(t);
+        expect(words.text, 'two\nlines');
+        expect(words.selection, isNot(at));
+        // What was brought back and changed is written.
+        words.clear();
+        await t.pump();
+        await up(t);
+        words.text = 'two\nlines!';
+        await t.pump();
+        await up(t);
+        await down(t);
+        expect(words.text, 'two\nlines!');
+      });
+
+      testWidgets('are left alone with a modifier and by an input method', (t) async {
+        all = ['one'];
+        await put3(t);
+        await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await up(t);
+        await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        expect(words.text, '');
+        t.testTextInput.updateEditingValue(
+          const TextEditingValue(
+            text: 'に',
+            selection: TextSelection.collapsed(offset: 1),
+            composing: TextRange(start: 0, end: 1),
+          ),
+        );
+        await t.pump();
+        await up(t);
+        expect(words.text, 'に');
+      });
+    });
+
     testWidgets('Enter belongs to an input method that is composing', (t) async {
       await show(t);
       t.testTextInput.updateEditingValue(

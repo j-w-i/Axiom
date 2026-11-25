@@ -19,16 +19,19 @@ class ItemModel extends ChangeNotifier {
   Outcome? outcome;
   bool get open => outcome == null;
 
-  /// For prose. Tools keep plain text.
+  /// For prose, beside its source.
   late final MarkdownDoc doc = MarkdownDoc();
   final StringBuffer _plain = StringBuffer();
 
   /// A running hash of the text so far: an ended item's text is compared with what was streamed
-  /// without keeping it twice.
+  /// without putting that together.
   int _length = 0, _hash = 0;
   String? _ended;
   bool get rich => kind == ItemKind.prose || kind == ItemKind.prompt || kind == ItemKind.reasoning;
   String get plain => _ended ?? _plain.toString();
+
+  /// What was said, as it was written: Markdown, with whatever hides in it.
+  String get source => plain;
 
   static int _fold(int h, String t) {
     for (var i = 0; i < t.length; i++) {
@@ -40,7 +43,8 @@ class ItemModel extends ChangeNotifier {
   void _append(String t) {
     _length += t.length;
     _hash = _fold(_hash, t);
-    rich ? doc.append(t) : _plain.write(t);
+    if (rich) doc.append(t);
+    _plain.write(t);
   }
 
   void _end(ItemEnded e) {
@@ -54,10 +58,9 @@ class ItemModel extends ChangeNotifier {
         doc.append(e.text);
       }
       doc.finish();
-    } else {
-      _ended = e.text;
-      _plain.clear();
     }
+    _ended = e.text;
+    _plain.clear();
   }
 
   void _changed() => notifyListeners();
@@ -95,6 +98,18 @@ class AgentModel extends ChangeNotifier {
   Outcome? ended;
   String? error;
   final List<ItemModel> items = [];
+
+  /// What its person has said to it, the last first, the same only once in a row.
+  List<String> get said {
+    final all = <String>[];
+    for (final i in items.reversed) {
+      if (i.kind != ItemKind.prompt || i.name.isNotEmpty || i.open) continue;
+      if (all.isEmpty || all.last != i.source) all.add(i.source);
+      if (all.length == 200) break;
+    }
+    return all;
+  }
+
   void _changed() => notifyListeners();
 }
 

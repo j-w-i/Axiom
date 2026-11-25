@@ -408,6 +408,7 @@ class _TalkState extends State<Talk> {
               ],
               controller: widget.draft.text,
               onSubmit: _say,
+              earlier: () => widget.agent.said,
             ),
           ],
         ),

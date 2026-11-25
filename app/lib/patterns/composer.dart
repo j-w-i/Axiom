@@ -28,10 +28,14 @@ class Composer extends StatefulWidget {
     this.ready,
     this.autofocus = false,
     this.high = 25,
+    this.earlier,
   });
 
   /// What it is heard as, if not by its placeholder.
   final String? label;
+
+  /// What was said before, the last first: ↑ in an empty box brings it back.
+  final List<String> Function()? earlier;
 
   /// What stands over the words.
   final Widget? header;
@@ -80,6 +84,34 @@ class _ComposerState extends State<Composer> {
 
   void _changed() => setState(() {});
 
+  /// What ↑ has brought back, and how it stood then. Whoever has touched it since is writing.
+  List<String> _before = const [];
+  int _back = -1;
+  TextEditingValue? _put;
+  bool get _recalling => _back >= 0 && _put == _text.value;
+
+  /// Walks through what was said before. Only from an empty box, or from what was brought back and
+  /// not touched: nothing that was written is ever replaced, and the caret moves as ever.
+  bool _recall(int by) {
+    final recalling = _recalling;
+    if (!recalling) {
+      if (by < 0 || _text.text.isNotEmpty) return false;
+      _before = widget.earlier?.call() ?? const [];
+      _back = -1;
+    }
+    final to = _back + by;
+    if (to >= _before.length) return recalling;
+    _back = to;
+    final s = to < 0 ? '' : _before[to];
+    final v = TextEditingValue(
+      text: s,
+      selection: TextSelection.collapsed(offset: s.length),
+    );
+    _put = v;
+    _text.value = v;
+    return true;
+  }
+
   @override
   void dispose() {
     _text.removeListener(_changed);
@@ -88,11 +120,21 @@ class _ComposerState extends State<Composer> {
     super.dispose();
   }
 
-  /// Enter sends. While an input method is composing, Enter is its own and is left to it.
+  /// Enter sends, ↑ and ↓ go through what was said before. While an input method is composing, they
+  /// are its own and are left to it.
   KeyEventResult _key(FocusNode _, KeyEvent e) {
     final enter =
         e.logicalKey == LogicalKeyboardKey.enter || e.logicalKey == LogicalKeyboardKey.numpadEnter;
     final k = HardwareKeyboard.instance;
+    final up = e.logicalKey == LogicalKeyboardKey.arrowUp;
+    if (up || e.logicalKey == LogicalKeyboardKey.arrowDown) {
+      final plain = !k.isShiftPressed && !k.isAltPressed && !k.isControlPressed && !k.isMetaPressed;
+      final composing = _text.value.composing;
+      if (e is KeyUpEvent || !plain || (composing.isValid && !composing.isCollapsed)) {
+        return KeyEventResult.ignored;
+      }
+      return _recall(up ? 1 : -1) ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
     if (!enter || e is! KeyDownEvent || k.isShiftPressed || k.isAltPressed) {
       return KeyEventResult.ignored;
     }
