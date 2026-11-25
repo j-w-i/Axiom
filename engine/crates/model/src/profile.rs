@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    secret::{Auth, SetupError},
+    codec::converse,
+    secret::{Auth, Endpoint, SetupError},
     types::Codec,
 };
 
@@ -57,6 +58,8 @@ pub enum Effort {
     Reasoning,
     /// `generationConfig.thinkingConfig.thinkingLevel`
     ThinkingLevel,
+    /// `additionalModelRequestFields.output_config.effort`, with thinking that adapts to it.
+    AdaptiveThinking,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +67,16 @@ pub enum Effort {
 pub enum MaxTokens {
     MaxTokens,
     MaxCompletionTokens,
+}
+
+/// Where in a prompt there may be a `cachePoint`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CachePoints {
+    /// After tools, system and messages, for minutes or an hour.
+    All,
+    /// After system and messages, for minutes.
+    NotTools,
 }
 
 /// Where a model's own native blocks may go back to.
@@ -104,6 +117,12 @@ pub struct Quirks {
     /// Whether the prompt can be marked for caching (`cache_control`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_markers: Option<bool>,
+    /// Converse: the same, with points of its own; nowhere if absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_points: Option<CachePoints>,
+    /// Converse: a result can say that it is of a tool that failed. Default false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_status: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replay: Option<Replay>,
     /// Send each tool's arguments as they are written, unchecked by the provider.
@@ -141,6 +160,8 @@ impl Quirks {
             no_limit: self.no_limit.or(base.no_limit),
             effort: self.effort.or(base.effort),
             cache_markers: self.cache_markers.or(base.cache_markers),
+            cache_points: self.cache_points.or(base.cache_points),
+            result_status: self.result_status.or(base.result_status),
             replay: self.replay.or(base.replay),
             eager_tool_args: self.eager_tool_args.or(base.eager_tool_args),
             max_tokens_field: self.max_tokens_field.or(base.max_tokens_field),
@@ -155,7 +176,12 @@ impl Quirks {
 
 impl Profile {
     pub fn quirks(&self, model: &str) -> Quirks {
-        match self.models.get(model) {
+        let own = self.models.get(model).or_else(|| {
+            // There a model has more than one name.
+            let mut names = converse::plain_names(model).filter(|_| self.codec == Codec::Converse);
+            names.find_map(|name| self.models.get(name))
+        });
+        match own {
             Some(own) => own.over(&self.quirks),
             None => self.quirks.clone(),
         }
@@ -247,6 +273,87 @@ impl Profile {
         }
     }
 
+    /// Amazon Bedrock's Converse API with a Bedrock API key, at the endpoint of a region. From
+    /// docs.aws.amazon.com/bedrock/latest/userguide, read 2026-11-25: the key (api-keys-use), the models
+    /// that take cache points and where (prompt-caching#prompt-caching-models), and those whose thinking
+    /// adapts to an effort (claude-messages-adaptive-thinking). That a result can say its tool failed is
+    /// written of "Amazon Nova and Anthropic Claude 3 and 4" (API_runtime_ToolResultBlock), and taken to
+    /// hold for Claude 5. That one model reads what another signed is written only of some.
+    pub fn bedrock() -> Self {
+        let claude = Quirks {
+            cache_points: Some(CachePoints::All),
+            result_status: Some(true),
+            ..Quirks::default()
+        };
+        let adaptive = Quirks { effort: Some(Effort::AdaptiveThinking), ..claude.clone() };
+        let nova = Quirks { cache_points: Some(CachePoints::NotTools), ..claude.clone() };
+        let of = |names: &[&str], quirks: &Quirks| -> Vec<(String, Quirks)> {
+            names.iter().map(|n| ((*n).to_owned(), quirks.clone())).collect()
+        };
+        let adaptive = of(
+            &[
+                "anthropic.claude-fable-5-2",
+                "anthropic.claude-mythos-5-2",
+                "anthropic.claude-haiku-5-5",
+                "anthropic.claude-sonnet-5-5",
+                "anthropic.claude-opus-5-5",
+                "anthropic.claude-fable-5-1",
+                "anthropic.claude-mythos-5-1",
+                "anthropic.claude-fable-5",
+                "anthropic.claude-mythos-5",
+                "anthropic.claude-opus-5",
+                "anthropic.claude-sonnet-5",
+                "anthropic.claude-opus-4-8",
+                "anthropic.claude-opus-4-7",
+                "anthropic.claude-opus-4-6-v1",
+                "anthropic.claude-sonnet-4-6",
+            ],
+            &adaptive,
+        );
+        let claude = of(
+            &[
+                "anthropic.claude-opus-4-5-20251101-v1:0",
+                "anthropic.claude-haiku-4-5-20251001-v1:0",
+            ],
+            &claude,
+        );
+        let nova = of(
+            &[
+                "amazon.nova-2-lite-v1:0",
+                "amazon.nova-pro-v1:0",
+                "amazon.nova-lite-v1:0",
+                "amazon.nova-micro-v1:0",
+            ],
+            &nova,
+        );
+        Self {
+            provider: "bedrock".into(),
+            codec: Codec::Converse,
+            base_url: None,
+            auth: Auth::Bearer,
+            headers: BTreeMap::new(),
+            listing: Listing::Data,
+            quirks: Quirks::default(),
+            models: adaptive.into_iter().chain(claude).chain(nova).collect(),
+        }
+    }
+
+    /// Whether `url` is where that is: Amazon's own endpoint of a region
+    /// (docs.aws.amazon.com/general/latest/gr/bedrock.html, read 2026-11-25), or this machine.
+    pub fn is_bedrock(url: &str) -> bool {
+        let Ok(endpoint) = Endpoint::parse(url) else { return false };
+        let (host, port) = endpoint.host();
+        let region = host
+            .strip_suffix(".amazonaws.com")
+            .and_then(|h| {
+                h.strip_prefix("bedrock-runtime.").or(h.strip_prefix("bedrock-runtime-fips."))
+            })
+            .unwrap_or_default();
+        let label = !region.is_empty()
+            && region.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        endpoint.is_plain() || (label && port == 443 && endpoint.is_root())
+    }
+
     /// Any server that speaks Chat Completions. Nothing beyond the protocol is taken for granted.
     pub fn openai_compatible(provider: impl Into<String>, base_url: impl Into<String>) -> Self {
         Self {
@@ -312,6 +419,8 @@ mod tests {
             max_output: Some(2),
             effort: Some(Effort::OutputConfig),
             cache_markers: Some(true),
+            cache_points: Some(CachePoints::NotTools),
+            result_status: Some(true),
             replay: Some(Replay::SameModel),
             eager_tool_args: Some(true),
             max_tokens_field: Some(MaxTokens::MaxCompletionTokens),
@@ -354,11 +463,17 @@ mod tests {
             Profile::openai(),
             Profile::gemini(),
             Profile::openrouter(),
+            Profile::bedrock(),
             Profile::lm_studio(),
             Profile::openai_compatible("p", "https://e.com"),
         ] {
             assert_eq!((p.quirks.context, p.quirks.max_output), (None, None));
-            assert!(p.models.is_empty() && p.quirks.body.is_empty());
+            assert!(p.quirks.body.is_empty());
+            // Of Bedrock's models it is written which can do what; of none, how much.
+            assert_eq!(p.models.is_empty(), p.provider != "bedrock");
+            for m in p.models.values() {
+                assert_eq!((m.context, m.max_output, m.body.len()), (None, None, 0));
+            }
             let again: Profile = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
             assert_eq!(again, p);
         }
@@ -384,6 +499,47 @@ mod tests {
             let secret = crate::Secret::new("k".into());
             assert!(crate::Credential::new(endpoint.origin(), &p.auth, secret).is_ok());
         }
+    }
+
+    #[test]
+    fn where_bedrock_is() {
+        for yes in [
+            "https://bedrock-runtime.us-east-1.amazonaws.com",
+            "https://bedrock-runtime.us-east-1.amazonaws.com/",
+            "https://BEDROCK-runtime.eu-west-2.amazonaws.com:443",
+            "https://bedrock-runtime-fips.us-gov-west-1.amazonaws.com",
+            "http://127.0.0.1:9/v1",
+            "http://localhost:9",
+        ] {
+            assert!(Profile::is_bedrock(yes), "{yes}");
+        }
+        for no in [
+            "",
+            "us-east-1",
+            "http://bedrock-runtime.us-east-1.amazonaws.com",
+            "https://bedrock.us-east-1.amazonaws.com",
+            "https://bedrock-runtime.amazonaws.com",
+            "https://bedrock-runtime..amazonaws.com",
+            "https://bedrock-runtime.a.b.amazonaws.com",
+            "https://bedrock-runtime.us-east-1.amazonaws.com.evil.example",
+            "https://bedrock-runtime.us-east-1.evil.example",
+            "https://bedrock-runtime.us-east-1.evil.example/.amazonaws.com",
+            "https://evil.example/bedrock-runtime.us-east-1.amazonaws.com",
+            "https://evil.bedrock-runtime.us-east-1.amazonaws.com",
+            "https://xbedrock-runtime.us-east-1.amazonaws.com",
+            "https://bedrock-runtime.us-east-1.amazonaws.com:8443",
+            "https://bedrock-runtime.us-east-1.amazonaws.com/v1",
+            "https://bedrock-runtime.us-east-1.amazonaws.com.",
+            "https://bedrock-runtime.us_east.amazonaws.com",
+            "https://u:p@bedrock-runtime.us-east-1.amazonaws.com",
+            "https://bedrock-runtime.us-east-1.amazonaws.com/?x",
+            "https://bucket.s3.us-east-1.amazonaws.com",
+            "https://localhost",
+        ] {
+            assert!(!Profile::is_bedrock(no), "{no}");
+        }
+        let p = Profile::bedrock();
+        assert_eq!((p.codec, p.base_url.is_none(), p.auth), (Codec::Converse, true, Auth::Bearer));
     }
 
     #[test]

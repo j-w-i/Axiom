@@ -42,6 +42,7 @@ ServiceMark? markOf(String? provider, String? model, [String? harness]) =>
       'openai' || 'chatgpt' => ServiceMark.openai,
       'gemini' => ServiceMark.gemini,
       'openrouter' => ServiceMark.openrouter,
+      'bedrock' => ServiceMark.bedrock,
       _ => null,
     };
 
@@ -512,6 +513,7 @@ String providerName(String p) => switch (p) {
   'chatgpt' => 'ChatGPT plan',
   'gemini' => 'Gemini API',
   'openrouter' => 'OpenRouter',
+  'bedrock' => 'Amazon Bedrock',
   'claude-code' => 'Claude Code, another account',
   'lm-studio' => 'LM Studio on this machine',
   'openai-compatible' => 'OpenAI-compatible server',
@@ -524,8 +526,13 @@ String? _keyFrom(String p) => switch (p) {
   'openai' => 'the OpenAI platform',
   'gemini' => 'Google AI Studio',
   'openrouter' => 'OpenRouter',
+  'bedrock' => 'the Amazon Bedrock console',
   _ => null,
 };
+
+/// Where Bedrock's models are, for a region. What is no region makes no such address, and the host
+/// refuses it.
+String bedrockAt(String region) => 'https://bedrock-runtime.$region.amazonaws.com';
 
 /// Accounts, keys and servers. Several for one provider is normal (PR-4).
 class AccountsPage extends StatefulWidget {
@@ -538,7 +545,7 @@ class AccountsPage extends StatefulWidget {
 
 class _AccountsPageState extends State<AccountsPage> {
   final _name = TextEditingController(), _url = TextEditingController();
-  final _key = TextEditingController();
+  final _key = TextEditingController(), _region = TextEditingController();
   String _provider = 'lm-studio';
   String? _problem, _leaving;
   bool _busy = false;
@@ -549,7 +556,7 @@ class _AccountsPageState extends State<AccountsPage> {
   @override
   void initState() {
     super.initState();
-    for (final c in [_name, _url, _key]) {
+    for (final c in [_name, _url, _key, _region]) {
       c.addListener(() => setState(() {}));
     }
   }
@@ -559,6 +566,7 @@ class _AccountsPageState extends State<AccountsPage> {
     _name.dispose();
     _url.dispose();
     _key.dispose();
+    _region.dispose();
     super.dispose();
   }
 
@@ -581,12 +589,17 @@ class _AccountsPageState extends State<AccountsPage> {
     await widget.store.connect(
       _name.text.trim(),
       _provider,
-      url: _provider == 'openai-compatible' ? _url.text.trim() : null,
+      url: switch (_provider) {
+        'openai-compatible' => _url.text.trim(),
+        'bedrock' => bedrockAt(_region.text.trim()),
+        _ => null,
+      },
       secret: secret.isEmpty ? null : secret,
     );
     _key.clear();
     _name.clear();
     _url.clear();
+    _region.clear();
   });
 
   /// Only for a person's press: it opens their browser.
@@ -601,6 +614,7 @@ class _AccountsPageState extends State<AccountsPage> {
     builder: (context, _) {
       final t = Ax.of(context), c = t.colors;
       final own = _provider == 'openai-compatible', plan = _provider == 'chatgpt';
+      final region = _provider == 'bedrock';
       final signin = widget.store.signin;
       final from = _keyFrom(_provider);
       final programs = [
@@ -612,6 +626,7 @@ class _AccountsPageState extends State<AccountsPage> {
           !_busy &&
           _name.text.trim().isNotEmpty &&
           (!own || _url.text.trim().isNotEmpty) &&
+          (!region || _region.text.trim().isNotEmpty) &&
           (from == null || _key.text.trim().isNotEmpty);
       return PageFrame(problem: _problem, [
         if (widget.store.connections.isNotEmpty) ...[
@@ -728,6 +743,7 @@ class _AccountsPageState extends State<AccountsPage> {
                   'openai',
                   'gemini',
                   'openrouter',
+                  'bedrock',
                   'openai-compatible',
                   'chatgpt',
                 ].followedBy(programs))
@@ -773,6 +789,17 @@ class _AccountsPageState extends State<AccountsPage> {
               controller: _url,
               mono: true,
               placeholder: 'https://example.com/v1',
+            ),
+          ),
+        if (region)
+          FormPart(
+            'Region',
+            note: 'The AWS region the key is for. The key goes to Bedrock there and nowhere else.',
+            child: AxField(
+              label: 'Region',
+              controller: _region,
+              mono: true,
+              placeholder: 'us-east-1',
             ),
           ),
         if (program)

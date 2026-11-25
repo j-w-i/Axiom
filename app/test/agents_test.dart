@@ -772,6 +772,67 @@ void main() {
     }
   });
 
+  testWidgets('a key for Bedrock has a region', (t) async {
+    final s = await shell(t, accounts: false);
+    await t.tap(find.bySemanticsLabel('Accounts').first);
+    await settled(t);
+    Finder field(String l) => find.descendant(
+      of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
+      matching: find.byType(EditableText),
+    );
+    expect(field('Region'), findsNothing);
+    await t.tap(find.bySemanticsLabel(RegExp('^Add: ')));
+    await settled(t);
+    await t.tap(find.bySemanticsLabel('Amazon Bedrock').last);
+    await settled(t);
+    expect(field('Address'), findsNothing);
+    expect(
+      find.text('An API key from the Amazon Bedrock console. It goes to the system\'s store.'),
+      findsOneWidget,
+    );
+    Future<void> add() async {
+      await t.tap(find.widgetWithText(AxButton, 'Add'));
+      await settled(t);
+    }
+
+    // Each of the three is needed.
+    const all = {'Name': 'Work', 'Region': 'eu-west-2', 'Key': 'sk-secret'};
+    for (final without in all.keys) {
+      for (final MapEntry(:key, :value) in all.entries) {
+        await t.enterText(field(key), key == without ? ' ' : value);
+      }
+      await settled(t);
+      await add();
+      expect(s.calls, isEmpty, reason: without);
+    }
+    await t.enterText(field('Key'), 'sk-secret');
+    await settled(t);
+    await snap(t, 'accounts-bedrock');
+    await add();
+    expect(s.calls.single, [
+      'connect',
+      'Work',
+      'bedrock',
+      'https://bedrock-runtime.eu-west-2.amazonaws.com',
+      'sk-secret',
+    ]);
+    expect(t.widget<EditableText>(field('Region')).controller.text, isEmpty);
+    expect(t.widget<EditableText>(field('Key')).controller.text, isEmpty);
+    expect(
+      find.textContaining('Amazon Bedrock · https://bedrock-runtime.eu-west-2'),
+      findsOneWidget,
+    );
+    expect(markOf('bedrock', null), ServiceMark.bedrock);
+    // Whose model it is says more than where it runs.
+    expect(markOf('bedrock', 'claude-opus-5-5'), ServiceMark.claude);
+    // Not the next account's.
+    await t.tap(find.bySemanticsLabel(RegExp('^Add: ')));
+    await settled(t);
+    await t.tap(find.bySemanticsLabel('Anthropic API').last);
+    await settled(t);
+    expect(field('Region'), findsNothing);
+  });
+
   testWidgets('fits a small window at twice the text', (t) async {
     final s = Asked()
       ..current = working(asks: true)

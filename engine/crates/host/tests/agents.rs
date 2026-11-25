@@ -218,6 +218,102 @@ async fn an_agent_is_set_up_and_does_what_it_is_told() {
     assert_eq!(t.server.requests()[2]["messages"].as_array().unwrap().len(), 6);
 }
 
+/// From the connection to the tool and back, as Bedrock has it.
+#[tokio::test]
+async fn an_agent_works_on_bedrock() {
+    let mut t = T::new(vec![
+        bedrock(
+            Some(("I should write.", "<sig>")),
+            "Writing.",
+            &[("tooluse_1", "write", r#"{"path":"n.txt","content":"made\n"}"#)],
+        ),
+        bedrock(None, "All done.", &[]),
+    ])
+    .await;
+    let add = |url: &str, secret: Option<&str>| Call::ConnectionAdd {
+        name: "Amazon".into(),
+        provider: "bedrock".into(),
+        url: Some(url.into()),
+        secret: secret.map(|s| SecretText(s.into())),
+    };
+    for (url, secret) in [
+        ("https://evil.example", Some(CANARY)),
+        ("https://bedrock-runtime.us-east-1.amazonaws.com.evil.example", Some(CANARY)),
+        ("https://bedrock-runtime.us-east-1.amazonaws.com", None),
+    ] {
+        let e = t.c.call(add(url, secret)).await.unwrap_err().to_string();
+        assert!(e.contains("Bedrock") && !e.contains(CANARY), "{e}");
+    }
+    let url = t.server.url.trim_end_matches("/v1").to_owned();
+    let v = t.c.call(add(&url, Some(CANARY))).await.unwrap();
+    t.connection = v["connection"].as_str().unwrap().into();
+    // Its models are named by hand.
+    let connection = t.connection.clone();
+    assert_eq!(t.c.call(Call::Models { connection }).await.unwrap(), json!([]));
+    let mut setup = Call::AgentAdd {
+        session: t.s.clone(),
+        name: "Lead".into(),
+        execution: Execution {
+            model: Some("m".into()),
+            effort: Some("low".into()),
+            ..t.execution()
+        },
+        access: Access::Work,
+        trust: false,
+        instructions: vec![],
+        apart: false,
+    };
+    let e = t.c.call(setup.clone()).await.unwrap_err().to_string();
+    assert!(e.contains("effort"), "{e}");
+    let Call::AgentAdd { execution, .. } = &mut setup else { panic!() };
+    execution.model = Some("us.anthropic.claude-sonnet-5-5".into());
+    let v = t.c.call(setup).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    t.prompt(&a, "make it").await.unwrap();
+    let (o, e, all) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None));
+    assert_eq!(t.file("n.txt").as_deref(), Some("made\n"));
+    assert_eq!(texts(&all, ItemKind::Reasoning), ["I should write."]);
+    assert_eq!(texts(&all, ItemKind::Prose), ["Writing.", "All done."]);
+    let used: Vec<_> = all
+        .iter()
+        .filter_map(|b| match b {
+            Body::Usage { usage, provenance, .. } => Some((usage.input, usage.output, *provenance)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(used, [(Some(40), Some(9), Provenance::Reported); 2]);
+    let asked = t.server.requests();
+    assert_eq!(asked[0]["additionalModelRequestFields"]["output_config"]["effort"], "low");
+    // Where it is kept between turns, and what was thought goes back signed.
+    assert_eq!(asked[0]["system"][1], json!({"cachePoint":{"type":"default"}}));
+    let turns = asked[1]["messages"].as_array().unwrap();
+    assert_eq!(
+        turns[1]["content"][0],
+        json!({"reasoningContent":{"reasoningText":{"text":"I should write.","signature":"<sig>"}}})
+    );
+    assert_eq!(turns[1]["content"][2]["toolUse"]["toolUseId"], "tooluse_1");
+    assert_eq!(turns[2]["content"][0]["toolResult"]["toolUseId"], "tooluse_1");
+    assert!(t.server.keys().iter().all(|k| *k == format!("Bearer {CANARY}")));
+
+    // Also when the host is another; and a failure after it began is one.
+    t.restart().await;
+    t.server.add(bedrock_exception("I ", "validationException", r#"{"message":"no more"}"#));
+    t.prompt(&a, "and now?").await.unwrap();
+    // What was before is told again first.
+    let (o, e, all) = loop {
+        let (o, e, all) = t.ended().await;
+        if o != Outcome::Completed {
+            break (o, e, all);
+        }
+    };
+    assert_eq!(o, Outcome::Failed);
+    assert!(e.unwrap().contains("no more"));
+    assert!(texts(&all, ItemKind::Prose).iter().all(|p| !p.contains(CANARY)));
+    let last = t.server.requests().pop().unwrap();
+    assert!(last["messages"].to_string().contains("<sig>"));
+}
+
 #[tokio::test]
 async fn a_person_is_asked_through_the_socket() {
     let mut t =

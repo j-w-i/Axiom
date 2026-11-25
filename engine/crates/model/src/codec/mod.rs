@@ -6,12 +6,14 @@ use serde::Deserialize;
 
 use crate::{
     error::Error,
+    eventstream,
     profile::{Profile, Quirks, Replay},
     sse,
     types::*,
 };
 
 pub mod chat;
+pub mod converse;
 pub mod gemini;
 pub mod messages;
 mod object;
@@ -34,6 +36,8 @@ pub enum EncodeError {
     Reserved(String),
     #[error("the model's name {0:?} cannot be part of an address")]
     BadModel(String),
+    #[error("the tool's name {0:?} cannot be sent to this provider")]
+    ToolName(String),
     #[error("the schema of the tool {tool:?} cannot be sent to this provider: {why}")]
     Schema { tool: String, why: String },
     #[error("the request cannot be written: {0}")]
@@ -46,7 +50,8 @@ impl From<serde_json::Error> for EncodeError {
 }
 
 /// A request as it goes out. Nothing after the first message depends on what comes before the last:
-/// appending a message leaves every byte before it as it was, but for cache markers, which move.
+/// appending a message leaves every byte before it as it was, but for cache markers, which move, and in
+/// the Converse codec for where a message ends: one of the same role goes on in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Encoded {
     pub body: Vec<u8>,
@@ -86,6 +91,7 @@ pub fn encode(request: &Request, profile: &Profile) -> Result<Encoded, EncodeErr
         Codec::Chat => chat::encode(request, &quirks, &scope),
         Codec::Responses => responses::encode(request, &quirks, &scope),
         Codec::Gemini => gemini::encode(request, &quirks, &scope),
+        Codec::Converse => converse::encode(request, &quirks, &scope),
     }?;
     encoded.lost.extend(unsigned(request, &quirks, &scope));
     encoded.lost.sort_by_key(|l| (l.message, l.block));
@@ -118,6 +124,7 @@ pub(crate) fn path(codec: Codec, model: &str) -> Result<String, EncodeError> {
         Codec::Chat => Ok("chat/completions".into()),
         Codec::Responses => Ok("responses".into()),
         Codec::Gemini => gemini::path(model),
+        Codec::Converse => converse::path(model),
     }
 }
 
@@ -156,6 +163,65 @@ impl<'a> Unfinished<'a> {
     }
 }
 
+/// How an answer of this codec comes, and is asked for.
+pub(crate) fn media_type(codec: Codec) -> &'static str {
+    match codec {
+        Codec::Messages | Codec::Chat | Codec::Responses | Codec::Gemini => "text/event-stream",
+        Codec::Converse => "application/vnd.amazon.eventstream",
+    }
+}
+
+/// An answer's bytes, into its events.
+#[derive(Debug)]
+pub struct Frames {
+    framing: Framing,
+    failed: Option<Error>,
+}
+#[derive(Debug)]
+enum Framing {
+    Sse(sse::Decoder),
+    Amazon(eventstream::Decoder),
+}
+
+impl Frames {
+    /// `limit`: most bytes of one event.
+    pub fn new(codec: Codec, limit: usize) -> Self {
+        let framing = match codec {
+            Codec::Messages | Codec::Chat | Codec::Responses | Codec::Gemini => {
+                Framing::Sse(sse::Decoder::new(limit))
+            }
+            Codec::Converse => Framing::Amazon(eventstream::Decoder::new(limit)),
+        };
+        Self { framing, failed: None }
+    }
+
+    /// Adds the events that end in `bytes` to `out`, also those before an error, after which there
+    /// are none.
+    pub fn push(&mut self, bytes: &[u8], out: &mut Vec<sse::Event>) -> Result<(), Error> {
+        let done = match &self.failed {
+            Some(e) => Err(e.clone()),
+            None => self.framing.push(bytes, out),
+        };
+        self.failed = done.clone().err();
+        done
+    }
+}
+impl Framing {
+    fn push(&mut self, bytes: &[u8], out: &mut Vec<sse::Event>) -> Result<(), Error> {
+        match self {
+            Framing::Sse(d) => d.push(bytes, out).map_err(|e| Error::protocol(e.to_string())),
+            Framing::Amazon(d) => {
+                let mut messages = Vec::new();
+                let read = d.push(bytes, &mut messages);
+                for message in messages {
+                    out.push(converse::event(message)?);
+                }
+                read.map_err(|e| Error::protocol(e.to_string()))
+            }
+        }
+    }
+}
+
 /// A stream's events, one answer long.
 #[derive(Debug)]
 pub struct Decoder {
@@ -169,6 +235,7 @@ enum Inner {
     Chat(chat::Decoder),
     Responses(responses::Decoder),
     Gemini(gemini::Decoder),
+    Converse(converse::Decoder),
 }
 
 impl Decoder {
@@ -178,6 +245,7 @@ impl Decoder {
             Codec::Chat => Inner::Chat(chat::Decoder::new(quirks)),
             Codec::Responses => Inner::Responses(responses::Decoder::default()),
             Codec::Gemini => Inner::Gemini(gemini::Decoder::default()),
+            Codec::Converse => Inner::Converse(converse::Decoder::default()),
         };
         Self { codec, taken: 0, ended: false }
     }
@@ -197,6 +265,7 @@ impl Decoder {
             Inner::Chat(d) => d.event(event, out),
             Inner::Responses(d) => d.event(event, out),
             Inner::Gemini(d) => d.event(event, out),
+            Inner::Converse(d) => d.event(event, out),
         };
         self.ended = done.is_err() || out.last() == Some(&Event::End);
         done
@@ -217,7 +286,16 @@ impl Decoder {
                 d.end(out);
                 return Ok(());
             }
-            Inner::Messages(_) | Inner::Chat(_) | Inner::Responses(_) | Inner::Gemini(_) => {}
+            // Nothing but what was used is missing.
+            Inner::Converse(d) if d.stopped() => {
+                d.end(out);
+                return Ok(());
+            }
+            Inner::Messages(_)
+            | Inner::Chat(_)
+            | Inner::Responses(_)
+            | Inner::Gemini(_)
+            | Inner::Converse(_) => {}
         }
         Err(Error::cut_short("the stream ended before the answer did"))
     }

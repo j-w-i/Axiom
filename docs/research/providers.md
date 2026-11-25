@@ -119,6 +119,19 @@ taken from [AI]/[MD]): OpenAI streaming-events reference, Anthropic rate-limits 
 - stopReason passthrough kept raw [AI :970,1125]. Auth env: AWS_ACCESS_KEY_ID/SECRET/REGION or AWS_BEARER_TOKEN_BEDROCK [MD].
 - [MD] bedrock tables: converse 39, chat-completions 44, responses 19, messages 6; model ids carry region prefixes (`us.`, `eu.`, `jp.`); cache explicit (max 4 breakpoints, min_tokens 512/1024) for Claude, implicit for others.
 - Anthropic server tools/tool search on Bedrock only through InvokeModel [doc]. cachePoint JSON shape, usage names, error retry class list: [unverified: recall].
+- **Read 2026-11-25** [doc: docs.aws.amazon.com/bedrock/latest, smithy.io/2.0; each page is named where the code rests on it: `model/src/codec/converse.rs`, `eventstream.rs`, `profile.rs`, `error.rs`], which settles:
+  - Key: `Authorization: Bearer`, env name `AWS_BEARER_TOKEN_BEDROCK`; for Bedrock and Bedrock Runtime actions only; short-term ones last at most 12 h and hold in one region, long-term ones are for trying things out, says AWS (userguide/api-keys-use,
+    api-keys-reference). Region lists differ from page to page (api-keys-supported, general/latest/gr/bedrock), so none is kept here.
+  - Frames: prelude, two CRC32s, ten header types; `:message-type` is `event`, `exception` (`:exception-type`) or `error` (`:error-code`, `:error-message`), also after HTTP 200 (smithy.io amazon-eventstream).
+  - Order: messageStart, per block start (tool use only), deltas, stop; messageStop; metadata with usage. `cachePoint {type: default, ttl?}`; Claude: tools, system, messages and 5m|1h; Nova: system and messages, 5m, no `ttl`; GPT: none in Converse (userguide/prompt-caching).
+    With a cache `inputTokens` is what was neither read nor written; reasoning tokens are not told.
+  - Claude's effort: `additionalModelRequestFields {thinking: {type: adaptive}, output_config: {effort}}` (userguide/claude-messages-adaptive-thinking#converse). The reference also has a top-level `outputConfig.effort`; which models take it is not said, so it is not used. Nova 2
+    has `reasoningConfig` (nova2-userguide/extended-thinking); not built.
+  - Reasoning: signed and redacted blocks go back unchanged, empty texts included; unsigned ones do not (DeepSeek's example takes them out, Nova 2's are the word `[REDACTED]`). Preserved thinking binds blocks to what comes before them (claude-messages-thinking-block-binding).
+  - Ids of uses `[a-zA-Z0-9_.:-]{1,64}`, names of tools `[a-zA-Z0-9_-]{1,64}`, a description is not empty. `status: error` of a result is "only supported by Amazon Nova and Anthropic Claude 3 and 4", though the page on tool use sends it to Cohere.
+  - Some models refuse tools in a stream: Llama 3.1 to 4, Mistral Large 1 and 2, Pixtral, Palmyra (userguide/tool-use-client-side). They are told apart by the error only.
+- **Not found on any page**, and so remembered or assumed: that turns must alternate (they are joined), the words for a prompt that is too long ("Input is too long"), that blank texts are refused, how a call without arguments is streamed, whether a signature comes in pieces
+  (they are joined), whether `toolConfig` may be left out when the history has uses of tools (Axiom's agents always have tools). No key has been used.
 
 ### 2.6 Vertex and Azure
 - Vertex: [MD] google-vertex tables generate-content 17, messages 18, responses 8, chat-completions 23, interactions 12; separate provider `google-vertex-anthropic` (18 Claude models, npm @ai-sdk/google-vertex/anthropic); env

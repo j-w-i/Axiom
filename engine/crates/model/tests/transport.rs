@@ -157,6 +157,302 @@ async fn gemini_is_asked_its_own_way() {
     assert_eq!(asked.head.matches(KEY).count(), 1);
 }
 
+const AMAZON: &str = "HTTP/1.1 200 OK\r\ncontent-type: application/vnd.amazon.eventstream\r\nx-amzn-requestid: req_head\r\nconnection: close\r\n\r\n";
+
+fn bedrock(url: &str) -> Client {
+    client_with(Profile::bedrock(), url, Options::default())
+}
+fn printed(name: &str) -> Vec<u8> {
+    let text = fixture(&format!("bedrock-from-documentation/{name}.jsonl"));
+    amazon::stream(&String::from_utf8(text).unwrap())
+}
+
+#[tokio::test]
+async fn bedrock_is_asked_its_own_way() {
+    let s = Server::new(vec![send(AMAZON), Step::Send(printed("tool"))]).await;
+    let mut r = request();
+    for (model, path) in [
+        ("us.anthropic.claude-sonnet-5-5", "us.anthropic.claude-sonnet-5-5"),
+        ("amazon.nova-pro-v1:0", "amazon.nova-pro-v1%3A0"),
+        (
+            "arn:aws:bedrock:us-east-1:111122223333:inference-profile/us.a.b",
+            "arn%3Aaws%3Abedrock%3Aus-east-1%3A111122223333%3Ainference-profile%2Fus.a.b",
+        ),
+    ] {
+        r.model = model.into();
+        let answer = timeout(LONG, bedrock(&s.url()).stream(&r)).await.unwrap().unwrap();
+        assert_eq!(answer.request_id(), Some("req_head"));
+        let (reply, e) = all(answer).await;
+        assert_eq!((e, reply.message.calls().count(), reply.complete), (None, 1, true));
+        let asked = s.asked().pop().unwrap();
+        assert!(
+            asked.head.starts_with(&format!("POST /v1/model/{path}/converse-stream HTTP/1.1\r\n")),
+            "{}",
+            asked.head
+        );
+        assert_eq!(asked.header("authorization"), Some(format!("Bearer {KEY}").as_str()));
+        assert_eq!(asked.header("accept"), Some("application/vnd.amazon.eventstream"));
+        assert_eq!(asked.header("content-type"), Some("application/json"));
+        assert_eq!(asked.body, axiom_model::codec::encode(&r, &Profile::bedrock()).unwrap().body);
+    }
+    // Nothing is sent for a list: it is at another origin, where the key does not go.
+    let before = s.asked().len();
+    let e = bedrock(&s.url()).list_models().await.unwrap_err();
+    assert_eq!(e, CallError::Encode(EncodeError::Unsupported("the list of models")));
+    assert_eq!(s.asked().len(), before);
+}
+
+#[tokio::test]
+async fn bedrock_is_not_led_elsewhere_by_a_models_name() {
+    let s = Server::new(vec![]).await;
+    for bad in [
+        "", ".", "..", "a/..", "../a", "a//b", "/a", "a/", "a/./b", "a?b", "a#b", "a%2fb", "a b",
+        "a\n", "é", "a\\b", "a&b", "a@b", "a\0", "//evil", "a+b",
+    ] {
+        let mut r = request();
+        r.model = bad.into();
+        let e = bedrock(&s.url()).stream(&r).await.unwrap_err();
+        assert_eq!(e, CallError::Encode(EncodeError::BadModel(bad.into())), "{bad:?}");
+    }
+    assert!(s.asked().is_empty());
+}
+
+#[tokio::test]
+async fn amazons_errors() {
+    let of = async |status: &str, name: Option<&str>, body: &str| {
+        let name = name.map(|n| format!("x-amzn-errortype: {n}\r\n")).unwrap_or_default();
+        let fields = format!("content-type: application/json\r\nx-amzn-requestid: req_1\r\n{name}");
+        let s = Server::new(vec![send(head(status, &fields)), send(body)]).await;
+        let e = fails(&bedrock(&s.url())).await;
+        assert_eq!(e.request_id.as_deref(), Some("req_1"));
+        (e.class, e.retry, e.code, e.message)
+    };
+    let uri = "http://internal.amazon.com/coral/com.amazon.coral.validate/";
+    for (status, name, body, class, retry, code) in [
+        (
+            "403 x",
+            Some("AccessDeniedException"),
+            r#"{"message":"m"}"#,
+            Class::Auth,
+            Retry::Never,
+            Some("AccessDeniedException"),
+        ),
+        ("403 x", None, r#"{"Message":"m"}"#, Class::Auth, Retry::Never, None),
+        (
+            "403 x",
+            Some("ExpiredTokenException"),
+            r#"{"message":"m"}"#,
+            Class::Auth,
+            Retry::Never,
+            Some("ExpiredTokenException"),
+        ),
+        (
+            "400 x",
+            Some("NotAuthorized"),
+            r#"{"message":"m"}"#,
+            Class::Auth,
+            Retry::Never,
+            Some("NotAuthorized"),
+        ),
+        (
+            "400 x",
+            Some("ValidationException"),
+            r#"{"message":"m"}"#,
+            Class::BadRequest,
+            Retry::Never,
+            Some("ValidationException"),
+        ),
+        (
+            "400 x",
+            None,
+            r#"{"__type":"aws.x#ValidationException","message":"m: Input is too long for requested model."}"#,
+            Class::ContextTooLong,
+            Retry::Never,
+            Some("aws.x#ValidationException"),
+        ),
+        (
+            "400 x",
+            Some("ThrottlingException"),
+            r#"{"message":"m"}"#,
+            Class::RateLimit,
+            Retry::Safe,
+            Some("ThrottlingException"),
+        ),
+        ("429 x", None, r#"{"message":"m"}"#, Class::RateLimit, Retry::Safe, None),
+        (
+            "429 x",
+            Some("ModelNotReadyException"),
+            r#"{"message":"m"}"#,
+            Class::Overloaded,
+            Retry::Safe,
+            Some("ModelNotReadyException"),
+        ),
+        (
+            "424 x",
+            Some("ModelErrorException"),
+            r#"{"message":"m"}"#,
+            Class::Server,
+            Retry::Restart,
+            Some("ModelErrorException"),
+        ),
+        (
+            "424 x",
+            Some("ModelErrorException"),
+            r#"{"message":"m","originalStatusCode":400}"#,
+            Class::BadRequest,
+            Retry::Never,
+            Some("ModelErrorException"),
+        ),
+        (
+            "424 x",
+            Some("ModelErrorException"),
+            r#"{"message":"m: prompt is too long","originalStatusCode":400}"#,
+            Class::ContextTooLong,
+            Retry::Never,
+            Some("ModelErrorException"),
+        ),
+        (
+            "408 x",
+            Some("ModelTimeoutException"),
+            r#"{"message":"m"}"#,
+            Class::Server,
+            Retry::Restart,
+            Some("ModelTimeoutException"),
+        ),
+        (
+            "404 x",
+            Some("ResourceNotFoundException"),
+            r#"{"message":"m"}"#,
+            Class::BadRequest,
+            Retry::Never,
+            Some("ResourceNotFoundException"),
+        ),
+        (
+            "413 x",
+            Some("RequestEntityTooLargeException"),
+            r#"{"message":"m"}"#,
+            Class::ContextTooLong,
+            Retry::Never,
+            Some("RequestEntityTooLargeException"),
+        ),
+        (
+            "503 x",
+            Some("ServiceUnavailableException"),
+            r#"{"message":"m"}"#,
+            Class::Overloaded,
+            Retry::Safe,
+            Some("ServiceUnavailableException"),
+        ),
+        ("529 x", None, r#"{"message":"m"}"#, Class::Overloaded, Retry::Safe, None),
+        (
+            "500 x",
+            Some("InternalServerException"),
+            r#"{"message":"m"}"#,
+            Class::Server,
+            Retry::Restart,
+            Some("InternalServerException"),
+        ),
+    ] {
+        let got = of(status, name, body).await;
+        assert!(got.3.starts_with('m'), "{got:?}");
+        assert_eq!(
+            (got.0, got.1, got.2.as_deref()),
+            (class, retry, code),
+            "{status} {name:?} {body}"
+        );
+        // With what older servers write around the name.
+        if let Some(name) = name {
+            for long in
+                [format!("{name}:{uri}"), format!("a.b#{name}"), format!("a.b#{name}:{uri}")]
+            {
+                let again = of(status, Some(&long), body).await;
+                assert_eq!((again.0, again.2.as_ref()), (class, Some(&long)), "{long}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_exception_in_the_stream_has_the_heads_id_and_is_cleaned() {
+    let begun =
+        amazon::event("contentBlockDelta", r#"{"contentBlockIndex":0,"delta":{"text":"hi"}}"#);
+    for after in [
+        amazon::exception("throttlingException", &format!(r#"{{"message":"key {KEY}"}}"#)),
+        amazon::exception(KEY, KEY),
+        amazon::exception(&format!("a#{KEY}:b"), KEY),
+        amazon::error(KEY, KEY),
+        amazon::event(KEY, KEY),
+        amazon::event("messageStop", KEY),
+        amazon::event("messageStop", &format!(r#"{{"stopReason":{{"{KEY}":1}}}}"#)),
+        amazon::message(&[(":message-type", KEY)], b""),
+        KEY.as_bytes().to_vec(),
+        amazon::message(&[(KEY, KEY)], KEY.as_bytes()),
+    ] {
+        let s = Server::new(vec![send(AMAZON), Step::Send([begun.clone(), after].concat())]).await;
+        // `all` looks for the credential.
+        let (r, e) = all(begins(&bedrock(&s.url())).await).await;
+        let e = e.unwrap();
+        assert_eq!((text(&r).as_str(), r.complete), ("hi", false));
+        assert_eq!(e.request_id.as_deref(), Some("req_head"));
+    }
+    let s = Server::new(vec![
+        send(AMAZON),
+        send(amazon::exception("throttlingException", r#"{"message":"slow down"}"#)),
+    ])
+    .await;
+    let (_, e) = all(begins(&bedrock(&s.url())).await).await;
+    let e = e.unwrap();
+    assert_eq!((e.class, e.retry, e.status), (Class::RateLimit, Retry::Restart, None));
+    assert_eq!(e.to_string(), "rate limited: slow down");
+}
+
+#[tokio::test]
+async fn a_stream_of_the_other_kind_is_none() {
+    for (c, ours, kind) in [
+        (bedrock as fn(&str) -> Client, false, "text/event-stream"),
+        (bedrock, false, "application/json"),
+        (bedrock, true, "application/vnd.amazon.eventstream"),
+        (bedrock, true, "Application/vnd.amazon.eventstream; x=y"),
+        (client, false, "application/vnd.amazon.eventstream"),
+    ] {
+        let fields = format!("content-type: {kind}\r\n");
+        let s = Server::new(vec![send(head("200 OK", &fields)), Step::Send(printed("text"))]).await;
+        match timeout(LONG, c(&s.url()).stream(&request())).await.unwrap() {
+            Ok(answer) => assert!(ours && all(answer).await.0.complete, "{kind}"),
+            Err(e) => assert!(!ours && provider(e).class == Class::Protocol, "{kind}"),
+        }
+    }
+    // One that does not say: its checksums do.
+    let s = Server::new(vec![send(head("200 OK", "")), Step::Send(printed("text"))]).await;
+    assert_eq!(all(begins(&bedrock(&s.url())).await).await.1, None);
+    let s = Server::new(vec![send(head("200 OK", "")), send("data: {}\n\ndata: {}\n\n")]).await;
+    let (_, e) = all(begins(&bedrock(&s.url())).await).await;
+    assert_eq!(e.unwrap().class, Class::Protocol);
+}
+
+#[tokio::test]
+async fn bedrock_that_hangs_up() {
+    let whole = printed("tool");
+    // Where the count of what was used begins, which is the last event.
+    let used = amazon::event(
+        "metadata",
+        r#"{"usage": {"inputTokens": 125, "outputTokens": 60, "totalTokens": 185}, "metrics": {"latencyMs": 1175}}"#,
+    );
+    assert!(whole.ends_with(&used));
+    let stopped = whole.len() - used.len();
+    for (to, complete) in
+        [(whole.len() - 1, true), (stopped, true), (stopped - 1, false), (0, false)]
+    {
+        let s = Server::new(vec![send(AMAZON), Step::Send(whole[..to].to_vec())]).await;
+        let (r, e) = all(begins(&bedrock(&s.url())).await).await;
+        assert_eq!((r.complete, r.message.calls().count()), (complete, usize::from(complete)));
+        assert_eq!(
+            e.map(|e| (e.class, e.retry)),
+            (!complete).then_some((Class::CutShort, Retry::Restart))
+        );
+    }
+}
+
 #[tokio::test]
 async fn gemini_that_hangs_up_before_it_stopped_is_cut_short() {
     let half =
@@ -398,6 +694,7 @@ async fn a_server_that_repeats_the_credential_does_not_get_it_into_an_error() {
             Profile::anthropic(),
             Profile::openai(),
             Profile::gemini(),
+            Profile::bedrock(),
         ] {
             let s = Server::new(way.clone()).await;
             let c = client_with(codec, &s.url(), Options::default());
@@ -407,7 +704,8 @@ async fn a_server_that_repeats_the_credential_does_not_get_it_into_an_error() {
                 Ok(answer) => all(answer).await.1,
             };
             assert!(failed.is_some(), "{n}");
-            if c.profile().codec != axiom_model::Codec::Messages {
+            use axiom_model::Codec::{Converse, Messages};
+            if ![Messages, Converse].contains(&c.profile().codec) {
                 provider(timeout(LONG, c.list_models()).await.unwrap().unwrap_err());
             }
         }

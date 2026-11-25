@@ -66,6 +66,19 @@ There is no OpenRouter key here. Read on 2026-11-25:
 | `error` | <https://openrouter.ai/docs/api_reference/errors-and-debugging#mid-stream-errors> | As printed |
 | `reasoning` | <https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#streaming-response> | **Put together**: that piece, then the last events of <https://openrouter.ai/docs/api_reference/streaming#the-final-usage-chunk-chat-completions>, whose `...` are left out and whose `usage` is the example of <https://openrouter.ai/docs/cookbook/administration/usage-accounting>; before them the comment that page says is sent |
 
+## `bedrock-from-documentation/`: from documentation, not recorded
+There is no AWS account here. Read on 2026-11-25. The pages print events as objects, never their bytes: a line here is one event as they print it
+(double quotes for Python's single ones), and `tests/common` makes the frames.
+
+| Name | Page | What was done to it |
+|------|------|---------------------|
+| `text` | <https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html>, "The following example is a partial response from `ConverseStream`" | As printed, without the `.` lines that stand for more; the page does not end the block |
+| `tool` | <https://docs.aws.amazon.com/nova/latest/userguide/tool-use-invocation.html> | **Put together**: the page prints the block whole. In the events of `API_runtime_ContentBlockStart` and `API_runtime_ContentBlockDelta`, its input in pieces; counts of the first page |
+| `reasoning` | `API_runtime_ReasoningContentBlockDelta`, `API_runtime_TokenUsage`, `API_runtime_CacheDetail` | **Put together**: no page prints such a stream. Words, signature, redacted bytes and counts are made up |
+
+The frames are checked with the vectors of AWS's SDK for Go (`tests/eventstream.rs`), the exceptions are those of `API_runtime_ConverseStream`, and
+errors are from its list, `APIReference/CommonErrors` and `userguide/troubleshooting-api-error-codes`.
+
 The APIs' real behaviour has not been tested.
 
 ## chatgpt/

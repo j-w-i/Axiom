@@ -1,0 +1,12 @@
+{"messageStart": {"role": "assistant"}}
+{"contentBlockDelta": {"delta": {"reasoningContent": {"text": "An even number is 2k. "}}, "contentBlockIndex": 0}}
+{"contentBlockDelta": {"delta": {"reasoningContent": {"text": "2j + 2k = 2(j + k)."}}, "contentBlockIndex": 0}}
+{"contentBlockDelta": {"delta": {"reasoningContent": {"signature": "<Signature_of_the_reasoning>"}}, "contentBlockIndex": 0}}
+{"contentBlockStop": {"contentBlockIndex": 0}}
+{"contentBlockDelta": {"delta": {"reasoningContent": {"redactedContent": "PFJlZGFjdGVkPg=="}}, "contentBlockIndex": 1}}
+{"contentBlockStop": {"contentBlockIndex": 1}}
+{"contentBlockDelta": {"delta": {"text": "The sum of two even numbers"}, "contentBlockIndex": 2}}
+{"contentBlockDelta": {"delta": {"text": " is even."}, "contentBlockIndex": 2}}
+{"contentBlockStop": {"contentBlockIndex": 2}}
+{"messageStop": {"stopReason": "end_turn"}}
+{"metadata": {"usage": {"inputTokens": 5, "cacheReadInputTokens": 100, "cacheWriteInputTokens": 20, "cacheDetails": [{"inputTokens": 12, "ttl": "1h"}, {"inputTokens": 8, "ttl": "5m"}], "outputTokens": 60, "totalTokens": 185}, "metrics": {"latencyMs": 1175}}}

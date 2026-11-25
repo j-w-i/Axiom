@@ -94,6 +94,10 @@ impl Endpoint {
     pub(crate) fn is_plain(&self) -> bool {
         self.base.scheme() == "http"
     }
+    /// Nothing but an origin.
+    pub(crate) fn is_root(&self) -> bool {
+        self.base.path() == "/"
+    }
     pub(crate) fn host(&self) -> (&str, u16) {
         (&self.origin.host, self.origin.port)
     }

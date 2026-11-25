@@ -1,0 +1,7 @@
+{"messageStart": {"role": "assistant"}}
+{"contentBlockDelta": {"delta": {"text": ""}, "contentBlockIndex": 0}}
+{"contentBlockDelta": {"delta": {"text": " Title"}, "contentBlockIndex": 0}}
+{"contentBlockDelta": {"delta": {"text": ":"}, "contentBlockIndex": 0}}
+{"contentBlockDelta": {"delta": {"text": " The"}, "contentBlockIndex": 0}}
+{"messageStop": {"stopReason": "max_tokens"}}
+{"metadata": {"usage": {"inputTokens": 47, "outputTokens": 20, "totalTokens": 67}, "metrics": {"latencyMs": 100.0}}}
