@@ -65,6 +65,12 @@ pub fn known_as(id: &str) -> Option<Known> {
     known().into_iter().find(|k| k.id == id)
 }
 
+/// Axiom's own, as it is named to a program.
+fn server(command: Place, args: Vec<String>) -> Server {
+    Server { name: SERVER.into(), tool: crate::peers::TOOL.into(), command, args }
+}
+const SERVER: &str = "axiom";
+
 impl Known {
     fn start(&self, workspace: Place, access: Access, trust: bool) -> Start {
         Start {
@@ -76,6 +82,8 @@ impl Known {
             trust: if trust { Trust::Given } else { Trust::Withheld },
             by: By::Person,
             tools: None,
+            hands: false,
+            system: None,
         }
     }
 
@@ -103,6 +111,7 @@ impl Known {
             program: program.as_ref().ok().map(|p| p.place().to_string()),
             problem: program.err().map(|e| e.to_string()),
             needs_trust: not.is_empty(),
+            hands: self.harness.takes_hands(),
             accounts: crate::connections::provider_of(self.id).map(str::to_owned),
             access: trusted,
         }
@@ -121,6 +130,9 @@ impl Known {
         let start = Start {
             model: s.execution.model.clone(),
             effort: s.execution.effort.clone(),
+            hands: s.hands(),
+            // Only whether it could be given one.
+            tools: s.hands().then(|| server(program.place().clone(), Vec::new())),
             ..self.start(workspace, access, s.trust)
         };
         match self.harness.launch(&start) {
@@ -147,6 +159,8 @@ pub struct Worker {
     pub workspace: Place,
     /// This program, for the tools it is given.
     pub bridge: Option<Place>,
+    /// What its model is told, if its hands are Axiom's.
+    pub words: Option<String>,
     pub inbox: mpsc::Receiver<Word>,
     /// Said and not yet told it.
     pub waits: Vec<(ItemId, String)>,
@@ -251,22 +265,23 @@ impl Worker {
             trust: if self.setup.trust { Trust::Given } else { Trust::Withheld },
             by: By::Person,
             tools: None,
+            hands: self.setup.hands(),
+            system: None,
         };
-        // A key for it alone, gone with its attempt. Without one it works all the same.
+        // A key for it alone, gone with its attempt. Without one it works all the same, unless it has
+        // nothing else to work with.
         let grant = match &self.bridge {
             Some(_) if self.known.harness.takes_tools() => {
                 let f = &self.floor;
-                f.agents.grant(&f.session.id, &f.agent, &self.site.tmp).ok()
+                let words = self.words.as_deref();
+                f.agents.grant(&f.session.id, &f.agent, &self.site.tmp, start.hands, words).ok()
             }
             _ => None,
         };
         if let (Some(g), Some(command)) = (&grant, &self.bridge) {
-            start.tools = Some(Server {
-                name: "axiom".into(),
-                tool: crate::peers::TOOL.into(),
-                command: command.clone(),
-                args: vec![crate::mcp::ARG.into(), g.file.display().to_string()],
-            });
+            let args = vec![crate::mcp::ARG.into(), g.file.display().to_string()];
+            start.tools = Some(server(command.clone(), args));
+            start.system = g.words.as_ref().and_then(|w| Place::new(w).ok());
         }
         let failed = |e: Error| Halt::Failed(e.to_string());
         let launch = self.known.harness.launch(&start).map_err(failed)?;
@@ -282,6 +297,7 @@ impl Worker {
                 launch.containment,
                 self.setup.trust,
                 self.site.config.as_ref(),
+                start.hands,
             ),
             unsandboxed: true,
         };
@@ -303,6 +319,7 @@ impl Worker {
             .await?;
         self.floor.sync().await?;
         let frames = Record(self.floor.clone());
+        let start_hands = start.hands;
         let live = self.known.harness.start(&self.site, start, token, frames).map_err(failed)?;
         let (tx, rx) = mpsc::channel(1);
         let attempt = Attempt {
@@ -314,6 +331,7 @@ impl Worker {
             handle: live.handle,
             events: live.events,
             containment: launch.containment,
+            hands: start_hands,
             _grant: grant,
             ready: false,
             resumes: false,
@@ -409,6 +427,8 @@ struct Attempt {
     handle: Handle,
     events: Events,
     containment: Containment,
+    /// Its tool calls are shown where they are done: by the host itself.
+    hands: bool,
     _grant: Option<Grant>,
     ready: bool,
     resumes: bool,
@@ -713,6 +733,8 @@ impl Attempt {
                     self.floor.say(vec![Say::End(o.item, Outcome::Completed, None)]).await?;
                 }
             }
+            Event::ToolStarted(t)
+                if self.hands && t.name.starts_with(&format!("mcp__{SERVER}__")) => {}
             Event::ToolStarted(t) => {
                 let t = *t;
                 let name = [t.title.as_deref().unwrap_or_default(), &t.name];
@@ -1077,12 +1099,17 @@ fn command(program: &Place, args: &[String]) -> String {
         .join(" ")
 }
 
-fn scope(k: &Known, c: Containment, trust: bool, account: Option<&Place>) -> String {
+fn scope(k: &Known, c: Containment, trust: bool, account: Option<&Place>, hands: bool) -> String {
     let held = match c {
+        _ if hands => {
+            "it has no tools of its own: what it does, it does with Axiom's, judged, asked \
+             about and contained as Axiom's own agents are"
+                .into()
+        }
         Containment::Harness => format!("{} says its own sandbox holds it back", k.name),
         _ => "nothing holds it back: it can do whatever you can".into(),
     };
-    let folder = if trust {
+    let folder = if trust && !hands {
         "The folder's own settings for it take effect."
     } else {
         "The folder's own settings for it are ignored."

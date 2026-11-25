@@ -333,6 +333,10 @@ pub struct HarnessInfo {
     pub needs_trust: bool,
     /// What it has a mode for.
     pub access: Vec<Access>,
+    /// Axiom's tools can stand in place of its own (the environment `axiom`): then it is asked about
+    /// and contained as Axiom's own agents are, and has every mode of access.
+    #[serde(default)]
+    pub hands: bool,
     /// What an account of it beside the first is called as a provider, if there can be any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounts: Option<String>,
@@ -347,9 +351,9 @@ pub enum Call {
     /// Instead of `hello`, from a program an agent is: opens `peer.call` for it and nothing else.
     #[serde(rename = "peer.hello")]
     PeerHello { grant: String },
-    /// A call of the tool `agent`.
+    /// A call of one of the tools its answer named.
     #[serde(rename = "peer.call")]
-    Peer { args: serde_json::Value },
+    Peer { tool: String, args: serde_json::Value },
     #[serde(rename = "host.status")]
     Status {},
     /// Stops the host if nothing runs, or always with `force`.

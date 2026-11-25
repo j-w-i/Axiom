@@ -85,12 +85,18 @@ pub struct Start {
     pub by: By,
     /// A server of Axiom's own that it is given, if it can be and may act.
     pub tools: Option<Server>,
+    /// That server's tools in place of its own, all of which are off: what it does, it asks that
+    /// server for. Whoever is behind it judges and contains.
+    pub hands: bool,
+    /// Words for the model, in a file of the host's: what it works with and where.
+    pub system: Option<Place>,
 }
 
-/// A Model Context Protocol server on standard streams, with one tool.
+/// A Model Context Protocol server on standard streams.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Server {
     pub name: String,
+    /// The one tool it has, if it stands beside the program's own.
     pub tool: String,
     pub command: Place,
     /// No secret: they are seen by other users of the computer.
@@ -121,6 +127,9 @@ impl Harness {
             if let Some(v) = v.as_ref().filter(|v| !plain(v)) {
                 return Err(Error::BadValue(what, v.clone()));
             }
+        }
+        if s.hands && (!self.takes_hands() || s.tools.is_none()) {
+            return Err(Error::NoHands);
         }
         if self.person_only() && s.by != By::Person {
             return Err(Error::PersonOnly);
@@ -154,6 +163,13 @@ impl Harness {
         !matches!(self, Harness::Codex)
     }
 
+    /// Whether all of its own tools can be switched off, so that it has only those it is given. Where
+    /// its documentation says so.
+    pub fn takes_hands(&self) -> bool {
+        // `--tools ""`: code.claude.com/docs/en/cli-reference, read 2026-11-25.
+        matches!(self, Harness::Claude(_))
+    }
+
     /// Whether its terms allow only what a person themselves says.
     pub fn person_only(&self) -> bool {
         matches!(self, Harness::Acp(a) if a.person_only)
@@ -171,7 +187,7 @@ impl Harness {
             Harness::Acp(a) => a.checked()?,
             _ => codex::ARGS.map(String::from).into(),
         };
-        let process = run(self, site, args, &site.tmp, true, token)?;
+        let process = run(self, site, args, &site.tmp, false, true, token)?;
         let (tx, rx) = oneshot::channel();
         let given = drive::Given {
             process,
@@ -209,14 +225,14 @@ impl Harness {
             }
         }
         let read_only = s.access == Access::Read;
-        let cwd = s.workspace.clone();
+        let (cwd, hands) = (s.workspace.clone(), s.hands);
         let talk: Box<dyn Talk> = match self {
             Harness::Acp(a) => Box::new(a.talk(site, Some(s))),
             Harness::Codex => Box::new(codex::Codex::new(site, Some(s))),
             Harness::Claude(p) => Box::new(claude::Claude::new(*p, s, &l)),
         };
         let given = drive::Given {
-            process: run(self, site, l.args, &cwd, true, token)?,
+            process: run(self, site, l.args, &cwd, hands, true, token)?,
             talk,
             frames,
             limits: site.limits.clone(),
@@ -234,6 +250,7 @@ fn run(
     site: &Site,
     args: Vec<String>,
     cwd: &Place,
+    hands: bool,
     stdin: bool,
     token: Unsandboxed,
 ) -> Result<Running, Error> {
@@ -242,6 +259,10 @@ fn run(
         // Nothing would keep it apart: it is not started as if something did.
         let name = harness.accounts().ok_or(Error::OneAccount)?;
         env.set(name, c.as_str())?;
+    }
+    if hands {
+        // Otherwise the tools it is given are put off until a tool of its own finds them.
+        env.set("ENABLE_TOOL_SEARCH", "false")?;
     }
     Ok(spawn(Job {
         program: site.program.place().clone(),
@@ -260,7 +281,7 @@ async fn version(
     token: Unsandboxed,
     p: Prompts,
 ) -> Result<Probe, Error> {
-    let mut r = run(harness, site, vec!["--version".into()], &site.tmp, false, token)?;
+    let mut r = run(harness, site, vec!["--version".into()], &site.tmp, false, false, token)?;
     let out = r.stdout.take().ok_or(Error::NoPipe)?;
     let mut said = Vec::new();
     let mut first = out.take(4096);

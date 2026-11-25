@@ -22,7 +22,7 @@ use tokio::{
 };
 
 use crate::{
-    agents::{self, Agents, Finished, Setup, Spoken, Switch, Told},
+    agents::{self, Agents, Finished, Holder, Setup, Spoken, Switch, Told},
     changes,
     connections::{Connections, MemoryVault, Vault},
     faults::{Access, Faults},
@@ -724,11 +724,11 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                 (false, Call::PeerHello { grant }) => {
                     let place = st.clients.clone().try_acquire_owned();
                     match (st.agents.granted(&grant), place) {
-                        (Some(_), Ok(place)) => {
+                        (Some(who), Ok(place)) => {
                             _place = Some(place);
                             peer = Some(grant);
                             stranger = None;
-                            out.answer(req.id, Ok(json!({})));
+                            out.answer(req.id, Ok(json!({ "tools": tools_of(&who) })));
                         }
                         (None, _) => {
                             let e = WireError::new(ErrorCode::Unauthorised, "wrong key");
@@ -752,7 +752,7 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                         out.answer(req.id, Err(e));
                         return;
                     };
-                    let Call::Peer { args } = call else {
+                    let Call::Peer { tool, args } = call else {
                         let words = "this key opens nothing else";
                         out.answer(req.id, Err(WireError::new(ErrorCode::Unauthorised, words)));
                         continue;
@@ -763,7 +763,9 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                         continue;
                     }
                     let (st, out) = (st.clone(), out.clone());
-                    asked.spawn(async move { out.answer(req.id, by_peer(&st, who, args).await) });
+                    asked.spawn(async move {
+                        out.answer(req.id, by_peer(&st, who, tool, args).await);
+                    });
                 }
                 (false, call) => match hello(st, call) {
                     Ok(client) => {
@@ -1059,6 +1061,7 @@ async fn prompt(
             (outcome, error, text) = (e.outcome, e.error, last);
             let stopped = *cancel.borrow();
             if stopped {
+                slot.stop_jobs();
                 // Who stops an agent stops what it began (SI-24).
                 for r in slot.forgive() {
                     st.stop(&r);
@@ -1117,17 +1120,96 @@ impl Switch for State {
     }
 }
 
-/// What an installed program asks of its session's other agents.
+fn specs_of(who: &Holder) -> Vec<axiom_tools::Spec> {
+    let mut all = if who.all { axiom_tools::specs() } else { Vec::new() };
+    all.extend(peers::specs());
+    all
+}
+
+/// As they are told to the program.
+fn tools_of(who: &Holder) -> Vec<Value> {
+    let shown = |s: axiom_tools::Spec| json!({"name": s.name, "description": s.description, "schema": s.schema});
+    specs_of(who).into_iter().map(shown).collect()
+}
+
+/// What an installed program asks for.
 async fn by_peer(
     st: &Arc<State>,
-    (session, agent): (SessionId, AgentId),
+    who: Holder,
+    tool: String,
     args: Value,
 ) -> Result<Value, WireError> {
+    let Holder { session, agent, all } = who.clone();
+    if !all && tool != peers::TOOL {
+        return Err(WireError::new(ErrorCode::Unauthorised, "this key opens nothing else"));
+    }
     let s = st.open(&session).await?;
     let floor =
         agents::Floor { agents: st.agents.clone(), store: st.store.clone(), session: s, agent };
-    let o = peers::call(&floor, &st.agents.desk(&session), &args).await;
-    Ok(json!({"ok": o.ok, "text": o.text}))
+    let desk = st.agents.desk(&session);
+    if !all {
+        let o = peers::call(&floor, &desk, &args).await;
+        return Ok(json!({"ok": o.ok, "text": o.text}));
+    }
+    // As one of Axiom's own agents, in the run it is in: nothing is done outside one.
+    let slot = st.agents.slot(&session, &floor.agent);
+    let Some((run, run_cancel)) = slot.now().await else {
+        return Err(agents::bad("the agent is in no run"));
+    };
+    let setup = setup(st, &session, &floor.agent).await?;
+    let site = agents::site_of(&st.agents, &setup, &floor.agent, &slot).await?;
+    // Stopped by a person, or no longer waited for: either way it ends in order, with its end said.
+    let (gone, cancel) = watch::channel(false);
+    let _gone = Leaves(gone);
+    let work = tokio::spawn(async move {
+        let mut cancel = either(run_cancel, cancel);
+        let specs = specs_of(&who);
+        let seen = slot.seen();
+        let hands = axiom_engine::Hands {
+            id: &floor.agent,
+            stage: &floor,
+            desk: &desk,
+            site: &site,
+            seen: &seen,
+            specs: &specs,
+        };
+        hands.tool(&run, &tool, &args, &mut cancel).await
+    });
+    match work.await {
+        Ok(Ok((text, ok))) => Ok(json!({"ok": ok, "text": text})),
+        Ok(Err(e)) => Err(agents::bad(e.to_string())),
+        Err(_) => Err(internal("the tool failed")),
+    }
+}
+
+/// Says that nobody waits any more.
+struct Leaves(watch::Sender<bool>);
+impl Drop for Leaves {
+    fn drop(&mut self) {
+        let _ = self.0.send(true);
+    }
+}
+
+/// True once one of them is.
+fn either(a: watch::Receiver<bool>, b: watch::Receiver<bool>) -> watch::Receiver<bool> {
+    let (tx, rx) = watch::channel(*a.borrow() || *b.borrow());
+    // One that nobody can make true any more says nothing of the other.
+    let is = |mut r: watch::Receiver<bool>| async move {
+        if r.wait_for(|x| *x).await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::spawn(async move {
+        tokio::select! {
+            () = is(a) => {}
+            () = is(b) => {}
+            () = tx.closed() => return,
+        }
+        let _ = tx.send(true);
+        // As long as somebody looks at it.
+        tx.closed().await;
+    });
+    rx
 }
 
 async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {

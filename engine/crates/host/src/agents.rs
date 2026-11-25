@@ -109,17 +109,29 @@ pub struct Finished {
     pub text: String,
 }
 
+/// Who holds a key, and what it opens: the tool `agent`, or all an agent of Axiom's has.
+#[derive(Debug, Clone)]
+pub struct Holder {
+    pub session: SessionId,
+    pub agent: AgentId,
+    pub all: bool,
+}
+
 /// A key that is good until this is dropped.
 pub struct Grant {
     agents: Arc<Agents>,
     key: String,
     pub file: PathBuf,
+    /// What the program's model is told.
+    pub words: Option<PathBuf>,
 }
 impl Drop for Grant {
     fn drop(&mut self) {
         let mut all = self.agents.grants.lock().unwrap_or_else(PoisonError::into_inner);
         all.remove(&self.key);
-        let _ = std::fs::remove_file(&self.file);
+        for f in [Some(&self.file), self.words.as_ref()].into_iter().flatten() {
+            let _ = std::fs::remove_file(f);
+        }
     }
 }
 
@@ -142,6 +154,16 @@ pub struct Told {
     /// The agents from the session's own to the one that says it.
     pub chain: Vec<AgentId>,
 }
+
+impl Setup {
+    /// A program of the person's own that works with Axiom's tools in place of its own.
+    pub fn hands(&self) -> bool {
+        self.execution.environment.as_deref() == Some(AXIOM)
+    }
+}
+
+/// The environment in which what an agent does is done by Axiom.
+pub const AXIOM: &str = "axiom";
 
 impl Slot {
     /// Nobody uses it, or is about to, and nothing runs in it.
@@ -179,7 +201,7 @@ pub struct Agents {
     audit: tokio::sync::Mutex<Option<Entry>>,
     pub switch: OnceLock<Weak<dyn Switch>>,
     /// What opens the tool `agent` for an installed program, while its attempt lives.
-    grants: Mutex<HashMap<String, (SessionId, AgentId)>>,
+    grants: Mutex<HashMap<String, Holder>>,
     data: PathBuf,
     /// The program that gives installed programs the tool `agent`: the host's own.
     bridge: Option<Place>,
@@ -290,6 +312,11 @@ impl Agents {
             }
             if !instructions.is_empty() {
                 return Err(bad("this harness reads the folder's words for agents by itself"));
+            }
+            match execution.environment.as_deref() {
+                None => {}
+                Some(AXIOM) if known.harness.takes_hands() && self.bridge.is_some() => {}
+                _ => return Err(bad("this harness has no such environment")),
             }
             let workspace = real(Path::new(workspace))?.to_string();
             let execution = Execution { provider: None, ..execution };
@@ -496,6 +523,8 @@ impl Agents {
         s: &SessionId,
         a: &AgentId,
         scratch: &Place,
+        all: bool,
+        words: Option<&str>,
     ) -> Result<Grant, String> {
         let mut b = [0u8; 32];
         axiom_proto::random(&mut b)?;
@@ -507,12 +536,19 @@ impl Agents {
         self.grants
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(key.clone(), (s.clone(), a.clone()));
-        Ok(Grant { agents: self.clone(), key, file })
+            .insert(key.clone(), Holder { session: s.clone(), agent: a.clone(), all });
+        // Whatever goes wrong from here on, the key and its file go again.
+        let mut grant = Grant { agents: self.clone(), key, file, words: None };
+        if let Some(w) = words {
+            let f = grant.file.with_extension("md");
+            private_file(&f, w).map_err(|e| e.to_string())?;
+            grant.words = Some(f);
+        }
+        Ok(grant)
     }
 
     /// Whose key it is.
-    pub fn granted(&self, key: &str) -> Option<(SessionId, AgentId)> {
+    pub fn granted(&self, key: &str) -> Option<Holder> {
         self.grants.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()
     }
 
@@ -739,12 +775,13 @@ impl Worker {
         let waits = store.pending(session.id.clone(), agent.clone()).await.map_err(internal)?;
         let written = agents.written(store).await?;
         let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
-        let (known, site, access, workspace) = tokio::task::spawn_blocking(move || {
+        let (known, site, access, workspace, words) = tokio::task::spawn_blocking(move || {
             let known = delegated::known_as(&s.execution.harness)
                 .ok_or_else(|| bad("this host does not know the agent's harness"))?;
             let site = a.site(&s, &ag, true)?;
             let path = a.programs(&site.path)?;
             let access = site.access;
+            let words = s.hands().then(|| axiom_engine::context::system(&site, HANDS));
             let program =
                 known.check(&s, access, site.workspace.clone(), &path, &written).map_err(bad)?;
             let config = match &s.execution.connection {
@@ -761,7 +798,7 @@ impl Worker {
                 written,
                 limits: axiom_harness::Limits::default(),
             };
-            Ok::<_, WireError>((known, site_of, access, site.workspace))
+            Ok::<_, WireError>((known, site_of, access, site.workspace, words))
         })
         .await
         .map_err(internal)??;
@@ -775,6 +812,7 @@ impl Worker {
             access,
             workspace,
             bridge: agents.bridge.clone(),
+            words,
             inbox,
             waits,
         })))
@@ -808,6 +846,26 @@ impl Worker {
             }
         }
     }
+}
+
+/// For a model whose program describes other tools than it has.
+const HANDS: &str = "Your only tools are those of the server axiom (read, write, edit, patch, list, glob, search, shell, job, fetch, agent). What is said elsewhere of other tools does not apply: you have none of them. A call may wait for a person's answer.";
+
+/// Where an agent works, and under whom.
+pub async fn site_of(
+    agents: &Arc<Agents>,
+    setup: &Setup,
+    agent: &AgentId,
+    slot: &Slot,
+) -> Result<Site, WireError> {
+    let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
+    let mut site =
+        tokio::task::spawn_blocking(move || a.site(&s, &ag, true)).await.map_err(internal)??;
+    let chain = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
+    if !chain.is_empty() {
+        site.chain.clone_from(&chain);
+    }
+    Ok(site)
 }
 
 /// The person's name on this computer.
@@ -982,6 +1040,25 @@ impl Slot {
         owed.drain().map(|(r, _)| r).collect()
     }
 
+    /// The run it is in, and what stops that.
+    pub async fn now(&self) -> Option<(RunId, watch::Receiver<bool>)> {
+        self.live
+            .lock()
+            .await
+            .as_ref()
+            .filter(|n| !n.tx.is_closed())
+            .map(|n| (n.run.clone(), n.cancel.clone()))
+    }
+
+    /// What it has running in the background ends.
+    pub fn stop_jobs(&self) {
+        self.seen.1.end();
+    }
+
+    pub fn seen(&self) -> Seen {
+        self.seen.clone()
+    }
+
     /// Whether it is in a run.
     pub async fn busy(&self) -> bool {
         self.live.lock().await.as_ref().is_some_and(|n| !n.tx.is_closed())
@@ -994,7 +1071,7 @@ impl Slot {
 
     /// What it has running began as what it was.
     pub async fn changed(&self) {
-        self.seen.1.end();
+        self.stop_jobs();
         // Its program ends; what it was told is kept by the program, and gone on with.
         *self.attempt.lock().await = None;
     }

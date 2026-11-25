@@ -99,6 +99,8 @@ impl World {
             trust: Trust::Given,
             by: By::Person,
             tools: None,
+            hands: false,
+            system: None,
         }
     }
     pub fn run(&self, h: &Harness, access: Access) -> Run {

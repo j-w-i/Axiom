@@ -1,6 +1,6 @@
-//! What an installed program is given of Axiom: the `agent` tool, as a Model Context Protocol server
-//! on its standard streams. It is this program, started by that one; it holds a key that opens this
-//! one tool for one agent, and only while its attempt lives. Whatever is asked of it is judged by the
+//! What an installed program is given of Axiom: the `agent` tool, or all the tools an agent of Axiom's
+//! has, as a Model Context Protocol server on its standard streams. It is this program, started by that
+//! one; it holds a key that opens these for one agent, and only while its attempt lives. Whatever is asked of it is judged by the
 //! host, as a call of Axiom's own agents is.
 
 use std::{collections::HashMap, path::Path, sync::Arc};
@@ -14,11 +14,16 @@ use tokio::{
     task::AbortHandle,
 };
 
-use crate::{client::Client, paths::Paths, peers};
+use crate::{
+    client::{Client, ClientError},
+    paths::Paths,
+};
 
 pub const ARG: &str = "--mcp";
 /// One line, at most.
 const LINE: u64 = 1024 * 1024;
+/// How often who waits is told that it goes on.
+const STILL: std::time::Duration = std::time::Duration::from_secs(60);
 /// Calls at once.
 const CALLS: usize = 4;
 
@@ -87,11 +92,28 @@ async fn speak(
                     v["params"]["name"].as_str().unwrap_or_default().to_owned(),
                     v["params"]["arguments"].clone(),
                 );
+                let token = v["params"]["_meta"]["progressToken"].clone();
                 let begun = Arc::new(tokio::sync::Notify::new());
                 let go = begun.clone();
                 let task = tasks.spawn(async move {
                     go.notified().await;
-                    let (text, ok) = call(&way, &name, args).await;
+                    let asked = call(&way, &name, args);
+                    tokio::pin!(asked);
+                    // A person may take long to answer: whoever waits is told that it goes on.
+                    let mut n = 0u64;
+                    let (text, ok) = loop {
+                        tokio::select! {
+                            r = &mut asked => break r,
+                            () = tokio::time::sleep(STILL) => {
+                                n += 1;
+                                if !token.is_null() {
+                                    let p = json!({"progressToken": token, "progress": n});
+                                    let m = json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": p});
+                                    let _ = write(&out, m).await;
+                                }
+                            }
+                        }
+                    };
                     if let Ok(mut c) = done.lock() {
                         c.remove(&id.to_string());
                     }
@@ -118,15 +140,13 @@ async fn speak(
                         "serverInfo": {"name": "axiom", "version": env!("CARGO_PKG_VERSION")},
                     })),
                     "ping" => Some(json!({})),
-                    "tools/list" => {
-                        let all: Vec<Value> = peers::specs()
-                            .iter()
-                            .map(|s| {
-                                json!({"name": s.name, "description": s.description, "inputSchema": s.schema})
-                            })
-                            .collect();
-                        Some(json!({ "tools": all }))
-                    }
+                    "tools/list" => match listed(&way).await {
+                        Ok(all) => Some(json!({ "tools": all })),
+                        Err(e) => {
+                            write(&out, error(&id, -32000, &e)).await?;
+                            continue;
+                        }
+                    },
                     _ => None,
                 };
                 let v = match answer {
@@ -149,15 +169,29 @@ async fn write(out: &Mutex<impl AsyncWrite + Unpin>, v: Value) -> std::io::Resul
     out.flush().await
 }
 
+async fn hello(way: &Way) -> Result<(Client, Value), ClientError> {
+    let mut c = Client::raw(&Paths::new(way.data.clone())).await?;
+    let v = c.call(Call::PeerHello { grant: way.grant.clone() }).await?;
+    Ok((c, v))
+}
+
+/// What the key opens. Their texts may be long: they are not to be put into a file instead, which its
+/// model could not read without tools of its own.
+async fn listed(way: &Way) -> Result<Vec<Value>, String> {
+    let (_, v) = hello(way).await.map_err(|e| e.to_string())?;
+    let all = v["tools"].as_array().cloned().unwrap_or_default();
+    let shown = |t: &Value| {
+        json!({"name": t["name"], "description": t["description"], "inputSchema": t["schema"],
+            "_meta": {"anthropic/maxResultSizeChars": 200_000}})
+    };
+    Ok(all.iter().map(shown).collect())
+}
+
 /// One call, on a connection of its own: closed, the host stops what it does for it.
 async fn call(way: &Way, name: &str, args: Value) -> (String, bool) {
-    if name != peers::TOOL {
-        return ("there is no such tool".into(), false);
-    }
     let asked = async {
-        let mut c = Client::raw(&Paths::new(way.data.clone())).await?;
-        c.call(Call::PeerHello { grant: way.grant.clone() }).await?;
-        c.call(Call::Peer { args }).await
+        let (mut c, _) = hello(way).await?;
+        c.call(Call::Peer { tool: name.to_owned(), args }).await
     };
     match asked.await {
         Ok(v) => (
@@ -197,23 +231,19 @@ mod tests {
         .await;
         assert_eq!(all.len(), 5, "{all:#?}");
         assert_eq!(all[0]["result"]["protocolVersion"], "2025-11-25");
-        assert_eq!(all[1]["id"], "two");
-        let tools = all[1]["result"]["tools"].as_array().unwrap();
-        assert_eq!((tools.len(), tools[0]["name"].as_str()), (1, Some("agent")));
-        assert!(tools[0]["inputSchema"]["properties"]["do"].is_object());
+        // What there is, the host says; there is none here.
+        assert_eq!(
+            (all[1]["id"].as_str(), all[1]["error"]["code"].as_i64()),
+            (Some("two"), Some(-32000))
+        );
         assert_eq!(all[2]["result"], json!({}));
         assert_eq!(all[3]["error"]["code"], -32601);
         assert_eq!(all[4]["error"]["code"], -32700);
     }
 
     #[tokio::test]
-    async fn there_is_one_tool() {
+    async fn a_host_that_is_not_there_is_said_and_not_the_end() {
         let way = Way { data: "/nonexistent".into(), grant: "x".into() };
-        assert_eq!(
-            super::call(&way, "shell", json!({})).await,
-            ("there is no such tool".into(), false)
-        );
-        // A host that is not there is said to the model, not the end of it.
         let (words, ok) = super::call(&way, "agent", json!({})).await;
         assert!(!ok && words.starts_with("Not done"), "{words}");
     }

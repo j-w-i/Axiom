@@ -38,6 +38,8 @@ pub fn start(access: Access) -> Start {
         trust: Trust::Given,
         by: By::Person,
         tools: None,
+        hands: false,
+        system: None,
     }
 }
 
