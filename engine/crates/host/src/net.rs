@@ -156,6 +156,7 @@ mod unix {
 /// gets two threads that carry its bytes. There are a few clients, not thousands. The socket lies
 /// in the user's own application data, which other users cannot enter; the token does the rest.
 #[cfg(windows)]
+#[allow(clippy::print_stderr)]
 mod windows {
     use std::{
         io::{Read, Write},
@@ -224,9 +225,11 @@ mod windows {
     impl Drop for Carried {
         fn drop(&mut self) {
             if let Some(s) = self.sock.take() {
+                eprintln!("dropped {:?}", std::os::windows::io::AsRawSocket::as_raw_socket(&s));
                 self.rt.spawn(async move {
                     tokio::time::sleep(LINGER).await;
-                    let _ = s.shutdown(Shutdown::Both);
+                    let r = s.shutdown(Shutdown::Both);
+                    eprintln!("lingered {:?} {r:?}", std::os::windows::io::AsRawSocket::as_raw_socket(&s));
                 });
             }
         }
@@ -257,6 +260,10 @@ mod windows {
     }
 
     pub fn carry(s: Raw) -> io::Result<Boxed> {
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let id = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let me = format!("{:?}", std::thread::current().name());
+        eprintln!("[{id}] carry in {me} handle {:?}", std::os::windows::io::AsRawSocket::as_raw_socket(&s));
         let rt = Handle::current();
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
         let (mut from_us, mut to_us) = tokio::io::split(theirs);
@@ -264,23 +271,33 @@ mod windows {
         let h = rt.clone();
         std::thread::Builder::new().name("socket in".into()).spawn(move || {
             let mut buf = vec![0u8; 64 * 1024];
-            while let Ok(n) = rd.read(&mut buf) {
+            loop {
+                eprintln!("[{id}] in: recv");
+                let r = rd.read(&mut buf);
+                eprintln!("[{id}] in: got {r:?}");
+                let Ok(n) = r else { break };
                 if n == 0 || h.block_on(to_us.write_all(&buf[..n])).is_err() {
                     break;
                 }
             }
+            eprintln!("[{id}] in: ends");
             let _ = h.block_on(to_us.shutdown());
+            eprintln!("[{id}] in: ended");
         })?;
         let h = rt.clone();
         let out = std::thread::Builder::new().name("socket out".into()).spawn(move || {
             let mut buf = vec![0u8; 64 * 1024];
             while let Ok(n) = h.block_on(from_us.read(&mut buf)) {
+                eprintln!("[{id}] out: send {n}");
                 if n == 0 || wr.write_all(&buf[..n]).is_err() {
                     break;
                 }
+                eprintln!("[{id}] out: sent {n}");
             }
             // Also wakes the other thread.
-            let _ = wr.shutdown(Shutdown::Both);
+            eprintln!("[{id}] out: shutdown");
+            let r = wr.shutdown(Shutdown::Both);
+            eprintln!("[{id}] out: shut {r:?}");
         });
         if let Err(e) = out {
             let _ = sock.shutdown(Shutdown::Both);
