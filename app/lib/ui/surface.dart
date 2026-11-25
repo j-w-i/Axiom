@@ -347,14 +347,17 @@ class Ground extends StatelessWidget {
 
 /// What scrolls goes out of sight gradually.
 class Fade extends StatelessWidget {
-  const Fade({required this.up, super.key, this.height = 28});
+  const Fade({required this.up, super.key, this.height = 28, this.ground});
+
+  /// What it scrolls on, if not the canvas.
+  final Color? ground;
 
   /// At the upper edge.
   final bool up;
   final double height;
   @override
   Widget build(BuildContext context) {
-    final c = Ax.of(context).colors.bay.fill;
+    final c = ground ?? Ax.of(context).colors.bay.fill;
     return IgnorePointer(
       child: DecoratedBox(
         decoration: BoxDecoration(

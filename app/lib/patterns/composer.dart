@@ -133,7 +133,7 @@ class _ComposerState extends State<Composer> {
         children: [
           ?widget.header,
           Padding(
-            padding: const EdgeInsets.fromLTRB(15, 12, 15, 6),
+            padding: const EdgeInsets.fromLTRB(AxSpace.edge, 13, AxSpace.edge, 6),
             child: Focus(
               canRequestFocus: false,
               skipTraversal: true,
@@ -155,7 +155,7 @@ class _ComposerState extends State<Composer> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(7, 1, 8, 8),
+            padding: const EdgeInsets.fromLTRB(AxSpace.chip, 2, 10, 10),
             child: Row(
               children: [
                 Expanded(

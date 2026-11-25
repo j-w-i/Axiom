@@ -409,7 +409,7 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: t.density.row + 1),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: AxSpace.row, vertical: 3),
             child: Row(children: children),
           ),
         ),
@@ -448,7 +448,7 @@ class _Cost extends StatelessWidget {
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
+            padding: const EdgeInsets.fromLTRB(AxSpace.row, 9, AxSpace.row, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -504,7 +504,7 @@ class _WriteState extends State<_Write> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(4, 4, 4, 2),
+    padding: const EdgeInsets.fromLTRB(0, 4, 0, 2),
     child: AxField(
       label: '${widget.choice.label} name',
       controller: _text,

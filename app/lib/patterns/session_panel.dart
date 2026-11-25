@@ -89,7 +89,17 @@ class NavRow extends StatelessWidget {
 
 /// What the rows under it have in common: a folder, or a state.
 class SideHeading extends StatefulWidget {
-  const SideHeading(this.label, {super.key, this.spoken, this.trailing, this.act});
+  const SideHeading(
+    this.label, {
+    super.key,
+    this.spoken,
+    this.trailing,
+    this.act,
+    this.first = false,
+  });
+
+  /// Nothing stands over it.
+  final bool first;
   final String label;
   final String? spoken;
 
@@ -109,7 +119,7 @@ class _SideHeadingState extends State<SideHeading> {
       onEnter: (_) => setState(() => _over = true),
       onExit: (_) => setState(() => _over = false),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 14, 2, 2),
+        padding: EdgeInsets.fromLTRB(AxSpace.row, widget.first ? 2 : 14, 2, 2),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 26),
           child: Row(
@@ -450,7 +460,7 @@ class PanelHeading extends StatelessWidget {
       ],
     );
     return Padding(
-      padding: EdgeInsets.fromLTRB(12, 4, acts ? 7 : 12, 4),
+      padding: EdgeInsets.fromLTRB(AxSpace.card, 4, acts ? 9 : AxSpace.card, 4),
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 30),
         child: Row(
@@ -499,7 +509,7 @@ class TaskRow extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 29),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: AxSpace.card),
           child: Row(
             children: [
               _Mark(mark, t.type.ui),
@@ -762,7 +772,7 @@ class ChangedRow extends StatelessWidget {
                 c.ghost,
                 radius: AxRadius.tick,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   child: Text(w, style: t.type.caption.ink(c.ink3)),
                 ),
               ),
@@ -812,7 +822,7 @@ class PanelRow extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 30),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: AxSpace.row),
               child: Row(
                 children: [
                   AxGlyph(icon, color: open || s.hovered ? c.ink1 : c.ink3, filled: open),

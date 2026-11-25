@@ -40,7 +40,7 @@ class UsageKey extends StatelessWidget {
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: t.density.control, maxWidth: 220),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: AxSpace.row),
               child: LayoutBuilder(
                 builder: (context, box) {
                   final room = box.maxWidth >= 68;
@@ -91,7 +91,10 @@ class UsageKey extends StatelessWidget {
               },
             ),
           ],
-          Padding(padding: const EdgeInsets.fromLTRB(8, 8, 8, 4), child: const Hairline()),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AxSpace.row, 8, AxSpace.row, 4),
+            child: const Hairline(),
+          ),
           Pressable(
             label: 'Link another ${service.name} account',
             onPressed: () {
@@ -104,7 +107,7 @@ class UsageKey extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AxRadius.key),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: AxSpace.row, vertical: 6),
                 child: Row(
                   children: [
                     SizedBox(
@@ -155,7 +158,7 @@ class _Account extends StatelessWidget {
           borderRadius: BorderRadius.circular(AxRadius.key),
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
+          padding: const EdgeInsets.fromLTRB(AxSpace.row, 8, AxSpace.row, 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

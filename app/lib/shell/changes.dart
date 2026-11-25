@@ -193,12 +193,12 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
       ),
       if (problem != null && all != null)
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, AxSpace.card, 8),
           child: Text(visible(problem), style: t.type.ui.ink(c.faultText)),
         ),
       if (words != null && !now.folded)
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
+          padding: const EdgeInsets.fromLTRB(AxSpace.card, 2, AxSpace.card, 12),
           child: Text(
             visible(words),
             style: t.type.ui.ink(problem != null && all == null ? c.faultText : c.ink3),
@@ -206,14 +206,14 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
         ),
     ];
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(6, 0, 14, 16),
+      padding: const EdgeInsets.fromLTRB(8, 0, AxSpace.edge, AxSpace.edge),
       itemCount: head.length + shown + (words == null && !all!.whole && !now.folded ? 1 : 0),
       itemBuilder: (context, i) => i < head.length
           ? head[i]
           : i < head.length + shown
           ? _file(files[i - head.length], i - head.length, n)
           : Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              padding: const EdgeInsets.fromLTRB(AxSpace.card, 10, AxSpace.card, 0),
               child: Text('There is more than can be shown here.', style: t.type.label.ink(c.ink3)),
             ),
     );
@@ -284,13 +284,13 @@ class _FileRow extends StatelessWidget {
       quiet: shut,
       onPressed: lines.isEmpty ? null : onOpen,
     );
-    final in_ = leading == null ? 37.0 : 62.0;
+    final in_ = leading == null ? 39.0 : 66.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             ?leading,
             Expanded(child: row),
             if (remarks._added == file.path)
@@ -309,12 +309,12 @@ class _FileRow extends StatelessWidget {
                 size: 28,
                 onPressed: () => remarks.begin(file.path, null),
               ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
           ],
         ),
         for (final (note, look) in notes)
           Padding(
-            padding: EdgeInsets.fromLTRB(in_, 0, 12, 8),
+            padding: EdgeInsets.fromLTRB(in_, 0, AxSpace.card, 8),
             child: look
                 ? Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -349,7 +349,11 @@ class _FileRow extends StatelessWidget {
               ],
             ),
           ),
-        if (!last) const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Hairline()),
+        if (!last)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: AxSpace.card),
+            child: Hairline(),
+          ),
       ],
     );
   }
@@ -668,7 +672,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         Expanded(child: _list(context, all, files, words, only)),
         if (files.isNotEmpty && _atWork)
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            padding: const EdgeInsets.fromLTRB(22, 8, 30, 0),
             child: Text(
               '${widget.agent.name} is still working: there may be more changes.',
               maxLines: 2,
@@ -679,7 +683,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         // What is done with them stands where the reading ends.
         if (made)
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 8, 14, 16),
+            padding: const EdgeInsets.fromLTRB(8, 10, AxSpace.edge, AxSpace.edge),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -746,7 +750,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
       ),
       if (_leaving)
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 8, 10),
+          padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, AxSpace.card, 10),
           child: Wrap(
             spacing: 8,
             runSpacing: 6,
@@ -790,14 +794,14 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         ),
       if (_problem case final p? when all != null)
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, AxSpace.card, 8),
           child: Text(visible(p), style: t.type.ui.ink(c.faultText)),
         ),
       if (_said != null || all?.back != null)
         Semantics(
           liveRegion: true,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 8, 10),
+            padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, AxSpace.card, 10),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -818,7 +822,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         ),
       if (words != null)
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
+          padding: const EdgeInsets.fromLTRB(AxSpace.card, 2, AxSpace.card, 12),
           child: Text(
             visible(words),
             style: t.type.ui.ink(_problem != null && all == null ? c.faultText : c.ink3),
@@ -828,12 +832,12 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
     final tail = <Widget>[
       if (words == null && !all!.whole)
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+          padding: const EdgeInsets.fromLTRB(AxSpace.card, 10, AxSpace.card, 0),
           child: Text('There is more than can be shown here.', style: t.type.label.ink(c.ink3)),
         ),
       if (all != null && all.ignored + all.odd > 0)
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          padding: const EdgeInsets.fromLTRB(AxSpace.card, 10, AxSpace.card, 8),
           child: Text(
             [
               if (all.ignored > 0)
@@ -848,7 +852,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
     final n = words == null ? files.length : 0;
     return ListView.builder(
       controller: _scroll,
-      padding: const EdgeInsets.fromLTRB(6, 0, 14, 4),
+      padding: const EdgeInsets.fromLTRB(8, 0, AxSpace.edge, 4),
       itemCount: head.length + n + tail.length,
       itemBuilder: (context, i) => i < head.length
           ? head[i]
@@ -875,7 +879,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         _shut.contains(f.path) ? _shut.remove(f.path) : _shut.add(f.path);
       }),
       leading: Padding(
-        padding: const EdgeInsets.only(left: 4, right: 4),
+        padding: const EdgeInsets.only(left: 6, right: 4),
         child: AxCheck(
           label: 'Apply $name',
           bare: true,

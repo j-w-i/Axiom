@@ -61,6 +61,41 @@ Future<void> mount(
   await t.pump(const Duration(milliseconds: 300));
 }
 
+/// Words of a card that stand nearer to its side than what is in a chip does: they look as if they
+/// were cut off. As wide as they are, and not as their box is.
+List<String> cramped(RenderObject root) {
+  final bad = <String>[];
+  Rect at(RenderBox b, Rect r) => MatrixUtils.transformRect(b.getTransformTo(root), r);
+  void words(RenderObject o, void Function(Rect, String) f) => o.visitChildren((c) {
+    if (c is RenderOffstage && c.offstage) return;
+    if (c is RenderParagraph) {
+      final all = c.text.toPlainText(includeSemanticsLabels: false);
+      final sel = TextSelection(baseOffset: 0, extentOffset: all.length);
+      for (final b in c.getBoxesForSelection(sel)) {
+        f(at(c, b.toRect()), all);
+      }
+    }
+    words(c, f);
+  });
+  void walk(RenderObject o) {
+    if (o is RenderOffstage && o.offstage) return;
+    if ((o is RenderSurface || o is RenderCardPart) && (o as RenderBox).size.height >= 30) {
+      final r = at(o, Offset.zero & o.size);
+      words(o, (w, said) {
+        // What goes out of sight sideways is cut for that.
+        if (said.trim().isEmpty || w.left < r.left || w.right > r.right || w.width < 4) return;
+        if (w.left - r.left < AxSpace.chip || r.right - w.right < AxSpace.chip) {
+          bad.add('$said: ${w.left - r.left} and ${r.right - w.right} of ${o.size}');
+        }
+      });
+    }
+    o.visitChildren(walk);
+  }
+
+  walk(root);
+  return bad;
+}
+
 /// Writes build/shots/[name].png for a person to look at.
 Future<void> snap(WidgetTester t, String name) async {
   debugDisableShadows = false;
@@ -72,6 +107,7 @@ Future<void> snap(WidgetTester t, String name) async {
 
   dirty(r);
   await t.pump();
+  expect(cramped(r), isEmpty, reason: name);
   await t.runAsync(() async {
     final img = await r.toImage(pixelRatio: t.view.devicePixelRatio);
     final b = await img.toByteData(format: ui.ImageByteFormat.png);
@@ -82,4 +118,5 @@ Future<void> snap(WidgetTester t, String name) async {
   debugDisableShadows = true;
   dirty(r);
   await t.pump();
+  expect(cramped(r), isEmpty, reason: name);
 }

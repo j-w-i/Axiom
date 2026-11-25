@@ -179,7 +179,10 @@ class Card extends StatelessWidget {
         children: [
           for (final (i, l) in lines.indexed) ...[
             if (i > 0) const Hairline(),
-            Padding(padding: const EdgeInsets.fromLTRB(14, 11, 12, 11), child: l),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AxSpace.card, vertical: 11),
+              child: l,
+            ),
           ],
         ],
       ),
@@ -860,7 +863,7 @@ class _SigningState extends State<_Signing> {
           c.plate,
           radius: AxRadius.card,
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(AxSpace.card),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -890,7 +893,6 @@ class _SigningState extends State<_Signing> {
                       ],
                       AxButton(
                         label: s.waits ? 'Cancel' : (s.problem == null ? 'Got it' : 'Close'),
-                        tone: AxTone.quiet,
                         onPressed: widget.onClose,
                       ),
                     ],
@@ -932,7 +934,7 @@ class _SignInState extends State<_SignIn> {
                 c.block,
                 radius: AxRadius.key,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   child: Text(
                     // Whole: it is what its person is about to run.
                     literal(widget.command),

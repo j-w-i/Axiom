@@ -443,7 +443,7 @@ class _RequestBarState extends State<RequestBar> {
                       child: SizedBox(
                         width: double.infinity,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                           child: Text(literal(r.subject), style: t.type.code),
                         ),
                       ),
@@ -534,7 +534,7 @@ class _RequestBarState extends State<RequestBar> {
           c.plate,
           radius: AxRadius.card,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(15, 12, 12, 12),
+            padding: const EdgeInsets.all(AxSpace.card),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,

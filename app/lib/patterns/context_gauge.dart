@@ -138,7 +138,7 @@ class ContextGauge extends StatelessWidget {
       panel: (context, close) => Focus(
         autofocus: true,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+          padding: const EdgeInsets.fromLTRB(AxSpace.row, 7, AxSpace.row, 9),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,

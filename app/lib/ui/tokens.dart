@@ -160,7 +160,7 @@ class AxColors {
     canvas: SurfaceSpec(Color(0xFF1A1B1E), shadows: [Shade(Color(0x33000000), 10, 2, .1)]),
     plate: SurfaceSpec(
       Color(0xFF242529),
-      lip: Color(0x07FFFFFF),
+      lip: Color(0x0BFFFFFF),
       shadows: [Shade(Color(0x29000000), 2, 1, .1), Shade(Color(0x1F000000), 14, 4, .1)],
     ),
     block: SurfaceSpec(Color(0xFF131417)),
@@ -174,6 +174,7 @@ class AxColors {
     field: SurfaceSpec(Color(0xFF242529)),
     written: SurfaceSpec(
       Color(0xFF27282C),
+      lip: Color(0x12FFFFFF),
       shadows: [Shade(Color(0x33000000), 4, 1, .1), Shade(Color(0x42000000), 20, 5, .1)],
     ),
     key: SurfaceSpec(
@@ -283,6 +284,7 @@ class AxColors {
     field: SurfaceSpec(Color(0xFFF0F1F3)),
     written: SurfaceSpec(
       Color(0xFFFFFFFF),
+      border: Color(0x120D0E10),
       shadows: [Shade(Color(0x0F0D0E10), 4, 1, .97), Shade(Color(0x140D0E10), 20, 5, .97)],
     ),
     key: SurfaceSpec(
@@ -395,6 +397,11 @@ class AxType {
 abstract final class AxSpace {
   /// The conversation, what is asked in it and where it is written: one column.
   static const double column = 740, gutter = 24;
+
+  /// From an edge to what is in it: words on the canvas [gutter], blocks and keys on it [edge]; words and
+  /// blocks on a card [card]; what is in a row or an item of a menu [row], in a chip [chip]. What floats
+  /// holds its items [menu] in.
+  static const double edge = 16, card = 14, row = 10, chip = 8, menu = 6;
 
   /// What stands beside that column, in [width].
   static double beside(double width) => math.max(gutter, (width - column) / 2);

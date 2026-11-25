@@ -590,7 +590,7 @@ void main() {
     final name = t.getRect(find.textContaining('An agent'));
     final end = t.getRect(find.text('Opus 5.5   replay'));
     expect(name.right, lessThan(end.left));
-    expect(end.right, closeTo(748, 1));
+    expect(end.right, closeTo(744, 1));
   });
 
   testWidgets('the bar fits at any width, with everything in it', (t) async {

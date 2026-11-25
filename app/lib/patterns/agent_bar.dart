@@ -15,14 +15,18 @@ class AgentBar extends StatelessWidget {
     this.mark,
     this.trailing,
     this.lead,
+    this.said = false,
     this.where,
-    this.inset = 20,
+    this.inset = AxSpace.gutter,
     this.height = 44,
   });
   final String name;
   final AgentState state;
   final ServiceMark? mark;
   final Widget? trailing;
+
+  /// What is at the other end is words, and not a key.
+  final bool said;
 
   /// Before the agent; after its name, where it is.
   final Widget? lead, where;
@@ -37,7 +41,11 @@ class AgentBar extends StatelessWidget {
         height: math.max(height, math.max(words, t.density.control) + 12),
         child: Padding(
           // On the line of the window's own buttons.
-          padding: EdgeInsets.only(left: inset, right: 12, bottom: 8),
+          padding: EdgeInsets.only(
+            left: inset,
+            right: said ? AxSpace.gutter : AxSpace.edge,
+            bottom: 8,
+          ),
           child: Row(
             children: [
               Expanded(

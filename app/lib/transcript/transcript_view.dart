@@ -1363,10 +1363,10 @@ class ToolRow extends StatelessWidget {
                 ),
               ),
             if (opened && diff != null)
-              Padding(padding: const EdgeInsets.fromLTRB(22, 4, 0, 6), child: _Changes(diff))
+              Padding(padding: const EdgeInsets.fromLTRB(26, 4, 0, 6), child: _Changes(diff))
             else if (opened && output.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(22, 4, 0, 6),
+                padding: const EdgeInsets.fromLTRB(26, 4, 0, 6),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

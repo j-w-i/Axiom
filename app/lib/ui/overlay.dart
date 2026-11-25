@@ -101,7 +101,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
                     Ax.of(context).colors.overlay,
                     radius: AxRadius.card,
                     child: Padding(
-                      padding: const EdgeInsets.all(5),
+                      padding: const EdgeInsets.all(AxSpace.menu),
                       // However much there is, it stays in the window and scrolls.
                       child: SingleChildScrollView(child: widget.panel(context, close)),
                     ),
@@ -252,7 +252,7 @@ class _AxNarrowState<T> extends State<AxNarrow<T>> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.only(bottom: 5),
+          padding: const EdgeInsets.only(bottom: 6),
           child: CallbackShortcuts(
             bindings: {
               const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
@@ -269,7 +269,7 @@ class _AxNarrowState<T> extends State<AxNarrow<T>> {
         widget.builder(context, shown),
         if (more > 0 || fit.isEmpty)
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 5, 8, 4),
+            padding: const EdgeInsets.fromLTRB(AxSpace.row, 6, AxSpace.row, 4),
             child: Text(fit.isEmpty ? 'None fits' : '$more more', style: t.type.small.ink(c.ink3)),
           ),
       ],
@@ -461,7 +461,10 @@ class _ItemsState<T> extends State<_Items<T>> {
                       borderRadius: BorderRadius.circular(AxRadius.key),
                     ),
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: t.density.pad / 2 + 1),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: AxSpace.row,
+                        vertical: t.density.pad / 2 + 1,
+                      ),
                       child: Row(
                         children: [
                           SizedBox(
@@ -627,7 +630,7 @@ class AxSelect<T> extends StatelessWidget {
                   // Taller with larger text.
                   constraints: BoxConstraints(minHeight: t.density.control),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: const EdgeInsets.fromLTRB(12, 0, 10, 0),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [

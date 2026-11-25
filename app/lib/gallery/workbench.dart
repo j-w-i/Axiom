@@ -143,7 +143,7 @@ class _WorkbenchState extends State<Workbench> {
     name: agent.name,
     state: agent.state,
     mark: mark,
-    inset: wide ? 20 : widget.titleInset + 12,
+    inset: wide ? AxSpace.gutter : widget.titleInset,
     trailing: _panelKey(),
   );
 
@@ -156,7 +156,7 @@ class _WorkbenchState extends State<Workbench> {
   Widget _side() {
     final t = Ax.of(context);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(6, 0, 14, 16),
+      padding: const EdgeInsets.fromLTRB(8, 0, AxSpace.edge, AxSpace.edge),
       children: [
         PlanView(s.session.tasks, folded: _folded.contains('plan'), onFold: () => _fold('plan')),
         PanelHeading(
@@ -174,7 +174,7 @@ class _WorkbenchState extends State<Workbench> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: ChangedRow(
                       path,
                       added: a,
@@ -191,7 +191,10 @@ class _WorkbenchState extends State<Workbench> {
                       child: DiffLines(s.diff),
                     ),
                   if (i < s.changed.length - 1)
-                    const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Hairline()),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: AxSpace.card),
+                      child: Hairline(),
+                    ),
                 ],
               ),
             ),
@@ -227,7 +230,7 @@ class _WorkbenchState extends State<Workbench> {
   Widget _drawer(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 4, 12),
+      padding: const EdgeInsets.fromLTRB(AxSpace.edge, 0, 8, AxSpace.edge),
       child: Surface(
         c.block,
         radius: AxRadius.card,
@@ -237,7 +240,7 @@ class _WorkbenchState extends State<Workbench> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 6, 6, 2),
+                padding: const EdgeInsets.fromLTRB(AxSpace.card, 8, 9, 2),
                 child: Row(
                   children: [
                     AxGlyph(AxIcon.terminal, color: c.ink3),
@@ -255,7 +258,7 @@ class _WorkbenchState extends State<Workbench> {
               ),
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(14, 2, 14, 10),
+                  padding: const EdgeInsets.fromLTRB(AxSpace.card, 2, AxSpace.card, 12),
                   child: Text(
                     '  PASS  src/auth/refresh.test.ts (6)\n'
                     '  PASS  src/auth/inflight.test.ts (4)\n'
@@ -374,7 +377,7 @@ class _Side extends StatelessWidget {
         ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 20),
             children: [
               const SideHeading('Needs you'),
               NeedsRow(
@@ -408,7 +411,7 @@ class _Side extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

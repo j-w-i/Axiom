@@ -20,6 +20,7 @@ import '../ui/icons.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
+import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'changes.dart';
 import 'drafts.dart';
@@ -335,7 +336,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
           final onList = beside || narrow ? null : () => setState(() => _list = true);
           final banner = problem == null
               ? null
-              : _Banner(problem, inset: beside ? 20 : widget.titleInset + 12);
+              : _Banner(problem, inset: beside ? AxSpace.gutter : widget.titleInset + AxSpace.edge);
           final content = switch (s) {
             // Kept while the host is away: what was written is not lost.
             _ when view == _View.start => StartPage(
@@ -380,7 +381,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
               looks: width >= _roomy,
               banner: banner,
               onList: onList,
-              inset: beside ? 20 : widget.titleInset + 12,
+              inset: beside ? AxSpace.gutter : widget.titleInset + AxSpace.edge,
               alone: !beside && !narrow,
               small: narrow,
               onAgain: () => _do('The session could not be opened', () => s.open(m.id)),
@@ -632,7 +633,7 @@ class _Banner extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Padding(
-      padding: EdgeInsets.fromLTRB(inset, 14, 20, 0),
+      padding: EdgeInsets.fromLTRB(inset, 14, AxSpace.gutter, 0),
       child: Row(
         children: [
           const AxLamp(AgentState.failed),
@@ -727,7 +728,10 @@ class _Strip extends StatelessWidget {
     final open = list;
     if (open == null) {
       return Padding(
-        padding: EdgeInsets.only(left: onList == null ? 24 : inset + 12, right: 14),
+        padding: EdgeInsets.only(
+          left: onList == null ? AxSpace.gutter : inset + AxSpace.edge,
+          right: AxSpace.edge,
+        ),
         child: Row(
           children: [
             if (onList case final f?) ...[
@@ -758,7 +762,7 @@ class _Strip extends StatelessWidget {
         ? (AgentState.asking, '${asks.length} asking', asks.first, c.attentionText)
         : (AgentState.failed, '${stopped.length} stopped', stopped.firstOrNull, c.faultText);
     return Padding(
-      padding: EdgeInsets.only(left: inset + 12, right: 8),
+      padding: EdgeInsets.only(left: inset + AxSpace.edge, right: AxSpace.edge),
       child: Row(
         children: [
           AxPopover(
@@ -919,7 +923,7 @@ class _Side extends StatelessWidget {
             child: SideHeading(
               label,
               trailing: Padding(
-                padding: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.only(right: 8),
                 child: Text('${all.length}', style: t.type.small.ink(c.ink3)),
               ),
             ),
@@ -945,9 +949,10 @@ class _Side extends StatelessWidget {
               onOpen: () => _then(() => onAnswer(w)),
             ),
         ],
-      for (final g in groups) ...[
+      for (final (i, g) in groups.indexed) ...[
         SideHeading(
           g.name,
+          first: close != null && i == 0 && store.needs.isEmpty,
           spoken: g.folder == null ? null : 'Folder ${g.folder}',
           act: g.folder == null
               ? null
@@ -975,7 +980,7 @@ class _Side extends StatelessWidget {
       ],
       if (store.older)
         Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          padding: const EdgeInsets.fromLTRB(AxSpace.row, 8, AxSpace.row, 0),
           child: Text(
             'The last ${HostStore.listed}. Older ones are in the journal.',
             style: t.type.small.ink(c.ink3),
@@ -985,7 +990,7 @@ class _Side extends StatelessWidget {
     if (close != null) {
       return Padding(
         // With what the panel has, 8 all round.
-        padding: const EdgeInsets.all(3),
+        padding: const EdgeInsets.all(2),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: list),
       );
     }
@@ -1042,10 +1047,20 @@ class _Side extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: ListView(padding: const EdgeInsets.fromLTRB(10, 0, 10, 12), children: list),
+          child: Stack(
+            children: [
+              ListView(padding: const EdgeInsets.fromLTRB(10, 0, 10, 20), children: list),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Fade(up: false, height: 20, ground: c.chassis.fill),
+              ),
+            ],
+          ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
           child: NavRow(
             AxIcon.account,
             'Accounts',
@@ -1180,7 +1195,7 @@ class _Display extends StatelessWidget {
             child: SizedBox(
               height: 44,
               child: Padding(
-                padding: EdgeInsets.only(left: inset, right: 14, bottom: 8),
+                padding: EdgeInsets.only(left: inset, right: AxSpace.edge, bottom: 8),
                 child: Row(
                   children: [
                     if (onList case final f?) ...[
@@ -1345,8 +1360,9 @@ class _Display extends StatelessWidget {
       name: a.name,
       state: stateOf(a),
       mark: markOf(x.provider, x.model, x.harness),
-      inset: small ? 20 : inset,
+      inset: small ? AxSpace.gutter : inset,
       height: small ? 40 : 44,
+      said: !acts,
       lead: onList == null
           ? null
           : Padding(

@@ -467,7 +467,7 @@ class _AxFieldState extends State<AxField> {
               constraints: BoxConstraints(minHeight: t.density.control + 2),
               child: Padding(
                 padding: EdgeInsets.symmetric(
-                  horizontal: t.density.pad,
+                  horizontal: t.density.pad - 1,
                   vertical: widget.lines > 1 ? 8 : 0,
                 ),
                 child: Row(

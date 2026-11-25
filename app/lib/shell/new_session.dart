@@ -139,7 +139,7 @@ class _StartPageState extends State<StartPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(15, 12, 15, 10),
+                      padding: const EdgeInsets.fromLTRB(AxSpace.edge, 13, AxSpace.edge, 10),
                       child: AxEditable(
                         label: 'Name',
                         placeholder: 'Name, such as Reviewer',
@@ -150,7 +150,10 @@ class _StartPageState extends State<StartPage> {
                         onSubmitted: (_) => FocusScope.of(context).nextFocus(),
                       ),
                     ),
-                    const Padding(padding: EdgeInsets.symmetric(horizontal: 15), child: Hairline()),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: AxSpace.edge),
+                      child: Hairline(),
+                    ),
                   ],
                 ),
           onSubmit: (_) => _start(chosen),
@@ -174,7 +177,7 @@ class _StartPageState extends State<StartPage> {
         ),
         const SizedBox(height: 6),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 7),
+          padding: const EdgeInsets.symmetric(horizontal: AxSpace.chip),
           child: Wrap(
             spacing: 2,
             runSpacing: 2,
@@ -203,7 +206,7 @@ class _StartPageState extends State<StartPage> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(15, 8, 15, 0),
+          padding: const EdgeInsets.fromLTRB(AxSpace.edge, 8, AxSpace.edge, 0),
           child: Semantics(
             liveRegion: missing != null,
             child: Text(said, style: t.type.label.ink(c.ink3)),
@@ -213,7 +216,7 @@ class _StartPageState extends State<StartPage> {
           Semantics(
             liveRegion: true,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(15, 10, 15, 0),
+              padding: const EdgeInsets.fromLTRB(AxSpace.edge, 10, AxSpace.edge, 0),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -498,14 +501,14 @@ class _FoldersState extends State<_Folders> {
               ),
             if (fit.isEmpty && !path && words.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 5, 8, 6),
+                padding: const EdgeInsets.fromLTRB(AxSpace.row, 6, AxSpace.row, 6),
                 child: Text(
                   'None fits',
                   style: Ax.of(context).type.small.ink(Ax.of(context).colors.ink3),
                 ),
               ),
             const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: EdgeInsets.symmetric(horizontal: AxSpace.row, vertical: 4),
               child: Hairline(),
             ),
             _Row('Choose…', icon: AxIcon.search, onPressed: widget.onLook),
@@ -542,7 +545,7 @@ class _Row extends StatelessWidget {
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: t.density.row),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: AxSpace.row),
             child: Row(
               children: [
                 AxGlyph(icon, color: c.ink3),
@@ -608,7 +611,7 @@ class _WordsKey extends StatelessWidget {
       panel: (context, _) => ListenableBuilder(
         listenable: d,
         builder: (context, _) => Padding(
-          padding: const EdgeInsets.all(9),
+          padding: const EdgeInsets.fromLTRB(AxSpace.row, 4, AxSpace.row, AxSpace.row),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,

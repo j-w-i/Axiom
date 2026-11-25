@@ -158,8 +158,13 @@ void main() {
         expect(l(c.written), greaterThan(l(c.bay)));
         expect(l(c.slab), greaterThan(l(c.track)));
         expect(l(c.canvas), greaterThan(l(c.chassis)));
-        // Where an agent is written to has no edge of any kind.
-        expect((c.written.lip.a, c.written.border.a), (0, 0));
+        // Where an agent is written to has the faint edge of what else is raised, and no ring (the owner:
+        // not "a border"; nor "flatter in comparison to some of the other surfaces").
+        final (edge, like) = c.brightness == Brightness.dark
+            ? (c.written.lip, c.overlay.lip)
+            : (c.written.border, c.overlay.border);
+        expect(edge.a, inExclusiveRange(0, .08));
+        expect(edge.a, lessThanOrEqualTo(like.a));
         // Light on an upper edge is faint; no shade is a line.
         for (final s in [c.plate, c.slab, c.key, c.written, c.overlay, c.canvas, c.primary]) {
           expect(s.lip.a, lessThan(.1));

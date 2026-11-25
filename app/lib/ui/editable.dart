@@ -169,7 +169,7 @@ class AxContextMenu extends StatelessWidget {
         c.overlay,
         radius: AxRadius.card,
         child: Padding(
-          padding: const EdgeInsets.all(5),
+          padding: const EdgeInsets.all(AxSpace.menu),
           child: IntrinsicWidth(
             child: Column(
               mainAxisSize: MainAxisSize.min,
