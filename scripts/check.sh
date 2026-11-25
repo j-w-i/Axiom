@@ -19,7 +19,7 @@ rust() {
 }
 
 app() {
-  (cd engine && cargo build -q -p axiom-host --locked)
+  (cd engine && cargo build -q -p axiom-host --locked --bins --examples)
   cd app
   flutter pub get --enforce-lockfile >/dev/null
   dart format --output=none --set-exit-if-changed lib test tool benchmark

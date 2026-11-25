@@ -61,7 +61,7 @@ jobs:
       - name: Desktop build packages
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake ninja-build pkg-config libgtk-3-dev
-      - run: cargo build -p axiom-host --locked
+      - run: cargo build -p axiom-host --locked --bins --examples
         working-directory: engine
       - run: flutter pub get --enforce-lockfile
         working-directory: app
