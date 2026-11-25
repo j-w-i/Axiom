@@ -438,7 +438,7 @@ impl Agents {
         let folders =
             all.into_iter().filter_map(|s| s.workspace).filter_map(|w| Place::new(w).ok());
         let own = Place::new(plain_verbatim(self.scratch.clone())).ok();
-        let copies = self.copies.root().and_then(|r| Place::new(plain_verbatim(r)).ok());
+        let copies = self.copies.root().and_then(|r| real(&r).ok());
         Ok(Reach::of(folders.chain(own).chain(copies)))
     }
 

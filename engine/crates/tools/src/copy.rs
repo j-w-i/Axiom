@@ -700,7 +700,8 @@ pub fn renew(
             continue;
         }
         let untouched = here.as_ref().map(|w| &w.is) == known.as_ref().map(|w| &w.is);
-        let at_folder = at(&f, &rel)?;
+        // Not what it may not have, which counts as gone.
+        let at_folder = if there.is_some() { at(&f, &rel)? } else { None };
         if untouched {
             if here.is_some()
                 && let Some((d, n)) = at(&c, &rel)?

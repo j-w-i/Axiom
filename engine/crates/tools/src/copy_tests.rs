@@ -245,6 +245,41 @@ fn the_folders_own_is_not_written_over() {
     assert!(!t.changes(&was).iter().any(|c| c.path == "a"));
 }
 
+/// Not through a link either that leads to a folder of the same.
+#[test]
+fn a_link_within_is_not_followed() {
+    let t = T::new(&[("d/x", "1")]);
+    symlink("d", t.folder.as_path().join("alias")).unwrap();
+    let mut was = t.make(&["alias/x"]).unwrap();
+    assert_eq!(names(&was), ["alias", "d/x"]);
+    assert_eq!(now(&open(&t.folder).unwrap(), "alias/x").unwrap(), None);
+    // In the copy it is a folder now, and in the folder it is a link still.
+    std::fs::remove_file(t.copy.as_path().join("alias")).unwrap();
+    write(&t.copy, "alias/x", "agent");
+    write(&t.copy, "alias/new", "agent");
+    for p in ["alias/x", "alias/new"] {
+        assert!(t.bring(&was, p).is_err(), "{p}");
+    }
+    assert_eq!((read(&t.folder, "d/x").as_deref(), read(&t.folder, "d/new")), (Some("1"), None));
+    write(&t.folder, "d/x", "2");
+    t.renew(&mut was);
+    assert_eq!(read(&t.copy, "alias/x").as_deref(), Some("agent"));
+}
+
+/// What may not be read any more is not left in a copy.
+#[test]
+fn a_rule_that_came_later_holds_for_a_copy() {
+    let t = T::new(&[("a", "1"), ("b", "2")]);
+    let mut was = t.make(&[]).unwrap();
+    let stop = AtomicBool::new(false);
+    let may = |p: &Place| p.name() != "a";
+    let from = From { folder: &t.folder, tracked: &[], may: &may, stop: &stop };
+    let r = renew(&from, &t.copy, &mut was, &t.beside, Most::default()).unwrap();
+    assert_eq!((r.taken, read(&t.copy, "a")), (vec!["a".to_owned()], None));
+    assert_eq!((names(&was), t.changes(&was)), (vec!["b"], vec![]));
+    assert_eq!(read(&t.folder, "a").as_deref(), Some("1"));
+}
+
 #[test]
 fn that_it_can_be_run_is_a_change_too() {
     let t = T::new(&[("a", "1"), ("b", "2")]);

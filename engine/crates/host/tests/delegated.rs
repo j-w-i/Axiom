@@ -346,6 +346,16 @@ async fn what_a_delegated_agent_may_not_be() {
     let (session, agent) = (t.s.clone(), a.clone());
     let e = t.c.call(Call::Prompt { session, agent, text: "x".into(), key: None }).await;
     assert!(e.unwrap_err().to_string().contains("inside what an agent may write"));
+    // Nor one that lies where agents have their copies.
+    let copies = t.f.dir.path().join("home/.axiom-work/s");
+    std::fs::create_dir_all(&copies).unwrap();
+    std::fs::copy(FAKE, copies.join("goose")).unwrap();
+    std::fs::remove_file(t.f.dir.path().join("bin/goose")).unwrap();
+    std::os::unix::fs::symlink(t.at("home/.axiom-work/s/goose"), t.f.dir.path().join("bin/goose"))
+        .unwrap();
+    let (session, agent) = (t.s.clone(), a.clone());
+    let e = t.c.call(Call::Prompt { session, agent, text: "x".into(), key: None }).await;
+    assert!(e.unwrap_err().to_string().contains("inside what an agent may write"));
     // It keeps its harness.
     let execution = Execution { harness: "claude".into(), ..execution };
     let set =

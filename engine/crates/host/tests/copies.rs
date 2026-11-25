@@ -190,7 +190,9 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
     t.write(".gitignore", "/target\n");
     t.write("a.txt", "one\n");
     t.write("b.txt", "two\n");
+    t.write("target/tracked", "t");
     git(&w, &["add", "-A"]);
+    git(&w, &["add", "-f", "target/tracked"]);
     git(&w, &["commit", "-q", "-m", "first"]);
     t.write("a.txt", "one and not committed\n");
     t.write("target/big", "x");
@@ -202,14 +204,15 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
         .does(
             &a,
             "pwd > where; echo agent > a.txt; mkdir -p new && echo n > new/n.txt; rm b.txt; \
-             git log --oneline > log; ls target > seen 2>&1",
+             git log --oneline > log; ls target > seen",
         )
         .await;
     assert_eq!((o, e), (Outcome::Completed, None));
     let copy = std::fs::canonicalize(t.copy_of(&a)).unwrap();
     assert_eq!(t.copied(&a, "where").unwrap().trim(), copy.to_str().unwrap());
     assert!(t.copied(&a, "log").unwrap().contains("first"), "git says what there was");
-    assert!(t.copied(&a, "seen").unwrap().contains("target"), "what git ignores is not there");
+    // What git ignores is not there, but for what it tracks all the same.
+    assert_eq!(t.copied(&a, "seen").as_deref(), Some("tracked\n"));
     assert!(t.server.requests()[0].to_string().contains("a copy of the project's folder"));
     // None of it is in the folder.
     assert_eq!(t.file("a.txt").as_deref(), Some("one and not committed\n"));
@@ -276,6 +279,10 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
     t.remove(&a, true).await.unwrap();
     assert!(!t.copy_of(&a).exists());
     assert!(!t.changes(&a).await.made);
+    // It can be set up as another, as any agent.
+    let (session, access) = (t.s.clone(), Some(Access::Ask));
+    let set = Call::AgentSet { session, agent: a.clone(), execution: None, access };
+    t.c.call(set).await.unwrap();
     t.does(&a, "true").await;
     assert_eq!(t.copied(&a, "a.txt").as_deref(), Some("one and not committed\n"));
     assert_eq!(t.changes(&a).await.files, []);
@@ -376,11 +383,16 @@ async fn the_folders_rules_hold_in_a_copy() {
     );
     t.write(".gitignore", ".axiom\n");
     let a = t.agent("Builder", Access::Work, true).await;
-    let write = json!({"path": "a.txt", "text": "agent"}).to_string();
+    t.write("b.txt", "two");
+    let write = |p: &str| json!({"path": p, "content": "agent"}).to_string();
     t.server.add(calls(&[
         ("c1", "read", r#"{"path":"a.txt"}"#),
-        ("c2", "write", &write),
-        ("c3", "shell", r#"{"command":"cat secret.txt > got; true"}"#),
+        ("c2", "read", r#"{"path":"b.txt"}"#),
+    ]));
+    t.server.add(calls(&[
+        ("c3", "write", &write("a.txt")),
+        ("c4", "write", &write("b.txt")),
+        ("c5", "shell", r#"{"command":"cat secret.txt > got; true"}"#),
     ]));
     t.server.add(text(&["done"]));
     t.tell(&a).await.unwrap();
@@ -390,6 +402,7 @@ async fn the_folders_rules_hold_in_a_copy() {
     assert_eq!(t.copied(&a, "secret.txt"), None, "what may not be read is not copied");
     assert_eq!(t.copied(&a, "got").as_deref(), Some(""));
     assert_eq!(t.copied(&a, "a.txt").as_deref(), Some("one"));
+    assert_eq!(t.copied(&a, "b.txt").as_deref(), Some("agent"));
 }
 
 #[tokio::test]
@@ -415,6 +428,14 @@ async fn what_stands_in_the_way_of_a_copy() {
     std::fs::remove_file(t.copy_of(&b)).unwrap();
     t.does(&b, "true").await;
     assert!(t.copied(&b, "a.txt").is_some());
+    // It became a link after it was made.
+    std::fs::rename(t.copy_of(&b), t.f.dir.path().join("moved")).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, t.copy_of(&b)).unwrap();
+    let call = Call::CopyChanges { session: t.s.clone(), agent: b.clone() };
+    assert!(refused(t.c.call(call).await).message.contains("leads elsewhere"));
+    assert!(t.tell(&b).await.is_err());
+    assert!(t.remove(&b, true).await.is_err());
+    assert!(elsewhere.join("precious").exists());
     // One that works in the folder has none.
     let c = t.agent("In it", Access::Work, false).await;
     let call = Call::CopyChanges { session: t.s.clone(), agent: c.clone() };
