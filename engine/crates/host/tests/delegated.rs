@@ -1022,3 +1022,28 @@ async fn the_models_it_has() {
     let e = t.c.call(call).await.unwrap_err().to_string();
     assert!(e.contains("how fast"), "{e}");
 }
+
+/// One that was set up to work with Axiom's tools in place of its own is not started with its own
+/// instead: something else would hold it back than its person was told (decision 0017).
+#[tokio::test]
+async fn what_was_set_up_otherwise_is_not_started() {
+    let mut t = T::new(&claude(&turn("go", "One."))).await;
+    let call = t.add("claude", Access::Work, false);
+    let a = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
+    t.c.call(Call::Shutdown { force: true }).await.unwrap();
+    for _ in 0..1000 {
+        if !t.f.paths.token().exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let db = rusqlite::Connection::open(t.f.paths.journal()).unwrap();
+    let setup = "update agent set setup = json_set(setup, '$.execution.environment', 'axiom')";
+    assert_eq!(db.execute(setup, []).unwrap(), 1);
+    drop(db);
+    t.restart_after_stop().await;
+    let (session, agent) = (t.s.clone(), a);
+    let e = t.c.call(Call::Prompt { session, agent, text: "go".into(), key: None }).await;
+    assert!(e.unwrap_err().to_string().contains("its own tools only"));
+    assert!(!t.f.dir.path().join("bin/seen.json").exists());
+}
