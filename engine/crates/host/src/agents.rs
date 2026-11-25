@@ -387,12 +387,10 @@ pub async fn load(
     .map_err(internal)??;
     let kept = store.messages(id.clone(), agent.clone()).await.map_err(internal)?;
     let (context, new) = Context::load(&kept).map_err(internal)?;
-    let mut n = kept.len() as u64;
-    for t in &new {
+    for (n, t) in (kept.len() as u64..).zip(&new) {
         let t: &Turn = t;
         let text = serde_json::to_string(t).map_err(internal)?;
         store.put_message(id.clone(), agent.clone(), n, text).await.map_err(internal)?;
-        n += 1;
     }
     let quirks = client.profile().quirks(&model);
     let messages = client.profile().codec == Codec::Messages;
