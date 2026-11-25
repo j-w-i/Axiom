@@ -106,7 +106,7 @@ class _ControlsSheetState extends State<ControlsSheet> {
           width: 260,
           child: Surface(
             Ax.of(context).colors.overlay,
-            radius: AxRadius.overlay,
+            radius: AxRadius.card,
             child: Padding(
               padding: const EdgeInsets.all(5),
               child: ExcludeFocus(
@@ -183,17 +183,8 @@ class SurfacesSheet extends StatelessWidget {
       ),
     );
     return _Sheet([
-      (
-        'Structure',
-        [
-          sw('chassis', c.chassis),
-          sw('plate', c.plate),
-          sw('plateHover', c.plateHover),
-          sw('plateSelected', c.plateSelected),
-          sw('overlay', c.overlay),
-        ],
-      ),
-      ('Displays', [sw('bay', c.bay), sw('block', c.block), sw('well', c.well)]),
+      ('Structure', [sw('chassis', c.chassis), sw('plate', c.plate), sw('overlay', c.overlay)]),
+      ('Displays', [sw('bay', c.bay), sw('block', c.block)]),
       (
         'Keys',
         [
@@ -231,7 +222,7 @@ class SurfacesSheet extends StatelessWidget {
       (
         'Icons',
         [
-          for (final i in AxIcon.values) AxGlyph(i, size: 18, color: i.kind(c) ?? c.ink2),
+          for (final i in AxIcon.values) AxGlyph(i, size: 18, color: c.ink2),
           const AxMark(size: 22),
         ],
       ),
@@ -250,6 +241,7 @@ class TypeSheet extends StatelessWidget {
         ('title', t.title),
         ('prose', t.prose),
         ('ui', t.ui),
+        ('uiMedium', t.uiMedium),
         ('uiStrong', t.uiStrong),
         ('label', t.label),
         ('labelStrong', t.labelStrong),
@@ -257,7 +249,6 @@ class TypeSheet extends StatelessWidget {
         ('caption', t.caption),
         ('code', t.code),
         ('codeSmall', t.codeSmall),
-        ('readout', t.readout),
       ])
         (n, [Text('Rotate once per account, 1,284 → 96 ms, Ilf1 O0 8B rn', style: st)]),
     ]);

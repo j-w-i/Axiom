@@ -5,14 +5,126 @@ import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
 import '../ui/press.dart';
-import '../ui/spring.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'models.dart';
 
-/// The open session: its agents and its plan, in one panel, because they are its own.
-class SessionPanel extends StatefulWidget {
+/// The ground of a row in the sidebar.
+Widget _ground(
+  AxColors c, {
+  required bool selected,
+  required bool hovered,
+  required Widget child,
+}) => DecoratedBox(
+  decoration: BoxDecoration(
+    color: selected
+        ? c.selected
+        : hovered
+        ? c.hover
+        : null,
+    borderRadius: BorderRadius.circular(AxRadius.key),
+  ),
+  child: child,
+);
+
+/// Somewhere to go: what it is and the keys that go there.
+class NavRow extends StatelessWidget {
+  const NavRow(
+    this.icon,
+    this.label, {
+    required this.onPressed,
+    super.key,
+    this.keys,
+    this.selected = false,
+  });
+  final AxIcon icon;
+  final String label;
+  final String? keys;
+  final bool selected;
+  final VoidCallback onPressed;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Pressable(
+      label: label,
+      hint: keys,
+      selected: selected ? true : null,
+      onPressed: onPressed,
+      builder: (context, s) => _ground(
+        c,
+        selected: selected,
+        hovered: s.hovered,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: t.density.row),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                AxGlyph(icon, size: 16, color: selected || s.hovered ? c.ink1 : c.ink2),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.type.ui.ink(selected || s.hovered ? c.ink1 : c.ink2),
+                  ),
+                ),
+                if (keys case final k?)
+                  Text(k, style: t.type.small.ink(selected ? c.ink3 : c.ink4)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the rows under it have in common: a folder, or a state.
+class SideHeading extends StatelessWidget {
+  const SideHeading(this.label, {super.key, this.icon, this.spoken, this.trailing});
+  final String label;
+  final String? spoken;
+  final AxIcon? icon;
+  final Widget? trailing;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 14, 4, 2),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 24),
+        child: Row(
+          children: [
+            if (icon case final i?) ...[
+              AxGlyph(i, size: 14, color: c.ink3),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Semantics(
+                header: true,
+                label: spoken,
+                excludeSemantics: spoken != null,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.type.smallStrong.ink(c.ink3),
+                ),
+              ),
+            ),
+            ?trailing,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The open session, where it stands among the others: its name, and its agents under it.
+class SessionPanel extends StatelessWidget {
   const SessionPanel({
     required this.session,
     required this.selected,
@@ -23,119 +135,68 @@ class SessionPanel extends StatefulWidget {
     this.onStop,
   });
   final SessionView session;
+
+  /// The agent that is shown, if one is.
   final String? selected;
   final ValueChanged<String> onSelect;
   final VoidCallback? onAddAgent;
   final ValueChanged<String>? onPause, onStop;
-  @override
-  State<SessionPanel> createState() => _SessionPanelState();
-}
-
-class _SessionPanelState extends State<SessionPanel> {
-  bool _plan = true;
 
   @override
   Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors, s = widget.session;
-    final done = s.tasks.where((k) => k.state == TaskState.done).length;
+    final t = Ax.of(context), c = t.colors, s = session;
     return Semantics(
       container: true,
       explicitChildNodes: true,
       label: 'Session ${s.title}',
-      child: Surface(
-        c.plate,
-        radius: AxRadius.bay,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(1, 1, 1, 5),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 36),
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 11, right: 3),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          s.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.uiStrong,
-                        ),
-                      ),
-                      Text(s.age, style: t.type.small.ink(c.ink3)),
-                      if (widget.onAddAgent != null) ...[
-                        const SizedBox(width: 2),
-                        AxButton.icon(
-                          AxIcon.plus,
-                          label: 'Add an agent to ${s.title}',
-                          tone: AxTone.quiet,
-                          size: 22,
-                          onPressed: widget.onAddAgent,
-                        ),
-                      ] else
-                        const SizedBox(width: 5),
-                    ],
-                  ),
-                ),
-              ),
-              for (final a in s.agents)
-                AgentRow(
-                  a,
-                  selected: a.id == widget.selected,
-                  onSelect: () => widget.onSelect(a.id),
-                  onPause: widget.onPause == null ? null : () => widget.onPause!(a.id),
-                  onStop: widget.onStop == null ? null : () => widget.onStop!(a.id),
-                ),
-              if (s.tasks.isNotEmpty) ...[
-                const Padding(padding: EdgeInsets.fromLTRB(11, 6, 11, 2), child: Seam()),
-                Pressable(
-                  label: 'Plan, $done of ${s.tasks.length} done',
-                  expanded: _plan,
-                  radius: 0,
-                  onPressed: () => setState(() => _plan = !_plan),
-                  builder: (context, st) => Padding(
-                    padding: const EdgeInsets.fromLTRB(11, 4, 11, 4),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 22,
-                          child: Align(
-                            alignment: const Alignment(-.82, 0),
-                            child: SpringTo(
-                              target: _plan ? 1 : 0,
-                              spring: AxMotion.snap,
-                              builder: (_, v, child) =>
-                                  Transform.rotate(angle: v * 1.5708, child: child),
-                              child: AxGlyph(
-                                AxIcon.right,
-                                size: 10,
-                                color: st.hovered ? c.ink2 : c.ink4,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Expanded(child: Text('Plan', style: t.type.label.ink(c.ink2))),
-                        Text('$done of ${s.tasks.length}', style: t.type.small.ink(c.ink3)),
-                      ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(minHeight: t.density.row),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8, right: 4),
+              child: Row(
+                children: [
+                  AxGlyph(AxIcon.down, size: 12, color: c.ink3),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      s.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.uiStrong,
                     ),
                   ),
-                ),
-                if (_plan)
-                  for (final k in s.tasks) TaskRow(k),
-                const SizedBox(height: 3),
-              ],
-            ],
+                  if (onAddAgent case final f?)
+                    AxButton.icon(
+                      AxIcon.plus,
+                      label: 'Add an agent to ${s.title}',
+                      tone: AxTone.quiet,
+                      size: 24,
+                      onPressed: f,
+                    ),
+                ],
+              ),
+            ),
           ),
-        ),
+          for (final a in s.agents)
+            AgentRow(
+              a,
+              selected: a.id == selected,
+              onSelect: () => onSelect(a.id),
+              onPause: onPause == null ? null : () => onPause!(a.id),
+              onStop: onStop == null ? null : () => onStop!(a.id),
+            ),
+        ],
       ),
     );
   }
 }
 
-/// One agent: who, on what, doing what. Its keys appear when the hand is here.
+/// One agent: whose it is, who, how it stands, and what it does. Its keys appear when the hand is
+/// here.
 class AgentRow extends StatefulWidget {
   const AgentRow(
     this.agent, {
@@ -158,7 +219,6 @@ class _AgentRowState extends State<AgentRow> {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors, a = widget.agent;
-    final hue = a.mark?.color(c);
     final live = a.state == AgentState.running || a.state == AgentState.asking;
     final now = a.recent.lastOrNull;
     final pause =
@@ -166,6 +226,21 @@ class _AgentRowState extends State<AgentRow> {
     final stop = widget.onStop != null && live;
     final pauseWord = '${a.state == AgentState.paused ? 'Resume' : 'Pause'} ${a.name}';
     final keys = (_hover || _within) && (pause || stop);
+    final does = TextSpan(
+      children: [
+        if (a.model.isNotEmpty) TextSpan(text: a.model),
+        if (a.model.isNotEmpty && now != null) const TextSpan(text: ' · '),
+        if (now != null)
+          TextSpan(
+            text: now.text,
+            style: now.failed
+                ? TextStyle(color: c.faultText)
+                : a.state == AgentState.asking
+                ? TextStyle(color: c.attentionText)
+                : null,
+          ),
+      ],
+    );
     return RepaintBoundary(
       child: MouseRegion(
         onEnter: (_) => setState(() => _hover = true),
@@ -184,122 +259,78 @@ class _AgentRowState extends State<AgentRow> {
                     if (x.isNotEmpty) x,
                 ].join(', '),
                 selected: widget.selected,
-                radius: 0,
                 onPressed: widget.onSelect,
                 actions: {
                   if (pause) CustomSemanticsAction(label: pauseWord): widget.onPause!,
                   if (stop) CustomSemanticsAction(label: 'Stop ${a.name}'): widget.onStop!,
                 },
-                builder: (context, s) => DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: widget.selected
-                        ? LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [c.rowSelectedTop, c.rowSelectedBottom],
-                          )
-                        : null,
-                    color: !widget.selected && s.hovered ? c.tinted(hue) : null,
-                  ),
-                  child: Stack(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(11, 6, 11, 7),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _Mark(AxLamp(a.state), t.type.ui),
-                            Expanded(
-                              child: Padding(
-                                padding: EdgeInsets.only(
-                                  right: keys ? (pause && stop ? 59 : 32) : 0,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                                      textBaseline: TextBaseline.alphabetic,
-                                      children: [
-                                        Expanded(
-                                          child: Text.rich(
-                                            TextSpan(
-                                              children: [
-                                                TextSpan(text: a.name),
-                                                const TextSpan(text: '   '),
-                                                if (a.mark case final m?)
-                                                  WidgetSpan(
-                                                    alignment: PlaceholderAlignment.middle,
-                                                    child: Padding(
-                                                      padding: const EdgeInsets.only(right: 5),
-                                                      child: AxServiceMark(m, size: 11),
-                                                    ),
-                                                  ),
-                                                TextSpan(
-                                                  text: a.model,
-                                                  style: t.type.label.ink(
-                                                    widget.selected ? c.ink3 : c.ink4,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: t.type.ui,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        if (!keys)
-                                          Text(
-                                            a.elapsed,
-                                            style: t.type.small.ink(
-                                              widget.selected ? c.ink3 : c.ink4,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    if (now != null)
-                                      Text(
-                                        now.text,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: t.type.label.ink(
-                                          a.state == AgentState.asking
-                                              ? c.attentionText
-                                              : now.failed
-                                              ? c.faultText
-                                              : c.ink3,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
+                builder: (context, s) => _ground(
+                  c,
+                  selected: widget.selected,
+                  hovered: s.hovered,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(26, 5, keys ? (pause && stop ? 60 : 34) : 8, 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _Mark(
+                          a.mark == null
+                              ? AxGlyph(AxIcon.comment, size: 13, color: c.ink3)
+                              : AxServiceMark(a.mark!, size: 14),
+                          t.type.uiMedium,
                         ),
-                      ),
-                    ],
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      a.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.type.uiMedium,
+                                    ),
+                                  ),
+                                  if (!keys) ...[const SizedBox(width: 6), AxLamp(a.state)],
+                                ],
+                              ),
+                              if (a.model.isNotEmpty || now != null)
+                                Text.rich(
+                                  does,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: t.type.small.ink(c.ink3),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
               if (keys)
                 Positioned(
-                  right: 11,
+                  right: 6,
                   child: Row(
                     children: [
                       if (pause)
                         AxButton.icon(
                           a.state == AgentState.paused ? AxIcon.play : AxIcon.pause,
                           label: pauseWord,
-                          size: 22,
+                          tone: AxTone.quiet,
+                          size: 24,
                           onPressed: widget.onPause,
                         ),
-                      if (pause && stop) const SizedBox(width: 3),
+                      if (pause && stop) const SizedBox(width: 2),
                       if (stop)
                         AxButton.icon(
                           AxIcon.stop,
                           label: 'Stop ${a.name}',
-                          size: 22,
+                          tone: AxTone.quiet,
+                          size: 24,
                           onPressed: widget.onStop,
                         ),
                     ],
@@ -313,20 +344,65 @@ class _AgentRowState extends State<AgentRow> {
   }
 }
 
-/// A mark in the first column, centred on a line of [style] at any text size.
+/// A mark in a column of its own, centred on a line of [style] at any text size.
 class _Mark extends StatelessWidget {
-  const _Mark(this.child, this.style);
+  const _Mark(this.child, this.style, {this.width = 22});
   final Widget child;
   final TextStyle style;
+  final double width;
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 22,
+    width: width,
     height: MediaQuery.textScalerOf(context).scale(style.fontSize!) * style.height!,
     child: Align(
       alignment: Alignment.centerLeft,
-      child: SizedBox(width: 12, child: Center(child: child)),
+      child: SizedBox(width: 14, child: Center(child: child)),
     ),
   );
+}
+
+/// What the session means to do: its parts, how they stand and whose they are.
+class PlanView extends StatelessWidget {
+  const PlanView(this.tasks, {super.key});
+  final List<TaskView> tasks;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    final done = tasks.where((k) => k.state == TaskState.done).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PanelHeading('Plan', Text('$done of ${tasks.length}', style: t.type.small.ink(c.ink3))),
+        for (final k in tasks) TaskRow(k),
+      ],
+    );
+  }
+}
+
+/// What a part of the panel beside the conversation is.
+class PanelHeading extends StatelessWidget {
+  const PanelHeading(this.label, this.trailing, {super.key});
+  final String label;
+  final Widget? trailing;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 5),
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              header: true,
+              child: Text(label, style: t.type.smallStrong.ink(t.colors.ink3)),
+            ),
+          ),
+          ?trailing,
+        ],
+      ),
+    );
+  }
 }
 
 class TaskRow extends StatelessWidget {
@@ -336,32 +412,32 @@ class TaskRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     final (mark, word) = switch (task.state) {
-      TaskState.done => (AxGlyph(AxIcon.check, size: 12, color: c.doneText), 'done'),
+      TaskState.done => (const AxLamp(AgentState.done), 'done'),
       TaskState.active => (const AxLamp(AgentState.running, turns: false), 'active'),
       TaskState.asking => (const AxLamp(AgentState.asking), 'asking'),
       TaskState.todo => (const AxLamp(AgentState.waiting), 'to do'),
-      TaskState.blocked => (AxGlyph(AxIcon.warn, size: 12, color: c.attentionText), 'blocked'),
+      TaskState.blocked => (AxGlyph(AxIcon.warn, size: 13, color: c.attentionText), 'blocked'),
     };
     return Semantics(
       label: '${task.title}, $word${task.owner == null ? '' : ', ${task.owner}'}',
       excludeSemantics: true,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 25),
+        constraints: const BoxConstraints(minHeight: 28),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 11),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              _Mark(mark, t.type.label),
+              _Mark(mark, t.type.ui),
               Expanded(
                 child: Text(
                   task.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: t.type.label.ink(switch (task.state) {
-                    TaskState.active => c.ink1,
-                    TaskState.asking => c.attentionText,
-                    _ => c.ink3,
-                  }),
+                  style: switch (task.state) {
+                    TaskState.active || TaskState.asking => t.type.uiMedium,
+                    TaskState.done => t.type.ui.ink(c.ink3),
+                    _ => t.type.ui.ink(c.ink2),
+                  },
                 ),
               ),
               if (task.owner != null && task.state != TaskState.done) ...[
@@ -395,23 +471,24 @@ class SessionRow extends StatelessWidget {
           ? 'at work'
           : session.age,
       onPressed: onOpen,
-      builder: (context, s) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: s.hovered ? c.hover : null,
-          borderRadius: BorderRadius.circular(AxRadius.key),
-        ),
-        child: SizedBox(
-          height: t.density.row + 2,
+      builder: (context, s) => _ground(
+        c,
+        selected: false,
+        hovered: s.hovered,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: t.density.row),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.only(left: 8, right: 10),
             child: Row(
               children: [
+                AxGlyph(AxIcon.right, size: 12, color: c.ink4),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     session.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: t.type.ui.ink(c.ink2),
+                    style: t.type.ui.ink(s.hovered ? c.ink1 : c.ink2),
                   ),
                 ),
                 for (final a in busy.take(4)) ...[const SizedBox(width: 4), AxLamp(a.state)],
@@ -452,18 +529,16 @@ class NeedsRow extends StatelessWidget {
       label: subject.isEmpty ? '$agent $what, in $session' : '$agent $what: $subject, in $session',
       hint: age,
       onPressed: onOpen,
-      builder: (context, s) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: s.hovered ? c.hover : null,
-          borderRadius: BorderRadius.circular(AxRadius.key),
-        ),
+      builder: (context, s) => _ground(
+        c,
+        selected: false,
+        hovered: s.hovered,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 5, 12, 6),
+          padding: const EdgeInsets.fromLTRB(8, 5, 10, 6),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(padding: const EdgeInsets.only(top: 3), child: AxLamp(state)),
-              const SizedBox(width: 9),
+              _Mark(AxLamp(state), t.type.uiMedium, width: 20),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -472,7 +547,7 @@ class NeedsRow extends StatelessWidget {
                       '$agent $what',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: t.type.ui.ink(c.ink1),
+                      style: t.type.uiMedium,
                     ),
                     if (subject.isNotEmpty)
                       Text(
@@ -506,6 +581,94 @@ class NeedsRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// A part beside the conversation, with the hairline that parts them.
+class SidePanel extends StatelessWidget {
+  const SidePanel({required this.children, super.key});
+  final List<Widget> children;
+  static const width = 284.0;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: width,
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Hairline(vertical: true),
+        Expanded(
+          child: ListView(padding: const EdgeInsets.only(top: 4, bottom: 16), children: children),
+        ),
+      ],
+    ),
+  );
+}
+
+/// A file that has been changed, and by how much.
+class ChangedRow extends StatelessWidget {
+  const ChangedRow(
+    this.path, {
+    required this.added,
+    required this.removed,
+    required this.onOpen,
+    super.key,
+  });
+  final String path;
+  final int added, removed;
+  final VoidCallback onOpen;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Pressable(
+        label: '$path, $added added, $removed removed',
+        onPressed: onOpen,
+        builder: (context, s) => _ground(
+          c,
+          selected: false,
+          hovered: s.hovered,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 28),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      path,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.codeSmall.ink(s.hovered ? c.ink1 : c.ink2),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ChangedBy(added, removed),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// `+7 −2` in the colours of what they count; what is nothing is not said.
+class ChangedBy extends StatelessWidget {
+  const ChangedBy(this.added, this.removed, {super.key});
+  final int added, removed;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (added > 0) Text('+$added', style: t.type.codeSmall.ink(c.doneText)),
+        if (added > 0 && removed > 0) const SizedBox(width: 7),
+        if (removed > 0) Text('−$removed', style: t.type.codeSmall.ink(c.faultText)),
+      ],
     );
   }
 }

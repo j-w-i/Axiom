@@ -30,8 +30,12 @@ class Talk extends StatefulWidget {
     required this.draft,
     required this.live,
     this.room = double.infinity,
+    this.onAgent,
     super.key,
   });
+
+  /// Shows another agent of the session.
+  final ValueChanged<String>? onAgent;
 
   /// How high the words of a question may be.
   final double room;
@@ -136,7 +140,7 @@ class _TalkState extends State<Talk> {
         'Model',
         [
           if (other && x.model == null)
-            AxMenuItem('', 'Its own model', mark: markOf(null, null, x.harness)),
+            AxMenuItem('', 'Default model', mark: markOf(null, null, x.harness)),
           if (!has && x.model != null)
             AxMenuItem(
               x.model!,
@@ -179,7 +183,7 @@ class _TalkState extends State<Talk> {
       ExecutionChoice(
         'Account',
         [
-          if (other) const AxMenuItem('', 'Its own sign-in'),
+          if (other) const AxMenuItem('', 'Default sign-in'),
           if (connection == null && x.connection != null)
             AxMenuItem(x.connection!, 'Removed', enabled: false, why: 'add it again'),
           for (final c in other ? s.accountsOf(x.harness) : s.own)
@@ -208,13 +212,13 @@ class _TalkState extends State<Talk> {
           [
             const AxMenuItem(
               'axiom',
-              'Axiom\'s',
+              'Axiom tools',
               detail: 'asked about and contained',
               mark: ServiceMark.axiom,
             ),
             AxMenuItem(
               '',
-              'Its own',
+              'Built-in tools',
               detail: 'outside Axiom\'s sandbox',
               mark: markOf(null, null, x.harness),
               // It would not be refused only when it is started.
@@ -261,118 +265,160 @@ class _TalkState extends State<Talk> {
         if (r.opened.answerable == Answerable.live && !_answered.contains(r.opened.request))
           r.opened,
     ];
+    // What another agent asks is asked where that agent is; here only that it does.
+    final mine = [
+      for (final r in asked)
+        if (r.agent == a.id || !widget.session.agents.containsKey(r.agent)) r,
+    ];
+    final others = {
+      for (final r in asked)
+        if (!mine.contains(r)) r.agent,
+    };
     final works = a.phase == AgentPhase.running || a.phase == AgentPhase.asking;
-    final first = asked.firstOrNull;
+    final first = mine.firstOrNull;
     final plan = s.connections.any((x) => x.id == a.execution.connection && x.plan);
     void usage() => unawaited(
       _do(() async {
         if (!await browse(planUsage)) throw Failed(0, 'browser', 'it is at $planUsage');
       }),
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (first != null && widget.live)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                RequestBar(
+    return LayoutBuilder(
+      builder: (context, box) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          AxSpace.beside(box.maxWidth),
+          0,
+          AxSpace.beside(box.maxWidth),
+          16,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (first != null && widget.live)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: RequestBar(
                   key: ValueKey(first.request),
                   RequestView(
                     agent: widget.session.agents[first.agent]?.name ?? 'An agent',
                     what: first.what,
                     subject: first.subject,
                     scope: first.scope,
-                    always: first.session ? 'Allow this for the session' : null,
+                    always: first.session ? 'Allow for this session' : null,
                     id: first.request,
                   ),
                   room: widget.room,
-                  waiting: asked.length - 1,
+                  waiting: mine.length - 1,
                   onOnce: () => _answer(first, Answer.once),
                   onAlways: () => _answer(first, Answer.session),
                   onDeny: () => _answer(first, Answer.deny),
                   onDenyWith: (words) => _answer(first, Answer.deny, words: words),
                 ),
-              ],
-            ),
-          ),
-        // How a run failed is said once, by the conversation.
-        if (problem case final p?)
-          Semantics(
-            liveRegion: true,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Padding(padding: EdgeInsets.only(top: 3), child: AxLamp(AgentState.failed)),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      visible(cutTo(p, 600)),
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.ui.ink(c.faultText),
-                    ),
-                  ),
-                ],
               ),
-            ),
-          ),
-        Composer(
-          key: ValueKey(a.id),
-          placeholder: works
-              ? 'Say more to ${a.name}. It is heard before the next step.'
-              : 'Say something to ${a.name}',
-          action: works ? 'Queue' : 'Send',
-          enabled: widget.live,
-          leading: [
-            ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
-            if (a.context != null)
-              ContextGauge(
-                ContextView(
-                  share: a.context,
-                  provenance: switch (a.contextKnown) {
-                    Known.reported => Provenance.reported,
-                    Known.measured => Provenance.measured,
-                    Known.estimated => Provenance.estimated,
-                    Known.unknown => Provenance.unknown,
-                  },
+            if (widget.live)
+              for (final id in others)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      const AxLamp(AgentState.asking),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${oneLine(literal(widget.session.agents[id]!.name), 60)} is waiting for you',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.type.ui.ink(c.ink2),
+                        ),
+                      ),
+                      if (widget.onAgent case final go?)
+                        AxButton(label: 'Review', onPressed: () => go(id)),
+                    ],
+                  ),
                 ),
-                hue: markOf(a.execution.provider, a.execution.model, a.execution.harness)?.color(c),
+            // How a run failed is said once, by the conversation.
+            if (problem case final p?)
+              Semantics(
+                liveRegion: true,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 3),
+                        child: AxLamp(AgentState.failed),
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          visible(cutTo(p, 600)),
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.type.ui.ink(c.faultText),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            if (plan)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      'Using ChatGPT plan',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.small.ink(c.ink3),
+            Composer(
+              key: ValueKey(a.id),
+              placeholder: works
+                  ? 'Message ${a.name}. It is sent before the next step.'
+                  : 'Message ${a.name}',
+              action: works ? 'Queue' : 'Send',
+              enabled: widget.live,
+              leading: [
+                ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
+                if (a.context != null)
+                  ContextGauge(
+                    ContextView(
+                      share: a.context,
+                      provenance: switch (a.contextKnown) {
+                        Known.reported => Provenance.reported,
+                        Known.measured => Provenance.measured,
+                        Known.estimated => Provenance.estimated,
+                        Known.unknown => Provenance.unknown,
+                      },
                     ),
+                    hue: markOf(
+                      a.execution.provider,
+                      a.execution.model,
+                      a.execution.harness,
+                    )?.color(c),
                   ),
-                  const SizedBox(width: 6),
-                  AxButton(
-                    label: 'Manage usage',
-                    // At the plan's limit it is the main act: OpenAI asks that of whoever uses a
-                    // plan. Nothing else is taken in the plan's place.
-                    tone: (a.error ?? '').startsWith('billing') ? AxTone.primary : AxTone.quiet,
-                    size: 24,
-                    onPressed: usage,
+                if (plan)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Using ChatGPT plan',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.type.small.ink(c.ink3),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      AxButton(
+                        label: 'Manage usage',
+                        // At the plan's limit it is the main act: OpenAI asks that of whoever uses a
+                        // plan. Nothing else is taken in the plan's place.
+                        tone: (a.error ?? '').startsWith('billing') ? AxTone.primary : AxTone.quiet,
+                        size: 24,
+                        onPressed: usage,
+                      ),
+                    ],
                   ),
-                ],
-              ),
+              ],
+              controller: widget.draft.text,
+              onSubmit: _say,
+            ),
           ],
-          controller: widget.draft.text,
-          onSubmit: _say,
         ),
-      ],
+      ),
     );
   }
 }

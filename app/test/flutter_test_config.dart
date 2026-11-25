@@ -11,6 +11,7 @@ Future<void> testExecutable(FutureOr<void> Function() main) async {
     binding.defaultTestTimeout = const Timeout(Duration(minutes: 1));
   }
   // No test opens anything.
+  folders = (at) => throw StateError('a test would have opened a window');
   opens = (u) => throw StateError('a test would have opened $u');
   await main();
 }

@@ -39,55 +39,54 @@ class WorkLine extends StatelessWidget {
       label: '$name $detail $result',
       excludeSemantics: true,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 24),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 22,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: AxGlyph(
-                  icon,
-                  size: 13,
-                  color: failed ? c.faultText : icon.kind(c) ?? c.ink4,
+        constraints: const BoxConstraints(minHeight: 26),
+        child: LayoutBuilder(
+          builder: (context, box) => Row(
+            children: [
+              SizedBox(
+                width: 24,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AxGlyph(icon, size: 15, color: failed ? c.faultText : c.ink3),
                 ),
               ),
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 120),
-              child: Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: t.type.label.ink(c.ink2),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: math.min(190, box.maxWidth * .34)),
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.type.label.ink(c.ink3),
+                ),
               ),
-            ),
-            const CopyGap(' '),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                detail,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: t.type.codeSmall.ink(c.ink3),
+              const CopyGap(' '),
+              const SizedBox(width: 8),
+              // What came of it stands by what was done.
+              Flexible(
+                child: Text(
+                  detail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.type.code.copyWith(height: 1.4, color: c.ink2),
+                ),
               ),
-            ),
-            CopyGap(result.isEmpty ? '' : '  '),
-            const SizedBox(width: 12),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 200),
-              child: Text.rich(
-                TextSpan(children: _tinted(result, c)),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: t.type.small.ink(failed ? c.faultText : c.ink3),
+              CopyGap(result.isEmpty ? '' : '  '),
+              if (result.isNotEmpty) const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: math.min(240, box.maxWidth * .34)),
+                child: Text.rich(
+                  TextSpan(children: _tinted(result, c)),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.type.label.ink(failed ? c.faultText : c.ink3),
+                ),
               ),
-            ),
-            if (more case final m?) ...[
-              const SizedBox(width: 7),
-              AxGlyph(m ? AxIcon.down : AxIcon.right, size: 9, color: c.ink4),
+              if (more case final m?) ...[
+                const SizedBox(width: 7),
+                AxGlyph(m ? AxIcon.down : AxIcon.right, size: 11, color: c.ink3),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -159,7 +158,7 @@ class DiffLines extends StatelessWidget {
             child: Text(
               '${l.number}',
               textAlign: TextAlign.right,
-              style: t.type.codeSmall.ink(c.ink4),
+              style: t.type.codeSmall.ink(c.ink3),
             ),
           ),
           SizedBox(
@@ -203,9 +202,9 @@ class DiffLines extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(AxRadius.key),
+      borderRadius: BorderRadius.circular(AxRadius.block),
       child: ColoredBox(
-        color: c.block.bottom,
+        color: c.block.fill,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
@@ -432,9 +431,21 @@ class _RequestBarState extends State<RequestBar> {
                         ],
                       ],
                     ),
-                    const SizedBox(height: 3),
-                    Text(literal(r.subject), style: t.type.code.ink(c.ink1)),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 9),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: c.bay.fill,
+                        borderRadius: BorderRadius.circular(AxRadius.key),
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          child: Text(literal(r.subject), style: t.type.code),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     Text(literal(r.scope), style: t.type.label.ink(c.ink3)),
                   ],
                 ),
@@ -461,7 +472,7 @@ class _RequestBarState extends State<RequestBar> {
               const SingleActivator(LogicalKeyboardKey.escape): () => _say(false),
             },
             child: AxField(
-              label: 'Why not',
+              label: 'Reason',
               controller: _why,
               focusNode: _whyFocus,
               placeholder: 'What it should do instead',
@@ -489,12 +500,12 @@ class _RequestBarState extends State<RequestBar> {
           if (widget.onDenyWith != null)
             _says
                 ? AxButton(label: 'Back', tone: AxTone.quiet, onPressed: () => _say(false))
-                : AxButton(label: 'Say why not', tone: AxTone.quiet, onPressed: () => _say(true)),
-          AxButton(
-            label: 'Deny',
-            tone: _says ? AxTone.key : AxTone.quiet,
-            onPressed: _says ? _denyWith : widget.onDeny,
-          ),
+                : AxButton(
+                    label: 'Deny with reason',
+                    tone: AxTone.quiet,
+                    onPressed: () => _say(true),
+                  ),
+          AxButton(label: 'Deny', onPressed: _says ? _denyWith : widget.onDeny),
         ]),
         if (!_says)
           group([
@@ -518,34 +529,18 @@ class _RequestBarState extends State<RequestBar> {
         fresh: true,
         child: Surface(
           c.plate,
-          child: Stack(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
-                child: LayoutBuilder(
-                  builder: (context, box) => box.maxWidth < 720
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            body,
-                            const SizedBox(height: 8),
-                            Align(alignment: Alignment.centerRight, child: keys),
-                          ],
-                        )
-                      : Row(
-                          children: [
-                            Expanded(child: body),
-                            const SizedBox(width: 16),
-                            ConstrainedBox(
-                              constraints: BoxConstraints(maxWidth: box.maxWidth - 240),
-                              child: keys,
-                            ),
-                          ],
-                        ),
-                ),
-              ),
-            ],
+          radius: AxRadius.card,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                body,
+                const SizedBox(height: 10),
+                Align(alignment: Alignment.centerRight, child: keys),
+              ],
+            ),
           ),
         ),
       ),

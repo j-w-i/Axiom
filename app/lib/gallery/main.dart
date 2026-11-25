@@ -69,7 +69,7 @@ class _GalleryState extends State<Gallery> {
                   ],
                 ),
               ),
-              const Seam(),
+              const Hairline(),
               Expanded(
                 child: _page < sheets.length
                     ? SingleChildScrollView(child: sheets[_page].$2(context))

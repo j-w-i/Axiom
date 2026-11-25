@@ -10,7 +10,7 @@ import 'tokens.dart';
 
 enum AxTone { key, primary, quiet }
 
-/// A key: raised at rest, recessed while held or engaged.
+/// A key: the main act, any other, or one that shows its ground when the hand is there.
 class AxButton extends StatelessWidget {
   const AxButton({
     required this.label,
@@ -87,7 +87,8 @@ class AxButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (icon != null) AxGlyph(icon!, size: 13, color: ink, filled: iconFilled),
+            if (icon != null)
+              AxGlyph(icon!, size: iconOnly ? 15 : 14, color: ink, filled: iconFilled),
             if (icon != null && !iconOnly) const SizedBox(width: 6),
             if (!iconOnly)
               Flexible(
@@ -103,13 +104,10 @@ class AxButton extends StatelessWidget {
         );
         final body = SizedBox(
           height: h,
-          width: width ?? (iconOnly ? h + 4 : null),
+          width: width ?? (iconOnly ? h : null),
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: iconOnly ? 0 : t.density.pad + 2),
-            child: Transform.translate(
-              offset: Offset(0, s.pressed ? .5 : 0),
-              child: Center(widthFactor: 1, child: row),
-            ),
+            child: Center(widthFactor: 1, child: row),
           ),
         );
         if (!s.enabled) {
@@ -118,16 +116,20 @@ class AxButton extends StatelessWidget {
               ? body
               : DecoratedBox(
                   decoration: BoxDecoration(
-                    border: Border.all(color: c.bayRule),
+                    border: Border.all(color: c.hairline),
                     borderRadius: BorderRadius.circular(AxRadius.key),
                   ),
                   child: body,
                 );
         }
-        if (tone == AxTone.quiet && !s.pressed && !engaged) {
+        if (tone == AxTone.quiet) {
           return DecoratedBox(
             decoration: BoxDecoration(
-              color: s.hovered ? c.hover : null,
+              color: s.pressed || engaged
+                  ? c.selected
+                  : s.hovered
+                  ? c.hover
+                  : null,
               borderRadius: BorderRadius.circular(AxRadius.key),
             ),
             child: body,
@@ -171,10 +173,10 @@ class AxSegments<T> extends StatelessWidget {
           const SingleActivator(LogicalKeyboardKey.arrowRight): () => _step(1),
         },
         child: Surface(
-          t.colors.well,
-          radius: AxRadius.bay,
+          t.colors.keyDown,
+          radius: AxRadius.key + 2,
           child: Padding(
-            padding: const EdgeInsets.all(3),
+            padding: const EdgeInsets.all(2),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -203,9 +205,7 @@ class AxSegments<T> extends StatelessWidget {
                           ),
                         ),
                       );
-                      return on
-                          ? Surface(t.colors.key, radius: AxRadius.key - 1, child: child)
-                          : child;
+                      return on ? Surface(t.colors.key, radius: AxRadius.key, child: child) : child;
                     },
                   ),
                 ],
@@ -218,7 +218,7 @@ class AxSegments<T> extends StatelessWidget {
   }
 }
 
-/// Tabs on a display. The active one carries its mark, so the mark always fits it.
+/// Tabs. The one that is chosen is filled; choosing moves nothing.
 class AxTabs extends StatelessWidget {
   const AxTabs({required this.tabs, required this.index, required this.onChanged, super.key});
 
@@ -247,7 +247,11 @@ class AxTabs extends StatelessWidget {
                 final on = i == index;
                 return DecoratedBox(
                   decoration: BoxDecoration(
-                    color: on ? t.colors.tabSelected : null,
+                    color: on
+                        ? t.colors.selected
+                        : s.hovered
+                        ? t.colors.hover
+                        : null,
                     borderRadius: BorderRadius.circular(AxRadius.key),
                   ),
                   child: Padding(
@@ -258,29 +262,19 @@ class AxTabs extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          // The strong width is always reserved: selecting a tab moves nothing.
-                          Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Visibility.maintain(
-                                visible: false,
-                                child: Text(name, style: t.type.labelStrong),
-                              ),
-                              Text(
-                                name,
-                                style: (on ? t.type.labelStrong : t.type.label).ink(
-                                  on
-                                      ? t.colors.ink1
-                                      : s.hovered
-                                      ? t.colors.ink2
-                                      : t.colors.ink3,
-                                ),
-                              ),
-                            ],
+                          Text(
+                            name,
+                            style: t.type.labelStrong.ink(
+                              on
+                                  ? t.colors.ink1
+                                  : s.hovered
+                                  ? t.colors.ink2
+                                  : t.colors.ink3,
+                            ),
                           ),
                           if (count != null) ...[
                             const SizedBox(width: 5),
-                            Text(count, style: t.type.small.ink(t.colors.ink4)),
+                            Text(count, style: t.type.small.ink(t.colors.ink3)),
                           ],
                         ],
                       ),
@@ -307,14 +301,14 @@ class AxSwitch extends StatelessWidget {
       label: label,
       button: false,
       toggled: value,
-      radius: 8,
+      radius: 9,
       onPressed: onChanged == null ? null : () => onChanged!(!value),
       builder: (context, s) => SizedBox(
         width: 32,
         height: 18,
         child: Surface(
-          value ? (s.enabled ? c.primaryDown : c.keyDown) : c.keyDown,
-          radius: 6,
+          value && s.enabled ? c.primary : c.keyDown,
+          radius: 9,
           child: SpringTo(
             target: value ? 1 : 0,
             spring: AxMotion.snap,
@@ -324,8 +318,8 @@ class AxSwitch extends StatelessWidget {
               child: SizedBox(
                 width: 14,
                 child: Surface(
-                  s.enabled ? c.keyHover : c.key,
-                  radius: 4,
+                  value && s.enabled ? c.bay : c.keyHover,
+                  radius: 7,
                   child: const SizedBox.expand(),
                 ),
               ),
@@ -367,7 +361,7 @@ class AxCheck extends StatelessWidget {
             child: value
                 ? Surface(
                     s.enabled ? c.primary : c.keyDown,
-                    radius: 3,
+                    radius: AxRadius.tick,
                     child: Center(
                       child: AxGlyph(
                         AxIcon.check,
@@ -378,21 +372,21 @@ class AxCheck extends StatelessWidget {
                   )
                 : DecoratedBox(
                     decoration: BoxDecoration(
-                      color: s.enabled ? c.bay.bottom : null,
+                      color: s.enabled ? c.bay.fill : null,
                       border: Border.all(
                         color: !s.enabled
-                            ? c.bayRule
+                            ? c.hairline
                             : s.hovered
                             ? c.ink2
                             : c.idle,
                       ),
-                      borderRadius: BorderRadius.circular(3),
+                      borderRadius: BorderRadius.circular(AxRadius.tick),
                     ),
                   ),
           ),
           if (!bare) ...[
             const SizedBox(width: 8),
-            Text(label, style: t.type.ui.ink(s.enabled ? c.ink2 : c.idle)),
+            Text(label, style: t.type.ui.ink(s.enabled ? c.ink1 : c.idle)),
           ],
         ],
       ),
@@ -400,7 +394,7 @@ class AxCheck extends StatelessWidget {
   }
 }
 
-/// A recessed text field.
+/// A text field.
 class AxField extends StatefulWidget {
   const AxField({
     required this.label,
@@ -416,7 +410,11 @@ class AxField extends StatefulWidget {
     this.leading,
     this.onSubmitted,
     this.onChanged,
+    this.autofocus = false,
   });
+
+  /// Takes the keyboard when it comes.
+  final bool autofocus;
   final String label, placeholder;
   final String? error;
   final TextEditingController? controller;
@@ -434,6 +432,15 @@ class _AxFieldState extends State<AxField> {
   FocusNode? _ownFocus;
   TextEditingController get _c => widget.controller ?? (_ownText ??= TextEditingController());
   FocusNode get _f => widget.focusNode ?? (_ownFocus ??= FocusNode());
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.autofocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _f.requestFocus();
+    });
+  }
 
   @override
   void dispose() {
@@ -455,7 +462,7 @@ class _AxFieldState extends State<AxField> {
           behavior: HitTestBehavior.opaque,
           onTap: widget.enabled ? () => _f.requestFocus() : null,
           child: Surface(
-            widget.enabled ? c.bay : c.keyDown,
+            widget.enabled ? c.plate : c.keyDown,
             radius: AxRadius.key,
             child: ListenableBuilder(
               listenable: _f,
@@ -527,7 +534,7 @@ class AxKeycap extends StatelessWidget {
     final t = Ax.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        border: Border.all(color: t.colors.bayRule),
+        border: Border.all(color: t.colors.hairline),
         borderRadius: BorderRadius.circular(3),
       ),
       child: Padding(

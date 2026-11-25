@@ -1,9 +1,11 @@
 /// Every visual constant in Axiom. Nothing outside this file names a colour, a duration or a spring
 /// (test/ui/tokens_test.dart enforces it and checks contrast in both themes).
 ///
-/// The language: graphite structure, charcoal displays, aqua only for what is live. Depth comes from
-/// one light above: raised parts carry a faint lit top edge, displays sit slightly below the surface.
+/// The language: flat, near-neutral charcoal; hairlines where a part ends; aqua only for what runs or
+/// has the keyboard. Only what floats casts a shadow.
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
@@ -12,41 +14,14 @@ import 'marks.dart';
 /// How one kind of surface is built. A surface is a role, not a colour (docs/design/system.md).
 @immutable
 class SurfaceSpec {
-  const SurfaceSpec({
-    required this.top,
-    required this.bottom,
-    this.border = const Color(0x00000000),
-    this.edge = const Color(0x00000000),
-    this.inset = const Color(0x00000000),
-    this.lip = const Color(0x00000000),
-    this.shadows = const [],
-  });
+  const SurfaceSpec(this.fill, {this.border = const Color(0x00000000), this.shadows = const []});
+  final Color fill;
 
-  /// Vertical gradient stops. They differ by a few percent at most.
-  final Color top, bottom;
-
-  /// The hairline that cuts the part out of what is under it.
+  /// The hairline that says where the part ends.
   final Color border;
 
-  /// The lit top edge of a raised part.
-  final Color edge;
-
-  /// The shade cast into a recessed part by its upper rim.
-  final Color inset;
-
-  /// The light caught by the lower rim of a recessed part.
-  final Color lip;
+  /// Only what floats has any.
   final List<BoxShadow> shadows;
-
-  SurfaceSpec lerp(SurfaceSpec o, double t) => SurfaceSpec(
-    top: Color.lerp(top, o.top, t)!,
-    bottom: Color.lerp(bottom, o.bottom, t)!,
-    border: Color.lerp(border, o.border, t)!,
-    edge: Color.lerp(edge, o.edge, t)!,
-    inset: Color.lerp(inset, o.inset, t)!,
-    lip: Color.lerp(lip, o.lip, t)!,
-    shadows: BoxShadow.lerpList(shadows, o.shadows, t)!,
-  );
 }
 
 @immutable
@@ -57,7 +32,6 @@ class AxColors {
     required this.ink2,
     required this.ink3,
     required this.ink4,
-    required this.voice,
     required this.onPrimary,
     required this.live,
     required this.liveText,
@@ -70,22 +44,15 @@ class AxColors {
     required this.idle,
     required this.focus,
     required this.selection,
-    required this.rule,
-    required this.ruleLight,
-    required this.bayRule,
-    required this.tabSelected,
+    required this.hairline,
+    required this.selected,
     required this.hover,
-    required this.rowSelectedTop,
-    required this.rowSelectedBottom,
     required this.meterTrack,
     required this.meterFill,
     required this.chassis,
     required this.plate,
-    required this.plateHover,
-    required this.plateSelected,
     required this.bay,
     required this.block,
-    required this.well,
     required this.key,
     required this.keyHover,
     required this.keyDown,
@@ -102,49 +69,31 @@ class AxColors {
     required this.codeType,
     required this.codeNumber,
     required this.codeComment,
-    required this.scrim,
-    required this.kindRead,
-    required this.kindEdit,
-    required this.kindSearch,
-    required this.kindRun,
-    required this.kindWeb,
-    required this.kindThink,
     required this.codeInline,
+    required this.codeTile,
     required this.services,
   });
 
   final Brightness brightness;
 
-  /// Text, strongest to faintest. All four pass 4.5:1 on every surface they are allowed on.
+  /// Text, strongest to faintest. All pass 4.5:1 on every surface they are allowed on: [ink4] on the
+  /// chassis and the bay only.
   final Color ink1, ink2, ink3, ink4;
-
-  /// The person's and other agents' words in a transcript.
-  final Color voice;
   final Color onPrimary;
 
   /// States. The plain colour is for marks (3:1), `…Text` for words (4.5:1).
   final Color live, liveText, attention, attentionText, fault, faultText, done, doneText, idle;
-  final Color focus,
-      selection,
-      rule,
-      ruleLight,
-      bayRule,
-      tabSelected,
-      hover,
-      rowSelectedTop,
-      rowSelectedBottom,
-      meterTrack,
-      meterFill;
-  final SurfaceSpec chassis, plate, plateHover, plateSelected, bay, block, well;
+
+  /// What is selected is filled with [selected], whoever it belongs to.
+  final Color focus, selection, hairline, selected, hover, meterTrack, meterFill;
+  final SurfaceSpec chassis, plate, bay, block;
   final SurfaceSpec key, keyHover, keyDown, primary, primaryHover, primaryDown;
   final SurfaceSpec overlay;
   final Color diffAdd, diffRemove;
   final Color codePlain, codeKeyword, codeString, codeCall, codeType, codeNumber, codeComment;
-  final Color scrim;
 
-  /// What kind of work: reading, changing, searching, running, the web, thinking or delegating.
-  final Color kindRead, kindEdit, kindSearch, kindRun, kindWeb, kindThink;
-  final Color codeInline;
+  /// Code among words: its ink, and the tile it stands on.
+  final Color codeInline, codeTile;
 
   /// A service's hue, for its mark and its levels. Neutral marks have none.
   final Map<ServiceMark, Color> services;
@@ -155,146 +104,56 @@ class AxColors {
 
   static const dark = AxColors(
     brightness: Brightness.dark,
-    ink1: Color(0xFFE9EDF5),
-    ink2: Color(0xFFC4CCD9),
-    ink3: Color(0xFFB0B9C9),
-    ink4: Color(0xFFA2ACBE),
-    voice: Color(0xFFB2BCD0),
-    onPrimary: Color(0xFF04222E),
+    ink1: Color(0xFFECEDED),
+    ink2: Color(0xFFBCBFC5),
+    ink3: Color(0xFFA0A4AC),
+    ink4: Color(0xFF8F939B),
+    onPrimary: Color(0xFF151619),
     live: Color(0xFF35C3F3),
     liveText: Color(0xFF86DCFB),
-    attention: Color(0xFFE3A947),
+    attention: Color(0xFFE2AA52),
     attentionText: Color(0xFFEBB965),
-    fault: Color(0xFFEF736B),
+    fault: Color(0xFFEE766E),
     faultText: Color(0xFFF49A92),
-    done: Color(0xFF52BC88),
+    done: Color(0xFF5FBD8B),
     doneText: Color(0xFF7ED3A6),
-    idle: Color(0xFF8C97AB),
+    idle: Color(0xFF8C9098),
     focus: Color(0xFF55CDF6),
     selection: Color(0x6620A9DB),
-    rule: Color(0xFF121317),
-    ruleLight: Color(0x0DFFFFFF),
-    bayRule: Color(0xFF292C32),
-    tabSelected: Color(0x14FFFFFF),
+    hairline: Color(0x14FFFFFF),
+    selected: Color(0x13FFFFFF),
     hover: Color(0x0AFFFFFF),
-    rowSelectedTop: Color(0xFF363A43),
-    rowSelectedBottom: Color(0xFF32353E),
-    meterTrack: Color(0x12FFFFFF),
-    meterFill: Color(0xFF8A97B0),
-    chassis: SurfaceSpec(
-      top: Color(0xFF212429),
-      bottom: Color(0xFF1C1E23),
-      edge: Color(0x0FFFFFFF),
-    ),
-    plate: SurfaceSpec(
-      top: Color(0xFF2B2E35),
-      bottom: Color(0xFF272A30),
-      border: Color(0xFF121317),
-      edge: Color(0x12FFFFFF),
-      shadows: [BoxShadow(color: Color(0x3D000000), blurRadius: 3, offset: Offset(0, 1))],
-    ),
-    plateHover: SurfaceSpec(
-      top: Color(0xFF32353C),
-      bottom: Color(0xFF2D3037),
-      border: Color(0xFF121317),
-      edge: Color(0x16FFFFFF),
-      shadows: [BoxShadow(color: Color(0x47000000), blurRadius: 4, offset: Offset(0, 1))],
-    ),
-    plateSelected: SurfaceSpec(
-      top: Color(0xFF2E3848),
-      bottom: Color(0xFF293341),
-      border: Color(0xFF0F131B),
-      edge: Color(0x1CFFFFFF),
-      shadows: [BoxShadow(color: Color(0x59000000), blurRadius: 8, offset: Offset(0, 2))],
-    ),
-    bay: SurfaceSpec(
-      top: Color(0xFF17191D),
-      bottom: Color(0xFF181A1E),
-      border: Color(0xFF0F1013),
-      inset: Color(0x42000000),
-      lip: Color(0x0CFFFFFF),
-    ),
-    block: SurfaceSpec(
-      top: Color(0xFF1F2226),
-      bottom: Color(0xFF1E2125),
-      border: Color(0xFF2C2F36),
-    ),
-    well: SurfaceSpec(
-      top: Color(0xFF141619),
-      bottom: Color(0xFF17191D),
-      border: Color(0xFF0E0F12),
-      inset: Color(0x42000000),
-      lip: Color(0x0CFFFFFF),
-    ),
-    key: SurfaceSpec(
-      top: Color(0xFF3B3F48),
-      bottom: Color(0xFF363A42),
-      border: Color(0xFF16181C),
-      edge: Color(0x14FFFFFF),
-      shadows: [BoxShadow(color: Color(0x2E000000), blurRadius: 1.5, offset: Offset(0, 1))],
-    ),
-    keyHover: SurfaceSpec(
-      top: Color(0xFF444851),
-      bottom: Color(0xFF3F434C),
-      border: Color(0xFF16181C),
-      edge: Color(0x1CFFFFFF),
-      shadows: [BoxShadow(color: Color(0x33000000), blurRadius: 2, offset: Offset(0, 1))],
-    ),
-    keyDown: SurfaceSpec(
-      top: Color(0xFF15171A),
-      bottom: Color(0xFF191B1F),
-      border: Color(0xFF0F1012),
-      inset: Color(0x3D000000),
-      lip: Color(0x0AFFFFFF),
-    ),
-    primary: SurfaceSpec(
-      top: Color(0xFF3CC3F4),
-      bottom: Color(0xFF30BAED),
-      border: Color(0xFF0B5F80),
-      edge: Color(0x29FFFFFF),
-      shadows: [BoxShadow(color: Color(0x38000000), blurRadius: 2, offset: Offset(0, 1))],
-    ),
-    primaryHover: SurfaceSpec(
-      top: Color(0xFF55CFF9),
-      bottom: Color(0xFF55CFF9),
-      border: Color(0xFF0B5F80),
-      edge: Color(0x4DFFFFFF),
-      shadows: [BoxShadow(color: Color(0x40000000), blurRadius: 3, offset: Offset(0, 1))],
-    ),
-    primaryDown: SurfaceSpec(
-      top: Color(0xFF1F9CCB),
-      bottom: Color(0xFF25A5D5),
-      border: Color(0xFF0B5F80),
-      inset: Color(0x3D000000),
-      lip: Color(0x14FFFFFF),
-    ),
+    meterTrack: Color(0x1FFFFFFF),
+    meterFill: Color(0xFFA8ACB4),
+    chassis: SurfaceSpec(Color(0xFF1C1D20)),
+    plate: SurfaceSpec(Color(0xFF232529), border: Color(0x1FFFFFFF)),
+    bay: SurfaceSpec(Color(0xFF151619)),
+    block: SurfaceSpec(Color(0xFF232529)),
+    key: SurfaceSpec(Color(0xFF2A2C31), border: Color(0x1FFFFFFF)),
+    keyHover: SurfaceSpec(Color(0xFF33353B), border: Color(0x29FFFFFF)),
+    keyDown: SurfaceSpec(Color(0xFF1F2125), border: Color(0x1FFFFFFF)),
+    primary: SurfaceSpec(Color(0xFFE9EAEC)),
+    primaryHover: SurfaceSpec(Color(0xFFFFFFFF)),
+    primaryDown: SurfaceSpec(Color(0xFFC9CBCF)),
     overlay: SurfaceSpec(
-      top: Color(0xFF2C2F36),
-      bottom: Color(0xFF282B31),
-      border: Color(0xFF0E0F12),
-      edge: Color(0x1AFFFFFF),
+      Color(0xFF26282C),
+      border: Color(0x1FFFFFFF),
       shadows: [
-        BoxShadow(color: Color(0x73000000), blurRadius: 28, offset: Offset(0, 12)),
-        BoxShadow(color: Color(0x59000000), blurRadius: 5, offset: Offset(0, 2)),
+        BoxShadow(color: Color(0x66000000), blurRadius: 32, offset: Offset(0, 12)),
+        BoxShadow(color: Color(0x40000000), blurRadius: 4, offset: Offset(0, 1)),
       ],
     ),
-    diffAdd: Color(0x2B4DB585),
-    diffRemove: Color(0x30E5645B),
-    codePlain: Color(0xFFB4BFD2),
-    codeKeyword: Color(0xFF86DCFB),
+    diffAdd: Color(0x264DB585),
+    diffRemove: Color(0x2AE5645B),
+    codePlain: Color(0xFFC9CCD2),
+    codeKeyword: Color(0xFF8FB7E8),
     codeString: Color(0xFF9FD08E),
-    codeCall: Color(0xFFE6EBF5),
+    codeCall: Color(0xFFECEDED),
     codeType: Color(0xFFD9AEE6),
     codeNumber: Color(0xFFEBBC72),
-    codeComment: Color(0xFF99A2B4),
-    scrim: Color(0x8A05080E),
-    kindRead: Color(0xFF8EA5CE),
-    kindEdit: Color(0xFF86DCFB),
-    kindSearch: Color(0xFF5FBFA8),
-    kindRun: Color(0xFFDDAE62),
-    kindWeb: Color(0xFF7FB58A),
-    kindThink: Color(0xFFBCA3DE),
-    codeInline: Color(0xFF86DCFB),
+    codeComment: Color(0xFFA0A4AC),
+    codeInline: Color(0xFFDADCE0),
+    codeTile: Color(0xFF232529),
     services: {
       ServiceMark.anthropic: Color(0xFFE08A66),
       ServiceMark.claude: Color(0xFFE08A66),
@@ -329,146 +188,56 @@ class AxColors {
 
   static const light = AxColors(
     brightness: Brightness.light,
-    ink1: Color(0xFF171B23),
-    ink2: Color(0xFF394150),
-    ink3: Color(0xFF424A58),
-    ink4: Color(0xFF4A5260),
-    voice: Color(0xFF45506A),
-    onPrimary: Color(0xFF04222E),
+    ink1: Color(0xFF191A1C),
+    ink2: Color(0xFF484B51),
+    ink3: Color(0xFF565A61),
+    ink4: Color(0xFF646870),
+    onPrimary: Color(0xFFFFFFFF),
     live: Color(0xFF08709C),
     liveText: Color(0xFF06587B),
     attention: Color(0xFF966612),
     attentionText: Color(0xFF6E4A07),
-    fault: Color(0xFFBE4038),
+    fault: Color(0xFFBB3D35),
     faultText: Color(0xFF98261F),
-    done: Color(0xFF357A59),
+    done: Color(0xFF2D7A55),
     doneText: Color(0xFF1B5A3D),
-    idle: Color(0xFF6B7380),
+    idle: Color(0xFF6B7078),
     focus: Color(0xFF0874A2),
     selection: Color(0x4D35B9E6),
-    rule: Color(0xFFAAB6C9),
-    ruleLight: Color(0x8CFFFFFF),
-    bayRule: Color(0xFFD6DEEC),
-    tabSelected: Color(0x1410182C),
-    hover: Color(0x0D10182C),
-    rowSelectedTop: Color(0xFFF4F7FF),
-    rowSelectedBottom: Color(0xFFEEF3FD),
-    meterTrack: Color(0x14243149),
-    meterFill: Color(0xFF66748E),
-    chassis: SurfaceSpec(
-      top: Color(0xFFD3DAE6),
-      bottom: Color(0xFFC9D1DF),
-      edge: Color(0x99FFFFFF),
-    ),
-    plate: SurfaceSpec(
-      top: Color(0xFFE4E9F2),
-      bottom: Color(0xFFDDE3EE),
-      border: Color(0xFFB2BDD0),
-      edge: Color(0xCCFFFFFF),
-      shadows: [BoxShadow(color: Color(0x1F1A2233), blurRadius: 3, offset: Offset(0, 1))],
-    ),
-    plateHover: SurfaceSpec(
-      top: Color(0xFFE9EEF6),
-      bottom: Color(0xFFE2E8F2),
-      border: Color(0xFFABB7CB),
-      edge: Color(0xE6FFFFFF),
-      shadows: [BoxShadow(color: Color(0x261A2233), blurRadius: 4, offset: Offset(0, 1))],
-    ),
-    plateSelected: SurfaceSpec(
-      top: Color(0xFFF4F7FC),
-      bottom: Color(0xFFEFF3F9),
-      border: Color(0xFF9DABC2),
-      edge: Color(0xFFFFFFFF),
-      shadows: [BoxShadow(color: Color(0x331A2233), blurRadius: 8, offset: Offset(0, 2))],
-    ),
-    bay: SurfaceSpec(
-      top: Color(0xFFF9FAFE),
-      bottom: Color(0xFFFBFCFF),
-      border: Color(0xFFB0BBCE),
-      inset: Color(0x14243149),
-      lip: Color(0x99FFFFFF),
-    ),
-    block: SurfaceSpec(
-      top: Color(0xFFEFF3FB),
-      bottom: Color(0xFFEDF1FA),
-      border: Color(0xFFD0D9E8),
-    ),
-    well: SurfaceSpec(
-      top: Color(0xFFC1CAD8),
-      bottom: Color(0xFFC5CEDC),
-      border: Color(0xFFA7B3C6),
-      inset: Color(0x1F243149),
-      lip: Color(0x80FFFFFF),
-    ),
-    key: SurfaceSpec(
-      top: Color(0xFFFAFCFF),
-      bottom: Color(0xFFEFF3F9),
-      border: Color(0xFFA6B3C8),
-      edge: Color(0xFFFFFFFF),
-      shadows: [BoxShadow(color: Color(0x1F1A2233), blurRadius: 1.5, offset: Offset(0, 1))],
-    ),
-    keyHover: SurfaceSpec(
-      top: Color(0xFFFFFFFF),
-      bottom: Color(0xFFF5F8FC),
-      border: Color(0xFF96A5BD),
-      edge: Color(0xFFFFFFFF),
-      shadows: [BoxShadow(color: Color(0x291A2233), blurRadius: 2, offset: Offset(0, 1))],
-    ),
-    keyDown: SurfaceSpec(
-      top: Color(0xFFC6CFDD),
-      bottom: Color(0xFFCDD5E2),
-      border: Color(0xFF9AA8BE),
-      inset: Color(0x1F243149),
-      lip: Color(0x80FFFFFF),
-    ),
-    primary: SurfaceSpec(
-      top: Color(0xFF4FCBF6),
-      bottom: Color(0xFF43C4F2),
-      border: Color(0xFF2389B0),
-      edge: Color(0x47FFFFFF),
-      shadows: [BoxShadow(color: Color(0x3324408F), blurRadius: 2, offset: Offset(0, 1))],
-    ),
-    primaryHover: SurfaceSpec(
-      top: Color(0xFF66D4FA),
-      bottom: Color(0xFF66D4FA),
-      border: Color(0xFF2389B0),
-      edge: Color(0x52FFFFFF),
-      shadows: [BoxShadow(color: Color(0x4024408F), blurRadius: 3, offset: Offset(0, 1))],
-    ),
-    primaryDown: SurfaceSpec(
-      top: Color(0xFF2AA9D8),
-      bottom: Color(0xFF31B1E0),
-      border: Color(0xFF1C7396),
-      inset: Color(0x3D000000),
-      lip: Color(0x66FFFFFF),
-    ),
+    hairline: Color(0x17000000),
+    selected: Color(0x11000000),
+    hover: Color(0x09000000),
+    meterTrack: Color(0x1A000000),
+    meterFill: Color(0xFF60646C),
+    chassis: SurfaceSpec(Color(0xFFF2F2F3)),
+    plate: SurfaceSpec(Color(0xFFF6F6F7), border: Color(0x24000000)),
+    bay: SurfaceSpec(Color(0xFFFFFFFF)),
+    block: SurfaceSpec(Color(0xFFF4F4F5)),
+    key: SurfaceSpec(Color(0xFFFFFFFF), border: Color(0x29000000)),
+    keyHover: SurfaceSpec(Color(0xFFF6F6F7), border: Color(0x38000000)),
+    keyDown: SurfaceSpec(Color(0xFFEAEAEC), border: Color(0x29000000)),
+    primary: SurfaceSpec(Color(0xFF202226)),
+    primaryHover: SurfaceSpec(Color(0xFF36393F)),
+    primaryDown: SurfaceSpec(Color(0xFF0E0F11)),
     overlay: SurfaceSpec(
-      top: Color(0xFFF6F9FE),
-      bottom: Color(0xFFF2F5FB),
-      border: Color(0xFFA2AFC4),
-      edge: Color(0xFFFFFFFF),
+      Color(0xFFFFFFFF),
+      border: Color(0x24000000),
       shadows: [
-        BoxShadow(color: Color(0x331A2233), blurRadius: 28, offset: Offset(0, 12)),
-        BoxShadow(color: Color(0x1F1A2233), blurRadius: 5, offset: Offset(0, 2)),
+        BoxShadow(color: Color(0x24000000), blurRadius: 32, offset: Offset(0, 12)),
+        BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 1)),
       ],
     ),
-    diffAdd: Color(0x2E2F8A5C),
-    diffRemove: Color(0x2ECB453D),
-    codePlain: Color(0xFF39414F),
-    codeKeyword: Color(0xFF065A7E),
+    diffAdd: Color(0x222F8A5C),
+    diffRemove: Color(0x1FCB453D),
+    codePlain: Color(0xFF33363B),
+    codeKeyword: Color(0xFF1F5FA8),
     codeString: Color(0xFF2F6A2A),
-    codeCall: Color(0xFF171B23),
+    codeCall: Color(0xFF191A1C),
     codeType: Color(0xFF7B3A94),
     codeNumber: Color(0xFF7F4F08),
-    codeComment: Color(0xFF4F5A6E),
-    scrim: Color(0x66202A3C),
-    kindRead: Color(0xFF45608F),
-    kindEdit: Color(0xFF06587B),
-    kindSearch: Color(0xFF14725F),
-    kindRun: Color(0xFF85590B),
-    kindWeb: Color(0xFF2E6B3B),
-    kindThink: Color(0xFF6A4A98),
-    codeInline: Color(0xFF065A7E),
+    codeComment: Color(0xFF5A5E66),
+    codeInline: Color(0xFF2A2C30),
+    codeTile: Color(0xFFF0F0F1),
     services: {
       ServiceMark.anthropic: Color(0xFFAD4F2B),
       ServiceMark.claude: Color(0xFFAD4F2B),
@@ -502,68 +271,68 @@ class AxColors {
   );
 }
 
-/// Text styles. Archivo carries words; Spline Sans Mono carries code, paths and commands.
+/// Text styles. Inter carries words; JetBrains Mono carries code, paths and commands.
 class AxType {
   const AxType(this._ink);
   final Color _ink;
 
-  TextStyle _a(
-    double size,
-    double weight,
-    double height, {
-    double tracking = .15,
-    double width = 100,
-  }) => TextStyle(
-    fontFamily: 'Archivo',
+  TextStyle _w(double size, double weight, double height, {double tracking = 0}) => TextStyle(
+    fontFamily: 'Inter',
     fontSize: size,
     height: height,
     color: _ink,
     letterSpacing: tracking,
     leadingDistribution: TextLeadingDistribution.even,
-    fontVariations: [FontVariation('wght', weight), FontVariation('wdth', width)],
-    fontFeatures: const [FontFeature.tabularFigures()],
+    fontVariations: [FontVariation('wght', weight), const FontVariation('opsz', 14)],
     decoration: TextDecoration.none,
   );
+
+  /// No ligatures: what is shown of a literal is its characters.
   TextStyle _m(double size, double height) => TextStyle(
-    fontFamily: 'Spline Sans Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: size,
     height: height,
     color: _ink,
     leadingDistribution: TextLeadingDistribution.even,
     fontVariations: const [FontVariation('wght', 400)],
+    fontFeatures: const [FontFeature.disable('liga'), FontFeature.disable('calt')],
     decoration: TextDecoration.none,
   );
 
-  /// Long reading. Measure is capped at about 76 characters by the transcript.
-  TextStyle get prose => _a(14, 400, 1.6, tracking: .2);
-  TextStyle get title => _a(15, 600, 1.35, tracking: .1);
-  TextStyle get heading => _a(19, 600, 1.3, tracking: 0);
-  TextStyle get ui => _a(13, 440, 1.35);
-  TextStyle get uiStrong => _a(13, 590, 1.35, tracking: .1);
-  TextStyle get label => _a(12, 440, 1.35);
-  TextStyle get labelStrong => _a(12, 560, 1.35);
-  TextStyle get small => _a(11, 440, 1.35, tracking: .2);
-
-  /// Captions on keys and scales: narrower, so five selectors fit on one row.
-  TextStyle get caption => _a(10, 500, 1.2, tracking: .25, width: 94);
+  /// Long reading. Measure is capped by the transcript.
+  TextStyle get prose => _w(14, 400, 1.6);
+  TextStyle get title => _w(15, 600, 1.35);
+  TextStyle get heading => _w(19, 600, 1.3, tracking: -.2);
+  TextStyle get ui => _w(13, 400, 1.4);
+  TextStyle get uiMedium => _w(13, 500, 1.4);
+  TextStyle get uiStrong => _w(13, 600, 1.4);
+  TextStyle get label => _w(12.5, 400, 1.4);
+  TextStyle get labelStrong => _w(12.5, 500, 1.4);
+  TextStyle get small => _w(11.5, 400, 1.4);
+  TextStyle get smallStrong => _w(11.5, 500, 1.4);
+  TextStyle get caption => _w(10.5, 500, 1.2);
   TextStyle get code => _m(12, 1.6);
-  TextStyle get codeSmall => _m(11, 1.5);
-  TextStyle get readout => _m(15, 1.2);
+  TextStyle get codeSmall => _m(11.5, 1.55);
 }
 
 abstract final class AxSpace {
-  static const double x1 = 2, x2 = 4, x3 = 6, x4 = 8, x5 = 12, x6 = 16, x7 = 24;
+  /// The conversation, what is asked in it and where it is written: one column.
+  static const double column = 720, gutter = 24;
+
+  /// What stands beside that column, in [width].
+  static double beside(double width) => math.max(gutter, (width - column) / 2);
 }
 
+/// A control, a tile of code, a card or what floats. What is inside is never rounder than its holder.
 abstract final class AxRadius {
-  static const double tick = 2, key = 5, plate = 6, bay = 7, overlay = 9;
+  static const double tick = 4, key = 6, block = 8, card = 10;
 }
 
 /// Control sizes. Density changes height and padding, never type size.
 enum AxDensity {
-  compact(24, 24, 6),
-  regular(28, 27, 8),
-  roomy(32, 32, 10);
+  compact(24, 24, 7),
+  regular(28, 28, 9),
+  roomy(32, 32, 11);
 
   const AxDensity(this.control, this.row, this.pad);
   final double control, row, pad;

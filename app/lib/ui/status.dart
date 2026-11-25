@@ -15,6 +15,13 @@ enum AgentState {
 
   const AgentState(this.word);
   final String word;
+
+  /// Beside the name of the agent that is shown.
+  String get said => switch (this) {
+    asking => 'Waiting for you',
+    waiting => 'Idle',
+    _ => word,
+  };
   Color mark(AxColors c) => switch (this) {
     running => c.live,
     asking => c.attention,

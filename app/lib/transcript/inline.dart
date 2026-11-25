@@ -2,7 +2,9 @@
 /// never in a position to load anything.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import '../ui/tokens.dart';
@@ -330,3 +332,82 @@ TextSpan inlineSpan(
       ),
   ],
 );
+
+/// Paints a tile under each piece of code in [words], which [child] shows.
+class CodeTiles extends SingleChildRenderObjectWidget {
+  const CodeTiles({required this.words, required this.color, required super.child, super.key});
+
+  /// As [inlineSpan] made it.
+  final TextSpan words;
+  final Color color;
+
+  List<TextRange> get _ranges {
+    var at = 0;
+    final out = <TextRange>[];
+    for (final r in words.children ?? const <InlineSpan>[]) {
+      final n = (r as TextSpan).text?.length ?? 0;
+      if (r.style?.fontFamily != null && r.style!.fontFamily != words.style?.fontFamily) {
+        out.add(TextRange(start: at, end: at + n));
+      }
+      at += n;
+    }
+    return out;
+  }
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => RenderCodeTiles(_ranges, color);
+  @override
+  void updateRenderObject(BuildContext context, RenderCodeTiles renderObject) => renderObject
+    ..ranges = _ranges
+    ..color = color;
+}
+
+class RenderCodeTiles extends RenderProxyBox {
+  RenderCodeTiles(this._ranges, this._color);
+  List<TextRange> _ranges;
+  List<TextRange> get ranges => _ranges;
+  set ranges(List<TextRange> v) {
+    if (listEquals(v, _ranges)) return;
+    _ranges = v;
+    markNeedsPaint();
+  }
+
+  Color _color;
+  set color(Color v) {
+    if (v == _color) return;
+    _color = v;
+    markNeedsPaint();
+  }
+
+  RenderParagraph? _words(RenderObject? o) {
+    if (o is RenderParagraph || o == null) return o as RenderParagraph?;
+    RenderParagraph? found;
+    o.visitChildren((x) => found ??= _words(x));
+    return found;
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (_ranges.isNotEmpty) {
+      if (_words(child) case final p?) {
+        final at = offset + p.localToGlobal(Offset.zero, ancestor: this);
+        final paint = Paint()..color = _color;
+        for (final r in _ranges) {
+          for (final b in p.getBoxesForSelection(
+            TextSelection(baseOffset: r.start, extentOffset: r.end),
+          )) {
+            final box = b.toRect().shift(at);
+            context.canvas.drawRRect(
+              RRect.fromRectAndRadius(
+                Rect.fromLTRB(box.left - 2, box.top - 1, box.right + 2, box.bottom + 1),
+                const Radius.circular(AxRadius.tick),
+              ),
+              paint,
+            );
+          }
+        }
+      }
+    }
+    super.paint(context, offset);
+  }
+}

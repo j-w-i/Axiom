@@ -5,6 +5,7 @@ version: 0.0.1+1
 environment:
   sdk: ^3.14.0
 dependencies:
+  file_selector: ^1.1.0
   flutter:
     sdk: flutter
   url_launcher: ^6.3.3
@@ -14,7 +15,7 @@ dev_dependencies:
     sdk: flutter
 flutter:
   fonts:
-    - family: Archivo
-      fonts: [{ asset: fonts/Archivo.ttf }]
-    - family: Spline Sans Mono
-      fonts: [{ asset: fonts/SplineSansMono.ttf }]
+    - family: Inter
+      fonts: [{ asset: fonts/Inter.ttf }]
+    - family: JetBrains Mono
+      fonts: [{ asset: fonts/JetBrainsMono.ttf }]

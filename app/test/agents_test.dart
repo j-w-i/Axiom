@@ -252,7 +252,7 @@ void main() {
     expect(s.calls, [
       ['models', 'c1'],
     ]);
-    AxButton start() => t.widget<AxButton>(find.widgetWithText(AxButton, 'Start'));
+    AxButton start() => t.widget<AxButton>(find.widgetWithText(AxButton, 'Start session'));
     expect(start().onPressed, isNull, reason: 'nothing is filled in');
     Future<void> write(String label, String text) => t.enterText(
       find.descendant(
@@ -261,7 +261,7 @@ void main() {
       ),
       text,
     );
-    await write('What should be done', 'Make the cache forget.\nAll of it.');
+    await write('Task', 'Make the cache forget.\nAll of it.');
     await write('Folder', '/home/me/project');
     await settled(t);
     expect(start().onPressed, isNull, reason: 'no model');
@@ -269,9 +269,9 @@ void main() {
     await settled(t);
     await t.tap(find.bySemanticsLabel('gpt-5.6').last);
     await settled(t);
-    await t.ensureVisible(find.text('Start'));
+    await t.ensureVisible(find.text('Start session'));
     await snap(t, 'start');
-    await t.tap(find.text('Start'));
+    await t.tap(find.text('Start session'));
     await settled(t);
     expect(s.calls.skip(1), [
       ['create', 'Make the cache forget. All of it.', '/home/me/project'],
@@ -313,14 +313,14 @@ void main() {
     await folder('/p');
     await t.tap(find.text('Follow AGENTS.md'));
     await settled(t);
-    await t.enterText(field('What should be done'), 'x');
+    await t.enterText(field('Task'), 'x');
     await t.ensureVisible(find.bySemanticsLabel('Model: none'));
     await t.tap(find.bySemanticsLabel('Model: none'));
     await settled(t);
     await t.tap(find.bySemanticsLabel('gpt-5.6').last);
     await settled(t);
-    await t.ensureVisible(find.text('Start'));
-    await t.tap(find.text('Start'));
+    await t.ensureVisible(find.text('Start session'));
+    await t.tap(find.text('Start session'));
     await settled(t);
     expect(s.calls.firstWhere((c) => c.first == 'add'), [
       'add',
@@ -372,9 +372,9 @@ void main() {
     await settled(t);
     await t.tap(find.bySemanticsLabel('Model: none'));
     await settled(t);
-    await t.tap(find.bySemanticsLabel('Another, by name').last);
+    await t.tap(find.bySemanticsLabel('Other, by name').last);
     await settled(t);
-    for (final (l, v) in [('What should be done', 'x'), ('Folder', '/w'), ('Model name', 'm')]) {
+    for (final (l, v) in [('Task', 'x'), ('Folder', '/w'), ('Model name', 'm')]) {
       await t.enterText(
         find.descendant(
           of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
@@ -385,16 +385,16 @@ void main() {
     }
     await settled(t);
     s.failure = const Failed(1, 'bad_request', '/w: not a folder');
-    await t.ensureVisible(find.text('Start'));
-    await t.tap(find.text('Start'));
+    await t.ensureVisible(find.text('Start session'));
+    await t.tap(find.text('Start session'));
     await settled(t);
     expect(find.textContaining('not a folder'), findsOneWidget);
     expect(find.text('/w'), findsOneWidget);
     s
       ..failure = null
       ..calls.clear();
-    await t.ensureVisible(find.text('Start'));
-    await t.tap(find.text('Start'));
+    await t.ensureVisible(find.text('Start session'));
+    await t.tap(find.text('Start session'));
     await settled(t);
     expect(s.calls.map((c) => c.first), ['create', 'add', 'open', 'prompt']);
   });
@@ -414,7 +414,10 @@ void main() {
     expect(find.text('cargo test'), findsWidgets);
     await settled(t);
     final row = find.byType(AgentRow);
-    expect(find.descendant(of: row, matching: find.text('Asks to run a command')), findsOneWidget);
+    expect(
+      find.descendant(of: row, matching: find.textContaining('Asks to run a command')),
+      findsOneWidget,
+    );
     expect(find.descendant(of: row, matching: find.text('shell')), findsNothing);
     expect(
       t
@@ -457,7 +460,7 @@ void main() {
       ),
     ]);
     await settled(t);
-    await t.tap(find.text('Allow this for the session'));
+    await t.tap(find.text('Allow for this session'));
     await settled(t);
     expect(s.calls.last, ['answer', 's', 'q3', 'x', Answer.session]);
     expect(find.byType(RequestBar), findsOneWidget);
@@ -514,7 +517,7 @@ void main() {
     ]);
     await t.tap(find.bySemanticsLabel('Access: Ask first'));
     await settled(t);
-    await t.tap(find.bySemanticsLabel(RegExp('Work in the folder')).last);
+    await t.tap(find.bySemanticsLabel(RegExp('Work without asking')).last);
     await settled(t);
     expect(s.calls.last, ['set', 's', 'a', null, null, Access.work]);
   });
@@ -573,14 +576,14 @@ void main() {
     // It is named by its files, and not by its text.
     expect(find.text('a.txt, b.txt'), findsOneWidget);
     expect(find.text('…'), findsNothing);
-    await t.tap(find.text('Patch'));
+    await t.tap(find.text('Edited'));
     await settled(t);
     expect(find.byType(DiffLines), findsNWidgets(2));
     expect(find.text('b.txt'), findsOneWidget);
     expect(find.textContaining('two', findRichText: true), findsOneWidget);
     expect(find.textContaining(r'\u{202E}', findRichText: true), findsOneWidget);
     expect(
-      find.descendant(of: find.byType(AgentRow), matching: find.text('Edited 2 files')),
+      find.descendant(of: find.byType(AgentRow), matching: find.textContaining('Edited 2 files')),
       findsOneWidget,
     );
     await snap(t, 'diff');
@@ -633,7 +636,7 @@ void main() {
     expect(find.textContaining('cargo bench'), findsOneWidget, reason: 'what was asked is told');
   });
 
-  testWidgets('accounts are added and removed, and a key is not shown', (t) async {
+  testWidgets('accounts are added and removed, and a key is No preview', (t) async {
     final s = await shell(t, accounts: false);
     await t.tap(find.bySemanticsLabel('Accounts').first);
     await settled(t);
@@ -728,7 +731,7 @@ void main() {
   /// Everything but the start itself.
   Future<void> fill(WidgetTester t, String say) async {
     await press(t, find.bySemanticsLabel('New session').first);
-    await t.enterText(field('What should be done'), say);
+    await t.enterText(field('Task'), say);
     await t.enterText(field('Folder'), '/w');
     await settled(t);
     await press(t, find.bySemanticsLabel('Model: none'));
@@ -794,18 +797,18 @@ void main() {
         ['sign in', null],
       ]);
       expect(opened, ['https://auth.openai.com/api/accounts/authorize?state=x']);
-      expect(find.text('Go on in your browser'), findsOneWidget);
+      expect(find.text('Continue in your browser'), findsOneWidget);
       final again = t.widget<AxButton>(find.widgetWithText(AxButton, 'Continue with ChatGPT'));
       expect(again.onPressed, isNull, reason: 'one at a time');
       await snap(t, 'accounts-plan-waits');
-      await press(t, find.widgetWithText(AxButton, 'Open it again'));
+      await press(t, find.widgetWithText(AxButton, 'Open again'));
       expect((opened.length, s.calls.length), (2, 1));
       String? copied;
       t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (m) async {
         if (m.method == 'Clipboard.setData') copied = (m.arguments as Map)['text'] as String;
         return null;
       });
-      await press(t, find.widgetWithText(AxButton, 'Copy the address'));
+      await press(t, find.widgetWithText(AxButton, 'Copy link'));
       expect(copied, opened.first);
       expect(find.text('Copied'), findsOneWidget);
 
@@ -829,11 +832,11 @@ void main() {
       await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
       await press(t, find.widgetWithText(AxButton, 'Cancel'));
       expect(s.calls.last, ['cancel sign-in', 'n0']);
-      expect(find.text('Go on in your browser'), findsNothing);
+      expect(find.text('Continue in your browser'), findsNothing);
       // What cannot be opened from here is opened by hand.
       can = false;
       await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
-      expect(find.text('Open the address in your browser'), findsOneWidget);
+      expect(find.text('Open the link in your browser'), findsOneWidget);
       s.toldOfSignin({'state': 'failed', 'problem': 'the sign-in was not allowed'});
       await settled(t);
       expect(find.text('the sign-in was not allowed'), findsOneWidget);
@@ -868,7 +871,7 @@ void main() {
       await press(t, find.widgetWithText(AxButton, 'Sign in again'));
       expect(s.calls.last, ['sign in', 'c7']);
       // Also with another provider chosen below.
-      expect(find.text('Go on in your browser'), findsOneWidget);
+      expect(find.text('Continue in your browser'), findsOneWidget);
       s.toldOfSignin({'state': 'done', 'connection': 'c7'});
       await settled(t);
       expect(find.text('You are signed in again'), findsOneWidget);
@@ -923,7 +926,7 @@ void main() {
       expect(manage, findsOneWidget);
       expect(t.widget<AxButton>(manage).tone, AxTone.primary);
       // Seen as failed wherever the agent is, and said once.
-      expect(find.text('Stopped with an error'), findsOneWidget);
+      expect(find.textContaining('Stopped with an error'), findsOneWidget);
       expect(find.textContaining('You have reached your usage limit'), findsOneWidget);
       expect(
         t.widgetList<AxLamp>(find.byType(AxLamp)).where((l) => l.state == AgentState.failed),
@@ -957,25 +960,25 @@ void main() {
     final s = await shell(t, accounts: false);
     s.harnesses = harnesses;
     await press(t, find.bySemanticsLabel('New session').first);
-    expect(find.text('Add an account or a server'), findsOneWidget);
-    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    expect(find.text('Add an account or server'), findsOneWidget);
+    await press(t, find.bySemanticsLabel('Harness: Axiom'));
     expect(find.text('not on this computer'), findsOneWidget, reason: 'Codex is not there');
     expect(find.bySemanticsLabel('Qwen Code'), findsNothing);
     await t.tap(find.text('Codex'), warnIfMissed: false);
     await settled(t);
-    expect(find.bySemanticsLabel('Runs with: Axiom'), findsOneWidget, reason: 'nothing happens');
+    expect(find.bySemanticsLabel('Harness: Axiom'), findsOneWidget, reason: 'nothing happens');
     await press(t, find.bySemanticsLabel('Claude Code').last);
     // No account is needed, and what it has no mode for is not offered.
-    expect(find.text('Add an account or a server'), findsNothing);
-    expect(find.bySemanticsLabel('Access: Only look'), findsOneWidget, reason: 'the least');
-    await press(t, find.bySemanticsLabel('Access: Only look'));
+    expect(find.text('Add an account or server'), findsNothing);
+    expect(find.bySemanticsLabel('Access: Read only'), findsOneWidget, reason: 'the least');
+    await press(t, find.bySemanticsLabel('Access: Read only'));
     expect(find.text('Claude Code has no mode for it'), findsOneWidget);
-    await press(t, find.bySemanticsLabel('Work in the folder').last);
-    await t.enterText(field('What should be done'), 'Do it.');
+    await press(t, find.bySemanticsLabel('Work without asking').last);
+    await t.enterText(field('Task'), 'Do it.');
     await t.enterText(field('Folder'), '/w');
     await settled(t);
     await snap(t, 'start-harness');
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     expect(s.calls, [
       ['create', 'Do it.', '/w'],
       ['add', 's_new', 'Lead', ('claude', false), null, Access.work],
@@ -1005,24 +1008,24 @@ void main() {
     final s = await shell(t);
     s.harnesses = handy;
     await press(t, find.bySemanticsLabel('New session').first);
-    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    await press(t, find.bySemanticsLabel('Harness: Axiom'));
     await press(t, find.bySemanticsLabel('Claude Code').last);
     // Contained by Axiom unless its person says otherwise, and with every access.
-    expect(find.bySemanticsLabel('Tools: Axiom\'s'), findsOneWidget);
+    expect(find.bySemanticsLabel('Tools: Axiom tools'), findsOneWidget);
     expect(find.bySemanticsLabel('Access: Ask first'), findsOneWidget);
-    expect(check('Let the folder'), findsNothing, reason: 'the folder\'s settings have no say');
+    expect(check('Use this folder'), findsNothing, reason: 'the folder\'s settings have no say');
     await snap(t, 'start-hands');
-    await press(t, find.bySemanticsLabel('Tools: Axiom\'s'));
-    await press(t, find.bySemanticsLabel('Its own').last);
-    expect(find.bySemanticsLabel('Access: Only look'), findsOneWidget, reason: 'it cannot ask');
-    expect(check('Let the folder'), findsOneWidget);
-    await press(t, find.bySemanticsLabel('Tools: Its own'));
-    await press(t, find.bySemanticsLabel('Axiom\'s').last);
-    await t.enterText(field('What should be done'), 'Do it.');
+    await press(t, find.bySemanticsLabel('Tools: Axiom tools'));
+    await press(t, find.bySemanticsLabel('Built-in tools').last);
+    expect(find.bySemanticsLabel('Access: Read only'), findsOneWidget, reason: 'it cannot ask');
+    expect(check('Use this folder'), findsOneWidget);
+    await press(t, find.bySemanticsLabel('Tools: Built-in tools'));
+    await press(t, find.bySemanticsLabel('Axiom tools').last);
+    await t.enterText(field('Task'), 'Do it.');
     await t.enterText(field('Folder'), '/w');
     await settled(t);
     s.calls.clear();
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     expect(s.calls.where((c) => c.first == 'add').single, [
       'add',
       's_new',
@@ -1050,7 +1053,7 @@ void main() {
     await settled(t);
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
-    await press(t, find.bySemanticsLabel('Tools: Axiom\'s'));
+    await press(t, find.bySemanticsLabel('Tools: Axiom tools'));
     expect(find.text('it has no mode for this access'), findsOneWidget);
     await t.sendKeyEvent(LogicalKeyboardKey.escape);
     await settled(t);
@@ -1058,11 +1061,11 @@ void main() {
     await settled(t);
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
-    await press(t, find.bySemanticsLabel('Tools: Axiom\'s'));
-    await press(t, find.bySemanticsLabel('Its own').last);
+    await press(t, find.bySemanticsLabel('Tools: Axiom tools'));
+    await press(t, find.bySemanticsLabel('Built-in tools').last);
     expect(find.textContaining('outside Axiom\'s sandbox and without'), findsOneWidget);
     await t.pump(AxMotion.settle);
-    await press(t, find.text('Change to Its own'));
+    await press(t, find.text('Change to Built-in tools'));
     expect(s.calls, [
       ['set', 's', 'a', null, null, null],
     ]);
@@ -1091,7 +1094,7 @@ void main() {
       if (m.method == 'Clipboard.setData') copied = (m.arguments as Map)['text'] as String;
       return null;
     });
-    await press(t, find.text('Copy to sign in'));
+    await press(t, find.text('Copy'));
     expect(copied, work.signIn);
     expect(find.text('Copied'), findsOneWidget);
     await snap(t, 'accounts-program');
@@ -1104,18 +1107,18 @@ void main() {
     expect(find.bySemanticsLabel('Work'), findsNothing);
     await t.sendKeyEvent(LogicalKeyboardKey.escape);
     await settled(t);
-    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    await press(t, find.bySemanticsLabel('Harness: Axiom'));
     await press(t, find.bySemanticsLabel('Goose').last);
     expect(find.byType(AxSelect<String>), findsOneWidget, reason: 'it has one account');
-    await press(t, find.bySemanticsLabel('Runs with: Goose'));
+    await press(t, find.bySemanticsLabel('Harness: Goose'));
     await press(t, find.bySemanticsLabel('Claude Code').last);
-    await press(t, find.bySemanticsLabel('Account: Its own sign-in'));
+    await press(t, find.bySemanticsLabel('Account: Default sign-in'));
     await press(t, find.bySemanticsLabel('Work').last);
-    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Task'), 'Do it.');
     await t.enterText(field('Folder'), '/w');
     await settled(t);
     s.calls.clear();
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     expect(s.calls.where((c) => c.first == 'add').single, [
       'add',
       's_new',
@@ -1143,10 +1146,10 @@ void main() {
     await settled(t);
     expect(s.calls, isEmpty, reason: 'it lists no models');
     await press(t, find.bySemanticsLabel('Account: Work'));
-    await press(t, find.bySemanticsLabel('Its own sign-in').last);
+    await press(t, find.bySemanticsLabel('Default sign-in').last);
     expect(find.textContaining('begins anew there'), findsOneWidget);
     await t.pump(AxMotion.settle);
-    await press(t, find.text('Change to Its own sign-in'));
+    await press(t, find.text('Change to Default sign-in'));
     expect(s.calls, [
       ['set', 's', 'a', null, null, null],
     ]);
@@ -1156,19 +1159,19 @@ void main() {
     final s = await shell(t);
     s.harnesses = harnesses;
     await press(t, find.bySemanticsLabel('New session').first);
-    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Task'), 'Do it.');
     await t.enterText(field('Folder'), '/w');
-    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    await press(t, find.bySemanticsLabel('Harness: Axiom'));
     await press(t, find.bySemanticsLabel('Goose').last);
-    AxButton start() => t.widget<AxButton>(find.widgetWithText(AxButton, 'Start'));
+    AxButton start() => t.widget<AxButton>(find.widgetWithText(AxButton, 'Start session'));
     expect(start().onPressed, isNull);
     await t.enterText(field('Model name'), 'gpt-5.6');
-    await press(t, check('Let the folder'));
+    await press(t, check('Use this folder'));
     expect(start().onPressed, isNotNull);
     // Another has not been said yes for.
-    await press(t, find.bySemanticsLabel('Runs with: Goose'));
+    await press(t, find.bySemanticsLabel('Harness: Goose'));
     await press(t, find.bySemanticsLabel('Claude Code').last);
-    expect(t.widget<AxCheck>(check('Let the folder')).value, isFalse);
+    expect(t.widget<AxCheck>(check('Use this folder')).value, isFalse);
     expect(
       t
           .widget<AxField>(find.byWidgetPredicate((w) => w is AxField && w.label == 'Model name'))
@@ -1176,10 +1179,10 @@ void main() {
           .text,
       isEmpty,
     );
-    await press(t, find.bySemanticsLabel('Runs with: Claude Code'));
+    await press(t, find.bySemanticsLabel('Harness: Claude Code'));
     await press(t, find.bySemanticsLabel('Goose').last);
-    await press(t, check('Let the folder'));
-    await press(t, find.text('Start'));
+    await press(t, check('Use this folder'));
+    await press(t, find.text('Start session'));
     expect(s.calls.where((c) => c.first == 'add').single, [
       'add',
       's_new',
@@ -1202,12 +1205,12 @@ void main() {
     expect(field('Folder'), findsNothing, reason: 'it is the session\'s');
     expect(find.text('Follow AGENTS.md'), findsOneWidget);
     await t.enterText(field('Name'), 'Reviewer');
-    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    await press(t, find.bySemanticsLabel('Harness: Axiom'));
     await press(t, find.bySemanticsLabel('Claude Code').last);
     await snap(t, 'add-agent');
     s.calls.clear();
     // It need not be told anything yet. While it is set up the other goes on.
-    await press(t, find.text('Add'));
+    await press(t, find.text('Add agent'));
     expect(s.calls, [
       ['add', 's', 'Reviewer', ('claude', false), null, Access.read],
     ]);
@@ -1221,33 +1224,23 @@ void main() {
     ]);
     await settled(t);
     // It is the one that is shown.
-    expect(find.text('Say something to Reviewer'), findsOneWidget);
-    expect(find.text('Nothing has been said to Reviewer yet.'), findsOneWidget);
+    expect(find.text('Message Reviewer'), findsOneWidget);
+    expect(find.text('No messages yet.'), findsOneWidget);
     expect(find.byType(TranscriptView), findsNothing);
     await snap(t, 'two-agents');
-    // What is selected is graphite, whoever it belongs to.
-    final fills = [
-      for (final b in t.widgetList<DecoratedBox>(
-        find.descendant(of: find.byType(AgentRow), matching: find.byType(DecoratedBox)),
-      ))
-        if (b.decoration case BoxDecoration(:final LinearGradient gradient)) gradient.colors,
-    ];
-    expect(fills, [
-      [AxColors.dark.rowSelectedTop, AxColors.dark.rowSelectedBottom],
-    ]);
-    expect(
-      t
-          .widgetList<DecoratedBox>(
-            find.descendant(of: find.byType(AxTabs), matching: find.byType(DecoratedBox)),
-          )
-          .map((b) => (b.decoration as BoxDecoration).color)
-          .nonNulls,
-      [AxColors.dark.tabSelected],
-    );
+    // What is selected has one fill, whoever it belongs to.
+    Iterable<Color> fills(Type of) => t
+        .widgetList<DecoratedBox>(
+          find.descendant(of: find.byType(of), matching: find.byType(DecoratedBox)),
+        )
+        .map((b) => (b.decoration as BoxDecoration).color)
+        .nonNulls;
+    expect(fills(AgentRow), [AxColors.dark.selected]);
+    expect(fills(AxTabs), [AxColors.dark.selected]);
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
-    expect(find.text('Its own model'), findsWidgets);
-    expect(find.text('Its own sign-in'), findsWidgets);
+    expect(find.text('Default model'), findsWidgets);
+    expect(find.text('Default sign-in'), findsWidgets);
     expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
   });
 
@@ -1297,24 +1290,24 @@ void main() {
   testWidgets('a no can say why, and is never a yes by that', (t) async {
     final s = await shell(t, session: working(asks: true));
     await settled(t);
-    await press(t, find.text('Say why not'));
+    await press(t, find.text('Deny with reason'));
     expect(find.text('Allow once'), findsNothing);
-    await t.enterText(field('Why not'), 'use the Makefile');
+    await t.enterText(field('Reason'), 'use the Makefile');
     await snap(t, 'why-not');
     await t.sendKeyEvent(LogicalKeyboardKey.escape);
     await settled(t);
     expect(find.text('Allow once'), findsOneWidget);
-    await press(t, find.text('Say why not'));
+    await press(t, find.text('Deny with reason'));
     expect(s.calls, isEmpty);
-    await t.enterText(field('Why not'), 'use the Makefile');
+    await t.enterText(field('Reason'), 'use the Makefile');
     await press(t, find.text('Deny'));
     expect(s.calls, [
       ['answer', 's', 'q1', 'd-q1', Answer.deny, 'use the Makefile'],
     ]);
     // The next question is another: nothing of it has been said.
-    expect(field('Why not'), findsNothing);
-    await press(t, find.text('Say why not'));
-    expect(t.widget<EditableText>(field('Why not')).controller.text, isEmpty);
+    expect(field('Reason'), findsNothing);
+    await press(t, find.text('Deny with reason'));
+    expect(t.widget<EditableText>(field('Reason')).controller.text, isEmpty);
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     await settled(t);
     expect(s.calls.last, ['answer', 's', 'q2', 'd-q2', Answer.deny]);
@@ -1325,30 +1318,30 @@ void main() {
     s.known = const [ModelInfo('claude-opus-5-5', effort: true), ModelInfo('plain')];
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
-    await press(t, find.bySemanticsLabel('Effort: Usual effort'));
+    await press(t, find.bySemanticsLabel('Effort: Default effort'));
     await press(t, find.bySemanticsLabel('High effort').last);
     expect(s.calls.last, ['set', 's', 'a', 'claude-opus-5-5', 'c1', 'high', null]);
     // A new one, and with a model that takes none.
     await t.sendKeyEvent(LogicalKeyboardKey.escape);
     await settled(t);
     await press(t, find.bySemanticsLabel('New session').first);
-    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Task'), 'Do it.');
     await t.enterText(field('Folder'), '/w');
     expect(find.bySemanticsLabel(RegExp('^Effort')), findsNothing);
     await press(t, find.bySemanticsLabel('Model: none'));
     await press(t, find.bySemanticsLabel('claude-opus-5-5').last);
-    await press(t, find.bySemanticsLabel('Effort: Usual effort'));
+    await press(t, find.bySemanticsLabel('Effort: Default effort'));
     await press(t, find.bySemanticsLabel('Low effort').last);
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     expect(s.calls.firstWhere((c) => c.first == 'add'), contains('effort low'));
     await press(t, find.bySemanticsLabel('New session').first);
     await press(t, find.bySemanticsLabel(RegExp('^Model: ')));
     await press(t, find.bySemanticsLabel('plain').last);
     expect(find.bySemanticsLabel(RegExp('^Effort')), findsNothing);
-    await t.enterText(field('What should be done'), 'Do more.');
+    await t.enterText(field('Task'), 'Do more.');
     await settled(t);
     s.calls.clear();
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     expect(
       s.calls.firstWhere((c) => c.first == 'add' || c.first == 'set').join(' '),
       isNot(contains('low')),
@@ -1373,16 +1366,16 @@ void main() {
     await t.enterText(field('About line 5'), 'why not const?');
     await snap(t, 'remark');
     // Looking again loses nothing; also when the line is not there any more.
-    await press(t, find.text('Look again'));
+    await press(t, find.bySemanticsLabel('Refresh'));
     expect(t.widget<EditableText>(field('About line 5')).controller.text, 'why not const?');
     s.now = now('other');
-    await press(t, find.text('Look again'));
+    await press(t, find.bySemanticsLabel('Refresh'));
     expect(t.widget<EditableText>(field('About line 5')).controller.text, 'why not const?');
-    await press(t, find.text('Add to your message'));
+    await press(t, find.text('Add to message'));
     expect(find.text('In your message'), findsOneWidget);
     expect(s.calls.where((c) => c.first == 'prompt'), isEmpty);
     // By the keyboard, about the file.
-    await press(t, find.bySemanticsLabel('Say something about lib/cache.dart'));
+    await press(t, find.bySemanticsLabel('Comment on lib/cache.dart'));
     await t.enterText(field('About the file'), 'and test it');
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     await settled(t);
@@ -1440,7 +1433,7 @@ void main() {
       await press(t, find.text('Lead asks to run a command'));
       expect(s.calls, isEmpty, reason: 'it is open already');
       expect(find.byType(AccountsPage), findsNothing);
-      expect(find.textContaining('to Lead'), findsWidgets);
+      expect(find.text('Message Lead. It is sent before the next step.'), findsWidgets);
       expect(find.byType(RequestBar), findsOneWidget);
       // In another session: that is opened, and its agent is the one that is shown.
       await press(t, find.text('Ada asks to write a file'));
@@ -1457,7 +1450,7 @@ void main() {
         ..needs = const [here]
         ..notifyListeners();
       await settled(t);
-      expect(find.text('Say something to Ada'), findsOneWidget);
+      expect(find.text('Message Ada'), findsOneWidget);
       expect(find.text('Needs you'), findsOneWidget);
       s
         ..needs = const []
@@ -1494,7 +1487,7 @@ void main() {
       expect(s.calls, isEmpty);
       expect(find.text('Needs you'), findsOneWidget);
       expect(find.text('2'), findsOneWidget);
-      expect(find.text('Finished, not seen yet'), findsOneWidget);
+      expect(find.text('Finished'), findsOneWidget);
       for (final l in ['Ada failed', 'Cleo has reached a limit', 'Lead has finished']) {
         expect(find.text(l), findsOneWidget, reason: l);
       }
@@ -1539,7 +1532,7 @@ void main() {
           ]))
         ..notifyListeners();
       await settled(t);
-      expect(find.text('Say something to Cleo'), findsOneWidget);
+      expect(find.text('Message Cleo'), findsOneWidget);
     });
   });
 
@@ -1582,14 +1575,14 @@ void main() {
     }
 
     AxCheck box(WidgetTester t, String f) =>
-        t.widget<AxCheck>(find.byWidgetPredicate((w) => w is AxCheck && w.label == 'Bring in $f'));
+        t.widget<AxCheck>(find.byWidgetPredicate((w) => w is AxCheck && w.label == 'Apply $f'));
 
     testWidgets('its person sees what it changed and brings in what they choose', (t) async {
       final s = await shown(t);
       expect(s.calls, [
         ['copy', 's', 'b'],
       ]);
-      expect(find.text('7 files in its own copy'), findsOneWidget);
+      expect(find.text('7 files in Ada\'s copy'), findsOneWidget);
       for (final (f, on, can) in [
         ('lib/cache.dart', true, true),
         ('Makefile', false, true),
@@ -1602,15 +1595,15 @@ void main() {
         expect((box(t, f).value, box(t, f).onChanged != null), (on, can), reason: f);
       }
       for (final words in [
-        'Never brought in: a shell runs what is written there.',
-        'The folder\'s own has changed too. Bring the copy up to date first.',
-        'It runs when someone builds, tests or installs.',
+        'Never applied: a shell runs what is written there.',
+        'Also changed in your folder. Update from folder first.',
+        'Runs when someone builds, tests or installs.',
         'Also changed by Ben.',
-        'It cannot be shown: too large, or not text.',
+        'No preview: too large, or not text.',
       ]) {
         expect(find.text(words), findsOneWidget, reason: words);
       }
-      expect(find.textContaining('Ada has not looked at yours yet'), findsOneWidget);
+      expect(find.textContaining('Ada has not seen yours'), findsOneWidget);
       expect(find.textContaining('was here', findRichText: true), findsWidgets);
       // What needs a look has the amber glyph; its words are words.
       Iterable<AxGlyph> warnings() => t
@@ -1638,9 +1631,9 @@ void main() {
       expect(find.text(last), findsOneWidget);
       await t.drag(list, const Offset(0, 400));
       await settled(t);
-      await press(t, find.bySemanticsLabel('Bring in Makefile'));
-      await press(t, find.bySemanticsLabel('Bring in gone.txt'));
-      await press(t, find.bySemanticsLabel('Bring in both.txt'));
+      await press(t, find.bySemanticsLabel('Apply Makefile'));
+      await press(t, find.bySemanticsLabel('Apply gone.txt'));
+      await press(t, find.bySemanticsLabel('Apply both.txt'));
       s
         ..calls.clear()
         ..moved = const Moved(
@@ -1648,21 +1641,21 @@ void main() {
           [('Makefile', 'it is not what was shown any more')],
         )
         ..copy = const CopyChanges(made: true, back: ('q1', 1));
-      await press(t, find.text('Bring in 2 files'));
+      await press(t, find.text('Apply 2 files'));
       expect(s.calls, [
         ['bring', ('lib/cache.dart', 'd1'), ('Makefile', 'd2')],
         ['copy', 's', 'b'],
       ]);
-      expect(find.textContaining('Brought in 1 file.'), findsOneWidget);
+      expect(find.textContaining('Applied 1 file.'), findsOneWidget);
       expect(find.textContaining('Makefile: it is not what was shown any more.'), findsOneWidget);
-      expect(find.text('The folder has all of it.'), findsOneWidget);
+      expect(find.text('No differences from the folder.'), findsOneWidget);
       await snap(t, 'copy-brought');
       s
         ..moved = const Moved(['lib/cache.dart'], [])
         ..copy = all;
-      await press(t, find.text('Put back 1 file'));
+      await press(t, find.text('Undo apply (1 file)'));
       expect(s.calls, contains(equals(['back', 's', 'b', 'q1'])));
-      expect(find.textContaining('Put back 1 file.'), findsOneWidget);
+      expect(find.textContaining('Reverted 1 file.'), findsOneWidget);
       // As usual again: what was chosen was for the last time.
       expect((box(t, 'Makefile').value, box(t, 'gone.txt').value), (false, true));
       // What was chosen was chosen of what was shown: another content has not been.
@@ -1670,7 +1663,7 @@ void main() {
       box(t, 'lib/cache.dart').onChanged!(false);
       await settled(t);
       expect((box(t, 'Makefile').value, box(t, 'lib/cache.dart').value), (true, false));
-      await press(t, find.text('Look again'));
+      await press(t, find.bySemanticsLabel('Refresh'));
       expect((box(t, 'Makefile').value, box(t, 'lib/cache.dart').value), (true, false));
       s.copy = const CopyChanges(
         made: true,
@@ -1679,7 +1672,7 @@ void main() {
           CopyFile('Makefile', 'changed', digest: 'other', there: 'f2', runs: true, diff: some),
         ],
       );
-      await press(t, find.text('Look again'));
+      await press(t, find.bySemanticsLabel('Refresh'));
       expect((box(t, 'Makefile').value, box(t, 'lib/cache.dart').value), (false, false));
     });
 
@@ -1690,9 +1683,9 @@ void main() {
         'The project has changed: both.txt.',
         const [('out/x', 'something is in the way')],
       );
-      await press(t, find.text('Bring it up to date'));
-      expect(find.textContaining('Took over 2 files.'), findsOneWidget);
-      expect(find.textContaining('nothing is sent yet'), findsOneWidget);
+      await press(t, find.text('Update from folder'));
+      expect(find.textContaining('Updated 2 files from the folder.'), findsOneWidget);
+      expect(find.textContaining('it is not sent yet'), findsOneWidget);
       expect(find.textContaining('out/x: something is in the way.'), findsOneWidget);
       expect(s.calls.where((c) => c.first == 'prompt'), isEmpty);
       await t.tap(find.text('Conversation').last);
@@ -1702,44 +1695,43 @@ void main() {
 
     testWidgets('it is thrown away with a second word, and never while it is worked in', (t) async {
       final s = await shown(t);
-      await press(t, find.text('Throw it away'));
+      await press(t, find.text('Discard copy…'));
       expect(
         find.text(
-          'Only it has these, and they would be lost: 7 files, 2 that git ignores, 1 that cannot be '
+          'These are only in the copy and would be lost: 7 files, 2 that git ignores, 1 that cannot be '
           'listed.',
         ),
         findsOneWidget,
       );
       await snap(t, 'copy-throw-away');
-      await press(t, find.text('Keep it'));
+      await press(t, find.text('Keep'));
       expect(s.calls.where((c) => c.first == 'throw away'), isEmpty);
-      await press(t, find.text('Throw it away'));
+      await press(t, find.text('Discard copy…'));
       s.copy = const CopyChanges();
-      await press(t, find.text('Throw the copy away'));
+      await press(t, find.text('Discard copy'));
       expect(s.calls.where((c) => c.first == 'throw away').single, ['throw away', 's', 'b', true]);
-      expect(find.textContaining('It is made when you first speak to it.'), findsOneWidget);
+      expect(find.textContaining('It is made with the first message.'), findsOneWidget);
       s.copy = const CopyChanges(made: true, ignored: 3);
-      await press(t, find.text('Look again'));
-      expect(find.text('The folder has all that can be listed.'), findsOneWidget);
-      await press(t, find.text('Throw it away'));
+      await press(t, find.bySemanticsLabel('Refresh'));
+      expect(find.text('No differences that can be listed.'), findsOneWidget);
+      await press(t, find.text('Discard copy…'));
       expect(find.textContaining('would be lost: 3 that git ignores.'), findsOneWidget);
-      await press(t, find.text('Keep it'));
+      await press(t, find.text('Keep'));
       s.copy = const CopyChanges(made: true, whole: false, files: files);
-      await press(t, find.text('Look again'));
-      await press(t, find.text('Throw it away'));
+      await press(t, find.bySemanticsLabel('Refresh'));
+      await press(t, find.text('Discard copy…'));
       expect(find.textContaining('would be lost: more than 7 files.'), findsOneWidget);
-      await press(t, find.text('Keep it'));
+      await press(t, find.text('Keep'));
       s.copy = const CopyChanges(made: true, back: ('q1', 2));
-      await press(t, find.text('Look again'));
-      await press(t, find.text('Throw it away'));
+      await press(t, find.bySemanticsLabel('Refresh'));
+      await press(t, find.text('Discard copy…'));
       expect(
         find.text(
-          'The folder has all that was changed in it. What was brought in last could not be put back '
-          'any more.',
+          'The folder already has all of its changes. The last apply could no longer be undone.',
         ),
         findsOneWidget,
       );
-      await press(t, find.text('Throw the copy away'));
+      await press(t, find.text('Discard copy'));
       expect(s.calls.where((c) => c.first == 'throw away').last.last, isFalse);
       // At work.
       s.copy = all;
@@ -1748,11 +1740,11 @@ void main() {
         const Event(96, 96, AgentStateChanged('b', AgentPhase.running)),
       ]);
       await settled(t);
-      await press(t, find.text('Look again'));
-      for (final l in ['Throw it away', 'Bring it up to date']) {
+      await press(t, find.bySemanticsLabel('Refresh'));
+      for (final l in ['Discard copy…', 'Update from folder']) {
         expect(t.widget<AxButton>(find.widgetWithText(AxButton, l)).onPressed, isNull, reason: l);
       }
-      expect(find.textContaining('Ada is at work'), findsOneWidget);
+      expect(find.textContaining('Ada is still working'), findsOneWidget);
       // When it stops it is looked at again; what goes wrong is said.
       s.calls.clear();
       s.current!.apply([
@@ -1766,14 +1758,14 @@ void main() {
       s
         ..failure = const Failed(1, 'internal', 'the copy is elsewhere now')
         ..calls.clear();
-      await press(t, find.text('Look again'));
+      await press(t, find.bySemanticsLabel('Refresh'));
       expect(find.text('the copy is elsewhere now'), findsOneWidget);
       // What went wrong is said, and what there is now is looked at all the same.
       s
         ..failsAt = 'bring'
         ..calls.clear()
         ..copy = const CopyChanges(made: true, files: [CopyFile('now.txt', 'new', digest: 'd')]);
-      await press(t, find.textContaining('Bring in 2 files'));
+      await press(t, find.textContaining('Apply 2 files'));
       expect(s.calls.map((c) => c.first), ['bring', 'copy']);
       expect(find.text('the copy is elsewhere now'), findsOneWidget);
       expect(find.text('now.txt'), findsOneWidget);
@@ -1783,7 +1775,7 @@ void main() {
       final s = await shell(t, session: working());
       await press(t, find.bySemanticsLabel('Add an agent to Fix the cache'));
       AxCheck apart() => t.widget<AxCheck>(
-        find.byWidgetPredicate((w) => w is AxCheck && w.label == 'Work in a copy of the folder'),
+        find.byWidgetPredicate((w) => w is AxCheck && w.label == 'Work in a separate copy'),
       );
       expect(apart().value, isTrue);
       await snap(t, 'add-agent-copy');
@@ -1791,14 +1783,14 @@ void main() {
       await press(t, find.bySemanticsLabel('Model: none'));
       await press(t, find.bySemanticsLabel('gpt-5.6').last);
       s.calls.clear();
-      await press(t, find.text('Add'));
+      await press(t, find.text('Add agent'));
       expect(s.calls.single.last, 'apart');
       await press(t, find.bySemanticsLabel('New session').first);
       expect(apart().value, isFalse);
       // Who only looks needs none.
       await press(t, find.bySemanticsLabel(RegExp('^Access: ')));
-      await press(t, find.bySemanticsLabel('Only look').last);
-      expect(find.text('Work in a copy of the folder'), findsNothing);
+      await press(t, find.bySemanticsLabel('Read only').last);
+      expect(find.text('Work in a separate copy'), findsNothing);
     });
 
     testWidgets('fits a small window', (t) async {
@@ -1814,7 +1806,7 @@ void main() {
       await settled(t);
       await press(t, find.text('Changes').last);
       expect(t.takeException(), isNull);
-      await press(t, find.text('Throw it away'));
+      await press(t, find.text('Discard copy…'));
       expect(t.takeException(), isNull);
     });
   });
@@ -1898,7 +1890,7 @@ void main() {
     ]);
     expect(find.text('Nothing has changed since the last commit.'), findsOneWidget);
     s.failure = const Failed(1, 'bad_request', 'there is no sandbox on this system');
-    await t.tap(find.text('Look again'));
+    await t.tap(find.bySemanticsLabel('Refresh'));
     await settled(t);
     expect(find.text('there is no sandbox on this system'), findsOneWidget);
     await t.tap(find.text('Conversation').last);
@@ -1925,6 +1917,95 @@ void main() {
       await t.pump(const Duration(milliseconds: 30));
     }
     expect(s.calls.length, 1);
+  });
+
+  testWidgets('what another agent asks is asked where that agent is', (t) async {
+    final s = await shell(t, session: working());
+    s.current!.apply(const [
+      Event(91, 91, AgentAdded('b', 'Ada', x, null, access: Access.ask)),
+      Event(
+        92,
+        92,
+        RequestOpened(
+          'q9',
+          'b',
+          'asks to run a command',
+          'make it',
+          'in .',
+          Answerable.live,
+          digest: 'd-q9',
+          session: true,
+        ),
+      ),
+    ]);
+    await settled(t);
+    // Not over another's words: a yes is given to the one that asked.
+    expect(find.byType(RequestBar), findsNothing);
+    expect(find.text('Ada is waiting for you'), findsOneWidget);
+    expect(find.text('Allow once'), findsNothing);
+    await snap(t, 'another-asks');
+    await press(t, find.text('Review'));
+    expect(find.text('Ada is waiting for you'), findsNothing);
+    expect(find.byType(RequestBar), findsOneWidget);
+    await press(t, find.text('Allow once'));
+    expect(s.calls.last, ['answer', 's', 'q9', 'd-q9', Answer.once]);
+  });
+
+  testWidgets('a folder is chosen in the system\'s own window, if one is chosen', (t) async {
+    final asked = <String?>[];
+    String? answer = '/chosen';
+    final was = folders;
+    folders = (at) async {
+      asked.add(at);
+      return answer;
+    };
+    addTearDown(() => folders = was);
+    await shell(t);
+    await press(t, find.bySemanticsLabel('New session').first);
+    await press(t, find.text('Choose…'));
+    expect(t.widget<EditableText>(field('Folder')).controller.text, '/chosen');
+    answer = null;
+    await press(t, find.text('Choose…'));
+    expect(t.widget<EditableText>(field('Folder')).controller.text, '/chosen');
+    expect(asked, [null, '/chosen']);
+    folders = (_) => throw PlatformException(code: 'x');
+    await press(t, find.text('Choose…'));
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('what has changed is beside the conversation, where there is room', (t) async {
+    final s = Asked()
+      ..current = working()
+      ..connections = const [key]
+      ..now = const Changes(
+        repository: true,
+        files: [Changed('lib/a.dart', 'changed')],
+        diff: '--- lib/a.dart\n+++ lib/a.dart\n@@ -1 +1,2 @@\n-old\n+fresh\n+more\n',
+      );
+    addTearDown(s.dispose);
+    await mount(t, Shell(s), size: const Size(1280, 820), dpr: 2);
+    await settled(t);
+    expect(s.calls, [
+      ['changes', 's'],
+    ]);
+    expect(find.text('Changed files'), findsOneWidget);
+    expect(find.bySemanticsLabel('lib/a.dart, 2 added, 1 removed'), findsOneWidget);
+    expect(find.bySemanticsLabel('Changes, 1'), findsOneWidget);
+    await snap(t, 'panel');
+    await press(t, find.bySemanticsLabel('Hide the panel'));
+    expect(find.text('Changed files'), findsNothing);
+    await press(t, find.bySemanticsLabel('Show the panel'));
+    await press(t, find.bySemanticsLabel('lib/a.dart, 2 added, 1 removed'));
+    expect(find.textContaining('fresh', findRichText: true), findsOneWidget);
+    // Nothing has changed: there is no panel, and the conversation has the room.
+    await press(t, find.text('Conversation').last);
+    s.now = const Changes(repository: true);
+    s.current!.apply(const [
+      Event(92, 92, RunEnded('r', Outcome.completed, null)),
+      Event(93, 93, AgentStateChanged('a', AgentPhase.done)),
+    ]);
+    await settled(t);
+    expect(find.text('Changed files'), findsNothing);
   });
 
   testWidgets('what is being written to an agent is there when its person comes back', (t) async {
@@ -1988,10 +2069,10 @@ void main() {
   testWidgets('adding an account on the way loses nothing of a new session', (t) async {
     final s = await shell(t, accounts: false);
     await press(t, find.bySemanticsLabel('New session').first);
-    await t.enterText(field('What should be done'), 'precious words');
+    await t.enterText(field('Task'), 'precious words');
     await t.enterText(field('Folder'), '/w');
     await settled(t);
-    await press(t, find.text('Add an account or a server'));
+    await press(t, find.text('Add an account or server'));
     s.connections = const [key];
     await press(t, find.text('Done'));
     if (find.byType(StartPage).evaluate().isEmpty) {
@@ -2008,15 +2089,15 @@ void main() {
       ..calls.clear()
       ..failsAt = 'prompt'
       ..failure = const LinkClosed('no answer');
-    await press(t, find.text('Start'));
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
+    await press(t, find.text('Start session'));
     expect(s.calls.map((c) => c.first), ['create', 'add', 'open', 'prompt', 'open', 'prompt']);
     expect(s.keys[0], s.keys[1]);
     s.calls.clear();
     await press(t, find.bySemanticsLabel('Access: Ask first'));
-    await press(t, find.bySemanticsLabel('Work in the folder').last);
+    await press(t, find.bySemanticsLabel('Work without asking').last);
     s.failure = null;
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     expect(s.calls, [
       ['set', 's_new', 'a_new', 'gpt-5.6', 'c1', Access.work],
       ['open', 's_new'],
@@ -2026,9 +2107,9 @@ void main() {
     s.calls.clear();
     await press(t, find.bySemanticsLabel('New session').first);
     expect(find.text('Do it.'), findsNothing);
-    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Task'), 'Do it.');
     await settled(t);
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     expect(s.calls.map((c) => c.first), ['create', 'add', 'open', 'prompt']);
     expect(s.keys.last, isNot(s.keys[1]));
   });
@@ -2041,7 +2122,7 @@ void main() {
       ..calls.clear()
       ..failsAt = 'add'
       ..gate = gate;
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     await press(t, find.bySemanticsLabel('Accounts').first);
     gate.complete();
     await settled(t);
@@ -2053,9 +2134,9 @@ void main() {
       ..gate = Completer<void>()
       ..failure = const LinkClosed('refused it');
     await press(t, find.bySemanticsLabel('New session').first);
-    await t.enterText(field('What should be done'), 'other words');
+    await t.enterText(field('Task'), 'other words');
     await settled(t);
-    await press(t, find.text('Start'));
+    await press(t, find.text('Start session'));
     await press(t, find.bySemanticsLabel('Accounts').first);
     s.gate!.complete();
     await settled(t);
@@ -2075,7 +2156,7 @@ void main() {
     gate.complete();
     await settled(t);
     expect(find.text('my-own'), findsOneWidget);
-    expect(find.bySemanticsLabel('Model: Another, by name'), findsOneWidget);
+    expect(find.bySemanticsLabel('Model: Other, by name'), findsOneWidget);
   });
 
   testWidgets('a provider that lists nothing: its model is written', (t) async {
@@ -2109,11 +2190,11 @@ void main() {
     s.failure = const LinkClosed('the host is gone');
     await t.tap(find.text('Stop'));
     await settled(t);
-    expect(find.textContaining('It was not stopped: the host is gone'), findsOneWidget);
+    expect(find.textContaining('It could not be stopped: the host is gone'), findsOneWidget);
     s.failure = null;
     await t.tap(find.text('Stop'));
     await settled(t);
-    expect(find.textContaining('It was not stopped'), findsNothing);
+    expect(find.textContaining('It could not be stopped'), findsNothing);
   });
 
   for (final (size, scale) in const [

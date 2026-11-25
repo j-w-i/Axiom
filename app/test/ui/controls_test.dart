@@ -141,7 +141,7 @@ void main() {
         ];
         expect(borders, hasLength(!on && outlined ? 1 : 0), reason: '$tone, $on');
         for (final b in borders) {
-          expect(b, Border.all(color: AxColors.dark.bayRule));
+          expect(b, Border.all(color: AxColors.dark.hairline));
         }
       }
     }
@@ -311,7 +311,7 @@ void main() {
     expect(got, isEmpty);
     await t.pump(AxMotion.settle);
     await t.tap(find.text('Deny'));
-    await t.tap(find.text('Allow in this worktree'));
+    await t.tap(find.text('Allow for this session'));
     await t.tap(find.text('Allow once'));
     expect(got, ['deny', 'always', 'once']);
   });
@@ -885,7 +885,7 @@ void main() {
     expect(shapes.length, AgentState.values.length);
   });
 
-  testWidgets('a session holds its agents and its plan; keys appear on hover', (t) async {
+  testWidgets('a session holds its agents; keys appear on hover', (t) async {
     final picked = <String>[], paused = <String>[];
     await put(
       t,
@@ -901,7 +901,6 @@ void main() {
       ),
     );
     expect(find.byType(AgentRow), findsNWidgets(6));
-    expect(find.byType(TaskRow), findsNWidgets(7));
     await t.tap(find.textContaining('Surveyor', findRichText: true).first);
     expect(picked, ['surveyor']);
     expect(find.bySemanticsLabel('Pause Lead'), findsNothing);
@@ -911,9 +910,14 @@ void main() {
     await t.pump();
     await t.tap(find.byType(AxButton).first);
     expect(paused, ['lead']);
-    await t.tap(find.text('Plan'));
-    await t.pumpAndSettle();
-    expect(find.byType(TaskRow), findsNothing);
+  });
+
+  testWidgets('a plan says how far it is, and how each part stands', (t) async {
+    await put(t, SizedBox(width: 284, child: PlanView(s.session.tasks)));
+    expect(find.byType(TaskRow), findsNWidgets(7));
+    expect(find.text('4 of 7'), findsOneWidget);
+    expect(find.bySemanticsLabel('Single-flight guard, active, Builder'), findsOneWidget);
+    expect(find.bySemanticsLabel('Failing test, done, Tester'), findsOneWidget);
   });
 
   testWidgets('reduced motion stops the lamp', (t) async {
@@ -961,7 +965,7 @@ void main() {
       );
       sizes.add(t.getSize(find.byType(AxButton)).height);
       final p = t.renderObject<RenderParagraph>(find.text('Run'));
-      expect(p.text.style!.fontSize, 12);
+      expect(p.text.style!.fontSize, 12.5);
     }
     expect(sizes, [24, 28, 32]);
   });

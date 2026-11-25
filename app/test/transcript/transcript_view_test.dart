@@ -2,6 +2,7 @@ import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/transcript/safe_text.dart';
+import 'package:axiom/transcript/inline.dart';
 import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/press.dart';
@@ -13,6 +14,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -174,21 +176,43 @@ void main() {
     }
   });
 
-  testWidgets('wide, the work stands beside the words it followed; narrow, under them', (t) async {
-    final f = Feed()..open('p');
+  testWidgets('the conversation is one column, as wide as it reads well, in the middle', (t) async {
+    final f = Feed()..open('r', ItemKind.prompt);
     f
+      ..end('r', 'Do it.')
+      ..open('p')
       ..end('p', 'I will read the file.')
       ..open('t', ItemKind.tool, 'read', {'path': 'a.dart'})
       ..end('t', '', {'summary': '20 lines'})
       ..open('q')
-      ..end('q', 'It is fine.');
-    await mount(t, TranscriptView(f.agent), size: const Size(1200, 500), dpr: 1);
-    Rect of(String x) => t.getRect(find.text(x, findRichText: true));
-    expect(of('a.dart').left, greaterThan(of('I will read the file.').right));
-    expect((of('a.dart').center.dy - of('I will read the file.').center.dy).abs(), lessThan(2));
-    expect(of('It is fine.').top, greaterThan(of('a.dart').bottom));
-    await mount(t, TranscriptView(f.agent), size: const Size(700, 500), dpr: 1);
-    expect(of('a.dart').top, greaterThan(of('I will read the file.').bottom));
+      ..end('q', 'It is fine. ${'So it is. ' * 60}');
+    for (final (width, left) in [(1200.0, 240.0), (700.0, 24.0)]) {
+      await mount(t, TranscriptView(f.agent), size: Size(width, 700), dpr: 1);
+      Rect of(String x) => t.getRect(find.text(x, findRichText: true));
+      final words = of('I will read the file.'), work = of('a.dart');
+      expect(words.left, closeTo(left, 1));
+      expect(work.top, greaterThan(words.bottom - 1));
+      // What came of it stands by it.
+      expect(of('20 lines').left - work.right, lessThan(16));
+      final long = t.getRect(find.textContaining('It is fine.', findRichText: true));
+      expect(long.right, lessThanOrEqualTo(width - left + 1));
+      // What was asked is at the right, as wide as its words.
+      final tile = of('Do it.');
+      expect(tile.right, closeTo(width - left - 14, 1));
+      expect(tile.width, lessThan(60));
+    }
+  });
+
+  testWidgets('code among words stands on a tile that is where the code is', (t) async {
+    final f = Feed()..open('p');
+    f.end('p', 'See **now** `a_b` and `c` here');
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    final tiles = t.renderObject<RenderCodeTiles>(find.byType(CodeTiles));
+    final text = t.renderObject<RenderParagraph>(
+      find.descendant(of: find.byType(CodeTiles), matching: find.byType(RichText)),
+    );
+    final plain = text.text.toPlainText();
+    expect([for (final r in tiles.ranges) plain.substring(r.start, r.end)], ['a_b', 'c']);
   });
 
   testWidgets('an end shorter than what was streamed is shown as it is', (t) async {
@@ -407,11 +431,11 @@ void main() {
     expect(tiles(), want);
   });
 
-  testWidgets('work stands on the first line of the words it stands beside', (t) async {
-    for (final (words, first) in [
+  testWidgets('work stands under the words that led to it, close to them', (t) async {
+    for (final (words, last) in [
       ('A paragraph.', 'A paragraph.'),
-      ([for (var i = 0; i < 9; i++) '- Item $i'].join('\n'), 'Item 3'),
-      ('Before.\n\n${[for (var i = 0; i < 6; i++) '## Head $i'].join('\n\n')}', 'Head 0'),
+      ([for (var i = 0; i < 9; i++) '- Item $i'].join('\n'), 'Item 8'),
+      ([for (var i = 0; i < 6; i++) '## Head $i'].join('\n\n'), 'Head 5'),
     ]) {
       final f = Feed()..open('p');
       f
@@ -419,9 +443,9 @@ void main() {
         ..open('t', ItemKind.tool, 'read', {'path': 'a.dart'})
         ..end('t', '');
       await mount(t, TranscriptView(f.agent, key: UniqueKey()), dpr: 1);
-      final a = t.getCenter(find.text(first, findRichText: true)).dy;
-      final b = t.getCenter(find.text('a.dart')).dy;
-      expect((a - b).abs(), lessThan(1.2), reason: first);
+      final a = t.getRect(find.text(last, findRichText: true));
+      final b = t.getRect(find.text('a.dart'));
+      expect(b.top - a.bottom, inInclusiveRange(2, 22), reason: last);
     }
   });
 

@@ -5,6 +5,7 @@ import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
+import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'models.dart';
 
@@ -36,49 +37,47 @@ class UsageKey extends StatelessWidget {
             color: open || s.hovered ? c.tinted(hue) : null,
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 112, maxWidth: 190, minHeight: 30),
-              child: IntrinsicWidth(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Row(
-                      children: [
-                        if (service.mark case final m?) ...[
-                          AxServiceMark(m, size: 12),
-                          const SizedBox(width: 6),
-                        ],
-                        Text(service.name, style: t.type.small.ink(open ? c.ink1 : c.ink2)),
-                        const SizedBox(width: 4),
-                        AxGlyph(AxIcon.down, size: 8, color: open || s.hovered ? c.ink2 : c.ink4),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            tight?.text ?? '–',
-                            maxLines: 1,
-                            textAlign: TextAlign.end,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.type.small.ink(c.ink3),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 3,
-                      child: AxMeter(
-                        label: '${service.name}, ${acc.name}',
-                        value: tight?.used,
-                        provenance: tight?.provenance ?? Provenance.unknown,
-                        thickness: 2,
-                        color: hue,
-                      ),
-                    ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: t.density.control, maxWidth: 220),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (service.mark case final m?) ...[
+                    AxServiceMark(m, size: 13),
+                    const SizedBox(width: 7),
                   ],
-                ),
+                  Flexible(
+                    child: Text(
+                      service.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.label.ink(open || s.hovered ? c.ink1 : c.ink2),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 30,
+                    child: AxMeter(
+                      label: '${service.name}, ${acc.name}',
+                      value: tight?.used,
+                      provenance: tight?.provenance ?? Provenance.unknown,
+                      color: hue,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      tight?.text ?? '–',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.label.ink(c.ink2),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  AxGlyph(AxIcon.down, size: 11, color: c.ink3),
+                ],
               ),
             ),
           ),
@@ -100,10 +99,7 @@ class UsageKey extends StatelessWidget {
               },
             ),
           ],
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-            child: ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
-          ),
+          Padding(padding: const EdgeInsets.fromLTRB(8, 8, 8, 4), child: const Hairline()),
           Pressable(
             label: 'Link another ${service.name} account',
             onPressed: () {
@@ -225,7 +221,7 @@ class _Account extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           '${w.provenance.words[0].toUpperCase()}${w.provenance.words.substring(1)}',
-                          style: t.type.caption.ink(c.ink4),
+                          style: t.type.caption.ink(c.ink3),
                         ),
                       ],
                     ],

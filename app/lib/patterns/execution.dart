@@ -42,11 +42,10 @@ class ExecutionKey extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    final hue = choices.first.item?.mark?.color(c);
     final words = [for (final ch in choices.take(2)) ?ch.item?.label];
     return AxPopover(
       key: ValueKey(of),
-      width: 372,
+      width: 400,
       anchor: (context, open, toggle) => Pressable(
         label: 'Runs on ${words.join(', ')}. Change',
         expanded: open,
@@ -56,7 +55,11 @@ class ExecutionKey extends StatelessWidget {
         },
         builder: (context, s) => DecoratedBox(
           decoration: BoxDecoration(
-            color: open || s.hovered ? c.tinted(hue) : null,
+            color: open
+                ? c.selected
+                : s.hovered
+                ? c.hover
+                : null,
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
           child: ConstrainedBox(
@@ -74,7 +77,10 @@ class ExecutionKey extends StatelessWidget {
                     child: Text.rich(
                       TextSpan(
                         children: [
-                          TextSpan(text: words.firstOrNull ?? 'Choose a model'),
+                          TextSpan(
+                            text: words.firstOrNull ?? 'Choose a model',
+                            style: TextStyle(fontVariations: t.type.labelStrong.fontVariations),
+                          ),
                           if (words.length > 1)
                             TextSpan(
                               text: '   ${words[1]}',
@@ -91,9 +97,8 @@ class ExecutionKey extends StatelessWidget {
                   SpringTo(
                     target: open ? 1 : 0,
                     spring: AxMotion.snap,
-                    builder: (_, v, child) =>
-                        Transform.rotate(angle: 3.1416 * (1 - v), child: child),
-                    child: AxGlyph(AxIcon.down, size: 9, color: open ? c.ink1 : c.ink3),
+                    builder: (_, v, child) => Transform.rotate(angle: 3.1416 * v, child: child),
+                    child: AxGlyph(AxIcon.down, size: 11, color: open ? c.ink1 : c.ink3),
                   ),
                 ],
               ),
@@ -273,7 +278,7 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
               target: open ? 1 : 0,
               spring: AxMotion.snap,
               builder: (_, v, child) => Transform.rotate(angle: v * 1.5708, child: child),
-              child: AxGlyph(AxIcon.right, size: 9, color: c.ink4),
+              child: AxGlyph(AxIcon.right, size: 11, color: c.ink3),
             ),
           ],
         ),

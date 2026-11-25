@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Loads the real fonts, so a rendered image shows what a person would see. Offscreen only: no
 /// test opens a window.
 Future<void> loadFonts() async {
-  for (final (family, file) in [('Archivo', 'Archivo'), ('Spline Sans Mono', 'SplineSansMono')]) {
+  for (final (family, file) in [('Inter', 'Inter'), ('JetBrains Mono', 'JetBrainsMono')]) {
     final l = FontLoader(family)
       ..addFont(Future.value(ByteData.sublistView(File('fonts/$file.ttf').readAsBytesSync())));
     await l.load();

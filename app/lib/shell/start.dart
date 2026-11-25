@@ -44,14 +44,14 @@ ServiceMark? markOf(String? provider, String? model, [String? harness]) =>
     };
 
 const accessItems = [
-  AxMenuItem(Access.read, 'Only look', detail: 'changes nothing'),
+  AxMenuItem(Access.read, 'Read only', detail: 'changes nothing'),
   AxMenuItem(Access.ask, 'Ask first', detail: 'before each change and command'),
-  AxMenuItem(Access.work, 'Work in the folder', detail: 'without asking; contained'),
+  AxMenuItem(Access.work, 'Work without asking', detail: 'contained in the folder'),
 ];
 
 /// How hard a model is to try, where that can be said.
 const efforts = [
-  AxMenuItem('', 'Usual effort'),
+  AxMenuItem('', 'Default effort'),
   AxMenuItem('low', 'Low effort'),
   AxMenuItem('medium', 'Medium effort'),
   AxMenuItem('high', 'High effort'),
@@ -89,24 +89,26 @@ class FormPart extends StatelessWidget {
 }
 
 class _Page extends StatelessWidget {
-  const _Page({required this.title, required this.children, this.problem});
-  final String title;
+  const _Page({required this.children, this.title, this.problem});
+  final String? title;
   final List<Widget> children;
   final String? problem;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+      padding: const EdgeInsets.fromLTRB(24, 40, 24, 32),
       child: Align(
-        alignment: Alignment.topLeft,
+        alignment: Alignment.topCenter,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
+          constraints: const BoxConstraints(maxWidth: 640),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(title, style: t.type.title),
-              const SizedBox(height: 20),
+              if (title case final w?) ...[
+                Semantics(header: true, child: Text(w, style: t.type.heading)),
+                const SizedBox(height: 18),
+              ],
               ...children,
               if (problem case final p?)
                 Semantics(
@@ -118,9 +120,9 @@ class _Page extends StatelessWidget {
                       children: [
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
-                          child: AxGlyph(AxIcon.warn, size: 13, color: c.faultText),
+                          child: AxGlyph(AxIcon.warn, size: 15, color: c.faultText),
                         ),
-                        const SizedBox(width: 7),
+                        const SizedBox(width: 8),
                         Expanded(child: Text(visible(p), style: t.type.ui.ink(c.faultText))),
                       ],
                     ),
@@ -130,6 +132,77 @@ class _Page extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Lines of one kind in a card, a hairline between them.
+class Card extends StatelessWidget {
+  const Card(this.lines, {super.key});
+  final List<Widget> lines;
+  @override
+  Widget build(BuildContext context) {
+    final c = Ax.of(context).colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: c.plate.border),
+        borderRadius: BorderRadius.circular(AxRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final (i, l) in lines.indexed) ...[
+            if (i > 0) const Hairline(),
+            Padding(padding: const EdgeInsets.fromLTRB(14, 10, 12, 10), child: l),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Something that can be chosen or not, and what that means.
+class OptionLine extends StatelessWidget {
+  const OptionLine({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    super.key,
+    this.note,
+    this.trailing,
+    this.below,
+  });
+  final String label;
+  final String? note;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final Widget? trailing, below;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AxCheck(label: label, value: value, onChanged: onChanged),
+                  if (note case final n?)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 24, top: 1),
+                      child: Text(n, style: t.type.label.ink(c.ink3)),
+                    ),
+                ],
+              ),
+            ),
+            ?trailing,
+          ],
+        ),
+        ?below,
+      ],
     );
   }
 }
@@ -380,7 +453,16 @@ class _Made {
 
 /// A new piece of work: what it is, where, and who does it.
 class StartPage extends StatefulWidget {
-  const StartPage(this.draft, {required this.onStarted, required this.onAccounts, super.key});
+  const StartPage(
+    this.draft, {
+    required this.onStarted,
+    required this.onAccounts,
+    this.onCancel,
+    super.key,
+  });
+
+  /// Leaves it as it is; null where there is nothing to go back to.
+  final VoidCallback? onCancel;
   final StartDraft draft;
   final ValueChanged<String> onStarted;
   final VoidCallback onAccounts;
@@ -401,13 +483,24 @@ class _StartPageState extends State<StartPage> {
     return oneLine(literal(f.endsWith(t) ? f.substring(0, f.length - t.length) : f), 60);
   }
 
+  /// The system's own window for it; nothing changes if it is left.
+  Future<void> _choose() async {
+    final f = await chooseFolder(wholePath(d.folder.text.trim()));
+    if (f != null && mounted) d.change(() => d.folder.text = f);
+  }
+
   Future<void> _start(Connection? c) async {
     final id = await d.start(c, () => mounted);
     if (id != null && mounted) widget.onStarted(id);
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
+  Widget build(BuildContext context) => CallbackShortcuts(
+    bindings: {const SingleActivator(LogicalKeyboardKey.escape): ?widget.onCancel},
+    child: _form(),
+  );
+
+  Widget _form() => ListenableBuilder(
     listenable: Listenable.merge([d.store, d]),
     builder: (context, _) {
       final s = d.store;
@@ -451,18 +544,21 @@ class _StartPageState extends State<StartPage> {
       ];
       final accessSelect = AxSelect<Access>(
         label: 'Access',
+        named: false,
         items: access,
         value: d.access,
         onChanged: (v) => d.change(() => d.access = v),
       );
       final effortSelect = AxSelect<String>(
         label: 'Effort',
+        named: false,
         items: efforts,
         value: d.effort,
         onChanged: (v) => d.change(() => d.effort = v),
       );
       final runsWith = AxSelect<String>(
-        label: 'Runs with',
+        label: 'Harness',
+        named: false,
         items: [
           const AxMenuItem(
             'axiom',
@@ -491,8 +587,159 @@ class _StartPageState extends State<StartPage> {
         value: d.harness,
         onChanged: d.runWith,
       );
+      final choices = <Widget>[
+        // What is chosen of the program or the account, in one row under the words.
+        if (here.isNotEmpty || missing.isNotEmpty || d.harness != 'axiom') runsWith,
+        if (d.harness != 'axiom') ...[
+          if (s.accountsOf(d.harness).isNotEmpty)
+            AxSelect<String>(
+              label: 'Account',
+              named: false,
+              items: [
+                const AxMenuItem('', 'Default sign-in'),
+                for (final x in s.accountsOf(d.harness))
+                  AxMenuItem(x.id, oneLine(x.name, 60), mark: markOf(x.provider, null)),
+              ],
+              value: d.account ?? '',
+              onChanged: (v) => d.change(() => d.account = v.isEmpty ? null : v),
+            ),
+          if (other?.hands ?? false)
+            AxSelect<bool>(
+              label: 'Tools',
+              named: false,
+              items: [
+                const AxMenuItem(
+                  true,
+                  'Axiom tools',
+                  detail: 'asked about and contained by Axiom',
+                  mark: ServiceMark.axiom,
+                ),
+                AxMenuItem(
+                  false,
+                  'Built-in tools',
+                  detail: 'outside Axiom\'s sandbox',
+                  mark: markOf(null, null, d.harness),
+                ),
+              ],
+              value: d.hands,
+              onChanged: (v) => d.change(() {
+                d.hands = v;
+                d.fit();
+              }),
+            ),
+        ] else if (all.isEmpty)
+          AxButton(
+            label: 'Add an account or server',
+            icon: AxIcon.plus,
+            onPressed: widget.onAccounts,
+          )
+        else ...[
+          AxSelect<String>(
+            label: 'Account',
+            named: false,
+            items: [
+              for (final x in all)
+                AxMenuItem(
+                  x.id,
+                  oneLine(x.name, 60),
+                  detail: providerName(x.provider),
+                  mark: markOf(x.provider, null),
+                ),
+            ],
+            value: chosen!.id,
+            onChanged: (v) => d.change(() {
+              d.connection = v;
+              d.problem = null;
+              d.typed = false;
+              d.model.clear();
+            }),
+          ),
+          if (listed)
+            AxSelect<String>(
+              label: 'Model',
+              named: typed,
+              face: !typed && d.model.text.isEmpty ? 'Choose a model' : null,
+              items: [
+                for (final m in models)
+                  AxMenuItem(m.id, oneLine(m.name ?? m.id, 80), mark: ServiceMark.of(m.id)),
+                const AxMenuItem(_other, 'Other, by name'),
+              ],
+              value: typed ? _other : d.model.text,
+              onChanged: (v) => d.change(() {
+                d.typed = v == _other;
+                d.model.text = d.typed ? '' : v;
+              }),
+            ),
+        ],
+        if (d.tries) effortSelect,
+        if (d.harness != 'axiom' || all.isNotEmpty) accessSelect,
+      ];
+      final options = <Widget>[
+        if (d.harness != 'axiom' && !d.withHands)
+          OptionLine(
+            label: 'Use this folder\'s agent settings',
+            note: other == null
+                ? 'It is not on this computer any more.'
+                : other.needsTrust
+                ? '${other.name} cannot be told to ignore them. They can name programs that it starts.'
+                : 'They can name programs that it starts.',
+            value: d.trust,
+            onChanged: (v) => d.change(() => d.trust = v),
+          ),
+        if (d.access != Access.read)
+          OptionLine(
+            label: 'Work in a separate copy',
+            note: other == null || d.withHands
+                ? 'Changes stay out of your folder until you apply them.'
+                : 'Changes stay out of your folder until you apply them. It is outside Axiom\'s '
+                      'sandbox, so it starts in the copy but is not held to it.',
+            value: d.apart,
+            onChanged: (v) => d.change(() => d.apart = v),
+          ),
+        if (other == null)
+          for (final w in d.words)
+            OptionLine(
+              label: 'Follow ${w.path}',
+              note: d.open == w.path ? null : 'Instructions for agents, as they are now.',
+              value: d.follow.contains(w.path),
+              onChanged: (v) => d.change(() {
+                v ? d.follow.add(w.path) : d.follow.remove(w.path);
+                // Read first: what is followed has been shown.
+                if (v) d.open = w.path;
+              }),
+              trailing: AxButton(
+                label: d.open == w.path ? 'Hide' : 'View',
+                tone: AxTone.quiet,
+                onPressed: () => d.change(() => d.open = d.open == w.path ? null : w.path),
+              ),
+              below: d.open != w.path
+                  ? null
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 220),
+                        child: Surface(
+                          c.block,
+                          radius: AxRadius.block,
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: Text(literal(w.text), style: t.type.codeSmall.ink(c.ink2)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+      ];
+      final model = d.harness != 'axiom'
+          ? 'Default model'
+          : all.isNotEmpty && (!listed || typed)
+          ? 'As the provider calls it'
+          : null;
       return _Page(
-        title: adds ? 'New agent' : 'New session',
+        title: adds ? 'Add an agent' : 'What should the agent do?',
         problem: d.problem,
         children: [
           if (adds)
@@ -501,27 +748,37 @@ class _StartPageState extends State<StartPage> {
               child: AxField(label: 'Name', controller: d.name, placeholder: 'Reviewer'),
             ),
           FormPart(
-            'What should be done',
-            note: adds ? 'It can also be told later.' : null,
-            child: AxField(label: 'What should be done', controller: d.say, lines: 4),
+            adds ? 'Task' : null,
+            note: adds ? 'Optional. You can message it later.' : null,
+            child: AxField(
+              label: 'Task',
+              controller: d.say,
+              lines: 4,
+              placeholder: adds ? '' : 'Describe the task',
+              autofocus: !adds,
+            ),
           ),
           if (!adds)
             FormPart(
               'Folder',
-              note: 'The whole path. The agent changes nothing outside it.',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              note: d.harness == 'axiom' || d.withHands
+                  ? 'The agent changes nothing outside it.'
+                  : null,
+              child: Row(
                 children: [
-                  AxField(
-                    label: 'Folder',
-                    controller: d.folder,
-                    mono: true,
-                    placeholder: '~/project',
+                  Expanded(
+                    child: AxField(
+                      label: 'Folder',
+                      controller: d.folder,
+                      mono: true,
+                      placeholder: '~/project',
+                    ),
                   ),
                   if (recent.isNotEmpty) ...[
-                    const SizedBox(height: 6),
+                    const SizedBox(width: 6),
                     AxSelect<String>(
                       label: 'Recent folders',
+                      face: 'Recent',
                       items: [
                         for (final f in recent)
                           AxMenuItem(f, oneLine(literal(_tail(f)), 60), detail: _head(f)),
@@ -530,245 +787,56 @@ class _StartPageState extends State<StartPage> {
                       onChanged: (v) => d.change(() => d.folder.text = v),
                     ),
                   ],
+                  const SizedBox(width: 6),
+                  AxButton(label: 'Choose…', icon: AxIcon.folder, onPressed: _choose),
                 ],
               ),
             ),
-          if (other == null)
-            for (final w in d.words)
-              FormPart(
-                null,
-                note: d.open == w.path ? null : 'Its words for agents. Followed only as they are now, and only if you say so.',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        AxCheck(
-                          label: 'Follow ${w.path}',
-                          value: d.follow.contains(w.path),
-                          onChanged: (v) => d.change(() {
-                            v ? d.follow.add(w.path) : d.follow.remove(w.path);
-                            // Read first: what is followed has been shown.
-                            if (v) d.open = w.path;
-                          }),
-                        ),
-                        AxButton(
-                          label: d.open == w.path ? 'Hide it' : 'Read it',
-                          tone: AxTone.quiet,
-                          onPressed: () =>
-                              d.change(() => d.open = d.open == w.path ? null : w.path),
-                        ),
-                      ],
-                    ),
-                    if (d.open == w.path)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 220),
-                          child: Surface(
-                            c.block,
-                            radius: AxRadius.key,
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.all(12),
-                              child: SizedBox(
-                                width: double.infinity,
-                                child: Text(literal(w.text), style: t.type.codeSmall.ink(c.ink2)),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-          if (here.isNotEmpty || missing.isNotEmpty || d.harness != 'axiom')
-            FormPart(
-              null,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  runsWith,
-                  if (s.accountsOf(d.harness).isNotEmpty)
-                    AxSelect<String>(
-                      label: 'Account',
-                      items: [
-                        const AxMenuItem('', 'Its own sign-in'),
-                        for (final x in s.accountsOf(d.harness))
-                          AxMenuItem(x.id, oneLine(x.name, 60), mark: markOf(x.provider, null)),
-                      ],
-                      value: d.account ?? '',
-                      onChanged: (v) => d.change(() => d.account = v.isEmpty ? null : v),
-                    ),
-                  if (other?.hands ?? false)
-                    AxSelect<bool>(
-                      label: 'Tools',
-                      items: [
-                        const AxMenuItem(
-                          true,
-                          'Axiom\'s',
-                          detail: 'asked about and contained by Axiom',
-                          mark: ServiceMark.axiom,
-                        ),
-                        AxMenuItem(
-                          false,
-                          'Its own',
-                          detail: 'outside Axiom\'s sandbox',
-                          mark: markOf(null, null, d.harness),
-                        ),
-                      ],
-                      value: d.hands,
-                      onChanged: (v) => d.change(() {
-                        d.hands = v;
-                        d.fit();
-                      }),
-                    ),
-                  if (d.harness != 'axiom') ...[if (d.tries) effortSelect, accessSelect],
-                ],
-              ),
+          FormPart(
+            null,
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: choices,
             ),
-          if (d.harness != 'axiom') ...[
+          ),
+          if (model != null)
             FormPart(
               'Model',
               child: AxField(
                 label: 'Model name',
                 controller: d.model,
                 mono: true,
-                placeholder: 'Its own choice',
+                placeholder: model,
+                onChanged: d.harness == 'axiom' ? (_) => d.typed = true : null,
               ),
             ),
-            if (!d.withHands)
-              FormPart(
-                null,
-                note: other == null
-                    ? 'It is not on this computer any more.'
-                    : other.needsTrust
-                    ? '${other.name} cannot be told to ignore what the folder says. Those settings can '
-                          'name programs that it starts.'
-                    : 'Those settings can name programs that it starts.',
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: AxCheck(
-                    label: 'Let the folder\'s own settings for it take effect',
-                    value: d.trust,
-                    onChanged: (v) => d.change(() => d.trust = v),
-                  ),
-                ),
-              ),
-          ] else if (all.isEmpty)
-            FormPart(
-              'Account',
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: AxButton(
-                  label: 'Add an account or a server',
-                  icon: AxIcon.plus,
-                  onPressed: widget.onAccounts,
-                ),
-              ),
-            )
-          else ...[
-            FormPart(
-              null,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  AxSelect<String>(
-                    label: 'Account',
-                    items: [
-                      for (final x in all)
-                        AxMenuItem(
-                          x.id,
-                          oneLine(x.name, 60),
-                          detail: providerName(x.provider),
-                          mark: markOf(x.provider, null),
-                        ),
-                    ],
-                    value: chosen!.id,
-                    onChanged: (v) => d.change(() {
-                      d.connection = v;
-                      d.problem = null;
-                      d.typed = false;
-                      d.model.clear();
-                    }),
-                  ),
-                  if (listed)
-                    AxSelect<String>(
-                      label: 'Model',
-                      items: [
-                        for (final m in models)
-                          AxMenuItem(m.id, oneLine(m.name ?? m.id, 80), mark: ServiceMark.of(m.id)),
-                        const AxMenuItem(_other, 'Another, by name'),
-                      ],
-                      value: typed ? _other : d.model.text,
-                      onChanged: (v) => d.change(() {
-                        d.typed = v == _other;
-                        d.model.text = d.typed ? '' : v;
-                      }),
-                    ),
-                  if (d.tries) effortSelect,
-                  accessSelect,
-                  AxButton(
-                    label: 'Accounts',
-                    icon: AxIcon.web,
-                    tone: AxTone.quiet,
-                    onPressed: widget.onAccounts,
-                  ),
-                ],
-              ),
-            ),
-            if (!listed || typed)
-              FormPart(
-                'Model',
-                child: AxField(
-                  label: 'Model name',
-                  controller: d.model,
-                  mono: true,
-                  placeholder: 'As the provider calls it',
-                  onChanged: (_) => d.typed = true,
-                ),
-              ),
-          ],
-          if (d.access != Access.read)
-            FormPart(
-              null,
-              note: other == null || d.withHands
-                  ? 'What it changes there gets into the folder when you bring it in.'
-                  : 'What it changes there gets into the folder when you bring it in. It is outside '
-                        'Axiom\'s sandbox: the copy is where it begins, and not where it has to stay.',
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: AxCheck(
-                  label: 'Work in a copy of the folder',
-                  value: d.apart,
-                  onChanged: (v) => d.change(() => d.apart = v),
-                ),
-              ),
-            ),
-          Text(
-            d.harness == 'axiom'
-                ? 'Commands run contained: no network, writing only in the folder.'
-                : d.withHands
-                ? 'Its model and your sign-in; Axiom\'s tools, questions and sandbox. You are asked '
-                      'before it is started.'
-                : 'It runs outside Axiom\'s sandbox. You are asked before it is started.',
-            style: t.type.label.ink(c.ink2),
-          ),
-          const SizedBox(height: 8),
+          if (options.isNotEmpty) ...[Card(options), const SizedBox(height: 16)],
           Row(
             children: [
+              Expanded(
+                child: Text(
+                  d.harness == 'axiom'
+                      ? 'Sandboxed: no network, writes only in the folder.'
+                      : d.withHands
+                      ? 'Its model and your sign-in, with Axiom\'s tools and sandbox. You approve each '
+                            'start.'
+                      : 'Runs outside Axiom\'s sandbox. You approve each start.',
+                  style: t.type.label.ink(c.ink2),
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (widget.onCancel case final f?) ...[
+                AxButton(label: 'Cancel', onPressed: f),
+                const SizedBox(width: 6),
+              ],
               AxButton(
                 label: d.busy
                     ? 'Starting'
                     : adds
-                    ? 'Add'
-                    : 'Start',
-                icon: adds ? AxIcon.plus : AxIcon.play,
+                    ? 'Add agent'
+                    : 'Start session',
                 tone: AxTone.primary,
                 onPressed: ready ? () => unawaited(_start(chosen)) : null,
               ),
@@ -888,110 +956,115 @@ class _AccountsPageState extends State<AccountsPage> {
           (!own || _url.text.trim().isNotEmpty) &&
           (from == null || _key.text.trim().isNotEmpty);
       return _Page(
-        title: 'Accounts and servers',
         problem: _problem,
         children: [
-          for (final x in widget.store.connections) ...[
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  if (markOf(x.provider, null) case final m?)
-                    AxServiceMark(m, size: 14)
-                  else
-                    AxGlyph(AxIcon.web, size: 14, color: c.ink3),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+          if (widget.store.connections.isNotEmpty) ...[
+            Card([
+              for (final x in widget.store.connections)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
                       children: [
-                        Text(
-                          oneLine(x.name, 80),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.uiStrong,
+                        if (markOf(x.provider, null) case final m?)
+                          AxServiceMark(m, size: 16)
+                        else
+                          AxGlyph(AxIcon.web, size: 16, color: c.ink3),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                oneLine(x.name, 80),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: t.type.uiMedium,
+                              ),
+                              Text(
+                                [
+                                  providerName(x.provider),
+                                  if (x.url case final u?) oneLine(u, 60),
+                                  switch (x) {
+                                    Connection(signIn: _?) => 'its own sign-in',
+                                    Connection(plan: true, lasts: true) => 'signed in',
+                                    Connection(plan: true) => 'signed in until the host stops',
+                                    Connection(lasts: true) => 'key in the system\'s store',
+                                    Connection(secret: true) => 'key until the host stops',
+                                    _ => 'no key',
+                                  },
+                                ].join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: t.type.small.ink(c.ink3),
+                              ),
+                            ],
+                          ),
                         ),
-                        Text(
-                          [
-                            providerName(x.provider),
-                            if (x.url case final u?) oneLine(u, 60),
-                            switch (x) {
-                              Connection(signIn: _?) => 'its own sign-in',
-                              Connection(plan: true, lasts: true) => 'signed in',
-                              Connection(plan: true) => 'signed in until the host stops',
-                              Connection(lasts: true) => 'key in the system\'s store',
-                              Connection(secret: true) => 'key until the host stops',
-                              _ => 'no key',
-                            },
-                          ].join(' · '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.small.ink(c.ink3),
-                        ),
+                        const SizedBox(width: 10),
+                        if (_leaving == x.id) ...[
+                          AxButton(
+                            label: 'Keep',
+                            autofocus: true,
+                            onPressed: () => setState(() => _leaving = null),
+                          ),
+                          const SizedBox(width: 6),
+                          AxButton(
+                            label: 'Remove ${oneLine(x.name, 30)}',
+                            onPressed: _busy
+                                ? null
+                                : () => unawaited(
+                                    _do(() async {
+                                      final ended = await widget.store.disconnect(x.id);
+                                      _leaving = null;
+                                      if (ended == false) {
+                                        _problem =
+                                            'It is removed here. OpenAI did not confirm that it is signed '
+                                            'out there: Axiom can be disconnected in ChatGPT\'s settings.';
+                                      }
+                                    }),
+                                  ),
+                          ),
+                        ] else
+                          AxButton(
+                            label: 'Remove',
+                            onPressed: _busy ? null : () => setState(() => _leaving = x.id),
+                          ),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  if (_leaving == x.id) ...[
-                    AxButton(
-                      label: 'Keep',
-                      tone: AxTone.quiet,
-                      autofocus: true,
-                      onPressed: () => setState(() => _leaving = null),
-                    ),
-                    const SizedBox(width: 6),
-                    AxButton(
-                      label: 'Remove ${oneLine(x.name, 30)}',
-                      onPressed: _busy
-                          ? null
-                          : () => unawaited(
-                              _do(() async {
-                                final ended = await widget.store.disconnect(x.id);
-                                _leaving = null;
-                                if (ended == false) {
-                                  _problem =
-                                      'It is removed here. OpenAI did not confirm that it is signed '
-                                      'out there: Axiom can be disconnected in ChatGPT\'s settings.';
-                                }
-                              }),
+                    if (x.problem case final p?)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 28, top: 8),
+                        child: Row(
+                          children: [
+                            Expanded(child: Text(visible(p), style: t.type.small.ink(c.faultText))),
+                            const SizedBox(width: 10),
+                            AxButton(
+                              label: 'Sign in again',
+                              onPressed: _busy ? null : () => unawaited(_signIn(again: x.id)),
                             ),
-                    ),
-                  ] else
-                    AxButton(
-                      label: 'Remove',
-                      tone: AxTone.quiet,
-                      onPressed: _busy ? null : () => setState(() => _leaving = x.id),
-                    ),
-                ],
-              ),
-            ),
-            if (x.problem case final p?)
-              Padding(
-                padding: const EdgeInsets.only(left: 24, bottom: 12),
-                child: Row(
-                  children: [
-                    Expanded(child: Text(visible(p), style: t.type.small.ink(c.faultText))),
-                    const SizedBox(width: 10),
-                    AxButton(
-                      label: 'Sign in again',
-                      onPressed: _busy ? null : () => unawaited(_signIn(again: x.id)),
-                    ),
+                          ],
+                        ),
+                      ),
+                    if (x.signIn case final command?)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 28, top: 8),
+                        child: _SignIn(command, leaving: _leaving == x.id),
+                      ),
                   ],
                 ),
-              ),
-            if (x.signIn case final command?)
-              Padding(
-                padding: const EdgeInsets.only(left: 24, bottom: 12),
-                child: _SignIn(command, leaving: _leaving == x.id),
-              ),
+            ]),
+            const SizedBox(height: 28),
           ],
-          if (widget.store.connections.isNotEmpty) const SizedBox(height: 18),
+          Semantics(header: true, child: Text('Add an account', style: t.type.title)),
+          const SizedBox(height: 12),
           FormPart(
             null,
             child: Align(
               alignment: Alignment.centerLeft,
               child: AxSelect<String>(
                 label: 'Add',
+                named: false,
                 items: [
                   for (final p in const [
                     'lm-studio',
@@ -1033,11 +1106,7 @@ class _AccountsPageState extends State<AccountsPage> {
           if (!plan)
             FormPart(
               'Name',
-              child: AxField(
-                label: 'Name',
-                controller: _name,
-                placeholder: 'So you can tell it apart',
-              ),
+              child: AxField(label: 'Name', controller: _name, placeholder: 'To tell it apart'),
             ),
           if (own)
             FormPart(
@@ -1054,9 +1123,8 @@ class _AccountsPageState extends State<AccountsPage> {
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
               child: Text(
-                'Your own Claude Code keeps it in a folder of its own. You sign in to it yourself, in '
-                'a terminal, with the command that is shown once it is added. Agents use an account '
-                'only where you choose it.',
+                'Claude Code keeps this account in its own folder. You sign in yourself, in a terminal, '
+                'with the command shown once it is added. Agents use it only where you choose it.',
                 style: t.type.label.ink(c.ink3),
               ),
             ),
@@ -1069,7 +1137,10 @@ class _AccountsPageState extends State<AccountsPage> {
               child: AxField(label: 'Key', controller: _key, secret: true, mono: true),
             ),
           Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
+              AxButton(label: 'Done', onPressed: widget.onDone),
+              const SizedBox(width: 6),
               if (plan)
                 AxButton(
                   label: 'Continue with ChatGPT',
@@ -1079,12 +1150,9 @@ class _AccountsPageState extends State<AccountsPage> {
               else
                 AxButton(
                   label: 'Add',
-                  icon: AxIcon.plus,
                   tone: AxTone.primary,
                   onPressed: ready ? () => unawaited(_add()) : null,
                 ),
-              const SizedBox(width: 8),
-              AxButton(label: 'Done', tone: AxTone.quiet, onPressed: widget.onDone),
             ],
           ),
         ],
@@ -1123,9 +1191,12 @@ class _SigningState extends State<_Signing> {
       Signin(connection: _?) => ('You are signed in again', null),
       Signin(:final problem?) => ('You are not signed in', visible(problem)),
       Signin(finishing: true) => ('Signing in…', null),
-      _ when widget.opened => ('Go on in your browser', 'Axiom notices when you are done there.'),
+      _ when widget.opened => (
+        'Continue in your browser',
+        'Axiom continues when you are done there.',
+      ),
       _ => (
-        'Open the address in your browser',
+        'Open the link in your browser',
         'It could not be opened from here. It is for a browser on this computer.',
       ),
     };
@@ -1134,10 +1205,10 @@ class _SigningState extends State<_Signing> {
       child: Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Surface(
-          c.block,
-          radius: AxRadius.key,
+          c.plate,
+          radius: AxRadius.card,
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1154,11 +1225,11 @@ class _SigningState extends State<_Signing> {
                     children: [
                       if (s.waits) ...[
                         AxButton(
-                          label: widget.opened ? 'Open it again' : 'Open it',
+                          label: widget.opened ? 'Open again' : 'Open',
                           onPressed: widget.onOpen,
                         ),
                         AxButton(
-                          label: _copied ? 'Copied' : 'Copy the address',
+                          label: _copied ? 'Copied' : 'Copy link',
                           onPressed: () async {
                             await Clipboard.setData(ClipboardData(text: s.url));
                             if (mounted) setState(() => _copied = true);
@@ -1220,8 +1291,7 @@ class _SignInState extends State<_SignIn> {
             ),
             const SizedBox(width: 6),
             AxButton(
-              label: _copied ? 'Copied' : 'Copy to sign in',
-              tone: AxTone.quiet,
+              label: _copied ? 'Copied' : 'Copy',
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: widget.command));
                 if (mounted) setState(() => _copied = true);

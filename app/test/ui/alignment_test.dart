@@ -3,6 +3,7 @@ import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/icons.dart';
+import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/overlay.dart';
 import 'package:axiom/ui/status.dart';
 import 'package:flutter/rendering.dart';
@@ -38,33 +39,50 @@ void main() {
     expect(y(number), closeTo(y(code), .01));
   });
 
-  testWidgets('every time and owner in a session ends on the same edge', (t) async {
+  testWidgets('marks and lamps of a session stand in columns of their own', (t) async {
     await mount(
       t,
       Align(
         alignment: Alignment.topLeft,
         child: SizedBox(
           width: 248,
-          child: SessionPanel(session: s.session, selected: 'builder', onSelect: (_) {}),
+          child: Column(
+            children: [
+              SessionPanel(session: s.session, selected: 'builder', onSelect: (_) {}),
+              for (final o in s.otherSessions) SessionRow(o, onOpen: () {}),
+              PlanView(s.session.tasks),
+            ],
+          ),
         ),
       ),
+      size: const Size(800, 900),
       dpr: 2,
     );
-    final right = {
-      for (final x in ['6:08', '9:55', '3:17', '2:20', '4 of 7', 'Reviewer'])
-        x: t.getTopRight(find.text(x).last).dx,
-    };
-    for (final e in right.entries) {
-      expect(e.value, closeTo(right['6:08']!, .3), reason: '$right');
-    }
-    final marks = {
-      for (final m in t.renderObjectList<RenderBox>(find.byType(AxLamp)))
-        m.localToGlobal(m.size.center(Offset.zero)).dx,
-    };
-    expect(
-      marks.reduce((a, b) => a > b ? a : b) - marks.reduce((a, b) => a < b ? a : b),
+    void oneLine(Iterable<double> xs, String what) => expect(
+      xs.reduce((a, b) => a > b ? a : b) - xs.reduce((a, b) => a < b ? a : b),
       lessThan(.6),
+      reason: '$what: $xs',
     );
+    Iterable<double> middles(Finder f) =>
+        t.renderObjectList<RenderBox>(f).map((m) => m.localToGlobal(m.size.center(Offset.zero)).dx);
+    final row = find.byType(AgentRow);
+    oneLine(middles(find.descendant(of: row, matching: find.byType(AxServiceMark))), 'marks');
+    oneLine(middles(find.descendant(of: row, matching: find.byType(AxLamp))), 'lamps');
+    oneLine(
+      middles(find.descendant(of: find.byType(TaskRow), matching: find.byType(AxLamp))),
+      'tasks',
+    );
+    oneLine([
+      for (final x in ['2h', '1d', '3d']) t.getTopRight(find.text(x)).dx,
+    ], 'ages');
+    oneLine([
+      for (final x in ['Builder', 'Tester', 'Reviewer']) t.getTopRight(find.text(x).last).dx,
+    ], 'owners');
+    // An agent's two lines begin where each other does.
+    oneLine([
+      for (final x in [find.text('Lead'), find.textContaining('Reading review notes')])
+        t.getTopLeft(x).dx,
+    ], 'lines');
   });
 
   testWidgets('menu details end on one edge, and their marks keep their shape', (t) async {
@@ -104,7 +122,7 @@ void main() {
       t,
       find.descendant(of: find.text('Answer'), matching: find.byType(RichText)),
     );
-    const capHeight = .686; // Archivo
-    expect(glyph, closeTo(b - 12 * capHeight / 2, .75));
+    const capHeight = .727; // Inter
+    expect(glyph, closeTo(b - 12.5 * capHeight / 2, .75));
   });
 }

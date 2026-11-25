@@ -99,7 +99,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
                   ),
                   child: Surface(
                     Ax.of(context).colors.overlay,
-                    radius: AxRadius.overlay,
+                    radius: AxRadius.card,
                     child: Padding(
                       padding: const EdgeInsets.all(5),
                       // However much there is, it stays in the window and scrolls.
@@ -506,7 +506,7 @@ class _ItemsState<T> extends State<_Items<T>> {
   }
 }
 
-/// A two-line selector key: what is being chosen, and the choice.
+/// A selector key: the choice, after what is being chosen where that is not plain.
 class AxSelect<T> extends StatelessWidget {
   const AxSelect({
     required this.label,
@@ -514,8 +514,16 @@ class AxSelect<T> extends StatelessWidget {
     required this.value,
     required this.onChanged,
     super.key,
+    this.named = true,
+    this.face,
   });
+
+  /// Shown in place of the choice.
+  final String? face;
   final String label;
+
+  /// Its label is shown, and not only heard.
+  final bool named;
   final List<AxMenuItem<T>> items;
   final T value;
   final ValueChanged<T> onChanged;
@@ -537,34 +545,30 @@ class AxSelect<T> extends StatelessWidget {
           radius: AxRadius.key,
           child: ConstrainedBox(
             // Taller with larger text.
-            constraints: BoxConstraints(minHeight: t.density.control + 6),
+            constraints: BoxConstraints(minHeight: t.density.control),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 9),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (chosen?.mark case final m?) ...[
+                  if (chosen?.mark case final m? when face == null) ...[
                     AxServiceMark(m, size: 13),
                     const SizedBox(width: 8),
                   ],
+                  if (named && face == null) ...[
+                    Text(label, style: t.type.label.ink(c.ink3)),
+                    const SizedBox(width: 6),
+                  ],
                   Flexible(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(label, style: t.type.caption.ink(c.ink3)),
-                        Text(
-                          chosen?.label ?? 'None',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.labelStrong.copyWith(height: 1.2),
-                        ),
-                      ],
+                    child: Text(
+                      face ?? chosen?.label ?? 'None',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.labelStrong,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  AxGlyph(AxIcon.down, size: 9),
+                  const SizedBox(width: 6),
+                  AxGlyph(AxIcon.down, size: 11, color: c.ink3),
                 ],
               ),
             ),

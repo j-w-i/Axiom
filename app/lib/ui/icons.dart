@@ -30,21 +30,17 @@ enum AxIcon {
   strips('M3 3.5 V12.5 M6.4 3.5 V12.5 M9.7 3.5 V12.5 M13 3.5 V12.5'),
   lanes('M2.5 4.5 H8 M5.5 8 H11 M9 11.5 H13.5'),
   warn('M8 3 L13.5 12.8 H2.5 Z M8 6.8 V9.4 M8 11 V11.1'),
+  folder('M2.5 4.2 H6.4 L7.8 5.8 H13.5 V12.6 H2.5 Z'),
+  settings('M3 5 H8 M11 5 H13 M3 11 H5 M8 11 H13 M9.5 3.4 V6.6 M6.5 9.4 V12.6'),
+  sidebar('M2.5 3.5 H13.5 V12.5 H2.5 Z M6 3.5 V12.5'),
+  panel('M2.5 3.5 H13.5 V12.5 H2.5 Z M10 3.5 V12.5'),
+  up('M8 12.5 V3.8 M4.5 7.2 L8 3.7 L11.5 7.2'),
+  comment('M2.8 3.5 H13.2 V10.8 H7.5 L4.8 13 V10.8 Z'),
+  refresh('M12.8 6.5 A5 5 0 1 0 13 9 M13 3.5 V6.6 H9.9'),
   more('M4 8 H4.1 M8 8 H8.1 M12 8 H12.1');
 
   const AxIcon(this.data);
 
-  /// The hue of the kind of work an icon stands for, if it stands for one.
-  Color? kind(AxColors c) => switch (this) {
-    file || list => c.kindRead,
-    edit => c.kindEdit,
-    search => c.kindSearch,
-    terminal => c.kindRun,
-    web => c.kindWeb,
-    think || delegate => c.kindThink,
-    shield || warn => c.attentionText,
-    _ => null,
-  };
   final String data;
   static final _cache = <AxIcon, Path>{};
   Path get path => _cache[this] ??= svgPath(data);

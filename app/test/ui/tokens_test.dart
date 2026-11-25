@@ -20,31 +20,11 @@ void main() {
   for (final (name, c) in [('dark', AxColors.dark), ('light', AxColors.light)]) {
     group(name, () {
       // Where each colour may be used as text. A hovered surface is included.
-      List<(String, Color)> stops(String n, SurfaceSpec s) => [
-        ('$n top', s.top),
-        ('$n bottom', s.bottom),
-      ];
-      final general = [
-        ...stops('chassis', c.chassis),
-        ...stops('plate', c.plate),
-        ...stops('plateHover', c.plateHover),
-        ...stops('plateSelected', c.plateSelected),
-        ...stops('bay', c.bay),
-        ...stops('overlay', c.overlay),
-        ('row', c.rowSelectedTop),
-        ('row', c.rowSelectedBottom),
-      ];
-      // A selected row and a selected plate take no hover tint.
-      final hovered = [
-        for (final (n, s) in general)
-          if (n != 'row' && !n.startsWith('plateSelected'))
-            ('$n hovered', Color.alphaBlend(c.hover, s)),
-      ];
-
+      final ground = [('chassis', c.chassis.fill), ('bay', c.bay.fill)];
+      final general = [...ground, ('plate', c.plate.fill), ('overlay', c.overlay.fill)];
+      final hovered = [for (final (n, s) in general) ('$n hovered', Color.alphaBlend(c.hover, s))];
       final chosen = [
-        ('row', c.rowSelectedTop),
-        ('row', c.rowSelectedBottom),
-        for (final (n, s) in stops('bay', c.bay)) ('tab on $n', Color.alphaBlend(c.tabSelected, s)),
+        for (final (n, s) in general) ('chosen on $n', Color.alphaBlend(c.selected, s)),
       ];
 
       test('text reads on every surface it may sit on', () {
@@ -57,11 +37,10 @@ void main() {
         }
 
         final everywhere = [...general, ...hovered];
-        check('ink1', c.ink1, everywhere, 7);
+        check('ink1', c.ink1, [...everywhere, ...chosen], 7);
         for (final (n, k) in [
           ('ink2', c.ink2),
           ('ink3', c.ink3),
-          ('ink4', c.ink4),
           ('liveText', c.liveText),
           ('attentionText', c.attentionText),
           ('faultText', c.faultText),
@@ -69,30 +48,40 @@ void main() {
         ]) {
           check(n, k, everywhere);
         }
+        // The faintest is for the grounds, and not where something is chosen.
+        check('ink4', c.ink4, [
+          for (final (n, s) in ground) ...[(n, s), ('$n hovered', Color.alphaBlend(c.hover, s))],
+        ]);
+        // Each recedes from the one before it.
+        for (final (_, bg) in ground) {
+          final r = [
+            for (final k in [c.ink1, c.ink2, c.ink3, c.ink4]) ratio(k, bg),
+          ];
+          expect(r[0] - r[1], greaterThan(2));
+          expect(r[1] - r[2], greaterThan(1));
+          expect(r[2], greaterThan(r[3]));
+        }
         final tints = [
           for (final h in c.services.entries)
-            ('${h.key.name} tint', Color.alphaBlend(c.tinted(h.value), c.overlay.top)),
+            ('${h.key.name} tint', Color.alphaBlend(c.tinted(h.value), c.overlay.fill)),
         ];
         check('ink1', c.ink1, tints);
         check('ink3', c.ink3, tints);
         for (final (n, k) in [
-          ('ink1', c.ink1),
           ('ink2', c.ink2),
           ('ink3', c.ink3),
           ('attention', c.attentionText),
+          ('fault', c.faultText),
         ]) {
           check(n, k, chosen);
         }
-        check('voice', c.voice, stops('bay', c.bay));
-        check('ink1', c.ink1, [...stops('key', c.key), ...stops('keyHover', c.keyHover)]);
-        check('ink1', c.ink1, stops('keyDown', c.keyDown));
-        check('ink2', c.ink2, stops('key', c.key));
-        check('ink4 placeholder', c.ink4, stops('bay', c.bay));
-        for (final s in [c.primary, c.primaryHover, c.primaryDown]) {
-          check('onPrimary', c.onPrimary, stops('primary', s));
+        for (final (n, s) in [('key', c.key), ('keyHover', c.keyHover), ('keyDown', c.keyDown)]) {
+          check('ink1', c.ink1, [(n, s.fill)]);
+          check('ink3', c.ink3, [(n, s.fill)]);
         }
-        for (final (n, k) in [('ink1', c.ink1), ('ink3', c.ink3), ('attention', c.attentionText)]) {
-          check(n, k, stops('plate (a request)', c.plate));
+        check('placeholder', c.ink3, [('plate', c.plate.fill)]);
+        for (final s in [c.primary, c.primaryHover, c.primaryDown]) {
+          check('onPrimary', c.onPrimary, [('primary', s.fill)]);
         }
         for (final (n, k) in [
           ('plain', c.codePlain),
@@ -104,10 +93,11 @@ void main() {
           ('comment', c.codeComment),
           ('inline', c.codeInline),
         ]) {
-          final b = c.block.bottom;
+          final b = c.block.fill;
           check('code $n', k, [
             ('block', b),
-            ('bay', c.bay.bottom),
+            ('bay', c.bay.fill),
+            ('tile', c.codeTile),
             ('added', Color.alphaBlend(c.diffAdd, b)),
             ('removed', Color.alphaBlend(c.diffRemove, b)),
           ]);
@@ -117,16 +107,8 @@ void main() {
 
       test('marks that carry meaning can be seen', () {
         final bad = <String>[];
-        for (final e in {
-          for (final m in c.services.entries) m.key.name: m.value,
-          'read': c.kindRead,
-          'edit': c.kindEdit,
-          'search': c.kindSearch,
-          'run': c.kindRun,
-          'web': c.kindWeb,
-          'think': c.kindThink,
-        }.entries) {
-          final tint = Color.alphaBlend(c.tinted(e.value), c.overlay.top);
+        for (final e in {for (final m in c.services.entries) m.key.name: m.value}.entries) {
+          final tint = Color.alphaBlend(c.tinted(e.value), c.overlay.fill);
           final track = [
             for (final (s, bg) in general) ('track on $s', Color.alphaBlend(c.meterTrack, bg)),
           ];
@@ -151,19 +133,34 @@ void main() {
         expect(bad, isEmpty, reason: bad.join('\n'));
       });
 
-      test('gradients stay within a few percent', () {
-        for (final s in [c.chassis, c.plate, c.key, c.bay, c.overlay, c.primary]) {
-          double l(Color k) => HSLColor.fromColor(k).lightness;
-          expect((l(s.top) - l(s.bottom)).abs(), lessThan(.045));
+      test('only what floats casts a shadow', () {
+        for (final s in [c.chassis, c.plate, c.bay, c.block, c.key, c.keyHover, c.primary]) {
+          expect(s.shadows, isEmpty);
         }
+        expect(c.overlay.shadows, isNotEmpty);
       });
 
-      // The owner's choice of three (B, 2026-11-25), after cobalt, violet and a truer blue.
-      test('the accent is the aqua that was chosen', () {
-        for (final k in [c.live, c.primary.top, c.primary.bottom]) {
-          final h = HSLColor.fromColor(k);
-          expect(h.hue, inInclusiveRange(192, 201));
-          expect(h.lightness, lessThan(.67));
+      // The owner's choices: aqua B (2026-11-25), and keys without a hue (round 12, A).
+      test('aqua is only what runs and what has the keyboard; keys are neutral', () {
+        for (final k in [c.live, c.liveText, c.focus]) {
+          expect(HSLColor.fromColor(k).hue, inInclusiveRange(192, 201));
+        }
+        for (final k in [
+          c.primary.fill,
+          c.onPrimary,
+          c.key.fill,
+          c.chassis.fill,
+          c.bay.fill,
+          c.plate.fill,
+          c.overlay.fill,
+          c.codeInline,
+          c.ink1,
+          c.ink3,
+        ]) {
+          expect((k.r - k.b).abs(), lessThan(.05), reason: '$k');
+        }
+        for (final k in [c.codeKeyword, c.codeString, c.codeCall, c.codeType, c.codeNumber]) {
+          expect(k, isNot(anyOf(c.live, c.liveText, c.focus)));
         }
       });
     });

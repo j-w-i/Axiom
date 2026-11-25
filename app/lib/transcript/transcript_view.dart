@@ -11,6 +11,7 @@ import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
 import '../ui/press.dart';
+import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'inline.dart';
 import 'markdown.dart';
@@ -372,7 +373,6 @@ class TranscriptViewState extends State<TranscriptView> {
         child: _RowView(
           rows,
           k,
-          wide: _width >= 860,
           onLink: widget.onLink,
           opened: _opened.contains,
           onToggle: _toggle,
@@ -388,7 +388,7 @@ class TranscriptViewState extends State<TranscriptView> {
     }
 
     final a = widget.agent;
-    const side = EdgeInsets.symmetric(horizontal: 24);
+    final side = EdgeInsets.symmetric(horizontal: AxSpace.beside(_width));
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.pageDown): () => _by(.9),
@@ -439,7 +439,7 @@ class TranscriptViewState extends State<TranscriptView> {
                       ),
                     ),
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                      padding: side.copyWith(bottom: 20),
                       sliver: SliverToBoxAdapter(
                         child: ListenableBuilder(
                           listenable: a,
@@ -544,7 +544,7 @@ class _Ending extends StatelessWidget {
             height: 18,
             child: Align(
               alignment: Alignment.centerLeft,
-              child: AxGlyph(AxIcon.warn, size: 13, color: failed ? c.faultText : c.ink3),
+              child: AxGlyph(AxIcon.warn, size: 15, color: failed ? c.faultText : c.ink3),
             ),
           ),
           Expanded(child: Text(words, style: t.type.ui.ink(failed ? c.faultText : c.ink3))),
@@ -554,39 +554,16 @@ class _Ending extends StatelessWidget {
   }
 }
 
-/// Reading width of prose, and of everything that stands with it.
-const _measure = 640.0, _wide = 780.0;
-
-BlockKind? _firstKind(ItemModel i, int from) {
-  final closed = i.doc.closed;
-  return from < closed.length ? closed[from].kind : i.doc.tail.firstOrNull?.kind;
-}
+/// Reading width, and the width of what was asked.
+const _measure = AxSpace.column, _asked = 600.0;
 
 class _RowView extends StatelessWidget {
-  const _RowView(
-    this.rows,
-    this.at, {
-    required this.wide,
-    required this.opened,
-    required this.onToggle,
-    this.onLink,
-  });
+  const _RowView(this.rows, this.at, {required this.opened, required this.onToggle, this.onLink});
   final List<TranscriptRow> rows;
   final int at;
-  final bool wide;
   final bool Function(ItemModel) opened;
   final void Function(ItemModel) onToggle;
   final void Function(String url)? onLink;
-
-  /// Prose and work side by side, at the proportions of the accepted design.
-  static Widget columns(Widget left, Widget right) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Expanded(flex: 54, child: _Unit(left)),
-      const SizedBox(width: 44),
-      Expanded(flex: 46, child: _Unit(right)),
-    ],
-  );
 
   @override
   Widget build(BuildContext context) {
@@ -600,45 +577,33 @@ class _RowView extends StatelessWidget {
         voice: i.kind,
         by: i.name,
         opens: r.index == 0,
-        afterTool: r.index == 0 && afterWork && !wide,
+        afterTool: r.index == 0 && afterWork,
         goesOn: r.index + 1 < blocks.length && blocks[r.index + 1].continues,
         closes: !i.open && r.index + 1 == blocks.length && i.doc.tail.isEmpty,
         whole: () => wholeCode(blocks, r.index),
         onLink: onLink,
       );
-      return RepaintBoundary(child: wide ? columns(w, const SizedBox.shrink()) : w);
+      return RepaintBoundary(child: w);
     }
     Widget prose() => i == null
         ? const SizedBox(width: double.infinity)
-        : _Prose(i, r.index, after: afterWork && !wide, onLink: onLink);
+        : _Prose(i, r.index, after: afterWork, onLink: onLink);
 
     if (r.work.isEmpty) {
-      final w = prose();
-      return RepaintBoundary(child: wide ? columns(w, const SizedBox.shrink()) : w);
+      return RepaintBoundary(child: prose());
     }
     final first = r.from == 0;
-    // The first line of the work stands on the first line of the words.
-    final top = wide
-        ? (!first
-              ? 2.0
-              : i == null || r.index == 0
-              ? 17.0
-              : switch (_firstKind(i, r.index)) {
-                  BlockKind.heading => 18.9,
-                  BlockKind.item => 5.0,
-                  _ => 10.0,
-                })
-        : at == 0
+    final top = at == 0
         ? 16.0
         : first
-        ? 10.0
-        : 2.0;
+        ? 8.0
+        : 0.0;
     final work = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (var k = r.from; k < r.to; k++)
           Padding(
-            padding: EdgeInsets.only(top: k == r.from ? top : 2),
+            padding: EdgeInsets.only(top: k == r.from ? top : 0),
             child: RepaintBoundary(
               child: ListenableBuilder(
                 key: ObjectKey(r.work[k]),
@@ -654,12 +619,10 @@ class _RowView extends StatelessWidget {
       ],
     );
     return RepaintBoundary(
-      child: wide
-          ? columns(first ? prose() : const SizedBox.shrink(), work)
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [if (first) prose(), work],
-            ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [if (first) prose(), work],
+      ),
     );
   }
 }
@@ -736,27 +699,6 @@ class _ProseState extends State<_Prose> {
   }
 }
 
-/// Copied as a whole before what stands beside it.
-class _Unit extends StatefulWidget {
-  const _Unit(this.child);
-  final Widget child;
-  @override
-  State<_Unit> createState() => _UnitState();
-}
-
-class _UnitState extends State<_Unit> {
-  final _delegate = StaticSelectionContainerDelegate();
-  @override
-  void dispose() {
-    _delegate.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) =>
-      SelectionContainer(delegate: _delegate, child: widget.child);
-}
-
 /// All of a code block that was cut into parts, from any of them.
 String wholeCode(List<Block> blocks, int at) {
   var from = at;
@@ -823,17 +765,32 @@ class _BlockViewState extends State<BlockView> {
     final base = t.type.prose.ink(ink);
     final code = t.type.code.copyWith(height: base.height, color: c.codeInline, fontSize: 12.5);
     Widget text(TextStyle s, {bool header = false}) {
+      final words = inlineSpan(
+        b.text,
+        s,
+        code,
+        c,
+        onLink: widget.onLink,
+        recognizers: _recognizers,
+      );
       final w = ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _measure),
-        child: Text.rich(
-          inlineSpan(b.text, s, code, c, onLink: widget.onLink, recognizers: _recognizers),
-          style: s,
+        child: CodeTiles(
+          words: words,
+          color: widget.voice == ItemKind.prompt ? c.bay.fill : c.codeTile,
+          child: Text.rich(words, style: s),
         ),
       );
       return header ? Semantics(header: true, child: w) : w;
     }
 
-    Widget left(Widget w) => Align(alignment: Alignment.topLeft, heightFactor: 1, child: w);
+    final asked = widget.voice == ItemKind.prompt;
+    Widget left(Widget w) => Align(
+      alignment: Alignment.topLeft,
+      heightFactor: 1,
+      widthFactor: asked ? 1 : null,
+      child: w,
+    );
     var child = switch (b.kind) {
       BlockKind.paragraph => left(text(base)),
       BlockKind.heading => left(
@@ -864,7 +821,7 @@ class _BlockViewState extends State<BlockView> {
       ),
       BlockKind.rule => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        child: ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
+        child: const Hairline(),
       ),
       BlockKind.code => CodeBlock(b, goesOn: widget.goesOn, whole: widget.whole),
       BlockKind.table => TableBlock(b.text),
@@ -886,7 +843,6 @@ class _BlockViewState extends State<BlockView> {
         : b.kind == BlockKind.item
         ? 6.0
         : 11.0;
-    final asked = widget.voice == ItemKind.prompt;
     if (asked && widget.opens && widget.by.isNotEmpty) {
       child = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -900,7 +856,17 @@ class _BlockViewState extends State<BlockView> {
         ],
       );
     }
-    if (asked) child = _Voice(child, opens: widget.opens, closes: widget.closes, gap: top);
+    if (asked) {
+      child = _Voice(
+        child,
+        opens: widget.opens,
+        closes: widget.closes,
+        gap: top,
+        // Parts of one request are as wide as each other.
+        fits:
+            widget.opens && widget.closes && b.kind != BlockKind.code && b.kind != BlockKind.table,
+      );
+    }
     child = Padding(
       // The tile begins above its words, which stay on the line any others would.
       padding: EdgeInsets.only(
@@ -911,7 +877,7 @@ class _BlockViewState extends State<BlockView> {
             : 0,
       ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: _wide),
+        constraints: BoxConstraints(maxWidth: asked ? _asked : _measure),
         child: child,
       ),
     );
@@ -919,7 +885,11 @@ class _BlockViewState extends State<BlockView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Align(alignment: Alignment.topLeft, heightFactor: 1, child: child),
+        Align(
+          alignment: asked ? Alignment.topRight : Alignment.topLeft,
+          heightFactor: 1,
+          child: child,
+        ),
         // At the right, so that it is read after the words and not among them.
         SizedBox(
           width: double.infinity,
@@ -945,30 +915,39 @@ class _BlockViewState extends State<BlockView> {
   }
 }
 
-/// What was asked stands on a tile of its own, so it is found when scrolling back. The words
-/// themselves are as strong as any others.
+/// What was asked stands on a tile of its own, at the right, so it is found when scrolling back. The
+/// words themselves are as strong as any others.
 class _Voice extends StatelessWidget {
-  const _Voice(this.child, {required this.opens, required this.closes, required this.gap});
+  const _Voice(
+    this.child, {
+    required this.opens,
+    required this.closes,
+    required this.gap,
+    required this.fits,
+  });
+
+  /// As wide as its words.
+  final bool fits;
   final Widget child;
   final bool opens, closes;
   final double gap;
-  static const pad = 8.0;
+  static const pad = 10.0;
   @override
   Widget build(BuildContext context) {
     final c = Ax.of(context).colors;
-    const r = Radius.circular(AxRadius.plate);
+    const r = Radius.circular(AxRadius.card);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: c.block.top,
+        color: c.block.fill,
         borderRadius: BorderRadius.vertical(
           top: opens ? r : Radius.zero,
           bottom: closes ? r : Radius.zero,
         ),
       ),
       child: SizedBox(
-        width: double.infinity,
+        width: fits ? null : double.infinity,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(12, opens ? pad : gap, 12, closes ? pad : 0),
+          padding: EdgeInsets.fromLTRB(14, opens ? pad : gap, 14, closes ? pad : 0),
           child: child,
         ),
       ),
@@ -1058,7 +1037,7 @@ class _CodeBlockState extends State<CodeBlock> {
             ? '${literal(cutTo(l, CodeBlock.maxColumns))} … ${l.length - CodeBlock.maxColumns} more'
             : literal(l),
     ];
-    const r = Radius.circular(AxRadius.key);
+    const r = Radius.circular(AxRadius.block);
     return MouseRegion(
       onEnter: (_) => setState(() => _over = true),
       onExit: (_) => setState(() => _over = _copied = false),
@@ -1070,7 +1049,7 @@ class _CodeBlockState extends State<CodeBlock> {
               bottom: widget.goesOn ? Radius.zero : r,
             ),
             child: ColoredBox(
-              color: c.block.bottom,
+              color: c.block.fill,
               child: SizedBox(
                 width: double.infinity,
                 child: SingleChildScrollView(
@@ -1170,7 +1149,7 @@ class TableBlock extends StatelessWidget {
           for (final (i, r) in rows.indexed)
             TableRow(
               decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: c.bayRule)),
+                border: Border(bottom: BorderSide(color: c.hairline)),
               ),
               children: [
                 for (var k = 0; k < n; k++)
@@ -1261,6 +1240,22 @@ class ToolRow extends StatelessWidget {
     _ => AxIcon.more,
   };
 
+  /// What is being done, and what was done, as a person would say it.
+  static (String, String)? verbs(String tool) => switch (tool.toLowerCase()) {
+    'read' || 'notebookread' => ('Reading', 'Read'),
+    'edit' ||
+    'write' ||
+    'multiedit' ||
+    'notebookedit' ||
+    'patch' ||
+    'apply_patch' => ('Editing', 'Edited'),
+    'search' || 'glob' || 'list' || 'grep' || 'ls' || 'find' => ('Searching', 'Searched'),
+    'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => ('Running', 'Ran'),
+    'fetch' || 'webfetch' || 'websearch' => ('Fetching', 'Fetched'),
+    'delegate' || 'agent' || 'task' => ('Working with another agent', 'Worked with another agent'),
+    _ => null,
+  };
+
   static bool isPatch(String name) => const {'patch', 'apply_patch'}.contains(name.toLowerCase());
 
   /// The files a call has changed, as its result says.
@@ -1317,10 +1312,13 @@ class ToolRow extends StatelessWidget {
         : null;
     final line = WorkLine(
       icon: ToolRow.iconOf(item.name),
-      name: name[0].toUpperCase() + name.substring(1),
+      name: switch (verbs(name)) {
+        (final now, final then) => item.open ? now : then,
+        null => name[0].toUpperCase() + name.substring(1),
+      },
       detail: shown,
       result: item.open
-          ? 'running'
+          ? ''
           : switch (item.outcome!) {
               Outcome.cancelled => 'cancelled',
               Outcome.interrupted => 'interrupted',
@@ -1334,7 +1332,7 @@ class ToolRow extends StatelessWidget {
       alignment: Alignment.topLeft,
       heightFactor: 1,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: _wide),
+        constraints: const BoxConstraints(maxWidth: _measure),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1347,8 +1345,13 @@ class ToolRow extends StatelessWidget {
                 expanded: opened,
                 radius: 0,
                 onPressed: onToggle ?? () {},
-                builder: (_, s) =>
-                    ColoredBox(color: s.hovered ? c.hover : c.bay.bottom, child: line),
+                builder: (_, s) => DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: s.hovered ? c.hover : null,
+                    borderRadius: BorderRadius.circular(AxRadius.key),
+                  ),
+                  child: line,
+                ),
               ),
             if (opened && diff != null)
               Padding(padding: const EdgeInsets.fromLTRB(22, 4, 0, 6), child: _Changes(diff))
