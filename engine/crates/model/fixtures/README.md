@@ -67,3 +67,7 @@ There is no OpenRouter key here. Read on 2026-11-25:
 | `reasoning` | <https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#streaming-response> | **Put together**: that piece, then the last events of <https://openrouter.ai/docs/api_reference/streaming#the-final-usage-chunk-chat-completions>, whose `...` are left out and whose `usage` is the example of <https://openrouter.ai/docs/cookbook/administration/usage-accounting>; before them the comment that page says is sent |
 
 The APIs' real behaviour has not been tested.
+
+## chatgpt/
+
+`test-only.pk8` is an RSA key made with `openssl genpkey` for `src/chatgpt_tests.rs`, which signs identity tokens with it. It is nobody's and good for nothing else.

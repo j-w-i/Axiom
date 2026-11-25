@@ -119,6 +119,7 @@ version = "0.0.1"
 dependencies = [
  "proptest",
  "reqwest",
+ "ring",
  "rustls",
  "rustls-platform-verifier",
  "serde",

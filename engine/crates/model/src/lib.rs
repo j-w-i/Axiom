@@ -5,6 +5,7 @@
 //! providers differ, [`transport`] is HTTP, and [`Accumulator`] folds events into a [`Reply`]. There is
 //! no loop here: nothing is retried, and no tool is run.
 
+pub mod chatgpt;
 pub mod codec;
 pub mod error;
 mod fold;

@@ -10,6 +10,8 @@ workspace = true
 
 [dependencies]
 reqwest.workspace = true
+# Signatures and digests of a sign-in. rustls has it in the tree anyway.
+ring = "0.17"
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
 serde.workspace = true
