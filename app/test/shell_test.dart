@@ -11,6 +11,8 @@ import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/gestures.dart';
+import 'package:axiom/ui/commands.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -437,6 +439,107 @@ void main() {
     await t.tap(find.bySemanticsLabel('Show the sidebar'));
     await t.pump();
     expect(find.byType(SessionPanel), findsOneWidget);
+    s.dispose();
+  });
+
+  testWidgets('a key goes to another session, the stop key stops, F6 goes around', (t) async {
+    final opened = <String>[];
+    final s = Opens(opened)
+      ..phase = HostPhase.connected
+      ..current = recorded()
+      ..sessions = [
+        info('p', 'One', '/me/web', 3),
+        info('q', 'Two', '/me/web', 2),
+        info('r', 'Three', '/me/docs', 1),
+      ];
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    final order = sessionOrder(s);
+    Future<void> ctrl(LogicalKeyboardKey k, {bool shift = false}) async {
+      if (shift) await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await keys(t, k);
+      if (shift) await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    }
+
+    await ctrl(LogicalKeyboardKey.digit1);
+    await ctrl(LogicalKeyboardKey.digit3);
+    expect(opened, [order[0], order[2]].where((x) => x != s.current!.id));
+    // There is no ninth.
+    await ctrl(LogicalKeyboardKey.digit9);
+    expect(opened.length, lessThanOrEqualTo(2));
+    opened.clear();
+    await ctrl(LogicalKeyboardKey.tab);
+    await ctrl(LogicalKeyboardKey.tab, shift: true);
+    final at = order.indexOf(s.current!.id), n = order.length;
+    expect(opened, [order[(at + 1) % n], order[(at - 1) % n]]);
+    // Around the window, and back.
+    FocusNode? where() => FocusManager.instance.primaryFocus;
+    await t.sendKeyEvent(LogicalKeyboardKey.f6);
+    await t.pump();
+    final first = where();
+    await t.sendKeyEvent(LogicalKeyboardKey.f6);
+    await t.pump();
+    expect(where(), isNot(first));
+    s.dispose();
+  });
+
+  test('no two commands have one key', () {
+    for (final mac in [true, false]) {
+      debugDefaultTargetPlatformOverride = mac ? TargetPlatform.macOS : TargetPlatform.linux;
+      final all = Command.values.map((c) => c.keys).toList();
+      expect(all.toSet().length, all.length, reason: '$all');
+      expect(Command.find.keys, mac ? '⌘K' : 'Ctrl+K');
+      expect(Command.allow.keys, mac ? '⇧⌘Y' : 'Ctrl+Shift+Y');
+    }
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('room can be made in a conversation that can act and is not at work', (t) async {
+    for (final (access, works, can) in [
+      (Access.ask, false, true),
+      (Access.ask, true, false),
+      (null, false, false),
+    ]) {
+      final m = SessionModel('s')
+        ..apply([
+          const Event(1, 1, SessionCreated('T', '/w')),
+          Event(
+            2,
+            2,
+            AgentAdded('a', 'Lead', const Execution(harness: 'axiom'), null, access: access),
+          ),
+          const Event(3, 3, RunStarted('r', 'a')),
+          const Event(4, 4, ItemStarted('i', 'r', 'a', ItemKind.prose, '', null)),
+          const Event(5, 5, ItemEnded('i', Outcome.completed, 'x', null)),
+          if (!works) const Event(6, 6, RunEnded('r', Outcome.completed, null)),
+        ]);
+      final s = store()
+        ..phase = HostPhase.connected
+        ..current = m;
+      await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+      await keys(t, LogicalKeyboardKey.keyK);
+      await t.enterText(
+        find.descendant(of: find.byType(SearchBox), matching: find.byType(EditableText)),
+        'summarise',
+      );
+      await t.pump();
+      expect(find.textContaining('Summarise the'), can ? findsOneWidget : findsNothing);
+      await t.pumpWidget(const SizedBox());
+      s.dispose();
+    }
+  });
+
+  testWidgets('a folder asked for in a terminal is where a session could begin', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    expect(find.byType(StartPage), findsNothing);
+    s.onFolder!('/me/from-a-terminal');
+    await t.pump();
+    expect(find.byType(StartPage), findsOneWidget);
+    expect(find.textContaining('from-a-terminal'), findsWidgets);
+    await t.pumpWidget(const SizedBox());
+    expect(s.onFolder, isNull);
     s.dispose();
   });
 

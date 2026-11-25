@@ -4,6 +4,7 @@ import 'package:axiom/patterns/models.dart';
 import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/patterns/usage.dart';
+import 'package:axiom/ui/commands.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/overlay.dart';
@@ -369,6 +370,82 @@ void main() {
       final rlo = String.fromCharCode(0x202E), esc = String.fromCharCode(0x1B);
       await show(t, req('rm ${rlo}x$esc[31m'));
       expect(find.text(r'rm \u{202E}x\u{1B}[31m'), findsOneWidget);
+    });
+
+    group('answered by key', () {
+      final all = Commands();
+      late List<String> got;
+      late StateSetter again;
+      late RequestView r;
+      Future<void> put2(WidgetTester t, RequestView first) async {
+        got = [];
+        r = first;
+        await put(
+          t,
+          CommandScope(
+            all,
+            child: SizedBox(
+              width: 800,
+              child: StatefulBuilder(
+                builder: (context, set) {
+                  again = set;
+                  final id = r.subject;
+                  return RequestBar(
+                    r,
+                    onOnce: () => got.add('once $id'),
+                    onAlways: () => got.add('always $id'),
+                    onDeny: () => got.add('deny $id'),
+                    onDenyWith: (w) => got.add('deny $w'),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        await t.pump();
+      }
+
+      testWidgets('not before it has been there long enough to be meant', (t) async {
+        await put2(t, req('one'));
+        for (final c in [Command.allow, Command.deny]) {
+          expect(all.run(c), isFalse);
+        }
+        await t.pump(AxMotion.settle);
+        all.run(Command.allow);
+        expect(got, ['once one']);
+        // What takes its place is another question: the same key again is no answer to it.
+        again(() => r = req('two'));
+        await t.pump();
+        await t.pump();
+        expect(all.run(Command.allow), isFalse);
+        expect(all.run(Command.deny), isFalse);
+        expect(got, ['once one']);
+        await t.pump(AxMotion.settle);
+        all.run(Command.deny);
+        expect(got, ['once one', 'deny two']);
+      });
+
+      testWidgets('a yes only once it has been seen to its end; never while why not is written', (
+        t,
+      ) async {
+        await put2(t, req([for (var i = 0; i < 80; i++) 'line $i'].join('\n')));
+        await t.pump(AxMotion.settle);
+        expect(all.run(Command.allow), isFalse);
+        expect(all.can(Command.deny), isTrue, reason: 'no is always possible');
+        await t.drag(
+          find.descendant(of: find.byType(RequestBar), matching: find.byType(Scrollable)),
+          const Offset(0, -5000),
+        );
+        await t.pumpAndSettle();
+        expect(all.can(Command.allow), isTrue);
+        await t.tap(find.text('Deny with reason'));
+        await t.pumpAndSettle();
+        expect(all.run(Command.allow), isFalse);
+        expect(got, isEmpty);
+        // Gone, nothing takes it.
+        await t.pumpWidget(const SizedBox());
+        expect(all.run(Command.deny), isFalse);
+      });
     });
 
     testWidgets('too long to show at once: yes waits until it has been scrolled through', (
@@ -789,6 +866,101 @@ void main() {
       await t.enterText(find.byType(EditableText), 'two');
       await t.sendKeyEvent(LogicalKeyboardKey.numpadEnter);
       expect(sent, ['one', 'two']);
+    });
+
+    group('earlier prompts', () {
+      var all = <String>[];
+      late TextEditingController words;
+      Future<void> put3(WidgetTester t) async {
+        words = TextEditingController();
+        addTearDown(words.dispose);
+        await put(
+          t,
+          SizedBox(
+            width: 600,
+            child: Composer(
+              placeholder: 'Say',
+              action: 'Send',
+              controller: words,
+              earlier: () => all,
+              onSubmit: (_) => true,
+            ),
+          ),
+        );
+        await t.tap(find.byType(EditableText));
+        await t.pump();
+      }
+
+      Future<void> up(WidgetTester t) => t.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      Future<void> down(WidgetTester t) => t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+
+      testWidgets('come back with ↑, and ↓ past the newest gives the empty box back', (t) async {
+        all = ['third\nof two lines', 'second', 'first'];
+        await put3(t);
+        await down(t);
+        expect(words.text, '');
+        for (final s in [...all, all.last]) {
+          await up(t);
+          expect(words.text, s);
+        }
+        for (final s in [all[1], all[0], '', '']) {
+          await down(t);
+          expect(words.text, s);
+        }
+        await up(t);
+        expect(words.text, all[0]);
+      });
+
+      testWidgets('never take the place of what is written or was touched', (t) async {
+        all = ['two\nlines', 'one'];
+        await put3(t);
+        for (final s in ['mine', ' ']) {
+          await t.enterText(find.byType(EditableText), s);
+          await t.pump();
+          await up(t);
+          await down(t);
+          expect(words.text, s);
+        }
+        words.clear();
+        await t.pump();
+        await up(t);
+        expect(words.text, 'two\nlines');
+        await t.pump();
+        // Where the caret was moved, the keys move the caret.
+        await t.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+        final at = words.selection;
+        await up(t);
+        expect(words.text, 'two\nlines');
+        expect(words.selection, isNot(at));
+        // What was brought back and changed is written.
+        words.clear();
+        await t.pump();
+        await up(t);
+        words.text = 'two\nlines!';
+        await t.pump();
+        await up(t);
+        await down(t);
+        expect(words.text, 'two\nlines!');
+      });
+
+      testWidgets('are left alone with a modifier and by an input method', (t) async {
+        all = ['one'];
+        await put3(t);
+        await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await up(t);
+        await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        expect(words.text, '');
+        t.testTextInput.updateEditingValue(
+          const TextEditingValue(
+            text: 'に',
+            selection: TextSelection.collapsed(offset: 1),
+            composing: TextRange(start: 0, end: 1),
+          ),
+        );
+        await t.pump();
+        await up(t);
+        expect(words.text, 'に');
+      });
     });
 
     testWidgets('Enter belongs to an input method that is composing', (t) async {

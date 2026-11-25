@@ -137,6 +137,8 @@ struct State {
     changed: Notify,
     /// Connections end.
     over: watch::Sender<bool>,
+    /// The folder a person asked for last in a terminal.
+    open: watch::Sender<String>,
     agents: Arc<Agents>,
     signins: Arc<Signins>,
 }
@@ -327,6 +329,7 @@ impl Host {
             stop: Notify::new(),
             changed: Notify::new(),
             over: watch::Sender::new(false),
+            open: watch::Sender::new(String::new()),
             cfg,
         });
         let switch: std::sync::Weak<dyn Switch> = Arc::downgrade(&st) as _;
@@ -795,13 +798,16 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                     });
                 }
                 (false, call) => match hello(st, call) {
-                    Ok(client) => {
+                    Ok((client, window)) => {
                         _place = Some(client);
                         stranger = None;
                         r.lines.set_limit(MAX_LINE);
                         let version = env!("CARGO_PKG_VERSION");
                         out.answer(req.id, Ok(json!({ "protocol": PROTOCOL, "version": version })));
                         tokio::spawn(tells(st.waiting.watch(), out.clone()));
+                        if window {
+                            tokio::spawn(opens(st.open.subscribe(), out.clone()));
+                        }
                     }
                     Err(e) => {
                         out.answer(req.id, Err(e));
@@ -870,6 +876,22 @@ async fn tells(mut waiting: watch::Receiver<usize>, out: Arc<Outbox>) {
     }
 }
 
+/// A folder is to be shown: the last that was asked for.
+async fn opens(mut open: watch::Receiver<String>, out: Arc<Outbox>) {
+    loop {
+        tokio::select! {
+            c = open.changed() => if c.is_err() || !out.room().await {
+                return;
+            },
+            () = out.closed() => return,
+        }
+        let path = open.borrow_and_update().clone();
+        if !out.tell(&Message::Open { open: path }) {
+            return;
+        }
+    }
+}
+
 /// The number of a request that could not be read, without reading the rest of it.
 fn id_of(line: &[u8]) -> u64 {
     #[derive(Deserialize)]
@@ -880,8 +902,9 @@ fn id_of(line: &[u8]) -> u64 {
 }
 
 /// A place among the clients, for who shows the token.
-fn hello(st: &State, call: Call) -> Result<OwnedSemaphorePermit, WireError> {
-    let Call::Hello { token, protocol, .. } = call else {
+/// A place, and whether the client has a window.
+fn hello(st: &State, call: Call) -> Result<(OwnedSemaphorePermit, bool), WireError> {
+    let Call::Hello { token, protocol, client } = call else {
         return Err(WireError::new(ErrorCode::Unauthorised, "say hello first"));
     };
     if !same(&token, &st.token) {
@@ -891,10 +914,9 @@ fn hello(st: &State, call: Call) -> Result<OwnedSemaphorePermit, WireError> {
         let m = format!("this host speaks protocol {PROTOCOL}, the client {protocol}");
         return Err(WireError::new(ErrorCode::Protocol, m));
     }
-    st.clients
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| WireError::new(ErrorCode::Busy, "too many clients"))
+    let place = st.clients.clone().try_acquire_owned();
+    let place = place.map_err(|_| WireError::new(ErrorCode::Busy, "too many clients"))?;
+    Ok((place, client.starts_with(axiom_proto::WINDOW)))
 }
 
 /// Opens a session and reads the first page, so that what cannot be read is an error answer.
@@ -1122,6 +1144,8 @@ enum Opening {
     Said { word: axiom_engine::Word, key: Option<String>, chain: Vec<AgentId> },
     /// What others have come to is told to it.
     Told,
+    /// Nothing is told to it: its conversation is summarised.
+    Compact,
 }
 
 /// Runs of an agent that others' ends may begin, one after another, with no person in between.
@@ -1242,6 +1266,7 @@ async fn start(
     let s = st.open(&session).await?;
     let run = RunId::new();
     let (live, cancel) = Live::new(st, &session, &run)?;
+    let compact = matches!(opening, Opening::Compact);
     let (word, key) = match opening {
         Opening::Said { word, key, chain } => {
             let mut now = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1250,7 +1275,7 @@ async fn start(
             (Some(word), key)
         }
         // As deep as it was when it told them.
-        Opening::Told => {
+        Opening::Told | Opening::Compact => {
             let mut now = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
             if now.is_empty() {
                 now.push(agent.clone());
@@ -1278,13 +1303,18 @@ async fn start(
             }
             let (a, c) = (&st.agents, cancel.clone());
             setup = copies::ready(a, &st.store, &session, &agent, setup.clone(), c).await?;
-            let owed = collect(&st, &session, &agent, &slot).await?;
-            if word.is_none() && owed.is_empty() {
+            // What is taken in here is answered: nothing is while room is made.
+            let owed =
+                if compact { Vec::new() } else { collect(&st, &session, &agent, &slot).await? };
+            if word.is_none() && owed.is_empty() && !compact {
                 return Err(agents::bad("there is nothing to tell it"));
             }
             let rx = turnstile.enter(&run, &cancel);
             let mut a =
                 agents::Worker::load(&st.agents, &st.store, s.clone(), &agent, &setup, rx).await?;
+            if compact {
+                a.compacts();
+            }
             a.begin(&run, word).await.map_err(refused)?;
             for (item, by, show) in owed {
                 said(&st, &session, axiom_engine::said(&item, &run, &agent, &show, &by)).await?;
@@ -1344,13 +1374,17 @@ async fn start(
                 break;
             }
         }
+        // A person asked for it, and for nothing else: there is nothing to be told of.
+        let only_compacted = compact && runs.len() == 1;
         let end = Finished { runs, outcome, error, text };
         // On the drive before anybody is told: who is owed it is told once, also by another host.
         let body = serde_json::to_string(&end).unwrap_or_default();
         let parents =
             st.store.end_owed(session.clone(), agent.clone(), end.runs.clone(), body).await;
         slot.finish(end);
-        tokio::spawn(unseen(st.clone(), session.clone(), agent.clone()));
+        if !only_compacted {
+            tokio::spawn(unseen(st.clone(), session.clone(), agent.clone()));
+        }
         for p in parents.unwrap_or_default().into_iter().chain([agent]) {
             tokio::spawn(deliver(st.clone(), session.clone(), p));
         }
@@ -1718,6 +1752,34 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             slot.changed().await;
             said(st, &session, agents::changed(&agent, &setup)).await?;
             Ok(json!({}))
+        }
+        Call::Open { path } => {
+            // A folder, by its whole name: what a window is given is what will be worked in.
+            let whole = path.len() <= 4096 && std::path::Path::new(&path).is_absolute();
+            let there = whole && tokio::fs::metadata(&path).await.is_ok_and(|m| m.is_dir());
+            if !there {
+                return Err(agents::bad("a folder is opened by its whole path"));
+            }
+            let windows = st.open.receiver_count();
+            st.open.send_replace(path);
+            Ok(json!({ "windows": windows }))
+        }
+        Call::Compact { session, agent } => {
+            if setup(st, &session, &agent).await?.execution.harness != "axiom" {
+                return Err(agents::bad("its program keeps its own conversation"));
+            }
+            let slot = st.agents.slot(&session, &agent);
+            let Spoken::Start(turnstile) = slot.speak().await? else {
+                return Err(WireError::new(ErrorCode::Busy, "the agent is at work"));
+            };
+            // Nobody says anything while the place is held. What waits is to be answered, and not
+            // only to be part of a summary.
+            let waits = st.store.pending(session.clone(), agent.clone()).await;
+            if !waits.map_err(|e| internal(e.to_string()))?.is_empty() {
+                return Err(agents::bad("something said to it waits to be heard: say more first"));
+            }
+            let run = start(st, session, agent, turnstile, Opening::Compact).await?;
+            Ok(json!({ "run": run }))
         }
         Call::Prompt { session, agent, text, key } => {
             if key.as_ref().is_some_and(|k| k.len() > KEY) {

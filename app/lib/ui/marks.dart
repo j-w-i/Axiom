@@ -117,10 +117,11 @@ class AxServiceMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = Ax.of(context).colors;
+    final size = MediaQuery.textScalerOf(context).scale(this.size);
     final tint = color ?? mark.color(c);
     final w = switch (mark) {
       ServiceMark.axiom => AxMark(size: size),
-      ServiceMark.local => AxGlyph(AxIcon.terminal, size: size, color: tint),
+      ServiceMark.local => AxGlyph(AxIcon.terminal, size: this.size, color: tint),
       _ => CustomPaint(size: Size.square(size), painter: _MarkPainter(mark, tint)),
     };
     return labelled

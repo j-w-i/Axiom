@@ -16,6 +16,7 @@ import '../ui/tokens.dart';
 import 'inline.dart';
 import 'markdown.dart';
 import 'safe_text.dart';
+import 'taking.dart';
 
 /// A row: one closed block, or the end of a passage: its last blocks and the work that followed it.
 class TranscriptRow {
@@ -164,8 +165,12 @@ class TranscriptRows {
 /// block being written rebuilds alone, at most once per frame. What is being read stays where it is;
 /// at the end, the view follows.
 class TranscriptView extends StatefulWidget {
-  const TranscriptView(this.agent, {super.key, this.onLink});
+  const TranscriptView(this.agent, {super.key, this.onLink, this.onQuote, this.takes = false});
   final AgentModel agent;
+
+  /// What was said can be copied whole, and quoted if somebody takes it.
+  final bool takes;
+  final void Function(String quote)? onQuote;
   final void Function(String url)? onLink;
   @override
   State<TranscriptView> createState() => TranscriptViewState();
@@ -189,6 +194,21 @@ class TranscriptViewState extends State<TranscriptView> {
   final _listening = <ItemModel>{};
   final _focus = FocusNode(debugLabel: 'transcript');
   bool _atEnd = true;
+
+  /// What is selected now.
+  String _selected = '';
+
+  String get _whose => '${oneLine(widget.agent.name, 60)}, an agent';
+  void _quote(ItemModel i) => widget.onQuote?.call(
+    quoted(
+      i.kind != ItemKind.prompt
+          ? _whose
+          : i.name.isEmpty
+          ? 'what I said'
+          : '${i.name}, an agent',
+      i.source,
+    ),
+  );
 
   /// What has been opened by hand, kept here so that a row can be rebuilt without losing it.
   final _opened = <ItemModel>{};
@@ -308,6 +328,37 @@ class TranscriptViewState extends State<TranscriptView> {
 
   /// What was pressed stays where it is: someone who opens an output is reading, and the end is not
   /// followed over it.
+  /// What was searched for and is gone to.
+  TranscriptRow? _found;
+
+  /// Goes to a part of an item and marks it; with null marks nothing.
+  void mark(ItemModel? i, int part) {
+    if (i == null) {
+      if (_found != null) setState(() => _found = null);
+      return;
+    }
+    final row = _rows.rows.where((r) {
+      if (!i.rich) {
+        final k = r.isEnd ? r.work.indexWhere((w) => identical(w, i)) : -1;
+        return k >= r.from && k < r.to && k >= 0;
+      }
+      if (!identical(r.item, i)) return false;
+      return r.isEnd ? r.from == 0 && part >= r.index : r.index == part;
+    }).firstOrNull;
+    if (row == null) return;
+    setState(() {
+      _found = row;
+      if (!i.rich) _opened.add(i);
+      _atEnd = false;
+      _epoch++;
+      // Clear of where it is searched from.
+      _hold((row, 64));
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && scroll.hasClients) _scrolled();
+    });
+  }
+
   void _toggle(ItemModel i) {
     final held = _firstVisible();
     setState(() {
@@ -373,12 +424,17 @@ class TranscriptViewState extends State<TranscriptView> {
         child: Padding(
           // Clear of where what scrolls goes out of sight.
           padding: EdgeInsets.only(top: k == 0 ? 16 : 0),
-          child: _RowView(
-            rows,
-            k,
-            onLink: widget.onLink,
-            opened: _opened.contains,
-            onToggle: _toggle,
+          child: _Marked(
+            identical(rows[k], _found),
+            child: _RowView(
+              rows,
+              k,
+              onLink: widget.onLink,
+              opened: _opened.contains,
+              onToggle: _toggle,
+              takes: widget.takes,
+              onQuote: widget.onQuote == null ? null : _quote,
+            ),
           ),
         ),
       ),
@@ -416,8 +472,22 @@ class TranscriptViewState extends State<TranscriptView> {
               child: SelectableRegion(
                 focusNode: _focus,
                 selectionControls: axSelectionControls,
-                contextMenuBuilder: (context, s) =>
-                    AxContextMenu(anchors: s.contextMenuAnchors, items: s.contextMenuButtonItems),
+                onSelectionChanged: (v) => _selected = v?.plainText ?? '',
+                contextMenuBuilder: (context, s) => AxContextMenu(
+                  anchors: s.contextMenuAnchors,
+                  items: [
+                    ...s.contextMenuButtonItems,
+                    if (widget.onQuote case final take? when _selected.trim().isNotEmpty)
+                      ContextMenuButtonItem(
+                        label: 'Quote',
+                        onPressed: () {
+                          // Whatever is selected here is of this agent's conversation.
+                          take(quoted('the conversation with $_whose', _selected));
+                          s.hideToolbar();
+                        },
+                      ),
+                  ],
+                ),
                 child: CustomScrollView(
                   controller: scroll,
                   center: _center,
@@ -563,13 +633,48 @@ class _Ending extends StatelessWidget {
 /// Reading width, and the width of what was asked.
 const _measure = AxSpace.column, _asked = 600.0;
 
+/// Where a search has come to.
+class _Marked extends StatelessWidget {
+  const _Marked(this.on, {required this.child});
+  final bool on;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: on ? Ax.of(context).colors.selected : null,
+      borderRadius: BorderRadius.circular(AxRadius.key),
+    ),
+    child: child,
+  );
+}
+
 class _RowView extends StatelessWidget {
-  const _RowView(this.rows, this.at, {required this.opened, required this.onToggle, this.onLink});
+  const _RowView(
+    this.rows,
+    this.at, {
+    required this.opened,
+    required this.onToggle,
+    this.onLink,
+    this.takes = false,
+    this.onQuote,
+  });
+  final bool takes;
+  final void Function(ItemModel)? onQuote;
   final List<TranscriptRow> rows;
   final int at;
   final bool Function(ItemModel) opened;
   final void Function(ItemModel) onToggle;
   final void Function(String url)? onLink;
+
+  /// What is still being said is not all there yet.
+  Widget _taken(ItemModel i, Widget w, {required bool stops}) => !takes || i.open
+      ? w
+      : Taking(
+          text: () => i.source,
+          onQuote: onQuote == null ? null : () => onQuote!(i),
+          stops: stops,
+          child: w,
+        );
 
   @override
   Widget build(BuildContext context) {
@@ -589,11 +694,15 @@ class _RowView extends StatelessWidget {
         whole: () => wholeCode(blocks, r.index),
         onLink: onLink,
       );
-      return RepaintBoundary(child: w);
+      return RepaintBoundary(child: _taken(i, w, stops: r.index == 0));
     }
     Widget prose() => i == null
         ? const SizedBox(width: double.infinity)
-        : _Prose(i, r.index, after: afterWork, onLink: onLink);
+        : _taken(
+            i,
+            _Prose(i, r.index, after: afterWork, onLink: onLink),
+            stops: r.index == 0,
+          );
 
     if (r.work.isEmpty) {
       return RepaintBoundary(child: prose());
@@ -830,7 +939,12 @@ class _BlockViewState extends State<BlockView> {
         child: const Hairline(),
       ),
       BlockKind.code => CodeBlock(b, goesOn: widget.goesOn, whole: widget.whole),
-      BlockKind.table => TableBlock(b.text),
+      BlockKind.table => Taking(
+        text: () => TableBlock.csv(b.text),
+        copy: 'Copy as CSV',
+        low: true,
+        child: TableBlock(b.text),
+      ),
     };
     // An item's marker stands in the column of its own depth; what belongs to it stands after.
     final indent = (b.kind == BlockKind.item ? b.depth - 1 : b.depth) * 22.0;
@@ -1112,7 +1226,18 @@ class TableBlock extends StatelessWidget {
   final String source;
   static const maxColumns = 12, maxCell = 1000;
 
-  static List<String> cells(String l) {
+  /// Whole, for where it goes on.
+  static String csv(String source) {
+    final raw = [for (final l in source.split('\n')) cells(l, whole: true)];
+    return csvOf([
+      for (final (i, r) in raw.indexed)
+        if (!(i == 1 && raw.length > 1 && _rules(r))) r,
+    ]);
+  }
+
+  static bool _rules(List<String> r) => r.every((x) => x.replaceAll(RegExp('[:-]'), '').isEmpty);
+
+  static List<String> cells(String l, {bool whole = false}) {
     var x = l.trim();
     if (x.startsWith('|')) x = x.substring(1);
     final out = <String>[];
@@ -1129,6 +1254,7 @@ class TableBlock extends StatelessWidget {
       }
     }
     if (b.toString().trim().isNotEmpty || !x.endsWith('|')) out.add(b.toString().trim());
+    if (whole) return out;
     return [for (final e in out.take(maxColumns)) e.length > maxCell ? '${cutTo(e, maxCell)}…' : e];
   }
 
@@ -1136,7 +1262,7 @@ class TableBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     final raw = source.split('\n').map(cells).toList();
-    final head = raw.length > 1 && raw[1].every((x) => x.replaceAll(RegExp('[:-]'), '').isEmpty);
+    final head = raw.length > 1 && _rules(raw[1]);
     final align = [
       if (head)
         for (final x in raw[1])

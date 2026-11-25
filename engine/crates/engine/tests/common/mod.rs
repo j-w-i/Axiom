@@ -373,6 +373,7 @@ impl T {
             told: None,
             waited: Duration::ZERO,
             noted: Default::default(),
+            compact: false,
             retries: Retries {
                 most: 3,
                 first: Duration::from_millis(1),
@@ -384,6 +385,14 @@ impl T {
     pub async fn run(&self, a: &mut Agent<Memory>, prompt: &str) -> Ended {
         let (_tx, rx) = watch::channel(false);
         self.run_with(a, prompt, rx).await
+    }
+    /// Nothing is said to it.
+    pub async fn run_unsaid(&self, a: &mut Agent<Memory>) -> Ended {
+        let (_tx, rx) = watch::channel(false);
+        let id = RunId::new();
+        a.begin(&id, None).await.unwrap();
+        let run = a.run(id, rx);
+        tokio::time::timeout(Duration::from_secs(60), run).await.expect("it ends")
     }
     pub async fn run_with(
         &self,

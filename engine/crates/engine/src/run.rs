@@ -91,6 +91,8 @@ pub struct Agent<S: Stage> {
     pub inbox: mpsc::Receiver<Word>,
     /// Taken in from what waited, or taken back by then: it may be in the inbox as well.
     pub noted: HashSet<ItemId>,
+    /// The next run only makes room, because a person asks for it.
+    pub compact: bool,
     /// Share of the window in use, as the last answer had it.
     pub fill: Option<f64>,
     /// Another model that answered, once a person has been told.
@@ -239,6 +241,12 @@ impl<S: Stage> Agent<S> {
         let began = Instant::now();
         let (mut output, mut unread) = (0, 0);
         self.waited = Duration::ZERO;
+        if std::mem::take(&mut self.compact) {
+            if self.context.messages().len() < 2 {
+                return Err(Halt::Failed("there is nothing to summarise yet".into()));
+            }
+            return self.make_room(run, cancel, "a person asked for it".into()).await;
+        }
         for _ in 0..self.limits.steps {
             if *cancel.borrow() {
                 return Err(Halt::Cancelled);
@@ -462,8 +470,12 @@ impl<S: Stage> Agent<S> {
             // What it knew of files went with the conversation.
             self.seen.forget();
             self.fill = None;
+            // What it goes on with is there to be read.
             return self
-                .notice(run, &format!("The conversation was summarised, because {why}."))
+                .notice(
+                    run,
+                    &format!("The conversation was summarised, because {why}. What was kept:\n\n{summary}"),
+                )
                 .await;
         }
         Err(Halt::Failed(format!("{why}, and it cannot be summarised either")))

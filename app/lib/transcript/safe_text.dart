@@ -132,6 +132,16 @@ String cutFrom(String s, int max) {
   return s.substring(s.codeUnitAt(at) & 0xFC00 == 0xDC00 ? at + 1 : at);
 }
 
+/// How many characters of [s] are not to be seen in it.
+int hiddenIn(String s) {
+  if (_plain(s)) return 0;
+  var n = 0;
+  for (final c in s.runes) {
+    if (c != 13 && _hidden(c)) n++;
+  }
+  return n;
+}
+
 /// For names and titles: one line, bounded.
 String oneLine(String s, [int max = 200]) {
   final t = visible(cutTo(s, max * 4)).replaceAll(RegExp(r'\s+'), ' ').trim();

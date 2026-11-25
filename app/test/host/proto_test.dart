@@ -52,6 +52,7 @@ void main() {
     expect([s.id, s.lastSeq, s.running], ['s_1', 3, true]);
     expect((messages[3] as Failed).code, 'not_found');
     expect((messages[4] as Fault).words, 'cannot be read');
+    expect((messages.last as FolderOpened).path, '/w');
     final status = (messages[5] as Answered).result! as Json;
     expect([status['damaged'], (status['faults']! as List<Object?>).length], ['why', 1]);
     final cut = (messages[6] as Events).events;

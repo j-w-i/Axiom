@@ -93,11 +93,18 @@ class AxButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null)
-              AxGlyph(
-                icon!,
-                color: ink,
-                filled: iconFilled,
-                size: iconFilled && icon == AxIcon.stop ? 13 : null,
+              // As large as the text, as far as the key has room for it.
+              Flexible(
+                flex: iconOnly ? 1 : 0,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: AxGlyph(
+                    icon!,
+                    color: ink,
+                    filled: iconFilled,
+                    size: iconFilled && icon == AxIcon.stop ? 13 : null,
+                  ),
+                ),
               ),
             if (icon != null && !iconOnly) const SizedBox(width: 7),
             if (!iconOnly)

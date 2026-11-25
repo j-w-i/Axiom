@@ -629,6 +629,7 @@ sealed class Message {
     if (j case {'session': final String s, 'resync': final int n}) return Resync(s, n);
     if (j case {'session': final String s, 'fault': final String f}) return Fault(s, f);
     if (j case {'waiting': final int n}) return WaitingChanged(n);
+    if (j case {'open': final String path}) return FolderOpened(path);
     if (j case {'id': final int id, 'error': final Json e}) {
       return Failed(id, e['code'] as String? ?? 'unknown', e['message'] as String? ?? '');
     }
@@ -644,6 +645,12 @@ class Events extends Message {
 }
 
 /// What waits for a person is something else now.
+/// A person asked in a terminal for a folder to be shown.
+class FolderOpened extends Message {
+  const FolderOpened(this.path);
+  final String path;
+}
+
 class WaitingChanged extends Message {
   const WaitingChanged(this.count);
   final int count;
