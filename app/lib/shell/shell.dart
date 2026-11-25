@@ -13,6 +13,7 @@ import '../patterns/context_gauge.dart';
 import '../patterns/model_name.dart';
 import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
+import '../transcript/find_here.dart';
 import '../transcript/safe_text.dart';
 import '../transcript/transcript_view.dart';
 import '../ui/commands.dart';
@@ -200,7 +201,12 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
         _commands.area();
       case Command.areaBack:
         _commands.area(back: true);
-      case Command.stop || Command.model || Command.access || Command.allow || Command.deny:
+      case Command.stop ||
+          Command.findHere ||
+          Command.model ||
+          Command.access ||
+          Command.allow ||
+          Command.deny:
         // Of what is on the screen. Nothing there: it is nobody's.
         return _commands.run(c);
     }
@@ -268,7 +274,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
         Command.list => true,
         Command.next || Command.previous => s.sessions.length > 1,
         Command.request => s.needs.any((w) => w.need == Need.asks),
-        Command.stop || Command.model || Command.access => _commands.can(c),
+        Command.stop || Command.findHere || Command.model || Command.access => _commands.can(c),
         _ => false,
       })
         Found(c.label, () => _run(c), icon: AxIcon.more, keys: c.keys),
@@ -1335,10 +1341,14 @@ class _Display extends StatelessWidget {
                       ),
                 child: CommandArea(
                   1,
-                  child: TranscriptView(
+                  child: FindHere(
                     a,
-                    takes: true,
-                    onQuote: acts ? (q) => drafts.of(session.id, a.id).add(q) : null,
+                    builder: (view) => TranscriptView(
+                      a,
+                      key: view,
+                      takes: true,
+                      onQuote: acts ? (q) => drafts.of(session.id, a.id).add(q) : null,
+                    ),
                   ),
                 ),
               ),

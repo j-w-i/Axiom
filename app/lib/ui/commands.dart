@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 enum Command {
   start('New session', LogicalKeyboardKey.keyN),
   find('Search', LogicalKeyboardKey.keyK),
+  findHere('Find in the conversation', LogicalKeyboardKey.keyF),
   accounts('Accounts', LogicalKeyboardKey.comma),
   panel('Show or hide the panel', LogicalKeyboardKey.keyD),
   list('Show or hide the sidebar', LogicalKeyboardKey.keyB),

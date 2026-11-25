@@ -328,6 +328,37 @@ class TranscriptViewState extends State<TranscriptView> {
 
   /// What was pressed stays where it is: someone who opens an output is reading, and the end is not
   /// followed over it.
+  /// What was searched for and is gone to.
+  TranscriptRow? _found;
+
+  /// Goes to a part of an item and marks it; with null marks nothing.
+  void mark(ItemModel? i, int part) {
+    if (i == null) {
+      if (_found != null) setState(() => _found = null);
+      return;
+    }
+    final row = _rows.rows.where((r) {
+      if (!i.rich) {
+        final k = r.isEnd ? r.work.indexWhere((w) => identical(w, i)) : -1;
+        return k >= r.from && k < r.to && k >= 0;
+      }
+      if (!identical(r.item, i)) return false;
+      return r.isEnd ? r.from == 0 && part >= r.index : r.index == part;
+    }).firstOrNull;
+    if (row == null) return;
+    setState(() {
+      _found = row;
+      if (!i.rich) _opened.add(i);
+      _atEnd = false;
+      _epoch++;
+      // Clear of where it is searched from.
+      _hold((row, 64));
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && scroll.hasClients) _scrolled();
+    });
+  }
+
   void _toggle(ItemModel i) {
     final held = _firstVisible();
     setState(() {
@@ -393,14 +424,17 @@ class TranscriptViewState extends State<TranscriptView> {
         child: Padding(
           // Clear of where what scrolls goes out of sight.
           padding: EdgeInsets.only(top: k == 0 ? 16 : 0),
-          child: _RowView(
-            rows,
-            k,
-            onLink: widget.onLink,
-            opened: _opened.contains,
-            onToggle: _toggle,
-            takes: widget.takes,
-            onQuote: widget.onQuote == null ? null : _quote,
+          child: _Marked(
+            identical(rows[k], _found),
+            child: _RowView(
+              rows,
+              k,
+              onLink: widget.onLink,
+              opened: _opened.contains,
+              onToggle: _toggle,
+              takes: widget.takes,
+              onQuote: widget.onQuote == null ? null : _quote,
+            ),
           ),
         ),
       ),
@@ -598,6 +632,21 @@ class _Ending extends StatelessWidget {
 
 /// Reading width, and the width of what was asked.
 const _measure = AxSpace.column, _asked = 600.0;
+
+/// Where a search has come to.
+class _Marked extends StatelessWidget {
+  const _Marked(this.on, {required this.child});
+  final bool on;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: on ? Ax.of(context).colors.selected : null,
+      borderRadius: BorderRadius.circular(AxRadius.key),
+    ),
+    child: child,
+  );
+}
 
 class _RowView extends StatelessWidget {
   const _RowView(
