@@ -19,7 +19,7 @@ import 'specimen.dart' as s;
 
 /// The components at work together, on specimen content. It proves the system, not the product.
 class Workbench extends StatefulWidget {
-  const Workbench({super.key, this.titleInset = 78, this.panel = true, this.terminal = false});
+  const Workbench({super.key, this.titleInset = 92, this.panel = true, this.terminal = false});
   final double titleInset;
   final bool panel, terminal;
   @override
@@ -116,11 +116,11 @@ class _WorkbenchState extends State<Workbench> {
                                   crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
                                     Expanded(child: _talk(choices, agent.name, agent.id)),
-                                    if (_terminal) _drawer(context),
+                                    if (_terminal && _panel) _drawer(context),
                                   ],
                                 ),
                                 panel: _panel && Beside.fits(room.maxWidth) ? _side() : null,
-                                wide: _opened.isNotEmpty,
+                                wide: _opened.isNotEmpty && !_folded.contains('files'),
                                 sizes: _sizes,
                                 onSizes: (v) => setState(() => _sizes = v),
                               ),
@@ -144,59 +144,57 @@ class _WorkbenchState extends State<Workbench> {
     state: agent.state,
     mark: mark,
     inset: wide ? 20 : widget.titleInset + 12,
-    trailing: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Flexible(
-          child: AxButton(label: 'Stop', icon: AxIcon.stop, iconFilled: true, onPressed: () {}),
-        ),
-        const SizedBox(width: 6),
-        ChangesKey(
-          files: 3,
-          open: _panel,
-          figure: _panel ? null : const ChangedBy(57, 2),
-          onPressed: () => setState(() => _panel = !_panel),
-        ),
-      ],
-    ),
+    trailing: _panelKey(),
   );
+
+  Widget _panelKey() => PanelKey(open: _panel, onPressed: () => setState(() => _panel = !_panel));
+
+  final _folded = <String>{};
+  void _fold(String name) =>
+      setState(() => _folded.contains(name) ? _folded.remove(name) : _folded.add(name));
 
   Widget _side() {
     final t = Ax.of(context);
     return ListView(
       padding: const EdgeInsets.fromLTRB(6, 0, 14, 16),
       children: [
-        PlanView(s.session.tasks),
-        const PanelHeading('3 changed files', ChangedBy(57, 2)),
-        for (final (i, (path, a, r)) in s.changed.indexed)
-          CardPart(
-            first: i == 0,
-            last: i == s.changed.length - 1,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: ChangedRow(
-                    path,
-                    added: a,
-                    removed: r,
-                    open: _opened.contains(path),
-                    onPressed: () => setState(
-                      () => _opened.contains(path) ? _opened.remove(path) : _opened.add(path),
+        PlanView(s.session.tasks, folded: _folded.contains('plan'), onFold: () => _fold('plan')),
+        PanelHeading(
+          '3 changed files',
+          const ChangedBy(57, 2),
+          folded: _folded.contains('files'),
+          onFold: () => _fold('files'),
+        ),
+        if (!_folded.contains('files'))
+          for (final (i, (path, a, r)) in s.changed.indexed)
+            CardPart(
+              first: i == 0,
+              last: i == s.changed.length - 1,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: ChangedRow(
+                      path,
+                      added: a,
+                      removed: r,
+                      open: _opened.contains(path),
+                      onPressed: () => setState(
+                        () => _opened.contains(path) ? _opened.remove(path) : _opened.add(path),
+                      ),
                     ),
                   ),
-                ),
-                if (_opened.contains(path))
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(10, 0, 10, 10),
-                    child: DiffLines(s.diff),
-                  ),
-                if (i < s.changed.length - 1)
-                  const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Hairline()),
-              ],
+                  if (_opened.contains(path))
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(10, 0, 10, 10),
+                      child: DiffLines(s.diff),
+                    ),
+                  if (i < s.changed.length - 1)
+                    const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Hairline()),
+                ],
+              ),
             ),
-          ),
         const SizedBox(height: 6),
         PanelGroup(
           'Terminals',
@@ -218,6 +216,8 @@ class _WorkbenchState extends State<Workbench> {
             PanelRow(AxIcon.terminal, 'pnpm dev', state: ':5173', onPressed: () {}),
           ],
           acts: true,
+          folded: _folded.contains('terminals'),
+          onFold: () => _fold('terminals'),
         ),
         SizedBox(height: t.density.row / 4),
       ],
@@ -304,6 +304,7 @@ class _WorkbenchState extends State<Workbench> {
                   const ContextGauge(s.contextView),
                 ],
                 onAttach: () {},
+                onStop: () {},
                 onSubmit: (_) => true,
               ),
             ],
@@ -334,9 +335,9 @@ class _Side extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 58,
+          height: 52,
           child: Padding(
-            padding: EdgeInsets.only(top: 8, left: inset, right: 10),
+            padding: EdgeInsets.only(left: inset, right: 10),
             child: Row(
               children: [
                 const AxMark(size: 18),
@@ -346,6 +347,7 @@ class _Side extends StatelessWidget {
                   AxIcon.sidebar,
                   label: 'Hide the sidebar',
                   tone: AxTone.quiet,
+                  iconFilled: true,
                   onPressed: () {},
                 ),
               ],

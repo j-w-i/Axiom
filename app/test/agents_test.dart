@@ -273,7 +273,7 @@ void main() {
     expect(start().onPressed, isNull, reason: 'no model');
     await t.tap(find.bySemanticsLabel('Model: none'));
     await settled(t);
-    await t.tap(find.bySemanticsLabel('gpt-5.6').last);
+    await t.tap(find.bySemanticsLabel('GPT-5.6').last);
     await settled(t);
     await t.ensureVisible(find.text('Start session'));
     await snap(t, 'start');
@@ -323,7 +323,7 @@ void main() {
     await t.ensureVisible(find.bySemanticsLabel('Model: none'));
     await t.tap(find.bySemanticsLabel('Model: none'));
     await settled(t);
-    await t.tap(find.bySemanticsLabel('gpt-5.6').last);
+    await t.tap(find.bySemanticsLabel('GPT-5.6').last);
     await settled(t);
     await t.ensureVisible(find.text('Start session'));
     await t.tap(find.text('Start session'));
@@ -407,12 +407,12 @@ void main() {
 
   testWidgets('a question is answered once, with what it showed', (t) async {
     final s = await shell(t, session: working(asks: true));
-    s.known = const [ModelInfo('claude-opus-5-5', name: 'Claude Opus 5.5')];
+    s.known = const [ModelInfo('claude-opus-5-5', name: 'Claude Opus 5.5 Preview')];
     await t.runAsync(() => s.models('c1'));
     s.calls.clear();
     await settled(t);
     expect(
-      find.descendant(of: find.byType(AgentRow), matching: find.textContaining('Claude Opus 5.5')),
+      find.descendant(of: find.byType(AgentRow), matching: find.textContaining('Opus 5.5 Preview')),
       findsOneWidget,
     );
     expect(find.byType(RequestBar), findsOneWidget);
@@ -491,7 +491,7 @@ void main() {
     expect(find.text('Not lost.'), findsOneWidget, reason: 'it was not taken');
     expect(find.text('the host is gone'), findsOneWidget);
     s.failure = null;
-    await t.tap(find.text('Stop'));
+    await t.tap(find.bySemanticsLabel('Stop'));
     await settled(t);
     expect(s.calls.last, ['cancel', 's', 'r']);
     s.current!.apply([
@@ -499,7 +499,7 @@ void main() {
       const Event(51, 51, AgentStateChanged('a', AgentPhase.failed)),
     ]);
     await settled(t);
-    expect(find.text('Stop'), findsNothing);
+    expect(find.bySemanticsLabel('Stop'), findsNothing);
     expect(find.textContaining('declined'), findsOneWidget);
   });
 
@@ -510,13 +510,13 @@ void main() {
     await settled(t);
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
-    await t.tap(find.bySemanticsLabel('Model: claude-opus-5-5'));
+    await t.tap(find.bySemanticsLabel('Model: Opus 5.5'));
     await settled(t);
-    await t.tap(find.bySemanticsLabel('gpt-5.6').last);
+    await t.tap(find.bySemanticsLabel('GPT-5.6').last);
     await settled(t);
     expect(s.calls, isEmpty);
     expect(find.textContaining('has to be read again'), findsOneWidget);
-    await t.tap(find.text('Change to gpt-5.6'));
+    await t.tap(find.text('Change to GPT-5.6'));
     await settled(t);
     expect(s.calls, [
       ['set', 's', 'a', 'gpt-5.6', 'c1', null],
@@ -554,7 +554,7 @@ void main() {
     ]);
     await settled(t);
     expect(find.byType(ContextGauge), findsOneWidget);
-    expect(find.textContaining('claude-haiku-5-5', findRichText: true), findsWidgets);
+    expect(find.textContaining('Haiku 5.5', findRichText: true), findsWidgets);
     expect(s.current!.agents['a']!.access, Access.work);
   });
 
@@ -638,7 +638,7 @@ void main() {
     await shell(t, session: working(access: null, asks: true));
     expect(find.byType(EditableText), findsNothing);
     expect(find.byType(RequestBar), findsNothing);
-    expect(find.text('Stop'), findsNothing);
+    expect(find.bySemanticsLabel('Stop'), findsNothing);
     expect(find.textContaining('cargo bench'), findsOneWidget, reason: 'what was asked is told');
   });
 
@@ -741,7 +741,7 @@ void main() {
     await t.enterText(field('Folder'), '/w');
     await settled(t);
     await press(t, find.bySemanticsLabel('Model: none'));
-    await press(t, find.bySemanticsLabel('gpt-5.6').last);
+    await press(t, find.bySemanticsLabel('GPT-5.6').last);
   }
 
   const harnesses = [
@@ -1335,7 +1335,7 @@ void main() {
     await t.enterText(field('Folder'), '/w');
     expect(find.bySemanticsLabel(RegExp('^Effort')), findsNothing);
     await press(t, find.bySemanticsLabel('Model: none'));
-    await press(t, find.bySemanticsLabel('claude-opus-5-5').last);
+    await press(t, find.bySemanticsLabel('Opus 5.5').last);
     await press(t, find.bySemanticsLabel('Effort: Default effort'));
     await press(t, find.bySemanticsLabel('Low effort').last);
     await press(t, find.text('Start session'));
@@ -1362,7 +1362,7 @@ void main() {
       diff: '--- lib/cache.dart\n+++ lib/cache.dart\n@@ -4,2 +4,2 @@\n a\n-old\n+$line\n',
     );
     s.now = now('fresh');
-    await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
+    await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
     await settled(t);
     await press(t, find.bySemanticsLabel(RegExp('^lib/cache.dart')));
     await press(t, find.textContaining('fresh', findRichText: true));
@@ -1386,7 +1386,7 @@ void main() {
     await t.enterText(field('About the file'), 'and test it');
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     await settled(t);
-    await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
+    await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
     await settled(t);
     final said = t
         .widgetList<EditableText>(find.byType(EditableText))
@@ -1432,7 +1432,7 @@ void main() {
       await settled(t);
       await t.tap(find.bySemanticsLabel(RegExp('^Zoe')).first);
       await settled(t);
-      await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
+      await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
       await settled(t);
       await t.tap(find.bySemanticsLabel('Accounts').first);
       await settled(t);
@@ -1577,7 +1577,7 @@ void main() {
       await settled(t);
       await t.tap(find.bySemanticsLabel(RegExp('^Ada')).first);
       await settled(t);
-      await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
+      await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
       await settled(t);
       return s;
     }
@@ -1696,7 +1696,7 @@ void main() {
       expect(find.textContaining('it is not sent yet'), findsOneWidget);
       expect(find.textContaining('out/x: something is in the way.'), findsOneWidget);
       expect(s.calls.where((c) => c.first == 'prompt'), isEmpty);
-      await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
+      await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
       await settled(t);
       expect(find.text('The project has changed: both.txt.'), findsOneWidget);
     });
@@ -1789,7 +1789,7 @@ void main() {
       await snap(t, 'add-agent-copy');
       await t.enterText(field('Name'), 'Ada');
       await press(t, find.bySemanticsLabel('Model: none'));
-      await press(t, find.bySemanticsLabel('gpt-5.6').last);
+      await press(t, find.bySemanticsLabel('GPT-5.6').last);
       s.calls.clear();
       await press(t, find.text('Add agent'));
       expect(s.calls.single.last, 'apart');
@@ -1812,7 +1812,7 @@ void main() {
       addTearDown(s.dispose);
       await mount(t, Shell(s), size: const Size(760, 520), dpr: 1, textScale: 2);
       await settled(t);
-      await press(t, find.bySemanticsLabel(RegExp('^Changes')).first);
+      await press(t, find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
       expect(t.takeException(), isNull);
       await press(t, find.text('Discard copy…'));
       expect(t.takeException(), isNull);
@@ -1861,7 +1861,7 @@ void main() {
           '--- (new)\n+++ new dir/é.txt\n@@ -0,0 +1 @@\n+fresh\n',
       whole: false,
     );
-    await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
+    await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
     await settled(t);
     expect(find.text('trunk'), findsOneWidget);
     expect(find.text('4 changed files'), findsOneWidget);
@@ -1906,7 +1906,7 @@ void main() {
     await t.tap(find.bySemanticsLabel('Refresh'));
     await settled(t);
     expect(find.text('there is no sandbox on this system'), findsOneWidget);
-    await t.tap(find.bySemanticsLabel(RegExp('^Changes')).first);
+    await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
     await settled(t);
     expect(find.textContaining('I will run the tests'), findsOneWidget);
   });
@@ -2003,7 +2003,7 @@ void main() {
     expect(s.calls, [
       ['changes', 's'],
     ]);
-    expect(find.bySemanticsLabel('Changes, 1 file'), findsOneWidget);
+    expect(find.bySemanticsLabel('Hide the panel'), findsOneWidget);
     expect(find.text('1 changed file'), findsOneWidget);
     expect(find.textContaining('fresh', findRichText: true), findsNothing);
     await snap(t, 'panel');
@@ -2053,12 +2053,18 @@ void main() {
     expect(wide(), closeTo(360, 1));
     await press(t, find.bySemanticsLabel(RegExp('^lib/a.dart')));
     expect(wide(), closeTo(slim, 1), reason: 'slim again when nothing is read');
-    // Away and back, by the bar and by the keys; what has changed is said while it is away.
-    await press(t, find.bySemanticsLabel('Changes, 1 file'));
-    expect(find.byType(ChangesView), findsNothing);
+    // Its parts can be put away; how much has changed is said still.
+    await press(t, find.bySemanticsLabel('1 changed file'));
+    expect(find.bySemanticsLabel(RegExp('^lib/a.dart')), findsNothing);
     expect(find.text('+2'), findsOneWidget);
+    await press(t, find.bySemanticsLabel('1 changed file'));
+    expect(find.bySemanticsLabel(RegExp('^lib/a.dart')), findsOneWidget);
+    // All of it, away and back, at its own side; also where the sidebar is put away.
+    await press(t, find.bySemanticsLabel('Hide the panel'));
+    expect(find.byType(ChangesView), findsNothing);
+    await press(t, find.bySemanticsLabel('Hide the sidebar'));
     s.calls.clear();
-    await press(t, find.bySemanticsLabel('Changes, 1 file'));
+    await press(t, find.bySemanticsLabel('Show the panel'));
     expect(find.byType(ChangesView), findsOneWidget);
     expect(s.calls, [
       ['changes', 's'],
@@ -2074,7 +2080,7 @@ void main() {
       await mount(t, Shell(s, key: ValueKey(size)), size: size, dpr: 1);
       await settled(t);
       await t.enterText(find.byType(EditableText), 'half a thought');
-      await press(t, find.bySemanticsLabel(RegExp('^Changes')).first);
+      await press(t, find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
       expect(find.byType(ChangesView), findsOneWidget);
       // Not pressed, read or reached behind it.
       expect(find.text('Allow once').hitTestable(), findsNothing);
@@ -2084,7 +2090,7 @@ void main() {
         final at = FocusManager.instance.primaryFocus?.context;
         expect(at?.findAncestorWidgetOfExactType<RequestBar>(), isNull);
       }
-      await press(t, find.bySemanticsLabel(RegExp('^Changes')).first);
+      await press(t, find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')));
       expect(find.text('half a thought'), findsOneWidget);
       expect(find.text('Allow once').hitTestable(), findsOneWidget);
       s.dispose();
@@ -2260,7 +2266,7 @@ void main() {
     ]);
     await t.tap(find.text('Model'));
     await settled(t);
-    expect(find.text('gpt-5.6'), findsWidgets);
+    expect(find.text('GPT-5.6'), findsWidgets);
     await t.sendKeyEvent(LogicalKeyboardKey.escape);
     await settled(t);
     await t.tap(find.byType(ExecutionKey));
@@ -2271,11 +2277,11 @@ void main() {
   testWidgets('a stop that fails says so', (t) async {
     final s = await shell(t, session: working());
     s.failure = const LinkClosed('the host is gone');
-    await t.tap(find.text('Stop'));
+    await t.tap(find.bySemanticsLabel('Stop'));
     await settled(t);
     expect(find.textContaining('It could not be stopped: the host is gone'), findsOneWidget);
     s.failure = null;
-    await t.tap(find.text('Stop'));
+    await t.tap(find.bySemanticsLabel('Stop'));
     await settled(t);
     expect(find.textContaining('It could not be stopped'), findsNothing);
   });

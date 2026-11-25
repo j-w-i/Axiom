@@ -1,8 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../ui/controls.dart';
 import '../ui/icons.dart';
-import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 
@@ -176,48 +176,22 @@ class _By extends Intent {
   final double d;
 }
 
-/// How much has changed, and the way to it.
-class ChangesKey extends StatelessWidget {
-  const ChangesKey({
-    required this.files,
-    required this.open,
-    required this.onPressed,
-    super.key,
-    this.figure,
-  });
-
-  /// Not known if none.
-  final int files;
+/// Shows the panel and puts it away. It stands over the panel, at the right, as the sidebar's does over
+/// the sidebar, at the left.
+class PanelKey extends StatelessWidget {
+  const PanelKey({required this.open, required this.onPressed, super.key, this.shortcut});
   final bool open;
-  final VoidCallback onPressed;
-  final Widget? figure;
+
+  /// Null where there is no panel to be shown.
+  final VoidCallback? onPressed;
+  final String? shortcut;
   @override
-  Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
-    return Pressable(
-      label: files == 0 ? 'Changes' : 'Changes, $files ${files == 1 ? 'file' : 'files'}',
-      toggled: open,
-      onPressed: onPressed,
-      builder: (context, s) => Ground(
-        open
-            ? c.selected
-            : s.hovered
-            ? c.hover
-            : null,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: t.density.control, minWidth: t.density.control),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 7),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AxGlyph(AxIcon.panel, color: open || s.hovered ? c.ink1 : c.ink2, filled: open),
-                if (figure case final f? when files > 0) ...[const SizedBox(width: 7), f],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => AxButton.icon(
+    AxIcon.panel,
+    label: open ? 'Hide the panel' : 'Show the panel',
+    shortcut: shortcut,
+    tone: AxTone.quiet,
+    iconFilled: open,
+    onPressed: onPressed,
+  );
 }

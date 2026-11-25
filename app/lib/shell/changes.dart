@@ -32,7 +32,16 @@ class FolderChanges extends ChangeNotifier {
 
   /// The files whose change is read.
   final opened = <String>{};
-  bool get reads => files.any((f) => opened.contains(f.$1.path) && f.$2.lines.isNotEmpty);
+  bool get reads =>
+      !folded && files.any((f) => opened.contains(f.$1.path) && f.$2.lines.isNotEmpty);
+
+  /// Only how much has changed is shown.
+  bool folded = false;
+  void fold() {
+    folded = !folded;
+    notifyListeners();
+  }
+
   void toggle(String path) {
     opened.contains(path) ? opened.remove(path) : opened.add(path);
     notifyListeners();
@@ -137,7 +146,7 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
         : files.isEmpty
         ? 'Nothing has changed since the last commit.'
         : null;
-    final n = words == null ? files.length : 0;
+    final n = words == null ? files.length : 0, shown = now.folded ? 0 : n;
     final head = <Widget>[
       ...widget.lead,
       PanelHeading(
@@ -179,13 +188,15 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
           ],
         ),
         acts: true,
+        folded: now.folded,
+        onFold: now.fold,
       ),
       if (problem != null && all != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
           child: Text(visible(problem), style: t.type.ui.ink(c.faultText)),
         ),
-      if (words != null)
+      if (words != null && !now.folded)
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
           child: Text(
@@ -196,10 +207,10 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
     ];
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(6, 0, 14, 16),
-      itemCount: head.length + n + (words == null && !all!.whole ? 1 : 0),
+      itemCount: head.length + shown + (words == null && !all!.whole && !now.folded ? 1 : 0),
       itemBuilder: (context, i) => i < head.length
           ? head[i]
-          : i < head.length + n
+          : i < head.length + shown
           ? _file(files[i - head.length], i - head.length, n)
           : Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),

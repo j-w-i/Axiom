@@ -8,6 +8,7 @@ import '../host/session_model.dart';
 import '../patterns/composer.dart';
 import '../patterns/context_gauge.dart';
 import '../patterns/execution.dart';
+import '../patterns/model_name.dart';
 import '../patterns/models.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
@@ -31,8 +32,12 @@ class Talk extends StatefulWidget {
     required this.live,
     this.room = double.infinity,
     this.onAgent,
+    this.onStop,
     super.key,
   });
+
+  /// Ends the run that is on.
+  final VoidCallback? onStop;
 
   /// Shows another agent of the session.
   final ValueChanged<String>? onAgent;
@@ -104,6 +109,7 @@ class _TalkState extends State<Talk> {
     final can = hands ? null : program?.access;
     final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
     final models = s.modelsOf(x.connection ?? '');
+    final names = namesOf(models ?? const []);
     final has = models?.any((m) => m.id == x.model) ?? false;
     final tries = program?.effort ?? models?.any((m) => m.id == x.model && m.effort) ?? false;
     Execution with_({
@@ -144,11 +150,10 @@ class _TalkState extends State<Talk> {
           if (!has && x.model != null)
             AxMenuItem(
               x.model!,
-              oneLine(x.model!, 60),
+              oneLine(modelName(x.model!), 60),
               mark: markOf(x.provider, x.model, x.harness),
             ),
-          for (final m in models ?? const <ModelInfo>[])
-            AxMenuItem(m.id, oneLine(m.name ?? m.id, 60), mark: ServiceMark.of(m.id)),
+          for (final m in models ?? const <ModelInfo>[]) modelItem(m, names),
         ],
         x.model ?? '',
         (v) => set(execution: with_(model: v)),
@@ -369,6 +374,7 @@ class _TalkState extends State<Talk> {
                   : 'Message ${a.name}',
               action: works ? 'Queue' : 'Send',
               enabled: widget.live,
+              onStop: widget.onStop,
               leading: [
                 ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
                 if (a.context != null)

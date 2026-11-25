@@ -10,6 +10,7 @@ import '../host/session_model.dart';
 import '../patterns/agent_bar.dart';
 import '../patterns/beside.dart';
 import '../patterns/context_gauge.dart';
+import '../patterns/model_name.dart';
 import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
 import '../transcript/safe_text.dart';
@@ -79,8 +80,17 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
 
   final _conversation = GlobalKey();
 
-  /// Whether it was shown when the window was drawn last.
-  bool? _shown;
+  /// Whether the panel is shown; null where there is none.
+  bool? _panel(BuildContext context) {
+    final m = widget.store.current;
+    final a = m?.agents[_agent] ?? m?.agents.values.firstOrNull;
+    if (m == null || a?.access == null || _view != _View.work || m.fault != null) return null;
+    // Of itself where there is room, if there is anything in it.
+    return _changing ??
+        (MediaQuery.sizeOf(context).width >= _roomy && !a!.apart && _changesOf(m).files.isNotEmpty);
+  }
+
+  static const _roomy = 1180.0;
   final _drafts = Drafts();
   late final _start = StartDraft(widget.store);
 
@@ -160,7 +170,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
       case LogicalKeyboardKey.comma:
         _show(_View.accounts);
       case LogicalKeyboardKey.keyD:
-        _change(!(_shown ?? false));
+        if (_panel(context) case final open?) _change(!open);
       case LogicalKeyboardKey.keyB:
         setState(() => _list = !_list);
       default:
@@ -265,6 +275,19 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
           final stale = s.phase != HostPhase.connected;
           final width = MediaQuery.sizeOf(context).width;
           final narrow = width < 860, beside = !narrow && _list;
+          Widget panelKey() => ListenableBuilder(
+            listenable: Listenable.merge([
+              if (s.current case final m?) ...[m, _changesOf(m), ...m.agents.values],
+            ]),
+            builder: (context, _) {
+              final open = _panel(context);
+              return PanelKey(
+                open: open ?? false,
+                shortcut: keysOf('D'),
+                onPressed: open == null ? null : () => _change(!open),
+              );
+            },
+          );
           Widget side([VoidCallback? close]) => _Side(
             store: s,
             inset: widget.titleInset,
@@ -336,13 +359,13 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
               stale: stale,
               drafts: _drafts,
               changes: _changesOf(m),
-              changing: _changing,
-              onChanging: _change,
-              onShown: (v) => _shown = v,
+              onClose: () => _change(false),
+              panelKey: panelKey,
+              open: () => _panel(context) ?? false,
               sizes: _sizes,
               onSizes: (v) => setState(() => _sizes = v),
               conversation: _conversation,
-              looks: width >= 1180,
+              looks: width >= _roomy,
               banner: banner,
               onList: onList,
               inset: beside ? 20 : widget.titleInset + 12,
@@ -378,8 +401,9 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 if (!narrow) ?banner,
-                                SizedBox(
-                                  height: narrow ? 46 : 50,
+                                Container(
+                                  height: 44,
+                                  padding: const EdgeInsets.only(bottom: 8),
                                   child: _Strip(
                                     problem: narrow ? problem : null,
                                     page: page,
@@ -496,14 +520,20 @@ ActivityView? _activity(AgentModel a, HostStore s) {
 AgentState stateOf(AgentModel a) =>
     a.ended == Outcome.failed ? AgentState.failed : phaseOf(a.phase);
 
-/// What its model is called, where the host has said so.
-String? _modelName(Execution x, HostStore s) {
+/// What its model is called.
+String? modelOf(Execution x, HostStore s) {
   final id = x.model, on = x.connection;
-  if (id == null || on == null) return id;
-  for (final m in s.modelsOf(on) ?? const <ModelInfo>[]) {
-    if (m.id == id) return m.name ?? id;
+  if (id == null) return null;
+  for (final m in s.modelsOf(on ?? '') ?? const <ModelInfo>[]) {
+    if (m.id == id) return modelName(id, m.name);
   }
-  return id;
+  return modelName(id);
+}
+
+/// What the account it uses is called.
+String? _accountOf(Execution x, HostStore s) {
+  final name = s.connections.where((c) => c.id == x.connection).firstOrNull?.name;
+  return name == null ? null : oneLine(name, 60);
 }
 
 AgentView viewOf(AgentModel a, HostStore s) {
@@ -513,13 +543,13 @@ AgentView viewOf(AgentModel a, HostStore s) {
     state: stateOf(a),
     // What chooses its model itself is named instead.
     model: oneLine(
-      _modelName(a.execution, s) ??
+      modelOf(a.execution, s) ??
           (a.execution.harness == 'axiom' ? '' : s.harnessName(a.execution.harness)),
       60,
     ),
-    harness: a.execution.harness,
+    harness: s.harnessName(a.execution.harness),
     service: markOf(a.execution.provider, a.execution.model, a.execution.harness),
-    connection: a.execution.connection ?? '',
+    connection: _accountOf(a.execution, s) ?? '',
     elapsed: '',
     context: a.context,
     contextProvenance: provenanceOf(a.contextKnown),
@@ -931,20 +961,28 @@ class _Side extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 58,
+          height: 52,
           child: Padding(
             // On the line of what stands on the canvas.
-            padding: EdgeInsets.only(top: 8, left: inset == 0 ? 20 : inset + 20, right: 10),
+            padding: EdgeInsets.only(left: inset == 0 ? 20 : inset + 20, right: 10),
             child: Row(
               children: [
                 const AxMark(size: 18),
                 const SizedBox(width: 9),
-                Expanded(child: Text('Axiom', style: t.type.uiStrong.copyWith(fontSize: 14))),
+                Expanded(
+                  child: Text(
+                    'Axiom',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.type.uiStrong.copyWith(fontSize: 14),
+                  ),
+                ),
                 AxButton.icon(
                   AxIcon.sidebar,
                   label: 'Hide the sidebar',
                   shortcut: _ShellState.keysOf('B'),
                   tone: AxTone.quiet,
+                  iconFilled: true,
                   onPressed: onHide,
                 ),
               ],
@@ -1038,9 +1076,9 @@ class _Display extends StatelessWidget {
     required this.onStop,
     required this.onAgent,
     required this.changes,
-    required this.changing,
-    required this.onChanging,
-    required this.onShown,
+    required this.open,
+    required this.onClose,
+    required this.panelKey,
     required this.sizes,
     required this.onSizes,
     required this.conversation,
@@ -1052,8 +1090,10 @@ class _Display extends StatelessWidget {
     required this.small,
   });
 
-  final bool? changing;
-  final ValueChanged<bool> onChanging, onShown;
+  /// Whether the panel is shown, now.
+  final bool Function() open;
+  final VoidCallback onClose;
+  final Widget Function() panelKey;
   final (double, double) sizes;
   final ValueChanged<(double, double)> onSizes;
 
@@ -1103,9 +1143,9 @@ class _Display extends StatelessWidget {
         ?banner,
         if (!small)
           SizedBox(
-            height: 50,
+            height: 44,
             child: Padding(
-              padding: EdgeInsets.only(left: inset, right: 14),
+              padding: EdgeInsets.only(left: inset, right: 14, bottom: 8),
               child: Row(
                 children: [
                   if (onList case final f?) ...[
@@ -1133,9 +1173,6 @@ class _Display extends StatelessWidget {
     null || AppLifecycleState.resumed => true,
     _ => false,
   };
-
-  bool _open(AgentModel a) =>
-      a.access != null && (changing ?? (looks && !a.apart && changes.files.isNotEmpty));
 
   Widget _work(BuildContext context, AgentModel a) {
     final c = Ax.of(context).colors;
@@ -1193,6 +1230,14 @@ class _Display extends StatelessWidget {
                           draft: drafts.of(session.id, a.id),
                           live: !stale,
                           onAgent: onAgent,
+                          onStop: switch (a.run) {
+                            final run?
+                                when !stale &&
+                                    (a.phase == AgentPhase.running ||
+                                        a.phase == AgentPhase.asking) =>
+                              () => onStop(run),
+                            _ => null,
+                          },
                           // What is asked stays in sight beside its keys.
                           room: box.maxHeight * .35,
                           key: ValueKey('${session.id} ${a.id}'),
@@ -1206,17 +1251,14 @@ class _Display extends StatelessWidget {
         ),
       ),
     );
-    void close() => onChanging(false);
     final all = ListenableBuilder(
       listenable: changes,
       child: talk,
       builder: (context, talk) {
-        final open = _open(a);
-        onShown(open);
-        final panel = !open
+        final panel = !open()
             ? null
             : CallbackShortcuts(
-                bindings: {const SingleActivator(LogicalKeyboardKey.escape): close},
+                bindings: {const SingleActivator(LogicalKeyboardKey.escape): onClose},
                 child: FocusTraversalGroup(
                   child: a.apart
                       ? CopyView(
@@ -1263,14 +1305,12 @@ class _Display extends StatelessWidget {
     final t = Ax.of(context), c = t.colors;
     final x = a.execution;
     final acts = a.access != null;
-    final run = a.run;
-    final works = a.phase == AgentPhase.running || a.phase == AgentPhase.asking;
     return AgentBar(
       name: a.name,
       state: stateOf(a),
       mark: markOf(x.provider, x.model, x.harness),
       inset: small ? 20 : inset,
-      height: small ? 44 : 50,
+      height: small ? 40 : 44,
       lead: onList == null
           ? null
           : Padding(
@@ -1290,7 +1330,11 @@ class _Display extends StatelessWidget {
             Flexible(
               child: Text(
                 [
-                  for (final p in [x.model, x.harness, x.connection])
+                  for (final p in [
+                    modelOf(x, store),
+                    store.harnessName(x.harness),
+                    _accountOf(x, store),
+                  ])
                     if (p != null) oneLine(p, 60),
                 ].join('   '),
                 maxLines: 1,
@@ -1306,15 +1350,6 @@ class _Display extends StatelessWidget {
               ),
             ),
           ],
-          if (acts && works && run != null && !stale)
-            Flexible(
-              child: AxButton(
-                label: 'Stop',
-                icon: AxIcon.stop,
-                iconFilled: true,
-                onPressed: () => onStop(run),
-              ),
-            ),
           if (stale) ...[
             const SizedBox(width: 10),
             Flexible(
@@ -1326,20 +1361,7 @@ class _Display extends StatelessWidget {
               ),
             ),
           ],
-          if (acts) ...[
-            const SizedBox(width: 6),
-            ChangesKey(
-              files: a.apart ? 0 : changes.files.length,
-              open: _open(a),
-              figure: small || _open(a)
-                  ? null
-                  : ChangedBy(
-                      changes.files.fold(0, (n, f) => n + f.$2.added),
-                      changes.files.fold(0, (n, f) => n + f.$2.removed),
-                    ),
-              onPressed: () => onChanging(!_open(a)),
-            ),
-          ],
+          if (acts) ...[const SizedBox(width: 6), panelKey()],
         ],
       ),
     );

@@ -43,6 +43,9 @@ void main() {
     await snap(t, 'workbench-changes');
     await mount(t, const Workbench(key: ValueKey(1), terminal: true));
     await snap(t, 'workbench-terminal');
+    await t.tap(find.bySemanticsLabel('Hide the panel'));
+    await t.pump(const Duration(milliseconds: 600));
+    await snap(t, 'workbench-bare');
   });
   testWidgets('workbench, narrow', (t) async {
     await mount(t, const Workbench(), size: const Size(820, 700));

@@ -93,7 +93,12 @@ class AxButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null)
-              AxGlyph(icon!, color: ink, filled: iconFilled, size: iconFilled ? 13 : null),
+              AxGlyph(
+                icon!,
+                color: ink,
+                filled: iconFilled,
+                size: iconFilled && icon == AxIcon.stop ? 13 : null,
+              ),
             if (icon != null && !iconOnly) const SizedBox(width: 7),
             if (!iconOnly)
               Flexible(

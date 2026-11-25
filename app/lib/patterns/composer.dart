@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
+import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 
@@ -19,6 +20,7 @@ class Composer extends StatefulWidget {
     super.key,
     this.controller,
     this.onAttach,
+    this.onStop,
     this.enabled = true,
     this.leading = const [],
   });
@@ -33,6 +35,10 @@ class Composer extends StatefulWidget {
   /// Whether there is anybody to send it to; writing goes on either way.
   final bool enabled;
   final VoidCallback? onAttach;
+
+  /// Ends what is being answered. While nothing is written it stands where sending does, and beside
+  /// that otherwise.
+  final VoidCallback? onStop;
 
   /// What stands under the words: how the agent runs, how full its context is.
   final List<Widget> leading;
@@ -91,6 +97,7 @@ class _ComposerState extends State<Composer> {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
+    final empty = _text.text.trim().isEmpty;
     return Surface(
       c.written,
       radius: AxRadius.written,
@@ -141,15 +148,37 @@ class _ComposerState extends State<Composer> {
                     onPressed: widget.onAttach,
                   ),
                 const SizedBox(width: 4),
-                AxButton.icon(
-                  AxIcon.up,
-                  label: widget.action,
-                  tone: AxTone.primary,
-                  round: true,
-                  size: 30,
-                  onPressed: _text.text.trim().isEmpty || !widget.enabled
-                      ? null
-                      : () => unawaited(_submit()),
+                // A click meant to send does not stop, nor the other way round.
+                Settle(
+                  stamp: (widget.onStop == null, empty),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.onStop case final stop?) ...[
+                        AxButton.icon(
+                          AxIcon.stop,
+                          key: const ValueKey('stop'),
+                          label: 'Stop',
+                          iconFilled: true,
+                          tone: AxTone.key,
+                          round: true,
+                          size: 30,
+                          onPressed: stop,
+                        ),
+                        if (!empty) const SizedBox(width: 6),
+                      ],
+                      if (!empty || widget.onStop == null)
+                        AxButton.icon(
+                          AxIcon.up,
+                          key: const ValueKey('send'),
+                          label: widget.action,
+                          tone: AxTone.primary,
+                          round: true,
+                          size: 30,
+                          onPressed: empty || !widget.enabled ? null : () => unawaited(_submit()),
+                        ),
+                    ],
+                  ),
                 ),
               ],
             ),

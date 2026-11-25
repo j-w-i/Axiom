@@ -392,7 +392,9 @@ class _Mark extends StatelessWidget {
 
 /// What the session means to do: how far it is, its parts, how they stand and whose they are.
 class PlanView extends StatelessWidget {
-  const PlanView(this.tasks, {super.key});
+  const PlanView(this.tasks, {super.key, this.folded = false, this.onFold});
+  final bool folded;
+  final VoidCallback? onFold;
   final List<TaskView> tasks;
   @override
   Widget build(BuildContext context) {
@@ -402,13 +404,26 @@ class PlanView extends StatelessWidget {
       'Plan',
       Text('$done of ${tasks.length}', style: t.type.small.ink(t.colors.ink3)),
       [for (final k in tasks) TaskRow(k)],
+      folded: folded,
+      onFold: onFold,
     );
   }
 }
 
 /// What a part of the panel beside the conversation is.
 class PanelHeading extends StatelessWidget {
-  const PanelHeading(this.label, this.trailing, {super.key, this.acts = false});
+  const PanelHeading(
+    this.label,
+    this.trailing, {
+    super.key,
+    this.acts = false,
+    this.folded = false,
+    this.onFold,
+  });
+
+  /// What it is over is put away under it.
+  final bool folded;
+  final VoidCallback? onFold;
 
   /// It ends in a key, whose sign, not its ground, stands in line.
   final bool acts;
@@ -416,7 +431,24 @@ class PanelHeading extends StatelessWidget {
   final Widget? trailing;
   @override
   Widget build(BuildContext context) {
-    final t = Ax.of(context);
+    final t = Ax.of(context), c = t.colors;
+    Widget words({bool hovered = false}) => Row(
+      children: [
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: t.type.smallStrong.ink(hovered ? c.ink1 : c.ink3),
+          ),
+        ),
+        if (onFold != null) ...[
+          const SizedBox(width: 5),
+          // What is put away is always seen to be; that the rest can be, under the hand.
+          if (folded || hovered) AxGlyph(folded ? AxIcon.right : AxIcon.down, color: c.ink3),
+        ],
+      ],
+    );
     return Padding(
       padding: EdgeInsets.fromLTRB(12, 4, acts ? 7 : 12, 4),
       child: ConstrainedBox(
@@ -426,7 +458,17 @@ class PanelHeading extends StatelessWidget {
             Expanded(
               child: Semantics(
                 header: true,
-                child: Text(label, style: t.type.smallStrong.ink(t.colors.ink3)),
+                child: onFold == null
+                    ? words()
+                    : Pressable(
+                        label: label,
+                        expanded: !folded,
+                        onPressed: onFold,
+                        builder: (context, s) => ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 26),
+                          child: words(hovered: s.hovered || s.focused),
+                        ),
+                      ),
               ),
             ),
             ?trailing,
@@ -618,8 +660,17 @@ class NeedsRow extends StatelessWidget {
 
 /// Rows of one kind on one raised surface, and what they are.
 class PanelGroup extends StatelessWidget {
-  const PanelGroup(this.name, this.trailing, this.rows, {super.key, this.acts = false});
-  final bool acts;
+  const PanelGroup(
+    this.name,
+    this.trailing,
+    this.rows, {
+    super.key,
+    this.acts = false,
+    this.folded = false,
+    this.onFold,
+  });
+  final bool acts, folded;
+  final VoidCallback? onFold;
   final String name;
   final Widget? trailing;
   final List<Widget> rows;
@@ -627,15 +678,16 @@ class PanelGroup extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      PanelHeading(name, trailing, acts: acts),
-      Surface(
-        Ax.of(context).colors.plate,
-        radius: AxRadius.card,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+      PanelHeading(name, trailing, acts: acts, folded: folded, onFold: onFold),
+      if (!folded)
+        Surface(
+          Ax.of(context).colors.plate,
+          radius: AxRadius.card,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+          ),
         ),
-      ),
       const SizedBox(height: 6),
     ],
   );

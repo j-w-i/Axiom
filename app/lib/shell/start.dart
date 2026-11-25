@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import '../host/host_store.dart';
 import '../host/link.dart';
 import '../host/proto.dart';
+import '../patterns/model_name.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
@@ -509,7 +510,7 @@ class _StartPageState extends State<StartPage> {
         WidgetsBinding.instance.addPostFrameCallback((_) => d.ask(chosen.id));
       }
       final models = (chosen == null ? null : s.modelsOf(chosen.id)) ?? const <ModelInfo>[];
-      final listed = models.isNotEmpty;
+      final listed = models.isNotEmpty, names = namesOf(models);
       // What is being written is not taken away when the list comes.
       final typed =
           d.typed || (d.model.text.isNotEmpty && !models.any((m) => m.id == d.model.text));
@@ -658,8 +659,7 @@ class _StartPageState extends State<StartPage> {
               named: typed,
               face: !typed && d.model.text.isEmpty ? 'Choose a model' : null,
               items: [
-                for (final m in models)
-                  AxMenuItem(m.id, oneLine(m.name ?? m.id, 80), mark: ServiceMark.of(m.id)),
+                for (final m in models) modelItem(m, names),
                 const AxMenuItem(_other, 'Other, by name'),
               ],
               value: typed ? _other : d.model.text,
@@ -1308,4 +1308,18 @@ class _SignInState extends State<_SignIn> {
       ],
     );
   }
+}
+
+Map<String, (String, String?)> namesOf(List<ModelInfo> all) =>
+    modelNames([for (final m in all) (m.id, m.name)]);
+
+/// A model that is offered.
+AxMenuItem<String> modelItem(ModelInfo m, Map<String, (String, String?)> names) {
+  final (name, id) = names[m.id]!;
+  return AxMenuItem(
+    m.id,
+    oneLine(name, 80),
+    detail: id == null ? null : oneLine(id, 80),
+    mark: ServiceMark.of(m.id),
+  );
 }

@@ -715,6 +715,69 @@ void main() {
       await t.pump();
     }
 
+    testWidgets('what is answered is stopped here, and never by a click meant to send', (t) async {
+      Future<void> settle() async {
+        await t.pump();
+        await t.pump(AxMotion.settle);
+        await t.pump();
+      }
+
+      var stops = 0, working = false;
+      final words = TextEditingController();
+      addTearDown(words.dispose);
+      late StateSetter again;
+      sent = [];
+      await put(
+        t,
+        SizedBox(
+          width: 600,
+          child: StatefulBuilder(
+            builder: (context, set) {
+              again = set;
+              return Composer(
+                placeholder: 'Say',
+                action: 'Send',
+                controller: words,
+                onStop: working ? () => stops++ : null,
+                onSubmit: (s) {
+                  sent.add(s);
+                  again(() => working = true);
+                  return true;
+                },
+              );
+            },
+          ),
+        ),
+      );
+      expect(find.bySemanticsLabel('Stop'), findsNothing);
+      await t.enterText(find.byType(EditableText), 'one');
+      await settle();
+      final at = t.getCenter(find.bySemanticsLabel('Send'));
+      await t.tapAt(at);
+      await t.pump();
+      // The second click of two falls on what has taken its place.
+      expect(t.getCenter(find.bySemanticsLabel('Stop')), at);
+      await t.tapAt(at);
+      await t.pump();
+      expect(sent, ['one']);
+      expect(stops, 0);
+      await settle();
+      await t.tapAt(at);
+      expect(stops, 1);
+      // With something written there are both, and sending is where it was.
+      await t.enterText(find.byType(EditableText), 'two');
+      await settle();
+      expect(t.getCenter(find.bySemanticsLabel('Send')), at);
+      await t.tap(find.bySemanticsLabel('Stop'));
+      expect(sent, ['one']);
+      expect(stops, 2);
+      await t.tapAt(at);
+      await t.pump();
+      expect(sent, ['one', 'two']);
+      words.clear();
+      await settle();
+    });
+
     testWidgets('Enter sends, Shift+Enter does not, the keypad works', (t) async {
       await show(t);
       await t.enterText(find.byType(EditableText), 'one');
