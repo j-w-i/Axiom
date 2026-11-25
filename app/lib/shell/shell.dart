@@ -17,6 +17,7 @@ import '../ui/marks.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
+import 'drafts.dart';
 import 'start.dart';
 import 'talk.dart';
 
@@ -38,8 +39,34 @@ class _ShellState extends State<Shell> {
   String? _agent;
   String? _session;
   _View _view = _View.work;
+  final _drafts = Drafts();
+  late final _start = StartDraft(widget.store);
+
+  /// What a key was pressed for and did not come about.
+  String? _failed;
+  Timer? _forget;
 
   void _show(_View v) => setState(() => _view = v);
+
+  void _do(String what, Future<void> Function() f) {
+    _say(null);
+    unawaited(f().catchError((Object e) => _say('$what: ${wordsOf(e)}')));
+  }
+
+  void _say(String? failed) {
+    _forget?.cancel();
+    if (!mounted) return;
+    setState(() => _failed = failed);
+    if (failed != null) _forget = Timer(const Duration(seconds: 15), () => _say(null));
+  }
+
+  @override
+  void dispose() {
+    _forget?.cancel();
+    _drafts.dispose();
+    _start.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,7 +102,7 @@ class _ShellState extends State<Shell> {
                     onAccounts: () => _show(_View.accounts),
                     onOpen: (id) {
                       _show(_View.work);
-                      unawaited(s.open(id).catchError((_) {}));
+                      _do('The session was not opened', () => s.open(id));
                     },
                   ),
                 ),
@@ -115,6 +142,20 @@ class _ShellState extends State<Shell> {
                                     style: t.type.label.ink(c.faultText),
                                   ),
                                 ),
+                              ] else if (_failed case final f?) ...[
+                                const AxLamp(AgentState.failed),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Semantics(
+                                    liveRegion: true,
+                                    child: Text(
+                                      oneLine(f, 200),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.type.label.ink(c.faultText),
+                                    ),
+                                  ),
+                                ),
                               ],
                             ],
                           ),
@@ -129,7 +170,7 @@ class _ShellState extends State<Shell> {
                             child: switch (s) {
                               // Kept while the host is away: what was written is not lost.
                               _ when _view == _View.start => StartPage(
-                                s,
+                                _start,
                                 onStarted: (_) => _show(_View.work),
                                 onAccounts: () => _show(_View.accounts),
                               ),
@@ -149,7 +190,11 @@ class _ShellState extends State<Shell> {
                                 m,
                                 agent: _agent,
                                 stale: stale,
-                                onAgain: () => unawaited(s.open(m.id).catchError((_) {})),
+                                drafts: _drafts,
+                                onAgain: () =>
+                                    _do('The session was not opened', () => s.open(m.id)),
+                                onStop: (run) =>
+                                    _do('It was not stopped', () => s.cancel(m.id, run)),
                               ),
                               _ => _Word(
                                 s.sessions.isEmpty ? 'No sessions yet' : 'Choose a session',
@@ -328,9 +373,13 @@ class _Display extends StatelessWidget {
     this.session, {
     required this.agent,
     required this.stale,
+    required this.drafts,
     required this.onAgain,
+    required this.onStop,
   });
   final HostStore store;
+  final Drafts drafts;
+  final ValueChanged<String> onStop;
   final SessionModel session;
   final String? agent;
   final bool stale;
@@ -358,15 +407,47 @@ class _Display extends StatelessWidget {
         // The transcript between these two looks after itself.
         ListenableBuilder(listenable: a, builder: (context, _) => _bar(context, a)),
         ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
-        Expanded(child: TranscriptView(a)),
-        if (session.requests.values.any((r) => !acts || r.opened.answerable != Answerable.live))
-          _Asked(session, all: !acts),
-        if (acts)
-          ListenableBuilder(
-            listenable: a,
-            builder: (context, _) =>
-                Talk(store, session, a, live: !stale, key: ValueKey('${session.id} ${a.id}')),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, box) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: TranscriptView(a)),
+                // In a window too small for all of it, its end is in sight and the rest scrolls.
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: box.maxHeight),
+                  child: SingleChildScrollView(
+                    reverse: true,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (session.requests.values.any(
+                          (r) => !acts || r.opened.answerable != Answerable.live,
+                        ))
+                          _Asked(session, all: !acts),
+                        if (acts)
+                          ListenableBuilder(
+                            listenable: a,
+                            builder: (context, _) => Talk(
+                              store,
+                              session,
+                              a,
+                              draft: drafts.of(session.id, a.id),
+                              live: !stale,
+                              // What is asked stays in sight beside its keys.
+                              room: box.maxHeight * .35,
+                              key: ValueKey('${session.id} ${a.id}'),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
+        ),
       ],
     );
   }
@@ -411,7 +492,7 @@ class _Display extends StatelessWidget {
               label: 'Stop',
               icon: AxIcon.stop,
               tone: AxTone.quiet,
-              onPressed: () => unawaited(store.cancel(session.id, run).catchError((_) {})),
+              onPressed: () => onStop(run),
             ),
           if (stale) ...[
             const SizedBox(width: 10),

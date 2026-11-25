@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'controls.dart';
 import 'icons.dart';
 import 'marks.dart';
 import 'press.dart';
@@ -192,8 +193,90 @@ class AxMenuItem<T> {
   final String? why;
 }
 
+/// Of many items only some are shown, and a field to narrow them down.
+class AxNarrow<T> extends StatefulWidget {
+  const AxNarrow({required this.items, required this.builder, super.key, this.value});
+  final List<AxMenuItem<T>> items;
+  final T? value;
+  final Widget Function(BuildContext, List<AxMenuItem<T>> shown) builder;
+
+  /// More than this are narrowed down.
+  static const most = 40;
+  @override
+  State<AxNarrow<T>> createState() => _AxNarrowState<T>();
+}
+
+class _AxNarrowState<T> extends State<AxNarrow<T>> {
+  final _words = TextEditingController();
+  final _field = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _words.addListener(() => setState(() {}));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.items.length > AxNarrow.most) _field.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _field.dispose();
+    _words.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seen = <T>{};
+    final all = [
+      for (final i in widget.items)
+        if (seen.add(i.value)) i,
+    ];
+    if (all.length <= AxNarrow.most) return widget.builder(context, all);
+    final t = Ax.of(context), c = t.colors;
+    final words = _words.text.toLowerCase().split(' ').where((w) => w.isNotEmpty).toList();
+    final fit = [
+      for (final i in all)
+        if (words.every('${i.label} ${i.detail ?? ''}'.toLowerCase().contains)) i,
+    ];
+    // What is chosen now is among them.
+    final shown = fit.take(AxNarrow.most).toList();
+    final chosen = fit.where((i) => i.value == widget.value).firstOrNull;
+    if (chosen != null && !shown.contains(chosen)) shown.insert(0, chosen);
+    final more = fit.length - shown.length;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 5),
+          child: CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+                  FocusScope.of(context).nextFocus(),
+            },
+            child: AxField(
+              label: 'Find one of ${all.length}',
+              placeholder: 'Find one of ${all.length}',
+              controller: _words,
+              focusNode: _field,
+            ),
+          ),
+        ),
+        widget.builder(context, shown),
+        if (more > 0 || fit.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 5, 8, 4),
+            child: Text(fit.isEmpty ? 'None fits' : '$more more', style: t.type.small.ink(c.ink3)),
+          ),
+      ],
+    );
+  }
+}
+
 /// Arrow keys, Home, End and type-ahead move; Enter chooses.
-class AxMenu<T> extends StatefulWidget {
+class AxMenu<T> extends StatelessWidget {
   const AxMenu({
     required this.items,
     required this.onChosen,
@@ -206,24 +289,80 @@ class AxMenu<T> extends StatefulWidget {
   final String label;
   final ValueChanged<T> onChosen;
   @override
-  State<AxMenu<T>> createState() => _AxMenuState<T>();
+  Widget build(BuildContext context) => AxNarrow<T>(
+    items: items,
+    value: value,
+    builder: (context, shown) => Settle(
+      // What comes under a pointer by itself is not what is pressed.
+      stamp: Object.hashAll([for (final i in shown) i.value]),
+      child: _Items<T>(
+        items: shown,
+        value: value,
+        label: label,
+        onChosen: onChosen,
+        take: items.length <= AxNarrow.most,
+      ),
+    ),
+  );
 }
 
-class _AxMenuState<T> extends State<AxMenu<T>> {
-  late final _nodes = [for (final _ in widget.items) FocusNode()];
+class _Items<T> extends StatefulWidget {
+  const _Items({
+    required this.items,
+    required this.value,
+    required this.label,
+    required this.onChosen,
+    required this.take,
+  });
+  final List<AxMenuItem<T>> items;
+  final T? value;
+  final String label;
+  final ValueChanged<T> onChosen;
+
+  /// The focus, when it comes.
+  final bool take;
+  @override
+  State<_Items<T>> createState() => _ItemsState<T>();
+}
+
+class _ItemsState<T> extends State<_Items<T>> {
+  /// Of each value: an item that moves keeps the focus it has.
+  final _all = <T, FocusNode>{};
+  List<FocusNode> get _nodes => [for (final i in widget.items) _node(i.value)];
+  FocusNode _node(T v) => _all.putIfAbsent(v, FocusNode.new);
+
   @override
   void initState() {
     super.initState();
+    if (!widget.take) return;
     final i = widget.items.indexWhere((e) => e.value == widget.value && e.enabled);
     final first = i >= 0 ? i : widget.items.indexWhere((e) => e.enabled);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && first >= 0) _take(first);
+      if (mounted && first >= 0 && first < widget.items.length) _take(first);
+    });
+  }
+
+  @override
+  void didUpdateWidget(_Items<T> old) {
+    super.didUpdateWidget(old);
+    final now = {for (final i in widget.items) i.value};
+    final focused = old.items.indexWhere((i) => _all[i.value]?.hasFocus ?? false);
+    final lost = focused >= 0 && !now.contains(old.items[focused].value);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // What had the focus has gone: its place has it.
+      if (lost && widget.items.isNotEmpty) _take(focused.clamp(0, widget.items.length - 1));
+      _all.removeWhere((v, n) {
+        if (widget.items.any((i) => i.value == v)) return false;
+        n.dispose();
+        return true;
+      });
     });
   }
 
   @override
   void dispose() {
-    for (final n in _nodes) {
+    for (final n in _all.values) {
       n.dispose();
     }
     super.dispose();
@@ -231,16 +370,17 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
 
   void _go(int from, int step) {
     var i = from;
-    for (var k = 0; k < _nodes.length; k++) {
-      i = (i + step) % _nodes.length;
+    final n = widget.items.length;
+    for (var k = 0; k < n; k++) {
+      i = (i + step) % n;
       if (widget.items[i].enabled) return _take(i);
     }
   }
 
   /// Focus, and into view if the menu scrolls.
   void _take(int i) {
-    _nodes[i].requestFocus();
-    if (_nodes[i].context case final c?) {
+    final node = _node(widget.items[i].value)..requestFocus();
+    if (node.context case final c?) {
       unawaited(
         Scrollable.ensureVisible(
           c,
@@ -260,7 +400,9 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
     if (e is KeyUpEvent) return KeyEventResult.ignored;
     final k = HardwareKeyboard.instance;
     if (k.isMetaPressed || k.isControlPressed || k.isAltPressed) return KeyEventResult.ignored;
-    final at = _nodes.indexWhere((n) => n.hasFocus);
+    final nodes = _nodes;
+    if (nodes.isEmpty) return KeyEventResult.ignored;
+    final at = nodes.indexWhere((n) => n.hasFocus);
     switch (e.logicalKey) {
       case LogicalKeyboardKey.arrowDown:
         _go(at, 1);
@@ -276,8 +418,8 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
         if (ch == null || ch.trim().isEmpty || ch.codeUnitAt(0) < 32 || ch.codeUnitAt(0) == 127) {
           return KeyEventResult.ignored;
         }
-        for (var k = 1; k <= _nodes.length; k++) {
-          final i = (at + k) % _nodes.length;
+        for (var k = 1; k <= nodes.length; k++) {
+          final i = (at + k) % nodes.length;
           final it = widget.items[i];
           if (it.enabled && it.label.toLowerCase().startsWith(ch)) {
             _take(i);
@@ -303,12 +445,13 @@ class _AxMenuState<T> extends State<AxMenu<T>> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final (i, it) in widget.items.indexed)
+              for (final it in widget.items)
                 Pressable(
+                  key: ValueKey(it.value),
                   label: it.label,
                   hint: it.enabled ? it.detail : it.why,
                   selected: it.value == widget.value,
-                  focusNode: _nodes[i],
+                  focusNode: _node(it.value),
                   onPressed: it.enabled ? () => widget.onChosen(it.value) : null,
                   builder: (context, s) => DecoratedBox(
                     decoration: BoxDecoration(

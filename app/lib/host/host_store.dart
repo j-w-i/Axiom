@@ -314,8 +314,9 @@ class HostStore extends ChangeNotifier {
         'access': ?access?.name,
       });
 
-  Future<void> prompt(String session, String agent, String text) =>
-      _live.call('agent.prompt', {'session': session, 'agent': agent, 'text': text});
+  /// [key] names what is said: again under the same name, it is heard once.
+  Future<void> prompt(String session, String agent, String text, {String? key}) =>
+      _live.call('agent.prompt', {'session': session, 'agent': agent, 'text': text, 'key': ?key});
 
   Future<void> answer(String session, RequestOpened r, Answer a) => _live.call('request.answer', {
     'session': session,

@@ -15,13 +15,17 @@ class Composer extends StatefulWidget {
     required this.action,
     required this.onSubmit,
     super.key,
+    this.controller,
     this.onAttach,
     this.enabled = true,
     this.leading = const [],
   });
   final String placeholder, action;
 
-  /// Takes what was written. If it fails, the words are put back unless others have been written.
+  /// What is being written, if it is kept elsewhere.
+  final TextEditingController? controller;
+
+  /// Takes what was written. If it fails, the words are put back, before what was written since.
   final FutureOr<bool> Function(String) onSubmit;
 
   /// Whether there is anybody to send it to; writing goes on either way.
@@ -35,18 +39,21 @@ class Composer extends StatefulWidget {
 }
 
 class _ComposerState extends State<Composer> {
-  final _text = TextEditingController();
+  late final _text = widget.controller ?? TextEditingController();
   final _focus = FocusNode();
   @override
   void initState() {
     super.initState();
-    _text.addListener(() => setState(() {}));
-    _focus.addListener(() => setState(() {}));
+    _text.addListener(_changed);
+    _focus.addListener(_changed);
   }
+
+  void _changed() => setState(() {});
 
   @override
   void dispose() {
-    _text.dispose();
+    _text.removeListener(_changed);
+    if (widget.controller == null) _text.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -70,7 +77,13 @@ class _ComposerState extends State<Composer> {
     if (s.isEmpty || !widget.enabled) return;
     _text.clear();
     final taken = await widget.onSubmit(s);
-    if (!taken && mounted && _text.text.isEmpty) _text.text = written;
+    if (taken || !(mounted || widget.controller != null)) return;
+    final since = _text.text;
+    final all = since.trim().isEmpty ? written : '$written\n\n$since';
+    _text.value = TextEditingValue(
+      text: all,
+      selection: TextSelection.collapsed(offset: all.length),
+    );
   }
 
   @override

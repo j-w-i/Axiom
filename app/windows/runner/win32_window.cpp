@@ -187,6 +187,18 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
 
+    case WM_GETMINMAXINFO: {
+      // As small as the interface is tested at, inside the window's frame.
+      UINT dpi = FlutterDesktopGetDpiForHWND(hwnd);
+      RECT smallest = {0, 0, MulDiv(760, dpi, 96), MulDiv(520, dpi, 96)};
+      AdjustWindowRectEx(&smallest, GetWindowLong(hwnd, GWL_STYLE), FALSE,
+                         GetWindowLong(hwnd, GWL_EXSTYLE));
+      auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+      info->ptMinTrackSize.x = smallest.right - smallest.left;
+      info->ptMinTrackSize.y = smallest.bottom - smallest.top;
+      return 0;
+    }
+
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
       LONG newWidth = newRectSize->right - newRectSize->left;

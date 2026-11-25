@@ -387,7 +387,7 @@ void main() {
         child: ExecutionKey(of: 'a', [
           ExecutionChoice(
             'Model',
-            [for (var i = 0; i < 60; i++) AxMenuItem('$i', 'Model $i')],
+            [for (var i = 0; i < AxNarrow.most; i++) AxMenuItem('$i', 'Model $i')],
             '0',
             (_) {},
             cost: (_) => 'It costs.',
@@ -404,7 +404,7 @@ void main() {
     await t.pump(const Duration(milliseconds: 600));
     // The last one that is in view.
     final last = [
-      for (var i = 1; i < 60; i++)
+      for (var i = 1; i < AxNarrow.most; i++)
         if (t.getRect(find.text('Model $i')).bottom < 548) i,
     ].last;
     await t.tap(find.text('Model $last'));

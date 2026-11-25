@@ -46,21 +46,29 @@ class RequestView {
     required this.subject,
     required this.scope,
     required this.always,
+    this.id = '',
   });
 
   @override
   bool operator ==(Object other) =>
       other is RequestView &&
+      other.id == id &&
       other.agent == agent &&
       other.what == what &&
       other.subject == subject &&
       other.scope == scope &&
       other.always == always;
   @override
-  int get hashCode => Object.hash(agent, what, subject, scope, always);
+  int get hashCode => Object.hash(id, agent, what, subject, scope, always);
 
   /// [subject] is the exact command, path or address. [scope] says what allowing it would permit.
-  final String agent, what, subject, scope, always;
+  final String agent, what, subject, scope;
+
+  /// What allowing it for longer is called; null if it can be allowed only once.
+  final String? always;
+
+  /// Two questions of the same words are two questions.
+  final String id;
 }
 
 /// One linked account. A service can have several; see docs/product/requirements.md PR-4.

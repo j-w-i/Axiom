@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:axiom/host/host_store.dart';
 import 'package:axiom/host/link.dart';
 import 'package:axiom/host/proto.dart';
@@ -6,9 +8,12 @@ import 'package:axiom/patterns/context_gauge.dart';
 import 'package:axiom/patterns/execution.dart';
 import 'package:axiom/patterns/models.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
+import 'package:axiom/shell/drafts.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/start.dart';
 import 'package:axiom/ui/controls.dart';
+import 'package:axiom/ui/overlay.dart';
+import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -25,9 +30,17 @@ class Asked extends HostStore {
   List<ModelInfo> known = const [ModelInfo('claude-opus-5-5'), ModelInfo('gpt-5.6')];
   final _seen = <String, List<ModelInfo>>{};
 
+  /// Only this fails, if it is not null.
+  String? failsAt;
+
+  /// What [failsAt] or everything waits for.
+  Completer<void>? gate;
+
   Future<T> _do<T>(List<Object?> call, T answer) async {
     calls.add(call);
-    if (failure case final f?) throw f;
+    final here = failsAt == null || failsAt == call.first;
+    if (here) await gate?.future;
+    if (failure case final f? when here) throw f;
     return answer;
   }
 
@@ -57,8 +70,13 @@ class Asked extends HostStore {
   @override
   Future<void> open(String id) => _do(['open', id], null);
   @override
-  Future<void> prompt(String session, String agent, String text) =>
-      _do(['prompt', session, agent, text], null);
+  Future<void> prompt(String session, String agent, String text, {String? key}) {
+    keys.add(key);
+    return _do(['prompt', session, agent, text], null);
+  }
+
+  /// Of each prompt.
+  final keys = <String?>[];
   @override
   Future<void> answer(String session, RequestOpened r, Answer a) =>
       _do(['answer', session, r.request, r.digest, a], null);
@@ -330,7 +348,16 @@ void main() {
       const Event(
         90,
         90,
-        RequestOpened('q3', 'a', 'asks to run a command', 'ls', '', Answerable.live, digest: 'x'),
+        RequestOpened(
+          'q3',
+          'a',
+          'asks to run a command',
+          'ls',
+          '',
+          Answerable.live,
+          digest: 'x',
+          session: true,
+        ),
       ),
     ]);
     await settled(t);
@@ -578,4 +605,264 @@ void main() {
       expect(t.takeException(), isNull, reason: l);
     }
   });
+
+  Finder field(String l) => find.descendant(
+    of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
+    matching: find.byType(EditableText),
+  );
+  Future<void> press(WidgetTester t, Finder f) async {
+    await t.ensureVisible(f);
+    await t.tap(f);
+    await settled(t);
+  }
+
+  /// Everything but the start itself.
+  Future<void> fill(WidgetTester t, String say) async {
+    await press(t, find.bySemanticsLabel('New session').first);
+    await t.enterText(field('What should be done'), say);
+    await t.enterText(field('Folder'), '/w');
+    await settled(t);
+    await press(t, find.bySemanticsLabel('Model: none'));
+    await press(t, find.bySemanticsLabel('gpt-5.6').last);
+  }
+
+  testWidgets('a double click answers one question, not the next as well', (t) async {
+    final s = await shell(t, session: working(asks: true));
+    await settled(t);
+    final at = t.getCenter(find.text('Allow once'));
+    for (final ms in [60, 96, 160, 200]) {
+      await t.tapAt(at);
+      await t.pump(Duration(milliseconds: ms));
+    }
+    expect(s.calls, [
+      ['answer', 's', 'q1', 'd-q1', Answer.once],
+    ]);
+    // Nor does a key that is held down.
+    await t.pump(AxMotion.settle);
+    expect(find.text('cargo bench'), findsWidgets);
+    for (var i = 0; i < 4; i++) {
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.pump(const Duration(milliseconds: 30));
+    }
+    expect(s.calls.length, 1);
+  });
+
+  testWidgets('what is being written to an agent is there when its person comes back', (t) async {
+    final s = await shell(t, session: working());
+    final words = find.byType(EditableText);
+    await t.enterText(words, 'Half a thought');
+    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    expect(find.text('Half a thought'), findsNothing);
+    await press(t, find.text('Done'));
+    expect(find.text('Half a thought'), findsOneWidget);
+    // Nor lost when it fails while the next is being written, or while one looks elsewhere.
+    final gate = Completer<void>();
+    s
+      ..gate = gate
+      ..failure = const LinkClosed('the host is gone');
+    await t.tap(words);
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.pump();
+    await t.enterText(words, 'and the next');
+    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    gate.complete();
+    await settled(t);
+    await press(t, find.text('Done'));
+    expect(find.text('Half a thought\n\nand the next'), findsOneWidget);
+    expect(find.text('the host is gone'), findsOneWidget);
+    // Said again, it is the same; said again after it was heard, it is not.
+    await t.tap(words);
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settled(t);
+    s.failure = null;
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settled(t);
+    await t.enterText(words, 'Half a thought\n\nand the next');
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settled(t);
+    expect(s.keys.length, 4);
+    expect(s.keys[1], isNot(s.keys[0]));
+    expect(s.keys[2], s.keys[1]);
+    expect(s.keys[3], isNot(s.keys[2]));
+    expect(s.keys.first, hasLength(32));
+  });
+
+  testWidgets('drafts of two agents are two, and not too many are kept', (t) async {
+    final d = Drafts();
+    d.of('s', 'a').text.text = 'one';
+    d.of('s', 'b').text.text = 'two';
+    expect([d.of('s', 'a').text.text, d.of('s', 'b').text.text], ['one', 'two']);
+    for (var i = 0; i < 1000; i++) {
+      d.of('s', '$i');
+    }
+    await t.pumpWidget(const SizedBox());
+    expect([d.of('s', 'a').text.text, d.of('s', 'b').text.text], ['one', 'two']);
+    for (var i = 0; i < 1000; i++) {
+      d.of('t', '$i').text.text = 'x';
+    }
+    await t.pumpWidget(const SizedBox());
+    expect(d.of('s', 'a').text.text, isEmpty);
+    d.dispose();
+  });
+
+  testWidgets('adding an account on the way loses nothing of a new session', (t) async {
+    final s = await shell(t, accounts: false);
+    await press(t, find.bySemanticsLabel('New session').first);
+    await t.enterText(field('What should be done'), 'precious words');
+    await t.enterText(field('Folder'), '/w');
+    await settled(t);
+    await press(t, find.text('Add an account or a server'));
+    s.connections = const [key];
+    await press(t, find.text('Done'));
+    if (find.byType(StartPage).evaluate().isEmpty) {
+      await press(t, find.bySemanticsLabel('New session').first);
+    }
+    expect(find.text('precious words'), findsOneWidget);
+    expect(find.text('/w'), findsOneWidget);
+  });
+
+  testWidgets('starting again makes nothing twice, and takes what was changed', (t) async {
+    final s = await shell(t);
+    await fill(t, 'Do it.');
+    s
+      ..calls.clear()
+      ..failsAt = 'prompt'
+      ..failure = const LinkClosed('no answer');
+    await press(t, find.text('Start'));
+    await press(t, find.text('Start'));
+    expect(s.calls.map((c) => c.first), ['create', 'add', 'open', 'prompt', 'open', 'prompt']);
+    expect(s.keys[0], s.keys[1]);
+    s.calls.clear();
+    await press(t, find.bySemanticsLabel('Access: Ask first'));
+    await press(t, find.bySemanticsLabel('Work in the folder').last);
+    s.failure = null;
+    await press(t, find.text('Start'));
+    expect(s.calls, [
+      ['set', 's_new', 'a_new', 'gpt-5.6', 'c1', Access.work],
+      ['open', 's_new'],
+      ['prompt', 's_new', 'a_new', 'Do it.'],
+    ]);
+    // The next is another.
+    s.calls.clear();
+    await press(t, find.bySemanticsLabel('New session').first);
+    expect(find.text('Do it.'), findsNothing);
+    await t.enterText(field('What should be done'), 'Do it.');
+    await settled(t);
+    await press(t, find.text('Start'));
+    expect(s.calls.map((c) => c.first), ['create', 'add', 'open', 'prompt']);
+    expect(s.keys.last, isNot(s.keys[1]));
+  });
+
+  testWidgets('who leaves while it starts is not taken back, and is told', (t) async {
+    final s = await shell(t);
+    await fill(t, 'precious words');
+    final gate = Completer<void>();
+    s
+      ..calls.clear()
+      ..failsAt = 'add'
+      ..gate = gate;
+    await press(t, find.text('Start'));
+    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    gate.complete();
+    await settled(t);
+    expect(s.calls.map((c) => c.first), ['create', 'add', 'prompt'], reason: 'it is not opened');
+    expect(find.byType(AccountsPage), findsOneWidget);
+    // And when it fails:
+    s
+      ..failsAt = 'prompt'
+      ..gate = Completer<void>()
+      ..failure = const LinkClosed('refused it');
+    await press(t, find.bySemanticsLabel('New session').first);
+    await t.enterText(field('What should be done'), 'other words');
+    await settled(t);
+    await press(t, find.text('Start'));
+    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    s.gate!.complete();
+    await settled(t);
+    await press(t, find.bySemanticsLabel('New session').first);
+    expect(find.text('other words'), findsOneWidget);
+    expect(find.text('refused it'), findsOneWidget);
+  });
+
+  testWidgets('a model being written is not taken away when the list comes', (t) async {
+    final s = await shell(t);
+    final gate = Completer<void>();
+    s
+      ..failsAt = 'models'
+      ..gate = gate;
+    await press(t, find.bySemanticsLabel('New session').first);
+    await t.enterText(field('Model name'), 'my-own');
+    gate.complete();
+    await settled(t);
+    expect(find.text('my-own'), findsOneWidget);
+    expect(find.bySemanticsLabel('Model: Another, by name'), findsOneWidget);
+  });
+
+  testWidgets('a provider that lists nothing: its model is written', (t) async {
+    final s = await shell(t);
+    s.known = const [];
+    await press(t, find.bySemanticsLabel('New session').first);
+    expect(field('Model name'), findsOneWidget);
+    expect(find.byType(AxSelect<Access>), findsOneWidget);
+  });
+
+  testWidgets('models are asked for when somebody looks, once', (t) async {
+    final s = await shell(t, session: working());
+    expect(s.calls, isEmpty);
+    await t.tap(find.byType(ExecutionKey));
+    await settled(t);
+    expect(s.calls, [
+      ['models', 'c1'],
+    ]);
+    await t.tap(find.text('Model'));
+    await settled(t);
+    expect(find.text('gpt-5.6'), findsWidgets);
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settled(t);
+    await t.tap(find.byType(ExecutionKey));
+    await settled(t);
+    expect(s.calls.length, 1);
+  });
+
+  testWidgets('a stop that fails says so', (t) async {
+    final s = await shell(t, session: working());
+    s.failure = const LinkClosed('the host is gone');
+    await t.tap(find.text('Stop'));
+    await settled(t);
+    expect(find.textContaining('It was not stopped: the host is gone'), findsOneWidget);
+    s.failure = null;
+    await t.tap(find.text('Stop'));
+    await settled(t);
+    expect(find.textContaining('It was not stopped'), findsNothing);
+  });
+
+  for (final (size, scale) in const [
+    // No window is smaller (macos, windows, linux: the runners say so).
+    (Size(760, 520), 1.0),
+    (Size(760, 520), 2.0),
+    (Size(900, 600), 1.5),
+  ]) {
+    testWidgets('fits ${size.width.round()} by ${size.height.round()} at $scale', (t) async {
+      final s = Asked()
+        ..current = working(asks: true)
+        ..connections = const [key];
+      addTearDown(s.dispose);
+      await mount(
+        t,
+        MediaQuery(
+          data: MediaQueryData(size: size, textScaler: TextScaler.linear(scale)),
+          child: Shell(s),
+        ),
+        size: size,
+        dpr: 1,
+      );
+      await settled(t);
+      expect(t.takeException(), isNull);
+      for (final l in ['New session', 'Accounts and servers']) {
+        await t.tap(find.bySemanticsLabel(l).first);
+        await settled(t);
+        expect(t.takeException(), isNull, reason: l);
+      }
+    });
+  }
 }

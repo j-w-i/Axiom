@@ -30,8 +30,11 @@ class ExecutionChoice {
 /// The agent's execution as one key: what it runs on, and everything about it when opened. [choices]
 /// begin with the model and the harness, which the key names.
 class ExecutionKey extends StatelessWidget {
-  const ExecutionKey(this.choices, {required this.of, super.key});
+  const ExecutionKey(this.choices, {required this.of, super.key, this.onOpen});
   final List<ExecutionChoice> choices;
+
+  /// When somebody is about to look.
+  final VoidCallback? onOpen;
 
   /// Whose execution it is. The panel of one agent closes when the key becomes another's.
   final Object of;
@@ -47,7 +50,10 @@ class ExecutionKey extends StatelessWidget {
       anchor: (context, open, toggle) => Pressable(
         label: 'Runs on ${words.join(', ')}. Change',
         expanded: open,
-        onPressed: toggle,
+        onPressed: () {
+          if (!open) onOpen?.call();
+          toggle();
+        },
         builder: (context, s) => DecoratedBox(
           decoration: BoxDecoration(
             color: open || s.hovered ? c.tinted(hue) : null,
@@ -274,9 +280,13 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
         if (open)
           Padding(
             padding: const EdgeInsets.only(left: 82, bottom: 5),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [for (final i in ch.items) ..._item(context, ch, i)],
+            child: AxNarrow<String>(
+              items: ch.items,
+              value: ch.value,
+              builder: (context, shown) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [for (final i in shown) ..._item(context, ch, i)],
+              ),
             ),
           ),
       ],

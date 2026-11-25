@@ -15,15 +15,28 @@ import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/status.dart';
 import '../ui/tokens.dart';
+import 'drafts.dart';
 import 'start.dart';
 
 /// What an agent asks, and where it is spoken to. Only for an agent that can act: a replayed one is
 /// only shown.
 class Talk extends StatefulWidget {
-  const Talk(this.store, this.session, this.agent, {required this.live, super.key});
+  const Talk(
+    this.store,
+    this.session,
+    this.agent, {
+    required this.draft,
+    required this.live,
+    this.room = double.infinity,
+    super.key,
+  });
+
+  /// How high the words of a question may be.
+  final double room;
   final HostStore store;
   final SessionModel session;
   final AgentModel agent;
+  final Draft draft;
 
   /// The host answers.
   final bool live;
@@ -32,27 +45,37 @@ class Talk extends StatefulWidget {
 }
 
 class _TalkState extends State<Talk> {
-  String? _problem;
-
   /// Answered from here, until the host says it is closed: not answered twice.
   final _answered = <String>{};
 
-  @override
-  void didUpdateWidget(Talk old) {
-    super.didUpdateWidget(old);
-    if (old.agent != widget.agent) _problem = null;
-  }
-
+  /// What goes wrong is said where this agent is spoken to, also if somebody has looked elsewhere
+  /// meanwhile.
   Future<bool> _do(Future<void> Function() f, {VoidCallback? failed}) async {
-    setState(() => _problem = null);
+    final problem = widget.draft.problem..value = null;
     try {
       await f();
       return true;
     } on Object catch (e) {
       failed?.call();
-      if (mounted) setState(() => _problem = wordsOf(e));
+      problem.value = wordsOf(e);
       return false;
     }
+  }
+
+  Future<bool> _say(String text) {
+    final d = widget.draft, s = widget.store;
+    final session = widget.session.id, agent = widget.agent.id;
+    return _do(() async {
+      await s.prompt(session, agent, text, key: d.keyFor(text));
+      d.heard();
+    });
+  }
+
+  /// The models of the account, if they have not been asked for.
+  void _look() {
+    final c = widget.agent.execution.connection;
+    if (c == null || widget.store.modelsOf(c) != null) return;
+    unawaited(_do(() => widget.store.models(c)));
   }
 
   void _answer(RequestOpened r, Answer a) {
@@ -131,7 +154,12 @@ class _TalkState extends State<Talk> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: widget.draft.problem,
+    builder: (context, problem, _) => _build(context, problem),
+  );
+
+  Widget _build(BuildContext context, String? problem) {
     final t = Ax.of(context), c = t.colors;
     final s = widget.store, a = widget.agent;
     final asked = [
@@ -166,8 +194,10 @@ class _TalkState extends State<Talk> {
                     what: first.what,
                     subject: first.subject,
                     scope: first.scope,
-                    always: 'Allow this for the session',
+                    always: first.session ? 'Allow this for the session' : null,
+                    id: first.request,
                   ),
+                  room: widget.room,
                   onOnce: () => _answer(first, Answer.once),
                   onAlways: () => _answer(first, Answer.session),
                   onDeny: () => _answer(first, Answer.deny),
@@ -175,7 +205,7 @@ class _TalkState extends State<Talk> {
               ],
             ),
           ),
-        if (_problem ?? a.error case final p?)
+        if (problem ?? a.error case final p?)
           Semantics(
             liveRegion: true,
             child: Padding(
@@ -205,7 +235,7 @@ class _TalkState extends State<Talk> {
           action: works ? 'Queue' : 'Send',
           enabled: widget.live,
           leading: [
-            ExecutionKey(_choices(s, a), of: a.id),
+            ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
             if (a.context != null)
               ContextGauge(
                 ContextView(
@@ -220,7 +250,8 @@ class _TalkState extends State<Talk> {
                 hue: markOf(a.execution.provider, a.execution.model)?.color(c),
               ),
           ],
-          onSubmit: (text) => _do(() => s.prompt(widget.session.id, a.id, text)),
+          controller: widget.draft.text,
+          onSubmit: _say,
         ),
       ],
     );

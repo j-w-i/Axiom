@@ -13,6 +13,7 @@ import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
+import 'drafts.dart';
 
 /// What the host said, in a sentence.
 String wordsOf(Object e) => switch (e) {
@@ -131,10 +132,159 @@ List<String> recentFolders(List<SessionInfo> sessions, {int most = 8}) {
   return out.toList();
 }
 
+/// What a person is setting up, and how far it has come. It outlives the page: adding an account on
+/// the way, or looking at another session, loses nothing.
+class StartDraft extends ChangeNotifier {
+  StartDraft(this.store) {
+    for (final c in [say, folder, model]) {
+      c.addListener(notifyListeners);
+    }
+    folder.addListener(_folderNamed);
+  }
+  final HostStore store;
+  final say = TextEditingController(), folder = TextEditingController();
+  final model = TextEditingController();
+  String? connection, problem;
+  Access access = Access.ask;
+  bool busy = false;
+
+  /// The model is written, not chosen.
+  bool typed = false;
+
+  /// The folder's words for agents, and those of them that are to be followed.
+  List<Instructions> words = const [];
+  final follow = <String>{};
+  String? open;
+  String? _looked, _asked;
+  Timer? _soon;
+  bool _gone = false;
+
+  /// Made already, if a later step failed: used, not made again.
+  _Made? _made;
+  final _prompt = Draft();
+
+  void change(VoidCallback f) {
+    f();
+    tell();
+  }
+
+  void tell() {
+    if (!_gone) notifyListeners();
+  }
+
+  /// Looks into the folder a moment after it has been named.
+  void _folderNamed() {
+    final path = wholePath(folder.text.trim());
+    if (path == _looked) return;
+    _looked = path;
+    _soon?.cancel();
+    if (words.isNotEmpty || follow.isNotEmpty) {
+      // What was said of another folder's does not hold for this one's.
+      words = const [];
+      follow.clear();
+      open = null;
+    }
+    if (path.isEmpty) return;
+    _soon = Timer(const Duration(milliseconds: 400), () async {
+      try {
+        final w = await store.look(path);
+        if (_looked == path) change(() => words = w);
+      } on Object {
+        // Not a folder yet; starting says so.
+      }
+    });
+  }
+
+  /// Asks for the models of the chosen connection, once.
+  void ask(String? id) {
+    if (id == null || id == _asked) return;
+    _asked = id;
+    unawaited(
+      store
+          .models(id)
+          .then(
+            (_) {},
+            onError: (Object e) {
+              if (_asked == id) change(() => problem = wordsOf(e));
+            },
+          ),
+    );
+  }
+
+  /// Where it works, if it does now. [shown]: whether its person still waits for it.
+  Future<String?> start(Connection c, bool Function() shown) async {
+    change(() {
+      busy = true;
+      problem = null;
+    });
+    try {
+      final text = say.text.trim(), where = wholePath(folder.text.trim());
+      final x = Execution(
+        harness: 'axiom',
+        provider: c.provider,
+        model: model.text.trim(),
+        connection: c.id,
+      );
+      final followed = [
+        for (final w in words)
+          if (follow.contains(w.path)) w,
+      ];
+      final as = [for (final w in followed) '${w.path} ${w.digest}'].join('\n');
+      var m = _made;
+      if (m == null || m.folder != where || (m.agent != null && m.follows != as)) {
+        m = _Made(await store.create(oneLine(text, 80), workspace: where), where);
+        _made = m;
+      }
+      final how = (x.provider, x.model, x.connection, access);
+      if (m.agent == null) {
+        m.agent = await store.addAgent(m.session, 'Lead', x, access, instructions: followed);
+        m
+          ..how = how
+          ..follows = as;
+      } else if (m.how != how) {
+        await store.setAgent(m.session, m.agent!, execution: x, access: access);
+        m.how = how;
+      }
+      if (shown()) await store.open(m.session);
+      await store.prompt(m.session, m.agent!, text, key: _prompt.keyFor('${m.session} $text'));
+      _made = null;
+      _prompt.heard();
+      say.clear();
+      follow.clear();
+      open = null;
+      return m.session;
+    } on Object catch (e) {
+      problem = wordsOf(e);
+      return null;
+    } finally {
+      busy = false;
+      tell();
+    }
+  }
+
+  @override
+  void dispose() {
+    _gone = true;
+    _soon?.cancel();
+    say.dispose();
+    folder.dispose();
+    model.dispose();
+    _prompt.dispose();
+    super.dispose();
+  }
+}
+
+class _Made {
+  _Made(this.session, this.folder);
+  final String session, folder;
+  String? agent, follows;
+  Object? how;
+}
+
 /// A new piece of work: what it is, where, and who does it.
 class StartPage extends StatefulWidget {
-  const StartPage(this.store, {required this.onStarted, required this.onAccounts, super.key});
-  final HostStore store;
+  const StartPage(this.draft, {required this.onStarted, required this.onAccounts, super.key});
+  final StartDraft draft;
   final ValueChanged<String> onStarted;
   final VoidCallback onAccounts;
   @override
@@ -142,82 +292,10 @@ class StartPage extends StatefulWidget {
 }
 
 class _StartPageState extends State<StartPage> {
-  final _say = TextEditingController(), _folder = TextEditingController();
-  final _model = TextEditingController();
-  String? _connection, _problem;
-  Access _access = Access.ask;
-  bool _busy = false, _typed = false;
-  String? _asked;
+  StartDraft get d => widget.draft;
 
   /// In the list of models: none of these.
   static const _other = '\n';
-
-  /// The folder's words for agents, and those of them that are to be followed.
-  List<Instructions> _words = const [];
-  final _follow = <String>{};
-  String? _looked, _open;
-  Timer? _soon;
-
-  /// Made already, if a later step failed: it is used, not made again.
-  String? _session;
-  String? _sessionFolder;
-
-  @override
-  void initState() {
-    super.initState();
-    for (final c in [_say, _folder, _model]) {
-      c.addListener(() => setState(() {}));
-    }
-    _folder.addListener(_folderNamed);
-  }
-
-  /// Looks into the folder a moment after it has been named.
-  void _folderNamed() {
-    final path = wholePath(_folder.text.trim());
-    if (path == _looked) return;
-    _looked = path;
-    _soon?.cancel();
-    if (_words.isNotEmpty || _follow.isNotEmpty) {
-      // What was said of another folder's does not hold for this one's.
-      _words = const [];
-      _follow.clear();
-      _open = null;
-    }
-    if (path.isEmpty) return;
-    _soon = Timer(const Duration(milliseconds: 400), () async {
-      try {
-        final w = await widget.store.look(path);
-        if (mounted && _looked == path) setState(() => _words = w);
-      } on Object {
-        // Not a folder yet; starting says so.
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _soon?.cancel();
-    _say.dispose();
-    _folder.dispose();
-    _model.dispose();
-    super.dispose();
-  }
-
-  /// Asks for the models of the chosen connection, once.
-  void _look(String? id) {
-    if (id == null || id == _asked) return;
-    _asked = id;
-    unawaited(
-      widget.store
-          .models(id)
-          .then(
-            (_) {},
-            onError: (Object e) {
-              if (mounted && _asked == id) setState(() => _problem = wordsOf(e));
-            },
-          ),
-    );
-  }
 
   static String _tail(String f) =>
       f.split(RegExp(r'[/\\]')).lastWhere((x) => x.isNotEmpty, orElse: () => f);
@@ -227,70 +305,39 @@ class _StartPageState extends State<StartPage> {
   }
 
   Future<void> _start(Connection c) async {
-    setState(() {
-      _busy = true;
-      _problem = null;
-    });
-    final s = widget.store;
-    try {
-      final text = _say.text.trim(), folder = wholePath(_folder.text.trim());
-      if (_session == null || _sessionFolder != folder) {
-        _session = await s.create(oneLine(text, 80), workspace: folder);
-        _sessionFolder = folder;
-      }
-      final id = _session!;
-      final x = Execution(
-        harness: 'axiom',
-        provider: c.provider,
-        model: _model.text.trim(),
-        connection: c.id,
-      );
-      final agent = await s.addAgent(
-        id,
-        'Lead',
-        x,
-        _access,
-        instructions: [
-          for (final w in _words)
-            if (_follow.contains(w.path)) w,
-        ],
-      );
-      await s.open(id);
-      await s.prompt(id, agent, text);
-      if (mounted) widget.onStarted(id);
-    } on Object catch (e) {
-      if (mounted) setState(() => _problem = wordsOf(e));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    final id = await d.start(c, () => mounted);
+    if (id != null && mounted) widget.onStarted(id);
   }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.store,
+    listenable: Listenable.merge([d.store, d]),
     builder: (context, _) {
-      final s = widget.store;
+      final s = d.store;
       final t = Ax.of(context), c = t.colors;
       final all = s.connections;
-      final chosen = all.where((x) => x.id == _connection).firstOrNull ?? all.firstOrNull;
+      final chosen = all.where((x) => x.id == d.connection).firstOrNull ?? all.firstOrNull;
       if (chosen != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _look(chosen.id));
+        WidgetsBinding.instance.addPostFrameCallback((_) => d.ask(chosen.id));
       }
       final models = (chosen == null ? null : s.modelsOf(chosen.id)) ?? const <ModelInfo>[];
       final listed = models.isNotEmpty;
+      // What is being written is not taken away when the list comes.
+      final typed =
+          d.typed || (d.model.text.isNotEmpty && !models.any((m) => m.id == d.model.text));
       final recent = recentFolders(s.sessions);
       final ready =
-          !_busy &&
+          !d.busy &&
           chosen != null &&
-          [_say, _folder, _model].every((x) => x.text.trim().isNotEmpty) &&
+          [d.say, d.folder, d.model].every((x) => x.text.trim().isNotEmpty) &&
           s.phase == HostPhase.connected;
       return _Page(
         title: 'New session',
-        problem: _problem,
+        problem: d.problem,
         children: [
           FormPart(
             'What should be done',
-            child: AxField(label: 'What should be done', controller: _say, lines: 4),
+            child: AxField(label: 'What should be done', controller: d.say, lines: 4),
           ),
           FormPart(
             'Folder',
@@ -298,7 +345,12 @@ class _StartPageState extends State<StartPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AxField(label: 'Folder', controller: _folder, mono: true, placeholder: '~/project'),
+                AxField(
+                  label: 'Folder',
+                  controller: d.folder,
+                  mono: true,
+                  placeholder: '~/project',
+                ),
                 if (recent.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   AxSelect<String>(
@@ -307,17 +359,17 @@ class _StartPageState extends State<StartPage> {
                       for (final f in recent)
                         AxMenuItem(f, oneLine(literal(_tail(f)), 60), detail: _head(f)),
                     ],
-                    value: _folder.text,
-                    onChanged: (v) => setState(() => _folder.text = v),
+                    value: d.folder.text,
+                    onChanged: (v) => d.change(() => d.folder.text = v),
                   ),
                 ],
               ],
             ),
           ),
-          for (final w in _words)
+          for (final w in d.words)
             FormPart(
               null,
-              note: _open == w.path
+              note: d.open == w.path
                   ? null
                   : 'Its words for agents. Followed only as they are now, and only if you say so.',
               child: Column(
@@ -330,21 +382,21 @@ class _StartPageState extends State<StartPage> {
                     children: [
                       AxCheck(
                         label: 'Follow ${w.path}',
-                        value: _follow.contains(w.path),
-                        onChanged: (v) => setState(() {
-                          v ? _follow.add(w.path) : _follow.remove(w.path);
+                        value: d.follow.contains(w.path),
+                        onChanged: (v) => d.change(() {
+                          v ? d.follow.add(w.path) : d.follow.remove(w.path);
                           // Read first: what is followed has been shown.
-                          if (v) _open = w.path;
+                          if (v) d.open = w.path;
                         }),
                       ),
                       AxButton(
-                        label: _open == w.path ? 'Hide it' : 'Read it',
+                        label: d.open == w.path ? 'Hide it' : 'Read it',
                         tone: AxTone.quiet,
-                        onPressed: () => setState(() => _open = _open == w.path ? null : w.path),
+                        onPressed: () => d.change(() => d.open = d.open == w.path ? null : w.path),
                       ),
                     ],
                   ),
-                  if (_open == w.path)
+                  if (d.open == w.path)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: ConstrainedBox(
@@ -397,11 +449,11 @@ class _StartPageState extends State<StartPage> {
                         ),
                     ],
                     value: chosen!.id,
-                    onChanged: (v) => setState(() {
-                      _connection = v;
-                      _problem = null;
-                      _typed = false;
-                      _model.clear();
+                    onChanged: (v) => d.change(() {
+                      d.connection = v;
+                      d.problem = null;
+                      d.typed = false;
+                      d.model.clear();
                     }),
                   ),
                   if (listed)
@@ -412,37 +464,38 @@ class _StartPageState extends State<StartPage> {
                           AxMenuItem(m.id, oneLine(m.name ?? m.id, 80), mark: ServiceMark.of(m.id)),
                         const AxMenuItem(_other, 'Another, by name'),
                       ],
-                      value: _typed ? _other : _model.text,
-                      onChanged: (v) => setState(() {
-                        _typed = v == _other;
-                        _model.text = _typed ? '' : v;
+                      value: typed ? _other : d.model.text,
+                      onChanged: (v) => d.change(() {
+                        d.typed = v == _other;
+                        d.model.text = d.typed ? '' : v;
                       }),
                     ),
                   AxSelect<Access>(
                     label: 'Access',
                     items: accessItems,
-                    value: _access,
-                    onChanged: (v) => setState(() => _access = v),
+                    value: d.access,
+                    onChanged: (v) => d.change(() => d.access = v),
                   ),
                   AxButton(label: 'Accounts', tone: AxTone.quiet, onPressed: widget.onAccounts),
                 ],
               ),
             ),
-            if (!listed || _typed)
+            if (!listed || typed)
               FormPart(
                 'Model',
                 child: AxField(
                   label: 'Model name',
-                  controller: _model,
+                  controller: d.model,
                   mono: true,
                   placeholder: 'As the provider calls it',
+                  onChanged: (_) => d.typed = true,
                 ),
               ),
           ],
           Row(
             children: [
               AxButton(
-                label: _busy ? 'Starting' : 'Start',
+                label: d.busy ? 'Starting' : 'Start',
                 icon: AxIcon.play,
                 tone: AxTone.primary,
                 onPressed: ready ? () => unawaited(_start(chosen)) : null,

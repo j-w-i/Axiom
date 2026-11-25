@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -245,9 +247,13 @@ class RequestBar extends StatefulWidget {
     required this.onAlways,
     required this.onDeny,
     super.key,
+    this.room = maxHeight,
   });
   final RequestView request;
   final VoidCallback onOnce, onAlways, onDeny;
+
+  /// How high its words may be, if that is less than [maxHeight].
+  final double room;
   static const maxHeight = 220.0;
   @override
   State<RequestBar> createState() => _RequestBarState();
@@ -305,7 +311,7 @@ class _RequestBarState extends State<RequestBar> {
     final ok = _seen ?? false;
     final agent = oneLine(literal(r.agent), 60);
     final words = ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: RequestBar.maxHeight),
+      constraints: BoxConstraints(maxHeight: math.min(RequestBar.maxHeight, widget.room)),
       child: NotificationListener<ScrollMetricsNotification>(
         onNotification: (_) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _look());
@@ -370,7 +376,8 @@ class _RequestBarState extends State<RequestBar> {
       alignment: WrapAlignment.end,
       children: [
         AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: widget.onDeny),
-        AxButton(label: oneLine(literal(r.always), 80), onPressed: ok ? widget.onAlways : null),
+        if (r.always case final a?)
+          AxButton(label: oneLine(literal(a), 80), onPressed: ok ? widget.onAlways : null),
         AxButton(label: 'Allow once', tone: AxTone.primary, onPressed: ok ? widget.onOnce : null),
       ],
     );
@@ -381,6 +388,7 @@ class _RequestBarState extends State<RequestBar> {
       explicitChildNodes: true,
       child: Settle(
         stamp: r,
+        fresh: true,
         child: Surface(
           c.plate,
           child: Stack(
