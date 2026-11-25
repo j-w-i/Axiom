@@ -652,7 +652,8 @@ void main() {
       needsTrust: true,
       access: [Access.ask],
     ),
-    HarnessInfo('codex', 'Codex', problem: 'not there'),
+    HarnessInfo('codex', 'Codex', problem: 'codex is not in any of the folders'),
+    HarnessInfo('qwen', 'Qwen Code', problem: 'qwen is not in any of the folders'),
   ];
 
   testWidgets('a session can run with a program of the person\'s own', (t) async {
@@ -661,7 +662,11 @@ void main() {
     await press(t, find.bySemanticsLabel('New session').first);
     expect(find.text('Add an account or a server'), findsOneWidget);
     await press(t, find.bySemanticsLabel('Runs with: Axiom'));
-    expect(find.bySemanticsLabel('Codex'), findsNothing, reason: 'it is not there');
+    expect(find.text('not on this computer'), findsOneWidget, reason: 'Codex is not there');
+    expect(find.bySemanticsLabel('Qwen Code'), findsNothing);
+    await t.tap(find.text('Codex'), warnIfMissed: false);
+    await settled(t);
+    expect(find.bySemanticsLabel('Runs with: Axiom'), findsOneWidget, reason: 'nothing happens');
     await press(t, find.bySemanticsLabel('Claude Code').last);
     // No account is needed, and what it has no mode for is not offered.
     expect(find.text('Add an account or a server'), findsNothing);

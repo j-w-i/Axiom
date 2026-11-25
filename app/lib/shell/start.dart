@@ -386,6 +386,11 @@ class _StartPageState extends State<StartPage> {
         for (final h in s.harnesses)
           if (h.program != null) h,
       ];
+      // Those that most people would look for: that they are not there is said.
+      final missing = [
+        for (final h in s.harnesses)
+          if (h.program == null && const {'claude', 'codex'}.contains(h.id)) h,
+      ];
       final other = d.delegated;
       final adds = d.into != null;
       bool filled(TextEditingController x) => x.text.trim().isNotEmpty;
@@ -424,6 +429,16 @@ class _StartPageState extends State<StartPage> {
               oneLine(h.name, 40),
               detail: 'its own sign-in',
               mark: markOf(null, null, h.id),
+            ),
+          for (final h in missing)
+            AxMenuItem(
+              h.id,
+              oneLine(h.name, 40),
+              mark: markOf(null, null, h.id),
+              enabled: false,
+              why: h.problem != null && !h.problem!.contains('is not in any of')
+                  ? oneLine(h.problem!, 80)
+                  : 'not on this computer',
             ),
         ],
         value: d.harness,
@@ -522,7 +537,7 @@ class _StartPageState extends State<StartPage> {
                   ],
                 ),
               ),
-          if (here.isNotEmpty || d.harness != 'axiom')
+          if (here.isNotEmpty || missing.isNotEmpty || d.harness != 'axiom')
             FormPart(
               null,
               child: Wrap(
