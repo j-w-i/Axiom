@@ -28,8 +28,8 @@ Order: policy+spawn → Anthropic Messages codec → Chat codec (local servers) 
 - sandbox: macOS and Linux escape suite passes; Windows states honestly that it is uncontained
 - permissions: SI-1…SI-16 each have a test; compaction, branching, resume; `axiom` CLI can do everything the GUI can
 - connections: several accounts per provider; secrets only in the OS store; none in logs, argv, env or journal (canary test)
-- [x] talking and reading: earlier prompts with ↑ (W-1), find in the conversation (W-2), copy a message (W-3), quote (W-4), one table of commands and keys (W-5), compact now (W-6), settings (W-14, in part), CLI for scripts (W-16), open a folder from a terminal (W-17, in part)
-- [ ] branching as a person uses it (W-54); dropping a folder on the window (W-17); of settings: zoom, code font, notifications, what the limits are (W-14)
+- [x] talking and reading: earlier prompts with ↑ (W-1), find in the conversation (W-2), copy a message (W-3), quote (W-4), one table of commands and keys (W-5), compact now (W-6), settings but for notifications (W-14), CLI for scripts (W-16), open a folder from a terminal or drop it on the window (W-17)
+- [x] branching as a person uses it (W-54, decision 0015)
 
 ## M3 Delegated harnesses ← M2 policy, spawn
 - ACP client (v1, v2), Codex app-server, Claude stream-json, Copilot; each replayed from recorded frames and driven once by hand with the owner's consent
@@ -50,7 +50,7 @@ Order: policy+spawn → Anthropic Messages codec → Chat codec (local servers) 
 - delegation across harnesses; exactly-once delivery under crash injection; child ⊆ parent under property test
 - worktree per writer; conflict forecast; gated merge; needs-you queue; score; task graph with gates
 - 10 agents on four harnesses for one hour: budgets met, no lost request
-- rows 1 to 13 as far as they are left, with pin and order (W-7), remarks on several lines (W-13), how one is told (W-15), set aside by rule (W-33), nothing to do for you (W-34)
+- rows 1 to 13 as far as they are left, with pin and order (W-7), remarks on several lines (W-13), how one is told, with its setting (W-15, and of W-14 notifications: there are none to set before), set aside by rule (W-33), nothing to do for you (W-34)
 - agents ask for agents (W-24, not before K49 is settled), know and stop it (W-25), answers of a shape (W-26), runs that resume (W-53), ask beside (W-55), sessions in sessions (W-56), Axiom for other agents (W-57, D-7), compact while idle (W-58)
 
 ## M6 Usage, routing, extensions ← M5
