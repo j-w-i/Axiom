@@ -16,6 +16,7 @@ import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/start.dart';
 import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/controls.dart';
+import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/overlay.dart';
 import 'package:axiom/ui/status.dart';
@@ -415,6 +416,16 @@ void main() {
     final row = find.byType(AgentRow);
     expect(find.descendant(of: row, matching: find.text('Asks to run a command')), findsOneWidget);
     expect(find.descendant(of: row, matching: find.text('shell')), findsNothing);
+    expect(
+      t
+          .widgetList<Text>(
+            find.descendant(of: find.byType(RequestBar), matching: find.text('cargo test')),
+          )
+          .single
+          .style!
+          .color,
+      AxColors.dark.ink1,
+    );
     await snap(t, 'asked');
     await t.tap(find.text('Allow once'));
     await settled(t);
@@ -1582,6 +1593,22 @@ void main() {
       }
       expect(find.textContaining('Ada has not looked at yours yet'), findsOneWidget);
       expect(find.textContaining('was here', findRichText: true), findsWidgets);
+      // What needs a look has the amber glyph; its words are words.
+      Iterable<AxGlyph> warnings() => t
+          .widgetList<AxGlyph>(
+            find.descendant(of: find.byType(CopyView), matching: find.byType(AxGlyph)),
+          )
+          .where((g) => g.icon == AxIcon.warn);
+      expect(warnings(), hasLength(5));
+      expect(warnings().every((g) => g.color == AxColors.dark.attention), isTrue);
+      expect(
+        t
+            .widgetList<Text>(
+              find.descendant(of: find.byType(CopyView), matching: find.byType(Text)),
+            )
+            .where((x) => x.style?.color == AxColors.dark.attentionText),
+        isEmpty,
+      );
       await snap(t, 'copy');
       // The last line is under the edge.
       final list = find.descendant(of: find.byType(CopyView), matching: find.byType(ListView));

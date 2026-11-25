@@ -433,7 +433,7 @@ class _RequestBarState extends State<RequestBar> {
                       ],
                     ),
                     const SizedBox(height: 3),
-                    Text(literal(r.subject), style: t.type.code.ink(c.attentionText)),
+                    Text(literal(r.subject), style: t.type.code.ink(c.ink1)),
                     const SizedBox(height: 3),
                     Text(literal(r.scope), style: t.type.label.ink(c.ink3)),
                   ],

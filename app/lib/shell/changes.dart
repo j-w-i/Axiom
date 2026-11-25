@@ -295,7 +295,19 @@ class _FileRow extends StatelessWidget {
         for (final (note, look) in notes)
           Padding(
             padding: const EdgeInsets.fromLTRB(50, 0, 6, 5),
-            child: Text(visible(note), style: t.type.label.ink(look ? c.attentionText : c.ink3)),
+            child: look
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: AxGlyph(AxIcon.warn, size: 12, color: c.attention),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(visible(note), style: t.type.label.ink(c.ink2))),
+                    ],
+                  )
+                : Text(visible(note), style: t.type.label.ink(c.ink3)),
           ),
         if (open)
           Padding(
@@ -712,14 +724,30 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(
-                [
-                  only.isEmpty
-                      ? 'The folder has all that was changed in it.'
-                      : 'Only it has these, and they would be lost: ${only.join(', ')}.',
-                  if (all?.back != null) 'What was brought in last could not be put back any more.',
-                ].join(' '),
-                style: t.type.ui.ink(only.isEmpty ? c.ink2 : c.attentionText),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (only.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: AxGlyph(AxIcon.warn, size: 12, color: c.attention),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Flexible(
+                    child: Text(
+                      [
+                        only.isEmpty
+                            ? 'The folder has all that was changed in it.'
+                            : 'Only it has these, and they would be lost: ${only.join(', ')}.',
+                        if (all?.back != null)
+                          'What was brought in last could not be put back any more.',
+                      ].join(' '),
+                      style: t.type.ui.ink(only.isEmpty ? c.ink2 : c.ink1),
+                    ),
+                  ),
+                ],
               ),
               AxButton(
                 label: 'Keep it',
