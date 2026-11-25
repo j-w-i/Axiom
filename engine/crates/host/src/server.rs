@@ -1216,6 +1216,10 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 // What it knows is in the harness it has.
                 return Err(agents::bad("an agent keeps its harness; add another agent instead"));
             }
+            if execution.as_ref().is_some_and(|e| e.connection != setup.execution.connection) {
+                // What was said is kept with the account it was said on.
+                setup.resume = None;
+            }
             setup.execution = execution.unwrap_or(setup.execution);
             setup.access = access.unwrap_or(setup.access);
             let a = st.agents.clone();

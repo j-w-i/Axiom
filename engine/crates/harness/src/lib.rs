@@ -56,6 +56,9 @@ pub struct Site {
     pub tmp: Place,
     /// Workspaces, and everything else an agent may write to.
     pub written: Reach,
+    /// Where the program keeps what is its own, if that is another place than usual: an account
+    /// beside the person's first ([`Harness::accounts`]).
+    pub config: Option<Place>,
     pub limits: Limits,
 }
 
@@ -122,6 +125,17 @@ impl Harness {
         }
     }
 
+    /// What the program itself documents for keeping several accounts apart: a variable that names
+    /// the folder of one. Only where its documentation says that logins are kept apart by it.
+    pub fn accounts(&self) -> Option<&'static str> {
+        match self {
+            // code.claude.com/docs/en/authentication, read 2026-11-25.
+            Harness::Claude(_) => Some("CLAUDE_CONFIG_DIR"),
+            // CODEX_HOME moves its files; whether it parts what is in the system's store is not said.
+            Harness::Codex | Harness::Acp(_) => None,
+        }
+    }
+
     /// Whether its terms allow only what a person themselves says.
     pub fn person_only(&self) -> bool {
         matches!(self, Harness::Acp(a) if a.person_only)
@@ -131,7 +145,7 @@ impl Harness {
     /// workspace: the token is for that.
     pub async fn probe(&self, site: &Site, token: Unsandboxed) -> Result<Probe, Error> {
         let talk: Box<dyn Talk> = match self {
-            Harness::Claude(p) => return version(site, token, *p).await,
+            Harness::Claude(p) => return version(self, site, token, *p).await,
             Harness::Acp(a) => Box::new(a.talk(site, None)),
             Harness::Codex => Box::new(codex::Codex::new(site, None)),
         };
@@ -139,7 +153,7 @@ impl Harness {
             Harness::Acp(a) => a.checked()?,
             _ => codex::ARGS.map(String::from).into(),
         };
-        let process = run(site, args, &site.tmp, true, token)?;
+        let process = run(self, site, args, &site.tmp, true, token)?;
         let (tx, rx) = oneshot::channel();
         let given = drive::Given {
             process,
@@ -184,7 +198,7 @@ impl Harness {
             Harness::Claude(p) => Box::new(claude::Claude::new(*p, s, &l)),
         };
         let given = drive::Given {
-            process: run(site, l.args, &cwd, true, token)?,
+            process: run(self, site, l.args, &cwd, true, token)?,
             talk,
             frames,
             limits: site.limits.clone(),
@@ -198,25 +212,37 @@ impl Harness {
 }
 
 fn run(
+    harness: &Harness,
     site: &Site,
     args: Vec<String>,
     cwd: &Place,
     stdin: bool,
     token: Unsandboxed,
 ) -> Result<Running, Error> {
+    let mut env = Env::harness(&site.path, &site.home, &site.user, &site.tmp)?;
+    if let Some(c) = &site.config {
+        // Nothing would keep it apart: it is not started as if something did.
+        let name = harness.accounts().ok_or(Error::OneAccount)?;
+        env.set(name, c.as_str())?;
+    }
     Ok(spawn(Job {
         program: site.program.place().clone(),
         args,
         cwd: cwd.clone(),
-        env: Env::harness(&site.path, &site.home, &site.user, &site.tmp)?,
+        env,
         stdin,
         contain: Contain::None(token),
     })?)
 }
 
 /// What `--version` says: the only thing Claude Code is asked without work.
-async fn version(site: &Site, token: Unsandboxed, p: Prompts) -> Result<Probe, Error> {
-    let mut r = run(site, vec!["--version".into()], &site.tmp, false, token)?;
+async fn version(
+    harness: &Harness,
+    site: &Site,
+    token: Unsandboxed,
+    p: Prompts,
+) -> Result<Probe, Error> {
+    let mut r = run(harness, site, vec!["--version".into()], &site.tmp, false, token)?;
     let out = r.stdout.take().ok_or(Error::NoPipe)?;
     let mut said = Vec::new();
     let mut first = out.take(4096);

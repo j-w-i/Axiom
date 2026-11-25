@@ -13,7 +13,7 @@ use axiom_proto::{Connection, ErrorCode, WireError, limits};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::paths::private_file;
+use crate::paths::{private_dir, private_file};
 
 /// Cleared when it is dropped.
 pub type Text = Zeroizing<String>;
@@ -72,7 +72,19 @@ const MOST: usize = 200;
 const NAME: usize = 200;
 const SECRET: usize = 16 * 1024;
 
+/// A program's own accounts, as providers.
+const PROGRAMS: &[(&str, &str, &str, &str)] =
+    &[("claude-code", "claude", "CLAUDE_CONFIG_DIR", "claude auth login")];
+
+/// What an account of the harness is called as a provider.
+pub fn provider_of(harness: &str) -> Option<&'static str> {
+    PROGRAMS.iter().find(|p| p.1 == harness).map(|p| p.0)
+}
+
 pub struct Connections {
+    /// Where programs keep accounts beside their first: a folder for each. What is in them is the
+    /// programs' own; nothing here reads it.
+    accounts: PathBuf,
     file: PathBuf,
     vault: Arc<dyn Vault>,
     all: Mutex<Vec<Kept>>,
@@ -112,7 +124,8 @@ impl Connections {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
         };
-        Ok(Self { file: file.into(), vault, all: Mutex::new(all) })
+        let accounts = file.with_file_name("accounts");
+        Ok(Self { accounts, file: file.into(), vault, all: Mutex::new(all) })
     }
 
     fn lock(&self) -> MutexGuard<'_, Vec<Kept>> {
@@ -132,8 +145,37 @@ impl Connections {
             url: k.url.clone(),
             secret: k.secret,
             lasts: k.secret && self.vault.lasts(),
+            sign_in: self.sign_in(k),
         };
         self.lock().iter().map(shown).collect()
+    }
+
+    fn folder(&self, id: &str) -> PathBuf {
+        self.accounts.join(id)
+    }
+
+    /// For the person's own terminal: nothing here signs in, or sees what that gives.
+    fn sign_in(&self, k: &Kept) -> Option<String> {
+        let p = PROGRAMS.iter().find(|p| p.0 == k.provider)?;
+        let dir = self.folder(&k.id).display().to_string();
+        Some(if cfg!(windows) {
+            format!("$env:{}='{}'; {}", p.2, dir.replace('\'', "''"), p.3)
+        } else {
+            format!("{}='{}' {}", p.2, dir.replace('\'', "'\\''"), p.3)
+        })
+    }
+
+    /// Where a program keeps an account of this harness.
+    pub fn account(&self, id: &str, harness: &str) -> Result<PathBuf, WireError> {
+        let k = self.lock().iter().find(|k| k.id == id).cloned();
+        let k = k.ok_or_else(|| WireError::new(ErrorCode::NotFound, "no such account"))?;
+        if provider_of(harness) != Some(k.provider.as_str()) {
+            return Err(bad("this account is not one of that program"));
+        }
+        let dir = self.folder(id);
+        private_dir(&self.accounts).map_err(internal)?;
+        private_dir(&dir).map_err(internal)?;
+        Ok(dir)
     }
 
     pub fn add(
@@ -154,6 +196,14 @@ impl Connections {
             Ok(s)
         });
         let secret = secret.transpose()?;
+        if PROGRAMS.iter().any(|p| p.0 == provider) {
+            if url.is_some() || secret.is_some() {
+                return Err(bad(
+                    "the program signs in by itself: it is given no address and no key",
+                ));
+            }
+            return self.keep(name, provider, None, None);
+        }
         let p = profile(&provider, url.as_deref())
             .ok_or_else(|| bad("the provider is not one that can be added, or needs an address"))?;
         if keyed(&provider) && (url.is_some() || secret.is_none()) {
@@ -167,6 +217,17 @@ impl Connections {
             Credential::new(endpoint.origin(), &p.auth, secret_of(s))
                 .map_err(|e| bad(e.to_string()))?;
         }
+        self.keep(name, provider, url, secret)
+    }
+
+    fn keep(
+        &self,
+        name: String,
+        provider: String,
+        url: Option<String>,
+        secret: Option<Text>,
+    ) -> Result<String, WireError> {
+        let program = PROGRAMS.iter().any(|p| p.0 == provider);
         let mut all = self.lock();
         if all.len() >= MOST {
             return Err(bad("there are as many connections as there may be"));
@@ -174,6 +235,11 @@ impl Connections {
         let id = axiom_proto::RequestId::new().0.replacen("q_", "c_", 1);
         if let Some(s) = &secret {
             self.vault.put(&id, s).map_err(internal)?;
+        }
+        if program {
+            // There when it is signed in to.
+            private_dir(&self.accounts).map_err(internal)?;
+            private_dir(&self.folder(&id)).map_err(internal)?;
         }
         let mut next = all.clone();
         next.push(Kept { id: id.clone(), name, provider, url, secret: secret.is_some() });
@@ -348,5 +414,14 @@ mod tests {
         let c = Connections::open(&t.file(), Arc::new(No)).unwrap();
         let e = c.add("x".into(), "anthropic".into(), None, Some(CANARY.into())).unwrap_err();
         assert!(e.message.contains("locked") && c.list().is_empty());
+    }
+
+    /// One place says how, another where: they are of one mind.
+    #[test]
+    fn programs_with_accounts_are_those_that_document_it() {
+        for k in crate::delegated::known() {
+            let here = PROGRAMS.iter().find(|p| p.1 == k.id).map(|p| p.2);
+            assert_eq!(here, k.harness.accounts(), "{}", k.id);
+        }
     }
 }

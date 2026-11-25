@@ -332,7 +332,7 @@ async fn what_a_delegated_agent_may_not_be() {
         instructions,
     };
     let x = Execution { connection: Some("c_1".into()), ..execution.clone() };
-    assert!(t.c.call(with(x, vec![])).await.unwrap_err().to_string().contains("signs in"));
+    assert!(t.c.call(with(x, vec![])).await.unwrap_err().to_string().contains("one account"));
     let x = Execution { model: Some("--yolo".into()), ..execution.clone() };
     assert!(t.c.call(with(x, vec![])).await.is_err());
     // A program that lies in a folder agents write to is not started (SI-22).
@@ -534,4 +534,110 @@ async fn it_goes_on_where_it_was_after_the_host_is_gone() {
     let log = t.audit().await;
     assert_eq!(log.len(), 2);
     assert!(log.iter().all(|e| e.containment == axiom_policy::audit::Containment::Harness));
+}
+
+/// PR-4: several accounts of one service, each where the program itself keeps them apart.
+#[tokio::test]
+async fn a_second_account_is_kept_apart() {
+    let mut t = T::new(&claude(&turn("go", "One."))).await;
+    let add = |name: &str, secret: Option<&str>| Call::ConnectionAdd {
+        name: name.into(),
+        provider: "claude-code".into(),
+        url: None,
+        secret: secret.map(|s| SecretText(s.into())),
+    };
+    assert!(t.c.call(add("Work", Some("sk-x"))).await.is_err(), "it is given no key");
+    let work =
+        t.c.call(add("Work", None)).await.unwrap()["connection"].as_str().unwrap().to_owned();
+    let more =
+        t.c.call(add("More", None)).await.unwrap()["connection"].as_str().unwrap().to_owned();
+    let all: Vec<Connection> =
+        serde_json::from_value(t.c.call(Call::Connections {}).await.unwrap()).unwrap();
+    let dir = t.f.paths.data.join("accounts").join(&work);
+    let sign_in = all.iter().find(|c| c.id == work).unwrap().sign_in.clone().unwrap();
+    assert_eq!(sign_in, format!("CLAUDE_CONFIG_DIR='{}' claude auth login", dir.display()));
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+    let v = t.c.call(Call::Harnesses {}).await.unwrap();
+    let list: Vec<HarnessInfo> = serde_json::from_value(v).unwrap();
+    let of = |id: &str| list.iter().find(|h| h.id == id).unwrap().accounts.clone();
+    assert_eq!(
+        (of("claude").as_deref(), of("goose"), of("codex")),
+        (Some("claude-code"), None, None)
+    );
+    let with = |t: &T, harness: &str, access, connection: &str| match t.add(harness, access, true) {
+        Call::AgentAdd { session, name, execution, access, trust, instructions } => {
+            Call::AgentAdd {
+                session,
+                name,
+                execution: Execution { connection: Some(connection.into()), ..execution },
+                access,
+                trust,
+                instructions,
+            }
+        }
+        _ => panic!(),
+    };
+    for (harness, access, c, why) in [
+        ("goose", Access::Ask, work.as_str(), "one account"),
+        ("claude", Access::Work, "c_none", "no such account"),
+    ] {
+        let e = t.c.call(with(&t, harness, access, c)).await.unwrap_err().to_string();
+        assert!(e.contains(why), "{e}");
+    }
+    // Nor is it one for Axiom's own loop.
+    let e = t.c.call(Call::Models { connection: work.clone() }).await.unwrap_err();
+    assert!(e.to_string().contains("not known"), "{e}");
+    let v = t.c.call(with(&t, "claude", Access::Work, &work)).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    t.prompt(&a, "go").await;
+    let (_, scope) = t.allow_start().await;
+    let real = std::fs::canonicalize(&dir).unwrap();
+    assert!(scope.contains(&format!("account is kept in {}", real.display())), "{scope}");
+    assert_eq!(t.ended().await.0, Outcome::Completed);
+    let seen = |t: &T| -> Value {
+        let s = std::fs::read_to_string(t.f.dir.path().join("bin/seen.json")).unwrap();
+        serde_json::from_str(&s).unwrap()
+    };
+    assert_eq!(seen(&t)["env"]["CLAUDE_CONFIG_DIR"], real.to_str().unwrap());
+    // On another account it begins anew: what was said is with the first.
+    t.script(&claude(&turn("go", "Two.")));
+    let set = |connection: Option<&str>| Call::AgentSet {
+        session: t.s.clone(),
+        agent: a.clone(),
+        execution: Some(Execution {
+            harness: "claude".into(),
+            provider: None,
+            model: None,
+            connection: connection.map(str::to_owned),
+            effort: None,
+            environment: None,
+        }),
+        access: None,
+    };
+    let (to_more, to_first) = (set(Some(&more)), set(None));
+    for (call, dir) in [(to_more, Some(more)), (to_first, None)] {
+        let mut r = t.c.call(call.clone()).await;
+        for _ in 0..200 {
+            if r.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            r = t.c.call(call.clone()).await;
+        }
+        r.unwrap();
+        t.script(&claude(&turn("go", "Two.")));
+        t.prompt(&a, "go").await;
+        let (subject, _) = t.allow_start().await;
+        assert!(subject.contains("--session-id") && !subject.contains("--resume"), "{subject}");
+        let (o, _, all) = t.ended().await;
+        assert_eq!(o, Outcome::Completed);
+        assert!(texts(&all, ItemKind::Notice).iter().any(|n| n.contains("begins anew")));
+        let env = seen(&t)["env"]["CLAUDE_CONFIG_DIR"].as_str().map(str::to_owned);
+        let want = dir.map(|d| real.with_file_name(d).to_str().unwrap().to_owned());
+        assert_eq!(env, want);
+    }
+    // Removed here, it is still the person's: what the program keeps there is not touched.
+    t.c.call(Call::ConnectionRemove { connection: work }).await.unwrap();
+    assert!(dir.is_dir());
 }

@@ -27,7 +27,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    connections::Connections,
+    connections::{self, Connections},
     delegated,
     paths::{Paths, private_dir},
     peers,
@@ -259,8 +259,11 @@ impl Agents {
         if execution.harness != "axiom" {
             let known = delegated::known_as(&execution.harness)
                 .ok_or_else(|| bad("this host does not know the harness"))?;
-            if execution.connection.is_some() {
-                return Err(bad("this harness signs in by itself: it has no connection"));
+            if let Some(c) = &execution.connection {
+                if connections::provider_of(&execution.harness).is_none() {
+                    return Err(bad("this harness has one account: its own sign-in"));
+                }
+                self.connections.account(c, &execution.harness)?;
             }
             if !instructions.is_empty() {
                 return Err(bad("this harness reads the folder's words for agents by itself"));
@@ -684,8 +687,13 @@ impl Worker {
             let access = site.access;
             let program =
                 known.check(&s, access, site.workspace.clone(), &path, &written).map_err(bad)?;
+            let config = match &s.execution.connection {
+                Some(c) => Some(real(&a.connections.account(c, &s.execution.harness)?)?),
+                None => None,
+            };
             let site_of = axiom_harness::Site {
                 program,
+                config,
                 path,
                 home: site.keep.home().clone(),
                 user: user()?,

@@ -23,6 +23,7 @@ pub fn site() -> Site {
         user: "me".into(),
         tmp: place("tmp"),
         written: Reach::none(),
+        config: None,
         limits: Limits::default(),
     }
 }

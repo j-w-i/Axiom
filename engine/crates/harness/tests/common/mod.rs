@@ -85,6 +85,7 @@ impl World {
             user: "me".into(),
             tmp: self.at("tmp"),
             written,
+            config: None,
             limits: self.limits.clone(),
         }
     }

@@ -400,6 +400,8 @@ pub enum Error {
     BadValue(&'static str, String),
     #[error("{0:?} would switch off what holds it back")]
     Unsafe(String),
+    #[error("this program does not say how several accounts of it are kept apart")]
+    OneAccount,
     #[error("this harness may only be started by a person")]
     PersonOnly,
     #[error("{0} is inside what an agent may write to")]

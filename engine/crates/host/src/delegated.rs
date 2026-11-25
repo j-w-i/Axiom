@@ -102,6 +102,7 @@ impl Known {
             program: program.as_ref().ok().map(|p| p.place().to_string()),
             problem: program.err().map(|e| e.to_string()),
             needs_trust: not.is_empty(),
+            accounts: crate::connections::provider_of(self.id).map(str::to_owned),
             access: trusted,
         }
     }
@@ -256,7 +257,12 @@ impl Worker {
             tool: format!("harness/{}", self.known.id),
             schema: String::new(),
             subject,
-            scope: scope(&self.known, launch.containment, self.setup.trust),
+            scope: scope(
+                &self.known,
+                launch.containment,
+                self.setup.trust,
+                self.site.config.as_ref(),
+            ),
             unsandboxed: true,
         };
         let what = format!("asks to start {}", self.known.name);
@@ -1049,7 +1055,7 @@ fn command(program: &Place, args: &[String]) -> String {
         .join(" ")
 }
 
-fn scope(k: &Known, c: Containment, trust: bool) -> String {
+fn scope(k: &Known, c: Containment, trust: bool, account: Option<&Place>) -> String {
     let held = match c {
         Containment::Harness => format!("{} says its own sandbox holds it back", k.name),
         _ => "nothing holds it back: it can do whatever you can".into(),
@@ -1059,8 +1065,9 @@ fn scope(k: &Known, c: Containment, trust: bool) -> String {
     } else {
         "The folder's own settings for it are ignored."
     };
+    let account = account.map(|a| format!(" Its account is kept in {a}.")).unwrap_or_default();
     format!(
-        "Outside Axiom's sandbox; {held}. It signs in by itself, and reaches the network. {folder}"
+        "Outside Axiom's sandbox; {held}. It signs in by itself, and reaches the network. {folder}{account}"
     )
 }
 

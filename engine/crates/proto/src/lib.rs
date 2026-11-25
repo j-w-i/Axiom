@@ -333,6 +333,9 @@ pub struct HarnessInfo {
     pub needs_trust: bool,
     /// What it has a mode for.
     pub access: Vec<Access>,
+    /// What an account of it beside the first is called as a provider, if there can be any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -390,7 +393,8 @@ pub enum Call {
         session: SessionId,
         name: String,
         /// With the harness `axiom`, `connection` and `model` are needed. Another is a program of the
-        /// person's own that signs in by itself ([`HarnessInfo`]): it has no connection.
+        /// person's own that signs in by itself ([`HarnessInfo`]): its connection, if it has one, is
+        /// another account of that program.
         execution: Execution,
         access: Access,
         /// The folder's own settings for such a program may take effect (SI-5).
@@ -500,6 +504,9 @@ pub struct Connection {
     /// Whether that is in the system's store, and not only as long as the host runs.
     #[serde(default)]
     pub lasts: bool,
+    /// Of an account of a program of the person's own: the command they sign in with, in a terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<String>,
 }
 
 /// Words of a workspace for agents: a file, and which content of it.
