@@ -13,6 +13,12 @@ enum Outcome { completed, failed, cancelled, interrupted, unknown }
 
 enum ItemKind { prompt, prose, reasoning, tool, notice, unknown }
 
+/// What an agent may do without asking.
+enum Access { read, ask, work, unknown }
+
+/// What a person answers.
+enum Answer { once, session, deny }
+
 enum Known { reported, measured, estimated, unknown }
 
 enum Answerable { live, message, no, unknown }
@@ -37,6 +43,43 @@ class Execution {
       environment = j['environment'] as String?;
   final String harness;
   final String? provider, model, connection, effort, environment;
+
+  Json encode() => {
+    'harness': harness,
+    'provider': ?provider,
+    'model': ?model,
+    'connection': ?connection,
+    'effort': ?effort,
+    'environment': ?environment,
+  };
+}
+
+/// An account, a key or a server: one way to reach a provider.
+class Connection {
+  const Connection(this.id, this.name, this.provider, {this.url, this.secret = false});
+  Connection.decode(Json j)
+    : id = j['id']! as String,
+      name = j['name']! as String,
+      provider = j['provider']! as String,
+      url = j['url'] as String?,
+      secret = j['secret'] as bool? ?? false;
+  final String id, name, provider;
+  final String? url;
+
+  /// Whether it has a secret in the system's store. The secret itself never comes back.
+  final bool secret;
+}
+
+/// What a provider says of a model.
+class ModelInfo {
+  const ModelInfo(this.id, {this.name, this.context});
+  ModelInfo.decode(Json j)
+    : id = j['id']! as String,
+      name = j['name'] as String?,
+      context = j['context'] as int?;
+  final String id;
+  final String? name;
+  final int? context;
 }
 
 class Usage {
@@ -66,6 +109,12 @@ sealed class Body {
           j['name']! as String,
           Execution.decode(j['execution']! as Json),
           j['parent'] as String?,
+          access: j['access'] == null ? null : _enum(Access.values, j['access'], Access.unknown),
+        ),
+        'agent.changed' => AgentChanged(
+          j['agent']! as String,
+          Execution.decode(j['execution']! as Json),
+          j['access'] == null ? null : _enum(Access.values, j['access'], Access.unknown),
         ),
         'agent.state' => AgentStateChanged(
           j['agent']! as String,
@@ -101,6 +150,9 @@ sealed class Body {
           j['subject']! as String,
           j['scope']! as String,
           _enum(Answerable.values, j['answerable'], Answerable.unknown),
+          digest: j['digest'] as String? ?? '',
+          item: j['item'] as String?,
+          session: j['session'] as bool? ?? false,
         ),
         'request.closed' => RequestClosed(j['request']! as String, j['answer']! as String),
         'usage' => UsageReported(
@@ -119,6 +171,7 @@ sealed class Body {
     'session.created',
     'session.titled',
     'agent.added',
+    'agent.changed',
     'agent.state',
     'run.started',
     'run.ended',
@@ -143,10 +196,19 @@ class SessionTitled extends Body {
 }
 
 class AgentAdded extends Body {
-  const AgentAdded(this.agent, this.name, this.execution, this.parent);
+  const AgentAdded(this.agent, this.name, this.execution, this.parent, {this.access});
   final String agent, name;
   final Execution execution;
   final String? parent;
+  final Access? access;
+}
+
+/// What it runs on or may do is another from here on.
+class AgentChanged extends Body {
+  const AgentChanged(this.agent, this.execution, this.access);
+  final String agent;
+  final Execution execution;
+  final Access? access;
 }
 
 class AgentStateChanged extends Body {
@@ -205,10 +267,22 @@ class RequestOpened extends Body {
     this.what,
     this.subject,
     this.scope,
-    this.answerable,
-  );
+    this.answerable, {
+    this.digest = '',
+    this.item,
+    this.session = false,
+  });
   final String request, agent, what, subject, scope;
   final Answerable answerable;
+
+  /// Names exactly this question; sent back with the answer (SI-2).
+  final String digest;
+
+  /// The tool call it is about.
+  final String? item;
+
+  /// Whether it can be allowed for the rest of the session.
+  final bool session;
 }
 
 class RequestClosed extends Body {

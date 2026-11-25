@@ -69,9 +69,7 @@ pub struct Config {
 }
 impl Config {
     pub fn new(paths: Paths) -> Self {
-        let mut beside = paths.data.file_name().unwrap_or_default().to_os_string();
-        beside.push("-scratch");
-        let scratch = paths.data.with_file_name(beside);
+        let scratch = paths.scratch();
         Self {
             paths,
             outbox: 8 * 1024 * 1024,

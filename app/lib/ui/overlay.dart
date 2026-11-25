@@ -390,23 +390,33 @@ class AxSelect<T> extends StatelessWidget {
               ? c.keyHover
               : c.key,
           radius: AxRadius.key,
-          child: SizedBox(
-            height: t.density.control + 6,
+          child: ConstrainedBox(
+            // Taller with larger text.
+            constraints: BoxConstraints(minHeight: t.density.control + 6),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 9),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(label, style: t.type.caption.ink(c.ink3)),
-                      Text(
-                        chosen?.label ?? 'None',
-                        style: t.type.labelStrong.copyWith(height: 1.2),
-                      ),
-                    ],
+                  if (chosen?.mark case final m?) ...[
+                    AxServiceMark(m, size: 13),
+                    const SizedBox(width: 8),
+                  ],
+                  Flexible(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(label, style: t.type.caption.ink(c.ink3)),
+                        Text(
+                          chosen?.label ?? 'None',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.type.labelStrong.copyWith(height: 1.2),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 8),
                   AxGlyph(AxIcon.down, size: 9),

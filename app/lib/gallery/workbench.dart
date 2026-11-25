@@ -193,7 +193,7 @@ class _WorkbenchState extends State<Workbench> {
                                     ContextGauge(s.contextView, hue: mark?.color(c)),
                                   ],
                                   onAttach: () {},
-                                  onSubmit: (_) {},
+                                  onSubmit: (_) => true,
                                 ),
                               ],
                             ),

@@ -598,7 +598,7 @@ fn settle(
                 tool: tool.into(),
                 schema,
                 subject,
-                scope,
+                scope: format!("{scope}. Asked because {}.", verdict.why),
                 unsandboxed: false,
             };
             Plan::Ask(Box::new(ask), step, verdict)

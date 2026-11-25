@@ -17,36 +17,31 @@ impl Paths {
 
     /// `AXIOM_DATA`, else the platform's place for application data.
     pub fn discover() -> Option<Self> {
-        let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-        let data = var("AXIOM_DATA").or_else(|| {
-            if cfg!(target_os = "macos") {
-                var("HOME").map(|h| h.join("Library/Application Support/Axiom"))
-            } else if cfg!(windows) {
-                var("LOCALAPPDATA").map(|h| h.join("Axiom"))
-            } else {
-                var("XDG_DATA_HOME")
-                    .or_else(|| var("HOME").map(|h| h.join(".local/share")))
-                    .map(|h| h.join("axiom"))
-            }
-        })?;
-        Some(Self { data })
+        var("AXIOM_DATA").or_else(usual).map(Self::new)
     }
 
-    /// Where agents' temporary folders go: the platform's place for what may be lost. `None`: beside
-    /// the data directory, which was chosen.
-    pub fn caches() -> Option<PathBuf> {
-        let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-        if var("AXIOM_DATA").is_some() {
-            None
-        } else if cfg!(target_os = "macos") {
-            var("HOME").map(|h| h.join("Library/Caches/Axiom/scratch"))
-        } else if cfg!(windows) {
-            var("LOCALAPPDATA").map(|h| h.join("Axiom-scratch"))
-        } else {
-            var("XDG_CACHE_HOME")
-                .or_else(|| var("HOME").map(|h| h.join(".cache")))
-                .map(|h| h.join("axiom/scratch"))
+    /// Where agents' temporary folders go. Not where the data is: that is kept from them. In the
+    /// platform's place for what may be lost, or, if the data directory was chosen, beside it.
+    pub fn scratch(&self) -> PathBuf {
+        let caches = || {
+            if cfg!(target_os = "macos") {
+                var("HOME").map(|h| h.join("Library/Caches/Axiom/scratch"))
+            } else if cfg!(windows) {
+                var("LOCALAPPDATA").map(|h| h.join("Axiom-scratch"))
+            } else {
+                var("XDG_CACHE_HOME")
+                    .or_else(|| var("HOME").map(|h| h.join(".cache")))
+                    .map(|h| h.join("axiom/scratch"))
+            }
+        };
+        if usual().as_deref() == Some(&*self.data)
+            && let Some(c) = caches()
+        {
+            return c;
         }
+        let mut beside = self.data.file_name().unwrap_or_default().to_os_string();
+        beside.push("-scratch");
+        self.data.with_file_name(beside)
     }
 
     pub fn run(&self) -> PathBuf {
@@ -82,6 +77,23 @@ impl Paths {
         self.data.as_os_str().as_encoded_bytes().iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
             (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
         })
+    }
+}
+
+fn var(k: &str) -> Option<PathBuf> {
+    std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// The platform's place for application data.
+fn usual() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        var("HOME").map(|h| h.join("Library/Application Support/Axiom"))
+    } else if cfg!(windows) {
+        var("LOCALAPPDATA").map(|h| h.join("Axiom"))
+    } else {
+        var("XDG_DATA_HOME")
+            .or_else(|| var("HOME").map(|h| h.join(".local/share")))
+            .map(|h| h.join("axiom"))
     }
 }
 

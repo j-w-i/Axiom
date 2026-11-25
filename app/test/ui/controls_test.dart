@@ -563,7 +563,14 @@ void main() {
         t,
         SizedBox(
           width: 600,
-          child: Composer(placeholder: 'Say', action: 'Queue', onSubmit: sent.add),
+          child: Composer(
+            placeholder: 'Say',
+            action: 'Queue',
+            onSubmit: (s) {
+              sent.add(s);
+              return true;
+            },
+          ),
         ),
       );
       await t.tap(find.byType(EditableText));

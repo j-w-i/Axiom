@@ -64,10 +64,16 @@ class ItemModel extends ChangeNotifier {
 }
 
 class AgentModel extends ChangeNotifier {
-  AgentModel(this.id, String name, this.execution, this.parent, this.since)
+  AgentModel(this.id, String name, this.execution, this.parent, this.since, {this.access})
     : name = oneLine(name, 60);
   final String id, name;
-  final Execution execution;
+  Execution execution;
+
+  /// Null: an agent that does nothing here, as a replayed one.
+  Access? access;
+
+  /// The run it is in.
+  String? run;
   final String? parent;
   final int since;
   AgentPhase phase = AgentPhase.waiting;
@@ -143,9 +149,17 @@ class SessionModel extends ChangeNotifier {
       case SessionTitled(:final title):
         this.title = oneLine(title);
         return true;
-      case AgentAdded(:final agent, :final name, :final execution, :final parent):
-        agents[agent] = AgentModel(agent, name, execution, parent, e.at);
+      case AgentAdded(:final agent, :final name, :final execution, :final parent, :final access):
+        agents[agent] = AgentModel(agent, name, execution, parent, e.at, access: access);
         return true;
+      case AgentChanged(:final agent, :final execution, :final access):
+        if (agents[agent] case final a?) {
+          a
+            ..execution = execution
+            ..access = access;
+          touched.add(a);
+          return true;
+        }
       case AgentStateChanged(:final agent, :final state):
         if (agents[agent] case final a?) {
           a.phase = state;
@@ -156,6 +170,7 @@ class SessionModel extends ChangeNotifier {
         _runs[run] = agent;
         if (agents[agent] case final a?) {
           a
+            ..run = run
             ..ended = null
             ..error = null;
           touched.add(a);
@@ -164,6 +179,7 @@ class SessionModel extends ChangeNotifier {
       case RunEnded(:final run, :final outcome, :final error):
         if (agents[_runs.remove(run)] case final a?) {
           a
+            ..run = null
             ..ended = outcome
             ..error = error == null ? null : visible(error);
           // Whatever its last state said, nothing of it runs any more.

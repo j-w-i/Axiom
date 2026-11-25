@@ -557,7 +557,7 @@ impl<S: Stage> Agent<S> {
                 if self.desk.allowed(&ask) {
                     (step, verdict, None)
                 } else {
-                    match self.ask(item, tool, &ask, &verdict, cancel).await? {
+                    match self.ask(item, tool, &ask, cancel).await? {
                         Ok(id) => (step, verdict, Some((id, ask.digest()))),
                         Err(why) => {
                             return Ok(Output { ok: false, text: why, detail: Value::Null });
@@ -575,7 +575,6 @@ impl<S: Stage> Agent<S> {
         item: &ItemId,
         tool: &str,
         ask: &Ask,
-        verdict: &Verdict,
         cancel: &mut Cancel,
     ) -> Result<Result<RequestId, String>, Halt> {
         let mut open = match self.desk.open(ask) {
@@ -584,10 +583,10 @@ impl<S: Stage> Agent<S> {
         };
         let id = open.id.clone();
         let what = match tool {
-            "shell" => "Run a command",
-            "write" | "edit" | "patch" => "Change files",
-            "read" | "list" | "glob" | "search" => "Look at files",
-            _ => "Use a tool",
+            "shell" => "asks to run a command",
+            "write" | "edit" | "patch" => "asks to change files",
+            "read" | "list" | "glob" | "search" => "asks to look at files",
+            _ => "asks to use a tool",
         };
         let opened = self
             .stage
@@ -595,7 +594,7 @@ impl<S: Stage> Agent<S> {
                 Say::Event(Body::RequestOpened {
                     request: id.clone(),
                     agent: self.id.clone(),
-                    what: format!("{what} ({})", verdict.why),
+                    what: what.into(),
                     subject: ask.subject.clone(),
                     scope: ask.scope.clone(),
                     answerable: Answerable::Live,

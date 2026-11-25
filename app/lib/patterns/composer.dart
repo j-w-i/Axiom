@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -14,10 +16,16 @@ class Composer extends StatefulWidget {
     required this.onSubmit,
     super.key,
     this.onAttach,
+    this.enabled = true,
     this.leading = const [],
   });
   final String placeholder, action;
-  final ValueChanged<String> onSubmit;
+
+  /// Takes what was written. If it fails, the words are put back unless others have been written.
+  final FutureOr<bool> Function(String) onSubmit;
+
+  /// Whether there is anybody to send it to; writing goes on either way.
+  final bool enabled;
   final VoidCallback? onAttach;
 
   /// What stands under the words: how the agent runs, how full its context is.
@@ -53,15 +61,16 @@ class _ComposerState extends State<Composer> {
     }
     final v = _text.value;
     if (v.composing.isValid && !v.composing.isCollapsed) return KeyEventResult.ignored;
-    _submit();
+    unawaited(_submit());
     return KeyEventResult.handled;
   }
 
-  void _submit() {
-    final s = _text.text.trim();
-    if (s.isEmpty) return;
-    widget.onSubmit(s);
+  Future<void> _submit() async {
+    final written = _text.text, s = written.trim();
+    if (s.isEmpty || !widget.enabled) return;
     _text.clear();
+    final taken = await widget.onSubmit(s);
+    if (!taken && mounted && _text.text.isEmpty) _text.text = written;
   }
 
   @override
@@ -119,7 +128,9 @@ class _ComposerState extends State<Composer> {
                 label: widget.action,
                 icon: AxIcon.send,
                 tone: AxTone.primary,
-                onPressed: _text.text.trim().isEmpty ? null : _submit,
+                onPressed: _text.text.trim().isEmpty || !widget.enabled
+                    ? null
+                    : () => unawaited(_submit()),
               ),
             ],
           ),

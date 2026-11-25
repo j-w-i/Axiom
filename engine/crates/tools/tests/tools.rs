@@ -151,7 +151,11 @@ async fn between_the_question_and_the_yes() {
     else {
         panic!()
     };
-    assert!(ask.subject.contains("-two\n+2\n") && ask.scope == "changes a.txt", "{ask:?}");
+    assert!(
+        ask.subject.contains("-two\n+2\n")
+            && ask.scope == "changes a.txt. Asked because this agent asks before each change.",
+        "{ask:?}"
+    );
     std::fs::write(t.root.join("home/w/a.txt"), "one\ntwo\nmore\n").unwrap();
     let o = step.run(&t.site, &t.seen, |_| {}).await;
     assert!(!o.ok && o.text.contains("changed meanwhile"), "{o:?}");

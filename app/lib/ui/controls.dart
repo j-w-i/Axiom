@@ -386,6 +386,7 @@ class AxField extends StatefulWidget {
     this.mono = false,
     this.error,
     this.enabled = true,
+    this.secret = false,
     this.leading,
     this.onSubmitted,
     this.onChanged,
@@ -395,7 +396,7 @@ class AxField extends StatefulWidget {
   final TextEditingController? controller;
   final FocusNode? focusNode;
   final int lines;
-  final bool mono, enabled;
+  final bool mono, enabled, secret;
   final Widget? leading;
   final ValueChanged<String>? onSubmitted, onChanged;
   @override
@@ -463,6 +464,7 @@ class _AxFieldState extends State<AxField> {
                           focusNode: _f,
                           style: style,
                           enabled: widget.enabled,
+                          secret: widget.secret,
                           maxLines: widget.lines == 1 ? 1 : null,
                           minLines: widget.lines,
                           onSubmitted: widget.onSubmitted,
