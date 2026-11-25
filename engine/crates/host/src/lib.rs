@@ -12,6 +12,7 @@ pub mod connections;
 mod delegated;
 mod faults;
 mod log;
+pub mod mcp;
 mod net;
 mod outbox;
 pub mod paths;

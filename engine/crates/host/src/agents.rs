@@ -28,8 +28,8 @@ use tokio::sync::{mpsc, watch};
 
 use crate::{
     connections::{self, Connections},
-    delegated,
-    paths::{Paths, private_dir},
+    delegated, mcp,
+    paths::{Paths, private_dir, private_file},
     peers,
     session::{self, Session},
     store::Store,
@@ -109,6 +109,20 @@ pub struct Finished {
     pub text: String,
 }
 
+/// A key that is good until this is dropped.
+pub struct Grant {
+    agents: Arc<Agents>,
+    key: String,
+    pub file: PathBuf,
+}
+impl Drop for Grant {
+    fn drop(&mut self) {
+        let mut all = self.agents.grants.lock().unwrap_or_else(PoisonError::into_inner);
+        all.remove(&self.key);
+        let _ = std::fs::remove_file(&self.file);
+    }
+}
+
 /// How an agent reaches the others of its session. Given by the host once it runs.
 pub trait Switch: Send + Sync {
     fn tell(
@@ -164,6 +178,11 @@ pub struct Agents {
     parties: Mutex<HashMap<SessionId, Party>>,
     audit: tokio::sync::Mutex<Option<Entry>>,
     pub switch: OnceLock<Weak<dyn Switch>>,
+    /// What opens the tool `agent` for an installed program, while its attempt lives.
+    grants: Mutex<HashMap<String, (SessionId, AgentId)>>,
+    data: PathBuf,
+    /// The program that gives installed programs the tool `agent`: the host's own.
+    bridge: Option<Place>,
     home: Option<PathBuf>,
     own: Vec<PathBuf>,
     scratch: PathBuf,
@@ -185,6 +204,7 @@ impl Agents {
         home: Option<PathBuf>,
         scratch: PathBuf,
         programs: Option<Vec<PathBuf>>,
+        bridge: Option<PathBuf>,
         endpoint: &str,
     ) -> Self {
         let mut own = vec![paths.data.clone()];
@@ -195,6 +215,9 @@ impl Agents {
             parties: Mutex::default(),
             audit: tokio::sync::Mutex::default(),
             switch: OnceLock::new(),
+            grants: Mutex::default(),
+            data: paths.data.clone(),
+            bridge: bridge.and_then(|b| real_file(&b)),
             home,
             own,
             scratch,
@@ -467,6 +490,32 @@ impl Agents {
         Ok(policy)
     }
 
+    /// A key for one agent's program, and the file that holds it. Both go with what is returned.
+    pub fn grant(
+        self: &Arc<Self>,
+        s: &SessionId,
+        a: &AgentId,
+        scratch: &Place,
+    ) -> Result<Grant, String> {
+        let mut b = [0u8; 32];
+        axiom_proto::random(&mut b)?;
+        let key: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        let file = scratch.as_path().join(format!("peer-{}.json", &key[..12]));
+        let way = mcp::Way { data: self.data.clone(), grant: key.clone() };
+        let text = serde_json::to_string(&way).map_err(|e| e.to_string())?;
+        private_file(&file, &text).map_err(|e| e.to_string())?;
+        self.grants
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.clone(), (s.clone(), a.clone()));
+        Ok(Grant { agents: self.clone(), key, file })
+    }
+
+    /// Whose key it is.
+    pub fn granted(&self, key: &str) -> Option<(SessionId, AgentId)> {
+        self.grants.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()
+    }
+
     /// Adds to the audit record (SI-23).
     async fn record(
         &self,
@@ -553,6 +602,11 @@ fn real(p: &Path) -> Result<Place, WireError> {
     Place::new(&c).map_err(|e| bad(format!("{}: {e}", p.display())))
 }
 
+fn real_file(p: &Path) -> Option<Place> {
+    let c = plain_verbatim(std::fs::canonicalize(p).ok()?);
+    c.is_file().then(|| Place::new(c).ok()).flatten()
+}
+
 /// Windows says what it found in a form that is not used here.
 fn plain_verbatim(p: PathBuf) -> PathBuf {
     match p.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
@@ -616,6 +670,12 @@ impl Floor {
             .record(&self.store, &self.session.id, deed, c)
             .await
             .map_err(|e| Refused::This(format!("it cannot be put on record: {e}")))
+    }
+    /// Where this agent works.
+    pub async fn workspace(&self) -> Option<String> {
+        let all = self.store.agents(self.session.id.clone()).await.ok()?;
+        let (_, text) = all.into_iter().find(|(a, _)| *a == self.agent)?;
+        Some(serde_json::from_str::<Setup>(&text).ok()?.workspace)
     }
     /// What was said waits until it is heard.
     pub async fn wait(&self, item: &ItemId, text: &str) -> Result<(), Refused> {
@@ -714,6 +774,7 @@ impl Worker {
             site,
             access,
             workspace,
+            bridge: agents.bridge.clone(),
             inbox,
             waits,
         })))

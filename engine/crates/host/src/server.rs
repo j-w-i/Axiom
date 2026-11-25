@@ -30,7 +30,7 @@ use crate::{
     net::{self, Boxed, Listener},
     outbox::{Follower, Outbox},
     paths::{Lock, Paths, Same, private_dir, private_file},
-    replay,
+    peers, replay,
     session::{Joined, Opened, Refused, Say, Session, encode, lines},
     store::Store,
 };
@@ -69,6 +69,8 @@ pub struct Config {
     pub scratch: PathBuf,
     /// Where harnesses are looked for; `None`: where programs usually are.
     pub programs: Option<Vec<PathBuf>>,
+    /// The host's own program, if installed programs are to have tools of Axiom's.
+    pub bridge: Option<PathBuf>,
     pub vault: Arc<dyn Vault>,
 }
 impl Config {
@@ -84,6 +86,7 @@ impl Config {
             home: home(),
             scratch,
             programs: None,
+            bridge: None,
             vault: Arc::new(MemoryVault::default()),
         }
     }
@@ -281,6 +284,7 @@ impl Host {
             cfg.home.clone(),
             cfg.scratch.clone(),
             cfg.programs.clone(),
+            cfg.bridge.clone(),
             listener.path(),
         );
         let st = Arc::new(State {
@@ -671,6 +675,9 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
     // The place this connection takes: a stranger's, until it shows the token.
     let mut stranger = Some(stranger);
     let mut _place = None;
+    // An installed program's: nothing is opened for it but its own tool, and that ends with it.
+    let mut peer: Option<String> = None;
+    let mut asked = JoinSet::new();
     // Keeps what is followed open.
     let mut following: HashMap<SessionId, Session> = HashMap::new();
     let many = Arc::new(Semaphore::new(SLOW));
@@ -714,6 +721,50 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                 }
             };
             match (stranger.is_none(), req.call) {
+                (false, Call::PeerHello { grant }) => {
+                    let place = st.clients.clone().try_acquire_owned();
+                    match (st.agents.granted(&grant), place) {
+                        (Some(_), Ok(place)) => {
+                            _place = Some(place);
+                            peer = Some(grant);
+                            stranger = None;
+                            out.answer(req.id, Ok(json!({})));
+                        }
+                        (None, _) => {
+                            let e = WireError::new(ErrorCode::Unauthorised, "wrong key");
+                            out.answer(req.id, Err(e));
+                            return;
+                        }
+                        (_, Err(_)) => {
+                            let e = WireError::new(ErrorCode::Busy, "too many clients");
+                            out.answer(req.id, Err(e));
+                            return;
+                        }
+                    }
+                }
+                (true, call) if peer.is_some() => {
+                    while asked.try_join_next().is_some() {}
+                    // Asked for each time: the key may be gone by now.
+                    let who = peer.as_deref().and_then(|k| st.agents.granted(k));
+                    let Some(who) = who else {
+                        let e =
+                            WireError::new(ErrorCode::Unauthorised, "the key is not good any more");
+                        out.answer(req.id, Err(e));
+                        return;
+                    };
+                    let Call::Peer { args } = call else {
+                        let words = "this key opens nothing else";
+                        out.answer(req.id, Err(WireError::new(ErrorCode::Unauthorised, words)));
+                        continue;
+                    };
+                    if asked.len() >= SLOW {
+                        let words = "too much is asked at once";
+                        out.answer(req.id, Err(WireError::new(ErrorCode::Busy, words)));
+                        continue;
+                    }
+                    let (st, out) = (st.clone(), out.clone());
+                    asked.spawn(async move { out.answer(req.id, by_peer(&st, who, args).await) });
+                }
                 (false, call) => match hello(st, call) {
                     Ok(client) => {
                         _place = Some(client);
@@ -1066,9 +1117,25 @@ impl Switch for State {
     }
 }
 
+/// What an installed program asks of its session's other agents.
+async fn by_peer(
+    st: &Arc<State>,
+    (session, agent): (SessionId, AgentId),
+    args: Value,
+) -> Result<Value, WireError> {
+    let s = st.open(&session).await?;
+    let floor =
+        agents::Floor { agents: st.agents.clone(), store: st.store.clone(), session: s, agent };
+    let o = peers::call(&floor, &st.agents.desk(&session), &args).await;
+    Ok(json!({"ok": o.ok, "text": o.text}))
+}
+
 async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
     match call {
-        Call::Hello { .. } => Err(WireError::new(ErrorCode::BadRequest, "already said hello")),
+        Call::Hello { .. } | Call::PeerHello { .. } => {
+            Err(WireError::new(ErrorCode::BadRequest, "already said hello"))
+        }
+        Call::Peer { .. } => Err(agents::bad("only an agent's own program may ask that")),
         Call::Follow { .. } | Call::Unfollow { .. } => Err(internal("handled by the connection")),
         Call::Status {} => {
             let mut status = json!({

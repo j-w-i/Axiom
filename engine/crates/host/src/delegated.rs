@@ -12,8 +12,8 @@ use std::{
 use axiom_engine::{Deed, Ended, FROM_AGENT, Refused, Say, Stage, Word, said};
 use axiom_harness::{
     Answer, By, ChoiceKind, Diff, Done, Error, Event, Events, Frame, Frames, Gone, Handle, Harness,
-    KNOWN, Kind, Level, Lost, Program, Prompts, Question, Ready, Settled, Site, Start, Trust, Why,
-    find,
+    KNOWN, Kind, Level, Lost, Program, Prompts, Question, Ready, Server, Settled, Site, Start,
+    Trust, Why, find,
 };
 use axiom_policy::{
     Access, Approval, Ask, Place, Reach, Unsandboxed, audit::Containment, rules::Decision,
@@ -28,7 +28,7 @@ use tokio::{
     task::{AbortHandle, JoinSet},
 };
 
-use crate::agents::{Floor, Setup, Slot};
+use crate::agents::{Floor, Grant, Setup, Slot};
 
 /// A program that has nothing to do for this long is ended; it goes on where it was when it is
 /// spoken to.
@@ -75,6 +75,7 @@ impl Known {
             resume: None,
             trust: if trust { Trust::Given } else { Trust::Withheld },
             by: By::Person,
+            tools: None,
         }
     }
 
@@ -144,6 +145,8 @@ pub struct Worker {
     pub site: Site,
     pub access: Access,
     pub workspace: Place,
+    /// This program, for the tools it is given.
+    pub bridge: Option<Place>,
     pub inbox: mpsc::Receiver<Word>,
     /// Said and not yet told it.
     pub waits: Vec<(ItemId, String)>,
@@ -239,7 +242,7 @@ impl Worker {
         run: &RunId,
         cancel: &mut watch::Receiver<bool>,
     ) -> Result<mpsc::Sender<Turn>, Halt> {
-        let start = Start {
+        let mut start = Start {
             workspace: self.workspace.clone(),
             model: self.setup.execution.model.clone(),
             effort: self.setup.execution.effort.clone(),
@@ -247,7 +250,24 @@ impl Worker {
             resume: self.setup.resume.clone(),
             trust: if self.setup.trust { Trust::Given } else { Trust::Withheld },
             by: By::Person,
+            tools: None,
         };
+        // A key for it alone, gone with its attempt. Without one it works all the same.
+        let grant = match &self.bridge {
+            Some(_) if self.known.harness.takes_tools() => {
+                let f = &self.floor;
+                f.agents.grant(&f.session.id, &f.agent, &self.site.tmp).ok()
+            }
+            _ => None,
+        };
+        if let (Some(g), Some(command)) = (&grant, &self.bridge) {
+            start.tools = Some(Server {
+                name: "axiom".into(),
+                tool: crate::peers::TOOL.into(),
+                command: command.clone(),
+                args: vec![crate::mcp::ARG.into(), g.file.display().to_string()],
+            });
+        }
         let failed = |e: Error| Halt::Failed(e.to_string());
         let launch = self.known.harness.launch(&start).map_err(failed)?;
         let subject = command(self.site.program.place(), &launch.args);
@@ -294,6 +314,7 @@ impl Worker {
             handle: live.handle,
             events: live.events,
             containment: launch.containment,
+            _grant: grant,
             ready: false,
             resumes: false,
             run: None,
@@ -388,6 +409,7 @@ struct Attempt {
     handle: Handle,
     events: Events,
     containment: Containment,
+    _grant: Option<Grant>,
     ready: bool,
     resumes: bool,
     run: Option<RunId>,

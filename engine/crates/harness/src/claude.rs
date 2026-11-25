@@ -84,6 +84,13 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
             containment = Containment::Harness;
         }
     }
+    // Who only looks has no tools of servers; whoever is asked about none of them could not use it.
+    if let Some(t) = s.tools.as_ref().filter(|_| s.access == Access::Work) {
+        let server = json!({"mcpServers": {t.name.as_str():
+            {"type": "stdio", "command": t.command.as_str(), "args": t.args}}});
+        add(&["--mcp-config", &server.to_string()]);
+        add(&["--allowedTools", &format!("mcp__{}__{}", t.name, t.tool)]);
+    }
     if s.trust == Trust::Withheld {
         // It shows no trust dialog in this mode, and runs what a project's settings and `.mcp.json`
         // name. So it reads neither.

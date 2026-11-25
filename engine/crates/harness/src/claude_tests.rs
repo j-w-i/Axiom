@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::*;
-use crate::test::{Desk, start};
+use crate::{
+    Harness,
+    test::{Desk, place, start},
+};
 
 type D = Desk<Claude>;
 
@@ -692,4 +695,33 @@ fn control_requests_that_nobody_answers_end_it() {
     assert!(d.end.is_none());
     d.interrupt();
     assert_eq!(d.ends().0, Why::Deaf);
+}
+
+#[test]
+fn it_is_given_a_server_where_it_may_act() {
+    let tools = Some(crate::Server {
+        name: "axiom".into(),
+        tool: "agent".into(),
+        command: place("bin/axiom-host"),
+        args: vec!["--mcp".into(), "/tmp/a file".into()],
+    });
+    for (access, given) in [(Access::Work, true), (Access::Read, false)] {
+        let s = Start { tools: tools.clone(), ..start(access) };
+        let l = Harness::Claude(Prompts::Refused).launch(&s).unwrap();
+        let at = l.args.iter().position(|a| a == "--mcp-config");
+        assert_eq!(at.is_some(), given, "{access:?}");
+        let Some(at) = at else { continue };
+        let v: Value = serde_json::from_str(&l.args[at + 1]).unwrap();
+        let server = &v["mcpServers"]["axiom"];
+        assert_eq!(server["args"], json!(["--mcp", "/tmp/a file"]));
+        assert_eq!(server["command"], place("bin/axiom-host").as_str());
+        assert!(server.get("env").is_none());
+        // Its one tool, and no other.
+        let allowed = l.args.iter().position(|a| a == "--allowedTools").unwrap();
+        assert_eq!(l.args[allowed + 1], "mcp__axiom__agent");
+    }
+    // None of the folder's own comes with it.
+    let s = Start { tools, trust: Trust::Withheld, ..start(Access::Work) };
+    let l = Harness::Claude(Prompts::Refused).launch(&s).unwrap();
+    assert!(l.args.iter().any(|a| a == "--strict-mcp-config"));
 }

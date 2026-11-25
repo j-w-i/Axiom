@@ -344,6 +344,12 @@ pub enum Call {
     /// Must be the first line on a connection.
     #[serde(rename = "hello")]
     Hello { token: String, client: String, protocol: u32 },
+    /// Instead of `hello`, from a program an agent is: opens `peer.call` for it and nothing else.
+    #[serde(rename = "peer.hello")]
+    PeerHello { grant: String },
+    /// A call of the tool `agent`.
+    #[serde(rename = "peer.call")]
+    Peer { args: serde_json::Value },
     #[serde(rename = "host.status")]
     Status {},
     /// Stops the host if nothing runs, or always with `force`.

@@ -83,6 +83,18 @@ pub struct Start {
     pub resume: Option<String>,
     pub trust: Trust,
     pub by: By,
+    /// A server of Axiom's own that it is given, if it can be and may act.
+    pub tools: Option<Server>,
+}
+
+/// A Model Context Protocol server on standard streams, with one tool.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Server {
+    pub name: String,
+    pub tool: String,
+    pub command: Place,
+    /// No secret: they are seen by other users of the computer.
+    pub args: Vec<String>,
 }
 
 /// A started attempt.
@@ -134,6 +146,12 @@ impl Harness {
             // CODEX_HOME moves its files; whether it parts what is in the system's store is not said.
             Harness::Codex | Harness::Acp(_) => None,
         }
+    }
+
+    /// Whether it can be given a server of Axiom's own, by what it documents.
+    pub fn takes_tools(&self) -> bool {
+        // Codex: the form of what it takes at a thread's start is nowhere documented.
+        !matches!(self, Harness::Codex)
     }
 
     /// Whether its terms allow only what a person themselves says.
