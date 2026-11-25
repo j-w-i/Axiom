@@ -47,7 +47,7 @@ Unitable's depth on round 12's layout, at the owner's word (2026-11-25). No verd
 Built on the owner's word (2026-11-25). No verdict on 16 yet. In the pictures and not in the app, because the host has nothing for it: the plan, the terminals and the levels of use. The panel of the app holds what has changed. The fifteen goldens fail here too. Opened once in a real window with the owner's yes (2026-11-25, macOS 27 arm64, release, specimen content, 120 Hz, Impeller): scrolling, build p99 2.0 ms and raster p99 3.3 ms; everything painted again, 3.7 and 4.5 ms; the first frame 63 ms. It could not be photographed (no permission to record the screen). Measured without showing a window: the system's buttons were 16 from the top and the header 33; with a unified toolbar both are 26, and clicks in the header still reach the client's view. That change, and full screen, have not been looked at by anybody (K8).
 
 ## Next
-1. Owner: say whether a real window may be opened once, when convenient, to check chrome and frame times.
+1. Owner: look at the window once (buttons on the header line, dragging, full screen). It was opened once for frame times, with their yes; opening it again needs another.
 2. Owner: say whether the real Claude Code or Codex on this computer may be started once, to see a delegated agent work (K40).
 3. Owner: sign in with ChatGPT once, if wanted (K47).
 4. Somebody with the standing to do it: the security review (K32).
