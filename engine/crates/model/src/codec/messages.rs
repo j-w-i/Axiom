@@ -10,10 +10,12 @@ use super::{
     object::{Array, Object},
     replays,
 };
-use crate::{error::Error, profile::Effort, profile::Quirks, sse, types::*};
+use crate::{error::Error, profile::Effort, profile::Quirks, profile::Thinking, sse, types::*};
 
 /// What the codec writes; a profile's `body` cannot.
-const OWN: [&str; 9] = [
+const OWN: [&str; 11] = [
+    "thinking",
+    "speed",
     "model",
     "max_tokens",
     "stream",
@@ -44,6 +46,19 @@ pub(super) fn encode(
             body.put("output_config", &json!({ "effort": effort }))?;
         }
         (Some(_), _) => return Err(EncodeError::Unsupported("effort")),
+    }
+    match (settings.thinking, quirks.thinking) {
+        (None, _) => {}
+        (Some(on), Some(Thinking::Adaptive)) => {
+            body.put("thinking", &json!({ "type": if on { "adaptive" } else { "disabled" } }))?;
+        }
+        (Some(_), None) => return Err(EncodeError::Unsupported("whether to think")),
+    }
+    if let Some(s) = &settings.speed {
+        if !quirks.speeds.as_ref().is_some_and(|all| all.contains(s)) {
+            return Err(EncodeError::Unsupported("the speed"));
+        }
+        body.put("speed", s)?;
     }
     for (key, value) in &quirks.body {
         if OWN.contains(&key.as_str()) {

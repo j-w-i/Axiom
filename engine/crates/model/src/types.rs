@@ -24,6 +24,9 @@ impl Json {
     pub fn get(&self) -> &str {
         self.0.get()
     }
+    pub(crate) fn value(&self) -> Value {
+        serde_json::from_str(self.0.get()).unwrap_or(Value::Null)
+    }
     pub(crate) fn raw(&self) -> &RawValue {
         &self.0
     }
@@ -236,6 +239,12 @@ pub struct Settings {
     pub max_output: Option<u32>,
     /// In the provider's own words. Asking a provider that has no such control is an error.
     pub effort: Option<String>,
+    /// Whether it thinks, where that can be told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
+    /// How fast, in the provider's own words, where that can be told. It has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
     pub stop: Vec<String>,
     pub cache: Cache,
 }

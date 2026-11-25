@@ -168,6 +168,7 @@ class HostStore extends ChangeNotifier {
     // Nothing that is shown depends on it.
     unawaited(loadConnections().catchError((_) {}));
     unawaited(loadHarnesses().catchError((_) {}));
+    unawaited(loadLists().catchError((_) {}));
     unawaited(loadNeeds());
     if (current case final c? when c.fault == null) await _follow(c);
     notifyListeners();
@@ -489,11 +490,37 @@ class HostStore extends ChangeNotifier {
   /// What was last heard of a connection's models; null before that.
   List<ModelInfo>? modelsOf(String connection) => _models[connection];
 
+  /// What providers and programs have said of their models, as the host has kept it.
+  List<ModelList> lists = const [];
+
+  Future<void> loadLists() async {
+    final r = await _live.call('model.known');
+    lists = [for (final j in r! as List<Object?>) ModelList.decode(j! as Json)];
+    notifyListeners();
+  }
+
+  /// What is known of models that are in no list, by account and name.
+  final _about = <(String, String), ModelInfo?>{};
+  static const _mostAbout = 200;
+  ModelInfo? aboutOf(String connection, String model) => _about[(connection, model)];
+
+  /// Asks the host once what can be said to a model; it asks nobody.
+  Future<void> about(String connection, String model) async {
+    final key = (connection, model);
+    if (model.isEmpty || _about.containsKey(key)) return;
+    if (_about.length >= _mostAbout) _about.clear();
+    _about[key] = null;
+    final r = await _live.call('model.about', {'connection': connection, 'model': model});
+    _about[key] = ModelInfo.decode(r! as Json);
+    notifyListeners();
+  }
+
   Future<List<ModelInfo>> models(String connection) async {
     final r = await _live.call('model.list', {'connection': connection});
     final all = [for (final j in r! as List<Object?>) ModelInfo.decode(j! as Json)];
     _models[connection] = all;
     notifyListeners();
+    unawaited(loadLists().catchError((Object _) {}));
     return all;
   }
 

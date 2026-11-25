@@ -14,11 +14,16 @@ import '../ui/editable.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
 import '../ui/overlay.dart';
+import '../ui/prefs.dart';
 import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
+import 'offers.dart';
 import 'outside.dart';
 import 'start.dart';
+
+/// Among models: goes to where it is said which are offered.
+const _manage = '\u0000';
 
 /// A conversation that has not begun: where it is written, what it runs on and where it works. What
 /// is sent begins it. The same for another agent of a session.
@@ -60,8 +65,13 @@ class _StartPageState extends State<StartPage> {
   }
 
   Future<bool> _start(Connection? c) async {
+    final key = offerKey(d.harness, d.on, d.model.text.trim());
     final id = await d.start(c, () => mounted);
-    if (id != null && mounted) widget.onStarted(id);
+    if (id != null && mounted) {
+      final all = PrefsScope.maybeOf(context);
+      all?.value = all.value.using(key);
+      widget.onStarted(id);
+    }
     return id != null;
   }
 
@@ -270,23 +280,37 @@ class _StartPageState extends State<StartPage> {
       for (final h in s.harnesses)
         if (h.program == null && const {'claude', 'codex'}.contains(h.id)) h,
     ];
-    final models = own && chosen != null
-        ? s.modelsOf(chosen.id) ?? const <ModelInfo>[]
-        : const <ModelInfo>[];
-    final names = namesOf(models), model = d.model.text.trim();
+    final prefs = PrefsScope.of(context);
+    final model = d.model.text.trim(), now = offerKey(d.harness, d.on, model);
+    final offers = arranged(offersOf(s), prefs, chosen: now);
+    final items = offerItems(offers, prefs);
     final accounts = own ? s.own : s.accountsOf(d.harness);
     return [
       if (!own || chosen != null)
         ExecutionChoice(
           'Model',
           [
-            if (!own) AxMenuItem('', 'Default model', mark: markOf(null, null, d.harness)),
-            for (final m in models) modelItem(m, names),
+            if (!own)
+              AxMenuItem(
+                offerKey(d.harness, d.on, ''),
+                'Default model',
+                mark: markOf(null, null, d.harness),
+              ),
+            ...items,
+            if (items.isNotEmpty)
+              const AxMenuItem(_manage, 'Choose which are offered', icon: AxIcon.list),
           ],
-          model,
-          (v) => d.change(() => d.model.text = v),
-          write: (v) => d.change(() => d.model.text = v),
-          written: model.isEmpty || models.any((m) => m.id == model)
+          now,
+          (v) {
+            if (v == _manage) return widget.onAccounts();
+            final o = offers.where((o) => o.key == v).firstOrNull;
+            o == null ? d.change(() => d.model.clear()) : d.choose(o);
+          },
+          write: (v) => d.change(() {
+            d.model.text = v;
+            d.fitModel();
+          }),
+          written: model.isEmpty || offers.any((o) => o.key == now)
               ? null
               : AxMenuItem(
                   model,
@@ -367,8 +391,17 @@ class _StartPageState extends State<StartPage> {
             d.fit();
           }),
         ),
-      if (d.tries)
-        ExecutionChoice('Effort', efforts, d.effort, (v) => d.change(() => d.effort = v)),
+      ...tellable(
+        d.info,
+        efforts: d.efforts,
+        effort: d.effort,
+        thinking: d.thinking,
+        speed: d.speed,
+        program: !own,
+        onEffort: (v) => d.change(() => d.effort = v),
+        onThinking: (v) => d.change(() => d.thinking = v),
+        onSpeed: (v) => d.change(() => d.speed = v),
+      ),
     ];
   }
 }

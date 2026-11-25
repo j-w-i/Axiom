@@ -65,6 +65,7 @@ impl T {
             connection: Some(v["connection"].as_str().unwrap().into()),
             effort: None,
             environment: None,
+            ..Execution::default()
         };
         let call = Call::AgentAdd {
             session: self.s.clone(),
@@ -701,6 +702,7 @@ async fn a_delegated_agent_is_told_with_a_yes() {
         connection: None,
         effort: None,
         environment: None,
+        ..Execution::default()
     };
     let call = Call::AgentAdd {
         session: t.s.clone(),

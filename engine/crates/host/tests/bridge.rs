@@ -75,6 +75,7 @@ impl T {
             connection,
             effort: None,
             environment: None,
+            ..Execution::default()
         };
         let call = Call::AgentAdd {
             session: self.s.clone(),
@@ -402,6 +403,7 @@ async fn with_hands(access: Access) -> (T, AgentId, RunId) {
         connection: None,
         effort: None,
         environment: Some("axiom".into()),
+        ..Execution::default()
     };
     let add = |e: Execution, access| Call::AgentAdd {
         session: t.s.clone(),
@@ -668,6 +670,7 @@ async fn a_program_hands_in_a_plan() {
             connection: None,
             effort: None,
             environment: environment.map(str::to_owned),
+            ..Execution::default()
         },
         access: Access::Read,
         trust: true,

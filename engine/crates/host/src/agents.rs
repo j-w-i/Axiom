@@ -25,6 +25,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::{
+    catalogue::Catalogue,
     connections::{self, Connections},
     copies::{self, Copies},
     delegated, mcp,
@@ -263,6 +264,7 @@ pub struct Agents {
     own: Vec<PathBuf>,
     scratch: PathBuf,
     pub programs: Programs,
+    pub catalogue: Catalogue,
     rules: PathBuf,
     pub copies: Copies,
 }
@@ -300,6 +302,7 @@ impl Agents {
             own,
             scratch,
             programs,
+            catalogue: Catalogue::open(&paths.data.join("models.json")),
             rules: paths.data.join("policy.toml"),
         }
     }
@@ -384,6 +387,9 @@ impl Agents {
                 }
                 self.connections.account(c, &execution.harness)?;
             }
+            if execution.thinking.is_some() {
+                return Err(bad("this harness cannot be told whether to think"));
+            }
             if !instructions.is_empty() {
                 return Err(bad("this harness reads the folder's words for agents by itself"));
             }
@@ -429,6 +435,15 @@ impl Agents {
         if execution.effort.is_some() && client.profile().quirks(m).effort.is_none() {
             return Err(bad("the effort cannot be set for this provider and model"));
         }
+        let quirks = client.profile().quirks(m);
+        if execution.thinking.is_some() && quirks.thinking.is_none() {
+            return Err(bad("whether it thinks cannot be set for this provider and model"));
+        }
+        if let Some(s) = &execution.speed
+            && !quirks.speeds.is_some_and(|all| all.contains(s))
+        {
+            return Err(bad("the speed cannot be set for this provider and model"));
+        }
         let place = real(Path::new(workspace))?;
         let setup = Setup {
             name,
@@ -467,6 +482,7 @@ impl Agents {
                 connection: None,
                 effort: None,
                 environment: None,
+                ..Execution::default()
             },
             access: axiom_proto::Access::Read,
             workspace: real(Path::new(workspace))?.to_string(),
@@ -1077,6 +1093,7 @@ pub async fn load(
     let connection = setup.execution.connection.clone().unwrap_or_default();
     let asked = connection.clone();
     let model = setup.execution.model.clone().unwrap_or_default();
+    let listed = agents.catalogue.find("axiom", Some(&connection), &model);
     let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
     // Links, folders, the system's store: off the runtime's own threads.
     let (client, site, (instructions, not)) = tokio::task::spawn_blocking(move || {
@@ -1105,6 +1122,8 @@ pub async fn load(
             .map(|m| u32::try_from(m.min(32_000)).unwrap_or(32_000))
             .or(messages.then_some(8192)),
         effort: setup.execution.effort.clone(),
+        thinking: setup.execution.thinking,
+        speed: setup.execution.speed.clone(),
         stop: Vec::new(),
         cache: if marks { Cache::Short } else { Cache::Off },
     };
@@ -1131,7 +1150,8 @@ pub async fn load(
         client,
         model,
         settings,
-        window: quirks.context,
+        // As its provider's list has it, where nothing is known for certain.
+        window: quirks.context.or_else(|| listed?.context),
         site,
         seen: agents.slot(&id, agent).seen.clone(),
         context,
@@ -1383,7 +1403,7 @@ pub fn added(agent: &AgentId, s: &Setup, from: Option<Branched>) -> Vec<Say> {
         Say::Event(Body::AgentAdded {
             agent: agent.clone(),
             name: s.name.clone(),
-            execution: s.execution.clone(),
+            execution: Box::new(s.execution.clone()),
             parent: None,
             access: Some(s.access),
             apart: s.apart.is_some(),
@@ -1396,7 +1416,7 @@ pub fn added(agent: &AgentId, s: &Setup, from: Option<Branched>) -> Vec<Say> {
 pub fn changed(agent: &AgentId, s: &Setup) -> Vec<Say> {
     vec![Say::Event(Body::AgentChanged {
         agent: agent.clone(),
-        execution: s.execution.clone(),
+        execution: Box::new(s.execution.clone()),
         access: Some(s.access),
         plan: s.plan,
     })]

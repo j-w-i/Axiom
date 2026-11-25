@@ -95,6 +95,8 @@ pub struct Start {
     pub hands: bool,
     /// Words for the model, in a file of the host's: what it works with and where.
     pub system: Option<Place>,
+    /// How fast, where that can be told: it has a price.
+    pub speed: Option<String>,
     /// Further arguments its person wants it started with.
     pub extra: Vec<String>,
 }
@@ -137,6 +139,9 @@ impl Harness {
         }
         if s.hands && (!self.takes_hands() || s.tools.is_none()) {
             return Err(Error::NoHands);
+        }
+        if s.speed.is_some() && !self.takes_speed() {
+            return Err(Error::NoSpeed);
         }
         if self.person_only() && s.by != By::Person {
             return Err(Error::PersonOnly);
@@ -196,6 +201,12 @@ impl Harness {
         // `--effort` and `model_reasoning_effort`: code.claude.com/docs/en/cli-reference and the
         // app-server's `turn/start`, read 2026-11-25. Of an ACP agent it is known once it runs.
         matches!(self, Harness::Claude(_) | Harness::Codex)
+    }
+
+    /// Whether it can be told to be fast, before it is started.
+    pub fn takes_speed(&self) -> bool {
+        // `fastMode` in `--settings`: code.claude.com/docs/en/fast-mode, read 2026-11-26.
+        matches!(self, Harness::Claude(_))
     }
 
     /// Whether its terms allow only what a person themselves says.

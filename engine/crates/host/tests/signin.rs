@@ -426,7 +426,7 @@ async fn a_person_signs_in_and_their_plan_is_used() {
     assert_eq!((c.secret, c.lasts, c.problem, c.url), (true, false, None, None));
     assert_eq!(
         t.models(&id).await.unwrap(),
-        json!([{"id": "gpt-a", "name": "GPT A", "effort": true}])
+        json!([{"id": "gpt-a", "name": "GPT A", "effort": true, "efforts": ["low", "medium", "high"]}])
     );
     assert!(t.o.at("/v1/models")[0].0.contains("Bearer at-canary-1"));
     let asked = &t.o.at("/token")[0].1;
@@ -737,6 +737,7 @@ async fn an_agent_works_on_it() {
             connection: Some(id.clone()),
             effort: None,
             environment: None,
+            ..Execution::default()
         },
         access: axiom_proto::Access::Read,
         trust: false,

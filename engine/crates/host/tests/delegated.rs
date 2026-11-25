@@ -89,6 +89,7 @@ impl T {
                 connection: None,
                 effort: None,
                 environment: None,
+                ..Execution::default()
             },
             access,
             trust,
@@ -740,6 +741,7 @@ async fn a_second_account_is_kept_apart() {
             connection: connection.map(str::to_owned),
             effort: None,
             environment: None,
+            ..Execution::default()
         }),
         access: None,
         plan: None,
@@ -976,4 +978,47 @@ async fn its_list_of_things_to_do() {
         [vec![s("Look", Doing), s("Do", Todo)], vec![s("Look", Done), s("Do", Unknown)], vec![]]
     );
     assert!(texts(&all, ItemKind::Notice).is_empty());
+}
+
+/// What it says of its models when it was started is kept, with what each can be told; it is not
+/// started for that.
+#[tokio::test]
+async fn the_models_it_has() {
+    let mut script = claude(&turn("go", "One."));
+    script[1]["say"]["response"]["response"]["models"] = json!([
+        {"value": "opus", "displayName": "Opus 5.5", "supportedEffortLevels": ["low", "max"], "supportsFastMode": true},
+        {"value": "haiku", "displayName": "Haiku"},
+    ]);
+    let mut t = T::new(&script).await;
+    let known = async |t: &mut T| -> ModelList {
+        let v = t.c.call(Call::ModelsKnown {}).await.unwrap();
+        let all: Vec<ModelList> = serde_json::from_value(v).unwrap();
+        all.into_iter().find(|l| l.harness == "claude").unwrap()
+    };
+    let l = known(&mut t).await;
+    assert_eq!((l.at, l.models.len()), (0, 4), "as it is documented");
+    let mut call = t.add("claude", Access::Work, false);
+    let Call::AgentAdd { execution, .. } = &mut call else { panic!() };
+    (execution.speed, execution.effort) = (Some("fast".into()), Some("max".into()));
+    let mut thinks = call.clone();
+    let Call::AgentAdd { execution, .. } = &mut thinks else { panic!() };
+    execution.thinking = Some(true);
+    assert!(t.c.call(thinks).await.unwrap_err().to_string().contains("whether to think"));
+    let a = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
+    t.prompt(&a, "go").await;
+    let (subject, _) = t.allow_start().await;
+    assert!(subject.contains("--effort max") && subject.contains("fastMode"), "{subject}");
+    assert_eq!(t.ended().await.0, Outcome::Completed);
+    let l = known(&mut t).await;
+    assert!(l.at > 0);
+    assert_eq!((l.models[0].id.as_str(), l.models[0].name.as_deref()), ("opus", Some("Opus 5.5")));
+    assert_eq!(l.models[0].efforts, ["low", "max"]);
+    assert_eq!(l.models[0].speeds, ["fast"]);
+    assert_eq!((l.models[1].effort, l.models[1].speeds.len()), (false, 0));
+    // Another program has no such thing.
+    let mut call = t.add("goose", Access::Ask, true);
+    let Call::AgentAdd { execution, .. } = &mut call else { panic!() };
+    execution.speed = Some("fast".into());
+    let e = t.c.call(call).await.unwrap_err().to_string();
+    assert!(e.contains("how fast"), "{e}");
 }

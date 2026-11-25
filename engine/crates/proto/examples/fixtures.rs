@@ -15,14 +15,16 @@ fn main() -> Result<(), serde_json::Error> {
         Body::AgentAdded {
             agent: a.clone(),
             name: "Lead".into(),
-            execution: Execution {
+            execution: Box::new(Execution {
                 harness: "axiom".into(),
                 provider: Some("anthropic".into()),
                 model: Some("m".into()),
                 connection: Some("c_2".into()),
                 effort: Some("high".into()),
                 environment: Some("e".into()),
-            },
+                thinking: Some(false),
+                speed: Some("fast".into()),
+            }),
             parent: Some(AgentId("a_0".into())),
             access: Some(Access::Ask),
             apart: true,
@@ -35,14 +37,15 @@ fn main() -> Result<(), serde_json::Error> {
         },
         Body::AgentChanged {
             agent: a.clone(),
-            execution: Execution {
+            execution: Box::new(Execution {
                 harness: "axiom".into(),
                 provider: None,
                 model: Some("n".into()),
                 connection: None,
                 effort: None,
                 environment: None,
-            },
+                ..Execution::default()
+            }),
             access: Some(Access::Work),
             plan: true,
         },
@@ -214,6 +217,37 @@ fn main() -> Result<(), serde_json::Error> {
                     unit: Unit::Seconds,
                 },
             ])?,
+        },
+        Message::Ok {
+            id: 7,
+            result: serde_json::to_value([ModelList {
+                harness: "axiom".into(),
+                connection: Some("c_2".into()),
+                at: 9,
+                models: vec![ModelInfo {
+                    id: "m".into(),
+                    name: Some("M".into()),
+                    context: Some(1000),
+                    effort: true,
+                    efforts: vec!["low".into(), "max".into()],
+                    thinking: true,
+                    speeds: vec!["fast".into()],
+                }],
+            }])?,
+        },
+        Message::Ok {
+            id: 8,
+            result: serde_json::to_value([ProgramInfo {
+                harness: "claude".into(),
+                account: Some("c_2".into()),
+                name: Some("N".into()),
+                path: Some("/p".into()),
+                args: vec!["a".into()],
+                vars: vec![
+                    VarInfo { name: "A".into(), value: Some("1".into()), lasts: true },
+                    VarInfo { name: "B".into(), value: None, lasts: false },
+                ],
+            }])?,
         },
         Message::Open { open: "/w".into() },
     ] {

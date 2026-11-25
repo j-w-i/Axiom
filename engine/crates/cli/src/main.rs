@@ -166,6 +166,7 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
                 connection: Some(c.into()),
                 effort: None,
                 environment: None,
+                ..Execution::default()
             },
             access: access(a)?,
             trust: false,

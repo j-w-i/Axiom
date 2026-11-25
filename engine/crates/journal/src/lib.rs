@@ -1057,14 +1057,15 @@ mod tests {
                 Body::AgentAdded {
                     agent: a.clone(),
                     name: "n".into(),
-                    execution: Execution {
+                    execution: Box::new(Execution {
                         harness: "h".into(),
                         provider: None,
                         model: None,
                         connection: None,
                         effort: None,
                         environment: None,
-                    },
+                        ..Execution::default()
+                    }),
                     parent: None,
                     access: None,
                     apart: false,

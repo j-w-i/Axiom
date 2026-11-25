@@ -450,7 +450,7 @@ impl Client {
                 inner => inner,
             });
             let values = groups.take(512).filter_map(|x| {
-                Some(Name { id: id(x, "/value")?, label: owned(x, "/name"), efforts: vec![] })
+                Some(Name { id: id(x, "/value")?, label: owned(x, "/name"), ..Name::default() })
             });
             let category = owned(c, "/category").unwrap_or_default();
             all.push(Opt { id: cid, category, current, values: values.collect() });

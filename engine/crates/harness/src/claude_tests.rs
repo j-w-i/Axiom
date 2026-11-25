@@ -55,6 +55,7 @@ fn args(p: Prompts, s: &Start) -> Vec<String> {
 #[test]
 fn how_it_is_started() {
     use Prompts::*;
+    let sandbox = settings(true, &start(Access::Work)).unwrap().unwrap();
     let both = |p, a, words: &[&str]| {
         let all = args(p, &start(a)).join(" ");
         let want = format!(
@@ -82,11 +83,11 @@ fn how_it_is_started() {
         Access::Work,
         &[
             "--permission-mode acceptEdits --permission-prompts none --disallowedTools AskUserQuestion --settings",
-            SANDBOX,
+            &sandbox,
         ],
     );
     assert!(matches!(launch(Refused, &start(Access::Ask)), Err(Error::NoMode(Access::Ask))));
-    let s: Value = serde_json::from_str(SANDBOX).unwrap();
+    let s: Value = serde_json::from_str(&sandbox).unwrap();
     assert_eq!(
         s,
         json!({"sandbox": {"enabled": true, "failIfUnavailable": true, "allowUnsandboxedCommands": false}})
@@ -612,6 +613,40 @@ fn a_list_of_things_to_do() {
     d.hear(refused);
     let plans: Vec<_> = d.told().into_iter().filter(|t| t.starts_with("plan")).collect();
     assert_eq!(plans, ["plan tasks [(\"Look\", Todo)] None"]);
+}
+
+/// How fast, beside what holds it back and not in its place.
+#[test]
+fn it_can_be_told_to_be_fast() {
+    let of = |a: Access, speed: &str| {
+        let s = Start { speed: Some(speed.into()), ..start(a) };
+        launch(Prompts::Refused, &s).map(|l| {
+            let at = l.args.iter().position(|a| a == "--settings").unwrap();
+            assert_eq!(l.args.iter().filter(|a| *a == "--settings").count(), 1);
+            serde_json::from_str::<Value>(&l.args[at + 1]).unwrap()
+        })
+    };
+    assert_eq!(of(Access::Read, "fast").unwrap(), json!({"fastMode": true}));
+    let work = of(Access::Work, "fast").unwrap();
+    assert_eq!(work["fastMode"], true);
+    assert_eq!(work["sandbox"]["allowUnsandboxedCommands"], false);
+    assert!(matches!(of(Access::Work, "slow"), Err(Error::BadValue(..))));
+    let fast = || Start { speed: Some("fast".into()), ..start(Access::Ask) };
+    for h in [crate::Harness::Codex, crate::Harness::Acp(crate::Acp::default())] {
+        assert!(matches!(h.launch(&fast()), Err(Error::NoSpeed)));
+    }
+    let hands = Start {
+        hands: true,
+        tools: Some(Server {
+            name: "axiom".into(),
+            tool: "agent".into(),
+            command: crate::test::place("bin/axiom"),
+            args: vec![],
+        }),
+        ..fast()
+    };
+    let all = launch(Prompts::Refused, &hands).unwrap().args.join(" ");
+    assert!(all.contains(r#"--settings {"fastMode":true}"#), "{all}");
 }
 
 #[test]

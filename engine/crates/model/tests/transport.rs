@@ -704,8 +704,7 @@ async fn a_server_that_repeats_the_credential_does_not_get_it_into_an_error() {
                 Ok(answer) => all(answer).await.1,
             };
             assert!(failed.is_some(), "{n}");
-            use axiom_model::Codec::{Converse, Messages};
-            if ![Messages, Converse].contains(&c.profile().codec) {
+            if c.profile().codec != axiom_model::Codec::Converse {
                 provider(timeout(LONG, c.list_models()).await.unwrap().unwrap_err());
             }
         }
@@ -1205,9 +1204,64 @@ async fn models() {
         (e.class, e.message.as_str()),
         (Class::Server, "Unexpected endpoint or method. (GET /v1/nope)")
     );
+}
 
-    let e = anthropic("http://127.0.0.1:1/v1").list_models().await.unwrap_err();
-    assert_eq!(e, CallError::Encode(EncodeError::Unsupported("the list of models")));
+/// As long as there are more, and with what each can be told.
+#[tokio::test]
+async fn anthropics_models_come_in_pages() {
+    let yes = r#"{"supported":true}"#;
+    let first = format!(
+        r#"{{"data":[{{"type":"model","id":"claude-b","display_name":"Claude B","max_input_tokens":1000000,"capabilities":{{"effort":{{"supported":true,"low":{yes},"medium":{yes},"high":{yes},"max":{yes},"xhigh":{yes}}},"thinking":{{"supported":true,"types":{{"adaptive":{yes},"disabled":{{"supported":false}}}}}}}}}}],"has_more":true,"last_id":"claude-b&x=1"}}"#
+    );
+    let second = r#"{"data":[{"id":"claude-a"}],"has_more":false,"last_id":"claude-a"}"#;
+    let (got, asked) = paged_of(Profile::anthropic(), vec![first, second.into(), "x".into()]).await;
+    let got = got.unwrap();
+    let [b, a] = got.as_slice() else { panic!() };
+    assert_eq!((b.id.as_str(), b.name.as_deref()), ("claude-b", Some("Claude B")));
+    assert_eq!(b.about.context, Some(1_000_000));
+    assert_eq!(b.about.efforts.as_ref().map(Vec::len), Some(5));
+    assert_eq!(b.about.thinking, Some(false));
+    assert_eq!((a.id.as_str(), &a.about), ("claude-a", &axiom_model::About::default()));
+    let lines: Vec<&str> = asked.iter().map(|a| a.lines().next().unwrap()).collect();
+    assert_eq!(
+        lines,
+        [
+            "GET /v1beta/models?limit=1000 HTTP/1.1",
+            "GET /v1beta/models?limit=1000&after_id=claude-b%26x%3D1 HTTP/1.1",
+        ]
+    );
+    assert!(asked.iter().all(|a| a.contains(&format!("x-api-key: {KEY}\r\n"))));
+    assert!(asked.iter().all(|a| a.contains("anthropic-version: ")));
+    // A list without an end, and one that is too long.
+    let page = |n: usize| {
+        format!(
+            r#"{{"data":[{}],"has_more":true,"last_id":"m"}}"#,
+            vec![r#"{"id":"m"}"#; n].join(",")
+        )
+    };
+    let (got, asked) = paged_of(Profile::anthropic(), vec![page(1); 12]).await;
+    assert_eq!((got.unwrap_err().class, asked.len()), (Class::Protocol, 10));
+    let (got, _) = paged_of(Profile::anthropic(), vec![page(5_001); 3]).await;
+    assert!(got.unwrap_err().message.contains("more than 10000 models"));
+    let big =
+        format!(r#"{{"data":[],"x":"{}","has_more":true,"last_id":"m"}}"#, "x".repeat(2 << 20));
+    let (got, asked) = paged_of(Profile::anthropic(), vec![big; 4]).await;
+    assert!(got.unwrap_err().message.contains("larger than 4194304") && asked.len() == 2);
+    for bad in ["[]", "", r#"{"data":[{}]}"#, r#"{"data":7}"#, "{}"] {
+        let (got, _) = paged_of(Profile::anthropic(), vec![bad.into()]).await;
+        assert_eq!(got.unwrap_err().class, Class::Protocol, "{bad}");
+    }
+    // OpenRouter's says what each can be told too, and what it is called.
+    let list = r#"{"data":[{"id":"a/b","name":"A: B","context_length":9,"reasoning":{"supported_efforts":["high","low"],"mandatory":true}}]}"#;
+    let (got, _) = paged_of(Profile::openrouter(), vec![list.into()]).await;
+    let got = got.unwrap();
+    assert_eq!((got[0].name.as_deref(), got[0].about.context), (Some("A: B"), Some(9)));
+    assert_eq!(got[0].about.efforts.as_deref(), Some(&["low".to_owned(), "high".into()][..]));
+    // Of any other server, what is called a name is not known to be one.
+    let (got, _) =
+        paged_of(Profile::openai_compatible("x", "http://localhost"), vec![list.into()]).await;
+    let got = got.unwrap();
+    assert_eq!((&got[0].name, &got[0].about), (&None, &axiom_model::About::default()));
 }
 
 #[tokio::test]
@@ -1227,6 +1281,12 @@ async fn openais_models() {
 
 /// Pages, one for each connection.
 async fn paged(pages: Vec<String>) -> (Result<Vec<axiom_model::ModelInfo>, Error>, Vec<String>) {
+    paged_of(Profile::gemini(), pages).await
+}
+async fn paged_of(
+    profile: Profile,
+    pages: Vec<String>,
+) -> (Result<Vec<axiom_model::ModelInfo>, Error>, Vec<String>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/v1beta", listener.local_addr().unwrap());
@@ -1247,7 +1307,7 @@ async fn paged(pages: Vec<String>) -> (Result<Vec<axiom_model::ModelInfo>, Error
             let _ = socket.write_all(page.as_bytes()).await;
         }
     });
-    let c = client_with(Profile::gemini(), &url, Options::default());
+    let c = client_with(profile, &url, Options::default());
     let got = timeout(LONG, c.list_models()).await.unwrap().map_err(provider);
     server.abort();
     let asked = asked.lock().unwrap().clone();
@@ -1264,6 +1324,7 @@ async fn geminis_models_come_in_pages() {
     let ids: Vec<&str> = got.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, ["a", "b", "tunedModels/c"]);
     assert!(got[0].native.get().contains(r#""inputTokenLimit":1"#));
+    assert_eq!((got[0].about.context, got[1].about.context), (Some(1), None));
     // The server's token is a value and nothing more.
     let lines: Vec<&str> = asked.iter().map(|a| a.lines().next().unwrap()).collect();
     assert_eq!(

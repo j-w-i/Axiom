@@ -556,6 +556,7 @@ async fn nothing_is_thrown_away_unsaid() {
         connection: Some(t.connection.clone()),
         effort: None,
         environment: None,
+        ..Execution::default()
     };
     let call = Call::AgentAdd {
         session: t.s.clone(),

@@ -39,6 +39,7 @@ async fn claude_code_works_once() {
         connection: None,
         effort: None,
         environment: std::env::var("AXIOM_LIVE_TOOLS").ok(),
+        ..Execution::default()
     };
     let add = |name: &str| Call::AgentAdd {
         session: s.clone(),

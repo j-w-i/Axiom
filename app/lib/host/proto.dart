@@ -39,6 +39,8 @@ class Execution {
     this.connection,
     this.effort,
     this.environment,
+    this.thinking,
+    this.speed,
   });
   Execution.decode(Json j)
     : harness = j['harness']! as String,
@@ -46,9 +48,15 @@ class Execution {
       model = j['model'] as String?,
       connection = j['connection'] as String?,
       effort = j['effort'] as String?,
-      environment = j['environment'] as String?;
+      environment = j['environment'] as String?,
+      thinking = j['thinking'] as bool?,
+      speed = j['speed'] as String?;
   final String harness;
   final String? provider, model, connection, effort, environment;
+
+  /// Whether the model thinks, and how fast it is, where that can be told.
+  final bool? thinking;
+  final String? speed;
 
   Json encode() => {
     'harness': harness,
@@ -57,6 +65,8 @@ class Execution {
     'connection': ?connection,
     'effort': ?effort,
     'environment': ?environment,
+    'thinking': ?thinking,
+    'speed': ?speed,
   };
 }
 
@@ -408,18 +418,46 @@ class VarSet {
 
 /// What a provider says of a model.
 class ModelInfo {
-  const ModelInfo(this.id, {this.name, this.context, this.effort = false});
+  const ModelInfo(
+    this.id, {
+    this.name,
+    this.context,
+    this.efforts = const [],
+    this.thinking = false,
+    this.speeds = const [],
+  });
   ModelInfo.decode(Json j)
     : id = j['id']! as String,
       name = j['name'] as String?,
       context = j['context'] as int?,
-      effort = j['effort'] as bool? ?? false;
+      efforts = [for (final e in j['efforts'] as List<Object?>? ?? const []) e! as String],
+      thinking = j['thinking'] as bool? ?? false,
+      speeds = [for (final e in j['speeds'] as List<Object?>? ?? const []) e! as String];
 
-  /// How hard it tries can be said.
-  final bool effort;
+  /// How hard it can be told to try, the least first; how fast it can be beside the standard.
+  final List<String> efforts, speeds;
+
+  /// Whether it thinks can be said.
+  final bool thinking;
   final String id;
   final String? name;
   final int? context;
+}
+
+/// What a provider or a program has said of the models it has.
+class ModelList {
+  const ModelList(this.harness, this.connection, this.at, this.models);
+  ModelList.decode(Json j)
+    : harness = j['harness']! as String,
+      connection = j['connection'] as String?,
+      at = j['at']! as int,
+      models = [for (final m in j['models']! as List<Object?>) ModelInfo.decode(m! as Json)];
+  final String harness;
+  final String? connection;
+
+  /// When, or 0 if it is from its documentation.
+  final int at;
+  final List<ModelInfo> models;
 }
 
 enum LimitUnit { count, bytes, seconds, unknown }

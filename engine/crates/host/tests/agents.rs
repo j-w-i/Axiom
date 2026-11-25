@@ -68,6 +68,7 @@ impl T {
             connection: Some(self.connection.clone()),
             effort: None,
             environment: None,
+            ..Execution::default()
         }
     }
     async fn agent(&mut self, access: Access) -> AgentId {
@@ -640,7 +641,16 @@ async fn a_plan_comes_first() {
         access,
         text: text.map(str::to_owned),
     };
-    let e = t.c.call(accept(&t, &one, Access::Work, None)).await.unwrap_err().to_string();
+    let mut tries = 0;
+    let e = loop {
+        // A run that has ended may not have left yet.
+        let e = t.c.call(accept(&t, &one, Access::Work, None)).await.unwrap_err().to_string();
+        tries += 1;
+        if tries == 500 || !e.contains("at work") {
+            break e;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
     assert!(e.contains("handed in last"), "{e}");
     let long = "x".repeat(64 * 1024 + 1);
     for text in [" ", long.as_str()] {
@@ -692,7 +702,13 @@ async fn a_plan_is_asked_for_and_no_more() {
     let e = t.c.call(set(&t, Some(Access::Ask), Some(true))).await.unwrap_err().to_string();
     assert!(e.contains("only reads"), "{e}");
     let now = async |t: &mut T, access, plan| {
-        t.c.call(set(t, access, plan)).await.unwrap();
+        // A run that has ended may not have left yet.
+        let mut tries = 0;
+        while let Err(e) = t.c.call(set(t, access, plan)).await {
+            tries += 1;
+            assert!(tries < 500 && e.to_string().contains("at work"), "{e}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         t.until(|b| match b {
             Body::AgentChanged { access, plan, .. } => Some((access.unwrap(), *plan)),
             _ => None,
@@ -1052,8 +1068,45 @@ async fn models_and_connections_are_listed() {
     let v = t.c.call(Call::Models { connection: t.connection.clone() }).await.unwrap();
     assert_eq!(v, json!([{"id": "m1"}, {"id": "m2"}]));
     assert!(t.c.call(Call::Models { connection: "c_x".into() }).await.is_err());
+    // It is kept, with when, also over a restart; nobody is asked for it.
+    let known = async |t: &mut T| -> Vec<ModelList> {
+        let v = t.c.call(Call::ModelsKnown {}).await.unwrap();
+        let all: Vec<ModelList> = serde_json::from_value(v).unwrap();
+        all.into_iter().filter(|l| l.harness == "axiom").collect()
+    };
+    let all = known(&mut t).await;
+    assert_eq!((all.len(), all[0].connection.as_ref()), (1, Some(&t.connection)));
+    assert!(all[0].at > 0 && all[0].models.len() == 2);
+    let before = t.server.requests().len();
+    t.restart().await;
+    assert_eq!(known(&mut t).await, all);
+    let about = |m: &str| Call::ModelAbout { connection: t.connection.clone(), model: m.into() };
+    let (one, other, odd, long) = (about("m1"), about("x"), about(" "), about(&"x".repeat(501)));
+    assert_eq!(t.c.call(one).await.unwrap(), json!({"id": "m1"}));
+    // One that is in no list has a name, and what its protocol can be told: nothing.
+    assert_eq!(t.c.call(other).await.unwrap(), json!({"id": "x"}));
+    assert!(t.c.call(odd).await.is_err() && t.c.call(long).await.is_err());
+    assert_eq!(t.server.requests().len(), before);
+    // What it cannot be told is refused before it is set up.
+    for e in [
+        Execution { thinking: Some(false), ..t.execution() },
+        Execution { speed: Some("fast".into()), ..t.execution() },
+    ] {
+        let call = Call::AgentAdd {
+            session: t.s.clone(),
+            name: "Lead".into(),
+            execution: e,
+            access: Access::Read,
+            trust: false,
+            instructions: vec![],
+            apart: false,
+            plan: false,
+        };
+        assert!(t.c.call(call).await.unwrap_err().to_string().contains("cannot be set"));
+    }
     t.c.call(Call::ConnectionRemove { connection: t.connection.clone() }).await.unwrap();
     assert_eq!(t.c.call(Call::Connections {}).await.unwrap(), json!([]));
+    assert!(known(&mut t).await.is_empty(), "it goes with its account");
     assert!(t.c.call(Call::ConnectionRemove { connection: t.connection.clone() }).await.is_err());
 }
 
@@ -1098,6 +1151,7 @@ async fn a_killed_host_leaves_nothing_running() {
         connection,
         effort: None,
         environment: None,
+        ..Execution::default()
     };
     c.call(Call::Follow { session: session.clone(), after: 0 }).await.unwrap();
     let call = Call::AgentAdd {

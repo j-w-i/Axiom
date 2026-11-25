@@ -16,9 +16,11 @@ import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
 import '../ui/overlay.dart';
+import '../ui/prefs.dart';
 import '../ui/status.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'offers.dart';
 import 'outside.dart';
 import 'plan.dart';
 import 'start.dart';
@@ -60,6 +62,10 @@ class Talk extends StatefulWidget {
   @override
   State<Talk> createState() => _TalkState();
 }
+
+const _anew =
+    'The other account does not know this conversation: it begins anew there. Nothing is sent from '
+    'one account to the other.';
 
 class _TalkState extends State<Talk> {
   /// Answered from here, until the host says it is closed: not answered twice.
@@ -168,8 +174,14 @@ class _TalkState extends State<Talk> {
     final c = widget.agent.execution.connection;
     // A program's account lists nothing.
     if (c == null || widget.agent.execution.harness != 'axiom') return;
-    if (widget.store.modelsOf(c) != null) return;
-    unawaited(_do(() => widget.store.models(c)));
+    final s = widget.store, m = widget.agent.execution.model ?? '';
+    unawaited(
+      _do(() async {
+        if (s.modelsOf(c) == null) await s.models(c);
+        // One that is in no list: what can be said to it.
+        if (infoOf(s, 'axiom', c, m) == null) await s.about(c, m);
+      }),
+    );
   }
 
   void _answer(RequestOpened r, Answer a, {String? words}) {
@@ -188,16 +200,21 @@ class _TalkState extends State<Talk> {
     final program = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull : null;
     final hands = x.environment == axiomTools;
     final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
-    final models = s.modelsOf(x.connection ?? '');
-    final names = namesOf(models ?? const []);
-    final has = models?.any((m) => m.id == x.model) ?? false;
-    final tries = program?.effort ?? models?.any((m) => m.id == x.model && m.effort) ?? false;
+    final prefs = PrefsScope.of(context);
+    final now = offerKey(x.harness, x.connection, x.model ?? '');
+    final offers = arranged(offersOf(s, harness: x.harness), prefs, chosen: now);
+    final has = offers.any((o) => o.key == now);
+    final info = infoOf(s, x.harness, x.connection, x.model ?? '');
+    final efforts =
+        info?.efforts ?? ((program?.effort ?? false) ? const ['low', 'medium', 'high'] : const []);
     Execution with_({
       String? model,
       String? connection,
       String? provider,
       bool? axioms,
       String? effort,
+      (bool?,)? thinking,
+      String? speed,
     }) => Execution(
       harness: x.harness,
       provider: provider ?? x.provider,
@@ -217,6 +234,18 @@ class _TalkState extends State<Talk> {
           : axioms
           ? axiomTools
           : null,
+      thinking: thinking == null ? x.thinking : thinking.$1,
+      speed: speed == null ? x.speed : (speed.isEmpty ? null : speed),
+    );
+
+    /// What cannot be said to the new model is not said to it.
+    Execution to(Offer o) => with_(
+      model: o.model.id,
+      connection: o.connection ?? '',
+      provider: o.provider,
+      effort: o.model.efforts.contains(x.effort) ? null : '',
+      thinking: o.model.thinking ? null : (null,),
+      speed: o.model.speeds.contains(x.speed) ? null : '',
     );
     void set({Execution? execution}) =>
         unawaited(_do(() => s.setAgent(widget.session.id, a.id, execution: execution)));
@@ -225,33 +254,44 @@ class _TalkState extends State<Talk> {
         'Model',
         [
           if (other && x.model == null)
-            AxMenuItem('', 'Default model', mark: markOf(null, null, x.harness)),
+            AxMenuItem(now, 'Default model', mark: markOf(null, null, x.harness)),
           if (!has && x.model != null)
             AxMenuItem(
-              x.model!,
+              now,
               oneLine(modelName(x.model!), 60),
               mark: markOf(x.provider, x.model, x.harness),
             ),
-          for (final m in models ?? const <ModelInfo>[]) modelItem(m, names),
+          ...offerItems(offers, prefs),
         ],
-        x.model ?? '',
-        (v) => set(execution: with_(model: v)),
-        cost: (_) => a.items.isEmpty
-            ? null
-            : 'The whole conversation has to be read again, none of it from the cache. Reasoning '
-                  'this model kept is not carried over.',
+        now,
+        (v) {
+          final o = offers.where((o) => o.key == v).firstOrNull;
+          if (o == null) return;
+          set(execution: to(o));
+          final all = PrefsScope.maybeOf(context);
+          all?.value = all.value.using(v);
+        },
+        cost: (v) {
+          final o = offers.where((o) => o.key == v).firstOrNull;
+          return a.items.isEmpty
+              ? null
+              : other && o?.connection != x.connection
+              ? _anew
+              : 'The whole conversation has to be read again, none of it from the cache. Reasoning '
+                    'this model kept is not carried over.';
+        },
       ),
-      if (tries || x.effort != null)
-        ExecutionChoice(
-          'Effort',
-          [
-            ...efforts,
-            if (x.effort case final e? when !efforts.any((i) => i.value == e))
-              AxMenuItem(e, oneLine(e, 30)),
-          ],
-          x.effort ?? '',
-          (v) => set(execution: with_(effort: v)),
-        ),
+      ...tellable(
+        info,
+        efforts: efforts,
+        effort: x.effort ?? '',
+        thinking: x.thinking,
+        speed: x.speed ?? '',
+        program: other,
+        onEffort: (v) => set(execution: with_(effort: v)),
+        onThinking: (v) => set(execution: with_(thinking: (v,))),
+        onSpeed: (v) => set(execution: with_(speed: v)),
+      ),
       ExecutionChoice(
         'Harness',
         [
@@ -285,10 +325,7 @@ class _TalkState extends State<Talk> {
         x.connection ?? '',
         (v) => set(execution: with_(connection: v)),
         // What was said stays with the account it was said on.
-        cost: (_) => !other || a.items.isEmpty
-            ? null
-            : 'The other account does not know this conversation: it begins anew there. Nothing is '
-                  'sent from one account to the other.',
+        cost: (_) => !other || a.items.isEmpty ? null : _anew,
       ),
       if (program?.hands ?? hands)
         ExecutionChoice(

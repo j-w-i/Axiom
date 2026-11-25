@@ -41,6 +41,7 @@ pub fn start(access: Access) -> Start {
         tools: None,
         hands: false,
         system: None,
+        speed: None,
         extra: vec![],
     }
 }

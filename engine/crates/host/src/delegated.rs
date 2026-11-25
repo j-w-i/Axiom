@@ -11,16 +11,16 @@ use std::{
 
 use axiom_engine::{Deed, Ended, FROM_AGENT, Refused, Say, Stage, Word, said};
 use axiom_harness::{
-    Answer, By, ChoiceKind, Diff, Done, Error, Event, Events, Frame, Frames, Gone, Handle, Harness,
-    KNOWN, Kind, Level, Lost, NotFound, Program, Progress, Prompts, Question, Ready, Server,
-    Settled, Site, Start, Trust, Why, find, find::take,
+    Answer, By, Caps, ChoiceKind, Diff, Done, Error, Event, Events, Frame, Frames, Gone, Handle,
+    Harness, KNOWN, Kind, Level, Lost, Name, Names, NotFound, Program, Progress, Prompts, Question,
+    Ready, Server, Settled, Site, Start, Trust, Why, find, find::take,
 };
 use axiom_policy::{
     Access, Approval, Ask, Place, Reach, Unsandboxed, audit::Containment, rules::Decision,
 };
 use axiom_proto::{
-    AgentState, Answerable, Body, HarnessInfo, ItemId, ItemKind, Lane, Outcome, Provenance,
-    RequestId, RunId, Todo, TodoState, Usage, UsedOn, limits,
+    AgentState, Answerable, Body, HarnessInfo, ItemId, ItemKind, Lane, ModelInfo, Outcome,
+    Provenance, RequestId, RunId, Todo, TodoState, Usage, UsedOn, limits,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -95,6 +95,7 @@ impl Known {
             tools: None,
             hands: false,
             system: None,
+            speed: None,
             extra: Vec::new(),
         }
     }
@@ -152,6 +153,7 @@ impl Known {
         let program = self.find(how, path, written).map_err(|e| e.to_string())?;
         let start = Start {
             extra: how.args.clone(),
+            speed: s.execution.speed.clone(),
             model: s.execution.model.clone(),
             effort: s.execution.effort.clone(),
             hands: s.hands(),
@@ -305,6 +307,7 @@ impl Worker {
             tools: None,
             hands: self.setup.hands(),
             system: None,
+            speed: self.setup.execution.speed.clone(),
             extra: self.how.args.clone(),
         };
         // A key for it alone, gone with its attempt. Without one it works all the same, unless it has
@@ -936,6 +939,12 @@ impl Attempt {
         // Otherwise it begins anew when its program has ended, and says so.
         self.floor.resume(r.caps.resume.then_some(r.session)).await;
         self.runs_on.clone_from(&r.model);
+        if let Some(models) = offered(&r.caps) {
+            let (agents, id) = (self.floor.agents.clone(), self.id.clone());
+            let account = self.connection.clone();
+            let put = move || agents.catalogue.put(&id, account.as_deref(), models);
+            let _ = tokio::task::spawn_blocking(put).await;
+        }
         if let (Some(is), Some(asked)) = (&r.model, &self.model)
             && is != asked
         {
@@ -1184,6 +1193,29 @@ fn opened(f: &Floor, id: &RequestId, ask: &Ask, what: &str) -> Vec<Say> {
         }),
         state(f, AgentState::Asking),
     ]
+}
+
+/// The models it says it has, if it says which.
+fn offered(c: &Caps) -> Option<Vec<ModelInfo>> {
+    let Names::Of(all) = &c.models else { return None };
+    let every: Vec<String> = match &c.efforts {
+        Names::Of(e) => e.iter().map(|e| e.id.clone()).collect(),
+        _ => Vec::new(),
+    };
+    // Where they depend on the model, one that names none has none.
+    let depends = all.iter().any(|m| !m.efforts.is_empty());
+    let one = |m: &Name| {
+        let efforts = if depends { m.efforts.clone() } else { every.clone() };
+        ModelInfo {
+            id: m.id.clone(),
+            name: m.label.clone(),
+            effort: !efforts.is_empty(),
+            efforts,
+            speeds: if m.fast { vec!["fast".into()] } else { Vec::new() },
+            ..ModelInfo::default()
+        }
+    };
+    Some(all.iter().map(one).collect())
 }
 
 /// As a person would write it in a shell.

@@ -57,6 +57,8 @@ pub struct Name {
     pub label: Option<String>,
     /// The efforts this model takes, where that depends on it.
     pub efforts: Vec<String>,
+    /// It can be faster than the standard, for a price.
+    pub fast: bool,
 }
 
 impl Names {
@@ -398,6 +400,8 @@ pub enum Error {
     Unsafe(String),
     #[error("{0:?} is not passed on to this program: it could change what holds it back")]
     NotPassed(String),
+    #[error("this program cannot be told how fast to be")]
+    NoSpeed,
     #[error("this program's own tools cannot be taken away")]
     NoHands,
     #[error("this program does not say how several accounts of it are kept apart")]

@@ -39,9 +39,24 @@ pub enum Prompts {
 
 pub(crate) const PROTOCOL: &str = "claude stream-json";
 
-/// Commands run in its own sandbox or not at all; what runs there is not asked about.
-const SANDBOX: &str =
-    r#"{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false}}"#;
+/// What it is told beside its flags. `contained`: commands run in its own sandbox or not at all; what
+/// runs there is not asked about.
+fn settings(contained: bool, s: &Start) -> Result<Option<String>, Error> {
+    let mut all = serde_json::Map::new();
+    if contained {
+        let sandbox =
+            json!({"enabled": true, "failIfUnavailable": true, "allowUnsandboxedCommands": false});
+        all.insert("sandbox".into(), sandbox);
+    }
+    match s.speed.as_deref() {
+        None => {}
+        Some("fast") => {
+            all.insert("fastMode".into(), json!(true));
+        }
+        Some(other) => return Err(Error::BadValue("a speed", other.to_owned())),
+    }
+    Ok((!all.is_empty()).then(|| Value::Object(all).to_string()))
+}
 
 /// Its modes by the names its answers use.
 fn mode(a: Access) -> &'static str {
@@ -88,6 +103,9 @@ fn hands(s: &Start, server: &Server) -> Result<Vec<String>, Error> {
 pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
     if let (true, Some(server)) = (s.hands, &s.tools) {
         let mut args = hands(s, server)?;
+        if let Some(all) = settings(false, s)? {
+            args.extend(["--settings".into(), all]);
+        }
         chosen(&mut args, s)?;
         return Ok(Launch { args, containment: Containment::None });
     }
@@ -120,9 +138,12 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
         }
         Access::Ask => add(&["--disallowedTools", "AskUserQuestion"]),
         Access::Work => {
-            add(&["--disallowedTools", "AskUserQuestion", "--settings", SANDBOX]);
+            add(&["--disallowedTools", "AskUserQuestion"]);
             containment = Containment::Harness;
         }
+    }
+    if let Some(all) = settings(s.access == Access::Work, s)? {
+        add(&["--settings", &all]);
     }
     // Who only looks has no tools of servers; whoever is asked about none of them could not use it.
     if let Some(t) = s.tools.as_ref().filter(|_| s.access == Access::Work) {
@@ -422,7 +443,8 @@ impl Claude {
                     every.push(Name { id: e.clone(), ..Name::default() });
                 }
             }
-            all.push(Name { id, label: owned(m, "/displayName"), efforts });
+            let fast = m.pointer("/supportsFastMode") == Some(&json!(true));
+            all.push(Name { id, label: owned(m, "/displayName"), efforts, fast });
         }
         if !all.is_empty() {
             (self.caps.models, self.caps.efforts) = (Names::Of(all), Names::Of(every));

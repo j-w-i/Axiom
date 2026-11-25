@@ -66,7 +66,7 @@ pub fn now_ms() -> u64 {
 }
 
 /// How a run reaches intelligence: five separate things (docs/architecture/overview.md).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Execution {
     pub harness: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,6 +79,12 @@ pub struct Execution {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
+    /// Whether the model thinks, where that can be told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
+    /// How fast, where that can be told. It has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
 }
 
 /// What an agent may do without asking (`axiom-policy`).
@@ -307,7 +313,7 @@ pub enum Body {
     AgentAdded {
         agent: AgentId,
         name: String,
-        execution: Execution,
+        execution: Box<Execution>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent: Option<AgentId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -326,7 +332,7 @@ pub enum Body {
     #[serde(rename = "agent.changed")]
     AgentChanged {
         agent: AgentId,
-        execution: Execution,
+        execution: Box<Execution>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access: Option<Access>,
         /// As [`Body::AgentAdded`].
@@ -947,6 +953,13 @@ pub enum Call {
     /// What can be used through a connection. Asks the provider.
     #[serde(rename = "model.list")]
     Models { connection: String },
+    /// What providers and programs have said of their models, as it was kept: an array of
+    /// [`ModelList`]. Nobody is asked.
+    #[serde(rename = "model.known")]
+    ModelsKnown {},
+    /// What is known of one model of a connection, also of one that is in no list. Nobody is asked.
+    #[serde(rename = "model.about")]
+    ModelAbout { connection: String, model: String },
     /// The record of what was done, after `after`.
     #[serde(rename = "audit.read")]
     Audit {
@@ -1026,7 +1039,7 @@ pub struct Instructions {
 }
 
 /// What a provider says of a model. What it does not say is not there.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1034,9 +1047,30 @@ pub struct ModelInfo {
     /// Tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<u64>,
-    /// How hard it tries can be said (`low`, `medium`, `high`).
+    /// How hard it tries can be said: `efforts`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub effort: bool,
+    /// As the model's provider calls them, the least first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<String>,
+    /// Whether it thinks can be said.
+    #[serde(default, skip_serializing_if = "not")]
+    pub thinking: bool,
+    /// How fast it can be beside the standard, for a price.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub speeds: Vec<String>,
+}
+
+/// What a provider or a program has said of the models it has.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelList {
+    /// [`Execution::harness`].
+    pub harness: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+    /// When it was said. 0: it is from its documentation.
+    pub at: u64,
+    pub models: Vec<ModelInfo>,
 }
 fn one() -> f64 {
     1.0

@@ -33,6 +33,8 @@ void main() {
       [x.harness, x.provider, x.model, x.connection, x.effort, x.environment],
       ['axiom', 'anthropic', 'm', 'c_2', 'high', 'e'],
     );
+    expect([x.thinking, x.speed], [false, 'fast']);
+    expect(Execution.decode(x.encode()).encode(), x.encode());
     expect((b[AgentStateChanged]! as AgentStateChanged).state, AgentPhase.asking);
     final ended = b[RunEnded]! as RunEnded;
     expect([ended.outcome, ended.error], [Outcome.failed, 'why']);
@@ -114,6 +116,33 @@ void main() {
       final l = HostLimit.decode({'of': 'x', 'what': 'y', 'most': most, 'unit': unit});
       expect(l.amount, want);
     }
+  });
+
+  test('lists of models and what is said of programs arrive', () {
+    Object? first(int n) => ((messages[n] as Answered).result! as List<Object?>).first;
+    final l = ModelList.decode(first(8)! as Json), m = l.models.single;
+    expect([l.harness, l.connection, l.at], ['axiom', 'c_2', 9]);
+    expect([m.id, m.name, m.context, m.thinking], ['m', 'M', 1000, true]);
+    expect(
+      [m.efforts, m.speeds],
+      [
+        ['low', 'max'],
+        ['fast'],
+      ],
+    );
+    final p = ProgramInfo.decode(first(9)! as Json);
+    expect([p.harness, p.account, p.name, p.path], ['claude', 'c_2', 'N', '/p']);
+    expect(p.args, ['a']);
+    expect(
+      [for (final v in p.vars) (v.name, v.value, v.lasts)],
+      [('A', '1', true), ('B', null, false)],
+    );
+    expect(const VarSet('A', value: 'v', secret: true).encode(), {
+      'name': 'A',
+      'value': 'v',
+      'secret': true,
+    });
+    expect(const VarSet('A').encode(), {'name': 'A', 'secret': false});
   });
 
   test('what is newer or malformed keeps its place', () {

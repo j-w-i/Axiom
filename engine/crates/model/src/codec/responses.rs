@@ -46,6 +46,7 @@ pub(super) fn encode(
     if !settings.stop.is_empty() {
         return Err(EncodeError::Unsupported("a stop sequence"));
     }
+    super::plain(settings)?;
     match (&settings.effort, quirks.effort) {
         (None, _) => {}
         (Some(effort), Some(Effort::Reasoning)) => {

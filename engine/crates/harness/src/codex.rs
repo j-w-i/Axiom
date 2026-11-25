@@ -262,7 +262,7 @@ impl Codex {
                     every.push(Name { id: e.clone(), ..Name::default() });
                 }
             }
-            all.push(Name { id, label: owned(m, "/displayName"), efforts });
+            all.push(Name { id, label: owned(m, "/displayName"), efforts, fast: false });
         }
         if !all.is_empty() {
             (self.caps.models, self.caps.efforts) = (Names::Of(all), Names::Of(every));

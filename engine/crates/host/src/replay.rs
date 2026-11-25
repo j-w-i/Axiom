@@ -120,14 +120,15 @@ pub async fn start(
         Say::Event(Body::AgentAdded {
             agent: agent.clone(),
             name,
-            execution: Execution {
+            execution: Box::new(Execution {
                 harness: "replay".into(),
                 provider: None,
                 model,
                 connection: None,
                 effort: None,
                 environment: None,
-            },
+                ..Execution::default()
+            }),
             parent: None,
             access: None,
             apart: false,

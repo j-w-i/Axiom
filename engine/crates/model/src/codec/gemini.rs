@@ -48,6 +48,7 @@ pub(super) fn encode(
     if !settings.stop.is_empty() {
         config.put("stopSequences", &settings.stop)?;
     }
+    super::plain(settings)?;
     match (&settings.effort, quirks.effort) {
         (None, _) => {}
         (Some(effort), Some(Effort::ThinkingLevel)) => {

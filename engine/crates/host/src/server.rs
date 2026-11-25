@@ -24,7 +24,7 @@ use tokio::{
 
 use crate::{
     agents::{self, Agents, Apart, Finished, Holder, Setup, Spoken, Switch, Told},
-    changes,
+    catalogue, changes,
     connections::{Connections, MemoryVault, Vault},
     copies::{self, Then},
     faults::{Access, Faults},
@@ -1887,7 +1887,13 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
         }
         Call::ProgramRemove { harness, account } => {
             let a = st.agents.clone();
-            blocking(move || a.programs.remove(&harness, account.as_deref())).await??;
+            let remove = move || {
+                a.programs.remove(&harness, account.as_deref())?;
+                // What another program of that name says is another matter.
+                a.catalogue.forget(|l| l.harness == harness);
+                Ok::<_, WireError>(())
+            };
+            blocking(remove).await??;
             Ok(json!({}))
         }
         Call::Look { path } => {
@@ -2025,7 +2031,11 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let leave = tokio::spawn(st.agents.connections.clone().leave(connection.clone()));
             let ended = leave.await.map_err(|e| internal(e.to_string()))??;
             let a = st.agents.clone();
-            blocking(move || a.programs.forget(&connection)).await??;
+            let forget = move || {
+                a.catalogue.forget(|l| l.connection.as_deref() == Some(&connection));
+                a.programs.forget(&connection)
+            };
+            blocking(forget).await??;
             Ok(ended.map_or_else(|| json!({}), |e| json!({ "ended": e })))
         }
         Call::SigninBegin { connection } => {
@@ -2038,7 +2048,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
         }
         Call::SigninCancel { signin } => st.signins.cancel(&signin).map(|()| json!({})),
         Call::Models { connection } => {
-            let a = st.agents.clone();
+            let (a, of) = (st.agents.clone(), connection.clone());
             let client = blocking(move || a.connections.client(&connection)).await??;
             // A provider that does not list them in one answer: they are named by hand.
             let all = match timeout(LISTING, client.list_models()).await {
@@ -2046,23 +2056,34 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 Ok(Err(axiom_model::CallError::Encode(_))) => Vec::new(),
                 Ok(r) => r.map_err(|e| agents::bad(e.to_string()))?,
             };
-            let quirks = |id: &str| client.profile().quirks(id);
-            let all: Vec<_> = all
+            let a = st.agents.clone();
+            let all: Vec<ModelInfo> = all
                 .into_iter()
-                .map(|m| {
-                    let (mut id, mut name) = (m.id, m.name);
-                    limits::clip(&mut id, limits::TITLE);
-                    if let Some(n) = &mut name {
-                        limits::clip(n, limits::TITLE);
-                    }
-                    {
-                        let q = quirks(&id);
-                        let effort = q.effort.is_some();
-                        axiom_proto::ModelInfo { context: q.context, name, effort, id }
-                    }
-                })
+                .map(|m| catalogue::fit(catalogue::about(client.profile(), m)))
                 .collect();
+            let keep = all.clone();
+            if !keep.is_empty() {
+                blocking(move || a.catalogue.put("axiom", Some(&of), keep)).await?;
+            }
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
+        }
+        Call::ModelsKnown {} => {
+            serde_json::to_value(st.agents.catalogue.list()).map_err(|e| internal(e.to_string()))
+        }
+        Call::ModelAbout { connection, model } => {
+            if model.trim().is_empty() || limits::text_len(&model) > limits::TITLE {
+                return Err(agents::bad("a model's name has between 1 and 500 bytes"));
+            }
+            let a = st.agents.clone();
+            let about = move || {
+                if let Some(m) = a.catalogue.find("axiom", Some(&connection), &model) {
+                    return Ok(m);
+                }
+                let client = a.connections.client(&connection)?;
+                let named = axiom_model::ModelInfo::named(model);
+                Ok::<_, WireError>(catalogue::about(client.profile(), named))
+            };
+            serde_json::to_value(blocking(about).await??).map_err(|e| internal(e.to_string()))
         }
         Call::Audit { after, limit } => {
             let all =

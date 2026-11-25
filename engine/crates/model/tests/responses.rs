@@ -561,6 +561,7 @@ fn a_request_to_the_byte() {
         effort: Some("high".into()),
         stop: Vec::new(),
         cache: Cache::Long,
+        ..Settings::default()
     };
     r.messages.push(assistant(vec![
         Block::text("yes"),

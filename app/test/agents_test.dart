@@ -12,6 +12,7 @@ import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/shell/changes.dart';
 import 'package:axiom/shell/drafts.dart';
+import 'package:axiom/shell/offers.dart';
 import 'package:axiom/shell/outside.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/new_session.dart';
@@ -21,6 +22,7 @@ import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/editable.dart';
 import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/marks.dart';
+import 'package:axiom/ui/prefs.dart';
 import 'package:axiom/ui/status.dart';
 import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
@@ -38,6 +40,7 @@ class Asked extends HostStore {
   final calls = <List<Object?>>[];
   Object? failure;
   List<ModelInfo> known = const [ModelInfo('claude-opus-5-5'), ModelInfo('gpt-5.6')];
+  Map<String, List<ModelInfo>> byAccount = const {};
   final _seen = <String, List<ModelInfo>>{};
 
   /// Only this fails, if it is not null.
@@ -80,6 +83,8 @@ class Asked extends HostStore {
     for (final i in instructions) i.digest,
     if (apart) 'apart',
     if (plan) 'plan',
+    if (x.thinking case final v?) 'thinking $v',
+    if (x.speed case final v?) 'speed $v',
   ], 'a_new');
 
   CopyChanges copy = const CopyChanges();
@@ -249,10 +254,25 @@ class Asked extends HostStore {
   }
 
   @override
+  Future<void> loadLists() async {}
+
+  /// What is said of one that is in no list.
+  ModelInfo? told;
+  ModelInfo? _toldNow;
+  @override
+  Future<void> about(String connection, String model) async {
+    await _do(['about', connection, model], null);
+    _toldNow = told;
+    notifyListeners();
+  }
+
+  @override
+  ModelInfo? aboutOf(String connection, String model) => _toldNow?.id == model ? _toldNow : null;
+  @override
   List<ModelInfo>? modelsOf(String connection) => _seen[connection];
   @override
   Future<List<ModelInfo>> models(String connection) async {
-    final r = await _do(['models', connection], known);
+    final r = await _do(['models', connection], byAccount[connection] ?? known);
     _seen[connection] = r;
     notifyListeners();
     return r;
@@ -1610,7 +1630,10 @@ void main() {
 
   testWidgets('how hard it tries is chosen where that can be said', (t) async {
     final s = await shell(t, session: working());
-    s.known = const [ModelInfo('claude-opus-5-5', effort: true), ModelInfo('plain')];
+    s.known = const [
+      ModelInfo('claude-opus-5-5', efforts: ['low', 'medium', 'high']),
+      ModelInfo('plain'),
+    ];
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
     await press(t, find.bySemanticsLabel('Effort: Default effort'));
@@ -2276,6 +2299,205 @@ void main() {
     folders = (_) => throw PlatformException(code: 'x');
     await look();
     expect(t.takeException(), isNull);
+  });
+
+  group('models', () {
+    const other = Connection('c7', 'Work', 'openrouter', secret: true);
+    const opus = ModelInfo(
+      'claude-opus-5-5',
+      name: 'Claude Opus 5.5',
+      context: 1000000,
+      efforts: ['low', 'xhigh'],
+      thinking: true,
+      speeds: ['fast'],
+    );
+    final lists = [
+      const ModelList('axiom', 'c1', 5, [opus, ModelInfo('claude-old')]),
+      const ModelList('axiom', 'c7', 5, [
+        ModelInfo('a/b', name: 'A: B', efforts: ['none', 'max']),
+      ]),
+      // Of an account that is not there any more, and a program that is not.
+      const ModelList('axiom', 'c0', 5, [ModelInfo('gone')]),
+      const ModelList('codex', null, 5, [ModelInfo('gpt-gone')]),
+      const ModelList('claude', null, 0, [
+        ModelInfo('opus', name: 'Opus', efforts: ['max'], speeds: ['fast']),
+      ]),
+    ];
+    Future<(Asked, ValueNotifier<Prefs>)> begin(WidgetTester t, {SessionModel? session}) async {
+      final prefs = ValueNotifier(const Prefs());
+      addTearDown(prefs.dispose);
+      final s = Asked()
+        ..current = session
+        ..connections = const [key, other]
+        ..harnesses = harnesses
+        ..lists = lists
+        ..byAccount = {'c1': lists[0].models, 'c7': lists[1].models};
+      addTearDown(s.dispose);
+      await mount(t, PrefsScope(prefs, child: Shell(s)), size: const Size(1100, 1400), dpr: 1);
+      return (s, prefs);
+    }
+
+    testWidgets('are one list over all accounts and programs', (t) async {
+      final (s, prefs) = await begin(t);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await part(t, 'Model');
+      expect(find.bySemanticsLabel('Opus 5.5'), findsWidgets);
+      expect(find.bySemanticsLabel('A: B'), findsWidgets);
+      expect(find.bySemanticsLabel('Opus'), findsWidgets, reason: 'of the program');
+      for (final gone in ['gone', 'GPT-gone', 'gpt-gone']) {
+        expect(find.bySemanticsLabel(gone), findsNothing);
+      }
+      // Whose it is, and how much it takes.
+      expect(find.text('Mine · 1M context'), findsOneWidget);
+      expect(find.text('Claude Code'), findsWidgets);
+      await snap(t, 'models-offered');
+      await press(t, find.bySemanticsLabel('A: B').last);
+      await leave(t);
+      expect(find.bySemanticsLabel(RegExp('Runs on A: B, Axiom')), findsOneWidget);
+      // As its provider calls it.
+      await part(t, 'Effort');
+      expect(find.bySemanticsLabel('No reasoning'), findsOneWidget);
+      await press(t, find.bySemanticsLabel('Maximum effort').last);
+      await leave(t);
+      await t.enterText(field('Task'), 'go');
+      await folder(t, '/w');
+      await press(t, find.bySemanticsLabel('Start session'));
+      expect(s.calls.where((c) => c.first == 'add').single, [
+        'add',
+        's_new',
+        'Lead',
+        'c7',
+        'effort max',
+        'a/b',
+        Access.ask,
+      ]);
+      expect(prefs.value.used, ['axiom\nc7\na/b']);
+    });
+
+    testWidgets('a model of a program brings its program', (t) async {
+      final (s, _) = await begin(t);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await part(t, 'Model');
+      await press(t, find.bySemanticsLabel('Opus').last);
+      await leave(t);
+      expect(find.bySemanticsLabel(RegExp('Runs on Opus, Claude Code')), findsOneWidget);
+      await part(t, 'Effort');
+      expect(find.bySemanticsLabel('Low effort'), findsNothing, reason: 'it does not say so');
+      await leave(t);
+      // Fast has a price, which is said before it is chosen.
+      await part(t, 'Speed');
+      await press(t, find.bySemanticsLabel('Fast').last);
+      expect(find.textContaining('usage credits'), findsOneWidget);
+      await press(t, find.text('Change to Fast'));
+      await leave(t);
+      await t.enterText(field('Task'), 'go');
+      await folder(t, '/w');
+      await press(t, find.bySemanticsLabel('Start session'));
+      expect(s.calls.where((c) => c.first == 'add').single, contains('speed fast'));
+    });
+
+    testWidgets('what one can be told is told it, and not another', (t) async {
+      final (s, _) = await begin(t);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await runs(t, 'Model', 'Opus 5.5');
+      await runs(t, 'Effort', 'Extra high effort');
+      await runs(t, 'Thinking', 'Does not think');
+      await t.enterText(field('Task'), 'go');
+      await folder(t, '/w');
+      await press(t, find.bySemanticsLabel('Start session'));
+      expect(
+        s.calls.where((c) => c.first == 'add').single,
+        containsAll(['effort xhigh', 'thinking false']),
+      );
+      s.calls.clear();
+      await press(t, find.bySemanticsLabel('New session').first);
+      await runs(t, 'Model', 'Opus 5.5');
+      await runs(t, 'Effort', 'Extra high effort');
+      await runs(t, 'Model', 'claude-old');
+      expect(find.bySemanticsLabel(RegExp('^Effort: ')), findsNothing);
+      await t.enterText(field('Task'), 'again');
+      await settled(t);
+      await press(t, find.bySemanticsLabel('Start session'));
+      final add = s.calls.where((c) => c.first == 'add').single;
+      expect(add.any((x) => '$x'.startsWith('effort') || '$x'.startsWith('thinking')), isFalse);
+    });
+
+    testWidgets('one that is in no list is asked about, and nobody else is', (t) async {
+      final (s, _) = await begin(t);
+      s.told = const ModelInfo('mine', efforts: ['high']);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await part(t, 'Model');
+      await t.enterText(field('Model name'), 'mine');
+      await t.pump(const Duration(seconds: 1));
+      await settled(t);
+      expect(s.calls.last, ['about', 'c1', 'mine']);
+      expect(find.bySemanticsLabel(RegExp('^Effort: ')), findsOneWidget);
+    });
+
+    testWidgets('an agent goes on with one of another account', (t) async {
+      final (s, prefs) = await begin(t, session: working());
+      await part(t, 'Model');
+      expect(find.bySemanticsLabel('Opus'), findsNothing, reason: 'it keeps its harness');
+      await press(t, find.bySemanticsLabel('A: B').last);
+      expect(find.textContaining('read again'), findsOneWidget);
+      await press(t, find.text('Change to A: B'));
+      expect(s.calls.last, ['set', 's', 'a', 'a/b', 'c7', null]);
+      expect(prefs.value.used, ['axiom\nc7\na/b']);
+    });
+
+    testWidgets('come as their person has them', (t) async {
+      final (s, prefs) = await begin(t);
+      await press(t, find.bySemanticsLabel('Accounts').first);
+      expect(find.textContaining('as documented'), findsOneWidget);
+      expect(find.textContaining('listed 1970-01-01'), findsWidgets);
+      Future<void> set(String model, String how) async {
+        await press(t, find.bySemanticsLabel(RegExp('^$model: ')));
+        await press(t, find.bySemanticsLabel(how).last);
+      }
+
+      await set('A: B', 'Favourite');
+      await set('claude-old', 'Hidden');
+      await snap(t, 'models-set');
+      expect(prefs.value.favourites, ['axiom\nc7\na/b']);
+      expect(prefs.value.hidden, ['axiom\nc1\nclaude-old']);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await part(t, 'Model');
+      expect(find.bySemanticsLabel('claude-old'), findsNothing);
+      final top = t.getTopLeft(find.bySemanticsLabel('A: B').last).dy;
+      expect(top, lessThan(t.getTopLeft(find.bySemanticsLabel('Opus 5.5').last).dy));
+      // And from there back to where it is said.
+      await press(t, find.bySemanticsLabel('Choose which are offered').last);
+      expect(find.text('Models'), findsOneWidget);
+      await set('A: B', 'Offered');
+      await set('claude-old', 'Offered');
+      expect(prefs.value.favourites, isEmpty);
+      expect(prefs.value.hidden, isEmpty);
+      s.calls.clear();
+      await press(t, find.widgetWithText(AxButton, 'Refresh'));
+      expect(s.calls, [
+        ['models', 'c1'],
+        ['models', 'c7'],
+      ]);
+    });
+
+    test('favourites, then the last used, then the rest', () {
+      Offer o(String id) => Offer('axiom', 'c', null, ModelInfo(id), 'C', null);
+      final all = [
+        for (final id in ['a', 'b', 'c', 'd', 'e']) o(id),
+      ];
+      String k(String id) => offerKey('axiom', 'c', id);
+      final p = Prefs(favourites: [k('d')], used: [k('c'), k('b')], hidden: [k('a'), k('e')]);
+      List<String> ids(String? chosen) => [
+        for (final o in arranged(all, p, chosen: chosen)) o.model.id,
+      ];
+      expect(ids(null), ['d', 'c', 'b']);
+      expect(ids(k('a')), ['d', 'c', 'b', 'a'], reason: 'what is chosen is there');
+      expect([for (final o in arranged(all, const Prefs())) o.model.id], ['a', 'b', 'c', 'd', 'e']);
+      expect(contextName(1000000), '1M context');
+      expect(contextName(1048576), '1M context');
+      expect(contextName(1500000), '1.5M context');
+      expect(contextName(200000), '200K context');
+    });
   });
 
   group('a plan first', () {

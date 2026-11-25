@@ -66,6 +66,7 @@ pub(super) fn encode(
     if !config.is_empty() {
         body.put("inferenceConfig", &config)?;
     }
+    super::plain(settings)?;
     match (&settings.effort, quirks.effort) {
         (None, _) => {}
         // As printed in userguide/claude-messages-adaptive-thinking#converse.

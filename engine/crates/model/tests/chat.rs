@@ -658,6 +658,7 @@ fn a_request_to_the_byte() {
         effort: Some("low".into()),
         stop: vec!["END".into()],
         cache: Cache::Long,
+        ..Settings::default()
     };
     r.messages.push(Message {
         role: Role::Assistant,

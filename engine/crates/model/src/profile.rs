@@ -21,6 +21,10 @@ pub enum Listing {
     Data,
     /// `models`, each with a `slug`, a `display_name` and a `visibility`.
     Slugs,
+    /// `data` in pages, each with an `id`, a `display_name` and `capabilities`.
+    Capabilities,
+    /// `data`, each with an `id`, a `name` and, if it reasons, `reasoning`.
+    Reasoning,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,6 +64,14 @@ pub enum Effort {
     ThinkingLevel,
     /// `additionalModelRequestFields.output_config.effort`, with thinking that adapts to it.
     AdaptiveThinking,
+}
+
+/// How a model is told whether to think.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Thinking {
+    /// `thinking.type`: `adaptive` or `disabled`.
+    Adaptive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +126,15 @@ pub struct Quirks {
     /// Where the effort goes; nowhere if absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
+    /// What it can be, the least first, where that is the same for all it is said of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub efforts: Option<Vec<String>>,
+    /// Where whether to think goes; nowhere if absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<Thinking>,
+    /// Messages: how fast it can be asked to be beside the standard, in `speed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speeds: Option<Vec<String>>,
     /// Whether the prompt can be marked for caching (`cache_control`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_markers: Option<bool>,
@@ -162,6 +183,9 @@ impl Quirks {
             max_output: self.max_output.or(base.max_output),
             no_limit: self.no_limit.or(base.no_limit),
             effort: self.effort.or(base.effort),
+            efforts: self.efforts.clone().or(base.efforts.clone()),
+            thinking: self.thinking.or(base.thinking),
+            speeds: self.speeds.clone().or(base.speeds.clone()),
             cache_markers: self.cache_markers.or(base.cache_markers),
             cache_points: self.cache_points.or(base.cache_points),
             result_status: self.result_status.or(base.result_status),
@@ -202,14 +226,22 @@ impl Profile {
             base_url: Some("https://api.anthropic.com/v1".into()),
             auth: Auth::Header("x-api-key".into()),
             headers: BTreeMap::from([("anthropic-version".into(), "2026-10-21".into())]),
-            listing: Listing::Data,
+            listing: Listing::Capabilities,
             quirks: Quirks {
                 effort: Some(Effort::OutputConfig),
+                thinking: Some(Thinking::Adaptive),
                 cache_markers: Some(true),
                 replay: Some(Replay::SameProvider),
                 ..Quirks::default()
             },
-            models: BTreeMap::new(),
+            // build-with-claude/fast-mode, read 2026-11-26: those that take it without a header that
+            // asks for what is not settled yet.
+            models: ["claude-fable-5-2", "claude-mythos-5-2", "claude-opus-5-5"]
+                .map(|m| {
+                    let fast = Some(vec!["fast".to_owned()]);
+                    (m.to_owned(), Quirks { speeds: fast, ..Quirks::default() })
+                })
+                .into(),
         }
     }
 
@@ -275,6 +307,7 @@ impl Profile {
                 cost_unit: Some("credits".into()),
                 ..Quirks::default()
             },
+            listing: Listing::Reasoning,
             ..Self::openai_compatible("openrouter", "https://openrouter.ai/api/v1")
         }
     }
@@ -424,6 +457,9 @@ mod tests {
             context: Some(1),
             max_output: Some(2),
             effort: Some(Effort::OutputConfig),
+            efforts: Some(vec!["e".into()]),
+            thinking: Some(Thinking::Adaptive),
+            speeds: Some(vec!["s".into()]),
             cache_markers: Some(true),
             cache_points: Some(CachePoints::NotTools),
             result_status: Some(true),
@@ -476,8 +512,9 @@ mod tests {
         ] {
             assert_eq!((p.quirks.context, p.quirks.max_output), (None, None));
             assert!(p.quirks.body.is_empty());
-            // Of Bedrock's models it is written which can do what; of none, how much.
-            assert_eq!(p.models.is_empty(), p.provider != "bedrock");
+            // Of Bedrock's models it is written which can do what, of Anthropic's which can be fast; of
+            // none, how much.
+            assert_eq!(p.models.is_empty(), !["bedrock", "anthropic"].contains(&&*p.provider));
             for m in p.models.values() {
                 assert_eq!((m.context, m.max_output, m.body.len()), (None, None, 0));
             }

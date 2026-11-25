@@ -7,7 +7,6 @@ import 'package:flutter/widgets.dart';
 import '../host/host_store.dart';
 import '../host/link.dart';
 import '../host/proto.dart';
-import '../patterns/model_name.dart';
 import '../transcript/safe_text.dart';
 import '../ui/commands.dart';
 import '../ui/controls.dart';
@@ -17,7 +16,9 @@ import '../ui/overlay.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'offers.dart';
 import 'outside.dart';
+import 'models_part.dart';
 import 'programs.dart';
 
 /// What the host said, in a sentence.
@@ -96,14 +97,6 @@ class AccessKey extends StatelessWidget {
     onChanged: (v) => onChanged(v.$1, v.$2),
   );
 }
-
-/// How hard a model is to try, where that can be said.
-const efforts = [
-  AxMenuItem('', 'Default effort'),
-  AxMenuItem('low', 'Low effort'),
-  AxMenuItem('medium', 'Medium effort'),
-  AxMenuItem('high', 'High effort'),
-];
 
 /// One labelled part of a form. Labels stand over what they name, on the surface itself.
 class FormPart extends StatelessWidget {
@@ -277,6 +270,7 @@ class StartDraft extends ChangeNotifier {
       c.addListener(notifyListeners);
     }
     folder.addListener(_folderNamed);
+    model.addListener(_modelNamed);
   }
   final HostStore store;
 
@@ -310,15 +304,43 @@ class StartDraft extends ChangeNotifier {
     }
   }
 
-  /// How hard it is to try; empty: as is usual.
-  String effort = '';
+  /// How hard it is to try; empty: as is usual. Whether it is to think, and how fast.
+  String effort = '', speed = '';
+  bool? thinking;
 
-  /// Whether that can be said of what is chosen.
-  bool get tries =>
-      delegated?.effort ??
-      (store.modelsOf(connection ?? store.own.firstOrNull?.id ?? '') ?? const []).any(
-        (m) => m.id == model.text.trim() && m.effort,
-      );
+  /// The account that is used now.
+  String? get on => harness == 'axiom' ? connection ?? store.own.firstOrNull?.id : account;
+
+  /// What is known of the model that is chosen.
+  ModelInfo? get info => infoOf(store, harness, on, model.text.trim());
+
+  /// How hard what is chosen can be told to try. A program may take it of a model it has not told of.
+  List<String> get efforts =>
+      info?.efforts ?? ((delegated?.effort ?? false) ? const ['low', 'medium', 'high'] : const []);
+
+  /// What cannot be said to what is chosen now is not said.
+  void fitModel() {
+    if (!efforts.contains(effort)) effort = '';
+    if (!(info?.thinking ?? false)) thinking = null;
+    if (!(info?.speeds.contains(speed) ?? false)) speed = '';
+  }
+
+  /// Chooses one of those that are offered.
+  void choose(Offer o) => change(() {
+    if (o.harness != harness) {
+      harness = o.harness;
+      trust = false;
+      problem = null;
+    }
+    if (o.harness == 'axiom') {
+      connection = o.connection;
+    } else {
+      account = o.connection;
+    }
+    model.text = o.model.id;
+    fit();
+    fitModel();
+  });
 
   /// In a copy of the folder of its own. Beside others it is, if nobody says otherwise.
   late bool apart = into != null;
@@ -337,6 +359,7 @@ class StartDraft extends ChangeNotifier {
     account = null;
     model.clear();
     fit();
+    fitModel();
   });
   String? connection, problem;
   Access access = Access.ask;
@@ -386,11 +409,24 @@ class StartDraft extends ChangeNotifier {
     }
     model.text = x.model ?? '';
     effort = x.effort ?? '';
+    thinking = x.thinking;
     fit();
   }
 
   void tell() {
     if (!_gone) notifyListeners();
+  }
+
+  Timer? _named;
+
+  /// What can be said to a model that is in no list is asked for a moment after it has been named.
+  void _modelNamed() {
+    _named?.cancel();
+    final c = on, m = model.text.trim();
+    if (harness != 'axiom' || c == null || m.isEmpty || info != null) return;
+    _named = Timer(const Duration(milliseconds: 400), () {
+      unawaited(store.about(c, m).catchError((Object _) {}));
+    });
   }
 
   /// Looks into the folder a moment after it has been named.
@@ -446,8 +482,10 @@ class StartDraft extends ChangeNotifier {
         provider: other ? null : c!.provider,
         model: written.isEmpty ? null : written,
         connection: other ? account : c!.id,
-        effort: tries && effort.isNotEmpty ? effort : null,
+        effort: efforts.contains(effort) ? effort : null,
         environment: withHands ? axiomTools : null,
+        thinking: (info?.thinking ?? false) ? thinking : null,
+        speed: (info?.speeds.contains(speed) ?? false) ? speed : null,
       );
       final followed = [
         for (final w in words)
@@ -465,7 +503,17 @@ class StartDraft extends ChangeNotifier {
         m = _Made(session, where);
         _made = m;
       }
-      final how = (x.provider, x.model, x.connection, x.effort, x.environment, access, plan);
+      final how = (
+        x.provider,
+        x.model,
+        x.connection,
+        x.effort,
+        x.environment,
+        x.thinking,
+        x.speed,
+        access,
+        plan,
+      );
       if (m.agent == null) {
         m.agent = await store.addAgent(
           m.session,
@@ -509,6 +557,7 @@ class StartDraft extends ChangeNotifier {
   void dispose() {
     _gone = true;
     _soon?.cancel();
+    _named?.cancel();
     say.dispose();
     folder.dispose();
     model.dispose();
@@ -858,6 +907,8 @@ class _AccountsPageState extends State<AccountsPage> {
         ),
         const SizedBox(height: 28),
         ProgramsPart(widget.store),
+        const SizedBox(height: 28),
+        ModelsPart(widget.store),
       ]);
     },
   );
@@ -1011,18 +1062,4 @@ class _SignInState extends State<_SignIn> {
       ],
     );
   }
-}
-
-Map<String, (String, String?)> namesOf(List<ModelInfo> all) =>
-    modelNames([for (final m in all) (m.id, m.name)]);
-
-/// A model that is offered.
-AxMenuItem<String> modelItem(ModelInfo m, Map<String, (String, String?)> names) {
-  final (name, id) = names[m.id]!;
-  return AxMenuItem(
-    m.id,
-    oneLine(name, 80),
-    detail: id == null ? null : oneLine(id, 80),
-    mark: ServiceMark.of(m.id),
-  );
 }

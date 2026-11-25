@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use crate::{
+    about::{self, About},
     codec::{self, Decoder, EncodeError, Frames, Lost},
     error::{self, Class, Error, Retry},
     profile::{Listing, Profile},
@@ -175,13 +176,14 @@ impl Client {
     /// its protocols, is one answer; Gemini's comes in pages.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, CallError> {
         // Bedrock's is at another origin than its models, where no credential for these goes (SI-4).
-        if matches!(self.profile.codec, Codec::Messages | Codec::Converse) {
+        if self.profile.codec == Codec::Converse {
             return Err(EncodeError::Unsupported("the list of models").into());
         }
         let credential = self.credential().await.map_err(|e| e.sealed(None))?;
         let c = credential.as_ref();
         let list = match (self.profile.codec, self.profile.listing) {
             (_, Listing::Slugs) => self.slugs(c).await,
+            (_, Listing::Capabilities) => self.capable(c).await,
             (Codec::Gemini, _) => self.pages(c).await,
             _ => self.list(c).await,
         };
@@ -213,11 +215,55 @@ impl Client {
                 models.push(ModelInfo {
                     id: m.slug,
                     name: m.display_name,
+                    about: About::default(),
                     native: Json::from(&*raw),
                 });
             }
         }
         Ok(models)
+    }
+
+    /// Anthropic's, as long as there are more (platform.claude.com/docs/en/api/models/list, read
+    /// 2026-11-26).
+    async fn capable(&self, c: Option<&Arc<Credential>>) -> Result<Vec<ModelInfo>, Error> {
+        #[derive(Deserialize)]
+        struct List {
+            data: Vec<Box<RawValue>>,
+            #[serde(default)]
+            has_more: bool,
+            last_id: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct Named {
+            id: String,
+            display_name: Option<String>,
+        }
+        let first = self.endpoint.at("models").map_err(setup)?;
+        let (mut models, mut after, mut room) = (Vec::new(), None::<String>, LIST);
+        for _ in 0..PAGES {
+            let mut url = first.clone();
+            url.query_pairs_mut().append_pair("limit", PAGE);
+            if let Some(id) = &after {
+                url.query_pairs_mut().append_pair("after_id", id);
+            }
+            let page = self.page(&url, room, c).await?;
+            room -= page.body.len();
+            let list: List = page.read()?;
+            if models.len() + list.data.len() > MODELS {
+                return Err(too_many_models());
+            }
+            for raw in list.data {
+                let m: Named = page.model(&raw)?;
+                let native = Json::from(&*raw);
+                let about = about::anthropic(&native.value());
+                models.push(ModelInfo { id: m.id, name: m.display_name, about, native });
+            }
+            after = list.last_id.filter(|_| list.has_more);
+            if after.is_none() {
+                return Ok(models);
+            }
+        }
+        Err(Error::protocol(format!("the list of models has more than {PAGES} pages")))
     }
 
     async fn list(&self, c: Option<&Arc<Credential>>) -> Result<Vec<ModelInfo>, Error> {
@@ -228,6 +274,7 @@ impl Client {
         #[derive(Deserialize)]
         struct Named {
             id: String,
+            name: Option<serde_json::Value>,
         }
         let url = self.endpoint.at("models").map_err(setup)?;
         let page = self.page(&url, LIST, c).await?;
@@ -237,8 +284,17 @@ impl Client {
         }
         let mut models = Vec::with_capacity(list.data.len());
         for raw in list.data {
-            let Named { id } = page.model(&raw)?;
-            models.push(ModelInfo { id, name: None, native: Json::from(&*raw) });
+            let Named { id, name } = page.model(&raw)?;
+            let native = Json::from(&*raw);
+            // Where a name and what else there is to it are known to be.
+            let (name, about) = match self.profile.listing {
+                Listing::Reasoning => (
+                    name.and_then(|n| n.as_str().map(str::to_owned)),
+                    about::openrouter(&native.value()),
+                ),
+                _ => (None, About::default()),
+            };
+            models.push(ModelInfo { id, name, about, native });
         }
         Ok(models)
     }
@@ -283,7 +339,9 @@ impl Client {
                 let asked = |methods: Vec<String>| methods.iter().any(|m| m == "generateContent");
                 if named.supported_generation_methods.is_none_or(asked) {
                     let id = named.name.strip_prefix("models/").unwrap_or(&named.name).to_owned();
-                    models.push(ModelInfo { id, name: None, native: Json::from(&*raw) });
+                    let native = Json::from(&*raw);
+                    let about = about::gemini(&id, &native.value());
+                    models.push(ModelInfo { id, name: None, about, native });
                 }
             }
             token = list.next_page_token.filter(|t| !t.is_empty());
@@ -425,7 +483,15 @@ pub struct ModelInfo {
     pub id: String,
     /// For people, where the list has one beside the id.
     pub name: Option<String>,
+    pub about: About,
     pub native: Json,
+}
+
+impl ModelInfo {
+    /// One of which nothing else has been said.
+    pub fn named(id: String) -> Self {
+        Self { id, name: None, about: About::default(), native: serde_json::Value::Null.into() }
+    }
 }
 
 /// An answer on its way.

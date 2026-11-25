@@ -134,9 +134,18 @@ pub struct TooLong {
 
 impl Execution {
     fn fit(&mut self) {
-        let Execution { harness, provider, model, connection, effort, environment } = self;
+        let Execution {
+            harness,
+            provider,
+            model,
+            connection,
+            effort,
+            environment,
+            thinking: _,
+            speed,
+        } = self;
         clip(harness, NAME);
-        for s in [provider, model, connection, effort, environment] {
+        for s in [provider, model, connection, effort, environment, speed] {
             clip_opt(s, NAME);
         }
     }
@@ -286,14 +295,15 @@ mod tests {
             Body::AgentAdded {
                 agent: a.clone(),
                 name: nul(),
-                execution: Execution {
+                execution: Box::new(Execution {
                     harness: nul(),
                     provider: some(),
                     model: some(),
                     connection: some(),
                     effort: some(),
                     environment: some(),
-                },
+                    ..Execution::default()
+                }),
                 parent: None,
                 access: None,
                 apart: false,
@@ -302,14 +312,15 @@ mod tests {
             },
             Body::AgentChanged {
                 agent: a.clone(),
-                execution: Execution {
+                execution: Box::new(Execution {
                     harness: nul(),
                     provider: some(),
                     model: some(),
                     connection: some(),
                     effort: some(),
                     environment: some(),
-                },
+                    ..Execution::default()
+                }),
                 access: None,
                 plan: false,
             },
