@@ -300,6 +300,21 @@ pub struct SessionInfo {
     pub running: bool,
 }
 
+/// Something that waits for a person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Waits {
+    pub session: SessionId,
+    pub title: String,
+    pub agent: AgentId,
+    pub name: String,
+    pub request: RequestId,
+    pub what: String,
+    /// The beginning of what it is about. All of it is where it is asked, and is answered there.
+    pub subject: String,
+    /// Since when.
+    pub at: u64,
+}
+
 /// What has been changed in a folder since its last commit.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Changes {
@@ -554,6 +569,9 @@ pub enum Call {
         /// The question's digest, as it was shown.
         digest: String,
     },
+    /// What waits for a person, in all sessions, the longest first.
+    #[serde(rename = "host.waiting")]
+    Waiting {},
     #[serde(rename = "connection.list")]
     Connections {},
     /// Adds an account, a key or a server. The secret goes to the system's store and nowhere else.
@@ -720,6 +738,11 @@ pub enum Message {
     Fault {
         session: SessionId,
         fault: String,
+    },
+    /// What waits for a person is something else now, and how many there are: `host.waiting` says
+    /// what. Sent to every client that has said hello.
+    Waiting {
+        waiting: usize,
     },
 }
 

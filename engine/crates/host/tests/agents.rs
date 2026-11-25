@@ -797,3 +797,51 @@ async fn live_on_lm_studio() {
     assert_eq!(o, Outcome::Completed);
     assert!(t.file("hello.txt").unwrap().to_lowercase().contains("hello"));
 }
+
+/// One queue of what waits for a person, over all sessions, told to whoever is there.
+#[tokio::test]
+async fn what_waits_for_a_person_is_one_queue() {
+    let asks = || calls(&[("c1", "shell", r#"{"command":"touch made"}"#)]);
+    let mut t = T::new(vec![asks(), text(&["ok"])]).await;
+    let mut other = t.f.client().await;
+    assert_eq!(other.call(Call::Waiting {}).await.unwrap(), json!([]));
+    let a = t.agent(Access::Ask).await;
+    t.prompt(&a, "go").await.unwrap();
+    let (request, digest, _) = t.question().await;
+    // Told to one that follows no session.
+    async fn told(c: &mut Client) -> usize {
+        loop {
+            let m = c.next_within(LONG).await.unwrap().expect("a word");
+            if let Message::Waiting { waiting } = m {
+                return waiting;
+            }
+        }
+    }
+    assert_eq!(told(&mut other).await, 1);
+    let v = other.call(Call::Waiting {}).await.unwrap();
+    let all: Vec<Waits> = serde_json::from_value(v).unwrap();
+    let [w] = &all[..] else { panic!("{all:?}") };
+    assert_eq!((&w.session, w.title.as_str()), (&t.s, "S"));
+    assert_eq!((&w.agent, w.name.as_str(), &w.request), (&a, "Lead", &request));
+    assert!(w.subject.contains("touch made") && w.at > 0, "{w:?}");
+    let (session, answer) = (t.s.clone(), Answer::Deny);
+    t.c.call(Call::Answer { session, request, answer, digest }).await.unwrap();
+    t.ended().await;
+    assert_eq!(told(&mut other).await, 0);
+    assert_eq!(other.call(Call::Waiting {}).await.unwrap(), json!([]));
+    // One that is stopped waits no more.
+    t.server.add(asks());
+    let v = t.prompt(&a, "go").await.unwrap();
+    t.question().await;
+    assert_eq!(told(&mut other).await, 1);
+    let run = RunId(v["run"].as_str().unwrap().into());
+    t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
+    t.ended().await;
+    assert_eq!(told(&mut other).await, 0);
+    // Nor does one of a host that is gone.
+    t.server.add(asks());
+    t.prompt(&a, "go").await.unwrap();
+    t.question().await;
+    t.restart().await;
+    assert_eq!(t.c.call(Call::Waiting {}).await.unwrap(), json!([]));
+}

@@ -26,5 +26,6 @@ pub mod signal;
 mod signin;
 mod store;
 pub mod vault;
+mod waiting;
 
 pub use server::{Config, Host, HostError};
