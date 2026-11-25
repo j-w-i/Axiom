@@ -245,7 +245,7 @@ class AxTabs extends StatelessWidget {
               builder: (context, s) {
                 final on = i == index;
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 13),
+                  padding: const EdgeInsets.symmetric(horizontal: 11),
                   child: ConstrainedBox(
                     constraints: BoxConstraints(minHeight: t.density.control - 4),
                     child: Row(
@@ -346,7 +346,7 @@ class AxCheck extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox.square(
-            dimension: 18,
+            dimension: 17,
             child: value
                 ? Surface(
                     s.enabled ? c.primary : c.ghost,
@@ -354,7 +354,7 @@ class AxCheck extends StatelessWidget {
                     child: Center(
                       child: AxGlyph(
                         AxIcon.check,
-                        size: 14,
+                        size: 13,
                         color: s.enabled ? c.onPrimary : c.idle,
                       ),
                     ),
@@ -463,11 +463,11 @@ class _AxFieldState extends State<AxField> {
               child: child,
             ),
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: t.density.control + 4),
+              constraints: BoxConstraints(minHeight: t.density.control + 2),
               child: Padding(
                 padding: EdgeInsets.symmetric(
                   horizontal: t.density.pad,
-                  vertical: widget.lines > 1 ? 10 : 0,
+                  vertical: widget.lines > 1 ? 8 : 0,
                 ),
                 child: Row(
                   crossAxisAlignment: widget.lines > 1

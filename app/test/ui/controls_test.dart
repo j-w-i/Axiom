@@ -1001,6 +1001,6 @@ void main() {
       final p = t.renderObject<RenderParagraph>(find.text('Run'));
       expect(p.text.style!.fontSize, 13);
     }
-    expect(sizes, [28, 32, 36]);
+    expect(sizes, [26, 30, 34]);
   });
 }

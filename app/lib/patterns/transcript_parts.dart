@@ -39,7 +39,7 @@ class WorkLine extends StatelessWidget {
       label: '$name $detail $result',
       excludeSemantics: true,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 28),
+        constraints: const BoxConstraints(minHeight: 26),
         child: LayoutBuilder(
           builder: (context, box) => Row(
             children: [
@@ -431,14 +431,14 @@ class _RequestBarState extends State<RequestBar> {
                         ],
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 9),
                     Surface(
                       c.block,
                       radius: AxRadius.key,
                       child: SizedBox(
                         width: double.infinity,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
                           child: Text(literal(r.subject), style: t.type.code),
                         ),
                       ),
@@ -529,13 +529,13 @@ class _RequestBarState extends State<RequestBar> {
           c.plate,
           radius: AxRadius.card,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 14, 14),
+            padding: const EdgeInsets.fromLTRB(15, 12, 12, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
                 body,
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Align(alignment: Alignment.centerRight, child: keys),
               ],
             ),

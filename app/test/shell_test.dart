@@ -187,7 +187,7 @@ void main() {
     // Once round: in the left pane until it is left, and back in it only at the end.
     final changes = [
       for (var k = 1; k < xs.length; k++)
-        if ((xs[k] < 272) != (xs[k - 1] < 272)) k,
+        if ((xs[k] < 264) != (xs[k - 1] < 264)) k,
     ];
     expect(changes.length, lessThanOrEqualTo(40 ~/ 14 * 2));
     expect(changes.first, greaterThan(10), reason: '$xs');
@@ -299,7 +299,7 @@ void main() {
     expect(find.text('2 asking'), findsOneWidget);
     expect(find.bySemanticsLabel('2 asking, open the first'), findsOneWidget);
     // Wider, the list is beside it again, at 224 and at 264.
-    for (final (width, left) in [(860.0, 232.0), (1079.0, 232.0), (1080.0, 272.0)]) {
+    for (final (width, left) in [(860.0, 228.0), (1079.0, 228.0), (1080.0, 264.0)]) {
       await mount(t, Shell(s, titleInset: 58), size: Size(width, 520));
       expect(find.byWidgetPredicate((w) => w is AxButton && w.label == 'Sessions'), findsNothing);
       expect(find.text('Other work'), findsWidgets);

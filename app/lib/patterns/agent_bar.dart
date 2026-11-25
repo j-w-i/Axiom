@@ -21,7 +21,7 @@ class AgentBar extends StatelessWidget {
     this.lead,
     this.where,
     this.inset = 20,
-    this.height = 56,
+    this.height = 50,
   });
   final String name;
   final AgentState state;
@@ -56,7 +56,7 @@ class AgentBar extends StatelessWidget {
             ConstrainedBox(
               constraints: BoxConstraints(maxWidth: wide),
               child: Padding(
-                padding: EdgeInsets.only(left: inset, right: 16),
+                padding: EdgeInsets.only(left: inset, right: 14),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -85,7 +85,7 @@ class AgentBar extends StatelessWidget {
             ),
             Expanded(
               child: Padding(
-                padding: EdgeInsets.only(right: trailing == null ? 6 : 14),
+                padding: EdgeInsets.only(right: trailing == null ? 6 : 12),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [

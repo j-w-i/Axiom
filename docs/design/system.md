@@ -15,7 +15,7 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 4a. **Things take the hue of the service they belong to.** Its mark, its level, its check, the hover of its menu item. What is selected has one neutral fill, whoever it belongs to. Icons of work have no hue; a failed one is red. Code, diffs and states are in colour. How full a context is, is neutral. Marks identify a service really in use (`THIRD_PARTY.md`); unknown models get none.
 4b. **No accent edges.** No coloured strip along any side of a tab, card, row, menu, key or message. Lamps: running is a ring with an arc that goes round, asking a full dot, waiting a small ring, paused two bars, done a check, failed a cross. A test reads the source for one.
 4c. **Amber is the lamp, the warning glyph and the one line that says who asks; never a ground.**
-5. **Grid of 4.** What is said, asked and written is one column, 740 at most, in the middle of its room, 28 from the edge at least. What was asked is at the right, as wide as its words, 600 at most. What came of a call stands beside it. Icons are 14–16 in a fixed column.
+5. **Grid of 4.** What is said, asked and written is one column, 740 at most, in the middle of its room, 24 from the edge at least. What was asked is at the right, as wide as its words, 600 at most. What came of a call stands beside it. Icons are 14–16 in a fixed column.
 6. **Two voices.** Inter for words; JetBrains Mono, without ligatures, only for literals: code, paths, commands. Both are shipped, so that what is rendered in a test is what a person sees on every system.
 7. **Numbers say where they come from.** Solid meter = reported or measured; dashed = estimated; empty track and words = unknown.
 8. **Nothing new can be pressed by a click meant for something else** (`Settle`): execution panel, requests. A question falls the moment anything it was about changes.
@@ -31,17 +31,17 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 | Role | Use | Treatment |
 |------|-----|-----------|
 | `chassis` | the window, the sidebar | ground, flat |
-| `canvas`, `bay` | what the window shows | one tone up, soft shade, round 16 |
+| `canvas`, `bay` | what the window shows | one tone up, soft shade, round 12 |
 | `track`, `block` | troughs; code, diffs, a command that is asked about | recessed |
 | `plate` | a request, what was asked, a group of rows | raised |
-| `written` | the composer | raised, soft shade, no edge of any kind, round 24 |
+| `written` | the composer | raised, soft shade, no edge of any kind, round 16 |
 | `slab` | what is chosen: a row, the thumb of a trough | raised |
 | `key` / `keyDown` / `primary` | keys, held ones, the main act | raised / recessed / ink |
 | `ghost` | a key of little weight, a tag | a veil |
 | `field` | a field | a tone, and a ring with the keyboard |
 | `overlay` | menus, search | raised, floating |
 
-Radii: check 6, control 10, code 14, card 18, canvas 16, composer 24. Controls are 32 high, fields 36, icon keys square, the act of the composer round. A held key gives 3 %; a ground comes in 110 ms. Icons have round corners, 1.4 of 16. Type 11–22, a little tight, with Inter's display cut as it grows. Density compact/regular/roomy changes control height (28/32/36), never type size.
+Radii: check 5, control 8, code 10, card 12, canvas 12, composer 16. Controls are 30 high, fields 32, icon keys square, the act of the composer round. A held key gives 3 %; a ground comes in 110 ms. Icons have round corners, 1.4 of 16. Type 11–22, a little tight, with Inter's display cut as it grows. Density compact/regular/roomy changes control height (26/30/34), never type size.
 States for every control: rest, hover, held, engaged, focused (keyboard ring), disabled (a main act and a key keep a hairline outline with grey words; a quiet key is flat words), loading, error.
 Keys of the window: new session N, search K, accounts comma, sidebar B, with ⌘ on macOS and Ctrl elsewhere.
 
@@ -63,4 +63,5 @@ Keys of the window: new session N, search K, accounts comma, sidebar B, with ⌘
 | 11 | Fable's review, steps 1–16 (`spec-fable.md`): what agents do in words, failure seen as failure, whole rows, one line of answers, a narrow window; graphite selection, outlines for main acts that cannot be pressed, less amber, the folder and Accounts in the strip | 2026-11-25, from pictures: B for D1, D3, D4, D5; D2 (long runs) as it was |
 | 12 | flat surfaces, neutral keys, Inter, sessions by folder as a tree, one-column conversation, panel at the right, requests where their agent is, ordinary words | asked for by the owner 2026-11-25 ("a bit like a toy"; confusing; placement, colour and shapes off). From pictures: "definitely much better, and yes I like A" (neutral keys). Reverses: two columns (7), colours by kind of work (6), plan in the session's panel (5), key radius 5 and aqua keys (10), raised materials (1–11) |
 | 13 | Unitable's depth on the layout of round 12: tones, lit edge and contact shade, troughs with a thumb that slides, rings round what is written into, continuous corners (`design/tactile`) | asked for by the owner 2026-11-25: "much, much better"; not the ring round the composer, and "doesn't quite feel modern yet" |
-| 14 | soft light in place of hard lines, no rings, a canvas on the chassis, one bar, larger type, controls and corners, round icons, dots, rings for levels, less on show (`design/modern`) | asked for by the owner 2026-11-25; rendered, no verdict yet |
+| 14 | soft light in place of hard lines, no rings, a canvas on the chassis, one bar, larger type, controls and corners, round icons, dots, rings for levels, less on show (`design/modern`) | asked for by the owner 2026-11-25: "totally getting better", but corners "a bit far in a few places" and padding too |
+| 15 | corners and padding between those of 13 and 14, all else as in 14 | rendered 2026-11-25, no verdict yet |

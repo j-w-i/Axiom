@@ -843,7 +843,7 @@ class _BlockViewState extends State<BlockView> {
     final top = b.continues
         ? 0.0
         : widget.opens
-        ? (widget.afterTool ? 18.0 : 22.0)
+        ? (widget.afterTool ? 15.0 : 19.0)
         : b.kind == BlockKind.heading
         ? 20.0
         : b.kind == BlockKind.item
@@ -937,14 +937,14 @@ class _Voice extends StatelessWidget {
   final Widget child;
   final bool opens, closes;
   final double gap;
-  static const pad = 12.0;
+  static const pad = 9.0;
   @override
   Widget build(BuildContext context) {
     final c = Ax.of(context).colors;
     final inner = SizedBox(
       width: fits ? null : double.infinity,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, opens ? pad : gap, 16, closes ? pad : 0),
+        padding: EdgeInsets.fromLTRB(14, opens ? pad : gap, 14, closes ? pad : 0),
         child: child,
       ),
     );
@@ -1064,10 +1064,10 @@ class _CodeBlockState extends State<CodeBlock> {
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   padding: EdgeInsets.fromLTRB(
-                    18,
-                    b.continues ? 0 : 15,
-                    18,
-                    widget.goesOn ? 0 : 15,
+                    14,
+                    b.continues ? 0 : 11,
+                    14,
+                    widget.goesOn ? 0 : 11,
                   ),
                   child: Text.rich(
                     TextSpan(

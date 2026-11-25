@@ -289,7 +289,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
             children: [
               if (beside)
                 SizedBox(
-                  width: width < 1080 ? 232 : 272,
+                  width: width < 1080 ? 228 : 264,
                   child: FocusTraversalGroup(child: side()),
                 ),
               Expanded(
@@ -312,7 +312,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                                 _Banner(p, inset: beside ? 20 : widget.titleInset + 12),
                             if (narrow || page != null || s.current == null)
                               SizedBox(
-                                height: narrow ? 48 : 56,
+                                height: narrow ? 46 : 50,
                                 child: _Strip(
                                   problem: narrow ? problem : null,
                                   page: page,
@@ -930,7 +930,7 @@ class _Side extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 64,
+          height: 58,
           child: Padding(
             // On the line of what stands on the canvas.
             padding: EdgeInsets.only(top: 8, left: inset == 0 ? 20 : inset + 20, right: 10),
@@ -972,7 +972,7 @@ class _Side extends StatelessWidget {
           child: ListView(padding: const EdgeInsets.fromLTRB(10, 0, 10, 12), children: list),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(10, 6, 10, 12),
+          padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
           child: NavRow(
             AxIcon.settings,
             'Accounts',
@@ -1091,7 +1091,7 @@ class _Display extends StatelessWidget {
     children: [
       if (!small)
         SizedBox(
-          height: 56,
+          height: 50,
           child: Padding(
             padding: EdgeInsets.only(left: inset, right: 14),
             child: Row(
@@ -1244,7 +1244,7 @@ class _Display extends StatelessWidget {
       index: acts ? tab : 0,
       onTab: onTab,
       inset: small ? 20 : inset,
-      height: small ? 46 : 56,
+      height: small ? 44 : 50,
       lead: onList == null
           ? null
           : Padding(

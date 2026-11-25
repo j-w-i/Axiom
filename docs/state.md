@@ -43,7 +43,7 @@ Built 2026-11-25 on the owner's yes to pictures (`design/system.md`, history). N
 ## The material, round 13 (`design/tactile`, on `design/flat`)
 Unitable's depth on round 12's layout, at the owner's word (2026-11-25). No verdict yet; `design/flat` is the same without it. The fifteen goldens fail here too, for the same reason. Not measured: what the outlines cost a frame on a display (K1).
 
-## Modern, round 14 (`design/modern`, on `design/tactile`)
+## Modern, rounds 14 and 15 (`design/modern`, on `design/tactile`)
 Built on the owner's word (2026-11-25). No verdict yet. The fifteen goldens fail here too. To be looked at in a real window: the system's own window buttons stand higher than the bar now is (K8), and what clipping the canvas and its soft shades cost a frame (K1).
 
 ## Next

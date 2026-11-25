@@ -99,7 +99,7 @@ class _ComposerState extends State<Composer> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 15, 18, 8),
+            padding: const EdgeInsets.fromLTRB(15, 12, 15, 6),
             child: Focus(
               canRequestFocus: false,
               skipTraversal: true,
@@ -121,7 +121,7 @@ class _ComposerState extends State<Composer> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(9, 2, 10, 10),
+            padding: const EdgeInsets.fromLTRB(7, 1, 8, 8),
             child: Row(
               children: [
                 Expanded(
@@ -146,7 +146,7 @@ class _ComposerState extends State<Composer> {
                   label: widget.action,
                   tone: AxTone.primary,
                   round: true,
-                  size: 34,
+                  size: 30,
                   onPressed: _text.text.trim().isEmpty || !widget.enabled
                       ? null
                       : () => unawaited(_submit()),

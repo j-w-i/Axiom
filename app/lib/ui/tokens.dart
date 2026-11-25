@@ -424,7 +424,7 @@ class AxType {
 
 abstract final class AxSpace {
   /// The conversation, what is asked in it and where it is written: one column.
-  static const double column = 740, gutter = 28;
+  static const double column = 740, gutter = 24;
 
   /// What stands beside that column, in [width].
   static double beside(double width) => math.max(gutter, (width - column) / 2);
@@ -433,14 +433,14 @@ abstract final class AxSpace {
 /// A control, a tile of code, a card or what floats. Corners are continuous, and what is inside is as
 /// much less round as it stands in from its holder.
 abstract final class AxRadius {
-  static const double tick = 6, key = 10, block = 14, card = 18, canvas = 16, written = 24;
+  static const double tick = 5, key = 8, block = 10, card = 12, canvas = 12, written = 16;
 }
 
 /// Control sizes. Density changes height and padding, never type size.
 enum AxDensity {
-  compact(28, 28, 10),
-  regular(32, 32, 12),
-  roomy(36, 36, 14);
+  compact(26, 26, 9),
+  regular(30, 30, 11),
+  roomy(34, 34, 13);
 
   const AxDensity(this.control, this.row, this.pad);
   final double control, row, pad;

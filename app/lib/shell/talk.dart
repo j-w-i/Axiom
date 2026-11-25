@@ -288,7 +288,7 @@ class _TalkState extends State<Talk> {
           AxSpace.beside(box.maxWidth),
           0,
           AxSpace.beside(box.maxWidth),
-          20,
+          16,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -296,7 +296,7 @@ class _TalkState extends State<Talk> {
           children: [
             if (first != null && widget.live)
               Padding(
-                padding: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.only(bottom: 8),
                 child: RequestBar(
                   key: ValueKey(first.request),
                   RequestView(

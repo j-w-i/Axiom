@@ -54,7 +54,7 @@ class NavRow extends StatelessWidget {
         hovered: s.hovered,
         key: act,
         child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: t.density.row + (act ? 4 : 0)),
+          constraints: BoxConstraints(minHeight: t.density.row + (act ? 2 : 0)),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Row(
@@ -105,7 +105,7 @@ class _SideHeadingState extends State<SideHeading> {
       onEnter: (_) => setState(() => _over = true),
       onExit: (_) => setState(() => _over = false),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 18, 2, 3),
+        padding: const EdgeInsets.fromLTRB(10, 14, 2, 2),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 26),
           child: Row(
@@ -286,7 +286,7 @@ class _AgentRowState extends State<AgentRow> {
                   selected: widget.selected,
                   hovered: s.hovered,
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(10, 7, keys ? (pause && stop ? 66 : 38) : 10, 7),
+                    padding: EdgeInsets.fromLTRB(10, 5, keys ? (pause && stop ? 66 : 38) : 10, 6),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -406,7 +406,7 @@ class PanelHeading extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      padding: const EdgeInsets.fromLTRB(12, 9, 12, 6),
       child: Row(
         children: [
           Expanded(
@@ -440,9 +440,9 @@ class TaskRow extends StatelessWidget {
       label: '${task.title}, $word${task.owner == null ? '' : ', ${task.owner}'}',
       excludeSemantics: true,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 32),
+        constraints: const BoxConstraints(minHeight: 29),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
               _Mark(mark, t.type.ui),
@@ -550,7 +550,7 @@ class NeedsRow extends StatelessWidget {
         selected: false,
         hovered: s.hovered,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 7, 10, 8),
+          padding: const EdgeInsets.fromLTRB(10, 5, 10, 6),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -607,12 +607,12 @@ class SidePanel extends StatelessWidget {
 
   /// What each is called, what stands at the end of its name, and its rows.
   final List<(String, Widget?, List<Widget>)> groups;
-  static const width = 312.0;
+  static const width = 300.0;
   @override
   Widget build(BuildContext context) => SizedBox(
     width: width,
     child: ListView(
-      padding: const EdgeInsets.fromLTRB(4, 0, 18, 20),
+      padding: const EdgeInsets.fromLTRB(4, 0, 14, 16),
       children: [
         for (final (name, trailing, rows) in groups) ...[
           PanelHeading(name, trailing),
@@ -620,7 +620,7 @@ class SidePanel extends StatelessWidget {
             Ax.of(context).colors.plate,
             radius: AxRadius.card,
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
+              padding: const EdgeInsets.symmetric(vertical: 4),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
             ),
           ),
@@ -656,7 +656,7 @@ class ChangedRow extends StatelessWidget {
           selected: false,
           hovered: s.hovered,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 32),
+            constraints: const BoxConstraints(minHeight: 29),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 7),
               child: Row(

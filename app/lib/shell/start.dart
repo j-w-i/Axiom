@@ -69,7 +69,7 @@ class FormPart extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -97,7 +97,7 @@ class _Page extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(28, 48, 28, 40),
+      padding: const EdgeInsets.fromLTRB(24, 34, 24, 32),
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
@@ -107,7 +107,7 @@ class _Page extends StatelessWidget {
             children: [
               if (title case final w?) ...[
                 Semantics(header: true, child: Text(w, style: t.type.heading)),
-                const SizedBox(height: 22),
+                const SizedBox(height: 18),
               ],
               ...children,
               if (problem case final p?)
@@ -151,7 +151,7 @@ class Card extends StatelessWidget {
         children: [
           for (final (i, l) in lines.indexed) ...[
             if (i > 0) const Hairline(),
-            Padding(padding: const EdgeInsets.fromLTRB(18, 14, 14, 14), child: l),
+            Padding(padding: const EdgeInsets.fromLTRB(14, 11, 12, 11), child: l),
           ],
         ],
       ),
@@ -190,7 +190,7 @@ class OptionLine extends StatelessWidget {
                   AxCheck(label: label, value: value, onChanged: onChanged),
                   if (note case final n?)
                     Padding(
-                      padding: const EdgeInsets.only(left: 26, top: 2),
+                      padding: const EdgeInsets.only(left: 25, top: 1),
                       child: Text(n, style: t.type.label.ink(c.ink3)),
                     ),
                 ],
@@ -786,7 +786,7 @@ class _StartPageState extends State<StartPage> {
                     ),
                   ],
                   const SizedBox(width: 8),
-                  AxButton(label: 'Choose…', icon: AxIcon.folder, size: 36, onPressed: _choose),
+                  AxButton(label: 'Choose…', icon: AxIcon.folder, size: 32, onPressed: _choose),
                 ],
               ),
             ),
@@ -1052,7 +1052,7 @@ class _AccountsPageState extends State<AccountsPage> {
                   ],
                 ),
             ]),
-            const SizedBox(height: 28),
+            const SizedBox(height: 24),
           ],
           Semantics(header: true, child: Text('Add an account', style: t.type.title)),
           const SizedBox(height: 12),

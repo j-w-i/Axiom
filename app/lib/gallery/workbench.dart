@@ -83,7 +83,7 @@ class _WorkbenchState extends State<Workbench> {
             children: [
               if (wide)
                 SizedBox(
-                  width: box.maxWidth >= 1080 ? 272 : 232,
+                  width: box.maxWidth >= 1080 ? 264 : 228,
                   child: FocusTraversalGroup(
                     child: _Side(
                       inset: widget.titleInset,
@@ -196,7 +196,7 @@ class _WorkbenchState extends State<Workbench> {
             AxSpace.beside(box.maxWidth),
             0,
             AxSpace.beside(box.maxWidth),
-            20,
+            16,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -208,7 +208,7 @@ class _WorkbenchState extends State<Workbench> {
                   onAlways: () => setState(() => _request = false),
                   onDeny: () => setState(() => _request = false),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
               ],
               Composer(
                 placeholder: 'Message $name',
@@ -240,7 +240,7 @@ class _Side extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 64,
+          height: 58,
           child: Padding(
             padding: EdgeInsets.only(top: 8, left: inset, right: 10),
             child: Row(
@@ -304,7 +304,7 @@ class _Side extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(10, 6, 10, 12),
+          padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
           child: NavRow(AxIcon.settings, 'Accounts', keys: '⌘,', onPressed: () {}),
         ),
       ],
