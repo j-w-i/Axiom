@@ -1,6 +1,6 @@
 # State (handover)
 
-Updated 2026-11-25. M1 is merged (j-w-i/Axiom#14). M2 so far is merged (j-w-i/Axiom#15). Branch `m3/accounts`.
+Updated 2026-11-25. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), installed programs and signing in with ChatGPT (j-w-i/Axiom#16).
 
 ## Where things stand
 - **M0**: done except the owner's reading of decisions 0006 (Google plans via Antigravity; Gemini CLI's consumer tier has ended) and 0007 (subscription lanes; written confirmation from Anthropic before launch).
