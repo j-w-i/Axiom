@@ -9,7 +9,10 @@ use axiom_model::{
     Accumulator, Args, Block, CallError, Class, Client, Content, Delta, Event, Message, Reply,
     Request, Retry, Role, Settings, Start, Stop, Tool,
 };
-use axiom_proto::{AgentId, AgentState, Body, ItemId, ItemKind, Outcome, Provenance, RunId, Usage};
+use axiom_proto::{
+    AgentId, AgentState, Body, Cost, Covers, ItemId, ItemKind, Outcome, Provenance, RunId, Usage,
+    UsedOn,
+};
 use axiom_tools::{Seen, Site, Spec};
 use serde_json::Value;
 use tokio::sync::{mpsc, watch};
@@ -74,6 +77,8 @@ pub struct Agent<S: Stage> {
     pub desk: Desk,
     pub client: Client,
     pub model: String,
+    /// What is said to be used, with what it is asked.
+    pub on: UsedOn,
     pub settings: Settings,
     /// Tokens the model takes, if they are known.
     pub window: Option<u64>,
@@ -297,7 +302,6 @@ impl<S: Stage> Agent<S> {
             };
             output += reply.usage.output.unwrap_or(0);
             self.compare(run, &reply).await?;
-            self.usage(&reply).await?;
             self.fill = fill(&reply, self.window);
             if reply.stop == Some(Stop::ContextFull) {
                 // What it had said is not whole; it says it again, from its notes.
@@ -306,7 +310,6 @@ impl<S: Stage> Agent<S> {
                     Halt::Full(words) => Halt::Failed(words),
                     e => e,
                 })?;
-                self.usage(&reply).await?;
                 self.fill = fill(&reply, self.window);
             }
             let stop = reply.stop.clone();
@@ -596,10 +599,12 @@ impl<S: Stage> Agent<S> {
                     // The connection closes first.
                     drop(answer);
                     self.end_all(&mut items, Outcome::Cancelled).await?;
+                    let reply = fold.finish();
+                    self.usage(run, &reply, aside).await?;
                     if aside {
                         return Err(Halt::Cancelled);
                     }
-                    return self.keep(fold.finish()).await;
+                    return self.keep(reply).await;
                 }
                 () = self.stage.closed() => return Err(Halt::Gone),
                 e = answer.next() => e,
@@ -618,10 +623,13 @@ impl<S: Stage> Agent<S> {
         };
         if let Some(e) = failed {
             self.end_all(&mut items, Outcome::Failed).await?;
+            self.usage(run, &fold.finish(), aside).await?;
             return Ok(Err(CallError::Provider(e)));
         }
         self.end_all(&mut items, Outcome::Completed).await?;
-        Ok(Ok(fold.finish()))
+        let reply = fold.finish();
+        self.usage(run, &reply, aside).await?;
+        Ok(Ok(reply))
     }
 
     /// What a cancelled answer leaves: the words it had said, so that the agent knows them too.
@@ -703,21 +711,51 @@ impl<S: Stage> Agent<S> {
         self.notice(run, &format!("{is} answers, not {}, which was asked for.", self.model)).await
     }
 
-    async fn usage(&self, r: &Reply) -> Result<(), Halt> {
+    /// Of every answer, also one that broke off and one that is no part of the conversation: all of
+    /// them are paid for.
+    async fn usage(&self, run: &RunId, r: &Reply, aside: bool) -> Result<(), Halt> {
         let u = &r.usage;
         if *u == axiom_model::Usage::default() {
             return Ok(());
         }
-        let context = fill(r, self.window).map(|f| f.min(1.0));
+        // How full the context is, only a whole answer of the conversation says.
+        let context = fill(r, self.window).filter(|_| r.complete && !aside).map(|f| f.min(1.0));
         let usage = Usage {
+            prompt: u.prompt,
             input: u.uncached.or(u.prompt),
+            cache_write_long: u.cache_write_long,
             cache_read: u.cache_read,
             cache_write: u.cache_write,
             output: u.output,
             reasoning: u.reasoning,
             context,
         };
-        let b = Body::Usage { agent: self.id.clone(), usage, provenance: Provenance::Reported };
+        let cost = u.cost.as_ref().map(|c| {
+            Box::new(Cost {
+                amount: c.amount,
+                currency: c.unit.clone(),
+                provenance: Provenance::Reported,
+                of: Covers::Answer,
+            })
+        });
+        let on = UsedOn {
+            model: Some(self.model.clone()),
+            answered: r.model.clone().filter(|m| !m.is_empty()),
+            speed: u.speed.clone(),
+            ..self.on.clone()
+        };
+        let b = Body::Usage {
+            agent: self.id.clone(),
+            usage,
+            provenance: Provenance::Reported,
+            of: Covers::Answer,
+            run: Some(run.clone()),
+            on: Some(Box::new(on)),
+            cost,
+            totals: Vec::new(),
+            cut: !r.complete,
+            aside,
+        };
         Ok(self.stage.say(vec![Say::Event(b)]).await?)
     }
 

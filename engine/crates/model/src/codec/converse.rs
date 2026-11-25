@@ -619,7 +619,7 @@ fn count(told: &Value) -> Usage {
         cache_write: write,
         cache_write_long: long,
         output: count("outputTokens"),
-        reasoning: None,
+        ..Usage::default()
     }
 }
 

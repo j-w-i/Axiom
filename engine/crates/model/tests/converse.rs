@@ -83,7 +83,7 @@ fn reasoning() {
         cache_write: Some(20),
         cache_write_long: Some(12),
         output: Some(60),
-        reasoning: None,
+        ..Usage::default()
     };
     assert_eq!(r.usage, want);
 }
@@ -310,7 +310,7 @@ fn usage_is_what_was_told() {
         cache_write: Some(0),
         cache_write_long: Some(0),
         output: Some(2),
-        reasoning: None,
+        ..Usage::default()
     };
     assert_eq!(of(cached), want);
     // What does not follow is not said.

@@ -994,10 +994,15 @@ fn plans_usage_and_notices() {
     let Event::Usage(s) = &e[0] else { panic!("{e:?}") };
     assert_eq!(s.context, Some((53000, 200_000)));
     assert_eq!(s.usage, Usage { context: Some(0.265), ..Usage::default() });
-    assert_eq!(
-        s.cost,
-        Some(Cost { amount: 0.045, currency: "USD".into(), provenance: Provenance::Reported })
-    );
+    let cost = |amount| {
+        let (provenance, of) = (Provenance::Reported, Covers::Session);
+        Cost { amount, currency: "USD".into(), provenance, of }
+    };
+    assert_eq!(s.cost, Some(cost(0.045)));
+    // It has no tokens to say, and so nothing they would be of.
+    assert_eq!((s.of, s.totals.len()), (Covers::Unknown, 0));
+    d.hear(update(json!({"sessionUpdate": "usage_update", "used": 1, "size": 2, "cost": {"amount": -1, "currency": "USD"}})));
+    assert!(matches!(&d.events()[0], Event::Usage(s) if s.cost.is_none()));
     assert_eq!(s.provenance, Some(Provenance::Reported));
     // More than full is full; nothing of nothing is not known.
     d.hear(update(json!({"sessionUpdate": "usage_update", "used": 9, "size": 3})));

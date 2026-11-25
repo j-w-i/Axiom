@@ -1035,7 +1035,7 @@ fn as_u64(v: i64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use axiom_proto::{Answerable, Execution, Provenance, Usage};
+    use axiom_proto::{Answerable, Covers, Execution, Provenance, Usage};
 
     use super::*;
 
@@ -1095,7 +1095,18 @@ mod tests {
             (Body::RequestClosed { request: q, answer: "a".into() }, Intent),
             (Body::AgentState { agent: a.clone(), state: AgentState::Running }, Stream),
             (
-                Body::Usage { agent: a, usage: Usage::default(), provenance: Provenance::Measured },
+                Body::Usage {
+                    agent: a,
+                    usage: Usage::default(),
+                    provenance: Provenance::Measured,
+                    of: Covers::Answer,
+                    run: None,
+                    on: None,
+                    cost: None,
+                    totals: vec![],
+                    cut: false,
+                    aside: false,
+                },
                 Stream,
             ),
             (

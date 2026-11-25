@@ -2,7 +2,7 @@
 //! wrote is its own word: untrusted, bounded, and a report, not proof (T36).
 
 use axiom_policy::{Access, Place, audit::Containment};
-use axiom_proto::{Outcome, Provenance, Usage};
+use axiom_proto::{Cost, Covers, ModelTotal, Outcome, Provenance, Usage};
 use axiom_spawn::Ended;
 use serde_json::Value;
 
@@ -269,16 +269,12 @@ pub struct Spent {
     pub usage: Usage,
     /// Tokens in the context, and how many there may be.
     pub context: Option<(u64, u64)>,
+    /// What `usage` covers.
+    pub of: Covers,
     pub cost: Option<Cost>,
+    /// By model, of the session so far.
+    pub totals: Vec<ModelTotal>,
     pub provenance: Option<Provenance>,
-}
-
-/// Of the session so far.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Cost {
-    pub amount: f64,
-    pub currency: String,
-    pub provenance: Provenance,
 }
 
 /// How much of a plan is used up, where the harness says so.

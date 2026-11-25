@@ -304,8 +304,9 @@ class SessionModel extends ChangeNotifier {
       case RequestClosed(:final request):
         requests.remove(request);
         return true;
-      case UsageReported(:final agent, :final usage, :final provenance):
-        if (agents[agent] case final a?) {
+      case UsageReported(:final agent, :final usage, :final provenance, :final cut):
+        // An answer that broke off says nothing of how full the context is.
+        if (agents[agent] case final a? when !cut) {
           a
             ..context = usage.context
             ..contextKnown = provenance;

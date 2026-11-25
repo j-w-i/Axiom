@@ -5,7 +5,7 @@
 mod common;
 
 use axiom_model::{
-    Args, Block, Cache, Class, Codec, Content, EncodeError, Event, Json, Loss, Lost, Message,
+    Args, Block, Cache, Class, Codec, Content, Cost, EncodeError, Event, Json, Loss, Lost, Message,
     Profile, Quirks, Reply, Request, Retry, Role, Settings, Stop, Tool, ToolCall, Usage,
     codec::{MAX_BLOCKS, encode},
     profile::{Effort, MaxTokens, Think},
@@ -425,6 +425,18 @@ fn usage() {
             ..Usage::default()
         }
     );
+    // What it cost, only where the profile says what that is.
+    let told = |q: &Quirks, u: Value| {
+        with(q, &stream(&[ends("stop"), json!({"choices":[],"usage":u}).to_string()])).0.usage.cost
+    };
+    let routed = Profile::openrouter().quirks;
+    let cost = |amount| Some(Cost { amount, unit: "credits".into() });
+    assert_eq!(told(&routed, json!({"prompt_tokens":1,"cost":0.0056})), cost(0.0056));
+    assert_eq!(told(&routed, json!({"cost":0})), cost(0.0));
+    for odd in [json!({}), json!({"cost":-1}), json!({"cost":"1"}), json!({"cost":null})] {
+        assert_eq!(told(&routed, odd), None);
+    }
+    assert_eq!(told(&Quirks::default(), json!({"cost":1})), None);
     // More read from the cache than there was: said, and nothing made of it.
     let u = usage(json!({"prompt_tokens":1,"prompt_tokens_details":{"cached_tokens":60}}));
     assert_eq!((u.prompt, u.uncached, u.cache_read), (Some(1), None, Some(60)));
@@ -533,6 +545,7 @@ fn as_openrouter_streams() {
         cache_write: Some(100),
         output: Some(2),
         reasoning: Some(0),
+        cost: Some(Cost { amount: 0.95, unit: "credits".into() }),
         ..Usage::default()
     };
     assert_eq!(r.usage, want);

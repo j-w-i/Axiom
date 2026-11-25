@@ -541,7 +541,7 @@ fn turn(text: &str, reply: &str) -> Vec<Value> {
         json!({"hear": {"type": "user", "message": {"role": "user", "content": text}}, "as": "p"}),
         json!({"say": {"type": "system", "subtype": "init", "uuid": "u1", "session_id": "$p/session_id", "claude_code_version": "2.1.330", "cwd": "/w", "tools": [], "model": "claude-opus-5-5", "permissionMode": "acceptEdits"}}),
         json!({"say": {"type": "assistant", "uuid": "u2", "session_id": "$p/session_id", "parent_tool_use_id": null, "message": {"id": reply, "type": "message", "role": "assistant", "content": [{"type": "text", "text": reply}]}}}),
-        json!({"say": {"type": "result", "subtype": "success", "uuid": "u3", "session_id": "$p/session_id", "is_error": false, "num_turns": 1, "result": reply, "stop_reason": "end_turn", "usage": {"input_tokens": 3, "output_tokens": 6}, "user_message_uuids": ["$p/uuid"]}}),
+        json!({"say": {"type": "result", "subtype": "success", "uuid": "u3", "session_id": "$p/session_id", "is_error": false, "num_turns": 1, "result": reply, "stop_reason": "end_turn", "usage": {"input_tokens": 3, "output_tokens": 6}, "total_cost_usd": 0.5, "modelUsage": {"claude-haiku-5-5": {"outputTokens": 2, "costUSD": 0.25}}, "user_message_uuids": ["$p/uuid"]}}),
     ]
 }
 
@@ -564,6 +564,20 @@ async fn it_goes_on_where_it_was_after_the_host_is_gone() {
     let (o, e, all) = t.ended().await;
     assert_eq!((o, e), (Outcome::Completed, None), "{}", t.heard());
     assert_eq!(texts(&all, ItemKind::Prose), ["One."]);
+    // What it says it used is kept, as what it says it is of.
+    let Some(Body::Usage { usage, of, run, on: Some(on), cost: Some(cost), totals, .. }) =
+        all.iter().find(|b| matches!(b, Body::Usage { .. }))
+    else {
+        panic!("{all:?}")
+    };
+    assert_eq!((usage.output, *of, run.is_some()), (Some(6), Covers::Turn, true));
+    assert_eq!((on.harness.as_str(), on.lane, &on.connection), ("claude", Lane::Program, &None));
+    assert_eq!(
+        (cost.amount, cost.provenance, cost.of),
+        (0.5, Provenance::Estimated, Covers::Session)
+    );
+    assert_eq!(totals[0].model.as_deref(), Some("claude-haiku-5-5"));
+    assert_eq!(totals[0].cost.as_ref().unwrap().amount, 0.25);
     let seen = |t: &T| std::fs::read_to_string(t.f.dir.path().join("bin/seen.json")).unwrap();
     let first: Value = serde_json::from_str(&seen(&t)).unwrap();
     let args: Vec<&str> =

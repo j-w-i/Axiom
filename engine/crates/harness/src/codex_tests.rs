@@ -501,9 +501,21 @@ fn plans_usage_and_limits() {
         cache_write: Some(1),
         output: Some(5),
         reasoning: Some(2),
-        context: None,
+        ..Usage::default()
     };
     assert_eq!((&s.usage, s.provenance, &s.cost), (&want, Some(Provenance::Reported), &None));
+    assert_eq!(s.of, axiom_proto::Covers::Unknown);
+    assert_eq!(s.totals[0].usage.input, Some(99));
+    d.hear(note(
+        "thread/tokenUsage/updated",
+        json!({"tokenUsage": {"last": {"outputTokens": 1}, "total": {"outputTokens": 6}}}),
+    ));
+    let e = d.events();
+    let Event::Usage(s) = &e[0] else { panic!("{e:?}") };
+    let usage = Usage { output: Some(6), ..Usage::default() };
+    assert_eq!(s.totals, [ModelTotal { model: None, usage, cost: None }]);
+    d.hear(note("thread/tokenUsage/updated", json!({"tokenUsage": {"last": {}}})));
+    assert!(matches!(&d.events()[0], Event::Usage(s) if s.totals.is_empty()));
     d.hear(note("thread/tokenUsage/updated", json!({"tokenUsage": {}})));
     assert_eq!(d.told(), ["unknown usage"]);
     d.hear(note(

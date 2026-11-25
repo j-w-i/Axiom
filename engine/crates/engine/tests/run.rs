@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use axiom_engine::{Context, Limits, Say, Turn, Word};
 use axiom_model::{Content, Role};
 use axiom_policy::{Access, Answer};
-use axiom_proto::{Body, ItemKind, Outcome};
+use axiom_proto::{Body, Covers, ItemKind, Lane, Outcome, RunId};
 
 #[tokio::test]
 async fn an_answer_is_said_and_kept() {
@@ -464,6 +464,77 @@ async fn calls_of_an_answer_that_broke_off_are_never_run() {
     assert!(t.stage.tools().is_empty());
 }
 
+/// Of everything that was asked, also what came to nothing and what was asked aside: on what, for which
+/// run, and whether there may have been more.
+#[tokio::test]
+async fn all_that_was_used_is_told() {
+    let begins = |n: u64| {
+        let mut r = anthropic(None, "Hm", &[]);
+        r.keep(n as usize);
+        r
+    };
+    let mut broke = begins(3);
+    broke.cut = true;
+    let t = T::anthropic(
+        Access::Work,
+        vec![
+            broke,
+            anthropic(None, "Said.", &[]),
+            anthropic(None, "Notes.", &[]),
+            begins(3).hangs(),
+        ],
+    )
+    .await;
+    let mut a = t.agent();
+    a.model = "claude-asked".into();
+    assert_eq!(t.run(&mut a, "go").await.outcome, Outcome::Completed);
+    a.compact = true;
+    assert_eq!(t.run_unsaid(&mut a).await.outcome, Outcome::Completed);
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let person = async {
+        t.stage.until(|s| s.items(ItemKind::Prose).len() == 3).await;
+        tx.send(true).unwrap();
+    };
+    let (e, ()) = tokio::join!(t.run_with(&mut a, "more", rx), person);
+    assert_eq!(e.outcome, Outcome::Cancelled);
+    let runs: Vec<RunId> = t
+        .stage
+        .all()
+        .into_iter()
+        .filter_map(|s| match s {
+            Say::Event(Body::RunStarted { run, .. }) => Some(run),
+            _ => None,
+        })
+        .collect();
+    let told: Vec<_> = t
+        .stage
+        .used()
+        .into_iter()
+        .map(|b| {
+            let Body::Usage { usage, of, run, on, cost, totals, cut, aside, .. } = b else {
+                unreachable!()
+            };
+            let on = on.unwrap();
+            assert_eq!((on.harness.as_str(), on.lane), ("axiom", Lane::Open));
+            assert_eq!(on.connection.as_deref(), Some("c"));
+            assert_eq!(on.model.as_deref(), Some("claude-asked"));
+            assert_eq!(on.answered.as_deref(), Some("claude-test"));
+            assert_eq!((of, cost, totals.len()), (Covers::Answer, None, 0));
+            let at = runs.iter().position(|r| Some(r) == run.as_ref()).unwrap();
+            (at, usage.input, cut, aside)
+        })
+        .collect();
+    assert_eq!(
+        told,
+        [
+            (0, Some(40), true, false),
+            (0, Some(40), false, false),
+            (1, Some(40), false, true),
+            (2, Some(40), true, false),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn stopping_stops_the_answer() {
     let t = T::new(Access::Work, vec![text(&["I was say"]).hangs(), text(&["ok"])]).await;
@@ -848,6 +919,17 @@ async fn room_is_made_because_a_person_asks() {
     assert_eq!(t.run(&mut a, "Go on.").await.outcome, Outcome::Completed);
     let sent = t.server.requests()[2]["messages"].to_string();
     assert!(sent.contains("Kept: hello.") && sent.contains("Go on."), "{sent}");
+    // How full the context is, the summary does not say: it was asked for aside.
+    let told: Vec<_> = t
+        .stage
+        .used()
+        .iter()
+        .map(|b| match b {
+            Body::Usage { usage, aside, .. } => (usage.context.is_some(), *aside),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(told, [(true, false), (false, true), (true, false)]);
     let c = Context::load(&t.stage.turns()).unwrap();
     assert_eq!(c.messages(), a.context.messages());
 }

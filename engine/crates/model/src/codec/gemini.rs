@@ -462,5 +462,6 @@ fn count(told: &Value) -> Usage {
         cache_write_long: None,
         output: rest.or_else(|| shown.zip(thoughts).and_then(|(a, b)| a.checked_add(b))),
         reasoning: thoughts,
+        ..Usage::default()
     }
 }

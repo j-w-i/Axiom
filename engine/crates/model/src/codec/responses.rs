@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{Value, json, value::RawValue};
 
 use super::{
-    EncodeError, Encoded, Loss, Lost, MAX_BLOCKS, Unfinished, json as parse,
+    EncodeError, Encoded, Loss, Lost, MAX_BLOCKS, Unfinished, json as parse, name,
     object::{Array, Object},
     replays,
 };
@@ -259,6 +259,7 @@ struct Response {
     error: Option<Box<RawValue>>,
     incomplete_details: Option<Value>,
     usage: Option<Value>,
+    service_tier: Option<Value>,
 }
 /// Of any event.
 #[derive(Deserialize)]
@@ -530,6 +531,9 @@ fn usage(response: &Response, out: &mut Vec<Event>) {
         cache_write_long: None,
         output: count("/output_tokens"),
         reasoning: count("/output_tokens_details/reasoning_tokens"),
+        cost: None,
+        // Which tier served it, not which was asked for (guides/priority-processing, read 2026-11-26).
+        speed: response.service_tier.as_ref().and_then(name),
     }));
 }
 

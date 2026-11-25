@@ -17,7 +17,7 @@ use axiom_policy::{
 };
 use axiom_proto::{
     AgentId, AgentState, Body, Branched, ErrorCode, Execution, HarnessInfo, Instructions, ItemId,
-    Outcome, RunId, SessionId, WireError, limits, now_ms,
+    Outcome, RunId, SessionId, UsedOn, WireError, limits, now_ms,
 };
 use axiom_tools::{Output, Seen, Site, Spec};
 use serde::{Deserialize, Serialize};
@@ -1002,6 +1002,7 @@ pub async fn load(
 ) -> Result<Agent<Floor>, WireError> {
     let id = session.id.clone();
     let connection = setup.execution.connection.clone().unwrap_or_default();
+    let asked = connection.clone();
     let model = setup.execution.model.clone().unwrap_or_default();
     let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
     // Links, folders, the system's store: off the runtime's own threads.
@@ -1012,7 +1013,7 @@ pub async fn load(
         if s.apart.is_some() {
             told.0 = format!("{}\n\n{}", copies::WORDS, told.0);
         }
-        Ok::<_, WireError>((a.connections.client(&connection)?, site, told))
+        Ok::<_, WireError>((a.connections.client(&asked)?, site, told))
     })
     .await
     .map_err(internal)??;
@@ -1044,6 +1045,13 @@ pub async fn load(
     let mut a = Agent {
         id: agent.clone(),
         desk: agents.desk(&id),
+        on: UsedOn {
+            harness: setup.execution.harness.clone(),
+            lane: agents.connections.lane(&connection),
+            provider: Some(client.profile().provider.clone()),
+            connection: Some(connection),
+            ..UsedOn::default()
+        },
         client,
         model,
         settings,

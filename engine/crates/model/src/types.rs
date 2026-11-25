@@ -251,7 +251,7 @@ pub struct Request {
 
 /// Tokens as the provider counted them. What it did not say, and what does not follow from what it
 /// said, is absent.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     /// The whole prompt: uncached, read and written.
     pub prompt: Option<u64>,
@@ -264,6 +264,19 @@ pub struct Usage {
     pub output: Option<u64>,
     /// Part of `output`.
     pub reasoning: Option<u64>,
+    /// What the provider says it took for the answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Cost>,
+    /// How fast the provider says it was answered, where that has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Cost {
+    pub amount: f64,
+    /// What the provider calls what it took.
+    pub unit: String,
 }
 
 /// Why the model stopped, by its provider's account.
@@ -311,7 +324,7 @@ pub enum Delta {
 
 /// The stream, whoever it comes from. Blocks are numbered from 0 as they start, and several may be
 /// open at once.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Started {
         id: Option<String>,

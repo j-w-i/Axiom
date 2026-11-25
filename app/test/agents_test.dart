@@ -618,6 +618,16 @@ void main() {
     await settled(t);
     expect(find.byType(ContextGauge), findsOneWidget);
     expect(find.textContaining('Haiku 5.5', findRichText: true), findsWidgets);
+    // An answer that broke off says nothing of it.
+    s.current!.apply([
+      Event(62, 62, UsageReported('a', Usage.decode({'input': 1}), Known.reported, cut: true)),
+    ]);
+    expect(s.current!.agents['a']!.context, .42);
+    // What was summarised is as full as nobody has said yet.
+    s.current!.apply([
+      Event(63, 63, UsageReported('a', Usage.decode({'input': 1}), Known.reported, aside: true)),
+    ]);
+    expect(s.current!.agents['a']!.context, null);
     expect(s.current!.agents['a']!.access, Access.work);
   });
 

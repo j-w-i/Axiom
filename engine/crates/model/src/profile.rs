@@ -144,6 +144,9 @@ pub struct Quirks {
     /// string may be what is left of something.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub empty_args: Option<bool>,
+    /// Chat: what the usage calls `cost` is what the provider took, in this unit. Not told if absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_unit: Option<String>,
     /// More members of the request body. None that the codec writes itself.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub body: BTreeMap<String, Value>,
@@ -169,6 +172,7 @@ impl Quirks {
             replay_reasoning: self.replay_reasoning.or(base.replay_reasoning),
             think: self.think.or(base.think),
             empty_args: self.empty_args.or(base.empty_args),
+            cost_unit: self.cost_unit.clone().or(base.cost_unit.clone()),
             body,
         }
     }
@@ -267,6 +271,8 @@ impl Profile {
                 effort: Some(Effort::ReasoningEffort),
                 max_tokens_field: Some(MaxTokens::MaxCompletionTokens),
                 replay_reasoning: Some(true),
+                // use-cases/usage-accounting, read 2026-11-26: told with every answer.
+                cost_unit: Some("credits".into()),
                 ..Quirks::default()
             },
             ..Self::openai_compatible("openrouter", "https://openrouter.ai/api/v1")
@@ -429,6 +435,7 @@ mod tests {
             think: Some(Think::Open),
             empty_args: Some(true),
             no_limit: Some(true),
+            cost_unit: Some("c".into()),
             body: BTreeMap::from([("a".into(), Value::from(1)), ("b".into(), Value::from(1))]),
         };
         let mut p = Profile::openai_compatible("p", "https://e.com/v1");

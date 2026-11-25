@@ -12,7 +12,7 @@ use axiom_model::{
     Client, Credential, Endpoint, Options, Profile, Secret,
     chatgpt::{Known, Places, Signed},
 };
-use axiom_proto::{Connection, ErrorCode, WireError, limits};
+use axiom_proto::{Connection, ErrorCode, Lane, WireError, limits};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -296,6 +296,17 @@ impl Connections {
         k.ok_or_else(|| WireError::new(ErrorCode::NotFound, "no such connection"))
     }
 
+    /// How it is paid for, as far as that is known here.
+    pub fn lane(&self, id: &str) -> Lane {
+        match self.one(id) {
+            Ok(k) if k.account.is_some() => Lane::Plan,
+            Ok(k) if PROGRAMS.iter().any(|p| p.0 == k.provider) => Lane::Program,
+            Ok(k) if k.secret => Lane::Key,
+            Ok(_) => Lane::Open,
+            Err(_) => Lane::Unknown,
+        }
+    }
+
     /// An account that is to be signed in to again.
     pub fn known(&self, id: &str) -> Result<Known, WireError> {
         let k = self.one(id)?.account.ok_or_else(|| bad("this is not an account of a plan"))?;
@@ -446,6 +457,10 @@ mod tests {
         let b = c.add("Work".into(), "anthropic".into(), None, Some("other".into())).unwrap();
         let l = c.add("Here".into(), "lm-studio".into(), None, None).unwrap();
         assert!(a != b && c.list().len() == 3);
+        let p = c.add("Own".into(), "claude-code".into(), None, None).unwrap();
+        let lanes = [a.as_str(), &l, &p, "c_none"].map(|x| c.lane(x));
+        assert_eq!(lanes, [Lane::Key, Lane::Open, Lane::Program, Lane::Unknown]);
+        c.remove(&p).unwrap();
         let text = std::fs::read_to_string(t.file()).unwrap();
         assert!(!text.contains(CANARY), "{text}");
         #[cfg(unix)]

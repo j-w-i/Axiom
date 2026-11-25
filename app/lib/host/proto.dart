@@ -21,6 +21,12 @@ enum Answer { once, session, deny }
 
 enum Known { reported, measured, estimated, unknown }
 
+/// What a figure is the sum of. [session] is a running total.
+enum Covers { answer, turn, session, unknown }
+
+/// Who is paid, and how. At [plan], a cost is what it would have been by use.
+enum Lane { key, plan, program, open, unknown }
+
 enum Answerable { live, message, no, unknown }
 
 typedef Json = Map<String, Object?>;
@@ -404,14 +410,59 @@ class HostLimit {
 
 class Usage {
   Usage.decode(Json j)
-    : input = j['input'] as int?,
+    : prompt = j['prompt'] as int?,
+      cacheWriteLong = j['cache_write_long'] as int?,
+      input = j['input'] as int?,
       cacheRead = j['cache_read'] as int?,
       cacheWrite = j['cache_write'] as int?,
       output = j['output'] as int?,
       reasoning = j['reasoning'] as int?,
       context = (j['context'] as num?)?.toDouble();
   final int? input, cacheRead, cacheWrite, output, reasoning;
+
+  /// The whole prompt; of what was written to a cache, what is kept for an hour.
+  final int? prompt, cacheWriteLong;
   final double? context;
+}
+
+/// What was used, as it was then.
+class UsedOn {
+  UsedOn.decode(Json j)
+    : harness = j['harness']! as String,
+      lane = _enum(Lane.values, j['lane'], Lane.unknown),
+      provider = j['provider'] as String?,
+      connection = j['connection'] as String?,
+      model = j['model'] as String?,
+      answered = j['answered'] as String?,
+      speed = j['speed'] as String?;
+  final String harness;
+  final Lane lane;
+
+  /// [model] was asked for, [answered] is said to have answered.
+  final String? provider, connection, model, answered, speed;
+}
+
+class Cost {
+  Cost.decode(Json j)
+    : amount = (j['amount']! as num).toDouble(),
+      currency = j['currency']! as String,
+      provenance = _enum(Known.values, j['provenance'], Known.unknown),
+      of = _enum(Covers.values, j['of'], Covers.unknown);
+  final double amount;
+  final String currency;
+  final Known provenance;
+  final Covers of;
+}
+
+/// One model's part of everything so far; of no model, all of it.
+class ModelTotal {
+  ModelTotal.decode(Json j)
+    : model = j['model'] as String?,
+      usage = Usage.decode(j['usage']! as Json),
+      cost = j['cost'] == null ? null : Cost.decode(j['cost']! as Json);
+  final String? model;
+  final Usage usage;
+  final Cost? cost;
 }
 
 sealed class Body {
@@ -488,6 +539,16 @@ sealed class Body {
           j['agent']! as String,
           Usage.decode(j['usage']! as Json),
           _enum(Known.values, j['provenance'], Known.unknown),
+          of: _enum(Covers.values, j['of'], Covers.unknown),
+          run: j['run'] as String?,
+          on: j['on'] == null ? null : UsedOn.decode(j['on']! as Json),
+          cost: j['cost'] == null ? null : Cost.decode(j['cost']! as Json),
+          totals: [
+            for (final t in (j['totals'] as List<Object?>?) ?? const [])
+              ModelTotal.decode(t! as Json),
+          ],
+          cut: j['cut'] as bool? ?? false,
+          aside: j['aside'] as bool? ?? false,
         ),
         _ => UnknownBody('$type'),
       };
@@ -650,10 +711,34 @@ class RequestClosed extends Body {
 }
 
 class UsageReported extends Body {
-  const UsageReported(this.agent, this.usage, this.provenance);
+  const UsageReported(
+    this.agent,
+    this.usage,
+    this.provenance, {
+    this.of = Covers.unknown,
+    this.run,
+    this.on,
+    this.cost,
+    this.totals = const [],
+    this.cut = false,
+    this.aside = false,
+  });
   final String agent;
   final Usage usage;
   final Known provenance;
+
+  /// What [usage] covers.
+  final Covers of;
+  final String? run;
+  final UsedOn? on;
+  final Cost? cost;
+  final List<ModelTotal> totals;
+
+  /// The answer broke off: there may have been more.
+  final bool cut;
+
+  /// Not for the conversation itself, but to summarise it.
+  final bool aside;
 }
 
 class UnknownBody extends Body {

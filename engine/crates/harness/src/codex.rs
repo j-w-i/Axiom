@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use axiom_policy::{Access, Place, audit::Containment};
-use axiom_proto::{Outcome, Provenance, Usage};
+use axiom_proto::{ModelTotal, Outcome, Provenance, Usage};
 use serde_json::{Value, json};
 
 use crate::{
@@ -723,16 +723,26 @@ fn usage(p: &Value, o: &mut Out) {
     if !has(p, "/tokenUsage/last") {
         return o.unknown("usage", p);
     }
-    let n = |k: &str| p.pointer(&format!("/tokenUsage/last/{k}")).and_then(Value::as_u64);
-    o.event(Event::Usage(Spent {
-        usage: Usage {
+    let of = |what: &str| {
+        let n = |k: &str| p.pointer(&format!("/tokenUsage/{what}/{k}")).and_then(Value::as_u64);
+        Usage {
             input: n("inputTokens"),
             cache_read: n("cachedInputTokens"),
             cache_write: n("cacheWriteInputTokens"),
             output: n("outputTokens"),
             reasoning: n("reasoningOutputTokens"),
-            context: None,
-        },
+            ..Usage::default()
+        }
+    };
+    let total = has(p, "/tokenUsage/total").then(|| ModelTotal {
+        model: None,
+        usage: of("total"),
+        cost: None,
+    });
+    // What the last is the last of, its documentation does not say.
+    o.event(Event::Usage(Spent {
+        usage: of("last"),
+        totals: total.into_iter().collect(),
         provenance: Some(Provenance::Reported),
         ..Spent::default()
     }));

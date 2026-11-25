@@ -592,7 +592,9 @@ fn what_else_it_asks_for_is_refused() {
 fn usage_and_limits() {
     let mut d = at_work();
     d.hear(result(json!({"total_cost_usd": 0.12, "usage": {"input_tokens": 3, "cache_read_input_tokens": 40, "cache_creation_input_tokens": 5, "output_tokens": 6,
-        "output_tokens_details": {"thinking_tokens": 2}}})));
+        "output_tokens_details": {"thinking_tokens": 2}, "cache_creation": {"ephemeral_1h_input_tokens": 4}},
+        "modelUsage": {"claude-opus-5-5": {"inputTokens": 1, "outputTokens": 2, "cacheReadInputTokens": 3, "cacheCreationInputTokens": 4, "costUSD": 0.1},
+            "odd": {"inputTokens": -1, "costUSD": -2}}})));
     let e = d.events();
     let Event::Usage(s) = &e[0] else { panic!("{e:?}") };
     let want = Usage {
@@ -601,13 +603,27 @@ fn usage_and_limits() {
         cache_write: Some(5),
         output: Some(6),
         reasoning: Some(2),
-        context: None,
+        cache_write_long: Some(4),
+        ..Usage::default()
     };
+    assert_eq!(s.of, Covers::Turn);
     assert_eq!((&s.usage, s.provenance), (&want, Some(Provenance::Reported)));
-    assert_eq!(
-        s.cost,
-        Some(Cost { amount: 0.12, currency: "USD".into(), provenance: Provenance::Estimated })
-    );
+    let dollars = |amount| {
+        let (provenance, of) = (Provenance::Estimated, Covers::Session);
+        Some(Cost { amount, currency: "USD".into(), provenance, of })
+    };
+    assert_eq!(s.cost, dollars(0.12));
+    // The other loops and models it used, of the session so far.
+    let opus = Usage {
+        input: Some(1),
+        output: Some(2),
+        cache_read: Some(3),
+        cache_write: Some(4),
+        ..Usage::default()
+    };
+    let total = |model: &str, usage, cost| ModelTotal { model: Some(model.into()), usage, cost };
+    let nothing = total("odd", Usage::default(), None);
+    assert_eq!(s.totals, [total("claude-opus-5-5", opus, dollars(0.1)), nothing]);
     d.hear(json!({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed_warning", "resetsAt": 1_795_600_000, "utilization": 0.83}}));
     let e = d.events();
     let Event::Limit(l) = &e[0] else { panic!("{e:?}") };

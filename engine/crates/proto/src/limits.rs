@@ -5,7 +5,7 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::{Answerable, Body, Execution};
+use crate::{Answerable, Body, Execution, UsedOn};
 
 /// A line from someone who has not shown the token.
 pub const HELLO_LINE: usize = 4 * 1024;
@@ -21,6 +21,8 @@ pub const TITLE: usize = 500;
 pub const WORKSPACE: usize = 4 * 1024;
 const NAME: usize = 500;
 const SCOPE: usize = 4 * 1024;
+/// Models of one report.
+pub const TOTALS: usize = 64;
 /// What a request is about, and why a run failed.
 pub const LONG: usize = 64 * 1024;
 
@@ -194,10 +196,27 @@ impl Body {
                     *v = json!({ "type": kind, "truncated": n });
                 }
             }
-            Body::RequestOpened { .. }
-            | Body::AgentState { .. }
-            | Body::RunStarted { .. }
-            | Body::Usage { .. } => {}
+            Body::Usage { on, cost, totals, .. } => {
+                if let Some(on) = on {
+                    let UsedOn { harness, lane: _, provider, connection, model, answered, speed } =
+                        on.as_mut();
+                    clip(harness, NAME);
+                    for s in [provider, connection, model, answered, speed] {
+                        clip_opt(s, NAME);
+                    }
+                }
+                if let Some(c) = cost {
+                    clip(&mut c.currency, NAME);
+                }
+                totals.truncate(TOTALS);
+                for t in totals {
+                    clip_opt(&mut t.model, NAME);
+                    if let Some(c) = &mut t.cost {
+                        clip(&mut c.currency, NAME);
+                    }
+                }
+            }
+            Body::RequestOpened { .. } | Body::AgentState { .. } | Body::RunStarted { .. } => {}
         }
     }
 }
@@ -242,6 +261,12 @@ mod tests {
         let some = || Some(nul());
         let wide = || Some(json!([nul()]));
         let id = |p: &str| p.to_owned();
+        let cost = || Cost {
+            amount: f64::MAX,
+            currency: nul(),
+            provenance: Provenance::Estimated,
+            of: Covers::Session,
+        };
         let (a, r, i, q) = (AgentId(id("a")), RunId(id("r")), ItemId(id("i")), RequestId(id("q")));
         vec![
             Body::SessionCreated { title: nul(), workspace: some() },
@@ -304,6 +329,33 @@ mod tests {
                 session: false,
             },
             Body::RequestClosed { request: q, answer: nul() },
+            Body::Usage {
+                agent: AgentId(id("a")),
+                usage: Usage::default(),
+                provenance: Provenance::Reported,
+                of: Covers::Turn,
+                run: None,
+                on: Some(Box::new(UsedOn {
+                    harness: nul(),
+                    lane: Lane::Program,
+                    provider: some(),
+                    connection: some(),
+                    model: some(),
+                    answered: some(),
+                    speed: some(),
+                })),
+                cost: Some(Box::new(cost())),
+                totals: vec![
+                    ModelTotal {
+                        model: some(),
+                        usage: Usage::default(),
+                        cost: Some(cost())
+                    };
+                    5000
+                ],
+                cut: true,
+                aside: true,
+            },
             Body::Unknown(json!({ "type": nul(), "x": nul() })),
         ]
     }

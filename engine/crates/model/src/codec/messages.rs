@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{
-    EncodeError, Encoded, Loss, Lost, MAX_BLOCKS, Unfinished, json as parse,
+    EncodeError, Encoded, Loss, Lost, MAX_BLOCKS, Unfinished, json as parse, name,
     object::{Array, Object},
     replays,
 };
@@ -371,6 +371,8 @@ impl Decoder {
             count("/cache_creation/ephemeral_1h_input_tokens").or(u.cache_write_long);
         u.output = count("/output_tokens").or(u.output);
         u.reasoning = count("/output_tokens_details/thinking_tokens").or(u.reasoning);
+        // build-with-claude/fast-mode, read 2026-11-26.
+        u.speed = told.get("speed").and_then(name).or(u.speed.take());
         u.prompt = match (u.uncached, u.cache_read, u.cache_write) {
             (Some(a), Some(b), Some(c)) => a.checked_add(b).and_then(|ab| ab.checked_add(c)),
             _ => None,

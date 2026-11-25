@@ -278,7 +278,15 @@ async fn an_agent_works_on_bedrock() {
     let used: Vec<_> = all
         .iter()
         .filter_map(|b| match b {
-            Body::Usage { usage, provenance, .. } => Some((usage.input, usage.output, *provenance)),
+            Body::Usage { usage, provenance, on, of, run, .. } => {
+                let on = on.as_deref().unwrap();
+                assert!(run.is_some() && *of == Covers::Answer);
+                assert_eq!((on.harness.as_str(), on.lane), ("axiom", Lane::Key));
+                assert_eq!(on.provider.as_deref(), Some("bedrock"));
+                assert!(on.connection.as_deref().is_some_and(|c| c.starts_with("c_")));
+                assert_eq!(on.model.as_deref(), Some("us.anthropic.claude-sonnet-5-5"));
+                Some((usage.input, usage.output, *provenance))
+            }
             _ => None,
         })
         .collect();

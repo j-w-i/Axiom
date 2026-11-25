@@ -157,6 +157,96 @@ pub struct Usage {
     /// Share of the context window in use, 0–1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<f64>,
+    /// The whole prompt, where that is told: with what was read from a cache and written to one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<u64>,
+    /// Of `cache_write`, what was written to be kept for an hour, which costs more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_long: Option<u64>,
+}
+
+/// What a figure is the sum of.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Covers {
+    /// One answer of a model.
+    Answer,
+    /// From a prompt to the end of what came of it.
+    Turn,
+    /// Everything so far, as whoever runs the loop counts it: a running total, not to be added up.
+    Session,
+    /// Not said.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl Covers {
+    fn unknown(&self) -> bool {
+        *self == Self::Unknown
+    }
+}
+
+/// Who is paid, and how.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Lane {
+    /// By use.
+    Key,
+    /// A plan that was signed in to: a cost is what it would have been by use.
+    Plan,
+    /// A program of the person's own, which signs in by itself. Which way is its own.
+    Program,
+    /// Nobody: a server that takes no key.
+    Open,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// What was used, as it was then: accounts are removed, and agents run on something else.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsedOn {
+    pub harness: String,
+    #[serde(default)]
+    pub lane: Lane,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+    /// The one that was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The one that is said to have answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered: Option<String>,
+    /// How fast it is said to have been done, where that has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Cost {
+    pub amount: f64,
+    /// ISO 4217, or what a provider calls its own.
+    pub currency: String,
+    pub provenance: Provenance,
+    #[serde(default, skip_serializing_if = "Covers::unknown")]
+    pub of: Covers,
+}
+
+/// One model's part of everything so far, or all of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelTotal {
+    /// Absent: of all models together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub usage: Usage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Cost>,
+}
+
+fn not(b: &bool) -> bool {
+    !*b
 }
 
 /// Where a branch begins.
@@ -283,7 +373,29 @@ pub enum Body {
     #[serde(rename = "request.closed")]
     RequestClosed { request: RequestId, answer: String },
     #[serde(rename = "usage")]
-    Usage { agent: AgentId, usage: Usage, provenance: Provenance },
+    Usage {
+        agent: AgentId,
+        usage: Usage,
+        provenance: Provenance,
+        /// What `usage` covers.
+        #[serde(default, skip_serializing_if = "Covers::unknown")]
+        of: Covers,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<Box<UsedOn>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost: Option<Box<Cost>>,
+        /// By model, where that is told.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        totals: Vec<ModelTotal>,
+        /// The answer broke off or was stopped: there may have been more than was told by then.
+        #[serde(default, skip_serializing_if = "not")]
+        cut: bool,
+        /// Not for the conversation itself, but to summarise it.
+        #[serde(default, skip_serializing_if = "not")]
+        aside: bool,
+    },
     /// Something newer than this build.
     #[serde(untagged)]
     Unknown(Value),

@@ -19,8 +19,8 @@ use axiom_policy::{
     Access, Approval, Ask, Place, Reach, Unsandboxed, audit::Containment, rules::Decision,
 };
 use axiom_proto::{
-    AgentState, Answerable, Body, HarnessInfo, ItemId, ItemKind, Outcome, Provenance, RequestId,
-    RunId, Usage, limits,
+    AgentState, Answerable, Body, HarnessInfo, ItemId, ItemKind, Lane, Outcome, Provenance,
+    RequestId, RunId, Usage, UsedOn, limits,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -355,6 +355,8 @@ impl Worker {
             questions: HashMap::new(),
             slot: self.slot.clone(),
             model: self.setup.execution.model.clone(),
+            runs_on: None,
+            connection: self.setup.execution.connection.clone(),
             plan: None,
             limit: None,
             early: None,
@@ -458,6 +460,9 @@ struct Attempt {
     questions: HashMap<String, (AbortHandle, RequestId, Option<String>)>,
     slot: Arc<Slot>,
     model: Option<String>,
+    /// As it says.
+    runs_on: Option<String>,
+    connection: Option<String>,
     plan: Option<String>,
     limit: Option<String>,
     /// A turn that ended before it was followed.
@@ -826,8 +831,27 @@ impl Attempt {
                     .and_then(|(n, of)| (of > 0).then(|| (n as f64 / of as f64).clamp(0.0, 1.0)));
                 let usage = Usage { context: share.or(s.usage.context), ..s.usage };
                 let provenance = s.provenance.unwrap_or(Provenance::Reported);
-                let agent = self.floor.agent.clone();
-                let body = Body::Usage { agent, usage, provenance };
+                let on = UsedOn {
+                    harness: self.id.into(),
+                    lane: Lane::Program,
+                    provider: None,
+                    connection: self.connection.clone(),
+                    model: self.model.clone(),
+                    answered: self.runs_on.clone(),
+                    speed: None,
+                };
+                let body = Body::Usage {
+                    agent: self.floor.agent.clone(),
+                    usage,
+                    provenance,
+                    of: s.of,
+                    run: self.run.clone(),
+                    on: Some(Box::new(on)),
+                    cost: s.cost.map(Box::new),
+                    totals: s.totals,
+                    cut: false,
+                    aside: false,
+                };
                 self.floor.say(vec![Say::Event(body)]).await?;
             }
             Event::Plan(p) => {
@@ -871,6 +895,7 @@ impl Attempt {
         self.resumes = r.caps.resume;
         // Otherwise it begins anew when its program has ended, and says so.
         self.floor.resume(r.caps.resume.then_some(r.session)).await;
+        self.runs_on.clone_from(&r.model);
         if let (Some(is), Some(asked)) = (&r.model, &self.model)
             && is != asked
         {

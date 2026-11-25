@@ -128,8 +128,15 @@ fn counts_are_kept_until_they_are_told_again() {
         cache_write_long: Some(10),
         output: Some(7),
         reasoning: Some(5),
+        ..Usage::default()
     };
     assert_eq!(r.usage, want);
+    // How fast it was done, whichever event says so.
+    for (first, last) in [(json!("fast"), json!(null)), (json!("standard"), json!("fast"))] {
+        let a = json!({"type":"message_start","message":{"usage":{"speed":first}}}).to_string();
+        let z = json!({"type":"message_delta","delta":{},"usage":{"speed":last}}).to_string();
+        assert_eq!(read(&stream(&[&a, &z, STOP])).0.usage.speed.as_deref(), Some("fast"));
+    }
     // Nonsense is not a count.
     let odd = r#"{"type":"message_start","message":{"usage":{"input_tokens":-1,"cache_read_input_tokens":"5","cache_creation_input_tokens":1.5,"output_tokens":null}}}"#;
     assert_eq!(read(&stream(&[odd])).0.usage, Usage::default());

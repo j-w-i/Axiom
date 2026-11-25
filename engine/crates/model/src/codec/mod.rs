@@ -23,6 +23,11 @@ mod schema;
 /// Most an answer may bring, as event data. Everything a decoder or an accumulator holds comes out
 /// of this.
 pub const MAX_ANSWER: usize = 64 * 1024 * 1024;
+/// A word of a provider's own, if it is one.
+pub(crate) fn name(v: &serde_json::Value) -> Option<String> {
+    v.as_str().filter(|s| !s.is_empty() && s.len() <= 64).map(str::to_owned)
+}
+
 /// Most blocks of one answer: a block costs more to hold than to send.
 pub const MAX_BLOCKS: usize = 4096;
 

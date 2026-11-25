@@ -14,7 +14,7 @@ use axiom_engine::{
 };
 use axiom_model::{Client, Endpoint, Options, Profile, Settings};
 use axiom_policy::{Access, Budget, Caps, Keep, Net, Place, Policy, Reach, Tools};
-use axiom_proto::{AgentId, Body, ItemId, ItemKind, Outcome, RequestId, RunId};
+use axiom_proto::{AgentId, Body, ItemId, ItemKind, Lane, Outcome, RequestId, RunId, UsedOn};
 use axiom_tools::{Seen, Site, specs, system};
 use tokio::sync::{mpsc, watch};
 
@@ -104,7 +104,7 @@ impl Memory {
         let at = |x: &str| l.iter().position(|y| y == x);
         matches!((at(a), at(b)), (Some(x), Some(y)) if x < y)
     }
-    fn items(&self, kind: ItemKind) -> Vec<(ItemId, String)> {
+    pub fn items(&self, kind: ItemKind) -> Vec<(ItemId, String)> {
         self.all()
             .into_iter()
             .filter_map(|s| match s {
@@ -157,7 +157,15 @@ impl Memory {
             .collect()
     }
     pub fn usage(&self) -> usize {
-        self.all().iter().filter(|s| matches!(s, Say::Event(Body::Usage { .. }))).count()
+        self.used().len()
+    }
+    /// Every report of what was used.
+    pub fn used(&self) -> Vec<Body> {
+        let used = |s| match s {
+            Say::Event(b @ Body::Usage { .. }) => Some(b),
+            _ => None,
+        };
+        self.all().into_iter().filter_map(used).collect()
     }
     pub fn requests(&self) -> usize {
         self.all().iter().filter(|s| matches!(s, Say::Event(Body::RequestOpened { .. }))).count()
@@ -355,6 +363,12 @@ impl T {
             desk: self.desk.clone(),
             client: Client::new(self.profile.clone(), endpoint, None, Options::default()).unwrap(),
             model: "m".into(),
+            on: UsedOn {
+                harness: "axiom".into(),
+                lane: Lane::Open,
+                connection: Some("c".into()),
+                ..UsedOn::default()
+            },
             settings: Settings { max_output: Some(1000), ..Settings::default() },
             window: Some(1000),
             site: Site {

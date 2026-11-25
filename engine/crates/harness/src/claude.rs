@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axiom_policy::{Access, audit::Containment};
-use axiom_proto::{Outcome, Provenance, Usage};
+use axiom_proto::{Cost, Covers, ModelTotal, Outcome, Provenance, Usage, limits};
 use serde_json::{Value, json};
 
 use crate::{
@@ -753,10 +753,33 @@ fn patch(r: &Value) -> Option<Diff> {
     Some(Diff { path, new, ..Diff::default() })
 }
 
+/// `usage` is of this turn, and of the main loop only; the rest is of the whole session so far, what it
+/// was resumed with included (agent-sdk/cost-tracking, read 2026-11-26).
 fn usage(v: &Value, o: &mut Out) {
     let n = |k: &str| v.pointer(&format!("/usage/{k}")).and_then(Value::as_u64);
-    let cost = v.pointer("/total_cost_usd").and_then(Value::as_f64);
-    if !has(v, "/usage") && cost.is_none() {
+    let cost = v.pointer("/total_cost_usd").and_then(dollars);
+    let totals: Vec<ModelTotal> = v
+        .pointer("/modelUsage")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .take(limits::TOTALS)
+        .map(|(model, m)| {
+            let n = |k: &str| m.get(k).and_then(Value::as_u64);
+            ModelTotal {
+                model: Some(model.clone()),
+                usage: Usage {
+                    input: n("inputTokens"),
+                    cache_read: n("cacheReadInputTokens"),
+                    cache_write: n("cacheCreationInputTokens"),
+                    output: n("outputTokens"),
+                    ..Usage::default()
+                },
+                cost: m.get("costUSD").and_then(dollars),
+            }
+        })
+        .collect();
+    if !has(v, "/usage") && cost.is_none() && totals.is_empty() {
         return;
     }
     o.event(Event::Usage(Spent {
@@ -766,17 +789,26 @@ fn usage(v: &Value, o: &mut Out) {
             cache_write: n("cache_creation_input_tokens"),
             output: n("output_tokens"),
             reasoning: n("output_tokens_details/thinking_tokens"),
-            context: None,
+            cache_write_long: n("cache_creation/ephemeral_1h_input_tokens"),
+            ..Usage::default()
         },
         context: None,
-        // Its documentation: an estimate, not a bill.
-        cost: cost.map(|amount| Cost {
-            amount,
-            currency: "USD".into(),
-            provenance: Provenance::Estimated,
-        }),
+        of: Covers::Turn,
+        cost,
+        totals,
         provenance: Some(Provenance::Reported),
     }));
+}
+
+/// Its documentation: an estimate, not a bill.
+fn dollars(v: &Value) -> Option<Cost> {
+    let amount = v.as_f64().filter(|a| *a >= 0.0)?;
+    Some(Cost {
+        amount,
+        currency: "USD".into(),
+        provenance: Provenance::Estimated,
+        of: Covers::Session,
+    })
 }
 
 fn limit(v: &Value, o: &mut Out) {

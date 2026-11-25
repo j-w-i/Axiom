@@ -444,6 +444,7 @@ async fn several_accounts_and_the_same_installation() {
     let mut t = T::new().await;
     let (a, b) = (t.sign_in().await, t.sign_in().await);
     assert!(a != b && t.list().await.len() == 2);
+    assert_eq!(connections(&t).lane(&a), Lane::Plan);
     assert_eq!(vaulted(&t.vault, &a).as_deref(), Some("rt-canary-1"));
     assert_eq!(vaulted(&t.vault, &b).as_deref(), Some("rt-canary-2"));
     let one = t.begin().await.asked["ext_agent_host_id"].clone();

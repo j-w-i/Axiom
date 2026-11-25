@@ -47,6 +47,19 @@ void main() {
       [1, 2, 3, 4, 5],
     );
     expect([u.usage.context, u.provenance], [.5, Known.estimated]);
+    expect([u.usage.prompt, u.usage.cacheWriteLong], [6, 7]);
+    expect([u.of, u.run, u.cut, u.aside], [Covers.turn, 'r_1', true, true]);
+    final on = u.on!;
+    expect(
+      [on.harness, on.lane, on.provider, on.connection],
+      ['claude', Lane.program, 'anthropic', 'c_2'],
+    );
+    expect([on.model, on.answered, on.speed], ['m', 'm-1', 'fast']);
+    final cost = u.cost!;
+    expect([cost.amount, cost.currency], [.25, 'USD']);
+    expect([cost.provenance, cost.of], [Known.estimated, Covers.session]);
+    final total = u.totals.single;
+    expect([total.model, total.usage.output, total.cost], ['m-1', 8, null]);
     expect((messages[1] as Resync).last, 9);
     final s = SessionInfo.decode(
       ((messages[2] as Answered).result! as List<Object?>).first! as Json,

@@ -41,6 +41,10 @@ impl Reply {
             }
         }
     }
+    /// Only its first events.
+    pub fn keep(&mut self, n: usize) {
+        self.body.truncate(n);
+    }
     /// After what it says, nothing more comes.
     pub fn hangs(mut self) -> Self {
         self.hang = true;
