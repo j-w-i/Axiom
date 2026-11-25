@@ -67,6 +67,28 @@ impl Env {
         Self { vars: vars.into_iter().map(|(k, v)| (k.to_string(), v)).collect() }
     }
 
+    /// For a program of a person's own that signs in by itself (an agent harness): what it needs to
+    /// find its files and other programs, and nothing that is not here. No key is passed on (SI-3).
+    pub fn harness(
+        path: &[Place],
+        home: &Place,
+        user: &str,
+        tmp: &Place,
+    ) -> Result<Self, SpawnError> {
+        if user.is_empty() || user.chars().any(|c| c.is_control() || c == '/') {
+            return Err(SpawnError::Env("USER".into()));
+        }
+        let path: Vec<&str> = path.iter().map(Place::as_str).filter(|p| !p.contains(':')).collect();
+        let vars = [
+            ("PATH", path.join(":")),
+            ("HOME", home.to_string()),
+            ("USER", user.to_owned()),
+            ("LANG", "en_US.UTF-8".into()),
+            ("TMPDIR", tmp.to_string()),
+        ];
+        Ok(Self { vars: vars.into_iter().map(|(k, v)| (k.to_string(), v)).collect() })
+    }
+
     /// Sets one more. Names that make a loader or a shell run something are refused.
     pub fn set(&mut self, name: &str, value: &str) -> Result<(), SpawnError> {
         let plain =
