@@ -94,8 +94,14 @@ impl Endpoint {
     pub(crate) fn is_plain(&self) -> bool {
         self.base.scheme() == "http"
     }
-    pub(crate) fn port(&self) -> u16 {
-        self.origin.port
+    pub(crate) fn host(&self) -> (&str, u16) {
+        (&self.origin.host, self.origin.port)
+    }
+    /// What [`Endpoint::parse`] refuses.
+    #[cfg(test)]
+    pub(crate) fn unchecked(text: &str) -> Self {
+        let base = Url::parse(text).unwrap();
+        Self { origin: Origin::of(&base).unwrap(), base }
     }
 }
 
