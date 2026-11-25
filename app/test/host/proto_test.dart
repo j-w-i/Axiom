@@ -25,6 +25,7 @@ void main() {
     final b = {for (final e in (messages[0] as Events).events) e.body.runtimeType: e.body};
     final added = b[AgentAdded]! as AgentAdded;
     expect([added.name, added.parent, added.apart], ['Lead', 'a_0', true]);
+    expect([added.plan, (b[AgentChanged]! as AgentChanged).plan], [true, true]);
     final from = added.from!;
     expect([from.agent, from.item, from.kept], ['a_0', 'i_0', true]);
     final x = added.execution;

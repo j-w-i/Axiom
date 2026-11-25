@@ -171,7 +171,13 @@ class _StartPageState extends State<StartPage> {
                 d.access,
                 can: d.can,
                 of: other?.name ?? 'Axiom',
-                onChanged: (v) => d.change(() => d.access = v),
+                plan: d.plan,
+                plans: d.plans,
+                onChanged: (v, plan) => d.change(() {
+                  d
+                    ..access = v
+                    ..plan = plan;
+                }),
               ),
           ],
         ),
@@ -183,7 +189,7 @@ class _StartPageState extends State<StartPage> {
             runSpacing: 2,
             children: [
               if (!adds) _FolderKey(d),
-              if (d.access != Access.read)
+              if (d.access != Access.read || d.plan)
                 AxSelect<bool>(
                   label: 'Works in',
                   quiet: true,

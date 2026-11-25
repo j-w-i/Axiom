@@ -1,14 +1,98 @@
-//! An agent's own list of things to do. It is the agent's claim, and nothing depends on it (PR-25).
+//! What an agent means to do: its own list, which is its claim and nothing depends on (PR-25), and a
+//! plan it hands in before it does anything, for its person to accept.
 
-use axiom_engine::{Other, Say};
+use axiom_engine::{Other, Say, Stage};
 use axiom_policy::rules::Decision;
-use axiom_proto::{Body, Todo, TodoState, limits};
+use axiom_proto::{Body, ItemId, ItemKind, Outcome, Todo, TodoState, limits};
 use axiom_tools::{Output, Spec};
 use serde_json::{Value, json};
 
 use crate::agents::Floor;
 
 pub const TODO: &str = "todo";
+pub const PLAN: &str = "plan";
+/// Bytes of a plan.
+pub const MOST: usize = 64 * 1024;
+
+/// For an agent that is to hand in a plan.
+pub const WORDS: &str = "You are asked for a plan first. Look as much as you need to; you can change nothing yet. If something is open that only your person can decide, ask them. When you know what to do, hand in the plan with the tool plan: what will be changed, where and in what order, how it will be checked, and what is not certain. Then end your turn, without saying the plan again. You begin when they have accepted it.";
+
+/// What an agent is told whose plan has been accepted.
+pub fn accepted(text: Option<String>) -> String {
+    match text {
+        None => "Your plan is accepted. Do it now.".into(),
+        Some(t) => format!("Your plan is accepted as it is here. Do it now.\n\n{}", t.trim()),
+    }
+}
+
+pub fn plan() -> Spec {
+    Spec {
+        name: PLAN,
+        description: "Hands in your plan, for your person to accept, change or refuse. It is shown to them whole. Another one takes its place.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The whole plan, in Markdown."},
+            },
+            "required": ["text"],
+            "additionalProperties": false,
+        }),
+    }
+}
+
+fn planned(args: &Value) -> Result<&str, String> {
+    let text = args.get("text").and_then(Value::as_str).map(str::trim);
+    let text = text.filter(|t| !t.is_empty()).ok_or("say it: text")?;
+    if text.len() > MOST {
+        return Err(format!("a plan has at most {MOST} bytes"));
+    }
+    Ok(text)
+}
+
+/// Only from one that was asked for it. It changes nothing: what is accepted is its person's to say.
+pub async fn judge_plan(f: &Floor, args: &Value) -> Other {
+    match planned(args) {
+        Err(why) => seen(Decision::Deny, why),
+        Ok(_) if !f.setup().await.is_some_and(|s| s.plan) => {
+            seen(Decision::Deny, "nobody asked for a plan".into())
+        }
+        Ok(_) => seen(Decision::Allow, "it is only shown".into()),
+    }
+}
+
+pub async fn hand_in(f: &Floor, args: &Value) -> Output {
+    let out = |ok, text: String| Output { ok, text, rest: None, detail: Value::Null };
+    let text = match planned(args) {
+        Ok(t) => t.to_owned(),
+        Err(why) => return out(false, format!("Not done: {why}.")),
+    };
+    let Some(run) = f.run().await else { return out(false, "Not done: there is no run.".into()) };
+    let item = ItemId::new();
+    let begins = Body::ItemStarted {
+        item: item.clone(),
+        run,
+        agent: f.agent.clone(),
+        kind: ItemKind::Plan,
+        name: String::new(),
+        args: None,
+        args_cut: 0,
+    };
+    let all = vec![
+        Say::Event(begins),
+        Say::Text(item.clone(), text),
+        Say::End(item.clone(), Outcome::Completed, None),
+    ];
+    let said = async {
+        Stage::say(f, all).await?;
+        // Shown before it can be accepted.
+        Stage::sync(f).await
+    };
+    if let Err(e) = said.await {
+        return out(false, format!("Not handed in: {e}."));
+    }
+    f.keep(|s| s.planned = Some(item)).await;
+    out(true, "Handed in. Your person decides; end your turn now.".into())
+}
 
 pub fn todo() -> Spec {
     Spec {
@@ -58,10 +142,13 @@ fn understand(args: &Value) -> Result<Vec<Todo>, String> {
 
 /// Nothing is asked: it changes nothing but what is shown.
 pub fn judge(args: &Value) -> Other {
-    let (decision, why) = match understand(args) {
-        Ok(_) => (Decision::Allow, "it is only shown".to_owned()),
-        Err(why) => (Decision::Deny, why),
-    };
+    match understand(args) {
+        Ok(_) => seen(Decision::Allow, "it is only shown".into()),
+        Err(why) => seen(Decision::Deny, why),
+    }
+}
+
+fn seen(decision: Decision, why: String) -> Other {
     Other {
         decision,
         what: String::new(),
@@ -85,7 +172,7 @@ pub async fn perform(f: &Floor, args: &Value) -> Output {
     };
     let run = f.run().await;
     let say = Say::Event(Body::Todo { agent: f.agent.clone(), run, steps, text: None });
-    match axiom_engine::Stage::say(f, vec![say]).await {
+    match Stage::say(f, vec![say]).await {
         Ok(()) => out(true, "Shown.".into(), json!({"summary": summary})),
         Err(e) => out(false, format!("Not shown: {e}."), Value::Null),
     }
@@ -95,6 +182,14 @@ pub async fn perform(f: &Floor, args: &Value) -> Output {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plan_has_words_and_an_end() {
+        let of = |t: &str| planned(&json!({ "text": t })).map(str::to_owned);
+        assert_eq!(of(" # P \n").as_deref(), Ok("# P"));
+        assert!(of(&"x".repeat(MOST)).is_ok() && of(&"x".repeat(MOST + 1)).is_err());
+        assert!(of(" ").is_err() && planned(&json!({})).is_err());
+    }
 
     #[test]
     fn a_list_is_whole_or_refused() {

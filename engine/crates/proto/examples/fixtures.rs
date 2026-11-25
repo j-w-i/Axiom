@@ -31,6 +31,7 @@ fn main() -> Result<(), serde_json::Error> {
                 item: ItemId("i_0".into()),
                 with: true,
             })),
+            plan: true,
         },
         Body::AgentChanged {
             agent: a.clone(),
@@ -43,6 +44,7 @@ fn main() -> Result<(), serde_json::Error> {
                 environment: None,
             },
             access: Some(Access::Work),
+            plan: true,
         },
         Body::AgentState { agent: a.clone(), state: AgentState::Asking },
         Body::RunStarted { run: r.clone(), agent: a.clone() },

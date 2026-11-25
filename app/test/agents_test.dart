@@ -21,7 +21,6 @@ import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/editable.dart';
 import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/marks.dart';
-import 'package:axiom/ui/overlay.dart';
 import 'package:axiom/ui/status.dart';
 import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
@@ -67,6 +66,7 @@ class Asked extends HostStore {
     List<Instructions> instructions = const [],
     bool trust = false,
     bool apart = false,
+    bool plan = false,
   }) => _do([
     'add',
     session,
@@ -79,6 +79,7 @@ class Asked extends HostStore {
     access,
     for (final i in instructions) i.digest,
     if (apart) 'apart',
+    if (plan) 'plan',
   ], 'a_new');
 
   CopyChanges copy = const CopyChanges();
@@ -157,17 +158,31 @@ class Asked extends HostStore {
   @override
   Future<void> cancel(String session, String run) => _do(['cancel', session, run], null);
   @override
-  Future<void> setAgent(String session, String agent, {Execution? execution, Access? access}) =>
-      _do([
-        'set',
-        session,
-        agent,
-        execution?.model,
-        execution?.connection,
-        ?execution?.environment,
-        ?execution?.effort,
-        access,
-      ], null);
+  Future<void> setAgent(
+    String session,
+    String agent, {
+    Execution? execution,
+    Access? access,
+    bool? plan,
+  }) => _do([
+    'set',
+    session,
+    agent,
+    execution?.model,
+    execution?.connection,
+    ?execution?.environment,
+    ?execution?.effort,
+    access,
+    if (plan ?? false) 'plan',
+  ], null);
+  @override
+  Future<void> acceptPlan(
+    String session,
+    String agent,
+    String item,
+    Access access, {
+    String? text,
+  }) => _do(['accept', session, agent, item, access, ?text], null);
   @override
   Future<String> connect(String name, String provider, {String? url, String? secret}) async {
     final id = await _do(['connect', name, provider, url, secret], 'c_new');
@@ -2263,6 +2278,121 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
+  group('a plan first', () {
+    testWidgets('is asked for when it is begun', (t) async {
+      final s = await shell(t);
+      s.harnesses = harnesses;
+      await press(t, find.bySemanticsLabel('New session').first);
+      await t.enterText(field('Task'), 'Think it over.');
+      await folder(t, '/home/me/project');
+      await runs(t, 'Model', 'GPT-5.6');
+      await press(t, find.bySemanticsLabel('Access: Ask first'));
+      await snap(t, 'plan-access');
+      await press(t, find.bySemanticsLabel('Plan first').last);
+      expect(find.bySemanticsLabel('Access: Plan first'), findsOneWidget);
+      await press(t, find.bySemanticsLabel(RegExp('^Works in')));
+      await press(t, find.bySemanticsLabel('In a separate copy').last);
+      await press(t, find.bySemanticsLabel('Start session'));
+      expect(s.calls.where((c) => c.first == 'add').single, [
+        'add',
+        's_new',
+        'Lead',
+        'c1',
+        'gpt-5.6',
+        Access.read,
+        'apart',
+        'plan',
+      ]);
+    });
+
+    testWidgets('and not of a program with its own tools', (t) async {
+      final s = await shell(t);
+      s.harnesses = harnesses;
+      await press(t, find.bySemanticsLabel('New session').first);
+      await press(t, find.bySemanticsLabel('Access: Ask first'));
+      await press(t, find.bySemanticsLabel('Plan first').last);
+      await runs(t, 'Harness', 'Goose');
+      expect(find.bySemanticsLabel('Access: Plan first'), findsNothing);
+      await press(t, find.bySemanticsLabel(RegExp('^Access: ')));
+      expect(find.bySemanticsLabel('Plan first'), findsNothing);
+    });
+
+    Future<Asked> proposed(WidgetTester t) async {
+      final s = await shell(t, session: working(access: Access.read));
+      final m = s.current!, run = m.agents['a']!.run!;
+      var n = m.seq + 1;
+      Event e(Body b) => Event(n, n++, b);
+      m.apply([
+        e(const AgentChanged('a', x, Access.read, plan: true)),
+        e(ItemStarted('p9', run, 'a', ItemKind.plan, '', null)),
+        e(const ItemEnded('p9', Outcome.completed, '## First\n\n1. Make `n.txt`.', null)),
+      ]);
+      await settled(t);
+      expect(find.text('Plan ready'), findsNothing, reason: 'it is still at work');
+      m.apply([e(RunEnded(run, Outcome.completed, null))]);
+      await settled(t);
+      await t.pump(const Duration(seconds: 1));
+      return s;
+    }
+
+    testWidgets('is shown whole and accepted as it is', (t) async {
+      final s = await proposed(t);
+      expect(find.textContaining('Plan ready', findRichText: true), findsOneWidget);
+      expect(find.text('Plan'), findsOneWidget);
+      expect(find.textContaining('First', findRichText: true), findsWidgets);
+      expect(find.text('What should be different'), findsOneWidget);
+      await snap(t, 'plan-ready');
+      await press(t, find.bySemanticsLabel('Then: Ask first'));
+      await press(t, find.bySemanticsLabel('Work without asking').last);
+      await press(t, find.widgetWithText(AxButton, 'Accept'));
+      expect(s.calls.last, ['accept', 's', 'a', 'p9', Access.work]);
+    });
+
+    testWidgets('or as its person has it', (t) async {
+      final s = await proposed(t);
+      await press(t, find.widgetWithText(AxButton, 'Edit plan'));
+      await t.pump(const Duration(seconds: 1));
+      expect(find.widgetWithText(AxButton, 'Accept'), findsOneWidget, reason: 'it is the same');
+      await t.enterText(field('Plan'), '  ');
+      await settled(t);
+      AxButton accept() =>
+          t.widget(find.byWidgetPredicate((w) => w is AxButton && w.label.startsWith('Accept')));
+      expect(accept().onPressed, isNull);
+      await t.enterText(field('Plan'), '## Mine');
+      await settled(t);
+      await snap(t, 'plan-edited');
+      s.failure = const Failed(1, 'bad_request', 'this is not the plan');
+      await press(t, find.widgetWithText(AxButton, 'Accept as edited'));
+      expect(find.text('this is not the plan'), findsOneWidget);
+      s.failure = null;
+      await press(t, find.widgetWithText(AxButton, 'Accept as edited'));
+      expect(s.calls.last, ['accept', 's', 'a', 'p9', Access.ask, '## Mine']);
+      // What was written is given up by a press, and not otherwise.
+      await press(t, find.widgetWithText(AxButton, 'Discard edits'));
+      expect(field('Plan'), findsNothing);
+    });
+
+    testWidgets('waits until something else is said', (t) async {
+      final s = await proposed(t);
+      final m = s.current!;
+      var n = m.seq + 1;
+      m.apply([
+        Event(n, n++, const RunStarted('r8', 'a')),
+        Event(n, n++, const ItemStarted('w9', 'r8', 'a', ItemKind.prompt, '', null)),
+        Event(n, n++, const ItemEnded('w9', Outcome.completed, 'another way', null)),
+        Event(n, n++, const RunEnded('r8', Outcome.completed, null)),
+      ]);
+      await settled(t);
+      expect(find.textContaining('Plan ready', findRichText: true), findsNothing);
+      // Who may do something else is not asked for one any more.
+      await press(t, find.bySemanticsLabel('Access: Plan first'));
+      await press(t, find.bySemanticsLabel('Ask first').last);
+      expect(s.calls.last, ['set', 's', 'a', null, null, Access.ask]);
+      await press(t, find.bySemanticsLabel('Access: Plan first'));
+      await press(t, find.bySemanticsLabel('Plan first').last);
+    });
+  });
+
   testWidgets('what an agent says it means to do ticks off beside it', (t) async {
     final s = Asked()
       ..current = working()
@@ -2577,7 +2707,7 @@ void main() {
     await press(t, find.bySemanticsLabel('New session').first);
     await part(t, 'Model');
     expect(field('Model name'), findsOneWidget);
-    expect(find.byType(AxSelect<Access>), findsOneWidget);
+    expect(find.byType(AccessKey), findsOneWidget);
   });
 
   testWidgets('models are asked for when somebody looks, once', (t) async {

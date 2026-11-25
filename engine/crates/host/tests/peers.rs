@@ -74,6 +74,7 @@ impl T {
             trust: false,
             instructions: vec![],
             apart: false,
+            plan: false,
         };
         let v = self.c.call(call).await.unwrap();
         A { id: AgentId(v["agent"].as_str().unwrap().into()), server }
@@ -709,6 +710,7 @@ async fn a_delegated_agent_is_told_with_a_yes() {
         trust: true,
         instructions: vec![],
         apart: false,
+        plan: false,
     };
     t.c.call(call).await.unwrap();
     let run = t.prompt(&lead, "go").await;

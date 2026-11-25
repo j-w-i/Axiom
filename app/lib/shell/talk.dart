@@ -20,6 +20,7 @@ import '../ui/status.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
 import 'outside.dart';
+import 'plan.dart';
 import 'start.dart';
 
 /// What an agent asks, and where it is spoken to. Only for an agent that can act: a replayed one is
@@ -323,7 +324,15 @@ class _TalkState extends State<Talk> {
       a.access ?? Access.ask,
       can: program?.access ?? Access.values,
       of: s.harnessName(x.harness),
-      onChanged: (v) => unawaited(_do(() => s.setAgent(widget.session.id, a.id, access: v))),
+      plan: a.planning,
+      plans: program == null,
+      onChanged: (v, plan) => unawaited(
+        _do(
+          () => plan
+              ? s.setAgent(widget.session.id, a.id, plan: true)
+              : s.setAgent(widget.session.id, a.id, access: v),
+        ),
+      ),
     );
   }
 
@@ -413,6 +422,17 @@ class _TalkState extends State<Talk> {
                     ],
                   ),
                 ),
+            if (a.proposed case final p? when widget.live && branch == null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: PlanBar(
+                  p.source,
+                  key: ValueKey(p.id),
+                  can: const [Access.ask, Access.work],
+                  onAccept: (access, text) =>
+                      _do(() => s.acceptPlan(widget.session.id, a.id, p.id, access, text: text)),
+                ),
+              ),
             // How a run failed is said once, by the conversation.
             if (problem case final p?)
               Semantics(
@@ -446,6 +466,8 @@ class _TalkState extends State<Talk> {
               header: branch == null ? null : _branchHeader(context, branch),
               placeholder: branch != null
                   ? 'Message the new branch'
+                  : a.proposed != null
+                  ? 'What should be different'
                   : works
                   ? 'Message ${a.name}. Sent before its next step'
                   : 'Message ${a.name}',

@@ -84,6 +84,7 @@ impl T {
             trust: true,
             instructions: vec![],
             apart: false,
+            plan: false,
         };
         AgentId(self.c.call(call).await.unwrap()["agent"].as_str().unwrap().into())
     }
@@ -341,6 +342,7 @@ async fn its_key_opens_one_tool_and_dies_with_it() {
             agent: t.agent().await,
             execution: None,
             access: Some(Access::Ask),
+            plan: None,
         };
         let _ = t.c.call(set).await;
     }
@@ -409,6 +411,7 @@ async fn with_hands(access: Access) -> (T, AgentId, RunId) {
         trust: false,
         instructions: vec![],
         apart: false,
+        plan: false,
     };
     // Its own way of asking is in no documentation; Axiom's needs none.
     let own = add(Execution { environment: None, ..execution.clone() }, Access::Ask);
@@ -648,4 +651,55 @@ async fn it_is_stopped_with_what_it_does() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("they are there still");
+}
+
+/// With Axiom's tools in place of its own, a program can be asked for a plan first; not with its own.
+#[tokio::test]
+async fn a_program_hands_in_a_plan() {
+    let waits = json!({"hear": {"type": "control_request", "request": {"subtype": "interrupt"}}});
+    let mut t = T::new(&claude_script(&[waits])).await;
+    let add = |harness: &str, environment: Option<&str>| Call::AgentAdd {
+        session: t.s.clone(),
+        name: "Lead".into(),
+        execution: Execution {
+            harness: harness.into(),
+            provider: None,
+            model: None,
+            connection: None,
+            effort: None,
+            environment: environment.map(str::to_owned),
+        },
+        access: Access::Read,
+        trust: true,
+        instructions: vec![],
+        apart: false,
+        plan: true,
+    };
+    let (own, good) = (add("claude", None), add("claude", Some("axiom")));
+    let e = t.c.call(own).await.unwrap_err().to_string();
+    assert!(e.contains("cannot be asked for a plan"), "{e}");
+    let v = t.c.call(good).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    let call =
+        Call::Prompt { session: t.s.clone(), agent: a.clone(), text: "go".into(), key: None };
+    t.c.call(call).await.unwrap();
+    let (request, digest, _) = t.question().await;
+    t.answer(request, Answer::Once, digest).await;
+    let (mut b, args) = t.mcp().await;
+    let words = args.iter().position(|a| a == "--append-system-prompt-file").unwrap();
+    let words = std::fs::read_to_string(&args[words + 1]).unwrap();
+    assert!(words.contains("asked for a plan first"), "{words}");
+    b.say(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
+    assert!(b.hear().await["result"]["tools"].to_string().contains("Hands in your plan"));
+    b.say(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "plan", "arguments": {"text": "# Mine"}}}))
+        .await;
+    let said = t
+        .until(|b| match b {
+            Body::ItemEnded { text, .. } if text.starts_with('#') => Some(text.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(said, "# Mine");
+    assert!(b.hear().await.to_string().contains("Your person decides"));
 }

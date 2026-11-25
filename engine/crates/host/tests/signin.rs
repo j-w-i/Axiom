@@ -742,6 +742,7 @@ async fn an_agent_works_on_it() {
         trust: false,
         instructions: vec![],
         apart: false,
+        plan: false,
     };
     let agent = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
     for over in [false, true] {

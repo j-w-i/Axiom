@@ -313,7 +313,8 @@ impl Worker {
             Some(_) if self.known.harness.takes_tools() => {
                 let f = &self.floor;
                 let words = self.words.as_deref();
-                f.agents.grant(&f.session.id, &f.agent, &self.site.tmp, start.hands, words).ok()
+                let opens = (start.hands, self.setup.plan);
+                f.agents.grant(&f.session.id, &f.agent, &self.site.tmp, opens, words).ok()
             }
             _ => None,
         };

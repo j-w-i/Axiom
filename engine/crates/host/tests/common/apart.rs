@@ -104,6 +104,7 @@ impl T {
             trust: false,
             instructions: vec![],
             apart,
+            plan: false,
         };
         AgentId(self.c.call(call).await.unwrap()["agent"].as_str().unwrap().into())
     }

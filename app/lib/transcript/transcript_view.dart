@@ -980,6 +980,17 @@ class _BlockViewState extends State<BlockView> {
         : b.kind == BlockKind.item
         ? 6.0
         : 11.0;
+    if (widget.voice == ItemKind.plan && widget.opens) {
+      child = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SelectionContainer.disabled(child: Text('Plan', style: t.type.label.ink(c.ink3))),
+          const SizedBox(height: 4),
+          child,
+        ],
+      );
+    }
     if (asked && widget.opens && widget.by.isNotEmpty) {
       child = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1045,6 +1056,7 @@ class _BlockViewState extends State<BlockView> {
       label: switch (widget.voice) {
         ItemKind.prompt => widget.by.isEmpty ? 'Request' : 'Request from ${widget.by}',
         ItemKind.reasoning => 'Reasoning',
+        ItemKind.plan => 'Plan',
         _ => 'Answer',
       },
       child: child,
@@ -1389,7 +1401,7 @@ class ToolRow extends StatelessWidget {
     'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => AxIcon.terminal,
     'fetch' || 'webfetch' || 'websearch' => AxIcon.web,
     'delegate' || 'agent' || 'task' => AxIcon.delegate,
-    'todo' || 'todowrite' || 'taskcreate' || 'taskupdate' || 'tasklist' => AxIcon.list,
+    'plan' || 'todo' || 'todowrite' || 'taskcreate' || 'taskupdate' || 'tasklist' => AxIcon.list,
     _ => AxIcon.more,
   };
 
@@ -1406,6 +1418,7 @@ class ToolRow extends StatelessWidget {
     'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => ('Running', 'Ran'),
     'fetch' || 'webfetch' || 'websearch' => ('Fetching', 'Fetched'),
     'delegate' || 'agent' || 'task' => ('Working with another agent', 'Worked with another agent'),
+    'plan' => ('Writing a plan', 'Wrote a plan'),
     'todo' ||
     'todowrite' ||
     'taskcreate' ||
@@ -1454,7 +1467,12 @@ class ToolRow extends StatelessWidget {
     }
     // A patch is named by what it changed, and never by its own text.
     final patch = isPatch(item.name);
-    final detail = patch ? patched(item).join(', ') : detailOf(args);
+    final detail = patch
+        ? patched(item).join(', ')
+        // It stands under it, whole.
+        : item.name == 'plan'
+        ? ''
+        : detailOf(args);
     final shown = item.argsCut > 0 && !patch
         ? '${_bytes(item.argsCut)} of arguments, not kept'
         : oneLine(literal(cutTo(detail, 800)), 400);

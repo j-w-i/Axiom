@@ -132,6 +132,7 @@ pub async fn start(
             access: None,
             apart: false,
             from: None,
+            plan: false,
         }),
         Say::Event(Body::RunStarted { run: run.clone(), agent: agent.clone() }),
         Say::Event(Body::AgentState { agent: agent.clone(), state: AgentState::Running }),

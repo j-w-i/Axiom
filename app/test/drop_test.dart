@@ -53,6 +53,7 @@ class Asked extends HostStore {
     List<Instructions> instructions = const [],
     bool trust = false,
     bool apart = false,
+    bool plan = false,
   }) async {
     did.add('add');
     return 'a';

@@ -128,7 +128,7 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
     assert!(!t.changes(&a).await.made);
     // It can be set up as another, as any agent.
     let (session, access) = (t.s.clone(), Some(Access::Ask));
-    let set = Call::AgentSet { session, agent: a.clone(), execution: None, access };
+    let set = Call::AgentSet { session, agent: a.clone(), execution: None, access, plan: None };
     t.c.call(set).await.unwrap();
     t.does(&a, "true").await;
     assert_eq!(t.copied(&a, "a.txt").as_deref(), Some("one and not committed\n"));
@@ -565,6 +565,7 @@ async fn nothing_is_thrown_away_unsaid() {
         trust: false,
         instructions: vec![],
         apart: true,
+        plan: false,
     };
     assert!(t.c.call(call).await.is_err());
     t.s = was;

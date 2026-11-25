@@ -517,9 +517,11 @@ class HostStore extends ChangeNotifier {
     List<Instructions> instructions = const [],
     bool trust = false,
     bool apart = false,
+    bool plan = false,
   }) async {
     final r = await _live.call('agent.add', {
       if (apart) 'apart': true,
+      if (plan) 'plan': true,
       'session': session,
       'name': name,
       'execution': x.encode(),
@@ -530,13 +532,36 @@ class HostStore extends ChangeNotifier {
     return (r! as Json)['agent']! as String;
   }
 
-  Future<void> setAgent(String session, String agent, {Execution? execution, Access? access}) =>
-      _live.call('agent.set', {
-        'session': session,
-        'agent': agent,
-        'execution': ?execution?.encode(),
-        'access': ?access?.name,
-      });
+  /// [plan]: whether it is to hand in a plan first; then it only reads.
+  Future<void> setAgent(
+    String session,
+    String agent, {
+    Execution? execution,
+    Access? access,
+    bool? plan,
+  }) => _live.call('agent.set', {
+    'session': session,
+    'agent': agent,
+    'execution': ?execution?.encode(),
+    'access': ?access?.name,
+    'plan': ?plan,
+  });
+
+  /// Accepts the plan an agent has handed in last, as it is or as [text] has it. It may do what
+  /// [access] says then, and begins.
+  Future<void> acceptPlan(
+    String session,
+    String agent,
+    String item,
+    Access access, {
+    String? text,
+  }) => _live.call('plan.accept', {
+    'session': session,
+    'agent': agent,
+    'item': item,
+    'access': access.name,
+    'text': ?text,
+  });
 
   /// Whether a conversation can be branched at an item.
   Future<BranchInfo> lookBranch(String session, String agent, String item) async {

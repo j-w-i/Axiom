@@ -61,15 +61,24 @@ class AccessKey extends StatelessWidget {
     required this.of,
     required this.onChanged,
     super.key,
+    this.plan = false,
+    this.plans = false,
   });
   final Access access;
+
+  /// It is asked for a plan first; and whether it can be.
+  final bool plan, plans;
 
   /// What there is a mode for, and of which harness.
   final List<Access> can;
   final String of;
-  final ValueChanged<Access> onChanged;
+
+  /// How much, and whether it is to hand in a plan first.
+  final void Function(Access access, bool plan) onChanged;
+
+  static const _plan = (Access.read, true);
   @override
-  Widget build(BuildContext context) => AxSelect<Access>(
+  Widget build(BuildContext context) => AxSelect<(Access, bool)>(
     label: 'Access',
     quiet: true,
     command: Command.access,
@@ -77,12 +86,14 @@ class AccessKey extends StatelessWidget {
     items: [
       for (final i in accessItems)
         if (can.contains(i.value))
-          i
+          AxMenuItem((i.value, false), i.label, detail: i.detail)
         else
-          AxMenuItem(i.value, i.label, enabled: false, why: '$of has no mode for it'),
+          AxMenuItem((i.value, false), i.label, enabled: false, why: '$of has no mode for it'),
+      if (plans || plan)
+        const AxMenuItem(_plan, 'Plan first', detail: 'reads, and hands in a plan'),
     ],
-    value: access,
-    onChanged: onChanged,
+    value: (access, plan),
+    onChanged: (v) => onChanged(v.$1, v.$2),
   );
 }
 
@@ -287,7 +298,12 @@ class StartDraft extends ChangeNotifier {
   /// What it may be, as it is set up now.
   List<Access> get can => withHands ? Access.values : delegated?.access ?? Access.values;
 
+  /// It is to hand in a plan first. Of Axiom's own, or with Axiom's tools.
+  bool plan = false;
+  bool get plans => harness == 'axiom' || withHands;
+
   void fit() {
+    plan = plan && plans;
     // The least it has a mode for, if not the one that is chosen.
     if (!can.contains(access)) {
       access = [Access.ask, Access.read, Access.work].where(can.contains).firstOrNull ?? access;
@@ -306,7 +322,7 @@ class StartDraft extends ChangeNotifier {
 
   /// In a copy of the folder of its own. Beside others it is, if nobody says otherwise.
   late bool apart = into != null;
-  bool get worksApart => apart && access != Access.read;
+  bool get worksApart => apart && (access != Access.read || plan);
 
   /// Of a program: another account than its first.
   String? account;
@@ -449,7 +465,7 @@ class StartDraft extends ChangeNotifier {
         m = _Made(session, where);
         _made = m;
       }
-      final how = (x.provider, x.model, x.connection, x.effort, x.environment, access);
+      final how = (x.provider, x.model, x.connection, x.effort, x.environment, access, plan);
       if (m.agent == null) {
         m.agent = await store.addAgent(
           m.session,
@@ -459,12 +475,13 @@ class StartDraft extends ChangeNotifier {
           instructions: followed,
           trust: other && trust,
           apart: worksApart,
+          plan: plan,
         );
         m
           ..how = how
           ..follows = as;
       } else if (m.how != how) {
-        await store.setAgent(m.session, m.agent!, execution: x, access: access);
+        await store.setAgent(m.session, m.agent!, execution: x, access: access, plan: plan);
         m.how = how;
       }
       if (shown() && into == null) await store.open(m.session);

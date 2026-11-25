@@ -298,6 +298,7 @@ mod tests {
                 access: None,
                 apart: false,
                 from: None,
+                plan: false,
             },
             Body::AgentChanged {
                 agent: a.clone(),
@@ -310,6 +311,7 @@ mod tests {
                     environment: some(),
                 },
                 access: None,
+                plan: false,
             },
             Body::RunEnded { run: r.clone(), outcome: Outcome::Failed, error: some() },
             Body::ItemStarted {

@@ -171,12 +171,14 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
             trust: false,
             instructions: Vec::new(),
             apart: false,
+            plan: false,
         },
         ["set", s, agent, a] => Call::AgentSet {
             session: SessionId(s.into()),
             agent: AgentId(agent.into()),
             execution: None,
             access: Some(access(a)?),
+            plan: None,
         },
         ["open", path] => {
             let path = std::fs::canonicalize(path).map_err(|e| format!("{path}: {e}"))?;

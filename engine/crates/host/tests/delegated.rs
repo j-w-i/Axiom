@@ -94,6 +94,7 @@ impl T {
             trust,
             instructions: vec![],
             apart: false,
+            plan: false,
         }
     }
     async fn agent(&mut self, harness: &str, access: Access) -> AgentId {
@@ -378,6 +379,7 @@ async fn what_a_delegated_agent_may_not_be() {
         trust,
         instructions,
         apart: false,
+        plan: false,
     };
     let x = Execution { connection: Some("c_1".into()), ..execution.clone() };
     assert!(t.c.call(with(x, vec![])).await.unwrap_err().to_string().contains("one account"));
@@ -403,8 +405,13 @@ async fn what_a_delegated_agent_may_not_be() {
     assert!(e.unwrap_err().to_string().contains("inside what an agent may write"));
     // It keeps its harness.
     let execution = Execution { harness: "claude".into(), ..execution };
-    let set =
-        Call::AgentSet { session: t.s.clone(), agent: a, execution: Some(execution), access: None };
+    let set = Call::AgentSet {
+        session: t.s.clone(),
+        agent: a,
+        execution: Some(execution),
+        access: None,
+        plan: None,
+    };
     assert!(t.c.call(set).await.unwrap_err().to_string().contains("keeps its harness"));
 }
 
@@ -489,6 +496,7 @@ async fn it_is_stopped() {
         agent: a,
         execution: None,
         access: Some(Access::Ask),
+        plan: None,
     };
     let mut r = t.c.call(set.clone()).await;
     for _ in 0..100 {
@@ -668,17 +676,25 @@ async fn a_second_account_is_kept_apart() {
         (Some("claude-code"), None, None)
     );
     let with = |t: &T, harness: &str, access, connection: &str| match t.add(harness, access, true) {
-        Call::AgentAdd { session, name, execution, access, trust, instructions, apart } => {
-            Call::AgentAdd {
-                session,
-                name,
-                execution: Execution { connection: Some(connection.into()), ..execution },
-                access,
-                trust,
-                instructions,
-                apart,
-            }
-        }
+        Call::AgentAdd {
+            session,
+            name,
+            execution,
+            access,
+            trust,
+            instructions,
+            apart,
+            plan: _,
+        } => Call::AgentAdd {
+            session,
+            name,
+            execution: Execution { connection: Some(connection.into()), ..execution },
+            access,
+            trust,
+            instructions,
+            apart,
+            plan: false,
+        },
         _ => panic!(),
     };
     let call = Call::ConnectionAdd {
@@ -726,6 +742,7 @@ async fn a_second_account_is_kept_apart() {
             environment: None,
         }),
         access: None,
+        plan: None,
     };
     let (to_more, to_first) = (set(Some(&more)), set(None));
     for (call, dir) in [(to_more, Some(more)), (to_first, None)] {

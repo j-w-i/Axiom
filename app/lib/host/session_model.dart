@@ -27,7 +27,10 @@ class ItemModel extends ChangeNotifier {
   /// without putting that together.
   int _length = 0, _hash = 0;
   String? _ended;
-  bool get rich => kind == ItemKind.prose || kind == ItemKind.prompt || kind == ItemKind.reasoning;
+  bool get rich => switch (kind) {
+    ItemKind.prose || ItemKind.prompt || ItemKind.reasoning || ItemKind.plan => true,
+    _ => false,
+  };
   String get plain => _ended ?? _plain.toString();
 
   /// What was said, as it was written: Markdown, with whatever hides in it.
@@ -75,6 +78,7 @@ class AgentModel extends ChangeNotifier {
     this.since, {
     this.access,
     this.apart = false,
+    this.planning = false,
   }) : name = oneLine(name, 60);
   final String id, name;
   Execution execution;
@@ -84,6 +88,19 @@ class AgentModel extends ChangeNotifier {
 
   /// It works in a copy of the folder of its own.
   final bool apart;
+
+  /// It only reads, and hands in a plan.
+  bool planning;
+
+  /// The plan that waits for its person: the last it handed in, if nothing has been said since.
+  ItemModel? get proposed {
+    if (!planning || run != null) return null;
+    for (final i in items.reversed) {
+      if (i.kind == ItemKind.prompt) return null;
+      if (i.kind == ItemKind.plan && i.agent == id && !i.open) return i;
+    }
+    return null;
+  }
 
   /// The run it is in.
   String? run;
@@ -223,16 +240,27 @@ class SessionModel extends ChangeNotifier {
         :final access,
         :final apart,
         :final from,
+        :final plan,
       ):
-        final a = AgentModel(agent, name, execution, parent, e.at, access: access, apart: apart);
+        final a = AgentModel(
+          agent,
+          name,
+          execution,
+          parent,
+          e.at,
+          access: access,
+          apart: apart,
+          planning: plan,
+        );
         if (from != null) {
           if (agents[from.agent] case final of?) a._goesOn(of, from);
         }
         agents[agent] = a;
         return true;
-      case AgentChanged(:final agent, :final execution, :final access):
+      case AgentChanged(:final agent, :final execution, :final access, :final plan):
         if (agents[agent] case final a?) {
           a
+            ..planning = plan
             ..execution = execution
             ..access = access;
           touched.add(a);

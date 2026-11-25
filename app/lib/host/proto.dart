@@ -11,7 +11,7 @@ enum AgentPhase { waiting, running, asking, paused, done, failed, unknown }
 
 enum Outcome { completed, failed, cancelled, interrupted, unknown }
 
-enum ItemKind { prompt, prose, reasoning, tool, notice, unknown }
+enum ItemKind { prompt, prose, reasoning, tool, notice, plan, unknown }
 
 /// What an agent may do without asking.
 enum Access { read, ask, work, unknown }
@@ -542,11 +542,13 @@ sealed class Body {
             ),
             _ => null,
           },
+          plan: j['plan'] as bool? ?? false,
         ),
         'agent.changed' => AgentChanged(
           j['agent']! as String,
           Execution.decode(j['execution']! as Json),
           j['access'] == null ? null : _enum(Access.values, j['access'], Access.unknown),
+          plan: j['plan'] as bool? ?? false,
         ),
         'agent.state' => AgentStateChanged(
           j['agent']! as String,
@@ -669,7 +671,11 @@ class AgentAdded extends Body {
     this.access,
     this.apart = false,
     this.from,
+    this.plan = false,
   });
+
+  /// It only reads, and hands in a plan.
+  final bool plan;
 
   /// It works in a copy of the folder of its own.
   final bool apart;
@@ -684,7 +690,10 @@ class AgentAdded extends Body {
 
 /// What it runs on or may do is another from here on.
 class AgentChanged extends Body {
-  const AgentChanged(this.agent, this.execution, this.access);
+  const AgentChanged(this.agent, this.execution, this.access, {this.plan = false});
+
+  /// It only reads, and hands in a plan.
+  final bool plan;
   final String agent;
   final Execution execution;
   final Access? access;

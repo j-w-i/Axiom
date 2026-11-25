@@ -1075,6 +1075,7 @@ fn slow(c: &Call) -> bool {
             | Call::Harnesses {}
             | Call::ProgramSet { .. }
             | Call::ProgramRemove { .. }
+            | Call::PlanAccept { .. }
             | Call::Changes { .. }
             | Call::CopyChanges { .. }
             | Call::CopyBring { .. }
@@ -1224,6 +1225,8 @@ async fn branch(
     let written = a.written(&st.store).await?;
     let mut new = p.setup.clone();
     new.name = name;
+    // What was handed in is the other's.
+    new.planned = None;
     new.from = Some(agents::Origin { agent: agent.clone(), turns: p.n });
     if let Some(apart) = &mut new.apart {
         apart.made = false;
@@ -1558,6 +1561,9 @@ fn specs_of(who: &Holder) -> Vec<axiom_tools::Spec> {
     all.extend(peers::specs());
     if who.all {
         all.push(planning::todo());
+        if who.plan {
+            all.push(planning::plan());
+        }
     }
     all
 }
@@ -1575,7 +1581,7 @@ async fn by_peer(
     tool: String,
     args: Value,
 ) -> Result<Value, WireError> {
-    let Holder { session, agent, all } = who.clone();
+    let Holder { session, agent, all, plan: _ } = who.clone();
     if !all && tool != peers::TOOL {
         return Err(WireError::new(ErrorCode::Unauthorised, "this key opens nothing else"));
     }
@@ -1748,7 +1754,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             begun.await.map_err(|_| internal("the run did not start"))??;
             Ok(json!({ "run": run, "agent": agent }))
         }
-        Call::AgentAdd { session, name, execution, access, trust, instructions, apart } => {
+        Call::AgentAdd { session, name, execution, access, trust, instructions, apart, plan } => {
             let workspace = workspace(st, &session).await?;
             if agents::full(stored(st, &session).await?.len()) {
                 return Err(agents::bad("the session has as many agents as it may"));
@@ -1775,6 +1781,8 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                     began,
                     apart,
                     from: None,
+                    plan,
+                    planned: None,
                 };
                 a.setup(s, &written)
             })
@@ -1887,7 +1895,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let all = blocking(move || a.look(&path)).await??;
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
         }
-        Call::AgentSet { session, agent, execution, access } => {
+        Call::AgentSet { session, agent, execution, access, plan } => {
             let slot = st.agents.slot(&session, &agent);
             // Nothing begins meanwhile.
             let _held = slot.hold().await?;
@@ -1901,7 +1909,13 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 setup.resume = None;
             }
             setup.execution = execution.unwrap_or(setup.execution);
-            setup.access = access.unwrap_or(setup.access);
+            setup.access = match (access, plan) {
+                (Some(a), _) => a,
+                (None, Some(true)) => axiom_proto::Access::Read,
+                (None, _) => setup.access,
+            };
+            // Who may do something else is not asked for a plan any more.
+            setup.plan = plan.unwrap_or(setup.plan && access.is_none());
             let a = st.agents.clone();
             let written = a.written(&st.store).await?;
             let setup = blocking(move || a.setup(setup, &written)).await??;
@@ -1911,6 +1925,29 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             slot.changed().await;
             said(st, &session, agents::changed(&agent, &setup)).await?;
             Ok(json!({}))
+        }
+        Call::PlanAccept { session, agent, item, access, text } => {
+            if text.as_ref().is_some_and(|t| t.trim().is_empty() || t.len() > planning::MOST) {
+                return Err(agents::bad("a plan has between 1 and 65536 bytes"));
+            }
+            let slot = st.agents.slot(&session, &agent);
+            {
+                // Nothing begins meanwhile.
+                let _held = slot.hold().await?;
+                let mut setup = setup(st, &session, &agent).await?;
+                if !setup.plan || setup.planned.as_ref() != Some(&item) {
+                    return Err(agents::bad("this is not the plan the agent has handed in last"));
+                }
+                (setup.plan, setup.planned, setup.access) = (false, None, access);
+                let a = st.agents.clone();
+                let written = a.written(&st.store).await?;
+                let setup = blocking(move || a.setup(setup, &written)).await??;
+                keep(st, &session, &agent, &setup).await?;
+                st.agents.desk(&session).forget();
+                slot.changed().await;
+                said(st, &session, agents::changed(&agent, &setup)).await?;
+            }
+            prompt(st, session, agent, planning::accepted(text), None, None).await
         }
         Call::Open { path } => {
             // A folder, by its whole name: what a window is given is what will be worked in.

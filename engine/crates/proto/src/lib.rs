@@ -127,6 +127,8 @@ pub enum ItemKind {
     Reasoning,
     Tool,
     Notice,
+    /// A plan an agent has handed in, for its person to accept: Markdown.
+    Plan,
     #[serde(other)]
     Unknown,
 }
@@ -316,6 +318,9 @@ pub enum Body {
         /// It goes on from another's conversation, whose items are its own up to there.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<Box<Branched>>,
+        /// It only reads, and hands in a plan.
+        #[serde(default, skip_serializing_if = "not")]
+        plan: bool,
     },
     /// What it runs on or may do is another from here on.
     #[serde(rename = "agent.changed")]
@@ -324,6 +329,9 @@ pub enum Body {
         execution: Execution,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access: Option<Access>,
+        /// As [`Body::AgentAdded`].
+        #[serde(default, skip_serializing_if = "not")]
+        plan: bool,
     },
     #[serde(rename = "agent.state")]
     AgentState { agent: AgentId, state: AgentState },
@@ -768,6 +776,10 @@ pub enum Call {
         /// gets into the folder by `copy.bring` only.
         #[serde(default)]
         apart: bool,
+        /// It is to hand in a plan first, with the access `read`. Of Axiom's own, or a program with
+        /// Axiom's tools in place of its own.
+        #[serde(default, skip_serializing_if = "not")]
+        plan: bool,
     },
     /// What has been changed in a session's folder since its last commit.
     #[serde(rename = "workspace.changes")]
@@ -836,6 +848,20 @@ pub enum Call {
         execution: Option<Execution>,
         #[serde(default)]
         access: Option<Access>,
+        /// Whether it is to hand in a plan first. If it is, it only reads; another access ends it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan: Option<bool>,
+    },
+    /// Accepts an agent's plan, the last it handed in, between its runs: from here on it may do what
+    /// `access` says, and is told to begin. `text`: the plan as its person has changed it.
+    #[serde(rename = "plan.accept")]
+    PlanAccept {
+        session: SessionId,
+        agent: AgentId,
+        item: ItemId,
+        access: Access,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
     /// Says something to an agent. Starts a run, or is heard by the one that runs, before its next
     /// step. Answers with the run.
