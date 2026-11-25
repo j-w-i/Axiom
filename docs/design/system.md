@@ -48,3 +48,4 @@ States for every control: rest, hover, held, engaged (sunken), focused (keyboard
 | 8 | `ExecutionKey`, `ContextGauge`, `AgentBar`; the first had a lip on the agent's section and brown keys, rejected at once: all accent edges and amber grounds removed (`img/round8-*.png`) | 2026-11-25: conversation "better now"; not the cobalt of the buttons, and the violet running pill "just bad" |
 | 9 | the owner's sampled blue for keys, links and live; lamps redrawn (`img/round9-*.png`) | 2026-11-25: "more of an aqua" |
 | 10 | aqua, option B of three, with dark words on keys; every corner 2 rounder, then 1 back (asked for on buttons) (`img/round10-*.png`) | accepted by the owner, 2026-11-25 |
+| 11 | Fable's review, steps 1–12 (`spec-fable.md`): what agents do in words, failure seen as failure, whole rows, one line of answers, a narrow window | to be shown |

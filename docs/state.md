@@ -34,6 +34,9 @@ Updated 2026-11-25. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), ins
 ## Not verified
 The real window has not been opened since the owner asked for none (K8); frame times on a display with many panes (K1); anything on Linux or Windows beyond CI; accessibility with a real screen reader.
 
+## The design spec (`design/spec-fable.md`)
+Steps 1–12 are done on `design/fable-spec`. Steps 13–17 wait for the owner's answers (its §6). One departure: at a ChatGPT plan's limit "Manage usage" is the primary key, as OpenAI's own page for whoever uses a plan asks; the spec says never. Nine goldens differ and have not been recorded again (the owner is asked): `controls-*` (the empty box, step 4), `workbench-*` and `execution-dark` ("Deny" is 2 px further left, step 3; with it seven pixels of one letter in the sidebar's "web-store" in the wider ones, which come and go with where "Deny" stands and with nothing else). The golden tests fail until then.
+
 ## Next
 1. Owner: say whether a real window may be opened once, when convenient, to check chrome and frame times.
 2. Owner: say whether the real Claude Code or Codex on this computer may be started once, to see a delegated agent work (K40).
