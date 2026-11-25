@@ -362,7 +362,8 @@ async fn what_is_not_as_it_should_be_is_not_signed_in() {
     }
     let big = json!("x".repeat(BODY + 1));
     let s = service(vec![(200, big)]).await;
-    assert!(matches!(a.finish(&s.places, "c", CLIENT).await, Err(Failed::Later(_))));
+    let e = a.finish(&s.places, "c", CLIENT).await.unwrap_err();
+    assert_eq!(e, Failed::Later("its answer is too long".into()));
 }
 
 #[tokio::test]

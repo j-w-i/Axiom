@@ -47,14 +47,14 @@ fn base64url(b: &[u8]) -> String {
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
-fn identity(nonce: &str, subject: &str) -> String {
+fn identity(nonce: &str, subject: &str, email: &str) -> String {
     let pair = RsaKeyPair::from_pkcs8(KEY).unwrap();
     let text = format!(
         "{}.{}",
         base64url(br#"{"alg":"RS256","kid":"k1"}"#),
         base64url(
             json!({"iss": "https://auth.openai.com", "aud": CLIENT, "sub": subject,
-                "email": "me@example.com", "iat": now(), "exp": now() + 600, "nonce": nonce})
+                "email": email, "iat": now(), "exp": now() + 600, "nonce": nonce})
             .to_string()
             .as_bytes()
         )
@@ -69,6 +69,7 @@ struct Other {
     /// The next sign-in's.
     nonce: String,
     subject: String,
+    email: String,
     scope: String,
     expires_in: u64,
     /// Counts what is given out.
@@ -93,6 +94,7 @@ impl OpenAi {
         let other = Other {
             nonce: String::new(),
             subject: "user-1".into(),
+            email: "me@example.com".into(),
             scope: "openid email offline_access resource.invoke chatgpt.tokens.use.direct".into(),
             expires_in: 3600,
             n: 0,
@@ -191,7 +193,7 @@ impl Other {
                 }
                 if form["grant_type"] == "authorization_code" {
                     let mut v = give(self);
-                    v["id_token"] = json!(identity(&self.nonce, &self.subject));
+                    v["id_token"] = json!(identity(&self.nonce, &self.subject, &self.email));
                     return (200, v.to_string());
                 }
                 if form["refresh_token"] != self.refresh {
@@ -334,7 +336,8 @@ impl Going {
     }
     async fn say(&self, all: &str) -> String {
         let mut s = TcpStream::connect(("127.0.0.1", self.port)).await.unwrap();
-        s.write_all(all.as_bytes()).await.unwrap();
+        // It may be hung up on before it has said everything.
+        let _ = s.write_all(all.as_bytes()).await;
         let mut out = String::new();
         let _ = tokio::time::timeout(LONG, s.read_to_string(&mut out)).await.unwrap();
         out
@@ -390,8 +393,9 @@ async fn a_person_signs_in_and_their_plan_is_used() {
     }
     let a = g.say(&format!("GET {right} HTTP/1.1\r\nHost: evil.example:{}\r\n\r\n", g.port)).await;
     assert!(a.starts_with("HTTP/1.1 404 "), "{a}");
-    let long =
-        format!("GET {right} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nX: {}", g.port, "x".repeat(20_000));
+    // Right in everything, and too long.
+    let host = format!("Host: 127.0.0.1:{}", g.port);
+    let long = format!("GET {right} HTTP/1.1\r\n{host}\r\nX: {}\r\n\r\n", "x".repeat(60_000));
     assert_eq!(g.say(&long).await, "");
     assert_eq!(t.state(&g).await, json!({"state": "waiting"}));
     // Connections that say nothing are not in the way.
@@ -408,7 +412,8 @@ async fn a_person_signs_in_and_their_plan_is_used() {
     ] {
         assert!(page.contains(has), "{page}");
     }
-    let s = t.end(&g).await;
+    // Known as soon as the page says it, whoever else still holds a connection.
+    let s = t.state(&g).await;
     assert_eq!(s["state"], "done");
     let id = s["connection"].as_str().unwrap().to_owned();
     assert!(!g.open().await, "nothing listens when it is done");
@@ -532,6 +537,7 @@ async fn when_it_is_over_somebody_signs_in_again() {
         (g.asked["client_id"].as_str(), g.asked["login_hint"].as_str()),
         (CLIENT, "me@example.com")
     );
+    t.o.with(|o| o.email = "new@example.com".into());
     g.come("code=c").await;
     assert_eq!(t.end(&g).await, json!({"state": "done", "connection": id}));
     let [c] = t.list().await.try_into().unwrap();
@@ -542,6 +548,7 @@ async fn when_it_is_over_somebody_signs_in_again() {
 
     // Not as somebody else, nor as another registration; and what there was stays.
     let g = t.try_begin(Some(&id)).await.unwrap();
+    assert_eq!(g.asked["login_hint"], "new@example.com");
     t.o.with(|o| o.subject = "user-2".into());
     g.come("code=c").await;
     assert!(t.problem(&g).await.contains("somebody else"));
