@@ -361,19 +361,31 @@ class AxCheck extends StatelessWidget {
         children: [
           SizedBox.square(
             dimension: 16,
-            child: Surface(
-              value && s.enabled ? c.primary : c.keyDown,
-              radius: 3,
-              child: value
-                  ? Center(
+            child: value
+                ? Surface(
+                    s.enabled ? c.primary : c.keyDown,
+                    radius: 3,
+                    child: Center(
                       child: AxGlyph(
                         AxIcon.check,
                         size: 12,
                         color: s.enabled ? c.onPrimary : c.idle,
                       ),
-                    )
-                  : null,
-            ),
+                    ),
+                  )
+                : DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: s.enabled ? c.bay.bottom : null,
+                      border: Border.all(
+                        color: !s.enabled
+                            ? c.bayRule
+                            : s.hovered
+                            ? c.ink2
+                            : c.idle,
+                      ),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
           ),
           if (!bare) ...[
             const SizedBox(width: 8),
