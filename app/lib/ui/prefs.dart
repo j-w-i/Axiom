@@ -10,6 +10,7 @@ class Prefs {
   const Prefs({
     this.look = Look.system,
     this.text = 1,
+    this.zoom = 1,
     this.density = AxDensity.regular,
     this.enterSends = true,
   });
@@ -19,10 +20,12 @@ class Prefs {
     if (j is! Map) return const Prefs();
     T of<T extends Enum>(List<T> all, Object? v, T or) =>
         all.where((e) => e.name == v).firstOrNull ?? or;
-    final text = j['text'];
+    double at(List<double> all, Object? v) =>
+        v is num && all.contains(v.toDouble()) ? v.toDouble() : 1;
     return Prefs(
       look: of(Look.values, j['look'], Look.system),
-      text: text is num && sizes.contains(text.toDouble()) ? text.toDouble() : 1,
+      text: at(sizes, j['text']),
+      zoom: at(zooms, j['zoom']),
       density: of(AxDensity.values, j['density'], AxDensity.regular),
       enterSends: j['enterSends'] is bool ? j['enterSends'] as bool : true,
     );
@@ -33,28 +36,35 @@ class Prefs {
   /// How large text is, beside what the system says.
   final double text;
   static const sizes = [.85, 1.0, 1.15, 1.3, 1.5, 1.75, 2.0];
+
+  /// How large everything is.
+  final double zoom;
+  static const zooms = [.8, .9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
   final AxDensity density;
 
   /// Enter sends and Shift+Enter breaks the line; or Enter breaks it, and with Control or Command it
   /// sends.
   final bool enterSends;
 
-  Prefs copyWith({Look? look, double? text, AxDensity? density, bool? enterSends}) => Prefs(
-    look: look ?? this.look,
-    text: text ?? this.text,
-    density: density ?? this.density,
-    enterSends: enterSends ?? this.enterSends,
-  );
+  Prefs copyWith({Look? look, double? text, double? zoom, AxDensity? density, bool? enterSends}) =>
+      Prefs(
+        look: look ?? this.look,
+        text: text ?? this.text,
+        zoom: zoom ?? this.zoom,
+        density: density ?? this.density,
+        enterSends: enterSends ?? this.enterSends,
+      );
 
-  /// The next size up or down, as far as there is one.
-  Prefs sized(int by) {
-    final at = sizes.indexOf(text) + by;
-    return copyWith(text: sizes[at.clamp(0, sizes.length - 1)]);
-  }
+  /// The next one up or down, as far as there is one.
+  Prefs sized(int by) => copyWith(text: _by(sizes, text, by));
+  Prefs zoomed(int by) => copyWith(zoom: _by(zooms, zoom, by));
+  static double _by(List<double> all, double v, int by) =>
+      all[(all.indexOf(v) + by).clamp(0, all.length - 1)];
 
   Map<String, Object> encode() => {
     'look': look.name,
     'text': text,
+    'zoom': zoom,
     'density': density.name,
     'enterSends': enterSends,
   };
@@ -64,10 +74,11 @@ class Prefs {
       other is Prefs &&
       other.look == look &&
       other.text == text &&
+      other.zoom == zoom &&
       other.density == density &&
       other.enterSends == enterSends;
   @override
-  int get hashCode => Object.hash(look, text, density, enterSends);
+  int get hashCode => Object.hash(look, text, zoom, density, enterSends);
 }
 
 /// Where they can be changed from anywhere in the window.

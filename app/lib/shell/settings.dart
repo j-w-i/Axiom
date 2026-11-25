@@ -50,6 +50,16 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
         row(
+          'Zoom',
+          'Everything in the window. ${Command.zoomIn.keys}, ${Command.zoomOut.keys}, ${Command.zoomReset.keys}',
+          choose(
+            'Zoom',
+            [for (final x in Prefs.zooms) AxMenuItem(x, '${(x * 100).round()}%')],
+            p.zoom,
+            (v) => set(p.copyWith(zoom: v)),
+          ),
+        ),
+        row(
           'Text size',
           'Icons grow with it.',
           choose(

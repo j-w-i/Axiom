@@ -25,6 +25,7 @@ import '../ui/press.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
+import '../ui/zoom.dart';
 import 'changes.dart';
 import 'drafts.dart';
 import 'find.dart';
@@ -196,6 +197,12 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
         _show(_View.accounts);
       case Command.settings:
         _show(_View.settings);
+      case Command.zoomIn:
+        _prefs((p) => p.zoomed(1));
+      case Command.zoomOut:
+        _prefs((p) => p.zoomed(-1));
+      case Command.zoomReset:
+        _prefs((p) => p.copyWith(zoom: 1));
       case Command.larger:
         _prefs((p) => p.sized(1));
       case Command.smaller:
@@ -290,7 +297,13 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     for (final c in Command.values)
       if (switch (c) {
         Command.panel => _panel(context) != null,
-        Command.list || Command.larger || Command.smaller || Command.usual => true,
+        Command.list ||
+        Command.zoomIn ||
+        Command.zoomOut ||
+        Command.zoomReset ||
+        Command.larger ||
+        Command.smaller ||
+        Command.usual => true,
         Command.next || Command.previous => s.sessions.length > 1,
         Command.request => s.needs.any((w) => w.need == Need.asks),
         Command.stop || Command.findHere || Command.model || Command.access => _commands.can(c),
@@ -378,6 +391,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                 ? _View.start
                 : _view;
             final width = MediaQuery.sizeOf(context).width;
+            // The window's own buttons stay as large as they are.
+            final inset = widget.titleInset / Zoom.of(context);
             final narrow = width < 860, beside = !narrow && _list;
             Widget panelKey() => ListenableBuilder(
               listenable: Listenable.merge([
@@ -394,7 +409,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
             );
             Widget side([VoidCallback? close]) => _Side(
               store: s,
-              inset: widget.titleInset,
+              inset: inset,
               agent: _agent,
               view: view,
               close: close,
@@ -429,10 +444,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
             final onList = beside || narrow ? null : () => setState(() => _list = true);
             final banner = problem == null
                 ? null
-                : _Banner(
-                    problem,
-                    inset: beside ? AxSpace.gutter : widget.titleInset + AxSpace.edge,
-                  );
+                : _Banner(problem, inset: beside ? AxSpace.gutter : inset + AxSpace.edge);
             final content = switch (s) {
               // Kept while the host is away: what was written is not lost.
               _ when view == _View.start => StartPage(
@@ -480,7 +492,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                 looks: width >= _roomy,
                 banner: banner,
                 onList: onList,
-                inset: beside ? AxSpace.gutter : widget.titleInset + AxSpace.edge,
+                inset: beside ? AxSpace.gutter : inset + AxSpace.edge,
                 alone: !beside && !narrow,
                 small: narrow,
                 onAgain: () => _do('The session could not be opened', () => s.open(m.id)),
@@ -518,7 +530,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                                         problem: narrow ? problem : null,
                                         page: page,
                                         session: s.current,
-                                        inset: beside ? 0 : widget.titleInset,
+                                        inset: beside ? 0 : inset,
                                         needs: s.needs,
                                         list: narrow ? side : null,
                                         onList: onList,

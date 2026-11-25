@@ -46,7 +46,7 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 
 Radii: check 5, control 8, code 10, card 12, canvas 12, composer 16. Controls are 30 high, fields 32, icon keys square, the act of the composer round. A held key gives 3 %; a ground comes in 110 ms. Icons are Microsoft's Fluent (16, one pixel of line, round corners), as path data in `icon_data.dart`. Type 11–22, a little tight, with Inter's display cut as it grows. Density compact/regular/roomy changes control height (26/30/34), never type size.
 States for every control: rest, hover, held, engaged, focused (keyboard ring), disabled (a main act and a key keep a hairline outline with grey words; a quiet key is flat words), loading, error.
-Keys of the window: new session N, search K, accounts comma, sidebar B, panel D, with ⌘ on macOS and Ctrl elsewhere.
+Keys of the window: new session N, search K, accounts comma, sidebar B, panel D, zoom + − 0, with ⌘ on macOS and Ctrl elsewhere. Text size has no keys of its own; it is found by the search.
 
 **A request** is shown whole, spelled out, and cannot be allowed before it has been seen to its end.
 

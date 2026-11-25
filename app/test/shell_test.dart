@@ -485,12 +485,21 @@ void main() {
   test('no two commands have one key', () {
     for (final mac in [true, false]) {
       debugDefaultTargetPlatformOverride = mac ? TargetPlatform.macOS : TargetPlatform.linux;
-      final all = Command.values.map((c) => c.keys).toList();
+      final all = Command.values.map((c) => c.keys).nonNulls.toList();
       expect(all.toSet().length, all.length, reason: '$all');
       expect(Command.find.keys, mac ? '⌘K' : 'Ctrl+K');
       expect(Command.allow.keys, mac ? '⇧⌘Y' : 'Ctrl+Shift+Y');
     }
     debugDefaultTargetPlatformOverride = null;
+    // Nor by another place a keyboard has it at.
+    final taken = <(LogicalKeyboardKey, bool, bool, bool)>{};
+    for (final c in Command.values) {
+      for (final k in [?c.key, ...c.also]) {
+        for (final shift in c.eitherShift ? [true, false] : [c.shift]) {
+          expect(taken.add((k, shift, c.control, c.bare)), isTrue, reason: '$c');
+        }
+      }
+    }
   });
 
   testWidgets('room can be made in a conversation that can act and is not at work', (t) async {
