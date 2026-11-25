@@ -54,6 +54,11 @@ impl Site {
         self.path.iter().filter_map(|d| d.join(name).ok()).find(|p| p.as_path().is_file())
     }
 
+    /// Whether an agent here reads it without a question.
+    pub fn reads(&self, p: &Place) -> bool {
+        self.judge(Action::Read(p)).decision == Decision::Allow
+    }
+
     fn judge(&self, a: Action<'_>) -> Verdict {
         self.policy
             .decide(a, self.access, &self.caps, &self.keep, &self.workspace, &|n| self.program(n))

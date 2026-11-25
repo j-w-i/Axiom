@@ -246,6 +246,25 @@ fn the_folders_own_is_not_written_over() {
 }
 
 #[test]
+fn that_it_can_be_run_is_a_change_too() {
+    let t = T::new(&[("a", "1"), ("b", "2")]);
+    let mode = |p: &Place, n: &str, m: u32| {
+        std::fs::set_permissions(p.as_path().join(n), PermissionsExt::from_mode(m)).unwrap();
+    };
+    mode(&t.folder, "b", 0o755);
+    let was = t.make(&[]).unwrap();
+    mode(&t.copy, "a", 0o755);
+    mode(&t.copy, "b", 0o644);
+    let c = t.changes(&was);
+    assert_eq!(shown(&c), [("a", What::Changed, false)]);
+    assert!(c[0].runs);
+    t.bring(&was, "a").unwrap();
+    let m = std::fs::metadata(t.folder.as_path().join("a")).unwrap().permissions().mode();
+    assert_eq!(m & 0o111, 0o111);
+    assert_eq!(t.changes(&was), []);
+}
+
+#[test]
 fn what_is_never_brought_in() {
     let t = T::new(&[("a", "1"), ("d/x", "2"), ("l", "3")]);
     let was = t.make(&[]).unwrap();
@@ -280,11 +299,8 @@ fn what_is_never_brought_in() {
     symlink(&out, t.copy.as_path().join("d")).unwrap();
     let c = t.changes(&was);
     assert!(c.iter().all(|c| c.path != "d/new"), "{c:?}");
-    for bad in ["../out/x", "/etc/x", "a/../b", "./a", "a//b", ""] {
-        assert!(
-            bring(&t.folder, &t.copy, bad, None, None).is_err()
-                || now(&open(&t.copy).unwrap(), bad).unwrap().is_none()
-        );
+    for bad in ["../out/x", "/etc/x", "a/../b", "./a", "a//b", "a/", "", "nothing"] {
+        assert!(bring(&t.folder, &t.copy, bad, None, None).is_err(), "{bad}");
     }
 }
 

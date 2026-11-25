@@ -14,6 +14,8 @@ use crate::agents::{Agents, bad};
 
 /// Of what git says, at most.
 const MOST: usize = 2 * 1024 * 1024;
+/// Of the names of what it tracks.
+const TRACKED: usize = 32 * 1024 * 1024;
 /// Of a file that is not tracked.
 const FILE: u64 = 256 * 1024;
 /// Files that are shown.
@@ -39,6 +41,14 @@ struct Git {
 impl Git {
     /// What it says, and whether that was all.
     async fn run(&self, args: &[&str]) -> Result<Option<(Vec<u8>, bool)>, WireError> {
+        self.run_to(args, MOST).await
+    }
+
+    async fn run_to(
+        &self,
+        args: &[&str],
+        most: usize,
+    ) -> Result<Option<(Vec<u8>, bool)>, WireError> {
         let s = &self.site;
         let caps = Caps { run: true, ..s.caps.clone() };
         let profile = Profile::read_only(&caps, &s.keep, &s.system, &s.scratch)
@@ -74,7 +84,7 @@ impl Git {
             return Err(bad("git cannot be run"));
         };
         let mut said = Vec::new();
-        let mut first = out.take(MOST as u64 + 1);
+        let mut first = out.take(most as u64 + 1);
         let mut words = [0; 4096];
         let read = async {
             // What it complains of is not kept, and does not hold it up.
@@ -85,12 +95,12 @@ impl Git {
             r
         };
         let done = tokio::time::timeout(LONGEST, read).await;
-        let whole = said.len() <= MOST && done.is_ok_and(|r| r.is_ok());
+        let whole = said.len() <= most && done.is_ok_and(|r| r.is_ok());
         if !whole {
             p.kill();
         }
         let ended = p.wait().await.map_err(|e| bad(e.to_string()))?;
-        said.truncate(MOST);
+        said.truncate(most);
         Ok((ended.code == Some(0) || !whole).then_some((said, whole)))
     }
 }
@@ -158,6 +168,23 @@ pub async fn changes(
     diff.push_str(&more);
     whole &= rest;
     Ok(Changes { repository: true, branch, files, diff, whole })
+}
+
+/// What git tracks in a folder, whatever it would ignore now. Nothing, where git has no say.
+pub async fn tracked(site: &Site) -> Result<Vec<String>, WireError> {
+    if !site.workspace.as_path().join(".git").is_dir() {
+        return Ok(Vec::new());
+    }
+    let Some(program) = git(site) else { return Ok(Vec::new()) };
+    let git = Git { program, site: site.clone() };
+    let Some((all, whole)) = git.run_to(&["ls-files", "-z"], TRACKED).await? else {
+        return Ok(Vec::new());
+    };
+    if !whole {
+        return Err(bad("git did not say in time what it tracks, or it is too much"));
+    }
+    let names = all.split(|b| *b == 0).filter(|n| !n.is_empty());
+    Ok(names.filter_map(|n| String::from_utf8(n.to_vec()).ok()).collect())
 }
 
 /// What git's status says: the branch, what has changed, and what of it is not tracked.

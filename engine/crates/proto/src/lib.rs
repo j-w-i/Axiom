@@ -183,6 +183,9 @@ pub enum Body {
         parent: Option<AgentId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access: Option<Access>,
+        /// It works in a copy of the folder of its own.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        apart: bool,
     },
     /// What it runs on or may do is another from here on.
     #[serde(rename = "agent.changed")]
@@ -318,6 +321,51 @@ pub struct Changed {
     pub what: String,
 }
 
+/// What an agent has changed in its own copy of the folder.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyChanges {
+    /// There is one: it has been spoken to.
+    pub made: bool,
+    pub files: Vec<CopyFile>,
+    /// What bringing all of it in would do to the folder as it is now.
+    pub diff: String,
+    /// All of it is here.
+    pub whole: bool,
+    /// How many files the last that was brought in can be put back for.
+    #[serde(default)]
+    pub back: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyFile {
+    pub path: String,
+    /// `new`, `changed` or `removed`.
+    pub what: String,
+    /// What the copy has now; absent if it was removed there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+    /// The folder's own has changed too: it is not brought in.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clash: bool,
+    /// Why it is never brought in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub never: Option<String>,
+    /// It runs when someone builds, tests or installs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub runs: bool,
+    /// Other agents that have changed it in their own copies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<String>,
+}
+
+/// A change, as a person has seen it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopySeen {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+}
+
 /// A harness, as it was found without being run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnessInfo {
@@ -413,10 +461,34 @@ pub enum Call {
         /// Instructions of the workspace a person has read and wants followed, by what they were.
         #[serde(default)]
         instructions: Vec<Instructions>,
+        /// It works in a copy of the folder, made when it is first spoken to; what it changes there
+        /// gets into the folder by `copy.bring` only.
+        #[serde(default)]
+        apart: bool,
     },
     /// What has been changed in a session's folder since its last commit.
     #[serde(rename = "workspace.changes")]
     Changes { session: SessionId },
+    /// What an agent has changed in its own copy.
+    #[serde(rename = "copy.changes")]
+    CopyChanges { session: SessionId, agent: AgentId },
+    /// Brings changes in, each as it was shown.
+    #[serde(rename = "copy.bring")]
+    CopyBring { session: SessionId, agent: AgentId, files: Vec<CopySeen> },
+    /// Puts back what was there before the last that was brought in.
+    #[serde(rename = "copy.back")]
+    CopyBack { session: SessionId, agent: AgentId },
+    /// Takes over into the copy what has changed in the folder.
+    #[serde(rename = "copy.renew")]
+    CopyRenew { session: SessionId, agent: AgentId },
+    /// Throws the copy away. With changes in it only if they are to be lost.
+    #[serde(rename = "copy.remove")]
+    CopyRemove {
+        session: SessionId,
+        agent: AgentId,
+        #[serde(default)]
+        lose: bool,
+    },
     /// The harnesses this host can drive.
     #[serde(rename = "harness.list")]
     Harnesses {},

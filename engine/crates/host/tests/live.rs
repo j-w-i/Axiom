@@ -47,6 +47,7 @@ async fn claude_code_works_once() {
         access: Access::Work,
         trust: false,
         instructions: vec![],
+        apart: false,
     };
     let (lead, other) = (add("Lead"), add("Other"));
     let agent = AgentId(c.call(lead).await.unwrap()["agent"].as_str().unwrap().into());

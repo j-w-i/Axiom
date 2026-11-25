@@ -25,6 +25,7 @@ fn main() -> Result<(), serde_json::Error> {
             },
             parent: Some(AgentId("a_0".into())),
             access: Some(Access::Ask),
+            apart: true,
         },
         Body::AgentChanged {
             agent: a.clone(),

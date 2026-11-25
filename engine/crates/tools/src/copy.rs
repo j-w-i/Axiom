@@ -483,8 +483,8 @@ pub fn changes(
     for (path, is) in all {
         let was = was.get(&path).map(|w| &w.is);
         let there = now(&f, &path)?;
-        if there == is {
-            // The folder has it already.
+        if has(there.as_ref(), is.as_ref()) {
+            // Nothing to bring in.
             continue;
         }
         let what = match (was, &is) {
@@ -498,6 +498,15 @@ pub fn changes(
         out.push(Change { clash: there.as_ref() != was, path, what, is, never, runs });
     }
     Ok((out, whole))
+}
+
+/// The folder has what the copy has. That it can be run there too is no change.
+fn has(there: Option<&Is>, is: Option<&Is>) -> bool {
+    match (there, is) {
+        (None, None) => true,
+        (Some(t), Some(i)) => t.digest == i.digest && t.link == i.link && (t.run || !i.run),
+        _ => false,
+    }
 }
 
 /// What is never brought in, and why.
@@ -570,6 +579,18 @@ fn spot(folder: &Place, rel: &str, make: bool) -> Result<fs::Spot, Why> {
     Ok(s)
 }
 
+/// The bytes of a folder's file, to be kept; `None`: there is none.
+pub fn peek(folder: &Place, path: &str) -> Result<Option<Vec<u8>>, Why> {
+    let f = open(folder).map_err(|e| e.to_string())?;
+    match now(&f, path).map_err(|e| e.to_string())? {
+        None => Ok(None),
+        Some(_) => spot(folder, path, false)?
+            .read(LARGEST)
+            .map(|c| Some(c.bytes))
+            .map_err(|e| e.to_string()),
+    }
+}
+
 /// Brings one change in, as a person has seen it: `seen` is what the copy had then, absent if it
 /// had removed it. The folder's own is only touched as long as it is what was copied.
 pub fn bring(
@@ -579,6 +600,9 @@ pub fn bring(
     was: Option<&Was>,
     seen: Option<&str>,
 ) -> Result<Before, Why> {
+    if parts(path).is_none() {
+        return Err("it is not a name of a file".into());
+    }
     let words = |e: CopyError| e.to_string();
     let (f, c) = (open(folder).map_err(words)?, open(copy).map_err(words)?);
     let (is, there) = (now(&c, path).map_err(words)?, now(&f, path).map_err(words)?);
@@ -587,6 +611,9 @@ pub fn bring(
     }
     if let Some(why) = never(path, is.as_ref(), there.as_ref()) {
         return Err(why.into());
+    }
+    if has(there.as_ref(), is.as_ref()) {
+        return Err("the folder has it already".into());
     }
     let was = was.map(|w| &w.is);
     if there.as_ref().map(|t| &t.digest) != was.map(|w| &w.digest) {
@@ -598,7 +625,6 @@ pub fn bring(
     };
     let run = there.as_ref().is_some_and(|t| t.run);
     match &is {
-        None if there.is_none() => {}
         None => spot(folder, path, false)?.remove().map_err(|e| e.to_string())?,
         Some(i) => {
             let from = spot(copy, path, false)?.read(LARGEST).map_err(|e| e.to_string())?;

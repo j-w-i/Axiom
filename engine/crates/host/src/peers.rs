@@ -167,13 +167,19 @@ pub async fn judge(f: &Floor, args: &Value) -> Other {
         return no(format!("{} may only be given a person's own words", p.setup.name));
     }
     let other = p.setup.execution.harness != "axiom";
-    let more = rank(p.setup.access) > rank(mine.access);
+    // In a copy of its own it changes nothing of the folder; who tells one that does, does more.
+    let leaves = mine.apart.is_some() && p.setup.apart.is_none();
+    let more =
+        rank(p.setup.access) > rank(mine.access) || (leaves && p.setup.access != Access::Read);
     let may = match p.setup.access {
         Access::Read => "only looks",
         Access::Ask => "asks before each change",
         _ => "changes files without asking",
     };
     let mut scope = format!("to {}, which runs on {} and {may}", p.setup.name, runs_on(&p.setup));
+    if p.setup.apart.is_some() {
+        scope.push_str(", in a copy of its own");
+    }
     if other {
         scope.push_str(", outside Axiom's sandbox");
     }
@@ -334,10 +340,11 @@ async fn list(f: &Floor) -> Output {
         let access = match p.setup.access {
             Access::Read => "only looks",
             Access::Ask => "asks before each change",
-            _ => "works in the folder",
+            _ => "works without asking",
         };
+        let place = if p.setup.apart.is_some() { ", in a copy of its own" } else { "" };
         text.push_str(&format!(
-            "{} ({}): {}, {access}, {now}\n",
+            "{} ({}): {}, {access}{place}, {now}\n",
             p.setup.name,
             p.id.0,
             runs_on(&p.setup)
