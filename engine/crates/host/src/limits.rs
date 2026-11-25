@@ -85,3 +85,39 @@ pub fn kept() -> Vec<Limit> {
 fn one(of: &str, what: &str, most: u64, unit: Unit) -> Limit {
     Limit { of: of.into(), what: what.into(), most: Some(most), unit }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Those that no test keeps by trying are at least told from what they are kept by.
+    #[test]
+    fn each_is_of_what_it_says() {
+        let all = kept();
+        for (what, most) in [
+            ("answer of the model", u64::from(run().steps)),
+            ("without waiting", run().time.as_secs()),
+            ("One command", axiom_tools::COMMAND),
+            ("in the background", jobs::MOST as u64),
+            ("Silence", program().silence.map_or(0, |s| s.as_secs())),
+            ("Nothing to do", delegated::IDLE.as_secs()),
+            ("last messages", FRAMES),
+            ("one below another", peers::DEEPEST as u64),
+            ("not heard the end of", peers::OWED as u64),
+            ("in a row", u64::from(server::WAKES)),
+            ("Runs at once", server::RUNS as u64),
+            ("from an agent to another", peers::TEXT as u64),
+            ("instructions", agents::INSTRUCTIONS),
+            ("part of an answer", wire::TEXT as u64),
+            ("a tool is given", wire::VALUE as u64),
+            ("a request is about", wire::LONG as u64),
+            ("reads or changes", axiom_tools::LARGEST),
+            ("Files in an agent's copy", copied().files as u64),
+            ("An agent's copy of a folder", copied().bytes),
+            ("applied from a copy", copy::LARGEST),
+        ] {
+            let of: Vec<_> = all.iter().filter(|l| l.what.contains(what)).collect();
+            assert_eq!(of.iter().map(|l| l.most).collect::<Vec<_>>(), [Some(most)], "{what}");
+        }
+    }
+}

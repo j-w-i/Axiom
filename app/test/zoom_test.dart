@@ -132,7 +132,7 @@ Future<ByteData> picture(WidgetTester t, double dpr) async => (await t.runAsync(
 void main() {
   testWidgets('it fills the window, and all of it is as much larger', (t) async {
     late Size room;
-    late double dpr, scale;
+    late double dpr, scale, top;
     final prefs = ValueNotifier(const Prefs());
     addTearDown(prefs.dispose);
     addTearDown(t.view.reset);
@@ -150,6 +150,7 @@ void main() {
             builder: (context) {
               room = MediaQuery.sizeOf(context);
               dpr = MediaQuery.devicePixelRatioOf(context);
+              top = MediaQuery.paddingOf(context).top;
               scale = Zoom.of(context);
               return const Align(
                 alignment: Alignment.bottomRight,
@@ -166,6 +167,7 @@ void main() {
       expect(room.width, moreOrLessEquals(800 / z));
       expect(room.height, moreOrLessEquals(600 / z));
       expect(dpr, moreOrLessEquals(2 * z));
+      expect(top, moreOrLessEquals(20 / z));
       expect(scale, z);
       final r = t.getRect(find.byKey(inner));
       expect(r.width, moreOrLessEquals(100 * z));
@@ -279,6 +281,12 @@ void main() {
       final hide = t.getRect(find.bySemanticsLabel('Hide the sidebar'));
       expect(hide.left, greaterThan(72), reason: '$zoom');
       expect(t.getRect(find.text('Axiom')).left, greaterThanOrEqualTo(72), reason: '$zoom');
+      // They do not grow, so neither does the room for them; what stands beside it does.
+      final header = find.byWidgetPredicate(
+        (w) => w is Padding && w.padding is EdgeInsets && (w.padding as EdgeInsets).right == 10,
+      );
+      final row = t.widgetList<Padding>(header).map((p) => (p.padding as EdgeInsets).left);
+      expect(row.where((l) => (l * zoom - (72 + 20 * zoom)).abs() < .01), isNotEmpty);
       await t.pumpWidget(const SizedBox());
     }
   });
