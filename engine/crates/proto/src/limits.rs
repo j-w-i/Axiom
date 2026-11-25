@@ -280,11 +280,13 @@ mod tests {
     fn worst() -> Vec<Body> {
         let nul = || "\0".repeat(2 << 20);
         let some = || Some(nul());
+        // In lists. What is made here is held whole: 5000 of `nul` are more than a computer has.
+        let long = || "\0".repeat(8 << 10);
         let wide = || Some(json!([nul()]));
         let id = |p: &str| p.to_owned();
-        let cost = || Cost {
+        let cost = |currency| Cost {
             amount: f64::MAX,
-            currency: nul(),
+            currency,
             provenance: Provenance::Estimated,
             of: Covers::Session,
         };
@@ -369,12 +371,12 @@ mod tests {
                     answered: some(),
                     speed: some(),
                 })),
-                cost: Some(Box::new(cost())),
+                cost: Some(Box::new(cost(nul()))),
                 totals: vec![
                     ModelTotal {
-                        model: some(),
+                        model: Some(long()),
                         usage: Usage::default(),
-                        cost: Some(cost())
+                        cost: Some(cost(long()))
                     };
                     5000
                 ],
@@ -384,7 +386,7 @@ mod tests {
             Body::Todo {
                 agent: AgentId(id("a")),
                 run: None,
-                steps: vec![Todo { text: nul(), state: TodoState::Doing }; 5000],
+                steps: vec![Todo { text: long(), state: TodoState::Doing }; 5000],
                 text: some(),
             },
             Body::Unknown(json!({ "type": nul(), "x": nul() })),
