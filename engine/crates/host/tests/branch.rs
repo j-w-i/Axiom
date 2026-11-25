@@ -301,6 +301,7 @@ async fn a_clash_that_is_not_settled_is_not_in_the_branch_either() {
     t.write("b", "0\n");
     let a = t.agent("First", Access::Work, true).await;
     t.does(&a, "echo mine > a; echo mine > b").await;
+    t.does(&a, "true").await;
     for f in ["a", "b"] {
         t.write(f, "theirs\n");
     }
@@ -308,14 +309,17 @@ async fn a_clash_that_is_not_settled_is_not_in_the_branch_either() {
     t.c.call(renew).await.unwrap();
     t.does(&a, "echo both > b").await;
     let answers = t.items(&a, ItemKind::Prose);
-    let b = t.branch(&a, &answers[1], true).await.unwrap();
+    let b = t.branch(&a, &answers[2], true).await.unwrap();
     let c = t.changes(&b).await;
     assert_eq!((file(&c, "a").unsettled, file(&c, "b").unsettled), (true, false));
     // Before that there was none to settle: both have changed it, and it was neither.
     let said = t.items(&a, ItemKind::Prompt);
-    let d = t.branch(&a, &said[1], true).await.unwrap();
+    let d = t.branch(&a, &said[2], true).await.unwrap();
     let c = t.changes(&d).await;
     assert!(file(&c, "a").unsettled && file(&c, "b").unsettled);
+    let e = t.branch(&a, &said[1], true).await.unwrap();
+    let c = t.changes(&e).await;
+    assert!(c.files.iter().all(|f| f.clash && !f.unsettled) && c.files.len() == 2, "{c:?}");
 }
 
 #[tokio::test]

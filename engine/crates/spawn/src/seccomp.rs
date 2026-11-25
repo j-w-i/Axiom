@@ -360,6 +360,19 @@ mod tests {
     }
 
     #[test]
+    fn both_refuse_the_same() {
+        let names = |c: &Calls| -> Vec<&str> {
+            let mut all: Vec<_> = c.refused.iter().chain(c.absent).map(|x| x.0).collect();
+            all.sort_unstable();
+            all
+        };
+        let (x, a) = (names(&X86_64), names(&AARCH64));
+        let more: Vec<_> = x.iter().filter(|n| !a.contains(n)).collect();
+        assert_eq!(more, [&"ioperm", &"iopl", &"uselib"], "what the other has not");
+        assert!(a.iter().all(|n| x.contains(n)));
+    }
+
+    #[test]
     fn another_processors_calls_are_the_end_of_it() {
         for (c, o) in [(&X86_64, &AARCH64), (&AARCH64, &X86_64)] {
             // i386, whose numbers are others, and what nobody has.
