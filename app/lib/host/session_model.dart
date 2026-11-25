@@ -1,0 +1,228 @@
+import 'package:flutter/foundation.dart';
+
+import '../transcript/markdown.dart';
+import '../transcript/safe_text.dart';
+import 'proto.dart';
+
+/// One item of a transcript. Notifies when its own text or state changes, and only then.
+class ItemModel extends ChangeNotifier {
+  ItemModel(this.id, this.agent, this.run, this.kind, String name, this.args, {this.argsCut = 0})
+    : name = oneLine(name, 60);
+  final String id, agent, run, name;
+  final ItemKind kind;
+  final Object? args;
+  Object? result;
+
+  /// Bytes that were too many for the host to keep.
+  final int argsCut;
+  int resultCut = 0;
+  Outcome? outcome;
+  bool get open => outcome == null;
+
+  /// For prose. Tools keep plain text.
+  late final MarkdownDoc doc = MarkdownDoc();
+  final StringBuffer _plain = StringBuffer();
+
+  /// A running hash of the text so far: an ended item's text is compared with what was streamed
+  /// without keeping it twice.
+  int _length = 0, _hash = 0;
+  String? _ended;
+  bool get rich => kind == ItemKind.prose || kind == ItemKind.prompt || kind == ItemKind.reasoning;
+  String get plain => _ended ?? _plain.toString();
+
+  static int _fold(int h, String t) {
+    for (var i = 0; i < t.length; i++) {
+      h = (h * 31 + t.codeUnitAt(i)) & 0x3FFFFFFFFFFF;
+    }
+    return h;
+  }
+
+  void _append(String t) {
+    _length += t.length;
+    _hash = _fold(_hash, t);
+    rich ? doc.append(t) : _plain.write(t);
+  }
+
+  void _end(ItemEnded e) {
+    outcome = e.outcome;
+    result = e.result;
+    resultCut = e.resultCut;
+    if (rich) {
+      // `text` is authoritative: if what was streamed differs in any way, it replaces it.
+      if (_length != e.text.length || _hash != _fold(0, e.text)) {
+        doc.reset();
+        doc.append(e.text);
+      }
+      doc.finish();
+    } else {
+      _ended = e.text;
+      _plain.clear();
+    }
+  }
+
+  void _changed() => notifyListeners();
+}
+
+class AgentModel extends ChangeNotifier {
+  AgentModel(this.id, String name, this.execution, this.parent, this.since)
+    : name = oneLine(name, 60);
+  final String id, name;
+  final Execution execution;
+  final String? parent;
+  final int since;
+  AgentPhase phase = AgentPhase.waiting;
+  ItemModel? last;
+  double? context;
+  Known contextKnown = Known.unknown;
+
+  /// How its last run ended, if it ended badly; what the provider or harness said.
+  Outcome? ended;
+  String? error;
+  final List<ItemModel> items = [];
+  void _changed() => notifyListeners();
+}
+
+class RequestModel {
+  const RequestModel(this.opened);
+  final RequestOpened opened;
+}
+
+/// A session, rebuilt from its events. [apply] takes a whole batch and notifies each listener at
+/// most once for it.
+class SessionModel extends ChangeNotifier {
+  SessionModel(this.id);
+  final String id;
+  String title = '';
+  String? workspace;
+
+  /// Follow from here after a reconnect.
+  int seq = 0;
+  int unknown = 0;
+
+  /// Set when the host cannot read or write the session.
+  String? fault;
+
+  /// False until the host has sent what it had.
+  bool loaded = false;
+  final Map<String, AgentModel> agents = {};
+  final Map<String, ItemModel> _open = {};
+  final Map<String, String> _runs = {};
+  final Map<String, RequestModel> requests = {};
+
+  void apply(List<Event> events) {
+    final items = <ItemModel>{}, touched = <AgentModel>{};
+    var self = !loaded;
+    loaded = true;
+    for (final e in events) {
+      // Never twice: a follow may overlap what is already here.
+      if (e.seq <= seq) continue;
+      seq = e.seq;
+      self = _one(e, items, touched) || self;
+    }
+    for (final i in items) {
+      i._changed();
+    }
+    for (final a in touched) {
+      a._changed();
+    }
+    if (self) notifyListeners();
+  }
+
+  void failed(String words) {
+    fault = words;
+    notifyListeners();
+  }
+
+  /// True if the session itself changed.
+  bool _one(Event e, Set<ItemModel> items, Set<AgentModel> touched) {
+    switch (e.body) {
+      case SessionCreated(:final title, :final workspace):
+        this.title = oneLine(title);
+        this.workspace = workspace;
+        return true;
+      case SessionTitled(:final title):
+        this.title = oneLine(title);
+        return true;
+      case AgentAdded(:final agent, :final name, :final execution, :final parent):
+        agents[agent] = AgentModel(agent, name, execution, parent, e.at);
+        return true;
+      case AgentStateChanged(:final agent, :final state):
+        if (agents[agent] case final a?) {
+          a.phase = state;
+          touched.add(a);
+          return true;
+        }
+      case RunStarted(:final run, :final agent):
+        _runs[run] = agent;
+        if (agents[agent] case final a?) {
+          a
+            ..ended = null
+            ..error = null;
+          touched.add(a);
+        }
+        return true;
+      case RunEnded(:final run, :final outcome, :final error):
+        if (agents[_runs.remove(run)] case final a?) {
+          a
+            ..ended = outcome
+            ..error = error == null ? null : visible(error);
+          // Whatever its last state said, nothing of it runs any more.
+          if (a.phase == AgentPhase.running || a.phase == AgentPhase.asking) {
+            a.phase = switch (outcome) {
+              Outcome.completed => AgentPhase.done,
+              Outcome.failed => AgentPhase.failed,
+              _ => AgentPhase.paused,
+            };
+          }
+          touched.add(a);
+        }
+        return true;
+      case ItemStarted(
+        :final item,
+        :final agent,
+        :final run,
+        :final kind,
+        :final name,
+        :final args,
+        :final argsCut,
+      ):
+        final a = agents[agent];
+        if (a == null) {
+          unknown++;
+          return false;
+        }
+        final i = ItemModel(item, agent, run, kind, name, args, argsCut: argsCut);
+        _open[item] = i;
+        a.items.add(i);
+        a.last = i;
+        touched.add(a);
+      case ItemDelta(:final item, :final text):
+        if (_open[item] case final i?) {
+          i._append(text);
+          items.add(i);
+        }
+      case final ItemEnded b:
+        if (_open.remove(b.item) case final i?) {
+          i._end(b);
+          items.add(i);
+          if (agents[i.agent] case final a?) touched.add(a);
+        }
+      case final RequestOpened b:
+        requests[b.request] = RequestModel(b);
+        return true;
+      case RequestClosed(:final request):
+        requests.remove(request);
+        return true;
+      case UsageReported(:final agent, :final usage, :final provenance):
+        if (agents[agent] case final a?) {
+          a
+            ..context = usage.context
+            ..contextKnown = provenance;
+          touched.add(a);
+        }
+      case UnknownBody():
+        unknown++;
+    }
+    return false;
+  }
+}

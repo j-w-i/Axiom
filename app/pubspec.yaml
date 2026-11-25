@@ -1,0 +1,19 @@
+name: axiom
+description: The Axiom desktop client.
+publish_to: none
+version: 0.0.1+1
+environment:
+  sdk: ^3.14.0
+dependencies:
+  flutter:
+    sdk: flutter
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+flutter:
+  fonts:
+    - family: Archivo
+      fonts: [{ asset: fonts/Archivo.ttf }]
+    - family: Spline Sans Mono
+      fonts: [{ asset: fonts/SplineSansMono.ttf }]

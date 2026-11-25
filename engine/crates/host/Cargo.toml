@@ -1,0 +1,37 @@
+[package]
+name = "axiom-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "axiom_host"
+
+[[bin]]
+name = "axiom-host"
+path = "src/main.rs"
+
+[dependencies]
+axiom-proto.workspace = true
+axiom-journal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+# One constant (O_NONBLOCK); tokio and getrandom have the crate in the tree anyway.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+# Unix sockets on Windows; std and tokio have none there.
+[target.'cfg(windows)'.dependencies]
+uds_windows.workspace = true
+
+[dev-dependencies]
+# Tests damage and lock the journal behind the host's back.
+rusqlite.workspace = true
+tempfile.workspace = true

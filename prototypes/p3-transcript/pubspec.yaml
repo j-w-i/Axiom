@@ -1,0 +1,9 @@
+name: p3_transcript
+publish_to: none
+version: 0.0.0+1
+environment: { sdk: ^3.14.0 }
+dependencies: { flutter: { sdk: flutter } }
+flutter:
+  fonts:
+    - { family: Archivo, fonts: [{ asset: fonts/Archivo.ttf }] }
+    - { family: Spline, fonts: [{ asset: fonts/SplineSansMono.ttf }] }

@@ -1,0 +1,11 @@
+M4 Pro, macOS 27.0, Dart 3.14 AOT, Rust 1.100, 400 000 events, second run, 2026-11-24
+socket ndjson batch=1, decode on receiver        1162 k ev/s   receiver busy 0.80 us/ev
+socket ljson batch=1, decode on receiver         1277 k ev/s   receiver busy 0.72 us/ev
+socket bin batch=1, decode on receiver          10583 k ev/s   receiver busy 0.06 us/ev
+socket ljson batch=32, decode on receiver        1499 k ev/s   receiver busy 0.61 us/ev
+socket bin batch=32, decode on receiver         13106 k ev/s   receiver busy 0.04 us/ev
+socket ljson batch=32, decode on isolate         1311 k ev/s   receiver busy 0.06 us/ev
+socket bin batch=32, decode on isolate           8903 k ev/s   receiver busy 0.02 us/ev
+FFI port json batch=1, decode on receiver         934 k ev/s   receiver busy 0.72 us/ev
+FFI port json batch=32, decode on receiver       1551 k ev/s   receiver busy 0.62 us/ev
+socket round trip: p50 14 us  p99 47 us  max 157 us

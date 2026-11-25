@@ -1,0 +1,15 @@
+[package]
+name = "p2"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[dependencies]
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+rusqlite = { version = "*", features = ["bundled"] }
+[profile.release]
+lto = true
+codegen-units = 1
+[workspace]

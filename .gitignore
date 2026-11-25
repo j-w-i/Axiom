@@ -6,3 +6,10 @@
 /.claude/worktrees/
 /.claude/settings.local.json
 **/failures/
+/engine/target/
+/prototypes/**/target/
+/prototypes/**/build/
+/prototypes/**/out/
+/prototypes/**/fonts/
+/prototypes/**/Cargo.lock
+/prototypes/**/pubspec.lock

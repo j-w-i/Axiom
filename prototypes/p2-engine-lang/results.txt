@@ -1,0 +1,11 @@
+M4 Pro, macOS 27.0, 2026-11-24. Corpus: flutter/packages. Third run of three (warm).
+rust search: 5336 files, 4488 hits, 31 ms      (gitignore-aware, regex engine)
+dart search: 5638 files, 4488 hits, 56 ms      (literal only, no gitignore, 8 isolates)
+rust regex 'Render[A-Z]\w+Box\b': 1068 hits, 34 ms
+start to first line p50: rust 2.8 ms, dart 43.4 ms; RSS: rust 2.1 MB, dart 17.4 MB
+sqlite WAL sync=NORMAL tx of 1: p50 8.6 us  p99 50.8 us  max 838.8 us
+sqlite WAL sync=NORMAL tx of 20: p50 31.9 us  p99 95.7 us  max 1601.6 us
+sqlite WAL sync=FULL tx of 20: p50 61.4 us  p99 797.9 us  max 1569.2 us
+jsonl append of 20 events, fsync=false: p50 2.7 us  p99 14.0 us  max 38.2 us
+jsonl append of 20 events, fsync=true: p50 4057.1 us  p99 6872.1 us  max 177017.9 us
+Not comparable: on a larger tree Dart took 1.07 s reading large binaries whole; Rust mmaps and quits at NUL.
