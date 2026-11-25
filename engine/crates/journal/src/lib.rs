@@ -48,7 +48,7 @@ impl Error {
     }
 }
 
-const SCHEMA: i64 = 3;
+const SCHEMA: i64 = 4;
 /// How long opening waits for another process.
 const OPENING: Duration = Duration::from_secs(1);
 /// How long a read does. It needs to only while another process recovers the file.
@@ -79,6 +79,15 @@ const HOST_TABLES: &str = "create table agent(
        agent text not null, n integer not null, at integer not null, body text not null,
        primary key(session, agent, n)) without rowid;
      create table audit(seq integer primary key, body text not null);";
+/// What agents have told others to do and not been told the end of, and what each came to last.
+const OWED_TABLES: &str = "create table owed(
+       session text not null references session(id) on delete cascade,
+       parent text not null, run text not null, child text not null, ended text,
+       primary key(session, parent, run)) without rowid;
+     create table finished(
+       session text not null references session(id) on delete cascade,
+       agent text not null, body text not null,
+       primary key(session, agent)) without rowid;";
 /// Of what was said on an agent's wire, this much is kept: the last.
 pub const FRAMES: u64 = 2000;
 /// The planner would scan the whole session for these; `indexed by` makes it an error not to use
@@ -163,7 +172,10 @@ impl Journal {
             if v == 1 {
                 from_1(&tx)?;
             }
-            tx.execute_batch(HOST_TABLES)?;
+            if v < 3 {
+                tx.execute_batch(HOST_TABLES)?;
+            }
+            tx.execute_batch(OWED_TABLES)?;
             tx.pragma_update(None, "user_version", SCHEMA)?;
             tx.commit()?;
         }
@@ -391,6 +403,92 @@ impl Journal {
         })
     }
 
+    /// An agent has told another to do something, and is owed its end.
+    pub fn put_owed(
+        &mut self,
+        id: &SessionId,
+        parent: &AgentId,
+        run: &RunId,
+        child: &AgentId,
+    ) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            j.db.prepare_cached(
+                "insert or ignore into owed(session, parent, run, child) values(?,?,?,?)",
+            )?
+            .execute(params![id.0, parent.0, run.0, child.0])?;
+            Ok(())
+        })
+    }
+
+    /// An agent's runs have ended, and what they came to. Whoever is owed that.
+    pub fn end_owed(
+        &mut self,
+        id: &SessionId,
+        child: &AgentId,
+        runs: &[RunId],
+        body: &str,
+    ) -> Result<Vec<AgentId>> {
+        self.commit(Durability::Intent, |j| {
+            j.db.prepare_cached(
+                "insert or replace into finished(session, agent, body) values(?,?,?)",
+            )?
+            .execute(params![id.0, child.0, body])?;
+            let mut parents = Vec::new();
+            let mut q = j.db.prepare_cached(
+                "update owed set ended=? where session=? and run=? and ended is null
+                 returning parent",
+            )?;
+            for r in runs {
+                let rows = q.query_map(params![body, id.0, r.0], |r| r.get(0).map(AgentId))?;
+                parents.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
+            }
+            parents.sort();
+            parents.dedup();
+            Ok(parents)
+        })
+    }
+
+    /// What an agent was owed is, at once, no longer owed and waits to be heard by it: `items` with
+    /// the runs each is of. One whose runs are not owed any more is left out; the rest is said.
+    pub fn deliver(
+        &mut self,
+        id: &SessionId,
+        parent: &AgentId,
+        items: &[(Vec<RunId>, ItemId, String)],
+    ) -> Result<Vec<ItemId>> {
+        self.commit(Durability::Intent, |j| {
+            let mut done = Vec::new();
+            for (runs, item, body) in items {
+                if j.drop_in(id, parent, runs)? == 0 {
+                    continue;
+                }
+                j.db.prepare_cached(
+                    "insert into pending(session, agent, n, item, body) values(?1, ?2,
+                       (select coalesce(max(n), 0) + 1 from pending where session=?1 and agent=?2),
+                       ?3, ?4)",
+                )?
+                .execute(params![id.0, parent.0, item.0, body])?;
+                done.push(item.clone());
+            }
+            Ok(done)
+        })
+    }
+
+    fn drop_in(&mut self, id: &SessionId, parent: &AgentId, runs: &[RunId]) -> Result<usize> {
+        let mut q =
+            self.db.prepare_cached("delete from owed where session=? and parent=? and run=?")?;
+        let mut n = 0;
+        for r in runs {
+            n += q.execute(params![id.0, parent.0, r.0])?;
+        }
+        Ok(n)
+    }
+
+    /// An agent has been told in another way, or is owed it no more.
+    pub fn drop_owed(&mut self, id: &SessionId, parent: &AgentId, runs: &[RunId]) -> Result<()> {
+        self.commit(Durability::Intent, |j| j.drop_in(id, parent, runs).map(drop))
+    }
+
     /// Keeps what was said on an agent's wire, and forgets what is older than [`FRAMES`] of it.
     pub fn put_frames(
         &mut self,
@@ -540,6 +638,27 @@ impl Reader {
         )?;
         let rows = q.query_map(params![id.0, agent.0], |r| Ok((ItemId(r.get(0)?), r.get(1)?)))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+    /// What an agent is owed: the run, whose it is, and what it came to if it has ended.
+    pub fn owed(
+        &self,
+        id: &SessionId,
+        parent: &AgentId,
+    ) -> Result<Vec<(RunId, AgentId, Option<String>)>> {
+        // A run's name begins with when it was made.
+        let mut q = self.db.prepare_cached(
+            "select run, child, ended from owed where session=? and parent=? order by run",
+        )?;
+        let rows = q.query_map(params![id.0, parent.0], |r| {
+            Ok((RunId(r.get(0)?), AgentId(r.get(1)?), r.get(2)?))
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+    /// What an agent came to last.
+    pub fn finished(&self, id: &SessionId, agent: &AgentId) -> Result<Option<String>> {
+        let mut q =
+            self.db.prepare_cached("select body from finished where session=? and agent=?")?;
+        Ok(q.query_row(params![id.0, agent.0], |r| r.get(0)).optional()?)
     }
     /// The audit record after `after`, at most `most` entries.
     pub fn audit(&self, after: u64, most: u32) -> Result<Vec<String>> {

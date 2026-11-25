@@ -296,7 +296,7 @@ async fn no_circles_and_not_too_deep() {
         (json!({"do": "tell", "name": "A", "text": "x"}), "no other agent"),
         (json!({"do": "tell", "name": "B"}), "say what"),
         (json!({"do": "fly"}), "do is"),
-        (json!({"do": "read", "name": "D"}), "said nothing"),
+        (json!({"do": "read", "name": "D"}), "not finished anything"),
     ] {
         a.server.add(agent(args));
         a.server.add(text(&["ok"]));
@@ -313,6 +313,237 @@ async fn no_circles_and_not_too_deep() {
     t.end_of(&run).await;
     let last = a.server.requests().last().unwrap()["messages"].to_string();
     assert!(last.contains("2 agents are named B") && last.contains("I am the second"));
+}
+
+/// Runs of an agent that have begun.
+fn runs(t: &T, a: &A) -> usize {
+    let of = |b: &&Body| matches!(b, Body::RunStarted { agent, .. } if *agent == a.id);
+    t.log.iter().filter(of).count()
+}
+/// How often the model was last told something.
+fn heard(a: &A, what: &str) -> usize {
+    let r = a.server.requests();
+    r.last().unwrap()["messages"].to_string().matches(what).count()
+}
+fn slow(answer: &str) -> Vec<Reply> {
+    vec![calls(&[("c", "shell", r#"{"command":"sleep 1"}"#)]), text(&[answer])]
+}
+impl T {
+    /// The next run of an agent to end, after what has been seen.
+    async fn next_end(&mut self, a: &A) -> Outcome {
+        let mut mine: Option<RunId> = None;
+        let id = a.id.clone();
+        self.until(|b| match b {
+            Body::RunStarted { run, agent } if *agent == id => {
+                mine = Some(run.clone());
+                None
+            }
+            Body::RunEnded { run, outcome, .. } if Some(run) == mine.as_ref() => Some(*outcome),
+            _ => None,
+        })
+        .await
+    }
+    /// Nothing more begins by itself.
+    async fn still(&mut self) {
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        quiet(&mut self.c).await;
+        while let Ok(Some(m)) = self.c.next_within(Duration::from_millis(50)).await {
+            if let Message::Events { events, .. } = m {
+                self.log.extend(events.into_iter().map(|e| e.body));
+            }
+        }
+    }
+    async fn restart(&mut self) {
+        self.c.call(Call::Shutdown { force: true }).await.unwrap();
+        while self.f.paths.token().exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let mut c = Config::new(self.f.paths.clone());
+        c.home = Some(self.f.dir.path().join("home"));
+        c.programs = Some(vec![self.f.dir.path().join("bin")]);
+        self.f.serve_with(c);
+        self.c = self.f.client().await;
+        let v = self.c.call(Call::SessionList { limit: 1, offset: 0 }).await.unwrap();
+        let after = v[0]["last_seq"].as_u64().unwrap();
+        self.c.call(Call::Follow { session: self.s.clone(), after }).await.unwrap();
+    }
+}
+
+/// PR-21: what came of it reaches who asked for it, by itself and once.
+#[tokio::test]
+async fn what_came_of_it_is_delivered_by_itself() {
+    let mut t = T::new().await;
+    let lead = t
+        .agent(
+            "Lead",
+            Access::Work,
+            vec![tell("Slow", "x"), text(&["I have told it."]), text(&["Now I know."])],
+        )
+        .await;
+    let slow = t.agent("Slow", Access::Work, slow("the answer")).await;
+    let run = t.prompt(&lead, "go").await;
+    assert_eq!(t.end_of(&run).await, Outcome::Completed);
+    assert_eq!(heard(&lead, "the answer"), 0);
+    assert_eq!(t.next_end(&lead).await, Outcome::Completed);
+    // As another agent's word (SI-2), shown as its.
+    assert_eq!((heard(&lead, "the answer"), heard(&lead, "Slow has finished")), (1, 1));
+    assert_eq!(heard(&lead, "another agent of this session, Slow"), 1);
+    let shown = t.log.iter().any(|b| {
+        matches!(b, Body::ItemStarted { kind: ItemKind::Prompt, name, agent, .. }
+            if name == "Slow" && *agent == lead.id)
+    });
+    assert!(shown);
+    t.still().await;
+    assert_eq!((runs(&t, &lead), runs(&t, &slow)), (2, 1));
+    // Once: not with the next word either, nor by waiting, nor by another host.
+    lead.server.add(wait());
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "more").await;
+    t.end_of(&run).await;
+    assert!(told(&lead).contains("nobody owes"), "{}", told(&lead));
+    t.restart().await;
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "more").await;
+    t.end_of(&run).await;
+    assert_eq!(heard(&lead, "the answer"), 1);
+    // What it said last is known there too.
+    lead.server.add(agent(json!({"do": "read", "name": "Slow"})));
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "again").await;
+    t.end_of(&run).await;
+    assert!(told(&lead).contains("the answer"), "{}", told(&lead));
+}
+
+#[tokio::test]
+async fn ends_that_come_together_are_told_together() {
+    let mut t = T::new().await;
+    let both = calls(&[
+        ("c1", "agent", r#"{"do":"tell","name":"One","text":"a"}"#),
+        ("c2", "agent", r#"{"do":"tell","name":"Two","text":"b"}"#),
+    ]);
+    let lead = t.agent("Lead", Access::Work, vec![both, text(&["told"]), text(&["both"])]).await;
+    t.agent("One", Access::Read, vec![text(&["first answer"])]).await;
+    t.agent("Two", Access::Read, vec![text(&["second answer"])]).await;
+    let run = t.prompt(&lead, "go").await;
+    t.end_of(&run).await;
+    assert_eq!(t.next_end(&lead).await, Outcome::Completed);
+    assert_eq!((heard(&lead, "first answer"), heard(&lead, "second answer")), (1, 1));
+    t.still().await;
+    assert_eq!(runs(&t, &lead), 2);
+}
+
+/// What went wrong, or was stopped, does not begin again by itself: it is told when it is spoken to.
+#[tokio::test]
+async fn it_is_held_for_one_that_failed() {
+    let mut t = T::new().await;
+    let lead =
+        t.agent("Lead", Access::Work, vec![tell("Slow", "x"), status(401, "no such key")]).await;
+    t.agent("Slow", Access::Work, slow("the answer")).await;
+    let run = t.prompt(&lead, "go").await;
+    assert_eq!(t.end_of(&run).await, Outcome::Failed);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    t.still().await;
+    assert_eq!(runs(&t, &lead), 1);
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "go on").await;
+    assert_eq!(t.end_of(&run).await, Outcome::Completed);
+    assert_eq!((heard(&lead, "the answer"), heard(&lead, "go on")), (1, 1));
+    t.still().await;
+    assert_eq!(runs(&t, &lead), 2);
+    // Stopped by a person, it is owed nothing more.
+    lead.server.add(tell("Slow", "y"));
+    lead.server.add(text(&["thinking"]).hangs());
+    let run = t.prompt(&lead, "once more").await;
+    let id = lead.id.clone();
+    t.until(|b| match b {
+        Body::ItemStarted { kind: ItemKind::Prose, agent, .. } if *agent == id => Some(()),
+        _ => None,
+    })
+    .await;
+    t.c.call(Call::Cancel { session: t.s.clone(), run: run.clone() }).await.unwrap();
+    assert_eq!(t.end_of(&run).await, Outcome::Cancelled);
+    t.still().await;
+    let n = runs(&t, &lead);
+    lead.server.clear();
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "and now").await;
+    t.end_of(&run).await;
+    assert_eq!(heard(&lead, "has finished"), 1, "only what it was told before");
+    t.still().await;
+    assert_eq!(runs(&t, &lead), n + 1);
+}
+
+/// What was on when the host ended is told as that, and nothing begins by itself after it.
+#[tokio::test]
+async fn what_was_cut_short_is_told_as_that() {
+    let mut t = T::new().await;
+    let lead = t.agent("Lead", Access::Work, vec![tell("Slow", "x"), text(&["told"])]).await;
+    let slow = t.agent("Slow", Access::Read, vec![text(&["begun"]).hangs()]).await;
+    let run = t.prompt(&lead, "go").await;
+    t.end_of(&run).await;
+    let id = slow.id.clone();
+    if runs(&t, &slow) == 0 {
+        t.until(|b| matches!(b, Body::RunStarted { agent, .. } if *agent == id).then_some(()))
+            .await;
+    }
+    // Killed, as it were: what the stop would say of it is not there.
+    let db = rusqlite::Connection::open(t.f.paths.journal()).unwrap();
+    t.c.call(Call::Shutdown { force: true }).await.unwrap();
+    while t.f.paths.token().exists() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    for _ in 0..200 {
+        if db.execute("update owed set ended = null", []).is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    drop(db);
+    let mut c = Config::new(t.f.paths.clone());
+    c.home = Some(t.f.dir.path().join("home"));
+    t.f.serve_with(c);
+    t.c = t.f.client().await;
+    let v = t.c.call(Call::SessionList { limit: 1, offset: 0 }).await.unwrap();
+    let after = v[0]["last_seq"].as_u64().unwrap();
+    t.c.call(Call::Follow { session: t.s.clone(), after }).await.unwrap();
+    t.log.clear();
+    t.still().await;
+    assert_eq!(runs(&t, &lead), 0);
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "go on").await;
+    assert_eq!(t.end_of(&run).await, Outcome::Completed);
+    assert_eq!(heard(&lead, "Slow was interrupted"), 1);
+    assert_eq!(heard(&lead, "the host ended meanwhile"), 1);
+}
+
+/// Agents do not keep each other going for ever with nobody there.
+#[tokio::test]
+async fn it_does_not_go_on_for_ever() {
+    let mut t = T::new().await;
+    let mut script = Vec::new();
+    for _ in 0..20 {
+        script.push(tell("Echo", "again"));
+        script.push(text(&["told"]));
+    }
+    let lead = t.agent("Lead", Access::Work, script).await;
+    let echo = t.agent("Echo", Access::Read, (0..20).map(|_| text(&["done"])).collect()).await;
+    let run = t.prompt(&lead, "go").await;
+    t.end_of(&run).await;
+    for _ in 0..40 {
+        let n = runs(&t, &lead);
+        t.still().await;
+        if runs(&t, &lead) == n {
+            break;
+        }
+    }
+    assert_eq!((runs(&t, &lead), runs(&t, &echo)), (9, 9));
+    // A person's word begins it again, and the last is told with it.
+    lead.server.clear();
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "enough").await;
+    t.end_of(&run).await;
+    t.still().await;
+    assert_eq!(runs(&t, &lead), 10);
 }
 
 /// SI-24.

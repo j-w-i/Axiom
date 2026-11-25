@@ -10,12 +10,14 @@ use std::{
 
 use axiom_engine::{Deed, Desk, Other, Say, Stage};
 use axiom_policy::{Ask, audit::Containment, rules::Decision};
-use axiom_proto::{Access, AgentId, AgentState, Answerable, Body, Outcome, RequestId, RunId};
+use axiom_proto::{
+    Access, AgentId, AgentState, Answerable, Body, Outcome, RequestId, RunId, SessionId,
+};
 use axiom_tools::{Output, Spec};
 use serde_json::{Value, json};
 
 use crate::{
-    agents::{Finished, Floor, Setup, Slot, Told},
+    agents::{Agents, Debt, Finished, Floor, Setup, Slot, Told},
     delegated,
 };
 
@@ -34,7 +36,7 @@ const LONGEST: u64 = 900;
 pub fn specs() -> Vec<Spec> {
     vec![Spec {
         name: TOOL,
-        description: "Works with the other agents of this session. list: who they are and what they are doing. tell: gives one a message and returns at once; if it was not at work, it begins. wait: until one of those you told has finished, then what it answered. read: what one answered last. An agent knows only what you tell it: say what to do, where, and what to report.",
+        description: "Works with the other agents of this session. list: who they are and what they are doing. tell: gives one a message and returns at once; if it was not at work, it begins. What it comes to reaches you by itself, also after you have ended your turn. wait: until one of those you told has finished, then what it answered, if you need that before you go on. read: what one answered last. An agent knows only what you tell it: say what to do, where, and what to report.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -159,7 +161,7 @@ pub async fn judge(f: &Floor, args: &Value) -> Other {
     if chain.len() >= DEEPEST {
         return no("agents already give each other work three deep".into());
     }
-    if slot.owed.lock().unwrap_or_else(PoisonError::into_inner).len() >= OWED {
+    if slot.owed().len() >= OWED {
         return no("it has told as many as it may; wait for some of them".into());
     }
     let known = delegated::known_as(&p.setup.execution.harness);
@@ -322,10 +324,16 @@ pub async fn perform(f: &Floor, args: &Value) -> Output {
         Asked::Tell(p, text) => tell(f, mine, p, text).await,
         Asked::Wait(d) => wait(f, d).await,
         Asked::Read(p) => {
-            let last = f.agents.slot(&f.session.id, &p.id).last.borrow().clone();
+            let mut last = f.agents.slot(&f.session.id, &p.id).last.borrow().clone();
+            if last.is_none() {
+                // From before this host began.
+                let kept = f.store.finished(f.session.id.clone(), p.id.clone()).await;
+                let kept = kept.ok().flatten().and_then(|t| serde_json::from_str(&t).ok());
+                last = kept.map(Arc::new);
+            }
             match last {
                 Some(l) => good(answer(&p.setup.name, &l), p.setup.name),
-                None => bad(format!("{} has said nothing since the host began", p.setup.name)),
+                None => bad(format!("{} has not finished anything yet", p.setup.name)),
             }
         }
     }
@@ -364,30 +372,55 @@ async fn tell(f: &Floor, mine: Setup, p: Peer, text: String) -> Output {
     let told = Told { by: mine.name, text, chain: chain(f, &slot) };
     match switch.tell(f.session.id.clone(), p.id.clone(), told).await {
         Ok(run) => {
-            slot.owed.lock().unwrap_or_else(PoisonError::into_inner).insert(run, p.id);
+            // What it comes to is this agent's to hear, also if neither host nor agent lasts as long.
+            let (s, me) = (f.session.id.clone(), f.agent.clone());
+            let kept = f.store.put_owed(s, me, run.clone(), p.id.clone()).await;
             let name = p.setup.name;
-            good(format!("{name} has it. wait says when it has finished.\n"), name)
+            slot.owed().insert(run, Debt { child: p.id, ended: None });
+            let how = match kept {
+                Ok(()) => "What it comes to reaches you by itself; wait if you need it first.",
+                Err(_) => "wait says when it has finished.",
+            };
+            good(format!("{name} has it. {how}\n"), name)
         }
         Err(e) => bad(format!("{} was not told: {}", p.setup.name, e.message)),
     }
 }
 
-/// What has finished of what this agent began, each once.
-fn finished(f: &Floor, slot: &Slot) -> Vec<(AgentId, Arc<Finished>)> {
-    let mut owed = slot.owed.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut out: Vec<(AgentId, Arc<Finished>)> = Vec::new();
-    let mut over: HashSet<RunId> = HashSet::new();
-    for (run, agent) in owed.iter() {
-        let last = f.agents.slot(&f.session.id, agent).last.borrow().clone();
-        if let Some(l) = last.filter(|l| l.runs.contains(run)) {
-            over.insert(run.clone());
-            if !out.iter().any(|(a, _)| a == agent) {
-                out.push((agent.clone(), l));
-            }
+fn end_of(agents: &Agents, session: &SessionId, run: &RunId, debt: &Debt) -> Option<Arc<Finished>> {
+    let last = agents.slot(session, &debt.child).last.borrow().clone();
+    last.filter(|l| l.runs.contains(run)).or_else(|| debt.ended.clone())
+}
+
+/// Whether something has finished that this agent is owed.
+pub fn has_finished(agents: &Agents, session: &SessionId, slot: &Slot) -> bool {
+    slot.owed().iter().any(|(run, debt)| end_of(agents, session, run, debt).is_some())
+}
+
+/// What has finished of what this agent began: whose, what it came to, and the runs of it that are
+/// owed. They are owed no more.
+pub fn finished(
+    agents: &Agents,
+    session: &SessionId,
+    slot: &Slot,
+) -> Vec<(AgentId, Arc<Finished>, Vec<RunId>)> {
+    let mut owed = slot.owed();
+    let mut out: Vec<(AgentId, Arc<Finished>, Vec<RunId>)> = Vec::new();
+    for (run, debt) in owed.iter() {
+        let Some(end) = end_of(agents, session, run, debt) else { continue };
+        match out.iter_mut().find(|o| o.0 == debt.child) {
+            // Both came to the same.
+            Some(o) => o.2.push(run.clone()),
+            None => out.push((debt.child.clone(), end, vec![run.clone()])),
         }
     }
-    owed.retain(|r, _| !over.contains(r));
+    owed.retain(|r, _| !out.iter().any(|o| o.2.contains(r)));
     out
+}
+
+/// What a child came to, as its parent is told of it.
+pub fn report(name: &str, l: &Finished) -> String {
+    answer(name, l)
 }
 
 /// Takes back what is said of who is waited for, whatever happens.
@@ -419,8 +452,7 @@ async fn wait(f: &Floor, most: Duration) -> Output {
     let _waits = Waits(&slot);
     loop {
         let owed: Vec<AgentId> = {
-            let o = slot.owed.lock().unwrap_or_else(PoisonError::into_inner);
-            let mut v: Vec<AgentId> = o.values().cloned().collect();
+            let mut v: Vec<AgentId> = slot.owed().values().map(|d| d.child.clone()).collect();
             v.sort();
             v.dedup();
             v
@@ -431,8 +463,11 @@ async fn wait(f: &Floor, most: Duration) -> Output {
         // Listened to before it is looked at: nothing is missed in between.
         let mut ends: Vec<_> =
             owed.iter().map(|a| f.agents.slot(&f.session.id, a).last.subscribe()).collect();
-        let done = finished(f, &slot);
+        let done = finished(&f.agents, &f.session.id, &slot);
         if !done.is_empty() {
+            let runs = done.iter().flat_map(|d| d.2.iter().cloned()).collect();
+            let (s, me) = (f.session.id.clone(), f.agent.clone());
+            let _ = f.store.drop_owed(s, me, runs).await;
             let (_, others) = match peers(f).await {
                 Ok(p) => p,
                 Err(e) => return bad(e),
@@ -443,7 +478,7 @@ async fn wait(f: &Floor, most: Duration) -> Output {
                     .find(|p| p.id == *a)
                     .map_or_else(|| a.0.clone(), |p| p.setup.name.clone())
             };
-            let mut text: String = done.iter().map(|(a, l)| answer(&name(a), l)).collect();
+            let mut text: String = done.iter().map(|(a, l, _)| answer(&name(a), l)).collect();
             let left: Vec<String> =
                 owed.iter().filter(|a| !done.iter().any(|d| d.0 == **a)).map(&name).collect();
             if !left.is_empty() {

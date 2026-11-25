@@ -1087,7 +1087,6 @@ async fn prompt(
     if let Some(v) = key.as_deref().and_then(|k| slot.answered(k)) {
         return Ok(v);
     }
-    let setup = setup(st, &session, &agent).await?;
     let turnstile = match spoken {
         Spoken::Heard(ear) => {
             // In the journal, and waiting to be heard, before it is said to be.
@@ -1106,17 +1105,118 @@ async fn prompt(
         }
         Spoken::Start(t) => t,
     };
+    if told.is_none() {
+        slot.wakes.store(0, Relaxed);
+    }
+    let chain = told.map(|t| t.chain).unwrap_or_default();
+    let word = axiom_engine::Word { text, item: None, shown };
+    let run = start(st, session, agent, turnstile, Opening::Said { word, key, chain }).await?;
+    Ok(json!({ "run": run, "queued": false }))
+}
+
+/// Why a run begins.
+enum Opening {
+    /// Something is said to the agent: by a person, or by those in the chain.
+    Said { word: axiom_engine::Word, key: Option<String>, chain: Vec<AgentId> },
+    /// What others have come to is told to it.
+    Told,
+}
+
+/// Runs of an agent that others' ends may begin, one after another, with no person in between.
+const WAKES: u32 = 8;
+/// Ends that come together are told together.
+const TOGETHER: Duration = Duration::from_millis(300);
+
+/// Tells an agent that is not at work what it is owed and has not asked for. One that is at work may
+/// ask itself, and is looked at again when it ends.
+fn deliver(
+    st: Arc<State>,
+    session: SessionId,
+    agent: AgentId,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    // Boxed: the run it may start may end in another.
+    Box::pin(async move {
+        tokio::time::sleep(TOGETHER).await;
+        let slot = st.agents.slot(&session, &agent);
+        if st.runs().closing || !peers::has_finished(&st.agents, &session, &slot) {
+            return;
+        }
+        let Ok(Spoken::Start(turnstile)) = slot.speak().await else { return };
+        // What went wrong would go wrong again, and whoever was stopped stays so: it is told when it
+        // is spoken to the next time.
+        let well = slot.last.borrow().as_ref().is_some_and(|l| l.outcome == Outcome::Completed);
+        if !well || slot.wakes.fetch_add(1, Relaxed) >= WAKES {
+            return;
+        }
+        let _ = start(&st, session, agent, turnstile, Opening::Told).await;
+    })
+}
+
+/// What an agent is owed and others have come to: at once no longer owed, and waiting to be heard.
+/// How it is shown.
+async fn collect(
+    st: &Arc<State>,
+    session: &SessionId,
+    agent: &AgentId,
+    slot: &agents::Slot,
+) -> Result<Vec<(ItemId, String, String)>, WireError> {
+    let live = |r: &RunId| st.runs().live.contains_key(r);
+    slot.load_owed(&st.store, session, agent, live).await?;
+    let done = peers::finished(&st.agents, session, slot);
+    if done.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = stored(st, session).await?;
+    let name = |id: &AgentId| {
+        let text = names.iter().find(|n| n.0 == *id).map(|n| n.1.as_str());
+        let setup = text.and_then(|t| serde_json::from_str::<Setup>(t).ok());
+        setup.map_or_else(|| id.0.clone(), |s| s.name)
+    };
+    let mut items = Vec::new();
+    let mut shown = Vec::new();
+    for (child, end, runs) in done {
+        let (item, name) = (ItemId::new(), name(&child));
+        let text = peers::report(&name, &end);
+        items.push((runs, item.clone(), axiom_engine::from_agent(&name, &text)));
+        shown.push((item, name, text));
+    }
+    let told = st.store.deliver(session.clone(), agent.clone(), items).await;
+    let told = told.map_err(|e| internal(e.to_string()))?;
+    shown.retain(|s| told.contains(&s.0));
+    Ok(shown)
+}
+
+async fn start(
+    st: &Arc<State>,
+    session: SessionId,
+    agent: AgentId,
+    turnstile: Box<agents::Turnstile>,
+    opening: Opening,
+) -> Result<RunId, WireError> {
+    let slot = st.agents.slot(&session, &agent);
+    let setup = setup(st, &session, &agent).await?;
     let s = st.open(&session).await?;
     let run = RunId::new();
     let (live, cancel) = Live::new(st, &session, &run)?;
-    let answer = json!({ "run": run, "queued": false });
+    let (word, key) = match opening {
+        Opening::Said { word, key, chain } => {
+            let mut now = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
+            *now = chain;
+            now.push(agent.clone());
+            (Some(word), key)
+        }
+        // As deep as it was when it told them.
+        Opening::Told => {
+            let mut now = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
+            if now.is_empty() {
+                now.push(agent.clone());
+            }
+            (None, None)
+        }
+    };
+    let first = run.clone();
     if let Some(k) = &key {
-        slot.remember(k.clone(), answer.clone());
-    }
-    {
-        let mut chain = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
-        *chain = told.map(|t| t.chain).unwrap_or_default();
-        chain.push(agent.clone());
+        slot.remember(k.clone(), json!({ "run": run, "queued": false }));
     }
     // By itself: a client that leaves now does not leave a run that never ends.
     let (told, begun) = oneshot::channel();
@@ -1130,11 +1230,17 @@ async fn prompt(
         let begin = async {
             let (a, c) = (&st.agents, cancel.clone());
             setup = copies::ready(a, &st.store, &session, &agent, setup.clone(), c).await?;
+            let owed = collect(&st, &session, &agent, &slot).await?;
+            if word.is_none() && owed.is_empty() {
+                return Err(agents::bad("there is nothing to tell it"));
+            }
             let rx = turnstile.enter(&run, &cancel);
             let mut a =
                 agents::Worker::load(&st.agents, &st.store, s.clone(), &agent, &setup, rx).await?;
-            let word = axiom_engine::Word { text, item: None, shown };
-            a.begin(&run, Some(word)).await.map_err(refused)?;
+            a.begin(&run, word).await.map_err(refused)?;
+            for (item, by, show) in owed {
+                said(&st, &session, axiom_engine::said(&item, &run, &agent, &show, &by)).await?;
+            }
             Ok(a)
         };
         let mut a = match begin.await {
@@ -1159,8 +1265,10 @@ async fn prompt(
             let stopped = *cancel.borrow();
             if stopped {
                 slot.stop_jobs();
-                // Who stops an agent stops what it began (SI-24).
-                for r in slot.forgive() {
+                // Who stops an agent stops what it began (SI-24), and is owed nothing of it.
+                let began = slot.forgive();
+                let _ = st.store.drop_owed(session.clone(), agent.clone(), began.clone()).await;
+                for r in began {
                     st.stop(&r);
                 }
             }
@@ -1188,13 +1296,21 @@ async fn prompt(
                 break;
             }
         }
-        slot.finish(Finished { runs, outcome, error, text });
+        let end = Finished { runs, outcome, error, text };
+        // On the drive before anybody is told: who is owed it is told once, also by another host.
+        let body = serde_json::to_string(&end).unwrap_or_default();
+        let parents =
+            st.store.end_owed(session.clone(), agent.clone(), end.runs.clone(), body).await;
+        slot.finish(end);
+        for p in parents.unwrap_or_default().into_iter().chain([agent]) {
+            tokio::spawn(deliver(st.clone(), session.clone(), p));
+        }
         // Its session before its place among what runs: what it said last is in the journal.
         drop(s);
         drop(live);
     });
     begun.await.map_err(|_| internal("the run did not start"))??;
-    Ok(answer)
+    Ok(first)
 }
 
 impl Switch for State {
