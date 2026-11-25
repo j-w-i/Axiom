@@ -2,13 +2,16 @@
 
 use std::{
     collections::HashMap,
-    io::{self, Write},
+    io::{self, Read, Write},
     process::ExitCode,
     time::Duration,
 };
 
 use axiom_host::{client::Client, paths::Paths, signal};
-use axiom_proto::{Body, Call, Event, Message, Outcome, SessionId};
+use axiom_proto::{
+    Access, AgentId, Answer, Answerable, Body, Call, Event, Execution, Message, Outcome, RequestId,
+    RunId, SecretText, SessionId,
+};
 use plain::{block, json, line};
 use serde_json::Value;
 
@@ -20,7 +23,40 @@ const USAGE: &str = "usage:
   axiom new TITLE [WORKSPACE]
   axiom replay SESSION SCRIPT [SPEED]
   axiom follow SESSION
+  axiom connections
+  axiom connect NAME PROVIDER [URL] [--key]     a key is read from standard input
+  axiom disconnect CONNECTION
+  axiom models CONNECTION
+  axiom agent SESSION NAME CONNECTION MODEL read|ask|work
+  axiom set SESSION AGENT read|ask|work
+  axiom say SESSION AGENT TEXT
+  axiom answer SESSION REQUEST DIGEST once|session|deny
+  axiom cancel SESSION RUN
+  axiom audit [AFTER]
   axiom stop [--force]";
+
+/// Longer is no key.
+const KEY: u64 = 16 * 1024;
+
+fn access(s: &str) -> Result<Access, Error> {
+    match s {
+        "read" => Ok(Access::Read),
+        "ask" => Ok(Access::Ask),
+        "work" => Ok(Access::Work),
+        _ => Err(USAGE.into()),
+    }
+}
+
+/// Never from the arguments: every process of this machine can read those (SI-3).
+fn key() -> Result<SecretText, Error> {
+    let mut s = String::new();
+    io::stdin().take(KEY + 1).read_to_string(&mut s)?;
+    let t = s.trim().to_owned();
+    if t.is_empty() || s.len() as u64 > KEY {
+        return Err("a key is read from standard input: between 1 and 16384 bytes".into());
+    }
+    Ok(SecretText(t))
+}
 
 /// A host that is busy with strangers lets a client in sooner than this.
 const ANSWER_WITHIN: Duration = Duration::from_secs(10);
@@ -87,6 +123,52 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
             speed: rest.first().map_or(Ok(1.0), |v| v.parse())?,
         },
         ["follow", s] => Call::Follow { session: SessionId(s.into()), after: 0 },
+        ["connections"] => Call::Connections {},
+        ["connect", name, provider, ref rest @ ..] => {
+            let url = rest.iter().find(|a| **a != "--key").map(|u| (*u).to_owned());
+            let secret = if rest.contains(&"--key") { Some(key()?) } else { None };
+            Call::ConnectionAdd { name: name.into(), provider: provider.into(), url, secret }
+        }
+        ["disconnect", c] => Call::ConnectionRemove { connection: c.into() },
+        ["models", c] => Call::Models { connection: c.into() },
+        ["agent", s, name, c, model, a] => Call::AgentAdd {
+            session: SessionId(s.into()),
+            name: name.into(),
+            execution: Execution {
+                harness: "axiom".into(),
+                provider: None,
+                model: Some(model.into()),
+                connection: Some(c.into()),
+                effort: None,
+                environment: None,
+            },
+            access: access(a)?,
+        },
+        ["set", s, agent, a] => Call::AgentSet {
+            session: SessionId(s.into()),
+            agent: AgentId(agent.into()),
+            execution: None,
+            access: Some(access(a)?),
+        },
+        ["say", s, agent, text] => Call::Prompt {
+            session: SessionId(s.into()),
+            agent: AgentId(agent.into()),
+            text: text.into(),
+        },
+        ["answer", s, r, digest, a] => Call::Answer {
+            session: SessionId(s.into()),
+            request: RequestId(r.into()),
+            answer: match a {
+                "once" => Answer::Once,
+                "session" => Answer::Session,
+                "deny" => Answer::Deny,
+                _ => return Err(USAGE.into()),
+            },
+            digest: digest.into(),
+        },
+        ["cancel", s, r] => Call::Cancel { session: SessionId(s.into()), run: RunId(r.into()) },
+        ["audit"] => Call::Audit { after: 0, limit: 200 },
+        ["audit", n] => Call::Audit { after: n.parse()?, limit: 200 },
         ["stop"] => Call::Shutdown { force: false },
         ["stop", "--force"] => Call::Shutdown { force: true },
         _ => return Err(USAGE.into()),
@@ -174,10 +256,17 @@ fn event(out: &mut impl Write, shown: &mut HashMap<String, String>, e: Event) ->
         Body::ItemStarted { name, .. } if !name.is_empty() => {
             writeln!(out, "* {}", line(&name))?;
         }
-        Body::RequestOpened { what, subject, scope, .. } => {
+        Body::RequestOpened { request, what, subject, scope, answerable, digest, .. } => {
             let scope = if scope.is_empty() { scope } else { format!(" ({})", line(&scope)) };
             writeln!(out, "? {}: {}{scope}", line(&what), line(&subject))?;
+            if answerable == Answerable::Live && !digest.is_empty() {
+                writeln!(out, "  answer {} {}", line(&request.0), line(&digest))?;
+            }
         }
+        Body::AgentAdded { agent, name, .. } => {
+            writeln!(out, "+ {} {}", line(&agent.0), line(&name))?;
+        }
+        Body::RunStarted { run, .. } => writeln!(out, "-- run {}", line(&run.0))?,
         _ => {}
     }
     Ok(())
