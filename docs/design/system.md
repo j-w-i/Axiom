@@ -31,7 +31,7 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 | `block` | code on the display | one tone up, no border |
 
 Radii: key 5, plate 6, display 7, overlay 9; what is inside is never rounder than what holds it. Type 10–19. Density compact/regular/roomy changes control height (24/28/32), never type size.
-States for every control: rest, hover, held, engaged (sunken), focused (keyboard ring), disabled (flat words, no surface), loading, error.
+States for every control: rest, hover, held, engaged (sunken), focused (keyboard ring), disabled (a main act and a key keep a hairline outline with grey words; a quiet key is flat words), loading, error.
 
 **A request** is shown whole, spelled out, and cannot be allowed before it has been seen to its end.
 

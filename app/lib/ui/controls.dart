@@ -112,7 +112,18 @@ class AxButton extends StatelessWidget {
             ),
           ),
         );
-        if (!s.enabled) return body;
+        if (!s.enabled) {
+          // A main act keeps its place while it cannot be pressed.
+          return tone == AxTone.quiet
+              ? body
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: c.bayRule),
+                    borderRadius: BorderRadius.circular(AxRadius.key),
+                  ),
+                  child: body,
+                );
+        }
         if (tone == AxTone.quiet && !s.pressed && !engaged) {
           return DecoratedBox(
             decoration: BoxDecoration(
