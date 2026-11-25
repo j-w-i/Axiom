@@ -20,7 +20,7 @@ Of `threat-model.md` §6. "Not yet" means that nothing in this build could break
 | 14 | `app/test/ui/tokens_test.dart` (no process but the host), no network code in the client |
 | 15 | `app/test/transcript`, `app/test/ui/controls_test.dart` (requests whole and spelled out) |
 | 16 | `policy/shell.rs` (compared with bash, zsh, sh), `policy/rules.rs` `deny_beats_everything` |
-| 17, 18 | in part: what another agent says is marked as that for the model and in the transcript (`host/tests/peers.rs`); a fetched page is marked; every address is asked about. No labels that are carried on yet |
+| 17, 18 | in part (what is delivered is marked as another agent's word, `host/tests/peers.rs`): what another agent says is marked as that for the model and in the transcript (`host/tests/peers.rs`); a fetched page is marked; every address is asked about. No labels that are carried on yet |
 | 19 | `policy/request.rs` `any_change_is_another_thing`; `host/tests/copies.rs` `what_is_shown_is_what_is_brought_in` |
 | 20 | `host/tests` (token, peer); `host/tests/signin.rs` `nothing_else_listens` (no other listener in any crate; until 2026-11-25 this table named a test there was not), `a_person_signs_in_and_their_plan_is_used`, `what_does_not_become_a_sign_in` (what it refuses, that it closes) |
 | 21 | not yet (K16) |

@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     pin::Pin,
-    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak, atomic::AtomicU32},
     time::Duration,
 };
 
@@ -105,8 +105,13 @@ pub struct Slot {
     pub last: watch::Sender<Option<Arc<Finished>>>,
     /// Who began its run, from the session's own agent down, and itself.
     pub chain: Mutex<Vec<AgentId>>,
-    /// Runs it began by telling others, whose end it has not been told.
-    pub owed: Mutex<HashMap<RunId, AgentId>>,
+    /// Runs it began by telling others, whose end it has not been told. As the journal has them, once
+    /// it has been in a run.
+    pub owed: Mutex<HashMap<RunId, Debt>>,
+    /// The journal has been asked.
+    owes: tokio::sync::OnceCell<()>,
+    /// Runs of it that others' ends began, since a person spoke to it.
+    pub wakes: AtomicU32,
     /// Who it waits for now.
     pub waits: Mutex<Vec<AgentId>>,
     /// Of a delegated agent: what it said last in this run.
@@ -117,8 +122,16 @@ pub struct Slot {
     pub stays: watch::Sender<usize>,
 }
 
+/// Something an agent is owed.
+#[derive(Debug, Clone)]
+pub struct Debt {
+    pub child: AgentId,
+    /// What it came to, if that is known from the journal.
+    pub ended: Option<Arc<Finished>>,
+}
+
 /// Runs that followed one another, and what they came to.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finished {
     pub runs: Vec<RunId>,
     pub outcome: Outcome,
@@ -904,8 +917,10 @@ impl Worker {
     ) -> (mpsc::Receiver<Word>, Ended, String) {
         match self {
             Self::Native(mut a) => {
+                let before = a.context.answers();
                 let e = a.run(run, cancel).await;
-                let last = a.context.last();
+                // Of this run: what it said before is no answer to what it was told now.
+                let last = a.context.last_since(before);
                 (a.inbox, e, last)
             }
             Self::Delegated(mut w) => {
@@ -1111,8 +1126,42 @@ impl Slot {
 
     /// What it began is nobody's any more.
     pub fn forgive(&self) -> Vec<RunId> {
-        let mut owed = self.owed.lock().unwrap_or_else(PoisonError::into_inner);
-        owed.drain().map(|(r, _)| r).collect()
+        self.owed().drain().map(|(r, _)| r).collect()
+    }
+
+    pub fn owed(&self) -> MutexGuard<'_, HashMap<RunId, Debt>> {
+        self.owed.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// What the journal has of what it is owed, once. `live`: whether a run is on in this host. One
+    /// that is not and has no end was cut short with the host before.
+    pub async fn load_owed(
+        &self,
+        store: &Store,
+        session: &SessionId,
+        agent: &AgentId,
+        live: impl Fn(&RunId) -> bool,
+    ) -> Result<(), WireError> {
+        self.owes
+            .get_or_try_init(|| async {
+                let rows = store.owed(session.clone(), agent.clone()).await.map_err(internal)?;
+                for (run, child, ended) in rows {
+                    let ended = match ended {
+                        Some(t) => Some(serde_json::from_str(&t).map_err(internal)?),
+                        None if live(&run) => None,
+                        None => Some(Finished {
+                            runs: vec![run.clone()],
+                            outcome: Outcome::Interrupted,
+                            error: Some("the host ended meanwhile".into()),
+                            text: String::new(),
+                        }),
+                    };
+                    self.owed().entry(run).or_insert(Debt { child, ended: ended.map(Arc::new) });
+                }
+                Ok(())
+            })
+            .await
+            .map(drop)
     }
 
     /// The run it is in, and what stops that.

@@ -271,6 +271,23 @@ class HostStore extends ChangeNotifier {
     }
   }
 
+  final _seen = <(String, String, int)>{};
+
+  /// Its person has what an agent came to before them.
+  void seen(String session, String agent) {
+    for (final w in needs) {
+      if (w.session != session || w.agent != agent || w.need == Need.asks) continue;
+      // Said once; the host says when it is gone.
+      if (!_seen.add((session, agent, w.at))) continue;
+      unawaited(
+        _live
+            .call('agent.seen', {'session': session, 'agent': agent})
+            .then((_) {}, onError: (Object _) => _seen.remove((session, agent, w.at))),
+      );
+    }
+    if (_seen.length > 1000) _seen.clear();
+  }
+
   /// Ways to reach providers, as the host has them.
   List<Connection> connections = const [];
   final _models = <String, List<ModelInfo>>{};

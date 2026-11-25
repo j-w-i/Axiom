@@ -18,6 +18,8 @@ pub enum Turn {
 #[derive(Debug, Clone, Default)]
 pub struct Context {
     turns: u64,
+    /// Of those, the agent's own.
+    answers: u64,
     kept: Vec<Message>,
 }
 
@@ -42,7 +44,10 @@ impl Context {
     pub fn push(&mut self, t: &Turn) {
         self.turns += 1;
         match t {
-            Turn::Message(m) => self.kept.push(m.clone()),
+            Turn::Message(m) => {
+                self.answers += u64::from(m.role == Role::Assistant);
+                self.kept.push(m.clone());
+            }
             Turn::Compacted { summary } => {
                 self.kept = vec![Message::user(format!(
                     "The conversation so far was too long and has been summarised:\n\n{summary}"
@@ -58,6 +63,16 @@ impl Context {
 
     pub fn is_empty(&self) -> bool {
         self.kept.is_empty()
+    }
+
+    /// How often the agent has answered.
+    pub fn answers(&self) -> u64 {
+        self.answers
+    }
+
+    /// What the agent said last, in words, if that was after it had answered so often.
+    pub fn last_since(&self, answers: u64) -> String {
+        if self.answers > answers { self.last() } else { String::new() }
     }
 
     /// What the agent said last, in words.

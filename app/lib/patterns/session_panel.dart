@@ -443,14 +443,16 @@ class NeedsRow extends StatelessWidget {
     required this.age,
     required this.onOpen,
     super.key,
+    this.state = AgentState.asking,
   });
+  final AgentState state;
   final String agent, what, subject, session, age;
   final VoidCallback onOpen;
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
     return Pressable(
-      label: '$agent $what: $subject, in $session',
+      label: subject.isEmpty ? '$agent $what, in $session' : '$agent $what: $subject, in $session',
       hint: age,
       onPressed: onOpen,
       builder: (context, s) => DecoratedBox(
@@ -463,7 +465,7 @@ class NeedsRow extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(padding: EdgeInsets.only(top: 3), child: AxLamp(AgentState.asking)),
+              Padding(padding: const EdgeInsets.only(top: 3), child: AxLamp(state)),
               const SizedBox(width: 9),
               Expanded(
                 child: Column(
@@ -475,12 +477,15 @@ class NeedsRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: t.type.ui.ink(c.ink1),
                     ),
-                    Text(
-                      subject,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.codeSmall.ink(c.ink2),
-                    ),
+                    if (subject.isNotEmpty)
+                      Text(
+                        subject,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: state == AgentState.asking
+                            ? t.type.codeSmall.ink(c.ink2)
+                            : t.type.small.ink(c.ink2),
+                      ),
                     Text(
                       session,
                       maxLines: 1,

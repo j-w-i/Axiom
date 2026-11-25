@@ -36,7 +36,7 @@ class Shell extends StatefulWidget {
 /// What the display shows.
 enum _View { work, start, agent, accounts }
 
-class _ShellState extends State<Shell> {
+class _ShellState extends State<Shell> with WidgetsBindingObserver {
   String? _agent;
   String? _session;
 
@@ -115,7 +115,20 @@ class _ShellState extends State<Shell> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// What came meanwhile is before its person now.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _forget?.cancel();
     _drafts.dispose();
     _start.dispose();
@@ -401,29 +414,57 @@ class _Side extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
             children: [
-              if (store.needs.isNotEmpty) ...[
-                Semantics(
-                  liveRegion: true,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
-                    child: Text(
-                      store.needs.length == 1 ? 'Needs you' : 'Needs you · ${store.needs.length}',
-                      style: t.type.label.ink(c.attentionText),
+              for (final (label, color, all) in [
+                (
+                  'Needs you',
+                  c.attentionText,
+                  [
+                    for (final w in store.needs)
+                      if (w.need != Need.finished) w,
+                  ],
+                ),
+                (
+                  'Finished, not seen yet',
+                  c.ink3,
+                  [
+                    for (final w in store.needs)
+                      if (w.need == Need.finished) w,
+                  ],
+                ),
+              ])
+                if (all.isNotEmpty) ...[
+                  Semantics(
+                    liveRegion: true,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
+                      child: Text(
+                        all.length == 1 ? label : '$label · ${all.length}',
+                        style: t.type.label.ink(color),
+                      ),
                     ),
                   ),
-                ),
-                for (final w in store.needs)
-                  NeedsRow(
-                    key: ValueKey((w.session, w.request)),
-                    agent: w.name.isEmpty ? 'An agent' : oneLine(literal(w.name), 40),
-                    what: oneLine(literal(w.what), 60),
-                    subject: oneLine(literal(w.subject), 120),
-                    session: w.title.isEmpty ? 'Session' : oneLine(literal(w.title), 60),
-                    age: ageOf(w.at),
-                    onOpen: () => onAnswer(w),
-                  ),
-                const SizedBox(height: 12),
-              ],
+                  for (final w in all)
+                    NeedsRow(
+                      key: ValueKey((w.session, w.agent, w.request)),
+                      agent: w.name.isEmpty ? 'An agent' : oneLine(literal(w.name), 40),
+                      what: switch (w.need) {
+                        Need.failed => 'failed',
+                        Need.limit => 'has reached a limit',
+                        Need.finished => 'has finished',
+                        _ => oneLine(literal(w.what), 60),
+                      },
+                      state: switch (w.need) {
+                        Need.failed || Need.limit => AgentState.failed,
+                        Need.finished => AgentState.done,
+                        _ => AgentState.asking,
+                      },
+                      subject: oneLine(literal(w.subject), 120),
+                      session: w.title.isEmpty ? 'Session' : oneLine(literal(w.title), 60),
+                      age: ageOf(w.at),
+                      onOpen: () => onAnswer(w),
+                    ),
+                  const SizedBox(height: 12),
+                ],
               if (m != null) ...[
                 ListenableBuilder(
                   listenable: m,
@@ -514,9 +555,19 @@ class _Display extends StatelessWidget {
     },
   );
 
+  /// Somebody looks: the window has their attention.
+  static bool get _attended => switch (WidgetsBinding.instance.lifecycleState) {
+    null || AppLifecycleState.resumed => true,
+    _ => false,
+  };
+
   Widget _work(BuildContext context, AgentModel a) {
     final c = Ax.of(context).colors;
     final acts = a.access != null;
+    if (_attended &&
+        store.needs.any((w) => w.session == session.id && w.agent == a.id && w.need != Need.asks)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => store.seen(session.id, a.id));
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

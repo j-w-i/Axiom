@@ -6,7 +6,7 @@ use std::{
 };
 
 use axiom_journal::{Error, Journal, Reader, Result};
-use axiom_proto::{AgentId, Event, ItemId, SessionId, SessionInfo, limits};
+use axiom_proto::{AgentId, Event, ItemId, RunId, SessionId, SessionInfo, limits};
 use tokio::sync::{mpsc, oneshot};
 
 /// An append waits with others and shares their commit.
@@ -152,6 +152,58 @@ impl Store {
         frames: Vec<(u64, String)>,
     ) -> Result<()> {
         self.write(move |j| j.put_frames(&id, &agent, &frames)).await
+    }
+    pub async fn put_unseen(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        kind: &'static str,
+        words: String,
+        at: u64,
+    ) -> Result<()> {
+        self.write(move |j| j.put_unseen(&id, &agent, kind, &words, at)).await
+    }
+    pub async fn drop_unseen(&self, id: SessionId, agent: AgentId) -> Result<()> {
+        self.write(move |j| j.drop_unseen(&id, &agent)).await
+    }
+    pub async fn put_owed(
+        &self,
+        id: SessionId,
+        parent: AgentId,
+        run: RunId,
+        child: AgentId,
+    ) -> Result<()> {
+        self.write(move |j| j.put_owed(&id, &parent, &run, &child)).await
+    }
+    pub async fn end_owed(
+        &self,
+        id: SessionId,
+        child: AgentId,
+        runs: Vec<RunId>,
+        body: String,
+    ) -> Result<Vec<AgentId>> {
+        self.write(move |j| j.end_owed(&id, &child, &runs, &body)).await
+    }
+    pub async fn deliver(
+        &self,
+        id: SessionId,
+        parent: AgentId,
+        items: Vec<(Vec<RunId>, ItemId, String)>,
+    ) -> Result<Vec<ItemId>> {
+        self.write(move |j| j.deliver(&id, &parent, &items)).await
+    }
+    pub async fn drop_owed(&self, id: SessionId, parent: AgentId, runs: Vec<RunId>) -> Result<()> {
+        self.write(move |j| j.drop_owed(&id, &parent, &runs)).await
+    }
+    pub async fn owed(
+        &self,
+        id: SessionId,
+        parent: AgentId,
+    ) -> Result<Vec<(RunId, AgentId, Option<String>)>> {
+        self.read_with(move |r| r.owed(&id, &parent)).await
+    }
+    pub async fn finished(&self, id: SessionId, agent: AgentId) -> Result<Option<String>> {
+        self.read_with(move |r| r.finished(&id, &agent)).await
     }
     pub async fn pending(&self, id: SessionId, agent: AgentId) -> Result<Vec<(ItemId, String)>> {
         self.read_with(move |r| r.pending(&id, &agent)).await

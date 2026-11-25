@@ -357,6 +357,32 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 200));
     final asked = h.asked.where((m) => m == 'host.waiting').length;
     expect(asked, lessThan(52), reason: 'never two at once');
+    // What has been seen is said once for each end; a question is not seen away.
+    Json end(String a, int at) => {
+      ...waits('x'),
+      'request': null,
+      'agent': a,
+      'need': 'failed',
+      'at': at,
+    };
+    h.needs = [waits('q1'), end('b', 5)];
+    h.last!.write('${json.encode({'waiting': 2})}\n');
+    for (var i = 0; i < 200 && st.needs.last.need != Need.failed; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    for (var i = 0; i < 5; i++) {
+      st
+        ..seen('s', 'a')
+        ..seen('s', 'b');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(h.asked.where((m) => m == 'agent.seen').length, 1);
+    h.needs = [end('b', 9)];
+    h.last!.write('${json.encode({'waiting': 1})}\n');
+    await until(1);
+    st.seen('s', 'b');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(h.asked.where((m) => m == 'agent.seen').length, 2);
     expect(st.phase, HostPhase.connected);
   });
 

@@ -267,6 +267,9 @@ class Moved {
   final List<(String, String)> left;
 }
 
+/// What it is that waits: a question, or what an agent came to that nobody has seen.
+enum Need { asks, failed, limit, finished, unknown }
+
 /// Something that waits for a person, wherever it is.
 class Waits {
   const Waits(
@@ -277,17 +280,20 @@ class Waits {
     this.request,
     this.what,
     this.subject,
-    this.at,
-  );
+    this.at, {
+    this.need = Need.asks,
+  });
   Waits.decode(Json j)
-    : session = j['session']! as String,
+    : need = _enum(Need.values, j['need'] ?? 'asks', Need.unknown),
+      session = j['session']! as String,
       title = j['title']! as String,
       agent = j['agent']! as String,
       name = j['name']! as String,
-      request = j['request']! as String,
-      what = j['what']! as String,
+      request = j['request'] as String? ?? '',
+      what = j['what'] as String? ?? '',
       subject = j['subject']! as String,
       at = j['at']! as int;
+  final Need need;
 
   /// [subject]: how it begins. All of it is where it is asked.
   final String session, title, agent, name, request, what, subject;
