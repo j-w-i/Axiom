@@ -125,14 +125,6 @@ impl Error {
         self
     }
 
-    /// Output had begun: a retry starts over.
-    pub(crate) fn mid_stream(mut self) -> Self {
-        if self.retry == Retry::Safe {
-            self.retry = Retry::Restart;
-        }
-        self
-    }
-
     fn words(&self) -> String {
         let class = match self.class {
             Class::Auth => "not authorised",
@@ -379,6 +371,7 @@ mod tests {
             (Some(400), anthropic("invalid_request_error", "You have reached your specified API usage limits"), Billing, Never),
             (Some(401), anthropic("authentication_error", "invalid x-api-key"), Auth, Never),
             (Some(402), anthropic("billing_error", "pay"), Billing, Never),
+            (Some(402), String::new(), Billing, Never),
             (Some(403), anthropic("permission_error", "no"), Auth, Never),
             (Some(404), anthropic("not_found_error", "model: x"), BadRequest, Never),
             (Some(409), anthropic("conflict_error", "x"), BadRequest, Never),
@@ -391,6 +384,9 @@ mod tests {
             (Some(400), r#"{"error":"maximum context length is 8"}"#.into(), ContextTooLong, Never),
             (Some(400), r#"{"error":"the context window is a fine thing"}"#.into(), BadRequest, Never),
             (Some(401), r#"{"error":{"message":"k","type":"invalid_request_error","code":"invalid_api_key"}}"#.into(), Auth, Never),
+            // The name is the same for many; the status says which.
+            (Some(401), anthropic("invalid_request_error", "x"), Auth, Never),
+            (Some(500), anthropic("invalid_request_error", "x"), Server, Restart),
             (Some(408), String::new(), Server, Restart),
             (Some(500), anthropic("api_error", "x"), Server, Restart),
             (Some(501), String::new(), Server, Never),

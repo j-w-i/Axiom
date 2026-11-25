@@ -240,6 +240,12 @@ fn a_call_in_one_piece_or_in_many() {
     assert_eq!(got, [one("a", 1)]);
     let Content::ToolCall(c) = &r.message.blocks[0].content else { panic!() };
     assert_eq!(c.raw, r#"{"n":1}"#);
+    // The id before the name, and not with it.
+    let (got, _) = run(&[
+        json!({"index":0,"id":"a","function":{}}),
+        json!({"index":0,"function":function("f", r#"{"n":1}"#)}),
+    ]);
+    assert_eq!(got, [one("a", 1)]);
     // The arguments as an object, which is not a string.
     let (got, r) = run(&[json!({"index":0,"id":"a","function":{"name":"f","arguments":{"n":1}}})]);
     assert_eq!(got, [one("a", 1)]);
@@ -327,6 +333,10 @@ fn reasoning_by_either_name() {
         assert_eq!(native(reasoning), format!(r#"{{"{key}":"ab"}}"#));
         assert_eq!(text.content, Content::Text { text: "cd".into() });
     }
+    // An empty one leaves it to the other.
+    let both = json!({"reasoning_content":"","reasoning":"a"});
+    let (r, _) = read(&stream(&[delta(both), ends("stop")]));
+    assert_eq!(r.message.blocks[0].content, Content::Reasoning { text: "a".into() });
     // A server that sends both says the same thing twice.
     let (r, _) =
         read(&stream(&[delta(json!({"reasoning_content":"a","reasoning":"a"})), ends("stop")]));
@@ -385,6 +395,10 @@ fn members_that_are_not_known_survive() {
     assert_eq!(native(find("tool_calls")), r#"{"tool_calls":"nonsense"}"#);
     assert_eq!(find("content").extra, [Json::parse(r#"{"i":1,"type":"image"}"#).unwrap()]);
     assert_eq!(text_of(&r.message), "t");
+    // What is null is not there.
+    assert!(
+        !r.message.blocks.iter().any(|b| b.content == Content::Unknown { name: "audio".into() })
+    );
     let reasoning = &r.message.blocks[0];
     assert_eq!(reasoning.content, Content::Reasoning { text: "xy".into() });
     // One object is whole.
