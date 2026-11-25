@@ -756,7 +756,6 @@ class _Display extends StatelessWidget {
             AxButton(
               label: 'Stop',
               icon: AxIcon.stop,
-              tone: AxTone.quiet,
               onPressed: () => onStop(run),
             ),
           if (stale) ...[
