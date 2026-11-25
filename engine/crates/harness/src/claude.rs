@@ -85,8 +85,9 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
         }
     }
     if s.trust == Trust::Withheld {
-        // It shows no trust dialog in this mode, and runs what a project's settings name.
-        add(&["--setting-sources", "user", "--strict-mcp-config"]);
+        // It shows no trust dialog in this mode, and runs what a project's settings and `.mcp.json`
+        // name. So it reads neither.
+        add(&["--setting-sources", "user"]);
     }
     if let Some(m) = &s.model {
         add(&["--model", m]);
@@ -248,11 +249,8 @@ impl Talk for Claude {
         if !self.ready {
             return Err(Refused::NotReady);
         }
-        // Without an id it is one that its result does not name.
-        let id = uuid().unwrap_or_default();
         let mut m = json!({
             "type": "user",
-            "uuid": id,
             "session_id": self.session,
             "parent_tool_use_id": null,
             "message": {"role": "user", "content": text},
@@ -270,7 +268,11 @@ impl Talk for Claude {
             (self.busy, self.error) = (true, None);
             o.event(Event::Began { by_agent: false });
         }
-        if self.unanswered.len() < 64 {
+        // Without an id it is one that its result does not name.
+        if let Ok(id) = uuid()
+            && self.unanswered.len() < 64
+        {
+            m["uuid"] = json!(id);
             self.unanswered.insert(id);
         }
         o.send.push(m);

@@ -104,7 +104,7 @@ fn how_it_is_started() {
     );
     s.trust = Trust::Withheld;
     let all = args(Refused, &s).join(" ");
-    assert!(all.contains("--setting-sources user --strict-mcp-config"), "{all}");
+    assert!(all.contains("--setting-sources user --model"), "{all}");
 }
 
 #[test]

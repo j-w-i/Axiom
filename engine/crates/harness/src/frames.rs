@@ -163,6 +163,8 @@ mod tests {
         assert!(f.text.contains("\"model\":\"m\"") && f.text.contains("\"n\":1"));
         assert_eq!(f.text.matches("(kept back)").count(), 4);
         assert_eq!(f.bytes, v.to_string().len() as u64);
+        let v = json!({"a": [[{"password": "SECRET"}]]});
+        assert!(!frame(Way::In, b"SECRET", Some(&v)).text.contains("SECRET"));
         // What holds none is kept as it came.
         let line = br#"{ "a" :1 , "tokens" : "x" }"#;
         let v: Value = serde_json::from_slice(line).unwrap();

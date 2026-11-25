@@ -135,6 +135,8 @@ async fn what_cannot_be_shown_whole_is_not_asked() {
     // All of it in the question; or in the tool call that it names.
     let mut by_name = ask(6, "");
     by_name["params"]["toolCall"] = json!({"toolCallId": "t"});
+    let mut long = ask(8, "");
+    long["params"]["toolCall"] = json!({"toolCallId": "u", "locations": [{"path": big}]});
     let w = world(&acp_1(&[
         hear_prompt(),
         json!({"say": ask(5, &big)}),
@@ -142,6 +144,8 @@ async fn what_cannot_be_shown_whole_is_not_asked() {
         json!({"say": say(json!({"sessionUpdate": "tool_call", "toolCallId": "t", "title": "T", "rawInput": {"a": big}}))}),
         json!({"say": by_name}),
         json!({"hear": {"id": 6, "result": {"outcome": {"optionId": "no"}}}}),
+        json!({"say": long}),
+        json!({"hear": {"id": 8, "result": {"outcome": {"optionId": "no"}}}}),
         json!({"say": ask(7, "small")}),
         json!({"hear": {"id": 7}}),
         end_turn("end_turn"),
@@ -154,7 +158,7 @@ async fn what_cannot_be_shown_whole_is_not_asked() {
     r.done().await;
     let why = "Not allowed, it is about more than can be shown: ";
     let n = r.count(|e| matches!(e, Event::Notice { text, .. } if text.starts_with(why)));
-    assert_eq!(n, 2, "{:#?}", r.all);
+    assert_eq!(n, 3);
     r.handle.shut().await.unwrap();
     r.closed().await;
 }
@@ -443,6 +447,35 @@ async fn it_says_nothing() {
 }
 
 #[tokio::test]
+async fn silence_is_counted_from_when_it_could_speak() {
+    let mut w = world(&acp_1(&[hear_prompt(), json!({"sleep": 300}), end_turn("end_turn")]));
+    w.limits.silence = Some(ms(1000));
+    let mut r = w.run(&acp(), Access::Ask);
+    r.ready().await;
+    tokio::time::sleep(ms(1300)).await;
+    r.prompt("go").await;
+    assert_eq!(r.done().await.outcome, Outcome::Completed);
+    r.handle.cancel().await.unwrap();
+    r.closed().await;
+    // Two of these do not fit: the second waits for who listens.
+    let big = message(&"x".repeat(3 * 1024 * 1024));
+    let mut w = world(&acp_1(&[
+        hear_prompt(),
+        json!({"say": big, "times": 2}),
+        json!({"sleep": 2000}),
+        end_turn("end_turn"),
+    ]));
+    w.limits.silence = Some(ms(1000));
+    let mut r = w.run(&acp(), Access::Ask);
+    r.ready().await;
+    r.prompt("go").await;
+    tokio::time::sleep(ms(1500)).await;
+    assert_eq!(r.done().await.outcome, Outcome::Completed);
+    r.handle.cancel().await.unwrap();
+    r.closed().await;
+}
+
+#[tokio::test]
 async fn waiting_for_a_person_is_not_silence() {
     let mut w = world(&acp_1(&[
         hear_prompt(),
@@ -567,11 +600,12 @@ async fn lines_in_pieces() {
 
 #[tokio::test]
 async fn a_flood_waits_for_who_listens() {
-    let n = 60_000;
+    let n = 15_000;
     let words = "0123456789".repeat(20);
     let w = world(&acp_1(&[
         hear_prompt(),
         json!({"say": message(&words), "times": n}),
+        json!({"touch": "all said"}),
         end_turn("end_turn"),
     ]));
     let mut r = w.run(&acp(), Access::Ask);
@@ -582,7 +616,8 @@ async fn a_flood_waits_for_who_listens() {
     let read = r.kept.frames.lock().unwrap().len();
     tokio::time::sleep(ms(500)).await;
     assert_eq!(r.kept.frames.lock().unwrap().len(), read, "it waits");
-    assert!(read < 12_000, "{read}");
+    assert!(read < 3000, "{read}");
+    assert!(!w.dir.path().join("bin/all said").exists(), "nor is it taken in unread");
     let mut got = 0;
     loop {
         match r.events.next().await.unwrap() {
@@ -773,6 +808,18 @@ async fn without_a_record_it_ends() {
         assert_eq!(g.why, Why::Journal);
         assert_eq!(w.heard().len(), 2);
     }
+    // Its last word cannot be kept: that is why it ends.
+    let w = world(&lines(&[
+        json!({"hear": {"method": "initialize"}}),
+        json!({"say": {"jsonrpc": "2.0", "id": 0, "result": {"protocolVersion": 2, "capabilities": {"session": {}}}}}),
+        json!({"hear": {"method": "session/new"}}),
+        json!({"say": {"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "s1"}}}),
+    ]));
+    let mut r = w.run(&acp(), Access::Ask);
+    r.ready().await;
+    r.kept.broken.store(true, Ordering::SeqCst);
+    r.handle.shut().await.unwrap();
+    assert_eq!(r.closed().await.why, Why::Journal);
     let w = world(&acp_1(&[]));
     let kept = Kept::default();
     kept.broken.store(true, Ordering::SeqCst);
@@ -1048,6 +1095,7 @@ async fn claude_goes_on_with_a_session_is_refused_and_stopped() {
         json!({"hear": {"type": "control_response", "response": {"request_id": "r", "response": {"behavior": "deny"}}}}),
         json!({"say": {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "denied", "is_error": true}]}}}),
         json!({"hear": {"type": "control_request", "request": {"subtype": "interrupt"}}, "as": "i"}),
+        json!({"sleep": 500}),
         json!({"say": {"type": "control_response", "response": {"subtype": "success", "request_id": "$i/request_id", "response": {}}}}),
         json!({"say": {"type": "result", "subtype": "error_during_execution", "is_error": true, "errors": [], "session_id": "old"}}),
         json!({"hang": true}),
@@ -1061,6 +1109,8 @@ async fn claude_goes_on_with_a_session_is_refused_and_stopped() {
     r.handle.answer(&q, Answer::Refuse).await.unwrap();
     r.until(|e| matches!(e, Event::ToolEnded(_))).await;
     r.handle.interrupt().await.unwrap();
+    // One that could be told more is not, while it is being stopped.
+    assert_eq!(r.handle.prompt("more", By::Person).await, Err(Refused::Busy));
     assert_eq!(r.done().await.outcome, Outcome::Cancelled);
     r.handle.cancel().await.unwrap();
     let g = r.closed().await;
