@@ -145,6 +145,13 @@ type Slot = tokio::sync::Mutex<Option<Opened>>;
 struct Runs {
     closing: bool,
     live: HashMap<RunId, (SessionId, watch::Sender<bool>)>,
+    /// What else is not to be ended in the middle.
+    at_work: usize,
+}
+impl Runs {
+    fn quiet(&self) -> bool {
+        self.live.is_empty() && self.at_work == 0
+    }
 }
 
 impl State {
@@ -158,7 +165,7 @@ impl State {
     /// Nothing starts after this. False, and no change, if it would disturb something.
     fn close(&self, force: bool) -> bool {
         let mut runs = self.runs();
-        if !force && !runs.live.is_empty() {
+        if !force && !runs.quiet() {
             return false;
         }
         runs.closing = true;
@@ -411,7 +418,7 @@ impl Host {
                 let changed = st.changed.notified();
                 tokio::pin!(changed);
                 changed.as_mut().enable();
-                if st.runs().live.is_empty() {
+                if st.runs().quiet() {
                     break;
                 }
                 changed.await;
@@ -529,7 +536,7 @@ async fn idle(st: &State) {
     };
     loop {
         let changed = st.changed.notified();
-        let quiet = st.connections.load(Relaxed) == 0 && st.runs().live.is_empty();
+        let quiet = st.connections.load(Relaxed) == 0 && st.runs().quiet();
         if quiet {
             tokio::select! {
                 () = tokio::time::sleep(d) => return,
@@ -935,7 +942,34 @@ async fn to_its_end<F>(
 where
     F: Future<Output = Result<Value, WireError>> + Send + 'static,
 {
-    tokio::spawn(f(st.clone())).await.map_err(|e| internal(e.to_string()))?
+    let at_work = AtWork::new(st)?;
+    let work = f(st.clone());
+    let work = tokio::spawn(async move {
+        let r = work.await;
+        drop(at_work);
+        r
+    });
+    work.await.map_err(|e| internal(e.to_string()))?
+}
+
+/// Something the host does not end in the middle of.
+struct AtWork(Arc<State>);
+impl AtWork {
+    fn new(st: &Arc<State>) -> Result<Self, WireError> {
+        let mut runs = st.runs();
+        if runs.closing {
+            return Err(WireError::new(ErrorCode::Busy, "the host is stopping"));
+        }
+        runs.at_work += 1;
+        drop(runs);
+        Ok(Self(st.clone()))
+    }
+}
+impl Drop for AtWork {
+    fn drop(&mut self) {
+        self.0.runs().at_work -= 1;
+        self.0.changed.notify_waiters();
+    }
 }
 
 /// The folder a session is about.
@@ -1406,10 +1440,10 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             })
             .await
         }
-        Call::CopyBack { session, agent } => {
+        Call::CopyBack { session, agent, back } => {
             let s = setup(st, &session, &agent).await?;
             to_its_end(st, move |st| async move {
-                copies::back(&st.agents, &st.store, session, agent, s).await
+                copies::back(&st.agents, &st.store, session, agent, s, back).await
             })
             .await
         }
@@ -1417,7 +1451,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             to_its_end(st, move |st| async move {
                 let slot = st.agents.slot(&session, &agent);
                 let _held = slot.hold().await?;
-                slot.changed().await;
+                slot.still().await?;
                 let s = setup(&st, &session, &agent).await?;
                 copies::renew(&st.agents, &st.store, session, agent, s).await
             })
@@ -1427,7 +1461,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             to_its_end(st, move |st| async move {
                 let slot = st.agents.slot(&session, &agent);
                 let _held = slot.hold().await?;
-                slot.changed().await;
+                slot.still().await?;
                 let s = setup(&st, &session, &agent).await?;
                 copies::remove(&st.agents, &st.store, session, agent, s, lose).await?;
                 Ok(json!({}))

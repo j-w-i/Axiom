@@ -24,6 +24,8 @@ pub struct Jobs(Arc<Mutex<All>>);
 struct All {
     next: u32,
     jobs: BTreeMap<u32, One>,
+    /// Told to end, and not ended yet.
+    ending: Vec<Arc<Mutex<State>>>,
 }
 
 #[derive(Debug)]
@@ -197,6 +199,23 @@ impl Jobs {
 
     /// All of them end.
     pub fn end(&self) {
-        lock(&self.0).jobs.clear();
+        let mut all = lock(&self.0);
+        let jobs = std::mem::take(&mut all.jobs);
+        all.ending.retain(|s| lock(s).ended.is_none());
+        all.ending.extend(jobs.into_values().map(|j| j.state));
+    }
+
+    /// Until all that were told to end have ended.
+    pub async fn ended(&self) {
+        loop {
+            {
+                let mut all = lock(&self.0);
+                all.ending.retain(|s| lock(s).ended.is_none());
+                if all.ending.is_empty() && all.jobs.is_empty() {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 }

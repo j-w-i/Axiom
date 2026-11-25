@@ -327,13 +327,24 @@ pub struct CopyChanges {
     /// There is one: it has been spoken to.
     pub made: bool,
     pub files: Vec<CopyFile>,
-    /// What bringing all of it in would do to the folder as it is now.
-    pub diff: String,
-    /// All of it is here.
+    /// These are all.
     pub whole: bool,
-    /// How many files the last that was brought in can be put back for.
+    /// What git ignores and only the copy has: files, or folders of them.
     #[serde(default)]
-    pub back: usize,
+    pub ignored: usize,
+    /// What was not copied or is not told of: it has no name that can be written down, is too deep,
+    /// or is no plain file.
+    #[serde(default)]
+    pub odd: usize,
+    /// The last that was brought in, if it can be put back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub back: Option<CopyBack>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyBack {
+    pub id: String,
+    pub files: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -344,9 +355,22 @@ pub struct CopyFile {
     /// What the copy has now; absent if it was removed there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
+    /// It can be run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub run: bool,
+    /// What the folder has now; absent if it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub there: Option<String>,
+    /// What bringing it in would do to the folder; absent if that cannot be shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff: Option<String>,
     /// The folder's own has changed too: it is not brought in.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub clash: bool,
+    /// The folder's own had changed too when the copy was brought up to date, and the agent has not
+    /// touched its own since.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unsettled: bool,
     /// Why it is never brought in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub never: Option<String>,
@@ -364,6 +388,10 @@ pub struct CopySeen {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub there: Option<String>,
 }
 
 /// A harness, as it was found without being run.
@@ -475,9 +503,9 @@ pub enum Call {
     /// Brings changes in, each as it was shown.
     #[serde(rename = "copy.bring")]
     CopyBring { session: SessionId, agent: AgentId, files: Vec<CopySeen> },
-    /// Puts back what was there before the last that was brought in.
+    /// Puts back what was there before the last that was brought in, as it was named.
     #[serde(rename = "copy.back")]
-    CopyBack { session: SessionId, agent: AgentId },
+    CopyBack { session: SessionId, agent: AgentId, back: String },
     /// Takes over into the copy what has changed in the folder.
     #[serde(rename = "copy.renew")]
     CopyRenew { session: SessionId, agent: AgentId },

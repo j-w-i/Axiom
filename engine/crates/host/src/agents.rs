@@ -79,6 +79,8 @@ const INSTRUCTIONS: u64 = 64 * 1024;
 const MOST: usize = 64;
 /// What may wait for an agent that is at work.
 const INBOX: usize = 32;
+/// How long what an agent began may take to end.
+const STILL: Duration = Duration::from_secs(15);
 /// Sessions whose agents are remembered beyond what the journal has.
 const PARTIES: usize = 1000;
 /// Sessions whose folders programs are not taken from.
@@ -109,6 +111,8 @@ pub struct Slot {
     pub said: Mutex<String>,
     /// Of a delegated agent: its program, if it runs.
     pub attempt: tokio::sync::Mutex<Option<mpsc::Sender<delegated::Turn>>>,
+    /// Programs of its that have not ended, also those nobody speaks to any more.
+    pub stays: watch::Sender<usize>,
 }
 
 /// Runs that followed one another, and what they came to.
@@ -518,6 +522,9 @@ impl Agents {
                 return Err(bad("the agent's own folder leads elsewhere"));
             }
         }
+        // What was there the last time is not this time's.
+        std::fs::remove_dir_all(at.as_path()).map_err(internal)?;
+        private_dir(at.as_path()).map_err(internal)?;
         Ok(at)
     }
 
@@ -1129,6 +1136,20 @@ impl Slot {
         self.stop_jobs();
         // Its program ends; what it was told is kept by the program, and gone on with.
         *self.attempt.lock().await = None;
+    }
+
+    /// The same, and nothing of it runs any more.
+    pub async fn still(&self) -> Result<(), WireError> {
+        self.changed().await;
+        let mut stays = self.stays.subscribe();
+        let ended = async {
+            self.seen.1.ended().await;
+            let _ = stays.wait_for(|n| *n == 0).await;
+        };
+        tokio::time::timeout(STILL, ended).await.map_err(|_| {
+            WireError::new(ErrorCode::Busy, "something the agent began still runs; try again")
+        })?;
+        Ok(())
     }
 
     /// After a run: whether something was said too late for it that is to begin another. If not,

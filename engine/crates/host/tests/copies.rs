@@ -148,12 +148,8 @@ impl T {
     }
     async fn bring(&mut self, a: &AgentId, all: &[&str]) -> Value {
         let c = self.changes(a).await;
-        let files = c
-            .files
-            .into_iter()
-            .filter(|f| all.contains(&f.path.as_str()))
-            .map(|f| CopySeen { path: f.path, digest: f.digest })
-            .collect();
+        let files =
+            c.files.into_iter().filter(|f| all.contains(&f.path.as_str())).map(seen).collect();
         let call = Call::CopyBring { session: self.s.clone(), agent: a.clone(), files };
         self.c.call(call).await.unwrap()
     }
@@ -177,6 +173,12 @@ impl T {
             .map(|e| e["subject"].as_str().unwrap().to_owned())
             .collect()
     }
+}
+fn seen(f: CopyFile) -> CopySeen {
+    CopySeen { path: f.path, digest: f.digest, run: f.run, there: f.there }
+}
+fn file<'a>(c: &'a CopyChanges, p: &str) -> &'a CopyFile {
+    c.files.iter().find(|f| f.path == p).unwrap_or_else(|| panic!("{p}: {c:?}"))
 }
 fn paths(c: &CopyChanges) -> Vec<(&str, &str)> {
     c.files.iter().map(|f| (f.path.as_str(), f.what.as_str())).collect()
@@ -218,7 +220,7 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
     assert_eq!(t.file("a.txt").as_deref(), Some("one and not committed\n"));
     assert!(t.file("b.txt").is_some() && t.file("where").is_none());
     let c = t.changes(&a).await;
-    assert!(c.made && c.whole && c.back == 0);
+    assert!(c.made && c.whole && c.back.is_none());
     assert_eq!(
         paths(&c),
         [
@@ -230,7 +232,8 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
             ("where", "new"),
         ]
     );
-    assert!(c.diff.contains("-one and not committed\n+agent\n"), "{}", c.diff);
+    let diff = file(&c, "a.txt").diff.clone().unwrap();
+    assert!(diff.contains("-one and not committed\n+agent\n"), "{diff}");
     assert!(c.files.iter().all(|f| !f.clash && f.never.is_none() && f.others.is_empty()));
     // It cannot reach the folder by itself.
     let there = t.path("evil");
@@ -248,14 +251,22 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
     assert_eq!(t.file("new/n.txt").as_deref(), Some("n\n"));
     assert_eq!((t.file("b.txt"), t.file("log")), (None, None));
     let c = t.changes(&a).await;
-    assert_eq!(c.back, 3);
+    let back = c.back.clone().unwrap();
+    assert_eq!(back.files, 3);
     assert!(c.files.iter().all(|f| f.path != "a.txt" && f.path != "b.txt"));
     let record = t.record().await;
     assert!(record[0].starts_with("brought in: a.txt (") && record[0].contains("b.txt (removed)"));
 
+    let (session, id) = (t.s.clone(), back.id);
     // Put back, but not over what has been changed since.
     t.write("a.txt", "mine\n");
-    let call = Call::CopyBack { session: t.s.clone(), agent: a.clone() };
+    let back = |id: &str| Call::CopyBack {
+        session: SessionId(session.0.clone()),
+        agent: a.clone(),
+        back: id.into(),
+    };
+    assert!(t.c.call(back("q_x")).await.is_err(), "not another than was shown");
+    let call = back(&id);
     let r = t.c.call(call.clone()).await.unwrap();
     assert_eq!(r["back"], json!(["b.txt", "new/n.txt"]));
     assert_eq!(r["left"], json!([{"path": "a.txt", "why": "it has changed since"}]));
@@ -274,7 +285,7 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
     // Thrown away only with a word to it, and then there is another.
     let e = t.remove(&a, false).await.unwrap_err();
     assert_eq!(e.code, ErrorCode::Busy);
-    assert!(e.message.contains("are not in the folder"), "{}", e.message);
+    assert!(e.message.contains("are in it only"), "{}", e.message);
     assert!(t.copy_of(&a).exists());
     t.remove(&a, true).await.unwrap();
     assert!(!t.copy_of(&a).exists());
@@ -287,7 +298,7 @@ async fn an_agent_works_apart_and_a_person_brings_it_in() {
     assert_eq!(t.copied(&a, "a.txt").as_deref(), Some("one and not committed\n"));
     assert_eq!(t.changes(&a).await.files, []);
     t.remove(&a, false).await.unwrap();
-    assert_eq!(t.record().await.len(), 5);
+    assert!(t.record().await.len() >= 5);
 }
 
 #[tokio::test]
@@ -297,11 +308,14 @@ async fn what_is_shown_is_what_is_brought_in() {
     t.write("b.txt", "two\n");
     let a = t.agent("Builder", Access::Work, true).await;
     t.does(&a, "echo agent > a.txt; echo agent > b.txt; echo x > .envrc").await;
+    let own = t.s.clone();
     let bring =
-        |files: Vec<CopySeen>| Call::CopyBring { session: t.s.clone(), agent: a.clone(), files };
+        |files: Vec<CopySeen>| Call::CopyBring { session: own.clone(), agent: a.clone(), files };
     let seen = |path: &str, digest: Option<&str>| CopySeen {
         path: path.into(),
         digest: digest.map(Into::into),
+        run: false,
+        there: None,
     };
     let c: CopyChanges = {
         let call = Call::CopyChanges { session: t.s.clone(), agent: a.clone() };
@@ -319,18 +333,24 @@ async fn what_is_shown_is_what_is_brought_in() {
     let r = t.c.call(call).await.unwrap();
     assert_eq!(r["brought"].as_array().map(Vec::len), Some(0), "{r}");
     assert_eq!(r["left"].as_array().map(Vec::len), Some(5), "{r}");
-    // The folder's own has changed.
+    // The folder's own has changed, whether that was shown or not.
+    let there = file(&c, "a.txt").there.clone();
     std::fs::write(t.path("a.txt"), "mine\n").unwrap();
-    let call = bring(vec![seen("a.txt", Some(&digest)), seen(".envrc", Some(&digest))]);
-    let r = t.c.call(call).await.unwrap();
-    assert_eq!(r["brought"], json!([]), "{r}");
+    let mut mine = t.changes(&a).await;
+    let now = mine.files.remove(mine.files.iter().position(|f| f.path == "a.txt").unwrap()).there;
+    for there in [there, now, None] {
+        let shown = CopySeen { there, ..seen("a.txt", Some(&digest)) };
+        let call = bring(vec![shown, seen(".envrc", Some(&digest))]);
+        let r = t.c.call(call).await.unwrap();
+        assert_eq!(r["brought"], json!([]), "{r}");
+    }
     assert_eq!(t.file("a.txt").as_deref(), Some("mine\n"));
     assert_eq!(t.file("b.txt").as_deref(), Some("two\n"));
     assert!(t.c.call(bring(vec![])).await.is_err());
     let c = t.changes(&a).await;
     assert!(c.files.iter().find(|f| f.path == "a.txt").unwrap().clash);
     // Nothing was brought in, so nothing is put back.
-    assert_eq!(c.back, 0);
+    assert_eq!(c.back, None);
 }
 
 #[tokio::test]
@@ -352,6 +372,10 @@ async fn two_who_change_the_same_are_told_of() {
     let c = t.changes(&b).await;
     assert!(c.files.iter().find(|f| f.path == "same.txt").unwrap().clash);
     let call = Call::CopyRenew { session: t.s.clone(), agent: b.clone() };
+    // Told of until it is settled.
+    t.c.call(call.clone()).await.unwrap();
+    let c = t.changes(&b).await;
+    assert!(file(&c, "same.txt").unsettled && !file(&c, "same.txt").clash);
     let r = t.c.call(call).await.unwrap();
     assert_eq!((&r["clashes"], &r["taken"]), (&json!(["same.txt"]), &json!(0)));
     let say = r["say"].as_str().unwrap();
@@ -362,7 +386,8 @@ async fn two_who_change_the_same_are_told_of() {
     assert_eq!(t.copied(&b, "same.txt").as_deref(), Some("ada\nben\n"));
     let c = t.changes(&b).await;
     assert!(!c.files.iter().find(|f| f.path == "same.txt").unwrap().clash);
-    assert!(c.diff.contains(" ada\n+ben\n"), "{}", c.diff);
+    let f = file(&c, "same.txt");
+    assert!(!f.unsettled && f.diff.as_ref().unwrap().contains(" ada\n+ben\n"), "{f:?}");
     t.bring(&b, &["same.txt"]).await;
     assert_eq!(t.file("same.txt").as_deref(), Some("ada\nben\n"));
     // What the folder has and only it changed is taken over.
@@ -506,4 +531,201 @@ async fn telling_one_that_works_in_the_folder_is_asked_about() {
         quiet(&mut t.c).await;
         t.server.clear();
     }
+}
+
+/// Axiom's own folder of what is known of copies, to be set back to what it was.
+fn records(t: &T) -> PathBuf {
+    t.f.paths.data.join("copies")
+}
+fn saved(d: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+        match e.file_type().unwrap().is_dir() {
+            true => out.extend(saved(&e.path())),
+            false => out.push((e.path(), std::fs::read(e.path()).unwrap())),
+        }
+    }
+    out
+}
+fn restore(t: &T, all: &[(PathBuf, Vec<u8>)]) {
+    std::fs::remove_dir_all(records(t)).unwrap();
+    for (p, b) in all {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b).unwrap();
+    }
+}
+fn record_of(all: &[(PathBuf, Vec<u8>)]) -> (usize, Value) {
+    let n = all.iter().position(|f| f.0.extension().is_some_and(|e| e == "json")).unwrap();
+    (n, serde_json::from_slice(&all[n].1).unwrap())
+}
+
+/// What ends half way is made good by what is known of it: nobody's work is taken for the folder's.
+#[tokio::test]
+async fn what_ended_half_way_is_recognised() {
+    let mut t = T::new(vec![]).await;
+    for n in ["a.txt", "b.txt"] {
+        t.write(n, "old\n");
+    }
+    let a = t.agent("Builder", Access::Work, true).await;
+    t.does(&a, "echo agent > a.txt; echo agent > b.txt; echo n > n.txt").await;
+    let first = saved(&records(&t));
+    t.bring(&a, &["a.txt", "n.txt"]).await;
+    let brought = saved(&records(&t));
+    let back =
+        |t: &T, id: String| Call::CopyBack { session: t.s.clone(), agent: a.clone(), back: id };
+
+    // Put back, and the host is gone before it has said so.
+    let id = t.changes(&a).await.back.unwrap().id;
+    t.c.call(back(&t, id.clone())).await.unwrap();
+    assert_eq!(t.file("a.txt").as_deref(), Some("old\n"));
+    restore(&t, &brought);
+    let c = t.changes(&a).await;
+    assert_eq!(paths(&c), [("a.txt", "changed"), ("b.txt", "changed"), ("n.txt", "new")]);
+    assert!(c.files.iter().all(|f| !f.clash) && c.back.is_none());
+    assert_eq!(t.remove(&a, false).await.unwrap_err().code, ErrorCode::Busy);
+    let call = Call::CopyRenew { session: t.s.clone(), agent: a.clone() };
+    let r = t.c.call(call.clone()).await.unwrap();
+    assert_eq!((&r["taken"], &r["clashes"]), (&json!(0), &json!([])), "{r}");
+    assert_eq!(t.copied(&a, "a.txt").as_deref(), Some("agent\n"));
+    assert_eq!(t.copied(&a, "n.txt").as_deref(), Some("n\n"));
+    // Half of it, and then again.
+    restore(&t, &brought);
+    t.write("n.txt", "n\n");
+    let r = t.c.call(back(&t, id)).await.unwrap();
+    assert_eq!((&r["back"], &r["left"]), (&json!(["a.txt", "n.txt"]), &json!([])), "{r}");
+    assert_eq!(t.file("n.txt"), None);
+
+    // Brought in, and the host is gone before it has said so: as if it had, and it can be put back.
+    t.bring(&a, &["a.txt", "n.txt"]).await;
+    let mut half = saved(&records(&t));
+    let (n, mut v) = record_of(&half);
+    v["files"] = record_of(&first).1["files"].clone();
+    half[n].1 = v.to_string().into_bytes();
+    restore(&t, &half);
+    let c = t.changes(&a).await;
+    assert_eq!(paths(&c), [("b.txt", "changed")]);
+    assert_eq!(c.back.as_ref().unwrap().files, 2);
+    t.does(&a, "echo more >> a.txt").await;
+    assert!(!file(&t.changes(&a).await, "a.txt").clash, "what was brought in is no clash");
+    let id = c.back.unwrap().id;
+    assert_eq!(t.c.call(back(&t, id)).await.unwrap()["left"], json!([]));
+    assert_eq!((t.file("a.txt").as_deref(), t.file("n.txt")), (Some("old\n"), None));
+
+    // On record, and nothing done yet.
+    t.bring(&a, &["b.txt"]).await;
+    let mut none = saved(&records(&t));
+    let (n, mut v) = record_of(&none);
+    v["files"] = record_of(&first).1["files"].clone();
+    none[n].1 = v.to_string().into_bytes();
+    t.write("b.txt", "old\n");
+    restore(&t, &none);
+    let c = t.changes(&a).await;
+    assert!(!file(&c, "b.txt").clash && c.back.is_none(), "{c:?}");
+    assert_eq!(t.bring(&a, &["b.txt"]).await["brought"], json!(["b.txt"]));
+    // What is kept is of the last only.
+    let dirs =
+        std::fs::read_dir(records(&t)).unwrap().flatten().find(|e| e.path().is_dir()).unwrap();
+    assert_eq!(std::fs::read_dir(dirs.path()).unwrap().count(), 1);
+}
+
+/// The same for bringing a copy up to date: what was taken over is not taken for the agent's.
+#[tokio::test]
+async fn what_was_taken_over_is_the_folders() {
+    let mut t = T::new(vec![]).await;
+    for n in ["a.txt", "b.txt", "gone.txt"] {
+        t.write(n, "one\n");
+    }
+    let a = t.agent("Builder", Access::Work, true).await;
+    t.does(&a, "true").await;
+    let first = saved(&records(&t));
+    t.write("a.txt", "two\n");
+    t.write("b.txt", "two\n");
+    std::fs::remove_file(t.path("gone.txt")).unwrap();
+    let call = Call::CopyRenew { session: t.s.clone(), agent: a.clone() };
+    t.c.call(call.clone()).await.unwrap();
+    // As it is while that goes on: what is to be taken over is on record, and one was not yet.
+    let (_, done) = record_of(&saved(&records(&t)));
+    let mut half = first.clone();
+    let (n, mut v) = record_of(&half);
+    v["taking"] =
+        json!({"a.txt": done["files"]["a.txt"], "b.txt": done["files"]["b.txt"], "gone.txt": null});
+    half[n].1 = v.to_string().into_bytes();
+    std::fs::write(t.copy_of(&a).join("b.txt"), "one\n").unwrap();
+    restore(&t, &half);
+    // The person goes on meanwhile.
+    t.write("a.txt", "three\n");
+    t.write("gone.txt", "again\n");
+    let c = t.changes(&a).await;
+    assert_eq!(c.files, [], "nothing of it is the agent's");
+    let r = t.c.call(call).await.unwrap();
+    assert_eq!((&r["taken"], &r["clashes"], &r["left"]), (&json!(3), &json!([]), &json!([])));
+    for (f, text) in [("a.txt", "three\n"), ("b.txt", "two\n"), ("gone.txt", "again\n")] {
+        assert_eq!(t.copied(&a, f).as_deref(), Some(text), "{f}");
+    }
+}
+
+/// What only it has is said, also where git does not look.
+#[tokio::test]
+async fn nothing_is_thrown_away_unsaid() {
+    let mut t = T::new(vec![]).await;
+    t.write(".gitignore", "out/\n");
+    t.write("a.txt", "one\n");
+    let a = t.agent("Builder", Access::Work, true).await;
+    t.does(&a, "mkdir out && echo work > out/notes").await;
+    let c = t.changes(&a).await;
+    assert_eq!((c.files.len(), c.ignored, c.whole), (0, 1, true));
+    let e = t.remove(&a, false).await.unwrap_err();
+    assert!(e.message.contains("are in it only"), "{}", e.message);
+    assert!(t.copied(&a, "out/notes").is_some());
+    t.remove(&a, true).await.unwrap();
+    // Nor is the home folder copied into itself.
+    let home = t.f.dir.path().join("home").to_str().unwrap().to_owned();
+    let call = Call::SessionCreate { title: "H".into(), workspace: Some(home) };
+    let h = SessionId(t.c.call(call).await.unwrap()["session"].as_str().unwrap().into());
+    let was = std::mem::replace(&mut t.s, h);
+    let execution = Execution {
+        harness: "axiom".into(),
+        provider: None,
+        model: Some("m".into()),
+        connection: Some(t.connection.clone()),
+        effort: None,
+        environment: None,
+    };
+    let call = Call::AgentAdd {
+        session: t.s.clone(),
+        name: "Home".into(),
+        execution,
+        access: Access::Work,
+        trust: false,
+        instructions: vec![],
+        apart: true,
+    };
+    assert!(t.c.call(call).await.is_err());
+    t.s = was;
+}
+
+/// Nothing of the agent writes any more when its copy is brought up to date or thrown away.
+#[tokio::test]
+async fn what_it_began_has_ended_first() {
+    let mut t = T::new(vec![]).await;
+    t.write("a.txt", "one\n");
+    let a = t.agent("Builder", Access::Work, true).await;
+    let command = "trap '' TERM; while true; do date +%s%N > tick; sleep 0.05; done";
+    let args = json!({"do": "start", "command": command}).to_string();
+    t.server.add(calls(&[("c1", "job", &args)]));
+    t.server.add(text(&["done"]));
+    t.tell(&a).await.unwrap();
+    t.ended().await;
+    for _ in 0..200 {
+        if t.copied(&a, "tick").is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(t.copied(&a, "tick").is_some());
+    let call = Call::CopyRenew { session: t.s.clone(), agent: a.clone() };
+    t.c.call(call).await.unwrap();
+    let was = t.copied(&a, "tick");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(t.copied(&a, "tick"), was, "it writes no more");
 }

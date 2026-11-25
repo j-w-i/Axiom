@@ -34,24 +34,69 @@ impl T {
         let stop = AtomicBool::new(false);
         let may = |p: &Place| p.name() != "kept";
         let from = From { folder: &self.folder, tracked: &tracked, may: &may, stop: &stop };
-        make(&from, &self.copy, most)
+        make(&from, &self.copy, most).map(|m| m.0)
     }
-    fn renew(&self, was: &mut Files) -> Renewed {
+    fn news(&self, was: &mut Files) -> Renewal {
         let stop = AtomicBool::new(false);
         let may = |p: &Place| p.name() != "kept";
         let from = From { folder: &self.folder, tracked: &[], may: &may, stop: &stop };
-        renew(&from, &self.copy, was, &self.beside, Most::default()).unwrap()
+        news(&from, &self.copy, was, Most::default()).unwrap()
+    }
+    /// All that can be taken over is, and the folder's side of what cannot is put beside.
+    fn renew(&self, was: &mut Files) -> (Vec<String>, Vec<String>) {
+        let r = self.news(was);
+        assert_eq!(r.left, []);
+        for (p, is) in &r.taking {
+            match take(&self.folder, &self.copy, p, is.as_ref()).unwrap() {
+                Some(w) => was.insert(p.clone(), w),
+                None => was.remove(p),
+            };
+        }
+        for (p, is) in &r.clashes {
+            beside(&self.folder, &self.beside, p).unwrap();
+            match is {
+                Some(is) => was.insert(p.clone(), Was { is: is.clone(), stamp: None }),
+                None => was.remove(p),
+            };
+        }
+        (r.taking.into_keys().collect(), r.clashes.into_keys().collect())
+    }
+    fn look(&self, was: &Files) -> Changes {
+        changes(&self.folder, &self.copy, was, 1000, &AtomicBool::new(false)).unwrap()
     }
     fn changes(&self, was: &Files) -> Vec<Change> {
-        let stop = AtomicBool::new(false);
-        let (c, whole) = changes(&self.folder, &self.copy, was, 1000, &stop).unwrap();
-        assert!(whole);
-        c
+        let c = self.look(was);
+        assert!(c.whole);
+        c.all
     }
-    fn bring(&self, was: &Files, path: &str) -> Result<Before, Why> {
-        let is = now(&open(&self.copy).unwrap(), path).unwrap();
-        bring(&self.folder, &self.copy, path, was.get(path), is.as_ref().map(|i| i.digest.as_str()))
+    fn plan(&self, was: &Files, path: &str) -> Result<Plan, Why> {
+        let at = |p: &Place| now(&open(p).unwrap(), path).unwrap();
+        let (is, there) = (at(&self.copy), at(&self.folder));
+        let shown = seen(is.as_ref(), there.as_ref());
+        plan(&self.folder, &self.copy, path, was.get(path), shown)
     }
+    fn bring(&self, was: &Files, path: &str) -> Result<Plan, Why> {
+        let p = self.plan(was, path)?;
+        bring(&self.folder, &self.copy, path, p.is.as_ref(), p.there.as_ref())?;
+        Ok(p)
+    }
+    fn back(&self, path: &str, p: &Plan) -> Result<(), Why> {
+        let before = p.bytes.as_deref().map(|b| (b, p.mode));
+        back(&self.folder, path, before, p.is.as_ref())
+    }
+}
+fn seen<'a>(is: Option<&'a Is>, there: Option<&'a Is>) -> Seen<'a> {
+    Seen {
+        digest: is.map(|i| i.digest.as_str()),
+        run: is.is_some_and(|i| i.run),
+        there: there.map(|i| i.digest.as_str()),
+    }
+}
+fn mode(p: &Place, n: &str) -> u32 {
+    std::fs::metadata(p.as_path().join(n)).unwrap().permissions().mode() & 0o777
+}
+fn chmod(p: &Place, n: &str, m: u32) {
+    std::fs::set_permissions(p.as_path().join(n), PermissionsExt::from_mode(m)).unwrap();
 }
 fn write(p: &Place, n: &str, text: &str) {
     let f = p.as_path().join(n);
@@ -189,7 +234,7 @@ fn what_was_changed_is_brought_in_and_put_back() {
     let mut undo = Vec::new();
     for p in ["a", "b", "new/deep/d.sh"] {
         let b = t.bring(&was, p).unwrap();
-        match &b.after {
+        match &b.is {
             Some(i) => was.insert(p.into(), Was { is: i.clone(), stamp: None }),
             None => was.remove(p),
         };
@@ -206,9 +251,9 @@ fn what_was_changed_is_brought_in_and_put_back() {
     );
     // Changed since: not put back over it.
     write(&t.folder, "a", "mine\n");
-    assert_eq!(back(&t.folder, &undo[0]).unwrap_err(), "it has changed since");
-    back(&t.folder, &undo[1]).unwrap();
-    back(&t.folder, &undo[2]).unwrap();
+    assert_eq!(t.back("a", &undo[0]).unwrap_err(), "it has changed since");
+    t.back("b", &undo[1]).unwrap();
+    t.back("new/deep/d.sh", &undo[2]).unwrap();
     assert_eq!(read(&t.folder, "b").as_deref(), Some("2\n"));
     assert_eq!(read(&t.folder, "new/deep/d.sh"), None);
     assert_eq!(read(&t.folder, "a").as_deref(), Some("mine\n"));
@@ -233,11 +278,30 @@ fn the_folders_own_is_not_written_over() {
     }
     assert_eq!(read(&t.folder, "a").as_deref(), Some("mine"));
     assert_eq!(read(&t.folder, "n").as_deref(), Some("mine too"));
-    // Only what was seen.
-    let e = bring(&t.folder, &t.copy, "b", was.get("b"), Some("other")).unwrap_err();
+    // Only what was seen, of both.
+    let at = |p: &Place| now(&open(p).unwrap(), "b").unwrap();
+    let (is, there) = (at(&t.copy), at(&t.folder));
+    let right = seen(is.as_ref(), there.as_ref());
+    for wrong in [
+        Seen { digest: Some("other"), ..right },
+        Seen { digest: None, ..right },
+        Seen { run: true, ..right },
+        Seen { there: Some("other"), ..right },
+        Seen { there: None, ..right },
+    ] {
+        let e = plan(&t.folder, &t.copy, "b", was.get("b"), wrong).unwrap_err();
+        assert!(e.contains("not what was shown"), "{e}");
+    }
+    // And only while both are still what they were.
+    let p = t.plan(&was, "b").unwrap();
+    write(&t.folder, "b", "saved meanwhile");
+    let e = bring(&t.folder, &t.copy, "b", p.is.as_ref(), p.there.as_ref()).unwrap_err();
+    assert!(e.contains("being changed"), "{e}");
+    write(&t.folder, "b", "2");
+    write(&t.copy, "b", "agent again");
+    let e = bring(&t.folder, &t.copy, "b", p.is.as_ref(), p.there.as_ref()).unwrap_err();
     assert!(e.contains("not what was shown"), "{e}");
-    let e = bring(&t.folder, &t.copy, "b", was.get("b"), None).unwrap_err();
-    assert!(e.contains("not what was shown"), "{e}");
+    write(&t.copy, "b", "agent");
     assert_eq!(read(&t.folder, "b").as_deref(), Some("2"));
     t.bring(&was, "b").unwrap();
     // What the folder has already is no change.
@@ -274,8 +338,11 @@ fn a_rule_that_came_later_holds_for_a_copy() {
     let stop = AtomicBool::new(false);
     let may = |p: &Place| p.name() != "a";
     let from = From { folder: &t.folder, tracked: &[], may: &may, stop: &stop };
-    let r = renew(&from, &t.copy, &mut was, &t.beside, Most::default()).unwrap();
-    assert_eq!((r.taken, read(&t.copy, "a")), (vec!["a".to_owned()], None));
+    let r = news(&from, &t.copy, &mut was, Most::default()).unwrap();
+    assert_eq!(r.taking, Taking::from([("a".to_owned(), None)]));
+    take(&t.folder, &t.copy, "a", None).unwrap();
+    was.remove("a");
+    assert_eq!(read(&t.copy, "a"), None);
     assert_eq!((names(&was), t.changes(&was)), (vec!["b"], vec![]));
     assert_eq!(read(&t.folder, "a").as_deref(), Some("1"));
 }
@@ -283,13 +350,10 @@ fn a_rule_that_came_later_holds_for_a_copy() {
 #[test]
 fn that_it_can_be_run_is_a_change_too() {
     let t = T::new(&[("a", "1"), ("b", "2")]);
-    let mode = |p: &Place, n: &str, m: u32| {
-        std::fs::set_permissions(p.as_path().join(n), PermissionsExt::from_mode(m)).unwrap();
-    };
-    mode(&t.folder, "b", 0o755);
+    chmod(&t.folder, "b", 0o755);
     let was = t.make(&[]).unwrap();
-    mode(&t.copy, "a", 0o755);
-    mode(&t.copy, "b", 0o644);
+    chmod(&t.copy, "a", 0o755);
+    chmod(&t.copy, "b", 0o644);
     let c = t.changes(&was);
     assert_eq!(shown(&c), [("a", What::Changed, false)]);
     assert!(c[0].runs);
@@ -335,7 +399,7 @@ fn what_is_never_brought_in() {
     let c = t.changes(&was);
     assert!(c.iter().all(|c| c.path != "d/new"), "{c:?}");
     for bad in ["../out/x", "/etc/x", "a/../b", "./a", "a//b", "a/", "", "nothing"] {
-        assert!(bring(&t.folder, &t.copy, bad, None, None).is_err(), "{bad}");
+        assert!(plan(&t.folder, &t.copy, bad, None, seen(None, None)).is_err(), "{bad}");
     }
 }
 
@@ -357,9 +421,9 @@ fn a_copy_is_brought_up_to_date() {
     write(&t.copy, "d", "agent");
     // In the copy only.
     write(&t.copy, "e", "agent");
-    let r = t.renew(&mut was);
-    assert_eq!(r.taken, ["a", "b", "x/new"]);
-    assert_eq!(r.clashes, ["c", "d"]);
+    let (taken, clashes) = t.renew(&mut was);
+    assert_eq!(taken, ["a", "b", "x/new"]);
+    assert_eq!(clashes, ["c", "d"]);
     assert_eq!(read(&t.copy, "a").as_deref(), Some("folder"));
     assert_eq!(read(&t.copy, "x/new").as_deref(), Some("folder"));
     assert_eq!((read(&t.copy, "b"), read(&t.copy, "kept")), (None, None));
@@ -373,9 +437,162 @@ fn a_copy_is_brought_up_to_date() {
         [("c", What::Changed, false), ("d", What::New, false), ("e", What::Changed, false)]
     );
     assert!(diff(&t.folder, &t.copy, &c[0]).unwrap().contains("-folder"));
-    assert_eq!(t.renew(&mut was), Renewed::default());
+    assert_eq!(t.news(&mut was), Renewal::default());
     t.bring(&was, "c").unwrap();
     assert_eq!(read(&t.folder, "c").as_deref(), Some("agent"));
+}
+
+/// What goes by another rule is at least counted.
+#[test]
+fn what_is_not_listed_is_counted() {
+    use std::os::unix::ffi::OsStrExt;
+    let t = T::new(&[("a", "1"), (".gitignore", "out/\n"), ("out/tracked", "t")]);
+    let was = t.make(&["out/tracked"]).unwrap();
+    assert_eq!(names(&was), [".gitignore", "a", "out/tracked"]);
+    let c = t.look(&was);
+    assert_eq!((c.all, c.ignored, c.odd), (vec![], 0, 0));
+    // The agent moves a file to where git does not look, and says itself what git ignores.
+    std::fs::remove_file(t.copy.as_path().join("a")).unwrap();
+    write(&t.copy, "out/a", "1");
+    write(&t.copy, "gen/a", "1");
+    write(&t.copy, ".gitignore", "out/\ngen/\n");
+    write(&t.copy, "out/tracked", "agent");
+    let c = t.look(&was);
+    let all: Vec<&str> = c.all.iter().map(|c| c.path.as_str()).collect();
+    assert_eq!((all, c.ignored), (vec![".gitignore", "a", "out/tracked"], 2));
+    let mut deep = t.copy.as_path().to_path_buf();
+    for _ in 0..70 {
+        deep.push("d");
+    }
+    std::fs::create_dir_all(&deep).unwrap();
+    // Where the file system takes names that are no text.
+    let odd = t.copy.as_path().join(OsStr::from_bytes(b"\xff"));
+    let n = 1 + usize::from(std::fs::write(odd, "x").is_ok());
+    assert_eq!(t.look(&was).odd, n);
+    // No more than there is room for, of what the folder does not have already.
+    let t = T::new(&[]);
+    let was = t.make(&[]).unwrap();
+    for n in ["a", "b", "c"] {
+        write(&t.copy, n, "x");
+        write(&t.folder, n, "x");
+    }
+    write(&t.copy, "d", "x");
+    let few = |n| changes(&t.folder, &t.copy, &was, n, &AtomicBool::new(false)).unwrap();
+    assert_eq!((few(1).all.len(), few(1).whole), (1, true));
+    assert_eq!((few(0).all.len(), few(0).whole), (0, false));
+}
+
+/// A folder that became a file is not brought in as the removal of all that was in it.
+#[test]
+fn what_took_the_place_of_a_folder() {
+    let t = T::new(&[("src/a", "1"), ("src/sub/b", "2"), ("gone/c", "3"), ("file", "4")]);
+    let was = t.make(&[]).unwrap();
+    std::fs::remove_dir_all(t.copy.as_path().join("src")).unwrap();
+    write(&t.copy, "src", "now a file");
+    std::fs::remove_dir_all(t.copy.as_path().join("gone")).unwrap();
+    std::fs::remove_file(t.copy.as_path().join("file")).unwrap();
+    write(&t.copy, "file/x", "now a folder");
+    for c in t.changes(&was) {
+        if c.path == "file/x" {
+            // Nothing to be said of the file itself, only of where it would be.
+            assert!(t.bring(&was, "file/x").is_err());
+            continue;
+        }
+        let can = c.path == "gone/c";
+        assert_eq!(c.never.is_none() && t.plan(&was, &c.path).is_ok(), can, "{c:?}");
+    }
+    assert!(t.bring(&was, "src/a").is_err());
+    assert!(t.bring(&was, "src").is_err());
+    assert_eq!(read(&t.folder, "src/a").as_deref(), Some("1"));
+    assert_eq!(read(&t.folder, "file").as_deref(), Some("4"));
+    t.bring(&was, "gone/c").unwrap();
+}
+
+#[test]
+fn permissions_are_put_back_as_they_were() {
+    let t = T::new(&[("secret", "1"), ("a", "2"), ("run", "3"), ("off", "4")]);
+    chmod(&t.folder, "secret", 0o600);
+    chmod(&t.folder, "run", 0o755);
+    chmod(&t.folder, "off", 0o755);
+    let mut was = t.make(&[]).unwrap();
+    std::fs::remove_file(t.copy.as_path().join("secret")).unwrap();
+    write(&t.copy, "a", "agent");
+    chmod(&t.copy, "a", 0o755);
+    write(&t.copy, "off", "agent");
+    chmod(&t.copy, "off", 0o644);
+    let mut all = Vec::new();
+    for n in ["secret", "a", "off"] {
+        let p = t.bring(&was, n).unwrap();
+        let there = now(&open(&t.folder).unwrap(), n).unwrap();
+        match there {
+            Some(is) => was.insert(n.into(), Was { is, stamp: None }),
+            None => was.remove(n),
+        };
+        all.push((n, p));
+    }
+    assert_eq!((mode(&t.folder, "a"), mode(&t.folder, "off")), (0o755, 0o755));
+    assert_eq!(t.changes(&was), [], "that it cannot be run any more is no change");
+    for (n, p) in &all {
+        t.back(n, p).unwrap();
+    }
+    assert_eq!(mode(&t.folder, "secret"), 0o600);
+    assert_eq!((mode(&t.folder, "a"), read(&t.folder, "a").as_deref()), (0o644, Some("2")));
+    assert_eq!(mode(&t.folder, "off"), 0o755);
+    // Only that it can be run differs from what was copied: no clash.
+    let was = T::new(&[]).make(&[]).unwrap_or_default();
+    let mut was = was;
+    was.insert("a".into(), Was { is: all[1].1.there.clone().unwrap(), stamp: None });
+    write(&t.copy, "a", "agent");
+    chmod(&t.folder, "a", 0o755);
+    assert!(t.changes(&was).iter().all(|c| c.path != "a" || !c.clash));
+}
+
+/// Two names that are one to the file system of the copy.
+#[test]
+fn one_name_is_not_written_over_by_another() {
+    let t = T::new(&[("a", "1")]);
+    let f = open(&t.folder).unwrap();
+    let c = open(&t.copy).unwrap();
+    put(&f, OsStr::new("a"), &c, "a", false).unwrap();
+    write(&t.folder, "b", "2");
+    let e = put(&f, OsStr::new("b"), &c, "a", false).unwrap_err();
+    assert_eq!(e.kind(), Some(io::ErrorKind::AlreadyExists));
+    assert_eq!(read(&t.copy, "a").as_deref(), Some("1"));
+    // In its place, whole or not at all, with nothing left over.
+    put(&f, OsStr::new("b"), &c, "a", true).unwrap();
+    assert_eq!(read(&t.copy, "a").as_deref(), Some("2"));
+    write(&t.copy, "dir/x", "x");
+    assert!(put(&f, OsStr::new("b"), &c, "dir", true).is_err());
+    assert_eq!(std::fs::read_dir(t.copy.as_path()).unwrap().count(), 2);
+}
+
+/// A thing that cannot be looked at does not keep the rest from being taken over.
+#[test]
+fn one_that_is_in_the_way_is_said() {
+    let t = T::new(&[("a", "1"), ("b", "2")]);
+    let mut was = t.make(&[]).unwrap();
+    write(&t.folder, "a", "folder");
+    chmod(&t.folder, "a", 0o000);
+    write(&t.folder, "b", "folder");
+    let r = t.news(&mut was);
+    chmod(&t.folder, "a", 0o644);
+    // (To whoever may read everything it is not in the way.)
+    if !r.left.is_empty() {
+        assert_eq!(r.left[0].0, "a");
+        assert_eq!(r.taking.keys().collect::<Vec<_>>(), ["b"]);
+    }
+    write(&t.copy, "out", "agent");
+    write(&t.folder, "out/x", "folder");
+    assert!(
+        take(
+            &t.folder,
+            &t.copy,
+            "out/x",
+            now(&open(&t.folder).unwrap(), "out/x").unwrap().as_ref()
+        )
+        .is_err()
+    );
+    assert_eq!(read(&t.copy, "out").as_deref(), Some("agent"));
 }
 
 #[test]

@@ -3,6 +3,7 @@
 //! is merged: what has changed in both is said to be a clash.
 
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
     io::{self, Read},
@@ -60,6 +61,15 @@ pub enum CopyError {
     Io(String, io::Error),
 }
 
+impl CopyError {
+    fn kind(&self) -> Option<io::ErrorKind> {
+        match self {
+            CopyError::Io(_, e) => Some(e.kind()),
+            _ => None,
+        }
+    }
+}
+
 /// A file as it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Is {
@@ -69,6 +79,22 @@ pub struct Is {
     /// It can be run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub run: bool,
+}
+
+impl Is {
+    /// With the same in it, whether or not it can be run.
+    fn like(&self, o: &Is) -> bool {
+        self.digest == o.digest && self.link == o.link
+    }
+}
+
+/// Whether two have the same in them, or are both not there.
+pub fn alike(a: Option<&Is>, b: Option<&Is>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.like(b),
+        _ => false,
+    }
 }
 
 /// A file of the copy as it was put there: that it has not been touched since is seen without
@@ -104,13 +130,34 @@ struct Walk<'a> {
     base: &'a Place,
     /// What git ignores is left out.
     ignoring: bool,
+    /// These are met although git ignores them.
+    known: Option<&'a Files>,
     may: May<'a>,
     stop: &'a AtomicBool,
+    /// What was not met: because git ignores it, and because it cannot be named or is too deep.
+    ignored: Cell<usize>,
+    odd: Cell<usize>,
 }
 
-impl Walk<'_> {
+fn more(c: &Cell<usize>) {
+    c.set(c.get() + 1);
+}
+
+impl<'a> Walk<'a> {
+    fn new(base: &'a Place, ignoring: bool, may: May<'a>, stop: &'a AtomicBool) -> Self {
+        let (ignored, odd) = (Cell::new(0), Cell::new(0));
+        Self { base, ignoring, known: None, may, stop, ignored, odd }
+    }
+
     fn each(&self, f: Each<'_>) -> Result<(), CopyError> {
-        self.folder(&open(self.base)?, "", 0, &mut Vec::new(), f)
+        self.folder(&open(self.base)?, "", 0, &mut Vec::new(), false, f)
+    }
+
+    /// Whether something known is below a folder.
+    fn holds(&self, below: &str) -> bool {
+        let at = format!("{below}/");
+        self.known
+            .is_some_and(|k| k.range(at.clone()..).next().is_some_and(|(n, _)| n.starts_with(&at)))
     }
 
     fn folder(
@@ -119,6 +166,7 @@ impl Walk<'_> {
         rel: &str,
         depth: usize,
         rules: &mut Vec<Gitignore>,
+        out: bool,
         f: Each<'_>,
     ) -> Result<(), CopyError> {
         if self.stop.load(Ordering::Relaxed) {
@@ -137,29 +185,49 @@ impl Walk<'_> {
         }
         names.sort_by(|a, b| a.0.cmp(&b.0));
         for (name, kind) in names {
+            if self.ignoring && name.eq_ignore_ascii_case(".git") {
+                continue;
+            }
             // What has no name that can be written down is left where it is.
-            let Some(n) = name.to_str() else { continue };
-            if n.eq_ignore_ascii_case(".git") && self.ignoring {
+            let Some(n) = name.to_str().filter(|n| parts(n).is_some()) else {
+                more(&self.odd);
                 continue;
-            }
+            };
             let path = here.join(n);
-            if ignored(rules, &path, kind.is_dir()) {
-                continue;
+            let below = if rel.is_empty() { n.to_owned() } else { format!("{rel}/{n}") };
+            let out = out || ignored(rules, &path, kind.is_dir());
+            if out {
+                let met = match kind.is_dir() {
+                    true => self.holds(&below),
+                    false => self.known.is_some_and(|k| k.contains_key(&below)),
+                };
+                if !met {
+                    more(&self.ignored);
+                    continue;
+                }
             }
-            let Ok(place) = Place::new(&path) else { continue };
+            let Ok(place) = Place::new(&path) else {
+                more(&self.odd);
+                continue;
+            };
             if !(self.may)(&place) {
                 continue;
             }
-            let below = if rel.is_empty() { n.to_owned() } else { format!("{rel}/{n}") };
             if kind.is_dir() {
-                // If it became a link meanwhile, it is none of the folder's.
-                if depth < DEEPEST
-                    && let Ok(d) = dir.open_dir_nofollow(&name)
-                {
-                    self.folder(&d, &below, depth + 1, rules, f)?;
+                if depth >= DEEPEST {
+                    more(&self.odd);
+                    continue;
+                }
+                match dir.open_dir_nofollow(&name) {
+                    Ok(d) => self.folder(&d, &below, depth + 1, rules, out, f)?,
+                    // It is gone, or became a link: then it is none of the folder's.
+                    Err(_) if !dir.symlink_metadata(&name).is_ok_and(|m| m.is_dir()) => {}
+                    Err(e) => return Err(CopyError::Io(path.display().to_string(), e)),
                 }
             } else if kind.is_file() || kind.is_symlink() {
                 f(dir, &name, &below)?;
+            } else {
+                more(&self.odd);
             }
         }
         rules.truncate(had);
@@ -186,6 +254,7 @@ fn is_at(dir: &Dir, name: &OsStr) -> io::Result<Option<(Is, Option<String>)>> {
     let mut o = OpenOptions::new();
     o.read(true).follow(FollowSymlinks::No).nonblock(true);
     let mut f = dir.open_with(name, &o)?;
+    let before = stamp(&f.metadata()?);
     let mut h = blake3::Hasher::new();
     let mut buf = vec![0; 64 * 1024];
     loop {
@@ -194,10 +263,11 @@ fn is_at(dir: &Dir, name: &OsStr) -> io::Result<Option<(Is, Option<String>)>> {
             n => h.update(&buf[..n]),
         };
     }
-    // Of what was read, and after: what is written meanwhile has another.
+    // What was written to meanwhile has none.
     let m = f.metadata()?;
     let digest = h.finalize().to_hex().to_string();
-    Ok(Some((Is { digest, link: false, run: runs(&m) }, stamp(&m))))
+    let stamp = stamp(&m).filter(|s| before.as_ref() == Some(s));
+    Ok(Some((Is { digest, link: false, run: runs(&m) }, stamp)))
 }
 
 #[cfg(unix)]
@@ -224,7 +294,11 @@ fn stamp(_: &cap_std::fs::Metadata) -> Option<String> {
 fn parts(rel: &str) -> Option<(Vec<&str>, &str)> {
     let mut names: Vec<&str> = rel.split('/').collect();
     let last = names.pop()?;
-    let plain = |n: &str| !n.is_empty() && n != "." && n != ".." && !n.contains(['\\', '\0']);
+    let plain = |n: &str| {
+        !n.is_empty() && n != "." && n != ".." && !n.contains(['\0', '\n'])
+        // On Windows it parts names.
+        && !(cfg!(windows) && n.contains(['\\', ':']))
+    };
     (names.iter().all(|n| plain(n)) && plain(last)).then_some((names, last))
 }
 
@@ -268,8 +342,10 @@ fn look(folder: &Dir, rel: &str, was: Option<&Was>) -> Result<Option<Was>, CopyE
     Ok(is_at(&d, OsStr::new(last)).map_err(err)?.map(|(is, stamp)| Was { is, stamp }))
 }
 
-/// Puts a file of one folder into another, where there is none, as the system can do it best.
-fn put(from: &Dir, name: &OsStr, to: &Dir, rel: &str) -> Result<Was, CopyError> {
+/// Puts a file of one folder into another, as the system can do it best. `over`: in the place of one
+/// that is there, whole or not at all; otherwise there must be none, by whatever name the system
+/// takes for the same.
+fn put(from: &Dir, name: &OsStr, to: &Dir, rel: &str, over: bool) -> Result<Was, CopyError> {
     let err = |e| CopyError::Io(rel.to_owned(), e);
     let Some((names, last)) = parts(rel) else {
         return Err(err(io::ErrorKind::InvalidInput.into()));
@@ -278,16 +354,46 @@ fn put(from: &Dir, name: &OsStr, to: &Dir, rel: &str) -> Result<Was, CopyError> 
         return Err(err(io::ErrorKind::NotADirectory.into()));
     };
     let m = from.symlink_metadata(name).map_err(err)?;
-    if m.is_symlink() {
-        let contents = from.read_link_contents(name).map_err(err)?;
-        link(&d, &contents, last).map_err(err)?;
+    let tmp = format!(".axiom-{}.tmp", fs::fresh());
+    let new = if over { tmp.as_str() } else { last };
+    if d.symlink_metadata(new).is_ok() {
+        return Err(err(io::ErrorKind::AlreadyExists.into()));
+    }
+    let done = if m.is_symlink() {
+        from.read_link_contents(name).and_then(|c| link(&d, &c, new))
     } else {
-        from.copy(name, &d, last).map_err(err)?;
+        content(from, name, &d, new)
+    };
+    let done = done.and_then(|()| if over { d.rename(new, &d, last) } else { Ok(()) });
+    if let Err(e) = done {
+        let _ = d.remove_file_or_symlink(new);
+        return Err(err(e));
     }
     let Some((is, stamp)) = is_at(&d, OsStr::new(last)).map_err(err)? else {
         return Err(err(io::ErrorKind::NotFound.into()));
     };
     Ok(Was { is, stamp })
+}
+
+/// On Linux by the standard library, which ends when a file becomes shorter meanwhile.
+#[cfg(target_os = "linux")]
+fn content(from: &Dir, name: &OsStr, to: &Dir, new: &str) -> io::Result<()> {
+    let mut o = OpenOptions::new();
+    o.read(true).follow(FollowSymlinks::No).nonblock(true);
+    let mut r = from.open_with(name, &o)?.into_std();
+    let m = r.metadata()?;
+    if !m.is_file() {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let mut o = OpenOptions::new();
+    o.write(true).create_new(true).follow(FollowSymlinks::No);
+    let mut w = to.open_with(new, &o)?.into_std();
+    io::copy(&mut r, &mut w)?;
+    w.set_permissions(m.permissions())
+}
+#[cfg(not(target_os = "linux"))]
+fn content(from: &Dir, name: &OsStr, to: &Dir, new: &str) -> io::Result<()> {
+    from.copy(name, to, new).map(drop)
 }
 
 #[cfg(unix)]
@@ -300,8 +406,8 @@ fn link(_: &Dir, _: &Path, _: &str) -> io::Result<()> {
 }
 
 /// Makes the copy, in a folder that is there and empty. What would be too much is refused before
-/// anything is made.
-pub fn make(from: &From<'_>, to: &Place, most: Most) -> Result<Files, CopyError> {
+/// anything is made. With how many files there are that cannot be copied.
+pub fn make(from: &From<'_>, to: &Place, most: Most) -> Result<(Files, usize), CopyError> {
     let target = open(to)?;
     if target.entries().map_err(|e| CopyError::Io(to.to_string(), e))?.next().is_some() {
         return Err(CopyError::There(to.to_string()));
@@ -327,37 +433,40 @@ pub fn make(from: &From<'_>, to: &Place, most: Most) -> Result<Files, CopyError>
     }
     drop(seen);
 
+    let walk = from.walk();
     let mut all = Files::new();
-    let mut done = |d: &Dir, n: &OsStr, rel: &str| {
+    let mut odd = 0;
+    let mut done = |d: &Dir, n: &OsStr, rel: &str, again: bool| {
         if from.stop.load(Ordering::Relaxed) {
             return Err(CopyError::Stopped);
         }
-        match put(d, n, &target, rel) {
-            Ok(w) => all.insert(rel.to_owned(), w),
+        match put(d, n, &target, rel, false) {
+            Ok(w) => {
+                all.insert(rel.to_owned(), w);
+            }
             // It went away while this went on.
-            Err(CopyError::Io(_, e)) if e.kind() == io::ErrorKind::NotFound => None,
-            Err(e) if cfg!(not(unix)) && unsupported(&e) => None,
+            Err(e)
+                if e.kind() == Some(io::ErrorKind::NotFound) && d.symlink_metadata(n).is_err() => {}
+            Err(e) if e.kind() == Some(io::ErrorKind::Unsupported) => odd += 1,
+            // Copied already, by the name the system has for it.
+            Err(e) if again && e.kind() == Some(io::ErrorKind::AlreadyExists) => {}
             Err(e) => return Err(e),
-        };
+        }
         Ok(())
     };
-    walk.each(&mut done)?;
+    walk.each(&mut |d, n, rel| done(d, n, rel, false))?;
     for rel in more {
         if let Some((d, n)) = at(&source, rel)? {
-            done(&d, OsStr::new(n), rel)?;
+            done(&d, OsStr::new(n), rel, true)?;
         }
     }
     if git {
-        from.git(&source, &mut |d, n, rel| match put(d, n, &target, rel) {
-            Err(CopyError::Io(_, e)) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        from.git(&source, &mut |d, n, rel| match put(d, n, &target, rel, false) {
+            Err(e) if e.kind() == Some(io::ErrorKind::NotFound) => Ok(()),
             r => r.map(drop),
         })?;
     }
-    Ok(all)
-}
-
-fn unsupported(e: &CopyError) -> bool {
-    matches!(e, CopyError::Io(_, e) if e.kind() == io::ErrorKind::Unsupported)
+    Ok((all, odd + walk.odd.get()))
 }
 
 struct Count {
@@ -389,7 +498,7 @@ const NOT_GIT: &[&str] = &["hooks", "worktrees", "modules"];
 
 impl From<'_> {
     fn walk(&self) -> Walk<'_> {
-        Walk { base: self.folder, ignoring: true, may: self.may, stop: self.stop }
+        Walk::new(self.folder, true, self.may, self.stop)
     }
 
     fn allowed(&self, rel: &str) -> bool {
@@ -410,8 +519,8 @@ impl From<'_> {
             let first = first.and_then(OsStr::to_str).unwrap_or_default();
             !NOT_GIT.contains(&first) && !p.name().ends_with(".lock")
         };
-        let w = Walk { base: &place, ignoring: false, may: &may, stop: self.stop };
-        w.folder(&dir, "", 0, &mut Vec::new(), &mut |d, n, rel| {
+        let w = Walk::new(&place, false, &may, self.stop);
+        w.folder(&dir, "", 0, &mut Vec::new(), false, &mut |d, n, rel| {
             let m = d.symlink_metadata(n).map_err(err)?;
             // A link in there would lead who knows where.
             if m.is_symlink() { Ok(()) } else { f(d, n, &format!(".git/{rel}")) }
@@ -433,6 +542,8 @@ pub struct Change {
     pub what: What,
     /// In the copy; absent if it is not there any more.
     pub is: Option<Is>,
+    /// In the folder.
+    pub there: Option<Is>,
     /// The folder's own has changed as well since it was copied.
     pub clash: bool,
     /// Why it cannot be brought in, whatever a person says.
@@ -441,72 +552,105 @@ pub struct Change {
     pub runs: bool,
 }
 
-/// Those that differ from what was copied, or from what the folder has had brought in since.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    pub all: Vec<Change>,
+    /// These are all.
+    pub whole: bool,
+    /// What git ignores and only the copy has: files, or folders of them.
+    pub ignored: usize,
+    /// What has no name that can be written down, or is too deep.
+    pub odd: usize,
+}
+
+/// What differs from what was copied, or from what the folder has had brought in since, and the
+/// folder does not have.
 pub fn changes(
     folder: &Place,
     copy: &Place,
     was: &Files,
     most: usize,
     stop: &AtomicBool,
-) -> Result<(Vec<Change>, bool), CopyError> {
+) -> Result<Changes, CopyError> {
     let (f, c) = (open(folder)?, open(copy)?);
-    let mut all: BTreeMap<String, Option<Is>> = BTreeMap::new();
+    let mut all: BTreeMap<String, (Option<Is>, Option<Is>)> = BTreeMap::new();
     let mut whole = true;
+    let mut found = |rel: &str, is: Option<Is>| -> Result<bool, CopyError> {
+        let there = now(&f, rel)?;
+        if has(there.as_ref(), is.as_ref()) {
+            return Ok(true);
+        }
+        if all.len() >= most {
+            return Ok(false);
+        }
+        all.insert(rel.to_owned(), (is, there));
+        Ok(true)
+    };
     for (rel, w) in was {
         if stop.load(Ordering::Relaxed) {
             return Err(CopyError::Stopped);
         }
         let is = look(&c, rel, Some(w))?.map(|n| n.is);
-        if is.as_ref() != Some(&w.is) {
-            if all.len() >= most {
-                whole = false;
-                break;
-            }
-            all.insert(rel.clone(), is);
+        if is.as_ref() != Some(&w.is) && !found(rel, is)? {
+            whole = false;
+            break;
         }
     }
     let may = |_: &Place| true;
-    let walk = Walk { base: copy, ignoring: true, may: &may, stop };
+    let walk = Walk { known: Some(was), ..Walk::new(copy, true, &may, stop) };
     walk.each(&mut |d, n, rel| {
-        if was.contains_key(rel) {
-            return Ok(());
-        }
-        if all.len() >= most {
-            whole = false;
+        if was.contains_key(rel) || !whole {
             return Ok(());
         }
         let is = is_at(d, n).map_err(|e| CopyError::Io(rel.to_owned(), e))?;
-        all.insert(rel.to_owned(), is.map(|i| i.0));
+        whole = found(rel, is.map(|i| i.0))?;
         Ok(())
     })?;
     let mut out = Vec::new();
-    for (path, is) in all {
+    for (path, (is, there)) in all {
         let was = was.get(&path).map(|w| &w.is);
-        let there = now(&f, &path)?;
-        if has(there.as_ref(), is.as_ref()) {
-            // Nothing to bring in.
-            continue;
-        }
         let what = match (was, &is) {
             (_, None) => What::Removed,
             (None, _) => What::New,
             _ => What::Changed,
         };
-        let never = never(&path, is.as_ref(), there.as_ref());
+        let mut never = never(&path, is.as_ref(), there.as_ref());
+        if is.is_none() && never.is_none() && !in_folders(&c, &path) {
+            never = Some("a folder it was in is something else in the copy");
+        }
         let runs = path.rsplit('/').next().is_some_and(paths::review_name)
             || is.as_ref().is_some_and(|i| i.run && !was.is_some_and(|w| w.run));
-        out.push(Change { clash: there.as_ref() != was, path, what, is, never, runs });
+        let clash = !alike(there.as_ref(), was);
+        out.push(Change { clash, path, what, is, there, never, runs });
     }
-    Ok((out, whole))
+    Ok(Changes { all: out, whole, ignored: walk.ignored.get(), odd: walk.odd.get() })
+}
+
+/// Nothing on the way to a file is anything but a folder, or not there.
+fn in_folders(top: &Dir, rel: &str) -> bool {
+    let Some((names, _)) = parts(rel) else { return false };
+    let mut at = String::new();
+    for n in names {
+        if !at.is_empty() {
+            at.push('/');
+        }
+        at.push_str(n);
+        match top.symlink_metadata(&at) {
+            Ok(m) if m.is_dir() => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return true,
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// The folder has what the copy has. That it can be run there too is no change.
 fn has(there: Option<&Is>, is: Option<&Is>) -> bool {
-    match (there, is) {
-        (None, None) => true,
-        (Some(t), Some(i)) => t.digest == i.digest && t.link == i.link && (t.run || !i.run),
-        _ => false,
-    }
+    alike(there, is)
+        && match (there, is) {
+            (Some(t), Some(i)) => t.run || !i.run,
+            _ => true,
+        }
 }
 
 /// What is never brought in, and why.
@@ -542,34 +686,21 @@ pub fn diff(folder: &Place, copy: &Place, c: &Change) -> Option<String> {
     Some(text::diff(&c.path, before.as_deref(), after.as_deref()))
 }
 
-/// What was there before a file was brought in, so that it can be put back.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Before {
-    pub path: String,
-    /// Absent: there was none.
-    pub bytes: Option<Vec<u8>>,
-    /// What the folder has now; absent: none.
-    pub after: Option<Is>,
-    pub run: bool,
-}
-
 /// Why a file was not brought in or put back.
 pub type Why = String;
 
 fn spot(folder: &Place, rel: &str, make: bool) -> Result<fs::Spot, Why> {
-    if parts(rel).is_none() {
+    let Some((names, _)) = parts(rel) else {
         return Err("it is not a name of a file".into());
-    }
+    };
     let place = folder.join(rel).map_err(|e| e.to_string())?;
-    let roots = std::slice::from_ref(folder);
     if make {
-        let (names, _) = parts(rel).ok_or("it is not a name of a file")?;
         let top = open(folder).map_err(|e| e.to_string())?;
         if parent(&top, &names, true).map_err(|e| e.to_string())?.is_none() {
             return Err("there is something else where its folder would be".into());
         }
     }
-    let s = match fs::find(roots, &place) {
+    let s = match fs::find(std::slice::from_ref(folder), &place) {
         Err(FsError::Missing(_)) => return Err("its folder is not there".into()),
         s => s.map_err(|e| e.to_string())?,
     };
@@ -579,34 +710,43 @@ fn spot(folder: &Place, rel: &str, make: bool) -> Result<fs::Spot, Why> {
     Ok(s)
 }
 
-/// The bytes of a folder's file, to be kept; `None`: there is none.
-pub fn peek(folder: &Place, path: &str) -> Result<Option<Vec<u8>>, Why> {
-    let f = open(folder).map_err(|e| e.to_string())?;
-    match now(&f, path).map_err(|e| e.to_string())? {
-        None => Ok(None),
-        Some(_) => spot(folder, path, false)?
-            .read(LARGEST)
-            .map(|c| Some(c.bytes))
-            .map_err(|e| e.to_string()),
-    }
+/// A change as a person was shown it.
+#[derive(Debug, Clone, Copy)]
+pub struct Seen<'a> {
+    /// In the copy; absent if it was removed there.
+    pub digest: Option<&'a str>,
+    pub run: bool,
+    /// In the folder; absent if it had none.
+    pub there: Option<&'a str>,
 }
 
-/// Brings one change in, as a person has seen it: `seen` is what the copy had then, absent if it
-/// had removed it. The folder's own is only touched as long as it is what was copied.
-pub fn bring(
+/// What a change would do, and what is there before.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plan {
+    pub is: Option<Is>,
+    pub there: Option<Is>,
+    pub bytes: Option<Vec<u8>>,
+    /// The permissions of what is there, where there are such.
+    pub mode: Option<u32>,
+}
+
+/// Whether a change may be brought in, as it was seen: only as long as the folder's own is what was
+/// copied, and both are what was shown. Nothing is touched.
+pub fn plan(
     folder: &Place,
     copy: &Place,
     path: &str,
     was: Option<&Was>,
-    seen: Option<&str>,
-) -> Result<Before, Why> {
+    seen: Seen<'_>,
+) -> Result<Plan, Why> {
     if parts(path).is_none() {
         return Err("it is not a name of a file".into());
     }
     let words = |e: CopyError| e.to_string();
     let (f, c) = (open(folder).map_err(words)?, open(copy).map_err(words)?);
     let (is, there) = (now(&c, path).map_err(words)?, now(&f, path).map_err(words)?);
-    if is.as_ref().map(|i| i.digest.as_str()) != seen {
+    let digest = |i: &Option<Is>| i.as_ref().map(|i| i.digest.clone());
+    if digest(&is).as_deref() != seen.digest || is.as_ref().is_some_and(|i| i.run != seen.run) {
         return Err("it is not what was shown any more".into());
     }
     if let Some(why) = never(path, is.as_ref(), there.as_ref()) {
@@ -615,118 +755,172 @@ pub fn bring(
     if has(there.as_ref(), is.as_ref()) {
         return Err("the folder has it already".into());
     }
-    let was = was.map(|w| &w.is);
-    if there.as_ref().map(|t| &t.digest) != was.map(|w| &w.digest) {
+    if !alike(there.as_ref(), was.map(|w| &w.is)) {
         return Err("the folder's own has changed since it was copied".into());
     }
-    let before = match &there {
+    if digest(&there).as_deref() != seen.there {
+        return Err("the folder's own is not what was shown any more".into());
+    }
+    if is.is_none() && !in_folders(&c, path) {
+        return Err("a folder it was in is something else in the copy".into());
+    }
+    let (mut bytes, mut mode) = (None, None);
+    if let Some(t) = &there {
+        let s = spot(folder, path, false)?;
+        mode = s.mode().map_err(|e| e.to_string())?;
+        let content = s.read(LARGEST).map_err(|e| e.to_string())?;
+        if content.digest != t.digest {
+            return Err("the folder's own is being changed".into());
+        }
+        bytes = Some(content.bytes);
+    }
+    Ok(Plan { is, there, bytes, mode })
+}
+
+/// Does what was planned, if both are still what they were.
+pub fn bring(
+    folder: &Place,
+    copy: &Place,
+    path: &str,
+    is: Option<&Is>,
+    there: Option<&Is>,
+) -> Result<(), Why> {
+    let words = |e: CopyError| e.to_string();
+    let from = match is {
         None => None,
-        Some(_) => Some(spot(folder, path, false)?.read(LARGEST).map_err(|e| e.to_string())?.bytes),
-    };
-    let run = there.as_ref().is_some_and(|t| t.run);
-    match &is {
-        None => spot(folder, path, false)?.remove().map_err(|e| e.to_string())?,
         Some(i) => {
-            let from = spot(copy, path, false)?.read(LARGEST).map_err(|e| e.to_string())?;
-            if from.digest != i.digest {
+            let c = spot(copy, path, false)?.read(LARGEST).map_err(|e| e.to_string())?;
+            if c.digest != i.digest {
                 return Err("it is not what was shown any more".into());
             }
-            spot(folder, path, true)?.write_as(&from.bytes, i.run).map_err(|e| e.to_string())?;
+            Some((c.bytes, i.run))
+        }
+    };
+    let f = open(folder).map_err(words)?;
+    if !alike(now(&f, path).map_err(words)?.as_ref(), there) {
+        return Err("the folder's own is being changed".into());
+    }
+    match from {
+        None => spot(folder, path, false)?.remove().map_err(|e| e.to_string()),
+        Some((bytes, run)) => {
+            let mode = if run { fs::Mode::Run } else { fs::Mode::Keep };
+            spot(folder, path, true)?.write_as(&bytes, mode).map_err(|e| e.to_string())
         }
     }
-    Ok(Before { path: path.to_owned(), bytes: before, after: is, run })
 }
 
-/// Puts back what was there before, if nothing else has changed it since.
-pub fn back(folder: &Place, b: &Before) -> Result<(), Why> {
+/// Puts back what was there before, if nothing has changed it since. It may have been put back.
+pub fn back(
+    folder: &Place,
+    path: &str,
+    before: Option<(&[u8], Option<u32>)>,
+    after: Option<&Is>,
+) -> Result<(), Why> {
     let f = open(folder).map_err(|e| e.to_string())?;
-    let there = now(&f, &b.path).map_err(|e| e.to_string())?;
-    if there.as_ref().map(|t| &t.digest) != b.after.as_ref().map(|t| &t.digest) {
+    let there = now(&f, path).map_err(|e| e.to_string())?;
+    if !alike(there.as_ref(), after) {
         return Err("it has changed since".into());
     }
-    match &b.bytes {
-        Some(bytes) => {
-            spot(folder, &b.path, true)?.write_as(bytes, b.run).map_err(|e| e.to_string())
+    match before {
+        Some((bytes, mode)) => {
+            let mode = mode.map_or(fs::Mode::Keep, fs::Mode::Exactly);
+            spot(folder, path, true)?.write_as(bytes, mode).map_err(|e| e.to_string())
         }
         None if there.is_none() => Ok(()),
-        None => spot(folder, &b.path, false)?.remove().map_err(|e| e.to_string()),
+        None => spot(folder, path, false)?.remove().map_err(|e| e.to_string()),
     }
 }
 
-/// What bringing a copy up to date came to.
+/// What is to be taken over into a copy: each as the folder has it, absent if it has none any more.
+pub type Taking = BTreeMap<String, Option<Is>>;
+
+/// What bringing a copy up to date is to do.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Renewed {
-    /// Taken over from the folder.
-    pub taken: Vec<String>,
-    /// Changed in both: the folder's is beside the copy now, for the agent to look at.
-    pub clashes: Vec<String>,
+pub struct Renewal {
+    pub taking: Taking,
+    /// Changed in both, with what the folder has.
+    pub clashes: Taking,
+    /// What cannot be looked at, with why.
+    pub left: Vec<(String, Why)>,
 }
 
-/// Takes over what has changed in the folder and not in the copy. Where both have, the copy's stays
-/// and the folder's is put into `beside`; from then on it counts as what was copied, and bringing
-/// the file in shows what that would undo.
-pub fn renew(
+/// What has changed in the folder since it was copied. Where the copy has it too, it counts as
+/// copied from here on.
+pub fn news(
     from: &From<'_>,
     copy: &Place,
     was: &mut Files,
-    beside: &Place,
     most: Most,
-) -> Result<Renewed, CopyError> {
-    let (f, c, b) = (open(from.folder)?, open(copy)?, open(beside)?);
+) -> Result<Renewal, CopyError> {
+    let (f, c) = (open(from.folder)?, open(copy)?);
     let mut names: BTreeSet<String> = was.keys().cloned().collect();
     from.walk().each(&mut |_, _, rel| {
         names.insert(rel.to_owned());
         if names.len() > most.files { Err(CopyError::TooMuch(most)) } else { Ok(()) }
     })?;
     names.extend(from.tracked.iter().filter(|t| from.allowed(t)).cloned());
-    let mut out = Renewed::default();
+    let mut out = Renewal::default();
     for rel in names {
         if from.stop.load(Ordering::Relaxed) {
             return Err(CopyError::Stopped);
         }
         let known = was.get(&rel).cloned();
-        let there = if from.allowed(&rel) { now(&f, &rel)? } else { None };
-        if there.as_ref() == known.as_ref().map(|w| &w.is) {
-            continue;
-        }
-        let here = look(&c, &rel, known.as_ref())?;
-        let err = |e| CopyError::Io(rel.clone(), e);
-        let set = |was: &mut Files, w: Option<Was>| match w {
-            Some(w) => was.insert(rel.clone(), w),
-            None => was.remove(&rel),
+        let both = || -> Result<_, CopyError> {
+            // What it may not have counts as gone.
+            let there = if from.allowed(&rel) { now(&f, &rel)? } else { None };
+            Ok((there, look(&c, &rel, known.as_ref())?))
         };
-        if here.as_ref().map(|w| &w.is) == there.as_ref() {
-            set(was, here);
+        let (there, here) = match both() {
+            Ok(b) => b,
+            Err(e) => {
+                out.left.push((rel, e.to_string()));
+                continue;
+            }
+        };
+        let is = |w: &Option<Was>| w.as_ref().map(|w| w.is.clone());
+        if there == is(&known) {
             continue;
         }
-        let untouched = here.as_ref().map(|w| &w.is) == known.as_ref().map(|w| &w.is);
-        // Not what it may not have, which counts as gone.
-        let at_folder = if there.is_some() { at(&f, &rel)? } else { None };
-        if untouched {
-            if here.is_some()
-                && let Some((d, n)) = at(&c, &rel)?
-            {
-                d.remove_file_or_symlink(n).map_err(err)?;
-            }
-            let w = match at_folder {
-                Some((d, n)) => Some(put(&d, OsStr::new(n), &c, &rel)?),
-                None => None,
+        if is(&here) == there {
+            match here {
+                Some(w) => was.insert(rel, w),
+                None => was.remove(&rel),
             };
-            set(was, w);
-            out.taken.push(rel);
+        } else if is(&here) == is(&known) {
+            out.taking.insert(rel, there);
         } else {
-            if let Some((d, n)) = at(&b, &rel)? {
-                d.remove_file_or_symlink(n).map_err(err)?;
-            }
-            if let Some((d, n)) = at_folder {
-                put(&d, OsStr::new(n), &b, &rel)?;
-            }
-            // No stamp: the copy's own is another file.
-            set(was, there.map(|is| Was { is, stamp: None }));
-            out.clashes.push(rel);
+            out.clashes.insert(rel, there);
         }
     }
     Ok(out)
+}
+
+/// Takes one over, if the folder still has it so.
+pub fn take(
+    folder: &Place,
+    copy: &Place,
+    rel: &str,
+    is: Option<&Is>,
+) -> Result<Option<Was>, CopyError> {
+    let (f, c) = (open(folder)?, open(copy)?);
+    if is.is_none() {
+        if let Some((d, n)) = at(&c, rel)? {
+            d.remove_file_or_symlink(n).map_err(|e| CopyError::Io(rel.to_owned(), e))?;
+        }
+        return Ok(None);
+    }
+    match at(&f, rel)? {
+        Some((d, n)) => put(&d, OsStr::new(n), &c, rel, true).map(Some),
+        None => Err(CopyError::Io(rel.to_owned(), io::ErrorKind::NotFound.into())),
+    }
+}
+
+/// Puts the folder's side of a clash beside the copy, for the agent to look at.
+pub fn beside(folder: &Place, beside: &Place, rel: &str) -> Result<(), CopyError> {
+    match at(&open(folder)?, rel)? {
+        Some((d, n)) => put(&d, OsStr::new(n), &open(beside)?, rel, true).map(drop),
+        None => Ok(()),
+    }
 }
 
 /// Opens a folder, for [`now`].

@@ -33,6 +33,16 @@ pub enum FsError {
     Io(String, io::Error),
 }
 
+/// The permissions of what is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// As they were, or what is usual for a new file.
+    Keep,
+    /// And it can be run.
+    Run,
+    Exactly(u32),
+}
+
 /// A name in an open folder, and where that really is.
 #[derive(Debug)]
 pub struct Spot {
@@ -237,15 +247,27 @@ impl Spot {
     /// Puts a whole new file in the place of what was there, or nothing at all. What other names the
     /// old file has (hard links) keep the old content. Its permissions are kept.
     pub fn write(&self, bytes: &[u8]) -> Result<(), FsError> {
-        self.put(bytes, false)
+        self.put(bytes, Mode::Keep)
     }
 
-    /// The same; if it is to be run, it can be.
-    pub fn write_as(&self, bytes: &[u8], run: bool) -> Result<(), FsError> {
-        self.put(bytes, run)
+    /// The same, with other permissions.
+    pub fn write_as(&self, bytes: &[u8], mode: Mode) -> Result<(), FsError> {
+        self.put(bytes, mode)
     }
 
-    fn put(&self, bytes: &[u8], run: bool) -> Result<(), FsError> {
+    /// Its permissions, where there are such.
+    pub fn mode(&self) -> Result<Option<u32>, FsError> {
+        #[cfg(unix)]
+        {
+            use cap_std::fs::MetadataExt;
+            let m = self.open()?.0.metadata().map_err(|e| self.err(e))?;
+            Ok(Some(m.mode() & 0o7777))
+        }
+        #[cfg(not(unix))]
+        Ok(None)
+    }
+
+    fn put(&self, bytes: &[u8], mode: Mode) -> Result<(), FsError> {
         let kept = match self.kind {
             Kind::Missing => None,
             Kind::File => Some(self.open()?.0.metadata().map_err(|e| self.err(e))?.permissions()),
@@ -259,9 +281,7 @@ impl Spot {
             if let Some(p) = kept {
                 f.set_permissions(p)?;
             }
-            if run {
-                can_run(&f)?;
-            }
+            set_mode(&f, mode)?;
             f.sync_all()?;
             drop(f);
             if self.kind == Kind::Missing {
@@ -311,20 +331,24 @@ impl Spot {
 }
 
 #[cfg(unix)]
-fn can_run(f: &File) -> io::Result<()> {
+fn set_mode(f: &File, mode: Mode) -> io::Result<()> {
     use cap_std::fs::PermissionsExt;
     let mut p = f.metadata()?.permissions();
-    // Whoever may read it.
-    let mode = p.mode();
-    p.set_mode(mode | (mode & 0o444) >> 2);
+    let was = p.mode();
+    p.set_mode(match mode {
+        Mode::Keep => return Ok(()),
+        // By whoever may read it.
+        Mode::Run => was | (was & 0o444) >> 2,
+        Mode::Exactly(m) => m,
+    });
     f.set_permissions(p)
 }
 #[cfg(not(unix))]
-fn can_run(_: &File) -> io::Result<()> {
+fn set_mode(_: &File, _: Mode) -> io::Result<()> {
     Ok(())
 }
 
-fn fresh() -> String {
+pub(crate) fn fresh() -> String {
     let mut b = [0u8; 8];
     // Without randomness the name may be taken: then creating it fails, as it should.
     let _ = axiom_proto::random(&mut b);
