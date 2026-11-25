@@ -3,7 +3,7 @@
 Features T3 Code has, Axiom neither has nor plans, and Axiom should. Written 2026-11-25.
 
 **Compared:** T3 Code v0.1.12 (`ca81b7b`) with Axiom `m5/unheard` (`f5a6bb4`), and with `design/modern` (`ea51056`) where it adds a function. Source and documents were read; neither app was run.
-**Status:** proposals. Nothing here is in the roadmap until the owner puts it there. Ideas are taken, no code.
+**Status:** in the roadmap since 2026-11-25: the owner asked for these to be worked into the milestones as advised here. The decisions at the end are followed as recommended, each written down in `../decisions/` before its code. Ideas are taken, no code.
 **Left out:** what M0–M7, the PR requirements, the known issues or rows 1–15 of `../research/t3code-comparison.md` already cover. Where those name only the broad parent, the parent is given.
 
 ## How to read it

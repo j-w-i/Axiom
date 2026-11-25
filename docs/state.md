@@ -1,6 +1,6 @@
 # State (handover)
 
-Updated 2026-11-25. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), installed programs and signing in with ChatGPT (j-w-i/Axiom#16), copies for agents (j-w-i/Axiom#18), what needs a person (j-w-i/Axiom#19), results that reach who asked (j-w-i/Axiom#20), the design spec's steps 1–16 (j-w-i/Axiom#21).
+Updated 2026-11-25. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), installed programs and signing in with ChatGPT (j-w-i/Axiom#16), copies for agents (j-w-i/Axiom#18), what needs a person (j-w-i/Axiom#19), results that reach who asked (j-w-i/Axiom#20), the design spec's steps 1–16 (j-w-i/Axiom#21), the redesign (j-w-i/Axiom#22), the groundwork for taking back what was said (j-w-i/Axiom#23). What is worth building (`product/worth-building.md`) is in the roadmap.
 
 ## Where things stand
 - **M0**: done except the owner's reading of decisions 0006 (Google plans via Antigravity; Gemini CLI's consumer tier has ended) and 0007 (subscription lanes; written confirmation from Anthropic before launch).
