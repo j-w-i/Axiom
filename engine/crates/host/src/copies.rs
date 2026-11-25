@@ -194,16 +194,16 @@ impl Points {
                 needed.insert(p.base.clone());
                 needed.extend(p.delta.values().flatten().map(points::name));
             }
-            // What changed files were before they were: for the points before that.
-            for p in &self.all {
-                let Some(base) = bases.get(&p.base) else { continue };
-                needed.extend(p.delta.keys().filter_map(|f| base.get(f)).map(points::name));
-            }
+            // What was copied, as far as it is kept: of files that are something else by now.
+            needed.extend(bases.values().flat_map(Base::values).map(points::name));
             let size: u64 = needed.iter().filter_map(|n| sizes.get(n)).sum();
             if self.all.is_empty() || (self.all.len() <= POINTS && size <= KEPT) {
                 break needed;
             }
-            self.all.remove(0);
+            let gone = self.all.remove(0);
+            if !self.all.iter().any(|p| p.base == gone.base) {
+                bases.remove(&gone.base);
+            }
         };
         let text = serde_json::to_string(self).map_err(internal)?;
         private_file(&dir.join(POINTS_FILE), &text).map_err(internal)?;
@@ -522,10 +522,10 @@ pub async fn again(
                 (path, Was { is, stamp })
             };
             // A clash that the first one has not settled is none of this one's doing either.
-            let clashes = known.clashes.into_iter().filter(|(path, had)| {
-                made.get(path).map(|w| &w.is.digest) == had.as_ref()
-                    && base.get(path) == known.files.get(path).map(|w| &w.is)
-            });
+            let clashes = known
+                .clashes
+                .into_iter()
+                .filter(|(path, _)| base.get(path) == known.files.get(path).map(|w| &w.is));
             let known = Known { clashes: clashes.collect(), odd: known.odd, ..Known::default() };
             new.keep(&Known { files: base.clone().into_iter().map(counted).collect(), ..known })
         });
@@ -872,6 +872,11 @@ pub async fn renew(
         // On record before it is done: what is taken over is the folder's, and nobody's change.
         known.taking = news.taking;
         own.keep(&known)?;
+        // For who goes back to before this.
+        if own.points.is_dir() {
+            let was = known.taking.keys().filter_map(|p| Some((p.as_str(), &known.files.get(p)?.is)));
+            points::keep_these(&own.copy, was, &own.points).map_err(words)?;
+        }
         let (c, f) =
             (copy::folder(&own.copy).map_err(words)?, copy::folder(&own.folder).map_err(words)?);
         let mut taken = 0;
@@ -968,4 +973,46 @@ pub async fn remove(
         work(turn, move |_| own.remove()).await?;
     }
     Ok(setup)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// The oldest go, and what none of the others needs.
+    #[test]
+    fn what_points_come_to_is_bounded() {
+        let d = tempfile::tempdir().unwrap();
+        let is = |n: u64| Is { digest: format!("d{n}"), link: false, run: false };
+        let file = |name: &str, size: u64| {
+            std::fs::File::create(d.path().join(name)).unwrap().set_len(size).unwrap();
+        };
+        std::fs::write(d.path().join("b.base"), r#"{"f":{"digest":"was"}}"#).unwrap();
+        file("was", 1);
+        file("nobodys", 1);
+        let mut all = Points::default();
+        for n in 0..5 {
+            file(&format!("d{n}"), KEPT / 4);
+            let delta = [("f".to_owned(), Some(is(n)))].into();
+            all.all.push(Point { n, base: "b.base".into(), delta });
+        }
+        // The same again costs nothing.
+        let delta = [("g".to_owned(), Some(is(4)))].into();
+        all.all.push(Point { n: 5, base: "b.base".into(), delta });
+        all.keep(d.path()).unwrap();
+        assert_eq!(all.all.iter().map(|p| p.n).collect::<Vec<_>>(), [2, 3, 4, 5]);
+        let names = || {
+            let all = std::fs::read_dir(d.path()).unwrap();
+            let mut all: Vec<_> =
+                all.map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+            all.sort();
+            all
+        };
+        assert_eq!(names(), ["b.base", "d2", "d3", "d4", "points.json", "was"]);
+        assert_eq!(Points::load(d.path()).unwrap().all.len(), 4);
+        all.all.clear();
+        all.keep(d.path()).unwrap();
+        assert_eq!(names(), ["points.json"]);
+    }
 }

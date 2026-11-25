@@ -599,27 +599,39 @@ async fn it_can_be_branched_between_runs() {
     assert_eq!(t.stage.cuts(), [begins, ends, second]);
 }
 
+/// What a person stopped is kept, and is no answer.
+#[tokio::test]
+async fn an_answer_that_was_stopped_is_no_place() {
+    let t = T::new(Access::Work, vec![text(&["half"]).hangs()]).await;
+    let mut a = t.agent();
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let stage = t.stage.clone();
+    tokio::spawn(async move {
+        stage.until(|s| !s.ids(ItemKind::Prose).is_empty()).await;
+        let _ = tx.send(true);
+    });
+    assert_eq!(t.run_with(&mut a, "go", rx).await.outcome, Outcome::Cancelled);
+    assert_eq!(t.stage.cuts().len(), 1);
+}
+
 /// What has not come to its end has none.
 #[tokio::test]
 async fn an_answer_that_is_not_one_is_no_place() {
     for (script, places) in [
-        (vec![text(&["half"]).hangs()], 1),
         (vec![status(400, "no")], 1),
         // Words, and then an answer without any.
-        (vec![calls(&[("c", "list", "{}")]), ends_with("stop", &[])], 1),
-        (vec![text(&["all"])], 2),
+        (
+            vec![
+                anthropic(None, "I look.", &[("t1", "list", "{}")]),
+                anthropic(Some(("Hm.", "s")), "", &[]),
+            ],
+            1,
+        ),
+        (vec![anthropic(Some(("Hm.", "s")), "All.", &[])], 2),
     ] {
-        let t = T::new(Access::Work, script).await;
+        let t = T::anthropic(Access::Work, script).await;
         let mut a = t.agent();
-        let (tx, rx) = tokio::sync::watch::channel(false);
-        let stage = t.stage.clone();
-        let stop = tokio::spawn(async move {
-            stage.until(|s| !s.ids(ItemKind::Prose).is_empty()).await;
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            let _ = tx.send(true);
-        });
-        t.run_with(&mut a, "go", rx).await;
-        stop.abort();
+        t.run(&mut a, "go").await;
         assert_eq!(t.stage.cuts().len(), places, "{:?}", t.stage.log());
     }
 }

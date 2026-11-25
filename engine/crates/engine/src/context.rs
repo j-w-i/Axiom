@@ -205,6 +205,31 @@ mod tests {
     use super::*;
     use axiom_model::{Args, ToolCall};
 
+    /// What was said last, and nothing else: what came of it is not in what was said.
+    #[test]
+    fn what_was_said_last_is_where_nothing_was_done() {
+        let text = |m: Message| serde_json::to_string(&Turn::Message(m)).unwrap();
+        let of = |role, blocks| text(Message { role, blocks });
+        let kept = [
+            text(Message::user("one")),
+            of(Role::Assistant, vec![call("c")]),
+            of(Role::User, vec![Block::result("c", "r", false)]),
+            of(Role::Assistant, vec![Block::text("done")]),
+            text(Message::user("two")),
+            text(Message::user("three")),
+            of(Role::Assistant, vec![call("d")]),
+            of(Role::User, vec![Block::result("d", "r", false)]),
+            text(Message::user("meanwhile")),
+            serde_json::to_string(&Turn::Compacted { summary: "s".into() }).unwrap(),
+            text(Message::user("four")),
+        ];
+        let at = |n| since(&kept, n).unwrap();
+        assert_eq!((at(0), at(1), at(2), at(3), at(4)), (0, 0, 2, 3, 4));
+        assert_eq!((at(5), at(6), at(7), at(8), at(9)), (4, 4, 7, 8, 8));
+        assert_eq!((at(10), at(11), at(99)), (10, 10, 10));
+        assert!(since(&["no turn".into()], 1).is_err());
+    }
+
     fn call(id: &str) -> Block {
         Block::new(Content::ToolCall(ToolCall {
             id: id.into(),

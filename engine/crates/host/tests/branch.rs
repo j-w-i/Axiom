@@ -262,6 +262,63 @@ async fn its_files_are_there_over_a_restart_and_in_a_branch_of_it() {
 }
 
 #[tokio::test]
+async fn its_files_are_those_of_its_own_place() {
+    let mut t = T::new(vec![]).await;
+    t.write("a", "0\n");
+    let a = t.agent("First", Access::Work, true).await;
+    t.does(&a, "echo 1 > b").await;
+    // A run that comes to nothing, and then the copy is brought up to date: the next begins with that.
+    t.server.add(status(400, "no"));
+    t.say(&a, "lost").await.unwrap();
+    assert_eq!(t.ended().await.0, Outcome::Failed);
+    t.write("a", "new\n");
+    let renew = Call::CopyRenew { session: t.s.clone(), agent: a.clone() };
+    t.c.call(renew).await.unwrap();
+    t.does(&a, "echo 2 > b").await;
+    let said = t.items(&a, ItemKind::Prompt);
+    let b = t.branch(&a, &said[2], true).await.unwrap();
+    assert_eq!((t.copied(&b, "a"), t.copied(&b, "b")), (Some("new\n".into()), Some("1\n".into())));
+    assert_eq!(paths(&t.changes(&b).await), [("b", "new")]);
+    let c = t.branch(&a, &said[1], true).await.unwrap();
+    assert_eq!(t.copied(&c, "a").unwrap(), "0\n");
+
+    // A branch that began with a new copy has its own from there on, and the other's before.
+    let answers = t.items(&a, ItemKind::Prose);
+    let d = t.branch(&a, &answers[1], false).await.unwrap();
+    assert!(t.look(&d, &answers[1]).await.unwrap().files, "the other's, until it has any");
+    t.does(&d, "echo d > b").await;
+    let own = t.items(&d, ItemKind::Prompt);
+    let e = t.branch(&d, &own[0], true).await.unwrap();
+    assert_eq!((t.copied(&e, "a"), t.copied(&e, "b")), (Some("new\n".into()), None));
+    let f = t.branch(&d, &said[2], true).await.unwrap();
+    assert_eq!(t.copied(&f, "b").unwrap(), "1\n");
+}
+
+#[tokio::test]
+async fn a_clash_that_is_not_settled_is_not_in_the_branch_either() {
+    let mut t = T::new(vec![]).await;
+    t.write("a", "0\n");
+    t.write("b", "0\n");
+    let a = t.agent("First", Access::Work, true).await;
+    t.does(&a, "echo mine > a; echo mine > b").await;
+    for f in ["a", "b"] {
+        t.write(f, "theirs\n");
+    }
+    let renew = Call::CopyRenew { session: t.s.clone(), agent: a.clone() };
+    t.c.call(renew).await.unwrap();
+    t.does(&a, "echo both > b").await;
+    let answers = t.items(&a, ItemKind::Prose);
+    let b = t.branch(&a, &answers[1], true).await.unwrap();
+    let c = t.changes(&b).await;
+    assert_eq!((file(&c, "a").unsettled, file(&c, "b").unsettled), (true, false));
+    // Before that there was none to settle: both have changed it, and it was neither.
+    let said = t.items(&a, ItemKind::Prompt);
+    let d = t.branch(&a, &said[1], true).await.unwrap();
+    let c = t.changes(&d).await;
+    assert!(file(&c, "a").unsettled && file(&c, "b").unsettled);
+}
+
+#[tokio::test]
 async fn files_that_are_not_to_be_had_any_more_leave_nothing_behind() {
     let mut t = T::new(vec![]).await;
     t.write("a", "0\n");

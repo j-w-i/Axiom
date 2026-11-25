@@ -76,6 +76,19 @@ pub fn keep(
     Ok(Some(delta))
 }
 
+/// Keeps what some files of a folder are, as far as they are still that.
+pub fn keep_these<'a>(
+    top: &Place,
+    which: impl Iterator<Item = (&'a str, &'a Is)>,
+    store: &Path,
+) -> Result<(), CopyError> {
+    let (t, s) = (copy::open(top)?, store_of(store)?);
+    for (rel, is) in which {
+        put_by(&t, rel, is, &s)?;
+    }
+    Ok(())
+}
+
 /// Keeps one content, if the file has it. Whether it is kept.
 fn put_by(top: &Dir, rel: &str, is: &Is, store: &Dir) -> Result<bool, CopyError> {
     let err = |e| CopyError::Io(rel.to_owned(), e);
