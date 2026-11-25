@@ -29,8 +29,12 @@ struct Kept {
     tool: String,
     shut: bool,
     no_turns: bool,
+    /// What its person has taken back.
+    taken: Vec<ItemId>,
     on_sync: Option<OnSync>,
+    on_turn: Option<OnTurn>,
 }
+type OnTurn = Box<dyn FnMut() + Send>;
 type OnSync = Box<dyn FnMut(&[String]) + Send>;
 
 #[derive(Clone, Default)]
@@ -58,6 +62,13 @@ impl Memory {
     }
     pub fn refuses_turns(&self) {
         self.0.lock().unwrap().no_turns = true;
+    }
+    pub fn take_back(&self, item: ItemId) {
+        self.0.lock().unwrap().taken.push(item);
+    }
+    /// Runs when a turn is kept.
+    pub fn on_turn(&self, f: impl FnMut() + Send + 'static) {
+        self.0.lock().unwrap().on_turn = Some(Box::new(f));
     }
     pub fn on_sync(&self, f: impl FnMut(&[String]) + Send + 'static) {
         self.0.lock().unwrap().on_sync = Some(Box::new(f));
@@ -221,14 +232,20 @@ impl Stage for Memory {
         }
         Ok(())
     }
-    async fn remember(&self, n: u64, turn: String, _heard: Option<ItemId>) -> Result<(), Refused> {
+    async fn remember(&self, n: u64, turn: String, heard: Option<ItemId>) -> Result<bool, Refused> {
         let mut k = self.op()?;
         if k.no_turns {
             return Err(Refused::This("no room".into()));
         }
         assert_eq!(n, k.turns.len() as u64, "a gap or a repeat");
+        if heard.is_some_and(|i| k.taken.contains(&i)) {
+            return Ok(false);
+        }
         k.turns.push(turn);
-        Ok(())
+        if let Some(f) = &mut k.on_turn {
+            f();
+        }
+        Ok(true)
     }
     async fn closed(&self) {
         loop {

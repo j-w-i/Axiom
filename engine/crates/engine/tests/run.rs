@@ -564,6 +564,80 @@ async fn a_person_can_speak_while_it_works() {
     assert!(sent.contains("also this") && sent.contains("and that"), "{sent}");
 }
 
+/// What a person says and takes back.
+fn word(text: &str, item: &str) -> Word {
+    Word { text: text.into(), item: Some(axiom_proto::ItemId(item.into())), shown: None }
+}
+
+#[tokio::test]
+async fn what_was_taken_back_is_told_to_nobody() {
+    let t = T::new(Access::Work, vec![text(&["one"])]).await;
+    let mut a = t.agent();
+    t.stage.take_back(axiom_proto::ItemId("i_1".into()));
+    t.inbox.try_send(word("not this", "i_1")).unwrap();
+    t.inbox.try_send(word("but this", "i_2")).unwrap();
+    assert_eq!(t.run(&mut a, "go").await.outcome, Outcome::Completed);
+    let r = t.server.requests();
+    let sent = r[0]["messages"].to_string();
+    assert!(!sent.contains("not this") && sent.contains("but this"), "{sent}");
+    let kept = t.stage.turns().join("");
+    assert!(!kept.contains("not this") && kept.contains("but this"), "{kept}");
+}
+
+/// Said during the last answer, and taken back before it was over: there is nothing to answer.
+#[tokio::test]
+async fn a_run_goes_on_for_what_still_waits_only() {
+    for (taken, requests) in [(vec!["i_1", "i_2"], 1), (vec!["i_1"], 2), (vec![], 2)] {
+        let t = T::new(Access::Work, vec![text(&["one"]), text(&["two"])]).await;
+        let mut a = t.agent();
+        for i in &taken {
+            t.stage.take_back(axiom_proto::ItemId((*i).into()));
+        }
+        let (inbox, server) = (t.inbox.clone(), t.server.clone());
+        let mut sent = false;
+        t.stage.on_turn(move || {
+            if !sent && !server.requests().is_empty() {
+                sent = true;
+                inbox.try_send(word("first", "i_1")).unwrap();
+                inbox.try_send(word("second", "i_2")).unwrap();
+            }
+        });
+        assert_eq!(t.run(&mut a, "go").await.outcome, Outcome::Completed);
+        let r = t.server.requests();
+        assert_eq!(r.len(), requests, "{taken:?}");
+        let last = r.last().unwrap()["messages"].to_string();
+        assert_eq!(last.contains("first"), taken.is_empty(), "{last}");
+        assert_eq!(last.contains("second"), taken.len() < 2, "{last}");
+    }
+}
+
+/// Taken in from what waited it is not taken in again from the inbox; taken back by then, it asks
+/// for no answer either.
+#[tokio::test]
+async fn what_waited_from_before_is_heard_once_or_not_at_all() {
+    for taken in [false, true] {
+        let t = T::new(Access::Work, vec![text(&["one"]), text(&["two"])]).await;
+        let mut a = t.agent();
+        let i = axiom_proto::ItemId("i_1".into());
+        if taken {
+            t.stage.take_back(i.clone());
+        }
+        a.note(vec![(i, "from before".into())]).await.unwrap();
+        let (inbox, server) = (t.inbox.clone(), t.server.clone());
+        let mut sent = false;
+        t.stage.on_turn(move || {
+            if !sent && !server.requests().is_empty() {
+                sent = true;
+                inbox.try_send(word("from before", "i_1")).unwrap();
+            }
+        });
+        assert_eq!(t.run(&mut a, "go").await.outcome, Outcome::Completed);
+        let kept = t.stage.turns().join("");
+        assert_eq!(kept.matches("from before").count(), usize::from(!taken), "{kept}");
+        assert_eq!(t.server.requests().len(), 1);
+    }
+}
+
 #[tokio::test]
 async fn what_goes_on_in_the_background_is_said_and_ends_when_stopped() {
     let m = format!("8{:05}", std::process::id() % 100_000);

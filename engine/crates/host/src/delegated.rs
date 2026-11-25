@@ -564,8 +564,13 @@ impl Attempt {
                     words.push((item, w.text));
                 }
             }
-            if !self.give(&mut words).await? {
-                return Err(Stop::Failed(format!("{} takes nothing now", self.name)));
+            match self.give(&mut words).await? {
+                Given::Taken => {}
+                // All of it was taken back: there is nothing to wait for.
+                Given::Nothing => continue,
+                Given::NotNow => {
+                    return Err(Stop::Failed(format!("{} takes nothing now", self.name)));
+                }
             }
             done = self.until_done(inbox, &mut words, &mut noted, cancel).await?;
         }
@@ -594,12 +599,17 @@ impl Attempt {
     }
 
     /// Tells it what waits. What it is told waits no longer before it is told: a person sees that it
-    /// was not answered, and nothing is done twice. Whether it was taken.
-    async fn give(&mut self, words: &mut Vec<(ItemId, String)>) -> Result<bool, Stop> {
+    /// was not answered, and nothing is done twice.
+    async fn give(&mut self, words: &mut Vec<(ItemId, String)>) -> Result<Given, Stop> {
         let items: Vec<ItemId> = words.iter().map(|w| w.0.clone()).collect();
+        // What has been taken back meanwhile is not told.
+        let waited = self.floor.heard(items).await?;
+        words.retain(|w| waited.contains(&w.0));
+        if words.is_empty() {
+            return Ok(Given::Nothing);
+        }
         let text: Vec<&str> = words.iter().map(|w| w.1.as_str()).collect();
         let text = text.join("\n\n");
-        self.floor.heard(items).await?;
         let handle = self.handle.clone();
         // Whatever another agent has a part in is not a person's own words.
         let by =
@@ -622,14 +632,16 @@ impl Attempt {
         match r {
             Ok(_) => {
                 words.clear();
-                Ok(true)
+                Ok(Given::Taken)
             }
             Err(e) => {
                 for (item, text) in words.iter() {
                     self.floor.wait(item, text).await?;
                 }
                 match e {
-                    axiom_harness::Refused::Busy | axiom_harness::Refused::NotReady => Ok(false),
+                    axiom_harness::Refused::Busy | axiom_harness::Refused::NotReady => {
+                        Ok(Given::NotNow)
+                    }
                     e => Err(Stop::Failed(format!("{} did not take it: {e}", self.name))),
                 }
             }
@@ -1004,6 +1016,14 @@ impl Attempt {
         }
         say
     }
+}
+
+/// What came of telling a program what waits.
+enum Given {
+    Taken,
+    NotNow,
+    /// Nothing waited any more.
+    Nothing,
 }
 
 /// Why a turn is not followed to its end.

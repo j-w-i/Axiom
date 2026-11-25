@@ -405,15 +405,41 @@ impl Journal {
         })
     }
 
-    /// What a person said has gone to who hears it.
-    pub fn heard(&mut self, id: &SessionId, agent: &AgentId, items: &[ItemId]) -> Result<()> {
+    /// What a person said has gone to who hears it. Those that still waited: what is not among them
+    /// was taken back, and is not to be told.
+    pub fn heard(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        items: &[ItemId],
+    ) -> Result<Vec<ItemId>> {
         self.commit(Durability::Intent, |j| {
             let mut q =
                 j.db.prepare_cached("delete from pending where session=? and agent=? and item=?")?;
+            let mut waited = Vec::new();
             for i in items {
-                q.execute(params![id.0, agent.0, i.0])?;
+                if q.execute(params![id.0, agent.0, i.0])? > 0 {
+                    waited.push(i.clone());
+                }
             }
-            Ok(())
+            Ok(waited)
+        })
+    }
+
+    /// Takes back what waits to be heard: what it was, or none if it has been heard.
+    pub fn take_back(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        item: &ItemId,
+    ) -> Result<Option<String>> {
+        self.commit(Durability::Intent, |j| {
+            Ok(j.db
+                .prepare_cached(
+                    "delete from pending where session=? and agent=? and item=? returning body",
+                )?
+                .query_row(params![id.0, agent.0, item.0], |r| r.get(0))
+                .optional()?)
         })
     }
 
@@ -557,7 +583,8 @@ impl Journal {
     }
 
     /// Adds to an agent's conversation. `n` is its next number, from 0: a gap or a repeat is refused.
-    /// What was `heard` with it waits no longer: both or neither.
+    /// What was `heard` with it waits no longer: both or neither. Whether it was added: what has been
+    /// taken back is not.
     pub fn put_message(
         &mut self,
         id: &SessionId,
@@ -565,7 +592,7 @@ impl Journal {
         n: u64,
         body: &str,
         heard: Option<&ItemId>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.commit(Durability::Intent, |j| {
             let have =
                 j.db.prepare_cached("select count(*) from message where session=? and agent=?")?
@@ -573,13 +600,18 @@ impl Journal {
             if have != n {
                 return Err(Error::Damaged(format!("message {n} where {have} is next")));
             }
+            if let Some(i) = heard {
+                let waited = j
+                    .db
+                    .prepare_cached("delete from pending where session=? and agent=? and item=?")?
+                    .execute(params![id.0, agent.0, i.0])?;
+                if waited == 0 {
+                    return Ok(false);
+                }
+            }
             j.db.prepare_cached("insert into message(session, agent, n, body) values(?,?,?,?)")?
                 .execute(params![id.0, agent.0, as_i64(n), body])?;
-            if let Some(i) = heard {
-                j.db.prepare_cached("delete from pending where session=? and agent=? and item=?")?
-                    .execute(params![id.0, agent.0, i.0])?;
-            }
-            Ok(())
+            Ok(true)
         })
     }
 

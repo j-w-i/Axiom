@@ -592,7 +592,7 @@ fn what_was_said_waits_until_it_is_heard() {
     let texts =
         |a: &AgentId| r.pending(&s, a).unwrap().into_iter().map(|(_, t)| t).collect::<Vec<_>>();
     assert_eq!(texts(&a), ["one", "two", "three"]);
-    j.put_message(&s, &a, 0, "m", Some(&i("i2"))).unwrap();
+    assert!(j.put_message(&s, &a, 0, "m", Some(&i("i2"))).unwrap());
     assert_eq!(texts(&a), ["one", "three"]);
     // Neither, if the message is refused.
     assert!(j.put_message(&s, &a, 5, "m", Some(&i("i1"))).is_err());
@@ -600,13 +600,45 @@ fn what_was_said_waits_until_it_is_heard() {
     j.put_pending(&s, &a, &i("i4"), "four").unwrap();
     assert_eq!(texts(&a), ["one", "three", "four"]);
     assert_eq!(texts(&b), ["other"]);
-    j.heard(&s, &a, &[i("i1"), i("i4"), i("nobody")]).unwrap();
+    assert_eq!(
+        j.heard(&s, &a, &[i("i1"), i("nobody"), i("i4")]).unwrap(),
+        [i("i1"), i("i4")],
+        "those that waited"
+    );
     assert_eq!((texts(&a), texts(&b)), (vec!["three".to_string()], vec!["other".to_string()]));
     j.put_agent(&s, &a, "x").unwrap();
     j.remove_agent(&s, &a).unwrap();
     assert!(r.agents(&s).unwrap().is_empty());
     j.delete(&s).unwrap();
     assert!(texts(&a).is_empty());
+}
+
+#[test]
+fn what_waits_is_taken_back_or_heard_and_never_both() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j");
+    let mut j = Journal::open(&p).unwrap();
+    let s = SessionId::new();
+    j.create(&s, "t", None, 1).unwrap();
+    let (a, b) = (AgentId("a".into()), AgentId("b".into()));
+    let i = |n: &str| ItemId(n.into());
+    for (x, t) in [("i1", "one"), ("i2", "two"), ("i3", "three")] {
+        j.put_pending(&s, &a, &i(x), t).unwrap();
+    }
+    assert_eq!(j.take_back(&s, &b, &i("i1")).unwrap(), None, "of another agent");
+    assert_eq!(j.take_back(&SessionId::new(), &a, &i("i1")).unwrap(), None);
+    assert_eq!(j.take_back(&s, &a, &i("i1")).unwrap().as_deref(), Some("one"));
+    assert_eq!(j.take_back(&s, &a, &i("i1")).unwrap(), None, "once");
+    // Taken back, it is not heard, by either way of hearing; and nothing is added in its place.
+    assert!(!j.put_message(&s, &a, 0, "m", Some(&i("i1"))).unwrap());
+    let r = Reader::open(&p).unwrap();
+    assert!(r.messages(&s, &a).unwrap().is_empty());
+    assert_eq!(j.heard(&s, &a, &[i("i1"), i("i2")]).unwrap(), [i("i2")]);
+    // Heard, it is not taken back.
+    assert_eq!(j.take_back(&s, &a, &i("i2")).unwrap(), None);
+    assert!(j.put_message(&s, &a, 0, "m", Some(&i("i3"))).unwrap());
+    assert_eq!(j.take_back(&s, &a, &i("i3")).unwrap(), None);
+    assert!(r.pending(&s, &a).unwrap().is_empty());
 }
 
 #[test]
