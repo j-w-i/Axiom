@@ -112,7 +112,18 @@ class AxButton extends StatelessWidget {
             ),
           ),
         );
-        if (!s.enabled) return body;
+        if (!s.enabled) {
+          // A main act keeps its place while it cannot be pressed.
+          return tone == AxTone.quiet
+              ? body
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: c.bayRule),
+                    borderRadius: BorderRadius.circular(AxRadius.key),
+                  ),
+                  child: body,
+                );
+        }
         if (tone == AxTone.quiet && !s.pressed && !engaged) {
           return DecoratedBox(
             decoration: BoxDecoration(
@@ -209,16 +220,8 @@ class AxSegments<T> extends StatelessWidget {
 
 /// Tabs on a display. The active one carries its mark, so the mark always fits it.
 class AxTabs extends StatelessWidget {
-  const AxTabs({
-    required this.tabs,
-    required this.index,
-    required this.onChanged,
-    super.key,
-    this.hue,
-  });
+  const AxTabs({required this.tabs, required this.index, required this.onChanged, super.key});
 
-  /// The hue of what the tabs belong to.
-  final Color? hue;
   final List<(String, String?)> tabs;
   final int index;
   final ValueChanged<int> onChanged;
@@ -244,7 +247,7 @@ class AxTabs extends StatelessWidget {
                 final on = i == index;
                 return DecoratedBox(
                   decoration: BoxDecoration(
-                    color: on ? t.colors.tinted(hue) : null,
+                    color: on ? t.colors.tabSelected : null,
                     borderRadius: BorderRadius.circular(AxRadius.key),
                   ),
                   child: Padding(
@@ -361,19 +364,31 @@ class AxCheck extends StatelessWidget {
         children: [
           SizedBox.square(
             dimension: 16,
-            child: Surface(
-              value && s.enabled ? c.primary : c.keyDown,
-              radius: 3,
-              child: value
-                  ? Center(
+            child: value
+                ? Surface(
+                    s.enabled ? c.primary : c.keyDown,
+                    radius: 3,
+                    child: Center(
                       child: AxGlyph(
                         AxIcon.check,
                         size: 12,
                         color: s.enabled ? c.onPrimary : c.idle,
                       ),
-                    )
-                  : null,
-            ),
+                    ),
+                  )
+                : DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: s.enabled ? c.bay.bottom : null,
+                      border: Border.all(
+                        color: !s.enabled
+                            ? c.bayRule
+                            : s.hovered
+                            ? c.ink2
+                            : c.idle,
+                      ),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
           ),
           if (!bare) ...[
             const SizedBox(width: 8),

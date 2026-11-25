@@ -264,8 +264,6 @@ class _TalkState extends State<Talk> {
     final works = a.phase == AgentPhase.running || a.phase == AgentPhase.asking;
     final first = asked.firstOrNull;
     final plan = s.connections.any((x) => x.id == a.execution.connection && x.plan);
-    // The plan's own limit. Nothing else is taken in its place: that is the person's to choose.
-    final spent = plan && problem == null && (a.error?.startsWith('billing') ?? false);
     void usage() => unawaited(
       _do(() async {
         if (!await browse(planUsage)) throw Failed(0, 'browser', 'it is at $planUsage');
@@ -281,14 +279,6 @@ class _TalkState extends State<Talk> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (asked.length > 1)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                    child: Text(
-                      '${asked.length - 1} more after this',
-                      style: t.type.label.ink(c.attentionText),
-                    ),
-                  ),
                 RequestBar(
                   key: ValueKey(first.request),
                   RequestView(
@@ -300,6 +290,7 @@ class _TalkState extends State<Talk> {
                     id: first.request,
                   ),
                   room: widget.room,
+                  waiting: asked.length - 1,
                   onOnce: () => _answer(first, Answer.once),
                   onAlways: () => _answer(first, Answer.session),
                   onDeny: () => _answer(first, Answer.deny),
@@ -308,7 +299,8 @@ class _TalkState extends State<Talk> {
               ],
             ),
           ),
-        if (problem ?? a.error case final p?)
+        // How a run failed is said once, by the conversation.
+        if (problem case final p?)
           Semantics(
             liveRegion: true,
             child: Padding(
@@ -326,10 +318,6 @@ class _TalkState extends State<Talk> {
                       style: t.type.ui.ink(c.faultText),
                     ),
                   ),
-                  if (spent) ...[
-                    const SizedBox(width: 10),
-                    AxButton(label: 'Manage usage', tone: AxTone.primary, onPressed: usage),
-                  ],
                 ],
               ),
             ),
@@ -369,8 +357,15 @@ class _TalkState extends State<Talk> {
                       style: t.type.small.ink(c.ink3),
                     ),
                   ),
-                  if (!spent)
-                    AxButton(label: 'Manage usage', tone: AxTone.quiet, size: 24, onPressed: usage),
+                  const SizedBox(width: 6),
+                  AxButton(
+                    label: 'Manage usage',
+                    // At the plan's limit it is the main act: OpenAI asks that of whoever uses a
+                    // plan. Nothing else is taken in the plan's place.
+                    tone: (a.error ?? '').startsWith('billing') ? AxTone.primary : AxTone.quiet,
+                    size: 24,
+                    onPressed: usage,
+                  ),
                 ],
               ),
           ],

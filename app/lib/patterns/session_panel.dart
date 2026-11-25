@@ -196,10 +196,7 @@ class _AgentRowState extends State<AgentRow> {
                         ? LinearGradient(
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
-                            colors: [
-                              for (final k in [c.rowSelectedTop, c.rowSelectedBottom])
-                                c.selected(k, hue),
-                            ],
+                            colors: [c.rowSelectedTop, c.rowSelectedBottom],
                           )
                         : null,
                     color: !widget.selected && s.hovered ? c.tinted(hue) : null,
@@ -473,7 +470,7 @@ class NeedsRow extends StatelessWidget {
                   children: [
                     Text(
                       '$agent $what',
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: t.type.ui.ink(c.ink1),
                     ),
@@ -486,17 +483,25 @@ class NeedsRow extends StatelessWidget {
                             ? t.type.codeSmall.ink(c.ink2)
                             : t.type.small.ink(c.ink2),
                       ),
-                    Text(
-                      session,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.type.small.ink(c.ink3),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            session,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.type.small.ink(c.ink3),
+                          ),
+                        ),
+                        if (age.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Text(age, style: t.type.small.ink(c.ink4)),
+                        ],
+                      ],
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(age, style: t.type.small.ink(c.ink3)),
             ],
           ),
         ),

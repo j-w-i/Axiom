@@ -8,10 +8,10 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 1. **Containment is spent, not given.** A surface may hold another surface only if the person acts on it as a unit (a key, a request, a menu, the display, the open session). Lists, selectors and activity are text on the surface they belong to. (Round 3 failed on this; the owner named it: "something is off about most of the app", and the plain sidebar was the part that worked.)
 2. **Three depths.** Chassis; display (below); session panel, keys, requests (above). Overlays float. Nothing else has depth.
 3. **One light, from above.** Raised parts have a faint lit top edge and a 1 px shadow; recessed parts a 5 px shade. Gradients span 2–4 %. No gloss, glow, engraving, side bevels or blur.
-4. **Aqua means live**: running, focus, the primary act, the selected tab. Never decoration. Hue 192–201 (tested), the owner's choice of three. A bright key carries dark words; levels are neutral. Amber asks, red failed, green done; each state has its own shape (tested).
-4a. **Things take the hue of the service they belong to.** Its mark, level, check and hover tint, and the fill of what is selected. Kinds of work have hues of their own (read, change, search, run, web, think), and code and diffs are in colour. Marks identify a service really in use (`THIRD_PARTY.md`); unknown models get none.
+4. **Aqua means live**: running, focus, the primary act. Never decoration. Hue 192–201 (tested), the owner's choice of three. A bright key carries dark words; levels are neutral. Amber asks, red failed, green done; each state has its own shape (tested).
+4a. **Things take the hue of the service they belong to.** Its mark, level, check and hover tint. What is selected is graphite, whoever it belongs to. Kinds of work have hues of their own (read, change, search, run, web, think), and code and diffs are in colour. Marks identify a service really in use (`THIRD_PARTY.md`); unknown models get none.
 4b. **No accent edges.** No coloured strip along any side of a tab, card, row, menu or message (owner: "every LLM does this weird lip thing"). What is selected is filled; what was asked stands on a tile; what asks has the amber lamp. Lamps: running is a ring with an arc that goes round, asking a diamond, waiting a ring, paused two bars, done a check, failed a cross. A test reads the source for one.
-4c. **Amber is a lamp and a word, never a ground.** Darkened it is brown (owner: "this colour is awful"). The answer that acts is aqua, like any other primary act.
+4c. **Amber is the lamp, the warning glyph and the one line that says who asks; never a ground.** What is asked about, and notes, are in neutral ink. Darkened it is brown (owner: "this colour is awful"). The answer that acts is aqua, like any other primary act.
 5. **Grid of 4.** Text starts on a shared left edge per surface (display 24, panel 12). Icons are 12–14 in a fixed column; text uses even leading so glyphs and words share a centre.
 6. **Two voices.** Archivo for words; Spline Sans Mono only for literals: code, paths, commands.
 7. **Numbers say where they come from.** Solid meter = reported or measured; dashed = estimated; empty track and words = unknown.
@@ -31,7 +31,7 @@ Source of truth: `app/lib/ui/tokens.dart`. Gallery: `app/lib/gallery/`. Images: 
 | `block` | code on the display | one tone up, no border |
 
 Radii: key 5, plate 6, display 7, overlay 9; what is inside is never rounder than what holds it. Type 10–19. Density compact/regular/roomy changes control height (24/28/32), never type size.
-States for every control: rest, hover, held, engaged (sunken), focused (keyboard ring), disabled (flat words, no surface), loading, error.
+States for every control: rest, hover, held, engaged (sunken), focused (keyboard ring), disabled (a main act and a key keep a hairline outline with grey words; a quiet key is flat words), loading, error.
 
 **A request** is shown whole, spelled out, and cannot be allowed before it has been seen to its end.
 
@@ -48,3 +48,4 @@ States for every control: rest, hover, held, engaged (sunken), focused (keyboard
 | 8 | `ExecutionKey`, `ContextGauge`, `AgentBar`; the first had a lip on the agent's section and brown keys, rejected at once: all accent edges and amber grounds removed (`img/round8-*.png`) | 2026-11-25: conversation "better now"; not the cobalt of the buttons, and the violet running pill "just bad" |
 | 9 | the owner's sampled blue for keys, links and live; lamps redrawn (`img/round9-*.png`) | 2026-11-25: "more of an aqua" |
 | 10 | aqua, option B of three, with dark words on keys; every corner 2 rounder, then 1 back (asked for on buttons) (`img/round10-*.png`) | accepted by the owner, 2026-11-25 |
+| 11 | Fable's review, steps 1–16 (`spec-fable.md`): what agents do in words, failure seen as failure, whole rows, one line of answers, a narrow window; graphite selection, outlines for main acts that cannot be pressed, less amber, the folder and Accounts in the strip | 2026-11-25, from pictures: B for D1, D3, D4, D5; D2 (long runs) as it was |

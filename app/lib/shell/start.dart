@@ -75,12 +75,12 @@ class FormPart extends StatelessWidget {
         children: [
           if (label case final l?) ...[
             ExcludeSemantics(child: Text(l, style: t.type.label.ink(c.ink2))),
-            const SizedBox(height: 5),
+            const SizedBox(height: 4),
           ],
           child,
           if (note case final n?) ...[
-            const SizedBox(height: 5),
-            Text(n, style: t.type.small.ink(c.ink3)),
+            const SizedBox(height: 4),
+            Text(n, style: t.type.label.ink(c.ink3)),
           ],
         ],
       ),
@@ -713,7 +713,12 @@ class _StartPageState extends State<StartPage> {
                     ),
                   if (d.tries) effortSelect,
                   accessSelect,
-                  AxButton(label: 'Accounts', tone: AxTone.quiet, onPressed: widget.onAccounts),
+                  AxButton(
+                    label: 'Accounts',
+                    icon: AxIcon.web,
+                    tone: AxTone.quiet,
+                    onPressed: widget.onAccounts,
+                  ),
                 ],
               ),
             ),
@@ -745,6 +750,16 @@ class _StartPageState extends State<StartPage> {
                 ),
               ),
             ),
+          Text(
+            d.harness == 'axiom'
+                ? 'Commands run contained: no network, writing only in the folder.'
+                : d.withHands
+                ? 'Its model and your sign-in; Axiom\'s tools, questions and sandbox. You are asked '
+                      'before it is started.'
+                : 'It runs outside Axiom\'s sandbox. You are asked before it is started.',
+            style: t.type.label.ink(c.ink2),
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               AxButton(
@@ -756,18 +771,6 @@ class _StartPageState extends State<StartPage> {
                 icon: adds ? AxIcon.plus : AxIcon.play,
                 tone: AxTone.primary,
                 onPressed: ready ? () => unawaited(_start(chosen)) : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  d.harness == 'axiom'
-                      ? 'Commands run contained: no network, writing only in the folder.'
-                      : d.withHands
-                      ? 'Its model and your sign-in; Axiom\'s tools, questions and sandbox. You are asked '
-                            'before it is started.'
-                      : 'It runs outside Axiom\'s sandbox. You are asked before it is started.',
-                  style: t.type.small.ink(c.ink3),
-                ),
               ),
             ],
           ),

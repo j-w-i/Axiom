@@ -42,9 +42,9 @@ void main() {
       ];
 
       final chosen = [
-        for (final h in c.services.entries)
-          for (final k in [c.rowSelectedTop, c.rowSelectedBottom])
-            ('${h.key.name} selected', c.selected(k, h.value)),
+        ('row', c.rowSelectedTop),
+        ('row', c.rowSelectedBottom),
+        for (final (n, s) in stops('bay', c.bay)) ('tab on $n', Color.alphaBlend(c.tabSelected, s)),
       ];
 
       test('text reads on every surface it may sit on', () {

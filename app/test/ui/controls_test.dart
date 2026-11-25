@@ -121,6 +121,32 @@ void main() {
     expect(i, 1);
   });
 
+  testWidgets('a main act that cannot be pressed keeps its place, in outline', (t) async {
+    for (final (tone, outlined) in [
+      (AxTone.primary, true),
+      (AxTone.key, true),
+      (AxTone.quiet, false),
+    ]) {
+      Size? size;
+      for (final on in [true, false]) {
+        await put(t, AxButton(label: 'Go', tone: tone, onPressed: on ? () {} : null));
+        final got = t.getSize(find.byType(AxButton));
+        size ??= got;
+        expect(got, size, reason: '$tone');
+        final borders = [
+          for (final b in t.widgetList<DecoratedBox>(
+            find.descendant(of: find.byType(AxButton), matching: find.byType(DecoratedBox)),
+          ))
+            if (b.decoration case BoxDecoration(:final Border border, color: null)) border,
+        ];
+        expect(borders, hasLength(!on && outlined ? 1 : 0), reason: '$tone, $on');
+        for (final b in borders) {
+          expect(b, Border.all(color: AxColors.dark.bayRule));
+        }
+      }
+    }
+  });
+
   testWidgets('choosing a tab moves nothing but the mark', (t) async {
     var i = 0;
     await put(

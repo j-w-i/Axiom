@@ -73,6 +73,7 @@ class AxColors {
     required this.rule,
     required this.ruleLight,
     required this.bayRule,
+    required this.tabSelected,
     required this.hover,
     required this.rowSelectedTop,
     required this.rowSelectedBottom,
@@ -128,6 +129,7 @@ class AxColors {
       rule,
       ruleLight,
       bayRule,
+      tabSelected,
       hover,
       rowSelectedTop,
       rowSelectedBottom,
@@ -151,11 +153,6 @@ class AxColors {
   Color tinted(Color? hue) =>
       hue == null ? hover : hue.withValues(alpha: brightness == Brightness.dark ? .11 : .10);
 
-  /// A selected row's own colour with the hue of what it stands for.
-  Color selected(Color base, Color? hue) => hue == null
-      ? base
-      : Color.alphaBlend(hue.withValues(alpha: brightness == Brightness.dark ? .09 : .15), base);
-
   static const dark = AxColors(
     brightness: Brightness.dark,
     ink1: Color(0xFFE9EDF5),
@@ -178,6 +175,7 @@ class AxColors {
     rule: Color(0xFF121317),
     ruleLight: Color(0x0DFFFFFF),
     bayRule: Color(0xFF292C32),
+    tabSelected: Color(0x14FFFFFF),
     hover: Color(0x0AFFFFFF),
     rowSelectedTop: Color(0xFF363A43),
     rowSelectedBottom: Color(0xFF32353E),
@@ -351,6 +349,7 @@ class AxColors {
     rule: Color(0xFFAAB6C9),
     ruleLight: Color(0x8CFFFFFF),
     bayRule: Color(0xFFD6DEEC),
+    tabSelected: Color(0x1410182C),
     hover: Color(0x0D10182C),
     rowSelectedTop: Color(0xFFF4F7FF),
     rowSelectedBottom: Color(0xFFEEF3FD),

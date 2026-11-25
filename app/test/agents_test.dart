@@ -7,14 +7,19 @@ import 'package:axiom/host/session_model.dart';
 import 'package:axiom/patterns/context_gauge.dart';
 import 'package:axiom/patterns/execution.dart';
 import 'package:axiom/patterns/models.dart';
+import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
+import 'package:axiom/shell/changes.dart';
 import 'package:axiom/shell/drafts.dart';
 import 'package:axiom/shell/outside.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/start.dart';
+import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/controls.dart';
+import 'package:axiom/ui/icons.dart';
 import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/overlay.dart';
+import 'package:axiom/ui/status.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -396,10 +401,31 @@ void main() {
 
   testWidgets('a question is answered once, with what it showed', (t) async {
     final s = await shell(t, session: working(asks: true));
+    s.known = const [ModelInfo('claude-opus-5-5', name: 'Claude Opus 5.5')];
+    await t.runAsync(() => s.models('c1'));
+    s.calls.clear();
+    await settled(t);
+    expect(
+      find.descendant(of: find.byType(AgentRow), matching: find.textContaining('Claude Opus 5.5')),
+      findsOneWidget,
+    );
     expect(find.byType(RequestBar), findsOneWidget);
-    expect(find.text('1 more after this'), findsOneWidget);
+    expect(find.text('1 more waiting'), findsOneWidget);
     expect(find.text('cargo test'), findsWidgets);
     await settled(t);
+    final row = find.byType(AgentRow);
+    expect(find.descendant(of: row, matching: find.text('Asks to run a command')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('shell')), findsNothing);
+    expect(
+      t
+          .widgetList<Text>(
+            find.descendant(of: find.byType(RequestBar), matching: find.text('cargo test')),
+          )
+          .single
+          .style!
+          .color,
+      AxColors.dark.ink1,
+    );
     await snap(t, 'asked');
     await t.tap(find.text('Allow once'));
     await settled(t);
@@ -544,12 +570,19 @@ void main() {
     await settled(t);
     expect(find.text('+2 −1'), findsOneWidget);
     expect(find.byType(DiffLines), findsNothing);
+    // It is named by its files, and not by its text.
+    expect(find.text('a.txt, b.txt'), findsOneWidget);
+    expect(find.text('…'), findsNothing);
     await t.tap(find.text('Patch'));
     await settled(t);
     expect(find.byType(DiffLines), findsNWidgets(2));
     expect(find.text('b.txt'), findsOneWidget);
     expect(find.textContaining('two', findRichText: true), findsOneWidget);
     expect(find.textContaining(r'\u{202E}', findRichText: true), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(AgentRow), matching: find.text('Edited 2 files')),
+      findsOneWidget,
+    );
     await snap(t, 'diff');
   });
 
@@ -602,7 +635,7 @@ void main() {
 
   testWidgets('accounts are added and removed, and a key is not shown', (t) async {
     final s = await shell(t, accounts: false);
-    await t.tap(find.bySemanticsLabel('Accounts and servers'));
+    await t.tap(find.bySemanticsLabel('Accounts').first);
     await settled(t);
     Finder field(String l) => find.descendant(
       of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
@@ -635,7 +668,7 @@ void main() {
 
   testWidgets('a provider that needs a key is not added without one', (t) async {
     final s = await shell(t, accounts: false);
-    await t.tap(find.bySemanticsLabel('Accounts and servers'));
+    await t.tap(find.bySemanticsLabel('Accounts').first);
     await settled(t);
     Finder field(String l) => find.descendant(
       of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
@@ -675,10 +708,10 @@ void main() {
     await mount(t, Shell(s), size: const Size(760, 560), dpr: 1, textScale: 1.6);
     await settled(t);
     expect(t.takeException(), isNull);
-    for (final l in ['New session', 'Accounts and servers']) {
+    for (final l in [RegExp(r'^New session$'), RegExp('^Accounts')]) {
       await t.tap(find.bySemanticsLabel(l).first);
       await settled(t);
-      expect(t.takeException(), isNull, reason: l);
+      expect(t.takeException(), isNull, reason: '$l');
     }
   });
 
@@ -737,7 +770,7 @@ void main() {
 
     Future<Asked> page(WidgetTester t) async {
       final s = await shell(t, accounts: false);
-      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await t.tap(find.bySemanticsLabel('Accounts').first);
       await settled(t);
       return s;
     }
@@ -809,7 +842,7 @@ void main() {
       // Another page, and back: it is on still.
       await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
       await press(t, find.bySemanticsLabel('New session').first);
-      await press(t, find.bySemanticsLabel('Accounts and servers'));
+      await press(t, find.bySemanticsLabel('Accounts').first);
       s.toldOfSignin({'state': 'done', 'connection': 'c7'});
       await settled(t);
       expect(find.text('You\'re using your ChatGPT plan'), findsOneWidget);
@@ -889,6 +922,13 @@ void main() {
       await snap(t, 'plan-used-up');
       expect(manage, findsOneWidget);
       expect(t.widget<AxButton>(manage).tone, AxTone.primary);
+      // Seen as failed wherever the agent is, and said once.
+      expect(find.text('Stopped with an error'), findsOneWidget);
+      expect(find.textContaining('You have reached your usage limit'), findsOneWidget);
+      expect(
+        t.widgetList<AxLamp>(find.byType(AxLamp)).where((l) => l.state == AgentState.failed),
+        hasLength(2),
+      );
     });
 
     test('only OpenAI\'s own pages are opened', () async {
@@ -1031,7 +1071,7 @@ void main() {
   testWidgets('a program can have several accounts', (t) async {
     final s = await shell(t);
     s.harnesses = harnesses;
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     await press(t, find.bySemanticsLabel('Add: LM Studio on this machine'));
     await press(t, find.bySemanticsLabel('Claude Code, another account').last);
     expect(field('Key'), findsNothing, reason: 'it signs in by itself');
@@ -1182,12 +1222,76 @@ void main() {
     await settled(t);
     // It is the one that is shown.
     expect(find.text('Say something to Reviewer'), findsOneWidget);
+    expect(find.text('Nothing has been said to Reviewer yet.'), findsOneWidget);
+    expect(find.byType(TranscriptView), findsNothing);
     await snap(t, 'two-agents');
+    // What is selected is graphite, whoever it belongs to.
+    final fills = [
+      for (final b in t.widgetList<DecoratedBox>(
+        find.descendant(of: find.byType(AgentRow), matching: find.byType(DecoratedBox)),
+      ))
+        if (b.decoration case BoxDecoration(:final LinearGradient gradient)) gradient.colors,
+    ];
+    expect(fills, [
+      [AxColors.dark.rowSelectedTop, AxColors.dark.rowSelectedBottom],
+    ]);
+    expect(
+      t
+          .widgetList<DecoratedBox>(
+            find.descendant(of: find.byType(AxTabs), matching: find.byType(DecoratedBox)),
+          )
+          .map((b) => (b.decoration as BoxDecoration).color)
+          .nonNulls,
+      [AxColors.dark.tabSelected],
+    );
     await t.tap(find.byType(ExecutionKey));
     await settled(t);
     expect(find.text('Its own model'), findsWidgets);
     expect(find.text('Its own sign-in'), findsWidgets);
     expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
+  });
+
+  test('what a tool is doing is said in words', () {
+    final m = SessionModel('s')
+      ..apply([
+        const Event(1, 1, SessionCreated('T', '/w')),
+        const Event(2, 2, AgentAdded('a', 'A', x, null)),
+      ]);
+    var n = 2;
+    String words(String tool, Object? args, {bool open = false, Object? result}) {
+      final id = 'i${++n}';
+      m.apply([
+        Event(n, n, ItemStarted(id, 'r', 'a', ItemKind.tool, tool, args)),
+        if (!open) Event(++n, n, ItemEnded(id, Outcome.completed, '', result)),
+      ]);
+      return toolWords(m.agents['a']!.items.last);
+    }
+
+    for (final (tool, args, open, said) in [
+      ('shell', {'command': 'cargo test -q'}, true, 'Running cargo test -q'),
+      ('Bash', {'command': 'cargo test -q'}, false, 'Ran cargo test -q'),
+      ('read', {'path': 'lib/src/cache.dart'}, false, 'Read cache.dart'),
+      ('Edit', {'file_path': '/w/lib/cache.dart'}, true, 'Editing cache.dart'),
+      ('grep', {'pattern': 'a/b c'}, false, 'Searched a/b c'),
+      ('fetch', {'url': 'https://example.com/a/b'}, false, 'Fetched b'),
+      ('agent', {'do': 'tell', 'name': 'Ada'}, true, 'Working with another agent'),
+      ('patch', {'patch': '*** Begin'}, true, 'Editing'),
+      ('weird_tool', {'x': 'y'}, false, 'Weird_tool y'),
+      ('list', <String, Object?>{}, false, 'Searched'),
+    ]) {
+      expect(words(tool, args, open: open), said, reason: tool);
+    }
+    const diff = '--- a.txt\n+++ a.txt\n@@ -1 +1 @@\n-a\n+b\n';
+    expect(words('patch', {'patch': 'x'}, result: {'diff': diff}), 'Edited 1 file');
+    expect(
+      words(
+        'apply_patch',
+        {'patch': 'x'},
+        result: {'diff': diff + diff.replaceAll('a.txt', 'b.txt')},
+      ),
+      'Edited 2 files',
+    );
+    expect(words('shell', {'command': 'x' * 400}).length, lessThan(60));
   });
 
   testWidgets('a no can say why, and is never a yes by that', (t) async {
@@ -1315,7 +1419,8 @@ void main() {
         ..needs = const [here, there]
         ..notifyListeners();
       await settled(t);
-      expect(find.text('Needs you · 2'), findsOneWidget);
+      expect(find.text('Needs you'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
       expect(find.text('Ada asks to write a file'), findsOneWidget);
       expect(
         find.bySemanticsLabel('Ada asks to write a file: a.txt, in Other work'),
@@ -1329,7 +1434,7 @@ void main() {
       await settled(t);
       await t.tap(find.text('Changes').last);
       await settled(t);
-      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await t.tap(find.bySemanticsLabel('Accounts').first);
       await settled(t);
       s.calls.clear();
       await press(t, find.text('Lead asks to run a command'));
@@ -1387,7 +1492,8 @@ void main() {
       t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await settled(t);
       expect(s.calls, isEmpty);
-      expect(find.text('Needs you · 2'), findsOneWidget);
+      expect(find.text('Needs you'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
       expect(find.text('Finished, not seen yet'), findsOneWidget);
       for (final l in ['Ada failed', 'Cleo has reached a limit', 'Lead has finished']) {
         expect(find.text(l), findsOneWidget, reason: l);
@@ -1404,7 +1510,7 @@ void main() {
         ..needs = const []
         ..notifyListeners();
       await settled(t);
-      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await t.tap(find.bySemanticsLabel('Accounts').first);
       await settled(t);
       s
         ..needs = const [done]
@@ -1501,13 +1607,37 @@ void main() {
         'It runs when someone builds, tests or installs.',
         'Also changed by Ben.',
         'It cannot be shown: too large, or not text.',
-        'Not listed: 2 that git ignores and only the copy has. 1 could not be copied or listed.',
       ]) {
         expect(find.text(words), findsOneWidget, reason: words);
       }
       expect(find.textContaining('Ada has not looked at yours yet'), findsOneWidget);
       expect(find.textContaining('was here', findRichText: true), findsWidgets);
+      // What needs a look has the amber glyph; its words are words.
+      Iterable<AxGlyph> warnings() => t
+          .widgetList<AxGlyph>(
+            find.descendant(of: find.byType(CopyView), matching: find.byType(AxGlyph)),
+          )
+          .where((g) => g.icon == AxIcon.warn);
+      expect(warnings(), hasLength(5));
+      expect(warnings().every((g) => g.color == AxColors.dark.attention), isTrue);
+      expect(
+        t
+            .widgetList<Text>(
+              find.descendant(of: find.byType(CopyView), matching: find.byType(Text)),
+            )
+            .where((x) => x.style?.color == AxColors.dark.attentionText),
+        isEmpty,
+      );
       await snap(t, 'copy');
+      // The last line is under the edge.
+      final list = find.descendant(of: find.byType(CopyView), matching: find.byType(ListView));
+      await t.drag(list, const Offset(0, -400));
+      await settled(t);
+      const last =
+          'Not listed: 2 that git ignores and only the copy has. 1 could not be copied or listed.';
+      expect(find.text(last), findsOneWidget);
+      await t.drag(list, const Offset(0, 400));
+      await settled(t);
       await press(t, find.bySemanticsLabel('Bring in Makefile'));
       await press(t, find.bySemanticsLabel('Bring in gone.txt'));
       await press(t, find.bySemanticsLabel('Bring in both.txt'));
@@ -1801,7 +1931,7 @@ void main() {
     final s = await shell(t, session: working());
     final words = find.byType(EditableText);
     await t.enterText(words, 'Half a thought');
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     expect(find.text('Half a thought'), findsNothing);
     await press(t, find.text('Done'));
     expect(find.text('Half a thought'), findsOneWidget);
@@ -1814,7 +1944,7 @@ void main() {
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     await t.pump();
     await t.enterText(words, 'and the next');
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     gate.complete();
     await settled(t);
     await press(t, find.text('Done'));
@@ -1912,7 +2042,7 @@ void main() {
       ..failsAt = 'add'
       ..gate = gate;
     await press(t, find.text('Start'));
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     gate.complete();
     await settled(t);
     expect(s.calls.map((c) => c.first), ['create', 'add', 'prompt'], reason: 'it is not opened');
@@ -1926,7 +2056,7 @@ void main() {
     await t.enterText(field('What should be done'), 'other words');
     await settled(t);
     await press(t, find.text('Start'));
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     s.gate!.complete();
     await settled(t);
     await press(t, find.bySemanticsLabel('New session').first);
@@ -2016,10 +2146,10 @@ void main() {
       );
       await settled(t);
       expect(t.takeException(), isNull);
-      for (final l in ['New session', 'Accounts and servers']) {
+      for (final l in [RegExp(r'^New session$'), RegExp('^Accounts')]) {
         await t.tap(find.bySemanticsLabel(l).first);
         await settled(t);
-        expect(t.takeException(), isNull, reason: l);
+        expect(t.takeException(), isNull, reason: '$l');
       }
     });
   }

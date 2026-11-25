@@ -14,6 +14,8 @@ import '../transcript/transcript_view.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/marks.dart';
+import '../ui/overlay.dart';
+import '../ui/press.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
@@ -150,93 +152,73 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
           // An agent is chosen within its session only.
           if (_session != s.current?.id) {
             _session = s.current?.id;
-            _agent = _wanted?.$1 == _session ? _wanted!.$2 : null;
+            _agent = switch (_wanted) {
+              (final session, final agent) when session == _session => agent,
+              _ => null,
+            };
             _wanted = null;
           }
           final stale = s.phase != HostPhase.connected;
+          final width = MediaQuery.sizeOf(context).width;
+          final narrow = width < 860;
+          Widget side([VoidCallback? close]) => _Side(
+            store: s,
+            inset: widget.titleInset,
+            agent: _agent,
+            close: close,
+            onAgent: (id) => setState(() {
+              _agent = id;
+              _view = _View.work;
+            }),
+            onAddAgent: () => _addAgent(s.current!.id),
+            onStart: () => _show(_View.start),
+            onAccounts: () => _show(_View.accounts),
+            onAnswer: _answer,
+            onOpen: (id) {
+              _wanted = null;
+              _show(_View.work);
+              _do('The session was not opened', () => s.open(id));
+            },
+          );
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(
-                width: 264,
-                child: FocusTraversalGroup(
-                  child: _Side(
-                    store: s,
-                    inset: widget.titleInset,
-                    agent: _agent,
-                    onAgent: (id) => setState(() {
-                      _agent = id;
-                      _view = _View.work;
-                    }),
-                    onAddAgent: () => _addAgent(s.current!.id),
-                    onStart: () => _show(_View.start),
-                    onAccounts: () => _show(_View.accounts),
-                    onAnswer: _answer,
-                    onOpen: (id) {
-                      _wanted = null;
-                      _show(_View.work);
-                      _do('The session was not opened', () => s.open(id));
-                    },
-                  ),
+              if (!narrow)
+                SizedBox(
+                  width: width < 1080 ? 224 : 264,
+                  child: FocusTraversalGroup(child: side()),
                 ),
-              ),
               Expanded(
+                // Kept when the window is made wider or narrower.
+                key: const ValueKey('display'),
                 child: FocusTraversalGroup(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       SizedBox(
                         height: 44,
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 12, right: 20),
-                          child: Row(
-                            children: [
-                              if (stale && s.phase != HostPhase.starting) ...[
-                                const AxLamp(AgentState.failed),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    s.binary == null && s.current == null
-                                        ? 'axiom-host was not found beside the application'
-                                        : 'The host is not answering. Trying again.',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: t.type.label.ink(c.faultText),
-                                  ),
-                                ),
-                              ] else if (s.damaged case final d?) ...[
-                                const AxLamp(AgentState.failed),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    'The journal is damaged: ${oneLine(d, 200)}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: t.type.label.ink(c.faultText),
-                                  ),
-                                ),
-                              ] else if (_failed case final f?) ...[
-                                const AxLamp(AgentState.failed),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Semantics(
-                                    liveRegion: true,
-                                    child: Text(
-                                      oneLine(f, 200),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: t.type.label.ink(c.faultText),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+                        child: _Strip(
+                          problem: switch (s) {
+                            _ when stale && s.phase != HostPhase.starting =>
+                              s.binary == null && s.current == null
+                                  ? 'axiom-host was not found beside the application'
+                                  : 'The host is not answering. Trying again.',
+                            HostStore(:final damaged?) =>
+                              'The journal is damaged: ${oneLine(damaged, 200)}',
+                            _ => _failed == null ? null : oneLine(_failed!, 200),
+                          },
+                          folder: s.current?.workspace,
+                          inset: widget.titleInset,
+                          needs: s.needs,
+                          list: narrow ? side : null,
+                          onAnswer: _answer,
+                          onStart: () => _show(_View.start),
+                          onAccounts: () => _show(_View.accounts),
                         ),
                       ),
                       Expanded(
                         child: Padding(
-                          padding: const EdgeInsets.only(right: 8, bottom: 8),
+                          padding: EdgeInsets.only(left: narrow ? 8 : 0, right: 8, bottom: 8),
                           child: Surface(
                             c.bay,
                             radius: AxRadius.bay,
@@ -320,15 +302,91 @@ Provenance provenanceOf(Known k) => switch (k) {
   Known.unknown => Provenance.unknown,
 };
 
-AgentView viewOf(AgentModel a, HostStore s) {
+/// What a tool is doing, and what it did, as a person would say it.
+(String, String)? _verbs(String tool) => switch (tool.toLowerCase()) {
+  'read' || 'notebookread' => ('Reading', 'Read'),
+  'edit' ||
+  'write' ||
+  'multiedit' ||
+  'notebookedit' ||
+  'patch' ||
+  'apply_patch' => ('Editing', 'Edited'),
+  'search' || 'glob' || 'list' || 'grep' || 'ls' || 'find' => ('Searching', 'Searched'),
+  'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => ('Running', 'Ran'),
+  'fetch' || 'webfetch' || 'websearch' => ('Fetching', 'Fetched'),
+  'delegate' || 'agent' || 'task' => ('Working with another agent', 'Worked with another agent'),
+  _ => null,
+};
+
+String _upper(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
+/// What a call is doing: never by the tool's own name alone, if it is one that is known.
+String toolWords(ItemModel i) {
+  final tool = i.name.toLowerCase();
+  final verbs = _verbs(tool);
+  final verb = verbs == null
+      ? _upper(oneLine(literal(i.name), 40))
+      : i.open
+      ? verbs.$1
+      : verbs.$2;
+  if (const {'delegate', 'agent', 'task'}.contains(tool)) return verb;
+  String about;
+  if (ToolRow.isPatch(tool)) {
+    final n = ToolRow.patched(i).length;
+    about = n == 0 ? '' : (n == 1 ? '1 file' : '$n files');
+  } else {
+    about = ToolRow.detailOf(i.args).trim();
+    if (!about.contains(' ') && about.contains('/')) {
+      about = about.split('/').lastWhere((x) => x.isNotEmpty, orElse: () => about);
+    }
+    about = oneLine(literal(about), 40);
+  }
+  return about.isEmpty ? verb : '$verb $about';
+}
+
+/// The second line of an agent's row: what it wants, how it ended, or what it is doing.
+ActivityView? _activity(AgentModel a, HostStore s) {
+  final asks = s.current?.requests.values
+      .where((r) => r.opened.agent == a.id && r.opened.answerable == Answerable.live)
+      .firstOrNull;
+  if (asks != null) {
+    return ActivityView(AxIcon.shield, _upper(oneLine(literal(asks.opened.what), 60)));
+  }
+  if (a.ended == Outcome.failed) {
+    return const ActivityView(AxIcon.warn, 'Stopped with an error', failed: true);
+  }
   final last = a.last;
+  if (last == null) return null;
+  return ActivityView(last.rich ? AxIcon.think : ToolRow.iconOf(last.name), switch (last.kind) {
+    ItemKind.tool => toolWords(last),
+    ItemKind.reasoning => 'Thinking',
+    ItemKind.prompt => 'Reading the request',
+    _ => last.open ? 'Writing' : 'Wrote an answer',
+  }, failed: last.outcome == Outcome.failed);
+}
+
+/// A run that failed is seen as that, whatever its agent could do next.
+AgentState stateOf(AgentModel a) =>
+    a.ended == Outcome.failed ? AgentState.failed : phaseOf(a.phase);
+
+/// What its model is called, where the host has said so.
+String? _modelName(Execution x, HostStore s) {
+  final id = x.model, on = x.connection;
+  if (id == null || on == null) return id;
+  for (final m in s.modelsOf(on) ?? const <ModelInfo>[]) {
+    if (m.id == id) return m.name ?? id;
+  }
+  return id;
+}
+
+AgentView viewOf(AgentModel a, HostStore s) {
   return AgentView(
     id: a.id,
     name: a.name,
-    state: phaseOf(a.phase),
+    state: stateOf(a),
     // What chooses its model itself is named instead.
     model: oneLine(
-      a.execution.model ??
+      _modelName(a.execution, s) ??
           (a.execution.harness == 'axiom' ? '' : s.harnessName(a.execution.harness)),
       60,
     ),
@@ -338,16 +396,155 @@ AgentView viewOf(AgentModel a, HostStore s) {
     elapsed: '',
     context: a.context,
     contextProvenance: provenanceOf(a.contextKnown),
-    recent: [
-      if (last != null)
-        ActivityView(last.rich ? AxIcon.think : ToolRow.iconOf(last.name), switch (last.kind) {
-          ItemKind.tool => last.name,
-          ItemKind.reasoning => 'Thinking',
-          ItemKind.prompt => 'Reading the request',
-          _ => last.open ? 'Writing' : 'Wrote an answer',
-        }, failed: last.outcome == Outcome.failed),
-    ],
+    recent: [?_activity(a, s)],
   );
+}
+
+/// What stands over the display: what has failed, and, where the window is too narrow for the list
+/// beside it, the way to the list.
+class _Strip extends StatelessWidget {
+  const _Strip({
+    required this.problem,
+    required this.folder,
+    required this.inset,
+    required this.needs,
+    required this.list,
+    required this.onAnswer,
+    required this.onStart,
+    required this.onAccounts,
+  });
+  final String? problem, folder;
+  final double inset;
+  final List<Waits> needs;
+  final Widget Function(VoidCallback close)? list;
+  final ValueChanged<Waits> onAnswer;
+  final VoidCallback onStart, onAccounts;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    final said = problem == null
+        ? null
+        : Semantics(
+            liveRegion: true,
+            child: Text(
+              problem!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: t.type.label.ink(c.faultText),
+            ),
+          );
+    final failed = Row(
+      children: [
+        if (said != null) ...[
+          const AxLamp(AgentState.failed),
+          const SizedBox(width: 10),
+          Expanded(child: said),
+        ],
+      ],
+    );
+    final open = list;
+    if (open == null) {
+      final at = folder;
+      return Padding(
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: said == null && at != null
+                  ? Semantics(
+                      label: 'Folder $at',
+                      excludeSemantics: true,
+                      child: Text(
+                        oneLine(
+                          literal(
+                            at
+                                .split(RegExp(r'[/\\]'))
+                                .lastWhere((x) => x.isNotEmpty, orElse: () => at),
+                          ),
+                          80,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.type.label.ink(c.ink2),
+                      ),
+                    )
+                  : failed,
+            ),
+            const SizedBox(width: 8),
+            AxButton(
+              label: 'Accounts',
+              icon: AxIcon.web,
+              tone: AxTone.quiet,
+              onPressed: onAccounts,
+            ),
+          ],
+        ),
+      );
+    }
+    final asks = [
+      for (final w in needs)
+        if (w.need == Need.asks) w,
+    ];
+    final stopped = [
+      for (final w in needs)
+        if (w.need == Need.failed || w.need == Need.limit) w,
+    ];
+    final (state, count, first, ink) = asks.isNotEmpty
+        ? (AgentState.asking, '${asks.length} asking', asks.first, c.attentionText)
+        : (AgentState.failed, '${stopped.length} stopped', stopped.firstOrNull, c.faultText);
+    return Padding(
+      padding: EdgeInsets.only(left: inset + 12, right: 8),
+      child: Row(
+        children: [
+          AxPopover(
+            width: 264,
+            maxHeight: MediaQuery.sizeOf(context).height - 60,
+            anchor: (context, isOpen, toggle) => AxButton.icon(
+              AxIcon.list,
+              label: 'Sessions',
+              tone: AxTone.quiet,
+              engaged: isOpen,
+              onPressed: toggle,
+            ),
+            panel: (context, close) => open(close),
+          ),
+          const SizedBox(width: 8),
+          if (first != null)
+            Flexible(
+              child: Pressable(
+                label: '$count, open the first',
+                onPressed: () => onAnswer(first),
+                builder: (context, p) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AxLamp(state),
+                    const SizedBox(width: 7),
+                    Flexible(
+                      child: Text(
+                        count,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.type.label.ink(ink),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(width: 12),
+          Expanded(flex: 3, child: failed),
+          const SizedBox(width: 8),
+          AxButton.icon(
+            AxIcon.web,
+            label: 'Accounts and servers',
+            tone: AxTone.quiet,
+            onPressed: onAccounts,
+          ),
+          AxButton.icon(AxIcon.plus, label: 'New session', tone: AxTone.quiet, onPressed: onStart),
+        ],
+      ),
+    );
+  }
 }
 
 class _Side extends StatelessWidget {
@@ -361,7 +558,11 @@ class _Side extends StatelessWidget {
     required this.onAccounts,
     required this.onOpen,
     required this.onAnswer,
+    this.close,
   });
+
+  /// Closes the panel it is in, where there is no room beside the display: then it is the list alone.
+  final VoidCallback? close;
   final ValueChanged<Waits> onAnswer;
   final HostStore store;
   final double inset;
@@ -369,12 +570,19 @@ class _Side extends StatelessWidget {
   final ValueChanged<String> onAgent, onOpen;
   final VoidCallback onStart, onAddAgent, onAccounts;
 
+  void _then(VoidCallback f) {
+    close?.call();
+    f();
+  }
+
+  /// At most four characters; nothing where no time was said.
   static String ageOf(int ms) {
+    if (ms <= 0) return '';
     final d = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
     if (d.inMinutes < 1) return 'now';
     if (d.inHours < 1) return '${d.inMinutes}m';
     if (d.inDays < 1) return '${d.inHours}h';
-    return '${d.inDays}d';
+    return d.inDays < 365 ? '${d.inDays}d' : '${d.inDays ~/ 365}y';
   }
 
   @override
@@ -382,6 +590,107 @@ class _Side extends StatelessWidget {
     final t = Ax.of(context), c = t.colors;
     final m = store.current;
     final others = store.sessions.where((s) => s.id != m?.id).toList();
+    final list = <Widget>[
+      for (final (label, color, all) in [
+        (
+          'Needs you',
+          c.ink2,
+          [
+            for (final w in store.needs)
+              if (w.need != Need.finished) w,
+          ],
+        ),
+        (
+          'Finished, not seen yet',
+          c.ink3,
+          [
+            for (final w in store.needs)
+              if (w.need == Need.finished) w,
+          ],
+        ),
+      ])
+        if (all.isNotEmpty) ...[
+          Semantics(
+            liveRegion: true,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+              child: Row(
+                children: [
+                  Expanded(child: Text(label, style: t.type.label.ink(color))),
+                  if (all.length > 1) Text('${all.length}', style: t.type.small.ink(c.ink3)),
+                ],
+              ),
+            ),
+          ),
+          for (final w in all)
+            NeedsRow(
+              key: ValueKey((w.session, w.agent, w.request)),
+              agent: w.name.isEmpty ? 'An agent' : oneLine(literal(w.name), 40),
+              what: switch (w.need) {
+                Need.failed => 'failed',
+                Need.limit => 'has reached a limit',
+                Need.finished => 'has finished',
+                _ => oneLine(literal(w.what), 60),
+              },
+              state: switch (w.need) {
+                Need.failed || Need.limit => AgentState.failed,
+                Need.finished => AgentState.done,
+                _ => AgentState.asking,
+              },
+              subject: oneLine(literal(w.subject), 120),
+              session: w.title.isEmpty ? 'Session' : oneLine(literal(w.title), 60),
+              age: ageOf(w.at),
+              onOpen: () => _then(() => onAnswer(w)),
+            ),
+          const SizedBox(height: 16),
+        ],
+      if (m != null) ...[
+        ListenableBuilder(
+          listenable: m,
+          builder: (_, _) => ListenableBuilder(
+            listenable: Listenable.merge(m.agents.values),
+            builder: (_, _) => SessionPanel(
+              session: SessionView(
+                id: m.id,
+                title: m.title.isEmpty ? 'Session' : m.title,
+                age: '',
+                agents: [for (final a in m.agents.values) viewOf(a, store)],
+              ),
+              selected: m.agents.containsKey(agent) ? agent : m.agents.keys.firstOrNull,
+              onSelect: (id) => _then(() => onAgent(id)),
+              // A replay's session has nobody to work beside.
+              onAddAgent: m.workspace == null ? null : () => _then(onAddAgent),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+      ],
+      if (others.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          child: Text(m == null ? 'Sessions' : 'Other sessions', style: t.type.label.ink(c.ink3)),
+        ),
+      for (final s in others)
+        SessionRow(
+          SessionView(id: s.id, title: oneLine(s.title), age: ageOf(s.updated), working: s.running),
+          onOpen: () => _then(() => onOpen(s.id)),
+        ),
+      if (store.older)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+          child: Text(
+            'The last ${HostStore.listed}. Older ones are in the journal.',
+            style: t.type.small.ink(c.ink3),
+          ),
+        ),
+    ];
+    if (close != null) {
+      return Padding(
+        // With what the panel has, 8 all round.
+        padding: const EdgeInsets.all(3),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: list),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -395,12 +704,6 @@ class _Side extends StatelessWidget {
                 const SizedBox(width: 9),
                 Expanded(child: Text('Axiom', style: t.type.uiStrong)),
                 AxButton.icon(
-                  AxIcon.web,
-                  label: 'Accounts and servers',
-                  tone: AxTone.quiet,
-                  onPressed: onAccounts,
-                ),
-                AxButton.icon(
                   AxIcon.plus,
                   label: 'New session',
                   tone: AxTone.quiet,
@@ -411,109 +714,7 @@ class _Side extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-            children: [
-              for (final (label, color, all) in [
-                (
-                  'Needs you',
-                  c.attentionText,
-                  [
-                    for (final w in store.needs)
-                      if (w.need != Need.finished) w,
-                  ],
-                ),
-                (
-                  'Finished, not seen yet',
-                  c.ink3,
-                  [
-                    for (final w in store.needs)
-                      if (w.need == Need.finished) w,
-                  ],
-                ),
-              ])
-                if (all.isNotEmpty) ...[
-                  Semantics(
-                    liveRegion: true,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
-                      child: Text(
-                        all.length == 1 ? label : '$label · ${all.length}',
-                        style: t.type.label.ink(color),
-                      ),
-                    ),
-                  ),
-                  for (final w in all)
-                    NeedsRow(
-                      key: ValueKey((w.session, w.agent, w.request)),
-                      agent: w.name.isEmpty ? 'An agent' : oneLine(literal(w.name), 40),
-                      what: switch (w.need) {
-                        Need.failed => 'failed',
-                        Need.limit => 'has reached a limit',
-                        Need.finished => 'has finished',
-                        _ => oneLine(literal(w.what), 60),
-                      },
-                      state: switch (w.need) {
-                        Need.failed || Need.limit => AgentState.failed,
-                        Need.finished => AgentState.done,
-                        _ => AgentState.asking,
-                      },
-                      subject: oneLine(literal(w.subject), 120),
-                      session: w.title.isEmpty ? 'Session' : oneLine(literal(w.title), 60),
-                      age: ageOf(w.at),
-                      onOpen: () => onAnswer(w),
-                    ),
-                  const SizedBox(height: 12),
-                ],
-              if (m != null) ...[
-                ListenableBuilder(
-                  listenable: m,
-                  builder: (_, _) => ListenableBuilder(
-                    listenable: Listenable.merge(m.agents.values),
-                    builder: (_, _) => SessionPanel(
-                      session: SessionView(
-                        id: m.id,
-                        title: m.title.isEmpty ? 'Session' : m.title,
-                        age: '',
-                        agents: [for (final a in m.agents.values) viewOf(a, store)],
-                      ),
-                      selected: m.agents.containsKey(agent) ? agent : m.agents.keys.firstOrNull,
-                      onSelect: onAgent,
-                      // A replay's session has nobody to work beside.
-                      onAddAgent: m.workspace == null ? null : onAddAgent,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-              ],
-              if (others.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                  child: Text(
-                    m == null ? 'Sessions' : 'Other sessions',
-                    style: t.type.label.ink(c.ink3),
-                  ),
-                ),
-              for (final s in others)
-                SessionRow(
-                  SessionView(
-                    id: s.id,
-                    title: oneLine(s.title),
-                    age: ageOf(s.updated),
-                    working: s.running,
-                  ),
-                  onOpen: () => onOpen(s.id),
-                ),
-              if (store.older)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-                  child: Text(
-                    'The last ${HostStore.listed}. Older ones are in the journal.',
-                    style: t.type.small.ink(c.ink3),
-                  ),
-                ),
-            ],
-          ),
+          child: ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 12), children: list),
         ),
       ],
     );
@@ -598,7 +799,21 @@ class _Display extends StatelessWidget {
               builder: (context, box) => Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(child: TranscriptView(a)),
+                  Expanded(
+                    child: ListenableBuilder(
+                      listenable: a,
+                      builder: (context, full) => a.last != null || a.ended != null
+                          ? full!
+                          : Padding(
+                              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                              child: Text(
+                                'Nothing has been said to ${a.name} yet.',
+                                style: Ax.of(context).type.ui.ink(c.ink3),
+                              ),
+                            ),
+                      child: TranscriptView(a),
+                    ),
+                  ),
                   // In a window too small for all of it, its end is in sight and the rest scrolls.
                   ConstrainedBox(
                     constraints: BoxConstraints(maxHeight: box.maxHeight),
@@ -646,7 +861,7 @@ class _Display extends StatelessWidget {
     final works = a.phase == AgentPhase.running || a.phase == AgentPhase.asking;
     return AgentBar(
       name: a.name,
-      state: phaseOf(a.phase),
+      state: stateOf(a),
       mark: markOf(x.provider, x.model, x.harness),
       tabs: [('Conversation', null), if (acts) ('Changes', null)],
       index: acts ? tab : 0,
@@ -676,12 +891,7 @@ class _Display extends StatelessWidget {
             ),
           ],
           if (acts && works && run != null && !stale)
-            AxButton(
-              label: 'Stop',
-              icon: AxIcon.stop,
-              tone: AxTone.quiet,
-              onPressed: () => onStop(run),
-            ),
+            AxButton(label: 'Stop', icon: AxIcon.stop, onPressed: () => onStop(run)),
           if (stale) ...[
             const SizedBox(width: 10),
             Flexible(
