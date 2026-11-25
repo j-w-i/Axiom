@@ -19,11 +19,10 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use crate::{
-    codec::{self, Decoder, EncodeError, Lost},
+    codec::{self, Decoder, EncodeError, Frames, Lost},
     error::{self, Class, Error, Retry},
     profile::{Listing, Profile},
     secret::{Credential, Endpoint, Secret, SetupError},
-    sse,
     types::*,
 };
 
@@ -161,7 +160,7 @@ impl Client {
         Ok(Answer {
             request_id: request_id(answer.headers(), credential.as_ref().map(|c| c.secret())),
             response: Some(answer),
-            sse: sse::Decoder::new(EVENT),
+            frames: Frames::new(self.profile.codec, EVENT),
             decoder: Decoder::new(self.profile.codec, &quirks),
             scope: codec::scope(request, &self.profile),
             ready: VecDeque::new(),
@@ -175,7 +174,8 @@ impl Client {
     /// What the server has: all of it, or an error. OpenAI's list, and that of any server that speaks
     /// its protocols, is one answer; Gemini's comes in pages.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, CallError> {
-        if self.profile.codec == Codec::Messages {
+        // Bedrock's is at another origin than its models, where no credential for these goes (SI-4).
+        if matches!(self.profile.codec, Codec::Messages | Codec::Converse) {
             return Err(EncodeError::Unsupported("the list of models").into());
         }
         let credential = self.credential().await.map_err(|e| e.sealed(None))?;
@@ -316,14 +316,15 @@ impl Client {
         c: Option<&Arc<Credential>>,
     ) -> Result<Response, Error> {
         let url = self.endpoint.at(path).map_err(setup)?;
+        let stream = codec::media_type(self.profile.codec);
         let request = self
-            .request(self.http.post(url.clone()), &url, "text/event-stream", c)?
+            .request(self.http.post(url.clone()), &url, stream, c)?
             .header(header::CONTENT_TYPE, "application/json")
             .body(body);
         let mut answer = self.send(request).await?;
         let kind = answer.headers().get(header::CONTENT_TYPE);
         let kind = kind.and_then(|v| v.to_str().ok()).unwrap_or("").trim().to_ascii_lowercase();
-        if kind.is_empty() || kind.starts_with("text/event-stream") {
+        if kind.is_empty() || kind.starts_with(stream) {
             return Ok(answer);
         }
         // Not a stream although it succeeded. It may still say what went wrong.
@@ -379,7 +380,10 @@ impl Client {
         }
         // What can be had of it: the status alone already says what to do.
         let body = read(&mut answer, ERROR_BODY, self.options.idle).await.unwrap_or_default();
-        Err(with_head(Error::provider(Some(status.as_u16()), &text(&body)), answer.headers()))
+        // Amazon's name of an error is in the head
+        // (smithy.io/2.0/aws/protocols/aws-restjson1-protocol.html#operation-error-serialization).
+        let name = answer.headers().get("x-amzn-errortype").and_then(|v| v.to_str().ok());
+        Err(with_head(Error::named(Some(status.as_u16()), name, &text(&body)), answer.headers()))
     }
 }
 
@@ -427,7 +431,7 @@ pub struct ModelInfo {
 /// An answer on its way.
 pub struct Answer {
     response: Option<Response>,
-    sse: sse::Decoder,
+    frames: Frames,
     decoder: Decoder,
     scope: Scope,
     /// Of the last piece that came.
@@ -491,11 +495,11 @@ impl Answer {
         let done = match chunk {
             Ok(Ok(Some(bytes))) => {
                 let mut events = Vec::new();
-                let read = self.sse.push(bytes.as_ref(), &mut events);
+                let read = self.frames.push(bytes.as_ref(), &mut events);
                 events.iter().try_for_each(|e| self.decoder.event(e, &mut out)).and_then(|()| {
                     match read {
                         Err(_) if self.decoder.ended() => Ok(()),
-                        read => read.map_err(|e| Error::protocol(e.to_string())),
+                        read => read,
                     }
                 })
             }
@@ -579,7 +583,11 @@ fn text(body: &[u8]) -> String {
 
 fn with_head(mut e: Error, head: &HeaderMap) -> Error {
     let get = |name: &str| head.get(name).and_then(|v| v.to_str().ok());
-    e.request_id = get("request-id").or(get("x-request-id")).map(str::to_owned).or(e.request_id);
+    e.request_id = ["request-id", "x-request-id", "x-amzn-requestid"]
+        .into_iter()
+        .find_map(get)
+        .map(str::to_owned)
+        .or(e.request_id);
     e.retry_after = get("retry-after").and_then(|v| error::retry_after(v, now()));
     e
 }

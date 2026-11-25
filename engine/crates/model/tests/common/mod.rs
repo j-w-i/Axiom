@@ -9,7 +9,10 @@ use std::{
     time::Duration,
 };
 
-use axiom_model::{Accumulator, Codec, Error, Event, Quirks, Reply, Scope, codec::Decoder, sse};
+use axiom_model::{
+    Accumulator, Codec, Error, Event, Quirks, Reply, Scope,
+    codec::{Decoder, Frames},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -55,15 +58,21 @@ pub fn scope(codec: Codec) -> Scope {
 
 /// Everything a stream says, however it is cut.
 pub fn events(codec: Codec, quirks: &Quirks, pieces: &[&[u8]]) -> (Vec<Event>, Option<Error>) {
-    let (mut sse, mut decoder) = (sse::Decoder::new(1 << 20), Decoder::new(codec, quirks));
+    let (mut frames, mut decoder) = (Frames::new(codec, 1 << 20), Decoder::new(codec, quirks));
     let mut out = Vec::new();
     for piece in pieces {
         let mut events = Vec::new();
-        sse.push(piece, &mut events).unwrap();
+        let read = frames.push(piece, &mut events);
         for event in &events {
             if let Err(e) = decoder.event(event, &mut out) {
                 return (out, Some(e));
             }
+        }
+        // What comes after the end says nothing.
+        if let Err(e) = read
+            && !decoder.ended()
+        {
+            return (out, Some(e));
         }
     }
     let end = decoder.finish(&mut out);

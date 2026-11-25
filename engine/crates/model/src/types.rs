@@ -73,6 +73,8 @@ pub enum Codec {
     Responses,
     /// Google Gemini `generateContent`.
     Gemini,
+    /// Amazon Bedrock `ConverseStream`.
+    Converse,
 }
 
 /// Where a block's native JSON came from, and so where it may be valid.
@@ -87,7 +89,7 @@ pub struct Scope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Native {
     pub scope: Scope,
-    /// In the Messages codec the block itself, in the Responses codec the item. In the Chat codec,
+    /// In the Messages and Converse codecs the block itself, in the Responses codec the item. In the Chat codec,
     /// which has no blocks, an entry of `tool_calls`, or an object with the members of the assistant
     /// message that it was. In the Gemini codec a part, or several as an array.
     pub json: Json,
