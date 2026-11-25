@@ -3,6 +3,7 @@ import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/transcript/transcript_view.dart';
+import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -187,6 +188,39 @@ void main() {
     ];
     expect(changes.length, lessThanOrEqualTo(40 ~/ 14 * 2));
     expect(changes.first, greaterThan(10), reason: '$xs');
+    s.dispose();
+  });
+
+  testWidgets('the strip says where the work is, until something has failed', (t) async {
+    for (final (path, last) in [
+      ('/home/me/axiom', 'axiom'),
+      ('/home/me/axiom/', 'axiom'),
+      (r'C:\work\axiom', 'axiom'),
+      ('/', '/'),
+      ('/home/me/a\u202Eb', r'a\u{202E}b'),
+    ]) {
+      final s = store()
+        ..phase = HostPhase.connected
+        ..current = (SessionModel('s')..apply([Event(1, 1, SessionCreated('Work', path))]));
+      await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+      expect(find.text(last), findsOneWidget, reason: path);
+      expect(find.bySemanticsLabel(RegExp('^Folder ')), findsOneWidget);
+      expect(find.widgetWithText(AxButton, 'Accounts'), findsOneWidget);
+      expect(find.bySemanticsLabel('Accounts and servers'), findsNothing);
+      s
+        ..damaged = 'row 3'
+        ..notifyListeners();
+      await t.pump();
+      expect(find.text(last), findsNothing);
+      expect(find.textContaining('The journal is damaged'), findsOneWidget);
+      s.dispose();
+    }
+    final s = store()..phase = HostPhase.connected;
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    expect(find.bySemanticsLabel(RegExp('^Folder ')), findsNothing, reason: 'nothing is open');
+    await t.tap(find.widgetWithText(AxButton, 'Accounts'));
+    await t.pump();
+    expect(find.text('Accounts and servers'), findsOneWidget);
     s.dispose();
   });
 

@@ -204,6 +204,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                               'The journal is damaged: ${oneLine(damaged, 200)}',
                             _ => _failed == null ? null : oneLine(_failed!, 200),
                           },
+                          folder: s.current?.workspace,
                           inset: widget.titleInset,
                           needs: s.needs,
                           list: narrow ? side : null,
@@ -401,6 +402,7 @@ AgentView viewOf(AgentModel a, HostStore s) {
 class _Strip extends StatelessWidget {
   const _Strip({
     required this.problem,
+    required this.folder,
     required this.inset,
     required this.needs,
     required this.list,
@@ -408,7 +410,7 @@ class _Strip extends StatelessWidget {
     required this.onStart,
     required this.onAccounts,
   });
-  final String? problem;
+  final String? problem, folder;
   final double inset;
   final List<Waits> needs;
   final Widget Function(VoidCallback close)? list;
@@ -439,7 +441,42 @@ class _Strip extends StatelessWidget {
     );
     final open = list;
     if (open == null) {
-      return Padding(padding: const EdgeInsets.only(left: 12, right: 20), child: failed);
+      final at = folder;
+      return Padding(
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: said == null && at != null
+                  ? Semantics(
+                      label: 'Folder $at',
+                      excludeSemantics: true,
+                      child: Text(
+                        oneLine(
+                          literal(
+                            at
+                                .split(RegExp(r'[/\\]'))
+                                .lastWhere((x) => x.isNotEmpty, orElse: () => at),
+                          ),
+                          80,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.type.label.ink(c.ink2),
+                      ),
+                    )
+                  : failed,
+            ),
+            const SizedBox(width: 8),
+            AxButton(
+              label: 'Accounts',
+              icon: AxIcon.web,
+              tone: AxTone.quiet,
+              onPressed: onAccounts,
+            ),
+          ],
+        ),
+      );
     }
     final asks = [
       for (final w in needs)
@@ -663,12 +700,6 @@ class _Side extends StatelessWidget {
                 const AxMark(size: 17),
                 const SizedBox(width: 9),
                 Expanded(child: Text('Axiom', style: t.type.uiStrong)),
-                AxButton.icon(
-                  AxIcon.web,
-                  label: 'Accounts and servers',
-                  tone: AxTone.quiet,
-                  onPressed: onAccounts,
-                ),
                 AxButton.icon(
                   AxIcon.plus,
                   label: 'New session',

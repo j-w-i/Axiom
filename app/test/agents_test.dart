@@ -635,7 +635,7 @@ void main() {
 
   testWidgets('accounts are added and removed, and a key is not shown', (t) async {
     final s = await shell(t, accounts: false);
-    await t.tap(find.bySemanticsLabel('Accounts and servers'));
+    await t.tap(find.bySemanticsLabel('Accounts').first);
     await settled(t);
     Finder field(String l) => find.descendant(
       of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
@@ -668,7 +668,7 @@ void main() {
 
   testWidgets('a provider that needs a key is not added without one', (t) async {
     final s = await shell(t, accounts: false);
-    await t.tap(find.bySemanticsLabel('Accounts and servers'));
+    await t.tap(find.bySemanticsLabel('Accounts').first);
     await settled(t);
     Finder field(String l) => find.descendant(
       of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
@@ -708,10 +708,10 @@ void main() {
     await mount(t, Shell(s), size: const Size(760, 560), dpr: 1, textScale: 1.6);
     await settled(t);
     expect(t.takeException(), isNull);
-    for (final l in ['New session', 'Accounts and servers']) {
+    for (final l in [RegExp(r'^New session$'), RegExp('^Accounts')]) {
       await t.tap(find.bySemanticsLabel(l).first);
       await settled(t);
-      expect(t.takeException(), isNull, reason: l);
+      expect(t.takeException(), isNull, reason: '$l');
     }
   });
 
@@ -770,7 +770,7 @@ void main() {
 
     Future<Asked> page(WidgetTester t) async {
       final s = await shell(t, accounts: false);
-      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await t.tap(find.bySemanticsLabel('Accounts').first);
       await settled(t);
       return s;
     }
@@ -842,7 +842,7 @@ void main() {
       // Another page, and back: it is on still.
       await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
       await press(t, find.bySemanticsLabel('New session').first);
-      await press(t, find.bySemanticsLabel('Accounts and servers'));
+      await press(t, find.bySemanticsLabel('Accounts').first);
       s.toldOfSignin({'state': 'done', 'connection': 'c7'});
       await settled(t);
       expect(find.text('You\'re using your ChatGPT plan'), findsOneWidget);
@@ -1071,7 +1071,7 @@ void main() {
   testWidgets('a program can have several accounts', (t) async {
     final s = await shell(t);
     s.harnesses = harnesses;
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     await press(t, find.bySemanticsLabel('Add: LM Studio on this machine'));
     await press(t, find.bySemanticsLabel('Claude Code, another account').last);
     expect(field('Key'), findsNothing, reason: 'it signs in by itself');
@@ -1434,7 +1434,7 @@ void main() {
       await settled(t);
       await t.tap(find.text('Changes').last);
       await settled(t);
-      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await t.tap(find.bySemanticsLabel('Accounts').first);
       await settled(t);
       s.calls.clear();
       await press(t, find.text('Lead asks to run a command'));
@@ -1510,7 +1510,7 @@ void main() {
         ..needs = const []
         ..notifyListeners();
       await settled(t);
-      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await t.tap(find.bySemanticsLabel('Accounts').first);
       await settled(t);
       s
         ..needs = const [done]
@@ -1931,7 +1931,7 @@ void main() {
     final s = await shell(t, session: working());
     final words = find.byType(EditableText);
     await t.enterText(words, 'Half a thought');
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     expect(find.text('Half a thought'), findsNothing);
     await press(t, find.text('Done'));
     expect(find.text('Half a thought'), findsOneWidget);
@@ -1944,7 +1944,7 @@ void main() {
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     await t.pump();
     await t.enterText(words, 'and the next');
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     gate.complete();
     await settled(t);
     await press(t, find.text('Done'));
@@ -2042,7 +2042,7 @@ void main() {
       ..failsAt = 'add'
       ..gate = gate;
     await press(t, find.text('Start'));
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     gate.complete();
     await settled(t);
     expect(s.calls.map((c) => c.first), ['create', 'add', 'prompt'], reason: 'it is not opened');
@@ -2056,7 +2056,7 @@ void main() {
     await t.enterText(field('What should be done'), 'other words');
     await settled(t);
     await press(t, find.text('Start'));
-    await press(t, find.bySemanticsLabel('Accounts and servers').first);
+    await press(t, find.bySemanticsLabel('Accounts').first);
     s.gate!.complete();
     await settled(t);
     await press(t, find.bySemanticsLabel('New session').first);
@@ -2146,10 +2146,10 @@ void main() {
       );
       await settled(t);
       expect(t.takeException(), isNull);
-      for (final l in ['New session', 'Accounts and servers']) {
+      for (final l in [RegExp(r'^New session$'), RegExp('^Accounts')]) {
         await t.tap(find.bySemanticsLabel(l).first);
         await settled(t);
-        expect(t.takeException(), isNull, reason: l);
+        expect(t.takeException(), isNull, reason: '$l');
       }
     });
   }
