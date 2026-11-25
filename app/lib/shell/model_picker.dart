@@ -9,6 +9,7 @@ import '../host/proto.dart';
 import '../patterns/execution.dart';
 import '../patterns/model_name.dart';
 import '../transcript/safe_text.dart';
+import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
@@ -91,7 +92,7 @@ class ModelKey extends StatelessWidget {
       const [],
       of: of,
       onOpen: onOpen,
-      width: 440,
+      width: ModelPicker.width,
       mark: now.model.isEmpty && !program
           ? null
           : markOf(source?.provider, now.model.isEmpty ? null : now.model, now.harness),
@@ -117,24 +118,29 @@ class _Asked {
   final VoidCallback apply;
 }
 
-/// Every model of every account and program, found by what it is called; under them what the chosen
-/// one can be told.
+/// Every model of every account and program: whose at the left, which in the middle, and at the right
+/// and below what the chosen one can be told.
 class ModelPicker extends StatefulWidget {
   const ModelPicker(this.of, {required this.close, super.key});
   final ModelKey of;
   final VoidCallback close;
 
-  /// Of each account or program, until something is looked for.
+  /// Of one account or program, until more are asked for.
   static const most = 8;
+  static const width = 600.0, height = 316.0, _rail = 48.0, _efforts = 160.0;
   @override
   State<ModelPicker> createState() => _ModelPickerState();
 }
 
 class _ModelPickerState extends State<ModelPicker> {
   final _words = TextEditingController(), _scroll = ScrollController();
-  final _field = FocusNode(debugLabel: 'models');
-  final _all = <String>{};
+  final _field = FocusNode(debugLabel: 'models'), _top = FocusNode(debugLabel: 'first model');
   _Asked? _asked;
+
+  /// Whose models are shown; those that are favourites; null: nobody has said.
+  String? _whose;
+  static const _favourites = '';
+  bool _more = false;
   ModelKey get of => widget.of;
 
   @override
@@ -147,6 +153,7 @@ class _ModelPickerState extends State<ModelPicker> {
   @override
   void dispose() {
     _field.dispose();
+    _top.dispose();
     _words.dispose();
     _scroll.dispose();
     super.dispose();
@@ -155,6 +162,8 @@ class _ModelPickerState extends State<ModelPicker> {
   List<String> get _looked =>
       _words.text.toLowerCase().split(' ').where((w) => w.isNotEmpty).toList();
 
+  static String _id(Source x) => '${x.harness} ${x.connection ?? ''}';
+
   void _choose(Offer o) {
     if (o.key == of.now.key) return widget.close();
     final cost = of.costs?.call(o);
@@ -162,11 +171,17 @@ class _ModelPickerState extends State<ModelPicker> {
     setState(() => _asked = _Asked(cost, 'Keep it', 'Change to ${o.name}', () => of.onModel(o)));
   }
 
-  void _favourite(BuildContext context, Offer o) {
+  void _favourite(Offer o) {
     final all = PrefsScope.maybeOf(context);
     if (all == null) return;
     all.value = all.value.offering(o.key, favourite: !all.value.favourites.contains(o.key));
   }
+
+  void _turn(String whose) => setState(() {
+    _whose = whose;
+    _more = false;
+    _words.clear();
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -180,255 +195,417 @@ class _ModelPickerState extends State<ModelPicker> {
     final words = _looked;
     bool fits(Source x, Offer o) =>
         words.every('${o.name} ${o.model.id} ${x.name} ${x.note}'.toLowerCase().contains);
-    final rows = <Widget>[];
-    // What Enter takes, while something is looked for.
-    Offer? first;
-    final favourites = [
+    final starred = [
       for (final x in sources)
         for (final o in x.models)
-          if (p.favourites.contains(o.key) && fits(x, o)) (x, o),
+          if (p.favourites.contains(o.key)) (x, o),
     ];
-    if (favourites.isNotEmpty) {
-      rows.add(const _Heading('Favourites', ''));
-      for (final (x, o) in favourites) {
-        if (words.isNotEmpty) first ??= o;
-        rows.add(_row(context, p, o, whose: sources.length > 1 ? x.name : null));
-      }
-    }
-    var found = favourites.length;
-    for (final x in sources) {
-      final all = [
-        for (final o in arranged(x.models, p, chosen: now.key))
-          if (!p.favourites.contains(o.key) && fits(x, o)) o,
-      ];
-      found += all.length;
-      if (all.isEmpty && (words.isNotEmpty || x.models.isNotEmpty)) continue;
-      final whole = words.isNotEmpty || _all.contains('${x.harness} ${x.connection}');
-      final shown = whole ? all.take(60).toList() : all.take(ModelPicker.most).toList();
-      final chosen = all.where((o) => o.key == now.key).firstOrNull;
-      if (chosen != null && !shown.contains(chosen)) shown.add(chosen);
-      rows.add(_Heading(x.name, x.note));
-      if (x.models.isEmpty) {
-        rows.add(_None(s, x.connection!, key: ValueKey('none ${x.connection}')));
-      }
-      for (final o in shown) {
-        if (words.isNotEmpty) first ??= o;
-        rows.add(_row(context, p, o));
-      }
-      if (all.length > shown.length) {
-        rows.add(
-          _Line(
-            label: 'Show ${all.length - shown.length} more of ${oneLine(x.name, 40)}',
-            onPressed: () => setState(() => _all.add('${x.harness} ${x.connection}')),
-            child: Padding(
-              padding: const EdgeInsets.only(left: 26),
-              child: Text('${all.length - shown.length} more', style: t.type.ui.ink(c.ink3)),
+    final mine = sources
+        .where((x) => x.harness == now.harness && x.connection == now.connection)
+        .firstOrNull;
+    final whose =
+        _whose ??
+        (mine != null && now.model.isNotEmpty || starred.isEmpty
+            ? (mine ?? sources.firstOrNull)?.let(_id)
+            : _favourites);
+    final source = sources.where((x) => _id(x) == whose).firstOrNull;
+    // What is looked for is looked for everywhere.
+    final all = words.isNotEmpty
+        ? [
+            for (final x in sources)
+              for (final o in arranged(x.models, p, chosen: now.key))
+                if (fits(x, o)) (x, o),
+          ]
+        : source == null
+        ? starred
+        : [for (final o in arranged(source.models, p, chosen: now.key)) (source, o)];
+    final shown = all.take(words.isNotEmpty || _more ? 100 : ModelPicker.most).toList();
+    final chosen = all.where((e) => e.$2.key == now.key).firstOrNull;
+    if (chosen != null && !shown.contains(chosen)) shown.add(chosen);
+    // What is in no list can still be there.
+    final written = _words.text.trim(), account = mine ?? sources.firstOrNull;
+    final typed = all.isEmpty && written.isNotEmpty && account != null
+        ? Offer(account.harness, account.connection, account.provider, ModelInfo(written))
+        : null;
+    final first = words.isEmpty ? null : shown.firstOrNull?.$2 ?? typed;
+    void to(TraversalDirection d) => FocusScope.of(context).focusedChild?.focusInDirection(d);
+
+    final search = Padding(
+      padding: const EdgeInsets.fromLTRB(AxSpace.row, 7, AxSpace.row, 8),
+      child: Row(
+        children: [
+          AxGlyph(AxIcon.search, color: c.ink3),
+          const SizedBox(width: 10),
+          Expanded(
+            child: CallbackShortcuts(
+              bindings: {const SingleActivator(LogicalKeyboardKey.arrowDown): _top.requestFocus},
+              child: AxEditable(
+                label: 'Search models',
+                placeholder: 'Search models',
+                controller: _words,
+                focusNode: _field,
+                style: t.type.ui,
+                maxLines: 1,
+                onSubmitted: (_) {
+                  if (first == null) return;
+                  _choose(first);
+                  // What has a price is asked about first.
+                  if (_asked == null) widget.close();
+                },
+              ),
             ),
           ),
-        );
-      }
-    }
-    // What is in no list can still be there.
-    final written = _words.text.trim();
-    final account =
-        sources
-            .where((x) => x.connection == now.connection && x.harness == now.harness)
-            .firstOrNull ??
-        sources.firstOrNull;
-    if (found == 0 && written.isNotEmpty && account != null) {
-      final o = first = Offer(
-        account.harness,
-        account.connection,
-        account.provider,
-        ModelInfo(written),
-      );
-      rows.add(
+        ],
+      ),
+    );
+    final rows = <Widget>[
+      if (words.isEmpty && source != null)
+        _Heading(source.name, source.note)
+      else if (words.isEmpty)
+        const _Heading('Favourites', ''),
+      if (words.isEmpty && source != null && source.models.isEmpty)
+        _None(s, source.connection!, key: ValueKey('none ${source.connection}')),
+      for (final (i, (x, o)) in shown.indexed)
+        _row(
+          p,
+          o,
+          key: i < 9 ? i + 1 : null,
+          node: i == 0 ? _top : null,
+          whose: (words.isNotEmpty || source == null) && sources.length > 1 ? x.name : null,
+        ),
+      if (all.length > shown.length)
+        _Line(
+          label: 'Show ${all.length - shown.length} more',
+          onPressed: () => setState(() => _more = true),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 26),
+            child: Text('Show more', style: t.type.ui.ink(c.ink3)),
+          ),
+        ),
+      if (typed != null)
         _Line(
           label: 'Use $written',
-          onPressed: () => _choose(o),
+          onPressed: () => _choose(typed),
           child: Text.rich(
             TextSpan(
               text: 'No model fits. Use ',
               style: t.type.ui.ink(c.ink3),
               children: [
                 TextSpan(text: oneLine(written, 60), style: t.type.uiMedium.ink(c.ink1)),
-                TextSpan(text: ' of ${oneLine(account.name, 40)}'),
+                TextSpan(text: ' of ${oneLine(account?.name ?? '', 40)}'),
               ],
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
-      );
-    }
-    void down() => FocusScope.of(context).nextFocus();
+    ];
+    final list = Settle(
+      // What comes under a pointer by itself is not what is pressed.
+      stamp: Object.hash(_words.text, whose, all.length, _more),
+      child: ListView.builder(
+        controller: _scroll,
+        padding: const EdgeInsets.only(bottom: 10),
+        itemCount: rows.length,
+        itemBuilder: (_, i) => rows[i],
+      ),
+    );
+    final middle = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        search,
+        _rule,
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(child: list),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Fade(up: false, height: 12, ground: c.overlay.fill),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    final rail = _Rail(
+      [
+        if (starred.isNotEmpty || whose == _favourites)
+          _Stop(_favourites, 'Favourites', icon: AxIcon.star),
+        for (final x in sources)
+          _Stop(
+            _id(x),
+            x.note.isEmpty ? x.name : '${x.name}, ${x.note}',
+            mark: markOf(x.provider, null, x.harness),
+            letters: _letters(x, sources),
+          ),
+      ],
+      // Where one looks everywhere, nobody's is shown.
+      at: words.isEmpty ? whose : null,
+      onTurn: _turn,
+    );
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.arrowDown): down,
-        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-            FocusScope.of(context).previousFocus(),
+        for (final (k, d) in const [
+          (LogicalKeyboardKey.arrowDown, TraversalDirection.down),
+          (LogicalKeyboardKey.arrowUp, TraversalDirection.up),
+          (LogicalKeyboardKey.arrowLeft, TraversalDirection.left),
+          (LogicalKeyboardKey.arrowRight, TraversalDirection.right),
+        ])
+          SingleActivator(k): () => to(d),
+        for (final (i, (_, o)) in shown.take(9).indexed)
+          SingleActivator(_digits[i], meta: Command.isMac, control: !Command.isMac): () =>
+              _choose(o),
       },
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final room = box.maxWidth >= 500;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: ModelPicker.height,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Beside the models, a tone apart from them.
+                    SizedBox(
+                      width: ModelPicker._rail,
+                      child: Ground(c.hover, radius: AxRadius.key, child: rail),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(child: middle),
+                    if (room) ...[
+                      const SizedBox(width: 6),
+                      SizedBox(
+                        width: ModelPicker._efforts,
+                        child: Ground(c.hover, radius: AxRadius.key, child: _effort(context)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (_asked case final q?)
+                _Ask(
+                  q,
+                  onKeep: () => setState(() => _asked = null),
+                  onChange: () {
+                    setState(() => _asked = null);
+                    q.apply();
+                  },
+                )
+              else
+                ..._below(context, efforts: !room),
+              if (of.advanced.isNotEmpty) ...[_rule, ExecutionPanel(of.advanced)],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  static const _digits = [
+    LogicalKeyboardKey.digit1,
+    LogicalKeyboardKey.digit2,
+    LogicalKeyboardKey.digit3,
+    LogicalKeyboardKey.digit4,
+    LogicalKeyboardKey.digit5,
+    LogicalKeyboardKey.digit6,
+    LogicalKeyboardKey.digit7,
+    LogicalKeyboardKey.digit8,
+    LogicalKeyboardKey.digit9,
+  ];
+
+  /// What tells one from others with the same mark, or stands for one that has none.
+  static String? _letters(Source x, List<Source> all) {
+    Object? mark(Source s) => markOf(s.provider, null, s.harness);
+    final alone = all.where((s) => mark(s) == mark(x)).length == 1;
+    if (mark(x) != null && alone) return null;
+    final name = x.harness != 'axiom' && x.connection != null ? x.note : x.name;
+    final words = name.split(RegExp(r'[^\p{L}\p{N}]+', unicode: true)).where((w) => w.isNotEmpty);
+    final letters = words.length > 1
+        ? words.take(2).map((w) => w.characters.first).join()
+        : words.firstOrNull?.characters.take(2).toString() ?? '?';
+    return letters.toUpperCase();
+  }
+
+  static const _rule = Padding(
+    padding: EdgeInsets.symmetric(horizontal: AxSpace.row),
+    child: Hairline(),
+  );
+
+  ModelInfo? get _info => infoOf(of.store, of.now.harness, of.now.connection, of.now.model);
+
+  List<String> get _efforts {
+    final program = of.store.harnesses.where((h) => h.id == of.now.harness).firstOrNull;
+    final all =
+        _info?.efforts ?? ((program?.effort ?? false) ? const ['low', 'medium', 'high'] : const []);
+    return all.isEmpty && of.now.effort.isEmpty ? const [] : {'', ...all, of.now.effort}.toList();
+  }
+
+  Widget _effort(BuildContext context) {
+    final t = Ax.of(context), c = t.colors, now = of.now, all = _efforts;
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: 'Effort',
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(AxSpace.row, 5, AxSpace.row, 7),
-            child: Row(
-              children: [
-                AxGlyph(AxIcon.search, color: c.ink3),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: AxEditable(
-                    label: 'Search models',
-                    placeholder: 'Search models',
-                    controller: _words,
-                    focusNode: _field,
-                    style: t.type.ui,
-                    maxLines: 1,
-                    onSubmitted: (_) => first == null ? null : _choose(first),
-                  ),
-                ),
-              ],
-            ),
+            padding: const EdgeInsets.fromLTRB(AxSpace.row, 9, AxSpace.row, 9),
+            child: Text('Effort', style: t.type.smallStrong.ink(c.ink3)),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: AxSpace.row),
-            child: Hairline(),
-          ),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 360),
-            child: Settle(
-              // What comes under a pointer by itself is not what is pressed.
-              stamp: Object.hash(_words.text, found, _all.length),
-              child: Stack(
+          if (all.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AxSpace.row, vertical: 6),
+              child: Text(
+                now.model.isEmpty && now.harness == 'axiom'
+                    ? 'Choose a model first.'
+                    : 'This model takes none.',
+                style: t.type.label.ink(c.ink3),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
                 children: [
-                  ListView.builder(
-                    controller: _scroll,
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.only(bottom: 10),
-                    itemCount: rows.length,
-                    itemBuilder: (_, i) => rows[i],
-                  ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Fade(up: false, height: 12, ground: c.overlay.fill),
-                  ),
+                  for (final e in all)
+                    Pressable(
+                      label: effortName(e),
+                      selected: e == now.effort,
+                      onPressed: () => of.onEffort(e),
+                      builder: (context, s) => Ground(
+                        s.hovered || s.focused ? c.hover : null,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: t.density.row + 4),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: AxSpace.row),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    effortName(e),
+                                    style: e == now.effort ? t.type.uiMedium : t.type.ui,
+                                  ),
+                                ),
+                                if (e == now.effort) AxGlyph(AxIcon.check, color: c.ink1),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
-          ),
-          if (_asked case final q?)
-            _Ask(
-              q,
-              onKeep: () => setState(() => _asked = null),
-              onChange: () {
-                setState(() => _asked = null);
-                q.apply();
-              },
-            )
-          else
-            ..._told(context),
-          if (of.onModels case final f?) ...[
-            _rule,
-            _Line(
-              label: 'Manage models',
-              onPressed: () {
-                widget.close();
-                f();
-              },
-              child: Text('Manage models', style: t.type.ui.ink(c.ink2)),
-            ),
-          ],
         ],
       ),
     );
   }
 
-  static const _rule = Padding(
-    padding: EdgeInsets.symmetric(horizontal: AxSpace.row, vertical: 4),
-    child: Hairline(),
-  );
-
-  /// What the chosen one can be told: only what is offered.
-  List<Widget> _told(BuildContext context) {
-    final now = of.now, s = of.store;
-    final info = infoOf(s, now.harness, now.connection, now.model);
-    final program = s.harnesses.where((h) => h.id == now.harness).firstOrNull;
-    final efforts =
-        info?.efforts ?? ((program?.effort ?? false) ? const ['low', 'medium', 'high'] : const []);
+  /// What else the chosen one can be told, and the way to all of them.
+  List<Widget> _below(BuildContext context, {required bool efforts}) {
+    final t = Ax.of(context), c = t.colors;
+    final now = of.now, info = _info;
     final speeds = {...?info?.speeds, if (now.speed.isNotEmpty) now.speed};
-    final all = <Widget>[
-      if (efforts.isNotEmpty || now.effort.isNotEmpty)
-        _Part(
-          'Effort',
-          AxSegments<String>(
-            label: 'Effort',
-            items: [
-              for (final e in {'', ...efforts, now.effort}) (e, effortName(e), null),
-            ],
-            value: now.effort,
-            onChanged: of.onEffort,
-          ),
-        ),
-      if ((info?.thinking ?? false) || now.thinking != null)
-        _Part(
-          'Thinking',
-          AxSegments<String>(
-            label: 'Thinking',
-            items: const [('', 'Default', null), ('on', 'On', null), ('off', 'Off', null)],
-            value: switch (now.thinking) {
-              null => '',
-              true => 'on',
-              false => 'off',
-            },
-            onChanged: (v) => of.onThinking(v.isEmpty ? null : v == 'on'),
-          ),
+    final keys = <Widget>[
+      if (efforts && _efforts.isNotEmpty)
+        AxSegments<String>(
+          label: 'Effort',
+          items: [for (final e in _efforts) (e, effortName(e), null)],
+          value: now.effort,
+          onChanged: of.onEffort,
         ),
       if (speeds.isNotEmpty)
-        _Part(
-          'Speed',
-          AxSegments<String>(
-            label: 'Speed',
-            items: [
-              ('', 'Standard', null),
-              for (final v in speeds) (v, v == 'fast' ? 'Fast' : oneLine(v, 20), null),
-            ],
-            value: now.speed,
-            onChanged: (v) {
-              if (v.isEmpty || v == now.speed) return of.onSpeed(v);
-              setState(
-                () => _asked = _Asked(
-                  now.harness == 'axiom'
-                      ? 'Fast answers cost more for each token. What was cached at one speed is not at '
-                            'the other.'
-                      : 'Fast answers cost more for each token. On a plan they are paid for by usage '
-                            'credits, and not by the plan.',
-                  'Keep it',
-                  'Change to Fast',
-                  () => of.onSpeed(v),
-                ),
-              );
-            },
-          ),
+        AxSegments<String>(
+          label: 'Speed',
+          items: [
+            ('', 'Standard', null),
+            for (final v in speeds) (v, v == 'fast' ? 'Fast' : oneLine(v, 20), null),
+          ],
+          value: now.speed,
+          onChanged: (v) {
+            if (v.isEmpty || v == now.speed) return of.onSpeed(v);
+            setState(
+              () => _asked = _Asked(
+                now.harness == 'axiom'
+                    ? 'Fast answers cost more for each token. What was cached at one speed is not at '
+                          'the other.'
+                    : 'Fast answers cost more for each token. On a plan they are paid for by usage '
+                          'credits, and not by the plan.',
+                'Keep it',
+                'Change to Fast',
+                () => of.onSpeed(v),
+              ),
+            );
+          },
         ),
-      if (of.advanced.isNotEmpty) ExecutionPanel(of.advanced),
+      if ((info?.thinking ?? false) || now.thinking != null)
+        // No menu: it would stand outside what is open, and close it.
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Thinking', style: t.type.label.ink(c.ink3)),
+            const SizedBox(width: 8),
+            AxSegments<String>(
+              label: 'Thinking',
+              items: const [('', 'Default', null), ('on', 'On', null), ('off', 'Off', null)],
+              value: switch (now.thinking) {
+                null => '',
+                true => 'on',
+                false => 'off',
+              },
+              onChanged: (v) => of.onThinking(v.isEmpty ? null : v == 'on'),
+            ),
+          ],
+        ),
     ];
-    return [if (all.isNotEmpty) _rule, ...all];
+    if (keys.isEmpty && of.onModels == null) return const [];
+    return [
+      _rule,
+      Padding(
+        padding: const EdgeInsets.fromLTRB(6, 8, 6, 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: keys,
+              ),
+            ),
+            if (of.onModels case final f?)
+              AxButton(
+                label: 'Manage models',
+                tone: AxTone.quiet,
+                onPressed: () {
+                  widget.close();
+                  f();
+                },
+              ),
+          ],
+        ),
+      ),
+    ];
   }
 
-  Widget _row(BuildContext context, Prefs p, Offer o, {String? whose}) {
+  Widget _row(Prefs p, Offer o, {int? key, FocusNode? node, String? whose}) {
     final t = Ax.of(context), c = t.colors;
     final on = o.key == of.now.key, star = p.favourites.contains(o.key);
     final mark = markOf(o.provider, o.byDefault ? null : o.model.id, o.harness);
-    void toggle() => _favourite(context, o);
+    void toggle() => _favourite(o);
     return CallbackShortcuts(
       key: ValueKey('$whose ${o.key}'),
       bindings: {const SingleActivator(LogicalKeyboardKey.keyF): toggle},
       child: Pressable(
         label: o.name,
+        focusNode: node,
         hint: [?whose, if (o.model.context case final n?) '${contextName(n)} context'].join(', '),
         selected: on,
         actions: {
@@ -443,9 +620,9 @@ class _ModelPickerState extends State<ModelPicker> {
               ? c.hover
               : null,
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: t.density.row + 4),
+            constraints: BoxConstraints(minHeight: t.density.row + 6),
             child: Padding(
-              padding: const EdgeInsets.only(left: AxSpace.row, right: 4),
+              padding: const EdgeInsets.only(left: AxSpace.row, right: 6),
               child: Row(
                 children: [
                   SizedBox(width: 16, child: mark == null ? null : AxServiceMark(mark, size: 15)),
@@ -456,9 +633,10 @@ class _ModelPickerState extends State<ModelPicker> {
                         text: oneLine(o.name, 80),
                         style: on ? t.type.uiMedium : t.type.ui,
                         children: [
-                          if (whose != null)
+                          if (whose != null || o.model.context != null)
                             TextSpan(
-                              text: '   ${oneLine(whose, 24)}',
+                              text:
+                                  '   ${[?whose?.let((w) => oneLine(w, 24)), ?o.model.context?.let(contextName)].join('  ')}',
                               style: t.type.small.ink(c.ink3),
                             ),
                         ],
@@ -467,12 +645,7 @@ class _ModelPickerState extends State<ModelPicker> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  if (o.model.context case final n?) ...[
-                    Text(contextName(n), style: t.type.small.ink(c.ink3)),
-                    const SizedBox(width: 8),
-                  ],
-                  if (on) ...[AxGlyph(AxIcon.check, color: c.ink1), const SizedBox(width: 2)],
+                  if (on) ...[AxGlyph(AxIcon.check, color: c.ink1), const SizedBox(width: 6)],
                   // The keyboard has F, and a screen reader an act of the row's.
                   ExcludeFocus(
                     child: ExcludeSemantics(
@@ -489,12 +662,91 @@ class _ModelPickerState extends State<ModelPicker> {
                       ),
                     ),
                   ),
+                  SizedBox(
+                    width: MediaQuery.textScalerOf(context).scale(Command.isMac ? 26 : 38),
+                    child: key == null
+                        ? null
+                        : ExcludeSemantics(
+                            child: Text(
+                              Command.isMac ? '⌘$key' : 'Ctrl $key',
+                              textAlign: TextAlign.right,
+                              maxLines: 1,
+                              style: t.type.small.ink(c.ink4),
+                            ),
+                          ),
+                  ),
                 ],
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+extension<T> on T {
+  R let<R>(R Function(T) f) => f(this);
+}
+
+/// One whose models can be looked at.
+class _Stop {
+  const _Stop(this.id, this.label, {this.mark, this.icon, this.letters});
+  final String id, label;
+  final ServiceMark? mark;
+  final AxIcon? icon;
+  final String? letters;
+}
+
+/// Accounts and programs, one under the other.
+class _Rail extends StatelessWidget {
+  const _Rail(this.all, {required this.at, required this.onTurn});
+  final List<_Stop> all;
+  final String? at;
+  final ValueChanged<String> onTurn;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      children: [
+        for (final s in all)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Pressable(
+              label: s.label,
+              selected: s.id == at,
+              onPressed: () => onTurn(s.id),
+              builder: (context, p) => Ground(
+                s.id == at
+                    ? c.selected
+                    : p.hovered || p.focused
+                    ? c.hover
+                    : null,
+                child: SizedBox(
+                  height: 40,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (s.icon case final i?)
+                        AxGlyph(i, filled: s.id == at, color: s.id == at ? c.ink1 : c.ink2)
+                      else if (s.mark case final m?)
+                        AxServiceMark(m, size: s.letters == null ? 18 : 16),
+                      if (s.letters case final l?)
+                        Text(
+                          l,
+                          textScaler: TextScaler.noScaling,
+                          style: (s.mark == null ? t.type.labelStrong : t.type.small)
+                              .copyWith(fontSize: s.mark == null ? 12 : 10, height: 1.2)
+                              .ink(c.ink2),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -508,7 +760,7 @@ class _Heading extends StatelessWidget {
     return Semantics(
       header: true,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(AxSpace.row, 10, AxSpace.row, 4),
+        padding: const EdgeInsets.fromLTRB(AxSpace.row, 9, AxSpace.row, 5),
         child: Text.rich(
           TextSpan(
             text: oneLine(name, 60),
@@ -591,35 +843,6 @@ class _Line extends StatelessWidget {
             child: Align(alignment: Alignment.centerLeft, heightFactor: 1, child: child),
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// Something the model can be told.
-class _Part extends StatelessWidget {
-  const _Part(this.name, this.control);
-  final String name;
-  final Widget control;
-  @override
-  Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AxSpace.row, vertical: 3),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 66,
-            child: ExcludeSemantics(child: Text(name, style: t.type.label.ink(c.ink3))),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              reverse: true,
-              child: control,
-            ),
-          ),
-        ],
       ),
     );
   }

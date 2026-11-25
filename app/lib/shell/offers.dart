@@ -131,7 +131,7 @@ String effortName(String e) => switch (e) {
   'low' => 'Low',
   'medium' => 'Medium',
   'high' => 'High',
-  'xhigh' => 'X-high',
+  'xhigh' => 'Extra high',
   'max' => 'Max',
   _ => oneLine(e, 20),
 };
