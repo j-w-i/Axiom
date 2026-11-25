@@ -349,7 +349,7 @@ String toolWords(ItemModel i) {
       : verbs.$2;
   if (const {'delegate', 'agent', 'task'}.contains(tool)) return verb;
   String about;
-  if (const {'patch', 'apply_patch'}.contains(tool)) {
+  if (ToolRow.isPatch(tool)) {
     final n = ToolRow.patched(i).length;
     about = n == 0 ? '' : (n == 1 ? '1 file' : '$n files');
   } else {
@@ -753,11 +753,7 @@ class _Display extends StatelessWidget {
             ),
           ],
           if (acts && works && run != null && !stale)
-            AxButton(
-              label: 'Stop',
-              icon: AxIcon.stop,
-              onPressed: () => onStop(run),
-            ),
+            AxButton(label: 'Stop', icon: AxIcon.stop, onPressed: () => onStop(run)),
           if (stale) ...[
             const SizedBox(width: 10),
             Flexible(

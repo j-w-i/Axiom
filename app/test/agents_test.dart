@@ -550,6 +550,9 @@ void main() {
     await settled(t);
     expect(find.text('+2 −1'), findsOneWidget);
     expect(find.byType(DiffLines), findsNothing);
+    // It is named by its files, and not by its text.
+    expect(find.text('a.txt, b.txt'), findsOneWidget);
+    expect(find.text('…'), findsNothing);
     await t.tap(find.text('Patch'));
     await settled(t);
     expect(find.byType(DiffLines), findsNWidgets(2));

@@ -1261,6 +1261,8 @@ class ToolRow extends StatelessWidget {
     _ => AxIcon.more,
   };
 
+  static bool isPatch(String name) => const {'patch', 'apply_patch'}.contains(name.toLowerCase());
+
   /// The files a call has changed, as its result says.
   static List<String> patched(ItemModel i) {
     final r = i.result;
@@ -1296,8 +1298,10 @@ class ToolRow extends StatelessWidget {
         child: Text(visible(item.plain), style: t.type.ui.ink(c.ink3)),
       );
     }
-    final detail = detailOf(args);
-    final shown = item.argsCut > 0
+    // A patch is named by what it changed, and never by its own text.
+    final patch = isPatch(item.name);
+    final detail = patch ? patched(item).join(', ') : detailOf(args);
+    final shown = item.argsCut > 0 && !patch
         ? '${_bytes(item.argsCut)} of arguments, not kept'
         : oneLine(literal(cutTo(detail, 800)), 400);
     final result = item.result;
@@ -1338,7 +1342,7 @@ class ToolRow extends StatelessWidget {
               line
             else
               Pressable(
-                label: '$name $shown',
+                label: shown.isEmpty ? name : '$name $shown',
                 hint: opened ? 'Hide output' : 'Show output',
                 expanded: opened,
                 radius: 0,
