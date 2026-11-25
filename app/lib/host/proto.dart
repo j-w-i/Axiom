@@ -92,6 +92,35 @@ class Instructions {
   Json encode() => {'path': path, 'digest': digest};
 }
 
+/// What has been changed in a folder since its last commit.
+class Changes {
+  const Changes({
+    this.repository = false,
+    this.branch,
+    this.files = const [],
+    this.diff = '',
+    this.whole = true,
+  });
+  Changes.decode(Json j)
+    : repository = j['repository']! as bool,
+      branch = j['branch'] as String?,
+      files = [
+        for (final f in j['files']! as List<Object?>)
+          Changed((f! as Json)['path']! as String, (f as Json)['what']! as String),
+      ],
+      diff = j['diff']! as String,
+      whole = j['whole']! as bool;
+  final bool repository, whole;
+  final String? branch;
+  final List<Changed> files;
+  final String diff;
+}
+
+class Changed {
+  const Changed(this.path, this.what);
+  final String path, what;
+}
+
 /// A program of the person's own that the host can drive.
 class HarnessInfo {
   const HarnessInfo(

@@ -1219,17 +1219,18 @@ class _Changes extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    final (files, left) = readDiff(diff);
+    final files = readDiffs(diff, atAll: 400);
+    final left = files.fold(0, (n, f) => n + f.left);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final (path, lines) in files) ...[
+        for (final f in files) ...[
           if (files.length > 1)
             Padding(
               padding: const EdgeInsets.only(top: 4, bottom: 4),
-              child: Text(oneLine(literal(path), 200), style: t.type.codeSmall.ink(c.ink3)),
+              child: Text(oneLine(literal(f.path), 200), style: t.type.codeSmall.ink(c.ink3)),
             ),
-          DiffLines(lines),
+          DiffLines(f.lines),
         ],
         if (left > 0)
           Padding(

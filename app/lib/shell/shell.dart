@@ -17,6 +17,7 @@ import '../ui/marks.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
+import 'changes.dart';
 import 'drafts.dart';
 import 'start.dart';
 import 'talk.dart';
@@ -39,6 +40,9 @@ class _ShellState extends State<Shell> {
   String? _agent;
   String? _session;
   _View _view = _View.work;
+
+  /// Of the agent's views, which.
+  int _tab = 0;
   final _drafts = Drafts();
   late final _start = StartDraft(widget.store);
 
@@ -235,6 +239,8 @@ class _ShellState extends State<Shell> {
                                 agent: _agent,
                                 stale: stale,
                                 drafts: _drafts,
+                                tab: _tab,
+                                onTab: (i) => setState(() => _tab = i),
                                 onAgain: () =>
                                     _do('The session was not opened', () => s.open(m.id)),
                                 onStop: (run) =>
@@ -427,11 +433,15 @@ class _Display extends StatelessWidget {
     required this.agent,
     required this.stale,
     required this.drafts,
+    required this.tab,
+    required this.onTab,
     required this.onAgain,
     required this.onStop,
   });
   final HostStore store;
   final Drafts drafts;
+  final int tab;
+  final ValueChanged<int> onTab;
   final ValueChanged<String> onStop;
   final SessionModel session;
   final String? agent;
@@ -460,47 +470,50 @@ class _Display extends StatelessWidget {
         // The transcript between these two looks after itself.
         ListenableBuilder(listenable: a, builder: (context, _) => _bar(context, a)),
         ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, box) => Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(child: TranscriptView(a)),
-                // In a window too small for all of it, its end is in sight and the rest scrolls.
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: box.maxHeight),
-                  child: SingleChildScrollView(
-                    reverse: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (session.requests.values.any(
-                          (r) => !acts || r.opened.answerable != Answerable.live,
-                        ))
-                          _Asked(session, all: !acts),
-                        if (acts)
-                          ListenableBuilder(
-                            listenable: a,
-                            builder: (context, _) => Talk(
-                              store,
-                              session,
-                              a,
-                              draft: drafts.of(session.id, a.id),
-                              live: !stale,
-                              // What is asked stays in sight beside its keys.
-                              room: box.maxHeight * .35,
-                              key: ValueKey('${session.id} ${a.id}'),
+        if (acts && tab == 1)
+          Expanded(child: ChangesView(store, session, key: ValueKey(session.id)))
+        else
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, box) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: TranscriptView(a)),
+                  // In a window too small for all of it, its end is in sight and the rest scrolls.
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: box.maxHeight),
+                    child: SingleChildScrollView(
+                      reverse: true,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (session.requests.values.any(
+                            (r) => !acts || r.opened.answerable != Answerable.live,
+                          ))
+                            _Asked(session, all: !acts),
+                          if (acts)
+                            ListenableBuilder(
+                              listenable: a,
+                              builder: (context, _) => Talk(
+                                store,
+                                session,
+                                a,
+                                draft: drafts.of(session.id, a.id),
+                                live: !stale,
+                                // What is asked stays in sight beside its keys.
+                                room: box.maxHeight * .35,
+                                key: ValueKey('${session.id} ${a.id}'),
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -515,7 +528,9 @@ class _Display extends StatelessWidget {
       name: a.name,
       state: phaseOf(a.phase),
       mark: markOf(x.provider, x.model, x.harness),
-      tabs: const [('Conversation', null)],
+      tabs: [('Conversation', null), if (acts) ('Changes', null)],
+      index: acts ? tab : 0,
+      onTab: onTab,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

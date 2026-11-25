@@ -264,6 +264,10 @@ class HostStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// What has been changed in a session's folder.
+  Future<Changes> changes(String session) async =>
+      Changes.decode((await _live.call('workspace.changes', {'session': session}))! as Json);
+
   /// As a person knows it.
   String harnessName(String id) =>
       id == 'axiom' ? 'Axiom' : harnesses.where((h) => h.id == id).firstOrNull?.name ?? id;

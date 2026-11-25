@@ -68,6 +68,9 @@ class Asked extends HostStore {
   @override
   Future<List<Instructions>> look(String path) async =>
       words[path] ?? (throw const Failed(1, 'bad', 'x'));
+  Changes now = const Changes();
+  @override
+  Future<Changes> changes(String session) => _do(['changes', session], now);
   @override
   Future<void> open(String id) => _do(['open', id], null);
   @override
@@ -485,12 +488,12 @@ void main() {
   });
 
   test('a diff is read line by line, and no more than there is room for', () {
-    final (files, left) = readDiff(
+    final f = readDiffs(
       '--- a\n+++ a\n@@ -10,2 +10,3 @@ fn x\n same\n-old\n+new\n+more\n@@ -90 +91 @@\n-x\n+y\n',
-    );
-    expect(files.single.$1, 'a');
+    ).single;
+    expect((f.path, f.added, f.removed, f.left), ('a', 3, 2, 0));
     expect(
-      [for (final l in files.single.$2) (l.kind, l.number, l.text)],
+      [for (final l in f.lines) (l.kind, l.number, l.text)],
       [
         (DiffKind.same, 10, 'same'),
         (DiffKind.remove, 11, 'old'),
@@ -500,11 +503,17 @@ void main() {
         (DiffKind.add, 91, 'y'),
       ],
     );
-    expect(left, 0);
-    final gone = readDiff('--- b\n+++ (removed)\n@@ -1 +0,0 @@\n-x\n').$1.single;
-    expect(gone.$1, 'b');
-    final many = readDiff('--- a\n+++ a\n@@ -1 +1 @@\n${'+x\n' * 500}', most: 10);
-    expect([many.$1.single.$2.length, many.$2], [10, 490]);
+    expect(readDiffs('--- b\n+++ (removed)\n@@ -1 +0,0 @@\n-x\n').single.path, 'b');
+    // A removed line that looks like the beginning of a file is a removed line.
+    final dashes = readDiffs(
+      '--- a\n+++ a\n@@ -1,2 +1,2 @@\n--- x\n+++ y\n same\n--- c d\t\n+++ c d\t\n@@ -1 +1 @@\n-1\n+2\n',
+    );
+    expect([for (final f in dashes) f.path], ['a', 'c d']);
+    expect([for (final l in dashes.first.lines) l.text], ['-- x', '++ y', 'same']);
+    final many = readDiffs('--- a\n+++ a\n@@ -0,0 +1,500 @@\n${'+x\n' * 500}', most: 10).single;
+    expect((many.lines.length, many.left, many.added), (10, 490, 500));
+    final all = readDiffs('--- a\n+++ a\n@@ -0,0 +1,9 @@\n${'+x\n' * 9}' * 3, atAll: 12);
+    expect([for (final f in all) f.lines.length], [9, 3, 0]);
     for (final odd in [
       '',
       'nonsense',
@@ -513,7 +522,7 @@ void main() {
       '--- a\n+++ a\n+x',
       '--- a\n+++ a\n@@ x @@\n+x',
     ]) {
-      readDiff(odd);
+      readDiffs(odd);
     }
   });
 
@@ -771,6 +780,69 @@ void main() {
     await press(t, find.text('Older'));
     expect(s.calls.last, ['open', 's1']);
     expect(s.calls.length, 2);
+  });
+
+  testWidgets('what has changed in the folder is shown, file by file', (t) async {
+    final s = await shell(t, session: working());
+    s.now = const Changes(
+      repository: true,
+      branch: 'trunk',
+      files: [
+        Changed('lib/cache.dart', 'changed'),
+        Changed('new dir/é.txt', 'new'),
+        Changed('gone.txt', 'removed'),
+        Changed('logo.png', 'new'),
+      ],
+      diff:
+          'diff --git lib/cache.dart lib/cache.dart\nindex 1..2 100644\n--- lib/cache.dart\n+++ lib/cache.dart\n'
+          '@@ -10,3 +10,3 @@ class Cache {\n   final a;\n--- old\n+  final b;\n   final c;\n'
+          'diff --git gone.txt gone.txt\ndeleted file mode 100644\n--- gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-was here\n'
+          '--- (new)\n+++ new dir/é.txt\n@@ -0,0 +1 @@\n+fresh\n',
+      whole: false,
+    );
+    await t.tap(find.text('Changes').last);
+    await settled(t);
+    expect(find.text('trunk'), findsOneWidget);
+    expect(find.text('4 files'), findsOneWidget);
+    for (final (file, what, add, remove) in [
+      ('lib/cache.dart', 'changed', 1, 1),
+      ('new dir/é.txt', 'new', 1, 0),
+      ('gone.txt', 'removed', 0, 1),
+      ('logo.png', 'new', 0, 0),
+    ]) {
+      expect(
+        find.bySemanticsLabel('$file, $what, $add added, $remove removed'),
+        findsOneWidget,
+        reason: file,
+      );
+    }
+    for (final l in ['  final b;', 'fresh', 'was here', '-- old']) {
+      expect(find.textContaining(l, findRichText: true), findsWidgets, reason: l);
+    }
+    expect(find.text('There is more than can be shown here.'), findsOneWidget);
+    await snap(t, 'changes');
+    await t.tap(find.bySemanticsLabel('lib/cache.dart, changed, 1 added, 1 removed'));
+    await settled(t);
+    expect(find.textContaining('  final b;', findRichText: true), findsNothing);
+    // When somebody has stopped working it is looked at again.
+    s.calls.clear();
+    s.now = const Changes(repository: true, branch: 'trunk');
+    s.current!.apply([
+      const Event(92, 92, RunEnded('r', Outcome.completed, null)),
+      const Event(93, 93, AgentStateChanged('a', AgentPhase.done)),
+    ]);
+    await settled(t);
+    expect(s.calls, [
+      ['changes', 's'],
+    ]);
+    expect(find.text('Nothing has changed since the last commit.'), findsOneWidget);
+    s.failure = const Failed(1, 'bad_request', 'there is no sandbox on this system');
+    await t.tap(find.text('Look again'));
+    await settled(t);
+    expect(find.text('there is no sandbox on this system'), findsOneWidget);
+    await t.tap(find.text('Conversation').last);
+    await settled(t);
+    expect(find.textContaining('I will run the tests'), findsOneWidget);
   });
 
   testWidgets('a double click answers one question, not the next as well', (t) async {

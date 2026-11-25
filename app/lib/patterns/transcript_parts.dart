@@ -199,42 +199,75 @@ class DiffLines extends StatelessWidget {
   }
 }
 
-/// A unified diff, file by file. Lines beyond [most] are left out; the second part says how many.
-(List<(String, List<DiffLine>)>, int) readDiff(String text, {int most = 400}) {
-  final files = <(String, List<DiffLine>)>[];
-  var was = 0, now = 0, shown = 0, left = 0;
-  var from = '';
+/// One file of a diff: its first lines, how many were added and removed in all, and how many lines
+/// are not here.
+class FileDiff {
+  FileDiff(this.path);
+  final String path;
+  final lines = <DiffLine>[];
+  int added = 0, removed = 0, left = 0;
+}
+
+/// A unified diff, file by file. How long a part is says itself, so that a removed line that begins
+/// with dashes is not taken for another file.
+/// Lines beyond [most] of one file, or [atAll] of all, are only counted.
+List<FileDiff> readDiffs(String text, {int most = 400, int atAll = 20000}) {
+  final files = <FileDiff>[];
+  FileDiff? f;
+  String? from;
+  var was = 0, now = 0, olds = 0, news = 0, shown = 0;
   for (final l in text.split('\n')) {
-    if (l.startsWith('--- ')) {
-      from = l.substring(4);
-    } else if (l.startsWith('+++ ')) {
-      final to = l.substring(4);
-      files.add((to.startsWith('(') ? from : to, []));
-    } else if (l.startsWith('@@')) {
-      final m = RegExp(r'^@@ -(\d+)(?:,\d+)? \+(\d+)').firstMatch(l);
-      was = int.parse(m?.group(1) ?? '0');
-      now = int.parse(m?.group(2) ?? '0');
-    } else if (files.isNotEmpty && l.isNotEmpty) {
-      final kind = switch (l[0]) {
+    if (olds > 0 || news > 0) {
+      final kind = switch (l.isEmpty ? ' ' : l[0]) {
         '+' => DiffKind.add,
         '-' => DiffKind.remove,
         ' ' => DiffKind.same,
         _ => null,
       };
-      if (kind == null) continue;
-      if (shown >= most) {
-        left++;
-        continue;
+      // "\ No newline at end of file".
+      if (kind == null || f == null) continue;
+      if (f.lines.length >= most || shown >= atAll) {
+        f.left++;
+      } else {
+        shown++;
+        f.lines.add(
+          DiffLine(
+            kind,
+            kind == DiffKind.remove ? was : now,
+            l.isEmpty ? '' : cutTo(l.substring(1), 1000),
+          ),
+        );
       }
-      shown++;
-      files.last.$2.add(
-        DiffLine(kind, kind == DiffKind.remove ? was : now, cutTo(l.substring(1), 1000)),
-      );
-      if (kind != DiffKind.add) was++;
-      if (kind != DiffKind.remove) now++;
+      if (kind != DiffKind.add) {
+        was++;
+        olds--;
+      }
+      if (kind != DiffKind.remove) {
+        now++;
+        news--;
+      }
+      if (kind == DiffKind.add) f.added++;
+      if (kind == DiffKind.remove) f.removed++;
+      continue;
+    }
+    if (l.startsWith('--- ')) {
+      from = l.substring(4);
+    } else if (l.startsWith('+++ ') && from != null) {
+      final to = l.substring(4);
+      final gone = to == '/dev/null' || to.startsWith('(');
+      // Git ends a name that has spaces in it with a tab.
+      final name = gone ? from : to;
+      f = FileDiff(name.endsWith('\t') ? name.substring(0, name.length - 1) : name);
+      files.add(f);
+      from = null;
+    } else if (RegExp(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@').firstMatch(l) case final m?) {
+      was = int.parse(m[1]!);
+      olds = int.parse(m[2] ?? '1');
+      now = int.parse(m[3]!);
+      news = int.parse(m[4] ?? '1');
     }
   }
-  return (files, left);
+  return files;
 }
 
 /// A permission request. The subject is exact, whole and spelled out: what cannot be seen is escaped,
