@@ -388,6 +388,8 @@ async fn two_who_change_the_same_are_told_of() {
     assert!(!c.files.iter().find(|f| f.path == "same.txt").unwrap().clash);
     let f = file(&c, "same.txt");
     assert!(!f.unsettled && f.diff.as_ref().unwrap().contains(" ada\n+ben\n"), "{f:?}");
+    let call = Call::CopyRenew { session: t.s.clone(), agent: b.clone() };
+    assert_eq!(t.c.call(call).await.unwrap()["clashes"], json!([]), "it is settled");
     t.bring(&b, &["same.txt"]).await;
     assert_eq!(t.file("same.txt").as_deref(), Some("ada\nben\n"));
     // What the folder has and only it changed is taken over.
@@ -626,6 +628,32 @@ async fn what_ended_half_way_is_recognised() {
     let dirs =
         std::fs::read_dir(records(&t)).unwrap().flatten().find(|e| e.path().is_dir()).unwrap();
     assert_eq!(std::fs::read_dir(dirs.path()).unwrap().count(), 1);
+}
+
+/// What was brought in is known of only as long as nothing else has happened to it.
+#[tokio::test]
+async fn what_changed_after_it_was_brought_in_is_a_persons() {
+    let mut t = T::new(vec![]).await;
+    t.write("a.txt", "old\n");
+    let a = t.agent("Builder", Access::Work, true).await;
+    t.does(&a, "echo agent > a.txt").await;
+    t.bring(&a, &["a.txt"]).await;
+    // Neither what it was nor what it became: the person's.
+    t.write("a.txt", "mine\n");
+    t.does(&a, "echo more >> a.txt").await;
+    let c = t.changes(&a).await;
+    assert!(file(&c, "a.txt").clash);
+    assert_eq!(t.bring(&a, &["a.txt"]).await["brought"], json!([]));
+    assert_eq!(t.file("a.txt").as_deref(), Some("mine\n"));
+    // Taken over since, and then as it was at first: still the person's, not the agent's.
+    t.does(&a, "echo agent > a.txt").await;
+    let renew = Call::CopyRenew { session: t.s.clone(), agent: a.clone() };
+    t.c.call(renew.clone()).await.unwrap();
+    assert_eq!(t.copied(&a, "a.txt").as_deref(), Some("mine\n"));
+    t.write("a.txt", "old\n");
+    assert_eq!(t.changes(&a).await.files, []);
+    t.c.call(renew).await.unwrap();
+    assert_eq!(t.copied(&a, "a.txt").as_deref(), Some("old\n"));
 }
 
 /// The same for bringing a copy up to date: what was taken over is not taken for the agent's.

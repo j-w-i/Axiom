@@ -499,7 +499,7 @@ fn what_took_the_place_of_a_folder() {
             continue;
         }
         let can = c.path == "gone/c";
-        assert_eq!(c.never.is_none() && t.plan(&was, &c.path).is_ok(), can, "{c:?}");
+        assert_eq!((c.never.is_none(), t.plan(&was, &c.path).is_ok()), (can, can), "{c:?}");
     }
     assert!(t.bring(&was, "src/a").is_err());
     assert!(t.bring(&was, "src").is_err());
