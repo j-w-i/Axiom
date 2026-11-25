@@ -152,7 +152,10 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
           // An agent is chosen within its session only.
           if (_session != s.current?.id) {
             _session = s.current?.id;
-            _agent = _wanted?.$1 == _session ? _wanted!.$2 : null;
+            _agent = switch (_wanted) {
+              (final session, final agent) when session == _session => agent,
+              _ => null,
+            };
             _wanted = null;
           }
           final stale = s.phase != HostPhase.connected;

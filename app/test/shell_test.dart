@@ -191,6 +191,20 @@ void main() {
     s.dispose();
   });
 
+  testWidgets('a session that is open no more leaves the window standing', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    s
+      ..current = null
+      ..notifyListeners();
+    await t.pump();
+    expect(t.takeException(), isNull);
+    expect(find.text('No sessions yet'), findsOneWidget);
+    s.dispose();
+  });
+
   testWidgets('the strip says where the work is, until something has failed', (t) async {
     for (final (path, last) in [
       ('/home/me/axiom', 'axiom'),
