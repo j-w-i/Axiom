@@ -703,6 +703,26 @@ void main() {
     expect(find.text('429: limit reached'), findsOneWidget);
   });
 
+  testWidgets('whose request it is, and what others call their tools', (t) async {
+    final f = Feed()
+      ..open('p', ItemKind.prompt, 'Lead')
+      ..end('p', 'Look at it.')
+      ..open('q', ItemKind.prompt)
+      ..end('q', 'And this.')
+      ..open('t', ItemKind.tool, 'agent', {'do': 'tell', 'name': 'Looker', 'text': 'Look.'})
+      ..end('t', 'ok', {'summary': 'Looker'})
+      ..open('u', ItemKind.tool, 'Bash', {'description': 'builds', 'command': 'make all'})
+      ..end('u', 'ok');
+    await mount(t, TranscriptView(f.agent), dpr: 1);
+    expect(find.text('From Lead'), findsOneWidget);
+    expect(find.bySemanticsLabel('Request from Lead'), findsOneWidget);
+    expect(find.bySemanticsLabel('Request'), findsOneWidget);
+    expect(find.text('tell Looker: Look.'), findsOneWidget);
+    expect(find.text('make all'), findsOneWidget);
+    expect(ToolRow.iconOf('Bash'), AxIcon.terminal);
+    expect(ToolRow.iconOf('WebFetch'), AxIcon.web);
+  });
+
   testWidgets('tool output opens on request', (t) async {
     final f = Feed()..open('t', ItemKind.tool, 'shell', {'command': 'make'});
     f.end('t', 'line one\nline two', {'summary': 'ok'});

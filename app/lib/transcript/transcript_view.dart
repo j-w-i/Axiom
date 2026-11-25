@@ -598,6 +598,7 @@ class _RowView extends StatelessWidget {
       final w = BlockView(
         blocks[r.index],
         voice: i.kind,
+        by: i.name,
         opens: r.index == 0,
         afterTool: r.index == 0 && afterWork && !wide,
         goesOn: r.index + 1 < blocks.length && blocks[r.index + 1].continues,
@@ -724,6 +725,7 @@ class _ProseState extends State<_Prose> {
     return _built[k] = BlockView(
       b,
       voice: i.kind,
+      by: i.name,
       opens: from + k == 0,
       afterTool: from + k == 0 && widget.after,
       goesOn: goesOn,
@@ -773,6 +775,7 @@ class BlockView extends StatefulWidget {
     this.block, {
     required this.voice,
     super.key,
+    this.by = '',
     this.opens = false,
     this.afterTool = false,
     this.goesOn = false,
@@ -783,6 +786,9 @@ class BlockView extends StatefulWidget {
   final String Function()? whole;
   final Block block;
   final ItemKind voice;
+
+  /// Of a request: the agent that made it, if it is not a person's.
+  final String by;
 
   /// First of its item; after a run of tools; continued by the next block; last of its item.
   final bool opens, afterTool, goesOn, closes;
@@ -881,6 +887,19 @@ class _BlockViewState extends State<BlockView> {
         ? 6.0
         : 11.0;
     final asked = widget.voice == ItemKind.prompt;
+    if (asked && widget.opens && widget.by.isNotEmpty) {
+      child = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SelectionContainer.disabled(
+            child: Text('From ${oneLine(literal(widget.by), 60)}', style: t.type.label.ink(c.ink3)),
+          ),
+          const SizedBox(height: 2),
+          child,
+        ],
+      );
+    }
     if (asked) child = _Voice(child, opens: widget.opens, closes: widget.closes, gap: top);
     child = Padding(
       // The tile begins above its words, which stay on the line any others would.
@@ -917,7 +936,7 @@ class _BlockViewState extends State<BlockView> {
       container: true,
       explicitChildNodes: true,
       label: switch (widget.voice) {
-        ItemKind.prompt => 'Request',
+        ItemKind.prompt => widget.by.isEmpty ? 'Request' : 'Request from ${widget.by}',
         ItemKind.reasoning => 'Reasoning',
         _ => 'Answer',
       },
@@ -1230,15 +1249,28 @@ class ToolRow extends StatelessWidget {
   final VoidCallback? onToggle;
   static const maxOutput = 20000;
 
-  static AxIcon iconOf(String name) => switch (name) {
-    'read' => AxIcon.file,
-    'edit' || 'write' || 'patch' => AxIcon.edit,
-    'search' || 'glob' || 'list' => AxIcon.search,
-    'shell' || 'test' || 'job' => AxIcon.terminal,
-    'fetch' => AxIcon.web,
-    'delegate' => AxIcon.delegate,
+  /// Also by the names that other harnesses have for the same.
+  static AxIcon iconOf(String name) => switch (name.toLowerCase()) {
+    'read' || 'notebookread' => AxIcon.file,
+    'edit' || 'write' || 'patch' || 'multiedit' || 'notebookedit' || 'apply_patch' => AxIcon.edit,
+    'search' || 'glob' || 'list' || 'grep' || 'ls' || 'find' => AxIcon.search,
+    'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => AxIcon.terminal,
+    'fetch' || 'webfetch' || 'websearch' => AxIcon.web,
+    'delegate' || 'agent' || 'task' => AxIcon.delegate,
     _ => AxIcon.more,
   };
+
+  static String _detail(Object? args) {
+    if (args is! Map) return '${args ?? ''}';
+    if (args['do'] case final String todo) {
+      final rest = [args['name'], args['text'] ?? args['command']].nonNulls.join(': ');
+      return rest.isEmpty ? todo : '$todo $rest';
+    }
+    for (final k in const ['path', 'file_path', 'command', 'pattern', 'url', 'query', 'title']) {
+      if (args[k] case final v?) return '$v';
+    }
+    return '${args.values.firstOrNull ?? ''}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1251,9 +1283,7 @@ class ToolRow extends StatelessWidget {
         child: Text(visible(item.plain), style: t.type.ui.ink(c.ink3)),
       );
     }
-    final detail = args is Map
-        ? '${args['path'] ?? args['command'] ?? args['pattern'] ?? args.values.firstOrNull ?? ''}'
-        : '${args ?? ''}';
+    final detail = _detail(args);
     final shown = item.argsCut > 0
         ? '${_bytes(item.argsCut)} of arguments, not kept'
         : oneLine(literal(cutTo(detail, 800)), 400);
