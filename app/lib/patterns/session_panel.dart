@@ -392,7 +392,11 @@ class SessionRow extends StatelessWidget {
         .toList();
     return Pressable(
       label: session.title,
-      hint: busy.isEmpty ? session.age : '${busy.length} at work',
+      hint: busy.isNotEmpty
+          ? '${busy.length} at work'
+          : session.working
+          ? 'at work'
+          : session.age,
       onPressed: onOpen,
       builder: (context, s) => DecoratedBox(
         decoration: BoxDecoration(
@@ -414,10 +418,81 @@ class SessionRow extends StatelessWidget {
                   ),
                 ),
                 for (final a in busy.take(4)) ...[const SizedBox(width: 4), AxLamp(a.state)],
+                if (busy.isEmpty && session.working) ...[
+                  const SizedBox(width: 4),
+                  const AxLamp(AgentState.running),
+                ],
                 const SizedBox(width: 8),
                 Text(session.age, style: t.type.small.ink(c.ink4)),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One thing that waits for a person: who asks what, and where. It is answered there.
+class NeedsRow extends StatelessWidget {
+  const NeedsRow({
+    required this.agent,
+    required this.what,
+    required this.subject,
+    required this.session,
+    required this.age,
+    required this.onOpen,
+    super.key,
+  });
+  final String agent, what, subject, session, age;
+  final VoidCallback onOpen;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Pressable(
+      label: '$agent $what: $subject, in $session',
+      hint: age,
+      onPressed: onOpen,
+      builder: (context, s) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: s.hovered ? c.hover : null,
+          borderRadius: BorderRadius.circular(AxRadius.key),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 5, 12, 6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(padding: EdgeInsets.only(top: 3), child: AxLamp(AgentState.asking)),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$agent $what',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.ui.ink(c.ink1),
+                    ),
+                    Text(
+                      subject,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.codeSmall.ink(c.ink2),
+                    ),
+                    Text(
+                      session,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.small.ink(c.ink3),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(age, style: t.type.small.ink(c.ink3)),
+            ],
           ),
         ),
       ),

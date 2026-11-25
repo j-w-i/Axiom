@@ -135,7 +135,11 @@ class SessionView {
     required this.age,
     this.agents = const [],
     this.tasks = const [],
+    this.working = false,
   });
+
+  /// Something of it runs. Who, is known of the one that is open only.
+  final bool working;
   final String id, title, age;
   final List<AgentView> agents;
   final List<TaskView> tasks;

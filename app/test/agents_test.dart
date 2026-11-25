@@ -1186,6 +1186,94 @@ void main() {
     expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
   });
 
+  group('what needs its person', () {
+    const here = Waits(
+      's',
+      'Fix the cache',
+      'a',
+      'Lead',
+      'q1',
+      'asks to run a command',
+      'cargo test',
+      1,
+    );
+    const there = Waits('s2', 'Other work', 'b', 'Ada', 'q2', 'asks to write a file', 'a.txt', 2);
+
+    testWidgets('is one list over all sessions, and leads to where it is asked', (t) async {
+      final s = await shell(t, session: working(asks: true));
+      expect(find.textContaining('Needs you'), findsNothing);
+      s
+        ..needs = const [here, there]
+        ..notifyListeners();
+      await settled(t);
+      expect(find.text('Needs you · 2'), findsOneWidget);
+      expect(find.text('Ada asks to write a file'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Ada asks to write a file: a.txt, in Other work'),
+        findsOneWidget,
+      );
+      await snap(t, 'needs-you');
+      // From another page and another tab, in the session that is open.
+      s.current!.apply([const Event(91, 91, AgentAdded('z', 'Zoe', x, null, access: Access.ask))]);
+      await settled(t);
+      await t.tap(find.bySemanticsLabel(RegExp('^Zoe')).first);
+      await settled(t);
+      await t.tap(find.text('Changes').last);
+      await settled(t);
+      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await settled(t);
+      s.calls.clear();
+      await press(t, find.text('Lead asks to run a command'));
+      expect(s.calls, isEmpty, reason: 'it is open already');
+      expect(find.byType(AccountsPage), findsNothing);
+      expect(find.textContaining('to Lead'), findsWidgets);
+      expect(find.byType(RequestBar), findsOneWidget);
+      // In another session: that is opened, and its agent is the one that is shown.
+      await press(t, find.text('Ada asks to write a file'));
+      expect(s.calls, [
+        ['open', 's2'],
+      ]);
+      s
+        ..current = (SessionModel('s2')
+          ..apply(const [
+            Event(1, 1, SessionCreated('Other work', '/o')),
+            Event(2, 2, AgentAdded('c', 'Cleo', x, null, access: Access.ask)),
+            Event(3, 3, AgentAdded('b', 'Ada', x, null, access: Access.ask)),
+          ]))
+        ..needs = const [here]
+        ..notifyListeners();
+      await settled(t);
+      expect(find.text('Say something to Ada'), findsOneWidget);
+      expect(find.text('Needs you'), findsOneWidget);
+      s
+        ..needs = const []
+        ..notifyListeners();
+      await settled(t);
+      expect(find.textContaining('Needs you'), findsNothing);
+    });
+
+    testWidgets('a session that is opened by hand shows its first agent', (t) async {
+      final s = await shell(t, session: working());
+      s
+        ..sessions = const []
+        ..needs = const [there]
+        ..notifyListeners();
+      await settled(t);
+      await press(t, find.text('Ada asks to write a file'));
+      // It was not opened: what was wanted then is not shown some other time.
+      s
+        ..current = (SessionModel('s3')
+          ..apply(const [
+            Event(1, 1, SessionCreated('Third', '/o')),
+            Event(2, 2, AgentAdded('c', 'Cleo', x, null, access: Access.ask)),
+            Event(3, 3, AgentAdded('b', 'Ada', x, null, access: Access.ask)),
+          ]))
+        ..notifyListeners();
+      await settled(t);
+      expect(find.text('Say something to Cleo'), findsOneWidget);
+    });
+  });
+
   group('an agent that works in a copy', () {
     const some = '--- x\n+++ x\n@@ -1 +1 @@\n-old\n+fresh\n';
     const files = [

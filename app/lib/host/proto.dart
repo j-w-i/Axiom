@@ -267,6 +267,33 @@ class Moved {
   final List<(String, String)> left;
 }
 
+/// Something that waits for a person, wherever it is.
+class Waits {
+  const Waits(
+    this.session,
+    this.title,
+    this.agent,
+    this.name,
+    this.request,
+    this.what,
+    this.subject,
+    this.at,
+  );
+  Waits.decode(Json j)
+    : session = j['session']! as String,
+      title = j['title']! as String,
+      agent = j['agent']! as String,
+      name = j['name']! as String,
+      request = j['request']! as String,
+      what = j['what']! as String,
+      subject = j['subject']! as String,
+      at = j['at']! as int;
+
+  /// [subject]: how it begins. All of it is where it is asked.
+  final String session, title, agent, name, request, what, subject;
+  final int at;
+}
+
 /// The environment in which what an agent does is done by Axiom, whatever its harness.
 const axiomTools = 'axiom';
 
@@ -586,6 +613,7 @@ sealed class Message {
     }
     if (j case {'session': final String s, 'resync': final int n}) return Resync(s, n);
     if (j case {'session': final String s, 'fault': final String f}) return Fault(s, f);
+    if (j case {'waiting': final int n}) return WaitingChanged(n);
     if (j case {'id': final int id, 'error': final Json e}) {
       return Failed(id, e['code'] as String? ?? 'unknown', e['message'] as String? ?? '');
     }
@@ -598,6 +626,12 @@ class Events extends Message {
   const Events(this.session, this.events);
   final String session;
   final List<Event> events;
+}
+
+/// What waits for a person is something else now.
+class WaitingChanged extends Message {
+  const WaitingChanged(this.count);
+  final int count;
 }
 
 class Resync extends Message {
