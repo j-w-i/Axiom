@@ -57,6 +57,7 @@ class Asked extends HostStore {
     Access access, {
     List<Instructions> instructions = const [],
     bool trust = false,
+    bool apart = false,
   }) => _do([
     'add',
     session,
@@ -67,7 +68,27 @@ class Asked extends HostStore {
     x.model,
     access,
     for (final i in instructions) i.digest,
+    if (apart) 'apart',
   ], 'a_new');
+
+  CopyChanges copy = const CopyChanges();
+  @override
+  Future<CopyChanges> copyChanges(String session, String agent) =>
+      _do(['copy', session, agent], copy);
+  Moved moved = const Moved([], []);
+  @override
+  Future<Moved> bringIn(String session, String agent, List<CopyFile> files) =>
+      _do(['bring', for (final f in files) (f.path, f.digest)], moved);
+  @override
+  Future<Moved> putBack(String session, String agent) => _do(['back', session, agent], moved);
+  (int, String?) renewed = (0, null);
+  @override
+  Future<(int, String?)> renewCopy(String session, String agent) =>
+      _do(['renew', session, agent], renewed);
+  @override
+  Future<void> removeCopy(String session, String agent, {required bool lose}) =>
+      _do(['throw away', session, agent, lose], null);
+
   Map<String, List<Instructions>> words = const {};
   @override
   Future<List<Instructions>> look(String path) async =>
@@ -195,6 +216,10 @@ SessionModel working({Access? access = Access.ask, bool asks = false}) {
   ]);
 }
 
+/// The box whose label begins so.
+Finder check(String label) =>
+    find.byWidgetPredicate((w) => w is AxCheck && w.label.startsWith(label));
+
 Future<void> settled(WidgetTester t) async {
   await t.pump(const Duration(milliseconds: 100));
   await t.pump(const Duration(milliseconds: 700));
@@ -274,7 +299,7 @@ void main() {
     await snap(t, 'instructions');
     // Another folder's are other words.
     await folder('/q');
-    expect(t.widget<AxCheck>(find.byType(AxCheck)).value, isFalse);
+    expect(t.widget<AxCheck>(check('Follow')).value, isFalse);
     await folder('/p');
     await t.tap(find.text('Follow AGENTS.md'));
     await settled(t);
@@ -940,12 +965,12 @@ void main() {
     // Contained by Axiom unless its person says otherwise, and with every access.
     expect(find.bySemanticsLabel('Tools: Axiom\'s'), findsOneWidget);
     expect(find.bySemanticsLabel('Access: Ask first'), findsOneWidget);
-    expect(find.byType(AxCheck), findsNothing, reason: 'the folder\'s settings have no say');
+    expect(check('Let the folder'), findsNothing, reason: 'the folder\'s settings have no say');
     await snap(t, 'start-hands');
     await press(t, find.bySemanticsLabel('Tools: Axiom\'s'));
     await press(t, find.bySemanticsLabel('Its own').last);
     expect(find.bySemanticsLabel('Access: Only look'), findsOneWidget, reason: 'it cannot ask');
-    expect(find.byType(AxCheck), findsOneWidget);
+    expect(check('Let the folder'), findsOneWidget);
     await press(t, find.bySemanticsLabel('Tools: Its own'));
     await press(t, find.bySemanticsLabel('Axiom\'s').last);
     await t.enterText(field('What should be done'), 'Do it.');
@@ -1093,12 +1118,12 @@ void main() {
     AxButton start() => t.widget<AxButton>(find.widgetWithText(AxButton, 'Start'));
     expect(start().onPressed, isNull);
     await t.enterText(field('Model name'), 'gpt-5.6');
-    await press(t, find.byType(AxCheck));
+    await press(t, check('Let the folder'));
     expect(start().onPressed, isNotNull);
     // Another has not been said yes for.
     await press(t, find.bySemanticsLabel('Runs with: Goose'));
     await press(t, find.bySemanticsLabel('Claude Code').last);
-    expect(t.widget<AxCheck>(find.byType(AxCheck)).value, isFalse);
+    expect(t.widget<AxCheck>(check('Let the folder')).value, isFalse);
     expect(
       t
           .widget<AxField>(find.byWidgetPredicate((w) => w is AxField && w.label == 'Model name'))
@@ -1108,7 +1133,7 @@ void main() {
     );
     await press(t, find.bySemanticsLabel('Runs with: Claude Code'));
     await press(t, find.bySemanticsLabel('Goose').last);
-    await press(t, find.byType(AxCheck));
+    await press(t, check('Let the folder'));
     await press(t, find.text('Start'));
     expect(s.calls.where((c) => c.first == 'add').single, [
       'add',
@@ -1158,6 +1183,191 @@ void main() {
     expect(find.text('Its own model'), findsWidgets);
     expect(find.text('Its own sign-in'), findsWidgets);
     expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
+  });
+
+  group('an agent that works in a copy', () {
+    const files = [
+      CopyFile('lib/cache.dart', 'changed', digest: 'd1'),
+      CopyFile('Makefile', 'changed', digest: 'd2', runs: true),
+      CopyFile('both.txt', 'changed', digest: 'd3', clash: true, others: ['Ben']),
+      CopyFile('.envrc', 'new', digest: 'd4', never: 'a shell runs what is written there'),
+      CopyFile('gone.txt', 'removed'),
+    ];
+    const all = CopyChanges(
+      made: true,
+      files: files,
+      diff:
+          '--- lib/cache.dart\n+++ lib/cache.dart\n@@ -1 +1 @@\n-old\n+fresh\n'
+          '--- gone.txt\n+++ (removed)\n@@ -1 +0,0 @@\n-was here\n',
+    );
+    Future<Asked> shown(WidgetTester t, {CopyChanges copy = all}) async {
+      final s = await shell(t, session: working());
+      s.copy = copy;
+      s.current!.apply([
+        const Event(90, 90, AgentStateChanged('a', AgentPhase.done)),
+        const Event(91, 91, AgentAdded('b', 'Ada', x, null, access: Access.work, apart: true)),
+      ]);
+      await settled(t);
+      await t.tap(find.bySemanticsLabel(RegExp('^Ada')).first);
+      await settled(t);
+      await t.tap(find.text('Changes').last);
+      await settled(t);
+      return s;
+    }
+
+    AxCheck box(WidgetTester t, String f) =>
+        t.widget<AxCheck>(find.byWidgetPredicate((w) => w is AxCheck && w.label == 'Bring in $f'));
+
+    testWidgets('its person sees what it changed and brings in what they choose', (t) async {
+      final s = await shown(t);
+      expect(s.calls, [
+        ['copy', 's', 'b'],
+      ]);
+      expect(find.text('5 files in its own copy'), findsOneWidget);
+      for (final (f, on, can) in [
+        ('lib/cache.dart', true, true),
+        ('Makefile', false, true),
+        ('both.txt', false, false),
+        ('.envrc', false, false),
+        ('gone.txt', true, true),
+      ]) {
+        expect((box(t, f).value, box(t, f).onChanged != null), (on, can), reason: f);
+      }
+      for (final words in [
+        'Never brought in: a shell runs what is written there.',
+        'The folder\'s own has changed too. Bring the copy up to date first.',
+        'It runs when someone builds, tests or installs.',
+        'Also changed by Ben.',
+      ]) {
+        expect(find.text(words), findsOneWidget, reason: words);
+      }
+      expect(find.textContaining('was here', findRichText: true), findsWidgets);
+      await snap(t, 'copy');
+      await press(t, find.bySemanticsLabel('Bring in Makefile'));
+      await press(t, find.bySemanticsLabel('Bring in gone.txt'));
+      await press(t, find.bySemanticsLabel('Bring in both.txt'));
+      s
+        ..calls.clear()
+        ..moved = const Moved(
+          ['lib/cache.dart'],
+          [('Makefile', 'it is not what was shown any more')],
+        )
+        ..copy = const CopyChanges(made: true, back: 1);
+      await press(t, find.text('Bring in 2 files'));
+      expect(s.calls, [
+        ['bring', ('lib/cache.dart', 'd1'), ('Makefile', 'd2')],
+        ['copy', 's', 'b'],
+      ]);
+      expect(find.textContaining('Brought in 1 file.'), findsOneWidget);
+      expect(find.textContaining('Makefile: it is not what was shown any more.'), findsOneWidget);
+      expect(find.text('The folder has all of it.'), findsOneWidget);
+      await snap(t, 'copy-brought');
+      s
+        ..moved = const Moved(['lib/cache.dart'], [])
+        ..copy = all;
+      await press(t, find.text('Put back 1 file'));
+      expect(find.textContaining('Put back 1 file.'), findsOneWidget);
+      // As usual again: what was chosen was for the last time.
+      expect((box(t, 'Makefile').value, box(t, 'gone.txt').value), (false, true));
+    });
+
+    testWidgets('it is brought up to date, and told of clashes by its person', (t) async {
+      final s = await shown(t);
+      s.renewed = (2, 'The project has changed: both.txt.');
+      await press(t, find.text('Bring it up to date'));
+      expect(find.textContaining('Took over 2 files.'), findsOneWidget);
+      expect(find.textContaining('nothing is sent yet'), findsOneWidget);
+      expect(s.calls.where((c) => c.first == 'prompt'), isEmpty);
+      await t.tap(find.text('Conversation').last);
+      await settled(t);
+      expect(find.text('The project has changed: both.txt.'), findsOneWidget);
+    });
+
+    testWidgets('it is thrown away with a second word, and never while it is worked in', (t) async {
+      final s = await shown(t);
+      await press(t, find.text('Throw it away'));
+      expect(find.text('5 files that only it has would be lost.'), findsOneWidget);
+      await snap(t, 'copy-throw-away');
+      await press(t, find.text('Keep it'));
+      expect(s.calls.where((c) => c.first == 'throw away'), isEmpty);
+      await press(t, find.text('Throw it away'));
+      s.copy = const CopyChanges();
+      await press(t, find.text('Throw the copy away'));
+      expect(s.calls.where((c) => c.first == 'throw away').single, ['throw away', 's', 'b', true]);
+      expect(find.textContaining('It is made when you first speak to it.'), findsOneWidget);
+      s
+        ..copy = const CopyChanges(made: true)
+        ..failure = null;
+      await press(t, find.text('Look again'));
+      await press(t, find.text('Throw it away'));
+      expect(find.text('The folder has all that was changed in it.'), findsOneWidget);
+      await press(t, find.text('Throw the copy away'));
+      expect(s.calls.where((c) => c.first == 'throw away').last.last, isFalse);
+      // At work.
+      s.copy = all;
+      s.current!.apply([
+        const Event(95, 95, RunStarted('r9', 'b')),
+        const Event(96, 96, AgentStateChanged('b', AgentPhase.running)),
+      ]);
+      await settled(t);
+      await press(t, find.text('Look again'));
+      for (final l in ['Throw it away', 'Bring it up to date']) {
+        expect(t.widget<AxButton>(find.widgetWithText(AxButton, l)).onPressed, isNull, reason: l);
+      }
+      expect(find.textContaining('Ada is at work'), findsOneWidget);
+      // When it stops it is looked at again; what goes wrong is said.
+      s.calls.clear();
+      s.current!.apply([
+        const Event(97, 97, RunEnded('r9', Outcome.completed, null)),
+        const Event(98, 98, AgentStateChanged('b', AgentPhase.done)),
+      ]);
+      await settled(t);
+      expect(s.calls, [
+        ['copy', 's', 'b'],
+      ]);
+      s.failure = const Failed(1, 'internal', 'the copy is elsewhere now');
+      await press(t, find.text('Look again'));
+      expect(find.text('the copy is elsewhere now'), findsOneWidget);
+    });
+
+    testWidgets('is set up so beside others, and by choice', (t) async {
+      final s = await shell(t, session: working());
+      await press(t, find.bySemanticsLabel('Add an agent to Fix the cache'));
+      AxCheck apart() => t.widget<AxCheck>(
+        find.byWidgetPredicate((w) => w is AxCheck && w.label == 'Work in a copy of the folder'),
+      );
+      expect(apart().value, isTrue);
+      await snap(t, 'add-agent-copy');
+      await t.enterText(field('Name'), 'Ada');
+      await press(t, find.bySemanticsLabel('Model: none'));
+      await press(t, find.bySemanticsLabel('gpt-5.6').last);
+      s.calls.clear();
+      await press(t, find.text('Add'));
+      expect(s.calls.single.last, 'apart');
+      await press(t, find.bySemanticsLabel('New session').first);
+      expect(apart().value, isFalse);
+      // Who only looks needs none.
+      await press(t, find.bySemanticsLabel(RegExp('^Access: ')));
+      await press(t, find.bySemanticsLabel('Only look').last);
+      expect(find.text('Work in a copy of the folder'), findsNothing);
+    });
+
+    testWidgets('fits a small window', (t) async {
+      final s = Asked()
+        ..copy = const CopyChanges(made: true, files: files, back: 3)
+        ..current = (SessionModel('s')
+          ..apply(const [
+            Event(1, 1, SessionCreated('Fix the cache', '/w')),
+            Event(2, 2, AgentAdded('b', 'Ada', x, null, access: Access.work, apart: true)),
+          ]));
+      addTearDown(s.dispose);
+      await mount(t, Shell(s), size: const Size(760, 520), dpr: 1, textScale: 2);
+      await settled(t);
+      await press(t, find.text('Changes').last);
+      expect(t.takeException(), isNull);
+      await press(t, find.text('Throw it away'));
+      expect(t.takeException(), isNull);
+    });
   });
 
   testWidgets('the window opens where its person was last, once', (t) async {

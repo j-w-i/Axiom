@@ -471,7 +471,17 @@ class _Display extends StatelessWidget {
         ListenableBuilder(listenable: a, builder: (context, _) => _bar(context, a)),
         ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
         if (acts && tab == 1)
-          Expanded(child: ChangesView(store, session, key: ValueKey(session.id)))
+          Expanded(
+            child: a.apart
+                ? CopyView(
+                    store,
+                    session,
+                    a,
+                    draft: drafts.of(session.id, a.id),
+                    key: ValueKey((session.id, a.id)),
+                  )
+                : ChangesView(store, session, key: ValueKey(session.id)),
+          )
         else
           Expanded(
             child: LayoutBuilder(

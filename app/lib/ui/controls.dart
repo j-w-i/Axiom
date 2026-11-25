@@ -335,8 +335,17 @@ class AxSwitch extends StatelessWidget {
 }
 
 class AxCheck extends StatelessWidget {
-  const AxCheck({required this.label, required this.value, required this.onChanged, super.key});
+  const AxCheck({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    super.key,
+    this.bare = false,
+  });
   final String label;
+
+  /// Its label is heard and not shown: what it is for stands beside it.
+  final bool bare;
   final bool value;
   final ValueChanged<bool>? onChanged;
   @override
@@ -366,8 +375,10 @@ class AxCheck extends StatelessWidget {
                   : null,
             ),
           ),
-          const SizedBox(width: 8),
-          Text(label, style: t.type.ui.ink(s.enabled ? c.ink2 : c.idle)),
+          if (!bare) ...[
+            const SizedBox(width: 8),
+            Text(label, style: t.type.ui.ink(s.enabled ? c.ink2 : c.idle)),
+          ],
         ],
       ),
     );

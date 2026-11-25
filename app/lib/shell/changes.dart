@@ -11,6 +11,7 @@ import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/press.dart';
 import '../ui/tokens.dart';
+import 'drafts.dart';
 import 'start.dart';
 
 /// What has been changed in the session's folder since its last commit. Looked at when it is shown,
@@ -169,64 +170,101 @@ class _ChangesViewState extends State<ChangesView> {
     );
   }
 
-  Widget _file(BuildContext context, (Changed, FileDiff) f) {
+  Widget _file(BuildContext context, (Changed, FileDiff) f) => _FileRow(
+    f.$1,
+    f.$2,
+    open: !_shut.contains(f.$1.path),
+    onOpen: () => setState(() {
+      _shut.contains(f.$1.path) ? _shut.remove(f.$1.path) : _shut.add(f.$1.path);
+    }),
+  );
+}
+
+/// A file, and what has changed in it.
+class _FileRow extends StatelessWidget {
+  const _FileRow(
+    this.file,
+    this.diff, {
+    required this.open,
+    required this.onOpen,
+    this.leading,
+    this.notes = const [],
+  });
+  final Changed file;
+  final FileDiff diff;
+  final bool open;
+  final VoidCallback onOpen;
+  final Widget? leading;
+
+  /// What is to be known of it, and whether somebody should look.
+  final List<(String, bool)> notes;
+
+  @override
+  Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    final (file, diff) = f;
     final lines = diff.lines, add = diff.added, remove = diff.removed, left = diff.left;
-    final open = !_shut.contains(file.path) && lines.isNotEmpty;
+    final open = this.open && lines.isNotEmpty;
     final name = oneLine(literal(file.path), 300);
+    final row = Pressable(
+      label: '$name, ${file.what}, $add added, $remove removed',
+      expanded: open,
+      onPressed: lines.isEmpty ? null : onOpen,
+      builder: (_, s) => Padding(
+        padding: const EdgeInsets.fromLTRB(6, 7, 6, 7),
+        child: Row(
+          children: [
+            AxGlyph(open ? AxIcon.down : AxIcon.right, size: 9, color: c.ink4),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.codeSmall.ink(s.hovered ? c.ink1 : c.ink2),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  if (file.what != 'changed')
+                    Text(
+                      file.what,
+                      style: t.type.small.ink(file.what == 'conflict' ? c.attentionText : c.ink3),
+                    ),
+                ],
+              ),
+            ),
+            if (add > 0) Text('+$add', style: t.type.small.ink(c.doneText)),
+            if (remove > 0) ...[
+              const SizedBox(width: 8),
+              Text('−$remove', style: t.type.small.ink(c.faultText)),
+            ],
+            if (lines.isEmpty) Text('not shown', style: t.type.small.ink(c.ink4)),
+          ],
+        ),
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Pressable(
-          label: '$name, ${file.what}, $add added, $remove removed',
-          expanded: open,
-          onPressed: lines.isEmpty
-              ? null
-              : () => setState(() {
-                  _shut.contains(file.path) ? _shut.remove(file.path) : _shut.add(file.path);
-                }),
-          builder: (_, s) => Padding(
-            padding: const EdgeInsets.fromLTRB(6, 7, 6, 7),
-            child: Row(
-              children: [
-                AxGlyph(open ? AxIcon.down : AxIcon.right, size: 9, color: c.ink4),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.codeSmall.ink(s.hovered ? c.ink1 : c.ink2),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      if (file.what != 'changed')
-                        Text(
-                          file.what,
-                          style: t.type.small.ink(
-                            file.what == 'conflict' ? c.attentionText : c.ink3,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                if (add > 0) Text('+$add', style: t.type.small.ink(c.doneText)),
-                if (remove > 0) ...[
-                  const SizedBox(width: 8),
-                  Text('−$remove', style: t.type.small.ink(c.faultText)),
-                ],
-                if (lines.isEmpty) Text('not shown', style: t.type.small.ink(c.ink4)),
-              ],
-            ),
+        if (leading case final l?)
+          Row(
+            children: [
+              l,
+              Expanded(child: row),
+            ],
+          )
+        else
+          row,
+        for (final (note, look) in notes)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(50, 0, 6, 5),
+            child: Text(visible(note), style: t.type.small.ink(look ? c.attentionText : c.ink3)),
           ),
-        ),
         if (open)
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 0, 8),
+            padding: EdgeInsets.fromLTRB(leading == null ? 24 : 50, 0, 0, 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -239,6 +277,344 @@ class _ChangesViewState extends State<ChangesView> {
               ],
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// What an agent has changed in its own copy of the folder, and what of it is brought in. Nothing is,
+/// unless it is pressed here.
+class CopyView extends StatefulWidget {
+  const CopyView(this.store, this.session, this.agent, {required this.draft, super.key});
+  final HostStore store;
+  final SessionModel session;
+  final AgentModel agent;
+
+  /// What is being written to the agent.
+  final Draft draft;
+  @override
+  State<CopyView> createState() => _CopyViewState();
+}
+
+class _CopyViewState extends State<CopyView> {
+  CopyChanges? _all;
+  Map<String, FileDiff> _diffs = const {};
+  String? _problem, _said;
+  bool _busy = false, _again = false, _leaving = false, _wasAtWork = false;
+  final _shut = <String>{};
+
+  /// Chosen or not against what is usual.
+  final _other = <String>{};
+
+  bool get _atWork =>
+      widget.agent.phase == AgentPhase.running || widget.agent.phase == AgentPhase.asking;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.agent.addListener(_changed);
+    _wasAtWork = _atWork;
+    unawaited(_look());
+  }
+
+  @override
+  void dispose() {
+    widget.agent.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    final now = _atWork;
+    if (_wasAtWork && !now) unawaited(_look());
+    if (_wasAtWork != now) setState(() => _wasAtWork = now);
+  }
+
+  Future<void> _look() => _do(() async {});
+
+  /// One thing at a time, and then what there is now.
+  Future<void> _do(Future<void> Function() f) async {
+    if (_busy) {
+      _again = true;
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _problem = null;
+      _leaving = false;
+    });
+    try {
+      await f();
+      do {
+        _again = false;
+        final c = await widget.store.copyChanges(widget.session.id, widget.agent.id);
+        if (!mounted) return;
+        setState(() {
+          _all = c;
+          _diffs = {for (final d in readDiffs(c.diff, most: 600)) d.path: d};
+        });
+      } while (_again);
+    } on Object catch (e) {
+      if (mounted) setState(() => _problem = wordsOf(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// What runs when someone builds is chosen by hand.
+  bool _chosen(CopyFile f) => f.can && (!f.runs != _other.contains(f.path));
+
+  static String _files(int n) => n == 1 ? '1 file' : '$n files';
+
+  void _tell(Moved m, String done) {
+    if (!mounted) return;
+    _other.clear();
+    setState(() {
+      _said = m.done.isEmpty ? null : '$done ${_files(m.done.length)}.';
+      if (m.left.isNotEmpty) {
+        _said = [
+          ?_said,
+          for (final (path, why) in m.left.take(5)) '${literal(path)}: $why.',
+          if (m.left.length > 5) 'And ${m.left.length - 5} more.',
+        ].join('\n');
+      }
+    });
+  }
+
+  Future<void> _bring(List<CopyFile> files) => _do(() async {
+    _tell(await widget.store.bringIn(widget.session.id, widget.agent.id, files), 'Brought in');
+  });
+
+  Future<void> _back() => _do(() async {
+    _tell(await widget.store.putBack(widget.session.id, widget.agent.id), 'Put back');
+  });
+
+  Future<void> _renew() => _do(() async {
+    final (taken, say) = await widget.store.renewCopy(widget.session.id, widget.agent.id);
+    if (say != null) {
+      final was = widget.draft.text.text.trimRight();
+      final all = was.isEmpty ? say : '$was\n\n$say';
+      widget.draft.text.value = TextEditingValue(
+        text: all,
+        selection: TextSelection.collapsed(offset: all.length),
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _said = [
+        taken == 0 ? 'Nothing was taken over.' : 'Took over ${_files(taken)}.',
+        if (say != null)
+          'Some have been changed in both. What to tell ${widget.agent.name} is written where you '
+              'speak to it; nothing is sent yet.',
+      ].join(' ');
+    });
+  });
+
+  Future<void> _remove(bool lose) => _do(() async {
+    await widget.store.removeCopy(widget.session.id, widget.agent.id, lose: lose);
+    if (!mounted) return;
+    setState(() => _said = 'The copy is gone. Another is made when it is next spoken to.');
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors, all = _all;
+    final files = all?.files ?? const <CopyFile>[];
+    final chosen = [
+      for (final f in files)
+        if (_chosen(f)) f,
+    ];
+    final made = all?.made ?? false;
+    final words = all == null
+        ? (_problem ?? 'Looking')
+        : !made
+        ? '${widget.agent.name} works in a copy of the folder. It is made when you first speak to it.'
+        : files.isEmpty
+        ? 'The folder has all of it.'
+        : null;
+    final quiet = _busy || _atWork;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 10, 18, 8),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.spaceBetween,
+            children: [
+              Text(
+                files.isEmpty ? 'Its own copy' : '${_files(files.length)} in its own copy',
+                style: t.type.label.ink(c.ink3),
+              ),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  if (made)
+                    AxButton(
+                      label: 'Bring it up to date',
+                      tone: AxTone.quiet,
+                      onPressed: quiet ? null : () => unawaited(_renew()),
+                    ),
+                  if (made && !_leaving)
+                    AxButton(
+                      label: 'Throw it away',
+                      tone: AxTone.quiet,
+                      onPressed: quiet ? null : () => setState(() => _leaving = true),
+                    ),
+                  AxButton(
+                    label: _busy ? 'Looking' : 'Look again',
+                    tone: AxTone.quiet,
+                    onPressed: _busy ? null : () => unawaited(_look()),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
+        if (_leaving)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 10, 18, 4),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  files.isEmpty
+                      ? 'The folder has all that was changed in it.'
+                      : '${_files(files.length)} that only it has would be lost.',
+                  style: t.type.ui.ink(files.isEmpty ? c.ink2 : c.attentionText),
+                ),
+                AxButton(
+                  label: 'Keep it',
+                  tone: AxTone.quiet,
+                  autofocus: true,
+                  onPressed: () => setState(() => _leaving = false),
+                ),
+                AxButton(
+                  label: 'Throw the copy away',
+                  onPressed: quiet ? null : () => unawaited(_remove(files.isNotEmpty)),
+                ),
+              ],
+            ),
+          ),
+        if (_problem case final p? when all != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
+            child: Text(visible(p), style: t.type.ui.ink(c.faultText)),
+          ),
+        if (_said != null || (all?.back ?? 0) > 0)
+          Semantics(
+            liveRegion: true,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 10, 18, 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(visible(_said ?? ''), style: t.type.ui.ink(c.ink2)),
+                    ),
+                  ),
+                  if (all?.back case final n? when n > 0)
+                    AxButton(
+                      label: 'Put back ${_files(n)}',
+                      tone: AxTone.quiet,
+                      onPressed: _busy ? null : () => unawaited(_back()),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        Expanded(
+          child: words != null
+              ? Align(
+                  alignment: Alignment.topLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+                    child: Text(
+                      visible(words),
+                      style: t.type.ui.ink(_problem != null && all == null ? c.faultText : c.ink3),
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 24, 24),
+                  itemCount: files.length + (all!.whole ? 0 : 1),
+                  itemBuilder: (context, i) => i == files.length
+                      ? Padding(
+                          padding: const EdgeInsets.fromLTRB(6, 10, 0, 0),
+                          child: Text(
+                            'There is more than can be shown here.',
+                            style: t.type.label.ink(c.ink3),
+                          ),
+                        )
+                      : _file(files[i]),
+                ),
+        ),
+        if (files.isNotEmpty) ...[
+          ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 10, 18, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _atWork
+                        ? '${widget.agent.name} is at work: this may not be all of it.'
+                        : 'The folder gets what is chosen, as it is shown.',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.type.small.ink(c.ink3),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                AxButton(
+                  label: chosen.isEmpty ? 'Bring in' : 'Bring in ${_files(chosen.length)}',
+                  tone: AxTone.primary,
+                  onPressed: _busy || chosen.isEmpty ? null : () => unawaited(_bring(chosen)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _file(CopyFile f) {
+    final name = oneLine(literal(f.path), 300);
+    return _FileRow(
+      f,
+      _diffs[f.path] ?? FileDiff(f.path),
+      open: !_shut.contains(f.path),
+      onOpen: () => setState(() {
+        _shut.contains(f.path) ? _shut.remove(f.path) : _shut.add(f.path);
+      }),
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 6),
+        child: AxCheck(
+          label: 'Bring in $name',
+          bare: true,
+          value: _chosen(f),
+          onChanged: !f.can || _busy
+              ? null
+              : (_) => setState(() {
+                  _other.contains(f.path) ? _other.remove(f.path) : _other.add(f.path);
+                }),
+        ),
+      ),
+      notes: [
+        if (f.never case final why?) ('Never brought in: $why.', false),
+        if (f.clash && f.never == null)
+          ('The folder\'s own has changed too. Bring the copy up to date first.', true),
+        if (f.runs && f.can) ('It runs when someone builds, tests or installs.', true),
+        if (f.others.isNotEmpty)
+          ('Also changed by ${f.others.map((o) => oneLine(o, 40)).join(', ')}.', true),
       ],
     );
   }

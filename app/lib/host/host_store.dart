@@ -268,6 +268,45 @@ class HostStore extends ChangeNotifier {
   Future<Changes> changes(String session) async =>
       Changes.decode((await _live.call('workspace.changes', {'session': session}))! as Json);
 
+  /// Much is read for it, and perhaps written.
+  static const _long = Duration(minutes: 5);
+
+  /// What an agent has changed in its own copy of the folder.
+  Future<CopyChanges> copyChanges(String session, String agent) async => CopyChanges.decode(
+    (await _live.call('copy.changes', {'session': session, 'agent': agent}, _long))! as Json,
+  );
+
+  /// Brings changes in, each as it was shown.
+  Future<Moved> bringIn(String session, String agent, List<CopyFile> files) async => Moved.decode(
+    (await _live.call('copy.bring', {
+          'session': session,
+          'agent': agent,
+          'files': [
+            for (final f in files) {'path': f.path, 'digest': ?f.digest},
+          ],
+        }, _long))!
+        as Json,
+    'brought',
+  );
+
+  /// Puts back what was there before the last that was brought in.
+  Future<Moved> putBack(String session, String agent) async => Moved.decode(
+    (await _live.call('copy.back', {'session': session, 'agent': agent}, _long))! as Json,
+    'back',
+  );
+
+  /// Takes over what has changed in the folder: how many files, and what its agent should be told
+  /// of those both have changed.
+  Future<(int, String?)> renewCopy(String session, String agent) async {
+    final r = await _live.call('copy.renew', {'session': session, 'agent': agent}, _long);
+    final j = r! as Json;
+    return (j['taken']! as int, j['say'] as String?);
+  }
+
+  /// Throws the copy away; [lose]: with what was changed in it.
+  Future<void> removeCopy(String session, String agent, {required bool lose}) =>
+      _live.call('copy.remove', {'session': session, 'agent': agent, 'lose': lose}, _long);
+
   /// Accounts that Axiom's own loop can use: not those of programs.
   List<Connection> get own => [
     for (final c in connections)
@@ -385,8 +424,10 @@ class HostStore extends ChangeNotifier {
     Access access, {
     List<Instructions> instructions = const [],
     bool trust = false,
+    bool apart = false,
   }) async {
     final r = await _live.call('agent.add', {
+      if (apart) 'apart': true,
       'session': session,
       'name': name,
       'execution': x.encode(),
@@ -407,7 +448,13 @@ class HostStore extends ChangeNotifier {
 
   /// [key] names what is said: again under the same name, it is heard once.
   Future<void> prompt(String session, String agent, String text, {String? key}) =>
-      _live.call('agent.prompt', {'session': session, 'agent': agent, 'text': text, 'key': ?key});
+      _live.call('agent.prompt', {
+        'session': session,
+        'agent': agent,
+        'text': text,
+        'key': ?key,
+        // A copy of the folder may have to be made first.
+      }, _long);
 
   Future<void> answer(String session, RequestOpened r, Answer a) => _live.call('request.answer', {
     'session': session,

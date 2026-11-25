@@ -64,13 +64,23 @@ class ItemModel extends ChangeNotifier {
 }
 
 class AgentModel extends ChangeNotifier {
-  AgentModel(this.id, String name, this.execution, this.parent, this.since, {this.access})
-    : name = oneLine(name, 60);
+  AgentModel(
+    this.id,
+    String name,
+    this.execution,
+    this.parent,
+    this.since, {
+    this.access,
+    this.apart = false,
+  }) : name = oneLine(name, 60);
   final String id, name;
   Execution execution;
 
   /// Null: an agent that does nothing here, as a replayed one.
   Access? access;
+
+  /// It works in a copy of the folder of its own.
+  final bool apart;
 
   /// The run it is in.
   String? run;
@@ -149,8 +159,23 @@ class SessionModel extends ChangeNotifier {
       case SessionTitled(:final title):
         this.title = oneLine(title);
         return true;
-      case AgentAdded(:final agent, :final name, :final execution, :final parent, :final access):
-        agents[agent] = AgentModel(agent, name, execution, parent, e.at, access: access);
+      case AgentAdded(
+        :final agent,
+        :final name,
+        :final execution,
+        :final parent,
+        :final access,
+        :final apart,
+      ):
+        agents[agent] = AgentModel(
+          agent,
+          name,
+          execution,
+          parent,
+          e.at,
+          access: access,
+          apart: apart,
+        );
         return true;
       case AgentChanged(:final agent, :final execution, :final access):
         if (agents[agent] case final a?) {

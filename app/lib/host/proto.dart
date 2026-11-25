@@ -162,6 +162,81 @@ class Changed {
   final String path, what;
 }
 
+/// What an agent has changed in its own copy of the folder.
+class CopyChanges {
+  const CopyChanges({
+    this.made = false,
+    this.files = const [],
+    this.diff = '',
+    this.whole = true,
+    this.back = 0,
+  });
+  CopyChanges.decode(Json j)
+    : made = j['made']! as bool,
+      files = [for (final f in j['files']! as List<Object?>) CopyFile.decode(f! as Json)],
+      diff = j['diff']! as String,
+      whole = j['whole']! as bool,
+      back = j['back'] as int? ?? 0;
+
+  /// There is one: it has been spoken to.
+  final bool made, whole;
+  final List<CopyFile> files;
+
+  /// What bringing all of it in would do to the folder as it is now.
+  final String diff;
+
+  /// How many files the last that was brought in can be put back for.
+  final int back;
+}
+
+class CopyFile extends Changed {
+  const CopyFile(
+    super.path,
+    super.what, {
+    this.digest,
+    this.clash = false,
+    this.never,
+    this.runs = false,
+    this.others = const [],
+  });
+  CopyFile.decode(Json j)
+    : digest = j['digest'] as String?,
+      clash = j['clash'] as bool? ?? false,
+      never = j['never'] as String?,
+      runs = j['runs'] as bool? ?? false,
+      others = [for (final o in j['others'] as List<Object?>? ?? const []) o! as String],
+      super(j['path']! as String, j['what']! as String);
+
+  /// What the copy has now; null if it was removed there.
+  final String? digest;
+
+  /// The folder's own has changed too: it is not brought in.
+  final bool clash;
+
+  /// Why it is never brought in.
+  final String? never;
+
+  /// It runs when someone builds, tests or installs.
+  final bool runs;
+
+  /// Other agents that have changed it in their own copies.
+  final List<String> others;
+  bool get can => !clash && never == null;
+}
+
+/// What was done, and what was not, each with why.
+class Moved {
+  const Moved(this.done, this.left);
+  Moved.decode(Json j, String done)
+    : done = [for (final f in j[done]! as List<Object?>) f! as String],
+      left = [
+        for (final f in j['left']! as List<Object?>)
+          ((f! as Json)['path']! as String, (f as Json)['why']! as String),
+      ];
+  final List<String> done;
+  final List<(String, String)> left;
+}
+
 /// The environment in which what an agent does is done by Axiom, whatever its harness.
 const axiomTools = 'axiom';
 
@@ -245,6 +320,7 @@ sealed class Body {
           Execution.decode(j['execution']! as Json),
           j['parent'] as String?,
           access: j['access'] == null ? null : _enum(Access.values, j['access'], Access.unknown),
+          apart: j['apart'] as bool? ?? false,
         ),
         'agent.changed' => AgentChanged(
           j['agent']! as String,
@@ -331,7 +407,17 @@ class SessionTitled extends Body {
 }
 
 class AgentAdded extends Body {
-  const AgentAdded(this.agent, this.name, this.execution, this.parent, {this.access});
+  const AgentAdded(
+    this.agent,
+    this.name,
+    this.execution,
+    this.parent, {
+    this.access,
+    this.apart = false,
+  });
+
+  /// It works in a copy of the folder of its own.
+  final bool apart;
   final String agent, name;
   final Execution execution;
   final String? parent;
