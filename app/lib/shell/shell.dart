@@ -1255,7 +1255,11 @@ class _Display extends StatelessWidget {
                         ),
                         child: Text('No messages yet.', style: Ax.of(context).type.ui.ink(c.ink3)),
                       ),
-                child: TranscriptView(a),
+                child: TranscriptView(
+                  a,
+                  takes: true,
+                  onQuote: acts ? (q) => drafts.of(session.id, a.id).add(q) : null,
+                ),
               ),
             ),
             // In a window too small for all of it, its end is in sight and the rest scrolls.
