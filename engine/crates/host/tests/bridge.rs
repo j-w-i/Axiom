@@ -510,9 +510,19 @@ async fn its_tools_are_axioms_and_so_is_what_holds_them_back() {
     b.tool(3, "write", json!({"path": "n.txt", "content": "x\n"})).await;
     let (id, digest, subject) = t.question().await;
     assert!(subject.contains("+x"), "{subject}");
-    t.answer(id, Answer::Deny, digest).await;
+    let call = Call::Answer {
+        session: t.s.clone(),
+        request: id,
+        answer: Answer::Deny,
+        digest,
+        words: Some("not there".into()),
+    };
+    t.c.call(call).await.unwrap();
     let (said, ok) = b.told(3).await;
-    assert!(!ok && said.contains("a person said no") && t.file("n.txt").is_none());
+    assert!(!ok && said.contains("a person said no. They said: not there"), "{said}");
+    assert!(t.file("n.txt").is_none());
+    // It is told with its no, and not once more as if its person had spoken.
+    assert!(!history(&t.f, &t.s).iter().any(|b| format!("{b:?}").contains("I said no")));
     b.tool(4, "write", json!({"path": "n.txt", "content": "x\n"})).await;
     let (id, digest, _) = t.question().await;
     t.answer(id, Answer::Once, digest).await;

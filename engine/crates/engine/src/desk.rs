@@ -126,6 +126,7 @@ mod tests {
         assert!(oa.wait().await.is_none() && oa.why.is_empty());
         let mut oc = d.open(&a).unwrap();
         d.deny(&oc.id, "not now".into()).unwrap();
+        assert!(!d.lock().requests.is_open(&oc.id));
         assert!(oc.wait().await.is_none());
         assert_eq!((oc.why.as_str(), d.allowed(&a)), ("not now", false));
         assert_eq!(d.deny(&oc.id, String::new()), Err(NotAnswered::Gone));
