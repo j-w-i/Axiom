@@ -15,6 +15,8 @@ mod bwrap;
 pub mod reaper;
 #[cfg(target_os = "macos")]
 mod seatbelt;
+#[cfg(any(target_os = "linux", test))]
+mod seccomp;
 #[cfg(unix)]
 mod tree;
 
@@ -179,8 +181,15 @@ pub fn spawn(job: Job) -> Result<Running, SpawnError> {
         .stdin(if job.stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(target_os = "linux")]
+    let filter = match &job.contain {
+        Contain::Sandbox(_) => Some(bwrap::filter()?),
+        Contain::None(_) => None,
+    };
+    #[cfg(all(unix, not(target_os = "linux")))]
+    let filter = None;
     #[cfg(unix)]
-    let mark = tree::prepare(&mut c).map_err(SpawnError::Start)?;
+    let mark = tree::prepare(&mut c, filter).map_err(SpawnError::Start)?;
     let mut child =
         tokio::process::Command::from(c).kill_on_drop(true).spawn().map_err(SpawnError::Start)?;
     #[cfg(unix)]

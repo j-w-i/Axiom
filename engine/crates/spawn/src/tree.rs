@@ -19,6 +19,8 @@ const LATE: Duration = Duration::from_secs(30);
 
 /// Where the mark is in what is started: high enough for no shell to use it.
 const MARK: i32 = 200;
+/// Where what bubblewrap is to read is.
+pub const FILTER: i32 = MARK + 1;
 
 #[derive(Debug)]
 pub struct Tree {
@@ -30,38 +32,45 @@ pub struct Tree {
     done: bool,
 }
 
-/// Makes what `c` starts a session of its own, with the mark and no other open file.
+/// Makes what `c` starts a session of its own, with the mark, `filter` if there is one, and no other
+/// open file.
 #[allow(unsafe_code)]
-pub fn prepare(c: &mut std::process::Command) -> io::Result<OwnedFd> {
+pub fn prepare(c: &mut std::process::Command, filter: Option<OwnedFd>) -> io::Result<OwnedFd> {
     let (ours, theirs) = io::pipe()?;
     let theirs = OwnedFd::from(theirs);
-    // SAFETY: only calls that are async-signal-safe, on integers; nothing is allocated. `theirs`
-    // lives in the closure, which lives in the command.
+    let last = if filter.is_some() { FILTER } else { MARK };
+    // SAFETY: only calls that are async-signal-safe, on integers; nothing is allocated. `theirs` and
+    // `filter` live in the closure, which lives in the command.
     unsafe {
         c.pre_exec(move || {
             if libc::setsid() < 0 || libc::dup2(theirs.as_raw_fd(), MARK) < 0 {
                 return Err(io::Error::last_os_error());
             }
+            if let Some(f) = &filter
+                && libc::dup2(f.as_raw_fd(), FILTER) < 0
+            {
+                return Err(io::Error::last_os_error());
+            }
             let none = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
             libc::setrlimit(libc::RLIMIT_CORE, &raw const none);
-            close_on_exec();
+            close_on_exec(last);
             Ok(())
         });
     }
     Ok(OwnedFd::from(ours))
 }
 
-/// Every file after the first three and besides the mark closes when the program starts. Not at
-/// once: the standard library still reports a failed start through one of them.
+/// Every file after the first three and besides those from the mark to `last` closes when the program
+/// starts. Not at once: the standard library still reports a failed start through one of them.
 #[allow(unsafe_code)]
-fn close_on_exec() {
+fn close_on_exec(last: i32) {
     // SAFETY: plain system calls.
     unsafe {
         #[cfg(target_os = "linux")]
         {
             const CLOEXEC: libc::c_uint = 4;
             let a = libc::syscall(libc::SYS_close_range, 3, MARK - 1, CLOEXEC);
-            let b = libc::syscall(libc::SYS_close_range, MARK + 1, libc::c_uint::MAX, CLOEXEC);
+            let b = libc::syscall(libc::SYS_close_range, last + 1, libc::c_uint::MAX, CLOEXEC);
             if a == 0 && b == 0 {
                 return;
             }
@@ -69,7 +78,7 @@ fn close_on_exec() {
         let mut l = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
         libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut l);
         let end = i32::try_from(l.rlim_cur).unwrap_or(i32::MAX).min(1 << 16);
-        for fd in (3..end).filter(|f| *f != MARK) {
+        for fd in (3..end).filter(|f| !(MARK..=last).contains(f)) {
             libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
         }
     }

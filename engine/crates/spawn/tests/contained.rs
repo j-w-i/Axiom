@@ -154,10 +154,8 @@ async fn no_network_and_no_names() {
     let u = std::os::unix::net::UnixListener::bind(path.as_path()).unwrap();
     u.set_nonblocking(true).unwrap();
     let o = f.sh("perl -MIO::Socket::UNIX -e 'print \"open\" if IO::Socket::UNIX->new(Peer=>\"s\")'; nc -U s </dev/null && echo open").await;
-    if cfg!(target_os = "macos") {
-        assert!(!o.out.contains("open"), "{o:?}");
-        assert!(u.accept().is_err());
-    }
+    assert!(!o.out.contains("open"), "{o:?}");
+    assert!(u.accept().is_err());
     let out = f.at("out/s");
     let u = std::os::unix::net::UnixListener::bind(out.as_path()).unwrap();
     u.set_nonblocking(true).unwrap();
@@ -236,9 +234,7 @@ async fn others_are_out_of_reach() {
 async fn a_set_user_bit_is_not_made() {
     let f = fixture();
     let o = f.sh("cp /bin/ls own-ls && chmod u+s own-ls && test -u own-ls && echo set").await;
-    if cfg!(target_os = "macos") {
-        assert!(!o.out.contains("set"), "{o:?}");
-    }
+    assert!(!o.out.contains("set"), "{o:?}");
 }
 
 /// SI-8.
