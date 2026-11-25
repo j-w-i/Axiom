@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
+import '../host/proto.dart';
+import '../patterns/session_panel.dart';
 import '../transcript/safe_text.dart';
 import '../ui/commands.dart';
 import '../ui/controls.dart';
@@ -11,7 +15,10 @@ import 'start.dart';
 
 /// What a person chooses about the window.
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.limits});
+
+  /// Asks the host for what it keeps everything to; null without a host.
+  final Future<List<HostLimit>> Function()? limits;
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +118,7 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
       ]),
+      if (limits case final f?) ...[const SizedBox(height: 18), _Limits(f)],
     ]);
   }
 }
@@ -161,4 +169,84 @@ class _CodeFontState extends State<_CodeFont> {
     sunken: true,
     onSubmitted: (_) => _take(),
   );
+}
+
+/// What the host keeps everything to, to be read. It is asked whenever somebody looks.
+class _Limits extends StatefulWidget {
+  const _Limits(this.ask);
+  final Future<List<HostLimit>> Function() ask;
+  @override
+  State<_Limits> createState() => _LimitsState();
+}
+
+class _LimitsState extends State<_Limits> {
+  bool _open = false;
+  List<HostLimit>? _all;
+  String? _problem;
+
+  Future<void> _fold() async {
+    setState(() {
+      _open = !_open;
+      _problem = null;
+    });
+    if (!_open) return;
+    try {
+      final all = await widget.ask();
+      if (mounted) setState(() => _all = all);
+    } on Object catch (e) {
+      if (mounted) setState(() => _problem = wordsOf(e));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    final all = _all ?? const <HostLimit>[];
+    final kinds = {for (final l in all) l.of};
+    Widget note(String words, {bool failed = false}) => Semantics(
+      liveRegion: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, AxSpace.card, 4),
+        child: Text(words, style: t.type.label.ink(failed ? c.faultText : c.ink3)),
+      ),
+    );
+    Widget row(HostLimit l) => MergeSemantics(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AxSpace.card, vertical: 5),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: Text(oneLine(literal(l.what), 200), style: t.type.ui)),
+            const SizedBox(width: 16),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 160),
+              child: Text(l.amount, textAlign: TextAlign.end, style: t.type.ui.ink(c.ink3)),
+            ),
+          ],
+        ),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PanelHeading('Limits', null, folded: !_open, onFold: () => unawaited(_fold())),
+        if (_open) ...[
+          if (_problem case final p?)
+            note(visible(p), failed: true)
+          else if (_all == null)
+            note('Asking the host')
+          else
+            note('What the host keeps agents to. They are not changed here.'),
+          if (_problem == null)
+            for (final kind in kinds) ...[
+              const SizedBox(height: 8),
+              PanelGroup(oneLine(literal(kind), 80), null, [
+                for (final l in all)
+                  if (l.of == kind) row(l),
+              ]),
+            ],
+        ],
+      ],
+    );
+  }
 }

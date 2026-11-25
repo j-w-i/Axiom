@@ -47,6 +47,14 @@ class Opens extends HostStore {
   Future<void> open(String id) async => opened.add(id);
 }
 
+class Keeps extends HostStore {
+  Keeps() : super(paths: HostPaths('/nonexistent'), binary: null, spawn: false);
+  @override
+  Future<List<HostLimit>> limits() async => const [
+    HostLimit('Files', 'One', 1 << 20, LimitUnit.bytes),
+  ];
+}
+
 HostStore store() => HostStore(paths: HostPaths('/nonexistent'), binary: null, spawn: false);
 
 void main() {
@@ -549,6 +557,21 @@ void main() {
     expect(find.textContaining('from-a-terminal'), findsWidgets);
     await t.pumpWidget(const SizedBox());
     expect(s.onFolder, isNull);
+    s.dispose();
+  });
+
+  testWidgets('the settings show what the host keeps everything to', (t) async {
+    final s = Keeps()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await keys(t, LogicalKeyboardKey.comma);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await t.tap(find.text('Limits'));
+    await t.pump();
+    await t.pump();
+    expect(find.text('1 MiB'), findsOneWidget);
     s.dispose();
   });
 

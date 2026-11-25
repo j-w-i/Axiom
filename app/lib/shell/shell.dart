@@ -464,7 +464,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                 onAccounts: () => _show(_View.accounts),
                 onCancel: _back,
               ),
-              _ when _view == _View.settings => const SettingsPage(),
+              _ when _view == _View.settings => SettingsPage(limits: widget.store.limits),
               _ when _view == _View.accounts => AccountsPage(
                 s,
                 onDone: () => _show(s.current == null ? _View.start : _View.work),
