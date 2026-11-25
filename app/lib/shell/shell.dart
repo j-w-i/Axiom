@@ -427,12 +427,14 @@ class _Side extends StatelessWidget {
   final ValueChanged<String> onAgent, onOpen;
   final VoidCallback onStart, onAddAgent, onAccounts;
 
+  /// At most four characters; nothing where no time was said.
   static String ageOf(int ms) {
+    if (ms <= 0) return '';
     final d = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
     if (d.inMinutes < 1) return 'now';
     if (d.inHours < 1) return '${d.inMinutes}m';
     if (d.inDays < 1) return '${d.inHours}h';
-    return '${d.inDays}d';
+    return d.inDays < 365 ? '${d.inDays}d' : '${d.inDays ~/ 365}y';
   }
 
   @override
@@ -475,7 +477,7 @@ class _Side extends StatelessWidget {
               for (final (label, color, all) in [
                 (
                   'Needs you',
-                  c.attentionText,
+                  c.ink2,
                   [
                     for (final w in store.needs)
                       if (w.need != Need.finished) w,
@@ -494,10 +496,13 @@ class _Side extends StatelessWidget {
                   Semantics(
                     liveRegion: true,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
-                      child: Text(
-                        all.length == 1 ? label : '$label · ${all.length}',
-                        style: t.type.label.ink(color),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(label, style: t.type.label.ink(color))),
+                          if (all.length > 1)
+                            Text('${all.length}', style: t.type.small.ink(c.ink3)),
+                        ],
                       ),
                     ),
                   ),
@@ -521,7 +526,7 @@ class _Side extends StatelessWidget {
                       age: ageOf(w.at),
                       onOpen: () => onAnswer(w),
                     ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                 ],
               if (m != null) ...[
                 ListenableBuilder(

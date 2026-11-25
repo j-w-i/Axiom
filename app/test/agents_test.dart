@@ -1374,7 +1374,8 @@ void main() {
         ..needs = const [here, there]
         ..notifyListeners();
       await settled(t);
-      expect(find.text('Needs you · 2'), findsOneWidget);
+      expect(find.text('Needs you'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
       expect(find.text('Ada asks to write a file'), findsOneWidget);
       expect(
         find.bySemanticsLabel('Ada asks to write a file: a.txt, in Other work'),
@@ -1446,7 +1447,8 @@ void main() {
       t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await settled(t);
       expect(s.calls, isEmpty);
-      expect(find.text('Needs you · 2'), findsOneWidget);
+      expect(find.text('Needs you'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
       expect(find.text('Finished, not seen yet'), findsOneWidget);
       for (final l in ['Ada failed', 'Cleo has reached a limit', 'Lead has finished']) {
         expect(find.text(l), findsOneWidget, reason: l);
