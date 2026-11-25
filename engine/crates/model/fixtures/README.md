@@ -28,3 +28,13 @@ last event where the page leaves it out, and that `web-search` is made whole whe
 the blocks between index 3 and 17 are left out, the last one's `content_block_stop` having index 3. Identifiers and signatures are the page's own,
 shortened by it. Bodies of errors in the tests are from `api/errors` and `api/rate-limits`, the redacted block is in the form of
 `build-with-claude/thinking`. The API's real behaviour has not been tested.
+
+## `openrouter-from-documentation/`: from documentation, not recorded
+There is no OpenRouter key here. Read on 2026-11-25:
+
+| Name | Page | What was done to it |
+|------|------|---------------------|
+| `error` | <https://openrouter.ai/docs/api_reference/errors-and-debugging#mid-stream-errors> | As printed |
+| `reasoning` | <https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#streaming-response> | **Put together**: that piece, then the last events of <https://openrouter.ai/docs/api_reference/streaming#the-final-usage-chunk-chat-completions>, whose `...` are left out and whose `usage` is the example of <https://openrouter.ai/docs/cookbook/administration/usage-accounting>; before them the comment that page says is sent |
+
+The APIs' real behaviour has not been tested.

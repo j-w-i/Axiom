@@ -520,6 +520,89 @@ fn an_answer_is_bounded() {
     assert_eq!(fold(Codec::Chat, &got).message.calls().count(), MAX_BLOCKS);
 }
 
+#[test]
+fn as_openrouter_streams() {
+    let quirks = Profile::openrouter().quirks;
+    let (r, e) = with(&quirks, &fixture("openrouter-from-documentation/reasoning.sse"));
+    // The reason to stop comes twice, the second time with the counts.
+    assert_eq!((e, r.stop, r.complete), (None, Some(Stop::EndTurn), true));
+    let want = Usage {
+        prompt: Some(194),
+        uncached: Some(94),
+        cache_read: Some(0),
+        cache_write: Some(100),
+        output: Some(2),
+        reasoning: Some(0),
+        ..Usage::default()
+    };
+    assert_eq!(r.usage, want);
+    let [details] = r.message.blocks.as_slice() else { panic!() };
+    assert_eq!(details.content, Content::Unknown { name: "reasoning_details".into() });
+    let (r, e) = with(&quirks, &fixture("openrouter-from-documentation/error.sse"));
+    let e = e.unwrap();
+    assert_eq!((e.class, e.retry, e.status), (Class::RateLimit, Retry::Restart, None));
+    assert_eq!(
+        (e.message.as_str(), e.code.as_deref()),
+        ("Rate limit exceeded", Some("rate_limit_exceeded"))
+    );
+    assert!(!r.complete);
+    // What it calls things (errors-and-debugging#typed-error-codes), and by number where that is new.
+    let class = |code: u16, kind: &str| {
+        let e = json!({"error":{"code":code,"message":"m","metadata":{"error_type":kind}},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}).to_string();
+        let e = with(&quirks, &stream(&[e])).1.unwrap();
+        (e.class, e.retry)
+    };
+    for (code, kind, want) in [
+        (401, "authentication", (Class::Auth, Retry::Never)),
+        (402, "payment_required", (Class::Billing, Retry::Never)),
+        (403, "permission_denied", (Class::Auth, Retry::Never)),
+        (403, "content_policy_violation", (Class::BadRequest, Retry::Never)),
+        (403, "refusal", (Class::BadRequest, Retry::Never)),
+        (400, "context_length_exceeded", (Class::ContextTooLong, Retry::Never)),
+        (400, "invalid_request", (Class::BadRequest, Retry::Never)),
+        (413, "payload_too_large", (Class::ContextTooLong, Retry::Never)),
+        (422, "unprocessable", (Class::BadRequest, Retry::Never)),
+        (502, "provider_unavailable", (Class::Server, Retry::Restart)),
+        (503, "provider_overloaded", (Class::Overloaded, Retry::Restart)),
+        (504, "timeout", (Class::Server, Retry::Restart)),
+        (500, "unmapped", (Class::Server, Retry::Restart)),
+    ] {
+        assert_eq!(class(code, kind), want, "{kind}");
+    }
+}
+
+#[test]
+fn openrouter_is_sent_reasoning_as_it_came() {
+    let detail = |text: &str, signature: Value| json!({"type":"reasoning.text","text":text,"signature":signature,"index":0});
+    let (reply, _) = read(&stream(&[
+        delta(json!({"reasoning":"a","reasoning_details":[detail("a", Value::Null)]})),
+        delta(json!({"reasoning":"b","reasoning_details":[detail("b", json!("sig"))]})),
+        delta(json!({"content":"t"})),
+        delta(
+            json!({"reasoning":"c","reasoning_details":[{"type":"reasoning.encrypted","data":"d"}]}),
+        ),
+        piece(json!({"index":0,"id":"x","function":function("f", "{}")})),
+        ends("tool_calls"),
+    ]));
+    let mut r = request();
+    (r.system, r.tools, r.messages) = (String::new(), Vec::new(), vec![reply.message]);
+    r.settings =
+        Settings { max_output: Some(9), effort: Some("xhigh".into()), ..Settings::default() };
+    let mut p = Profile::openrouter();
+    p.provider = "p".into();
+    let e = encode(&r, &p).unwrap();
+    let text = String::from_utf8(e.body).unwrap();
+    assert_eq!(
+        text,
+        r#"{"model":"m","stream":true,"stream_options":{"include_usage":true},"max_completion_tokens":9,"reasoning_effort":"xhigh","messages":[{"role":"assistant","content":"t","reasoning":"abc","reasoning_details":[{"index":0,"signature":null,"text":"a","type":"reasoning.text"},{"index":0,"signature":"sig","text":"b","type":"reasoning.text"},{"data":"d","type":"reasoning.encrypted"}],"tool_calls":[{"id":"x","type":"function","function":{"name":"f","arguments":"{}"}}]}]}"#
+    );
+    assert_eq!(e.lost, []);
+    // Not to another model, though it is the same provider.
+    r.model = "other".into();
+    let lost: Vec<_> = encode(&r, &p).unwrap().lost.iter().map(|l| l.what).collect();
+    assert_eq!(lost, [Loss::Reasoning, Loss::Unknown, Loss::Reasoning]);
+}
+
 // Requests.
 
 fn profile() -> Profile {

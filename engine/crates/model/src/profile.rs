@@ -161,6 +161,22 @@ impl Profile {
         }
     }
 
+    /// OpenRouter with a key. From openrouter.ai/docs, read 2026-11-25: the limit and the effort (the
+    /// reference of chat completions), and that a message goes back as it came, with its reasoning and
+    /// the details of it, whose chunks are concatenated in order
+    /// (guides/best-practices/reasoning-tokens#preserving-reasoning, #streaming-response).
+    pub fn openrouter() -> Self {
+        Self {
+            quirks: Quirks {
+                effort: Some(Effort::ReasoningEffort),
+                max_tokens_field: Some(MaxTokens::MaxCompletionTokens),
+                replay_reasoning: Some(true),
+                ..Quirks::default()
+            },
+            ..Self::openai_compatible("openrouter", "https://openrouter.ai/api/v1")
+        }
+    }
+
     /// Any server that speaks Chat Completions. Nothing beyond the protocol is taken for granted.
     pub fn openai_compatible(provider: impl Into<String>, base_url: impl Into<String>) -> Self {
         Self {
@@ -262,6 +278,7 @@ mod tests {
     fn nothing_unknown_is_claimed() {
         for p in [
             Profile::anthropic(),
+            Profile::openrouter(),
             Profile::lm_studio(),
             Profile::openai_compatible("p", "https://e.com"),
         ] {
