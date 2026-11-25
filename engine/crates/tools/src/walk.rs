@@ -82,7 +82,7 @@ impl Walk<'_> {
     ) -> bool {
         use cap_fs_ext::DirExt;
         let here = self.base.join(rel);
-        let mine = ignore_rules(dir, &here);
+        let mine = ignore_rules(dir, &here, &[".gitignore", ".ignore"]);
         let had = rules.len();
         rules.extend(mine);
         let mut entries: Vec<_> = match dir.entries() {
@@ -144,11 +144,11 @@ impl Walk<'_> {
 }
 
 /// The folder's own rules, read through its handle.
-fn ignore_rules(dir: &Dir, here: &std::path::Path) -> Option<Gitignore> {
+pub(crate) fn ignore_rules(dir: &Dir, here: &std::path::Path, files: &[&str]) -> Option<Gitignore> {
     let mut b = GitignoreBuilder::new(here);
     let mut any = false;
-    for name in [".gitignore", ".ignore"] {
-        let Some(text) = read_in(dir, name.as_ref(), 256 * 1024) else { continue };
+    for name in files {
+        let Some(text) = read_in(dir, OsStr::new(name), 256 * 1024) else { continue };
         for l in String::from_utf8_lossy(&text).lines().take(10_000) {
             // A line that is no rule is left out, as git does.
             any |= b.add_line(None, l).is_ok();
@@ -157,7 +157,7 @@ fn ignore_rules(dir: &Dir, here: &std::path::Path) -> Option<Gitignore> {
     any.then(|| b.build().ok()).flatten()
 }
 
-fn ignored(rules: &[Gitignore], path: &std::path::Path, dir: bool) -> bool {
+pub(crate) fn ignored(rules: &[Gitignore], path: &std::path::Path, dir: bool) -> bool {
     // The nearest rule that speaks decides.
     for r in rules.iter().rev() {
         let m = r.matched(path, dir);

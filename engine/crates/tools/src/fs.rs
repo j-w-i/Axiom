@@ -237,6 +237,15 @@ impl Spot {
     /// Puts a whole new file in the place of what was there, or nothing at all. What other names the
     /// old file has (hard links) keep the old content. Its permissions are kept.
     pub fn write(&self, bytes: &[u8]) -> Result<(), FsError> {
+        self.put(bytes, false)
+    }
+
+    /// The same; if it is to be run, it can be.
+    pub fn write_as(&self, bytes: &[u8], run: bool) -> Result<(), FsError> {
+        self.put(bytes, run)
+    }
+
+    fn put(&self, bytes: &[u8], run: bool) -> Result<(), FsError> {
         let kept = match self.kind {
             Kind::Missing => None,
             Kind::File => Some(self.open()?.0.metadata().map_err(|e| self.err(e))?.permissions()),
@@ -249,6 +258,9 @@ impl Spot {
             f.write_all(bytes)?;
             if let Some(p) = kept {
                 f.set_permissions(p)?;
+            }
+            if run {
+                can_run(&f)?;
             }
             f.sync_all()?;
             drop(f);
@@ -296,6 +308,20 @@ impl Spot {
             _ => Err(FsError::NotFolder(self.shown().into())),
         }
     }
+}
+
+#[cfg(unix)]
+fn can_run(f: &File) -> io::Result<()> {
+    use cap_std::fs::PermissionsExt;
+    let mut p = f.metadata()?.permissions();
+    // Whoever may read it.
+    let mode = p.mode();
+    p.set_mode(mode | (mode & 0o444) >> 2);
+    f.set_permissions(p)
+}
+#[cfg(not(unix))]
+fn can_run(_: &File) -> io::Result<()> {
+    Ok(())
 }
 
 fn fresh() -> String {

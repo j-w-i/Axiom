@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
+pub mod copy;
 pub mod edit;
 pub mod fs;
 pub mod jobs;
