@@ -23,6 +23,7 @@ use tokio::{
 
 use crate::{
     agents::{self, Agents, Finished, Setup, Spoken, Switch, Told},
+    changes,
     connections::{Connections, MemoryVault, Vault},
     faults::{Access, Faults},
     log,
@@ -911,6 +912,7 @@ fn slow(c: &Call) -> bool {
         Call::Models { .. }
             | Call::Look { .. }
             | Call::Harnesses {}
+            | Call::Changes { .. }
             | Call::ConnectionAdd { .. }
             | Call::ConnectionRemove { .. }
     )
@@ -1188,6 +1190,11 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 return Err(e);
             }
             Ok(json!({ "agent": agent }))
+        }
+        Call::Changes { session } => {
+            let folder = workspace(st, &session).await?;
+            let c = changes::changes(&st.agents, &session, folder).await?;
+            serde_json::to_value(c).map_err(|e| internal(e.to_string()))
         }
         Call::Harnesses {} => {
             let a = st.agents.clone();

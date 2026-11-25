@@ -309,6 +309,28 @@ impl Agents {
         Ok(setup)
     }
 
+    /// For the host's own look at a folder: as an agent that only looks.
+    pub fn looking(&self, workspace: &str, who: &AgentId) -> Result<Site, WireError> {
+        let s = Setup {
+            name: String::new(),
+            execution: Execution {
+                harness: "axiom".into(),
+                provider: None,
+                model: None,
+                connection: None,
+                effort: None,
+                environment: None,
+            },
+            access: axiom_proto::Access::Read,
+            workspace: real(Path::new(workspace))?.to_string(),
+            instructions: vec![],
+            trust: false,
+            resume: None,
+            began: false,
+        };
+        self.site(&s, who, true)
+    }
+
     /// Programs of delegated agents end.
     pub async fn end(&self) {
         let slots: Vec<Arc<Slot>> =

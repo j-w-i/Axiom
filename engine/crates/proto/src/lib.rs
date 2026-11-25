@@ -297,6 +297,27 @@ pub struct SessionInfo {
     pub running: bool,
 }
 
+/// What has been changed in a folder since its last commit.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Changes {
+    /// Git has something to do with the folder. If not, nothing else is known.
+    pub repository: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub files: Vec<Changed>,
+    /// A unified diff of them, without prefixes.
+    pub diff: String,
+    /// All of it is here.
+    pub whole: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Changed {
+    pub path: String,
+    /// `new`, `changed`, `removed` or `conflict`.
+    pub what: String,
+}
+
 /// A harness, as it was found without being run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnessInfo {
@@ -379,6 +400,9 @@ pub enum Call {
         #[serde(default)]
         instructions: Vec<Instructions>,
     },
+    /// What has been changed in a session's folder since its last commit.
+    #[serde(rename = "workspace.changes")]
+    Changes { session: SessionId },
     /// The harnesses this host can drive.
     #[serde(rename = "harness.list")]
     Harnesses {},

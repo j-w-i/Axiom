@@ -6,6 +6,7 @@
 //! - the listener is local, owned by one user, and needs a token (SI-20).
 
 mod agents;
+mod changes;
 pub mod client;
 pub mod connections;
 mod delegated;
