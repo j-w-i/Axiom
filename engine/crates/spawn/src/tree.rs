@@ -4,13 +4,18 @@
 //! anyone looked is missed on macOS; it is contained all the same.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io,
     os::unix::{
         io::{AsRawFd, OwnedFd},
         process::CommandExt,
     },
+    time::{Duration, Instant},
 };
+
+/// What is ended is waited for this long, and after that this long elsewhere.
+const SOON: Duration = Duration::from_secs(1);
+const LATE: Duration = Duration::from_secs(30);
 
 /// Where the mark is in what is started: high enough for no shell to use it.
 const MARK: i32 = 200;
@@ -76,6 +81,12 @@ fn signal(pid: i32, sig: i32) -> bool {
     unsafe { libc::kill(pid, sig) == 0 }
 }
 
+#[allow(unsafe_code)]
+fn group(pid: i32) -> i32 {
+    // SAFETY: a plain system call.
+    unsafe { libc::getpgid(pid) }
+}
+
 impl Tree {
     pub fn new(pid: u32, mark: Option<OwnedFd>) -> Self {
         let root = i32::try_from(pid).unwrap_or(0);
@@ -86,16 +97,28 @@ impl Tree {
         t
     }
 
-    /// Adds what those known have started since.
+    /// Adds what those known have started since, and drops those that have ended: their numbers may
+    /// be somebody else's by now, with children that are none of this.
     pub fn look(&mut self) {
-        let mut todo: Vec<i32> = self.known.keys().copied().collect();
-        while let Some(p) = todo.pop() {
-            for c in sys::children(p) {
-                if let std::collections::btree_map::Entry::Vacant(e) = self.known.entry(c)
-                    && let Some(at) = sys::started(c)
-                {
-                    e.insert(at);
-                    todo.push(c);
+        let all = sys::Table::new();
+        let mut todo: Vec<(i32, u64)> = self.known.iter().map(|(p, at)| (*p, *at)).collect();
+        while let Some((p, at)) = todo.pop() {
+            if sys::started(p) != Some(at) {
+                // The root's own start is what tells whether its group is still its.
+                if p != self.root {
+                    self.known.remove(&p);
+                }
+                continue;
+            }
+            let children = all.children(p);
+            // Ended meanwhile is no matter. Begun anew meanwhile: whose they are is not known.
+            if sys::started(p).is_some_and(|x| x != at) {
+                continue;
+            }
+            for c in children {
+                let Some(at) = sys::started(c) else { continue };
+                if self.known.insert(c, at) != Some(at) {
+                    todo.push((c, at));
                 }
             }
         }
@@ -122,16 +145,32 @@ impl Tree {
             .collect()
     }
 
-    /// Ends all of it. How many others there were.
+    /// Ends all of it. How many others there were. What is not gone soon (it may be waiting for a
+    /// drive) is not waited for here.
     pub fn kill(&mut self) -> usize {
         if self.done {
             return 0;
         }
         self.done = true;
-        let mut seen = std::collections::BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        if !self.kill_within(SOON, &mut seen) {
+            let mut rest = Self {
+                root: self.root,
+                known: std::mem::take(&mut self.known),
+                mark: self.mark.take(),
+                done: true,
+            };
+            std::thread::spawn(move || rest.kill_within(LATE, &mut BTreeSet::new()));
+        }
+        seen.len()
+    }
+
+    /// Whether all of it is gone.
+    fn kill_within(&mut self, most: Duration, seen: &mut BTreeSet<i32>) -> bool {
+        let began = Instant::now();
         // A process may start another while it is being ended, so that a signal to the group misses
         // it. Nobody holding the mark any more is the proof that none did.
-        for _ in 0..1000 {
+        while began.elapsed() < most {
             self.look();
             #[cfg(target_os = "macos")]
             for p in self.mark.iter().flat_map(sys::holding) {
@@ -143,10 +182,10 @@ impl Tree {
             let root = self.known.get(&self.root).copied();
             let rooted = root.is_some() && sys::started(self.root) == root;
             if others.is_empty() && !rooted && self.released(0) {
-                break;
+                return true;
             }
             // Its group's number is nobody else's as long as one of the group lives.
-            if rooted || !others.is_empty() || !self.released(0) {
+            if rooted || others.iter().any(|p| group(*p) == self.root) {
                 signal(-self.root, libc::SIGKILL);
             }
             for p in others {
@@ -155,11 +194,9 @@ impl Tree {
             }
             self.released(1);
         }
-        seen.len()
+        false
     }
-}
 
-impl Tree {
     /// Whether nobody holds the mark, within `ms`.
     fn released(&self, ms: i32) -> bool {
         match &self.mark {
@@ -214,9 +251,16 @@ mod sys {
         v
     }
 
-    pub fn children(pid: i32) -> Vec<i32> {
-        // SAFETY: the buffer is as large as said.
-        list(|b, n| unsafe { libc::proc_listchildpids(pid, b, n) })
+    /// Who has started whom: asked of the system each time.
+    pub struct Table;
+    impl Table {
+        pub fn new() -> Self {
+            Self
+        }
+        pub fn children(&self, pid: i32) -> Vec<i32> {
+            // SAFETY: the buffer is as large as said.
+            list(|b, n| unsafe { libc::proc_listchildpids(pid, b, n) })
+        }
     }
 
     /// This user's processes that hold the other end of the mark.
@@ -269,10 +313,62 @@ mod sys {
         stat(pid).filter(|s| !matches!(s.0, 'Z' | 'X')).map(|s| s.2)
     }
 
-    pub fn children(pid: i32) -> Vec<i32> {
-        let Ok(d) = std::fs::read_dir("/proc") else { return Vec::new() };
-        d.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
-            .filter(|p| stat(*p).is_some_and(|s| s.1 == pid))
-            .collect()
+    /// Who has started whom, read once.
+    pub struct Table(std::collections::BTreeMap<i32, Vec<i32>>);
+    impl Table {
+        pub fn new() -> Self {
+            let mut all: std::collections::BTreeMap<i32, Vec<i32>> = Default::default();
+            let pids = std::fs::read_dir("/proc").into_iter().flatten();
+            for p in pids.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok()) {
+                if let Some((_, parent, _)) = stat(p) {
+                    all.entry(parent).or_default().push(p);
+                }
+            }
+            Self(all)
+        }
+        pub fn children(&self, pid: i32) -> Vec<i32> {
+            self.0.get(&pid).cloned().unwrap_or_default()
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// A number that is somebody else's by now: neither it nor its children are ended.
+    #[test]
+    fn who_has_a_number_after_one_of_ours_lives() {
+        let mut other = std::process::Command::new("/bin/sh")
+            .args(["-c", "sleep 61 & echo up; wait"])
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut up = [0; 3];
+        io::Read::read_exact(other.stdout.as_mut().unwrap(), &mut up).unwrap();
+        let pid = i32::try_from(other.id()).unwrap();
+        let at = sys::started(pid).unwrap();
+        let children = sys::Table::new().children(pid);
+        assert_eq!(children.len(), 1);
+        let mut ours =
+            std::process::Command::new("sleep").arg("62").process_group(0).spawn().unwrap();
+        for root in [pid, i32::try_from(ours.id()).unwrap()] {
+            let mut t = Tree { root, known: BTreeMap::new(), mark: None, done: false };
+            t.known.insert(root, sys::started(root).unwrap());
+            t.known.insert(pid, at - 1);
+            t.look();
+            assert!(!t.known.contains_key(&children[0]));
+            t.kill();
+        }
+        assert!(!ours.wait().unwrap().success());
+        assert!(other.try_wait().unwrap().is_none());
+        assert!(sys::started(children[0]).is_some());
+        // As it was when it was ours: all of it ends.
+        let mut t = Tree { root: pid, known: [(pid, at)].into(), mark: None, done: false };
+        assert_eq!(t.kill(), 1);
+        other.wait().unwrap();
+        assert!(sys::started(children[0]).is_none());
     }
 }
