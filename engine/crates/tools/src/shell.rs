@@ -29,6 +29,8 @@ pub struct Command {
 
 const HEAD: usize = 12 * 1024;
 const TAIL: usize = 36 * 1024;
+/// How long the pipes may be silent after the end.
+const DRAIN: Duration = Duration::from_secs(1);
 /// Kept in a file at most.
 const SPOOL: u64 = 32 * 1024 * 1024;
 
@@ -79,6 +81,9 @@ impl Command {
         // Until the process has ended and both pipes are read: what it left running could hold them
         // open, and is ended with it.
         let mut ended = None;
+        let mut after = 0;
+        let drain = tokio::time::sleep(self.limit);
+        tokio::pin!(drain);
         while out_open || err_open || ended.is_none() {
             let n = tokio::select! {
                 r = out.read(&mut a), if out_open => {
@@ -91,8 +96,11 @@ impl Command {
                 }
                 r = p.wait(), if ended.is_none() => {
                     ended = Some(r);
+                    drain.as_mut().reset((Instant::now() + DRAIN).into());
                     None
                 }
+                // Somebody out of reach holds them.
+                () = &mut drain, if ended.is_some() => break,
                 _ = look.tick(), if ended.is_none() => {
                     p.look();
                     None
@@ -104,12 +112,20 @@ impl Command {
                 }
             };
             if let Some(bytes) = n.filter(|b| !b.is_empty()) {
+                // As much as pipes hold, twice.
+                after += if ended.is_some() { bytes.len() } else { 0 };
+                if after > 256 * 1024 {
+                    break;
+                }
                 ends.add(bytes);
                 let l = lines.add(bytes);
                 spool.add(bytes).await;
                 // Who shows it may be behind: then the command waits. Who has left does not count.
                 if !l.is_empty() {
                     let _ = heard.send(l).await;
+                }
+                if ended.is_some() {
+                    drain.as_mut().reset((Instant::now() + DRAIN).into());
                 }
             }
         }
@@ -201,8 +217,33 @@ struct Spool {
     left: u64,
 }
 
+/// Of these files, how many are kept.
+const SPOOLS: usize = 8;
+
+/// The oldest of them go.
+async fn fewer(scratch: &Place) {
+    let Ok(mut d) = tokio::fs::read_dir(scratch.as_path()).await else { return };
+    let mut all = Vec::new();
+    while let Ok(Some(e)) = d.next_entry().await {
+        let name = e.file_name().to_string_lossy().into_owned();
+        // Only what is certainly one of ours, and not what a name may lead to.
+        let ours = name.strip_prefix("output-").and_then(|n| n.strip_suffix(".txt"));
+        if ours.is_some_and(|n| n.len() == 12 && n.bytes().all(|b| b.is_ascii_hexdigit()))
+            && let Ok(m) = e.metadata().await
+            && m.is_file()
+        {
+            all.push((m.modified().ok(), e.path()));
+        }
+    }
+    all.sort();
+    for (_, p) in all.iter().take((all.len() + 1).saturating_sub(SPOOLS)) {
+        let _ = tokio::fs::remove_file(p).await;
+    }
+}
+
 impl Spool {
     async fn new(scratch: &Place) -> Self {
+        fewer(scratch).await;
         let mut b = [0u8; 6];
         let _ = axiom_proto::random(&mut b);
         let name: String = b.iter().map(|x| format!("{x:02x}")).collect();

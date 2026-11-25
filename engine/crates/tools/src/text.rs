@@ -6,15 +6,20 @@ use std::fmt::Write;
 pub const LINE: usize = 2000;
 
 /// Lines from `from` (1 is the first), numbered, at most `lines` of them and about `bytes` bytes.
-/// Says what is left out.
-pub fn numbered(text: &str, from: usize, lines: usize, bytes: usize) -> String {
+/// Says what is left out. Also which lines they are, from 0.
+pub fn numbered(
+    text: &str,
+    from: usize,
+    lines: usize,
+    bytes: usize,
+) -> (String, std::ops::Range<usize>) {
     let from = from.max(1);
     let all = text.lines().count();
     if all == 0 {
-        return "(the file is empty)".into();
+        return ("(the file is empty)".into(), 0..0);
     }
     if from > all {
-        return format!("(the file has only {all} lines)");
+        return (format!("(the file has only {all} lines)"), 0..0);
     }
     let mut out = String::new();
     let mut last = from - 1;
@@ -33,7 +38,7 @@ pub fn numbered(text: &str, from: usize, lines: usize, bytes: usize) -> String {
     if last < all {
         let _ = writeln!(out, "({} more lines; read on from line {})", all - last, last + 1);
     }
-    out
+    (out, from - 1..last)
 }
 
 /// Output of a program without what would command a terminal: escape sequences and controls go;
@@ -185,19 +190,23 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    fn first(t: &str, from: usize, lines: usize, bytes: usize) -> String {
+        numbered(t, from, lines, bytes).0
+    }
+
     #[test]
     fn lines_are_numbered_and_bounded() {
-        assert_eq!(numbered("a\nb\n", 1, 10, 1000), "     1\ta\n     2\tb\n");
+        assert_eq!(first("a\nb\n", 1, 10, 1000), "     1\ta\n     2\tb\n");
         assert_eq!(
-            numbered("a\nb\nc", 2, 1, 1000),
+            first("a\nb\nc", 2, 1, 1000),
             "     2\tb\n(1 more lines; read on from line 3)\n"
         );
-        assert_eq!(numbered("a", 5, 1, 1000), "(the file has only 1 lines)");
-        assert_eq!(numbered("", 1, 1, 1000), "(the file is empty)");
-        assert_eq!(numbered("a\r\nb", 0, 9, 99), "     1\ta\n     2\tb\n");
-        let long = numbered(&"é".repeat(LINE + 5), 1, 1, 100_000);
+        assert_eq!(first("a", 5, 1, 1000), "(the file has only 1 lines)");
+        assert_eq!(first("", 1, 1, 1000), "(the file is empty)");
+        assert_eq!(first("a\r\nb", 0, 9, 99), "     1\ta\n     2\tb\n");
+        let long = first(&"é".repeat(LINE + 5), 1, 1, 100_000);
         assert!(long.contains("… (2005 characters)") && long.chars().count() < LINE + 60);
-        let many = numbered(&"x\n".repeat(10_000), 1, 10_000, 800);
+        let many = first(&"x\n".repeat(10_000), 1, 10_000, 800);
         assert!(many.len() < 1000 && many.contains("more lines"), "{many}");
     }
 

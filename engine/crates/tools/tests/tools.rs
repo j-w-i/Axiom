@@ -591,3 +591,173 @@ async fn jobs_go_on_and_are_read() {
     assert!(!o.ok || !t.root.join("home/out-of-it").exists());
     t.seen.1.end();
 }
+
+#[tokio::test]
+async fn what_was_read_in_part_is_not_written_anew() {
+    let t = t(Access::Work);
+    let text: String = (1..=30).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(t.root.join("home/w/long.txt"), &text).unwrap();
+    let write = json!({"path": "long.txt", "content": "short\n"});
+    let read =
+        |from: usize, lines: usize| json!({"path": "long.txt", "from": from, "lines": lines});
+    assert!(t.run("write", write.clone()).await.text.contains("read long.txt before"));
+    t.run("read", read(1, 10)).await;
+    t.run("read", read(21, 10)).await;
+    let o = t.run("write", write.clone()).await;
+    assert!(o.text.contains("only a part"), "{}", o.text);
+    // What it says itself it may replace.
+    let o = t.run("edit", json!({"path": "long.txt", "old": "line 5\n", "new": "LINE 5\n"})).await;
+    assert!(o.ok, "{}", o.text);
+    std::fs::write(t.root.join("home/w/long.txt"), &text).unwrap();
+    // In pieces, in any order, is whole as well; after a change nothing of it counts.
+    for (from, lines) in [(21, 10), (1, 15), (3, 2), (14, 7)] {
+        assert!(!t.run("write", write.clone()).await.ok);
+        t.run("read", read(from, lines)).await;
+    }
+    assert!(t.run("write", write.clone()).await.ok);
+    assert_eq!(t.file("long.txt").as_deref(), Some("short\n"));
+    // What it wrote it knows.
+    assert!(t.run("write", json!({"path": "long.txt", "content": "again\n"})).await.ok);
+    std::fs::write(t.root.join("home/w/none.txt"), "").unwrap();
+    t.run("read", json!({"path": "none.txt"})).await;
+    assert!(t.run("write", json!({"path": "none.txt", "content": "x"})).await.ok);
+}
+
+#[tokio::test]
+async fn arguments_as_models_send_them() {
+    let t = t(Access::Work);
+    let o = t.run("read", json!({"path": "a.txt", "from": 2.0, "lines": 1.0})).await;
+    assert!(o.ok && o.text.contains("two") && !o.text.contains("one"), "{}", o.text);
+    let o = t
+        .run("search", json!({"pattern": "two", "path": null, "only": null, "around": null}))
+        .await;
+    assert!(o.ok, "{}", o.text);
+    assert!(t.run("job", json!({"do": "list", "id": null, "command": null})).await.ok);
+    for bad in [
+        json!({"path": null}),
+        json!({"path": "a.txt", "from": 1.5}),
+        json!({"path": "a.txt", "from": -1.0}),
+    ] {
+        assert!(!t.run("read", bad.clone()).await.ok, "{bad}");
+    }
+}
+
+#[tokio::test]
+async fn what_is_found_has_an_end() {
+    let t = t(Access::Work);
+    let line = "x".repeat(400) + "\n";
+    for d in 0..3 {
+        std::fs::write(t.root.join(format!("home/w/big{d}.txt")), line.repeat(4000)).unwrap();
+    }
+    let o = t.run("search", json!({"pattern": "x", "around": 20})).await;
+    assert!(o.ok && o.text.len() < 96 * 1024 && o.text.contains("there may be more"));
+    let many = t.root.join("home/w/many");
+    std::fs::create_dir(&many).unwrap();
+    for n in 0..450 {
+        std::fs::write(many.join(format!("{n:03}-{}", "y".repeat(230))), "").unwrap();
+    }
+    for (tool, args) in
+        [("list", json!({"path": "many"})), ("glob", json!({"pattern": "*", "path": "many"}))]
+    {
+        let o = t.run(tool, args).await;
+        let shown = o.text.lines().filter(|l| !l.starts_with('(')).count();
+        assert!(o.text.len() < 66 * 1024, "{tool}");
+        assert!(o.text.contains(&format!("({} more)", 450 - shown)), "{tool}");
+    }
+}
+
+#[tokio::test]
+async fn a_patch_that_fails_leaves_no_folders() {
+    let t = t(Access::Work);
+    let p = "*** Begin Patch\n*** Add File: n1/n2/new\n+x\n*** Update File: a.txt\n-one\n+1\n*** End Patch";
+    let (Plan::Go(step, _) | Plan::Ask(_, step, _)) = t.plan("patch", json!({"patch": p})) else {
+        panic!()
+    };
+    std::fs::write(t.root.join("home/w/a.txt"), "other\n").unwrap();
+    let o = step.run(&t.site, &t.seen, quiet()).await;
+    assert!(!o.ok, "{}", o.text);
+    assert!(!t.root.join("home/w/n1").exists());
+    std::fs::write(t.root.join("home/w/a.txt"), "one\n").unwrap();
+    assert!(t.run("patch", json!({"patch": p})).await.ok);
+    assert_eq!(t.file("n1/n2/new").as_deref(), Some("x\n"));
+    let many: String = (0..101).map(|n| format!("*** Add File: f{n}\n+x\n")).collect();
+    let o = t.run("patch", json!({"patch": format!("*** Begin Patch\n{many}*** End Patch")})).await;
+    assert!(o.text.contains("more than 100 files"), "{}", o.text);
+}
+
+/// The strictest of its files decides for a patch, in whatever order they are.
+#[tokio::test]
+async fn one_file_to_ask_about_is_enough() {
+    let mut t = t(Access::Work);
+    let rules = "version=1\n[[rule]]\nid='a'\ntool='write'\npaths=['src/**']\ndecision='ask'";
+    t.site.policy = Policy::parse(rules, Source::Workspace).unwrap();
+    let add = |f: &str| format!("*** Add File: {f}\n+x\n");
+    for (files, want) in [
+        (vec!["new", "other"], Decision::Allow),
+        (vec!["new", "src/new"], Decision::Ask),
+        (vec!["src/new", "new"], Decision::Ask),
+        (vec!["n1", "src/n2", "n3"], Decision::Ask),
+    ] {
+        let body: String = files.iter().map(|f| add(f)).collect();
+        let p = format!("*** Begin Patch\n{body}*** End Patch");
+        assert_eq!(t.decision("patch", json!({"patch": p})), want, "{files:?}");
+    }
+}
+
+/// A walk does not show what would have to be asked about.
+#[tokio::test]
+async fn a_walk_shows_only_what_may_be_read() {
+    let mut t = t(Access::Work);
+    let rules = "version=1\n[[rule]]\nid='a'\ntool='read'\npaths=['**/*.rs']\ndecision='ask'";
+    t.site.policy = Policy::parse(rules, Source::Workspace).unwrap();
+    for (tool, args) in [
+        ("glob", json!({"pattern": "**"})),
+        ("search", json!({"pattern": "main|one"})),
+        ("list", json!({"path": "src"})),
+    ] {
+        let o = t.run(tool, args).await;
+        assert!(o.ok && !o.text.contains("b.rs") && o.text.contains("not allowed"), "{}", o.text);
+    }
+}
+
+/// A file is never in neither place.
+#[tokio::test]
+async fn a_moved_file_is_written_before_the_old_one_goes() {
+    let t = t(Access::Work);
+    let p = "*** Begin Patch\n*** Update File: a.txt\n*** Move to: src/b.rs.d/c.txt\n-one\n+1\n*** End Patch";
+    let (Plan::Go(step, _) | Plan::Ask(_, step, _)) = t.plan("patch", json!({"patch": p})) else {
+        panic!()
+    };
+    // The new place cannot be written any more.
+    std::fs::write(t.root.join("home/w/src/b.rs.d"), "in the way").unwrap();
+    assert!(!step.run(&t.site, &t.seen, quiet()).await.ok);
+    assert_eq!(t.file("a.txt").as_deref(), Some("one\ntwo\nthree\n"));
+}
+
+#[tokio::test]
+async fn only_the_last_outputs_are_kept() {
+    let t = t(Access::Work);
+    std::fs::write(t.root.join("tmp/output-mine.txt"), "").unwrap();
+    for _ in 0..10 {
+        t.run("shell", json!({"command": "seq 1 30000"})).await;
+    }
+    let names: Vec<String> = std::fs::read_dir(t.root.join("tmp"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.starts_with("output-"))
+        .collect();
+    assert_eq!(names.len(), 9, "{names:?}");
+    assert!(names.contains(&"output-mine.txt".into()));
+}
+
+/// Somebody holds the output open who cannot be found any more: that is not waited for.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn who_holds_the_output_open_is_not_waited_for() {
+    let t = t(Access::Work);
+    let script = "perl -MPOSIX -e 'POSIX::close($_) for 3..255; if (!fork) { setsid(); if (!fork) { sleep 12 } exit } exit' ; echo done";
+    let now = Instant::now();
+    let o = t.run("shell", json!({ "command": script })).await;
+    assert!(o.text.contains("done"), "{}", o.text);
+    assert!(now.elapsed() < Duration::from_secs(8), "{:?}", now.elapsed());
+}

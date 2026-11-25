@@ -789,9 +789,14 @@ impl<S: Stage> Agent<S> {
         let (site, seen) = (self.site.clone(), self.seen.clone());
         let (t, a) = (tool.to_owned(), args.clone());
         // Files are looked at off the runtime's own threads.
-        let plan = tokio::task::spawn_blocking(move || axiom_tools::plan(&t, &a, &site, &seen))
-            .await
-            .map_err(|_| Halt::Failed("the tool failed".into()))?;
+        let plan = tokio::task::spawn_blocking(move || axiom_tools::plan(&t, &a, &site, &seen));
+        // Planning changes nothing: whoever stops does not wait for it.
+        let plan = tokio::select! {
+            biased;
+            () = stopped(cancel) => return Err(Halt::Unbegun),
+            () = self.stage.closed() => return Err(Halt::Gone),
+            p = plan => p.map_err(|_| Halt::Failed("the tool failed".into()))?,
+        };
         let (step, verdict, answered) = match plan {
             Plan::No(why) => {
                 return Ok(Output {

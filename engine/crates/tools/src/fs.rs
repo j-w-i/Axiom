@@ -282,6 +282,11 @@ impl Spot {
         self.dir.create_dir(&self.name).map_err(|e| self.err(e))
     }
 
+    /// If nothing is in it.
+    pub fn remove_folder(&self) -> Result<(), FsError> {
+        self.dir.remove_dir(&self.name).map_err(|e| self.err(e))
+    }
+
     /// The folder itself, to list or walk.
     pub fn folder(&self) -> Result<Dir, FsError> {
         match self.kind {

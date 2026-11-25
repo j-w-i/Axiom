@@ -25,6 +25,9 @@ const LONGEST: Duration = Duration::from_secs(20);
 /// Of a line that is found, characters.
 const SHOWN: usize = 300;
 
+/// What all of it may come to, bytes.
+const TEXT: usize = 64 * 1024;
+
 /// What may be shown: judged for each file by its real place.
 pub type May<'a> = &'a dyn Fn(&Place) -> bool;
 
@@ -210,10 +213,17 @@ impl Look<'_> {
             return "(the folder is empty)".into();
         }
         names.sort();
-        let more = names.len().saturating_sub(most);
-        names.truncate(most);
-        let mut out = names.join("\n");
-        out.push('\n');
+        let all = names.len();
+        let mut out = String::new();
+        let mut n = 0;
+        for name in names.iter().take(most) {
+            if out.len() + name.len() > TEXT {
+                break;
+            }
+            let _ = writeln!(out, "{name}");
+            n += 1;
+        }
+        let more = all - n;
         if more > 0 {
             let _ = writeln!(out, "({more} more)");
         }
@@ -228,7 +238,7 @@ impl Look<'_> {
         let mut w = self.walk();
         w.files(self.dir, &mut |_, _, _, rel| {
             if set.is_match(rel) {
-                if n < most {
+                if n < most && out.len() + rel.len() < TEXT {
                     let _ = writeln!(out, "{rel}");
                     n += 1;
                 } else {
@@ -282,7 +292,7 @@ impl Look<'_> {
             let mut shown = 0;
             let mut any = false;
             for i in 0..last {
-                if n >= most {
+                if n >= most || out.len() > TEXT {
                     break;
                 }
                 if !re.is_match(lines[i]) {
@@ -308,16 +318,17 @@ impl Look<'_> {
                 }
                 shown = to;
             }
-            n < most
+            n < most && out.len() <= TEXT
         });
+        let long = out.len() > TEXT;
         w.skipped.unread = unread;
         if n == 0 {
             out.push_str("(nothing found)\n");
         } else {
             let _ = writeln!(out, "({n} lines in {files} files)");
         }
-        if n >= most && w.skipped.ended.is_none() {
-            let _ = writeln!(out, "(there may be more: only the first {most} are shown)");
+        if (n >= most || long) && w.skipped.ended.is_none() {
+            let _ = writeln!(out, "(there may be more: only the first {n} are shown)");
         }
         w.skipped.say(&mut out);
         Ok(out)

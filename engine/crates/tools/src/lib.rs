@@ -69,13 +69,48 @@ impl Site {
 
 /// What this agent has read, so that it changes only what it knows; and what it has running.
 #[derive(Debug, Clone, Default)]
-pub struct Seen(Arc<Mutex<BTreeMap<Place, String>>>, pub jobs::Jobs);
+pub struct Seen(Arc<Mutex<BTreeMap<Place, Known>>>, pub jobs::Jobs);
+
+/// A file as it was when it was read.
+#[derive(Debug, Clone)]
+struct Known {
+    digest: String,
+    /// Which lines have been shown, from 0, in order and apart; none of `lines` is all.
+    shown: Vec<std::ops::Range<usize>>,
+    lines: usize,
+}
+
+impl Known {
+    fn whole(&self) -> bool {
+        self.lines == 0 || self.shown.first().is_some_and(|r| *r == (0..self.lines))
+    }
+}
 
 impl Seen {
+    /// All of it is known: it was written.
     fn add(&self, p: &Place, digest: &str) {
-        if let Ok(mut m) = self.0.lock() {
-            m.insert(p.clone(), digest.to_owned());
+        self.part(p, digest, 0..0, 0);
+    }
+    fn part(&self, p: &Place, digest: &str, shown: std::ops::Range<usize>, lines: usize) {
+        let Ok(mut m) = self.0.lock() else { return };
+        let k = m.entry(p.clone()).or_insert_with(|| Known {
+            digest: digest.to_owned(),
+            shown: vec![],
+            lines,
+        });
+        if k.digest != digest || lines == 0 {
+            *k = Known { digest: digest.to_owned(), shown: vec![], lines };
         }
+        k.shown.push(shown);
+        k.shown.sort_by_key(|r| r.start);
+        let mut all: Vec<std::ops::Range<usize>> = Vec::new();
+        for r in k.shown.drain(..) {
+            match all.last_mut() {
+                Some(l) if r.start <= l.end => l.end = l.end.max(r.end),
+                _ => all.push(r),
+            }
+        }
+        k.shown = all;
     }
     /// Everything has to be read again.
     pub fn forget(&self) {
@@ -83,7 +118,7 @@ impl Seen {
             m.clear();
         }
     }
-    fn digest(&self, p: &Place) -> Option<String> {
+    fn known(&self, p: &Place) -> Option<Known> {
         self.0.lock().ok()?.get(p).cloned()
     }
 }
@@ -236,6 +271,8 @@ const LARGEST: u64 = 8 * 1024 * 1024;
 /// Of a file, at a time.
 const READ: usize = 64 * 1024;
 const FOUND: usize = 200;
+/// Files of one patch.
+const PATCHED: usize = 100;
 
 macro_rules! args {
     ($name:ident { $($f:ident : $t:ty $(= $d:expr)?),* $(,)? }) => {
@@ -288,7 +325,19 @@ struct JobArgs {
 }
 args!(ShellArgs { command: String, cwd: String = "here", seconds: u64 = "two_minutes" });
 
+/// Many models send `null` for what they leave out, and whole numbers as `1.0`.
 fn args<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, String> {
+    let mut v = v.clone();
+    if let Some(all) = v.as_object_mut() {
+        all.retain(|_, x| !x.is_null());
+        for x in all.values_mut() {
+            if let Some(f) = x.as_f64().filter(|f| x.is_f64() && f.fract() == 0.0)
+                && (0.0..1e15).contains(&f)
+            {
+                *x = json!(f as u64);
+            }
+        }
+    }
     T::deserialize(v).map_err(|e| format!("the arguments cannot be used: {e}"))
 }
 
@@ -352,7 +401,7 @@ fn understand(tool: &str, v: &Value, site: &Site, seen: &Seen) -> Result<Plan, S
         }
         "write" => {
             let a: WriteArgs = args(v)?;
-            let c = change(site, seen, &a.path, |_| Ok(Some(a.content)), true)?;
+            let c = change(site, seen, &a.path, |_| Ok(Some(a.content)), Must::All)?;
             changes(tool, site, vec![c])
         }
         "edit" => {
@@ -365,14 +414,18 @@ fn understand(tool: &str, v: &Value, site: &Site, seen: &Seen) -> Result<Plan, S
                     let t = t.ok_or("the file does not exist")?;
                     edit::replace(t, &a.old, &a.new, a.all).map(Some).map_err(|e| e.to_string())
                 },
-                true,
+                Must::Some,
             )?;
             changes(tool, site, vec![c])
         }
         "patch" => {
             let a: PatchArgs = args(v)?;
             let mut all = Vec::new();
-            for f in edit::parse_patch(&a.patch).map_err(|e| e.to_string())? {
+            let files = edit::parse_patch(&a.patch).map_err(|e| e.to_string())?;
+            if files.len() > PATCHED {
+                return Err(format!("the patch changes more than {PATCHED} files"));
+            }
+            for f in files {
                 patched(site, seen, f, &mut all)?;
             }
             changes(tool, site, all)
@@ -418,13 +471,22 @@ fn find(site: &Site, reach: &Reach, path: &str) -> Result<Spot, String> {
     Ok(spot)
 }
 
+/// What of a file must have been read before it is changed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Must {
+    /// The change itself names what it changes.
+    Nothing,
+    Some,
+    All,
+}
+
 /// Of `path`, what it holds and what it is to hold.
 fn change(
     site: &Site,
     seen: &Seen,
     path: &str,
     f: impl FnOnce(Option<&str>) -> Result<Option<String>, String>,
-    known: bool,
+    known: Must,
 ) -> Result<Change, String> {
     let place = site.workspace.join(path).map_err(|e| format!("{path}: {e}"))?;
     let spot = match fs::find(site.caps.write.roots(), &place) {
@@ -455,11 +517,16 @@ fn change(
         Some(s) if s.kind != Kind::Missing => return Err(format!("{path} is not a plain file")),
         _ => None,
     };
-    if let (Some(b), true) = (&before, known) {
-        match seen.digest(&place) {
+    if let Some(b) = before.as_ref().filter(|_| known != Must::Nothing) {
+        match seen.known(&place) {
             None => return Err(format!("read {path} before changing it")),
-            Some(d) if d != b.digest => {
+            Some(k) if k.digest != b.digest => {
                 return Err(format!("{path} has changed since you read it; read it again"));
+            }
+            Some(k) if known == Must::All && !k.whole() => {
+                return Err(format!(
+                    "only a part of {path} has been read; read all of it before writing it anew, or edit it"
+                ));
             }
             Some(_) => {}
         }
@@ -521,7 +588,7 @@ fn patched(
                 Some(_) => Err(format!("{path} exists already")),
                 None => Ok(Some(text)),
             },
-            false,
+            Must::Nothing,
         )?),
         F::Remove { path } => add(change(
             site,
@@ -531,7 +598,7 @@ fn patched(
                 t.ok_or(format!("{path} does not exist"))?;
                 Ok(None)
             },
-            true,
+            Must::Some,
         )?),
         // What a hunk changes is named by the hunk itself: it need not have been read.
         F::Update { path, to: None, hunks } => add(change(
@@ -542,7 +609,7 @@ fn patched(
                 let t = t.ok_or(format!("{path} does not exist"))?;
                 edit::apply(t, &hunks, &path).map(Some).map_err(|e| e.to_string())
             },
-            false,
+            Must::Nothing,
         )?),
         F::Update { path, to: Some(to), hunks } => {
             let mut text = String::new();
@@ -555,7 +622,7 @@ fn patched(
                     text = edit::apply(t, &hunks, &path).map_err(|e| e.to_string())?;
                     Ok(None)
                 },
-                false,
+                Must::Nothing,
             )?;
             let new = change(
                 site,
@@ -565,7 +632,7 @@ fn patched(
                     Some(_) => Err(format!("{to} exists already")),
                     None => Ok(Some(text)),
                 },
-                false,
+                Must::Nothing,
             )?;
             add(new)?;
             add(gone)
@@ -725,12 +792,10 @@ fn files(op: Op, site: &Site, seen: &Seen, stop: &AtomicBool) -> Output {
             Err(e) => Output::bad(e),
             Ok(c) => match std::str::from_utf8(&c.bytes) {
                 Ok(t) if !t.contains('\0') => {
-                    seen.add(&spot.place, &c.digest);
                     let n = t.lines().count();
-                    Output {
-                        detail: json!({"summary": count(n, "line")}),
-                        ..Output::ok(text::numbered(t, from, lines, READ))
-                    }
+                    let (text, shown) = text::numbered(t, from, lines, READ);
+                    seen.part(&spot.place, &c.digest, shown, n);
+                    Output { detail: json!({"summary": count(n, "line")}), ..Output::ok(text) }
                 }
                 _ => Output::bad(format!(
                     "{} is not text ({} bytes)",
@@ -767,10 +832,11 @@ fn make(all: Vec<Change>, site: &Site, seen: &Seen) -> Output {
     let shown: String = all.iter().map(diff).collect();
     // Everything is looked at again before anything is changed.
     let mut ready = Vec::new();
+    let mut folders = Folders { made: Vec::new(), site };
     for c in all {
         let spot = match c.spot {
             Some(s) => s,
-            None => match made(site, &c.place) {
+            None => match made(site, &c.place, &mut folders.made) {
                 Ok(s) => s,
                 Err(e) => return Output::bad(e),
             },
@@ -820,6 +886,7 @@ fn make(all: Vec<Change>, site: &Site, seen: &Seen) -> Output {
         }
         done.push((place, spot, before));
     }
+    folders.made.clear();
     let names: Vec<String> = done.iter().map(|d| site.shown(&d.0)).collect();
     Output {
         ok: true,
@@ -829,9 +896,24 @@ fn make(all: Vec<Change>, site: &Site, seen: &Seen) -> Output {
     }
 }
 
+/// Folders made for files that were not: they go again, unless somebody put something into them.
+struct Folders<'a> {
+    made: Vec<Place>,
+    site: &'a Site,
+}
+impl Drop for Folders<'_> {
+    fn drop(&mut self) {
+        for p in self.made.iter().rev() {
+            if let Ok(s) = fs::find(self.site.caps.write.roots(), p) {
+                let _ = s.remove_folder();
+            }
+        }
+    }
+}
+
 /// Makes the folders on the way, one by one, each looked at; the last must be where it was judged to
 /// be.
-fn made(site: &Site, place: &Place) -> Result<Spot, String> {
+fn made(site: &Site, place: &Place, folders: &mut Vec<Place>) -> Result<Spot, String> {
     let mut missing: Vec<Place> = Vec::new();
     let mut up = place.parent();
     while let Some(p) = up {
@@ -851,6 +933,7 @@ fn made(site: &Site, place: &Place) -> Result<Spot, String> {
             return Err(format!("{p} leads elsewhere now"));
         }
         s.create_folder().map_err(|e| e.to_string())?;
+        folders.push(p);
     }
     let s = fs::find(site.caps.write.roots(), place).map_err(|e| e.to_string())?;
     if s.place != *place {
