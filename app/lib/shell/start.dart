@@ -49,6 +49,14 @@ const accessItems = [
   AxMenuItem(Access.work, 'Work in the folder', detail: 'without asking; contained'),
 ];
 
+/// How hard a model is to try, where that can be said.
+const efforts = [
+  AxMenuItem('', 'Usual effort'),
+  AxMenuItem('low', 'Low effort'),
+  AxMenuItem('medium', 'Medium effort'),
+  AxMenuItem('high', 'High effort'),
+];
+
 /// One labelled part of a form. Labels stand over what they name, on the surface itself.
 class FormPart extends StatelessWidget {
   const FormPart(this.label, {required this.child, super.key, this.note});
@@ -179,6 +187,16 @@ class StartDraft extends ChangeNotifier {
     }
   }
 
+  /// How hard it is to try; empty: as is usual.
+  String effort = '';
+
+  /// Whether that can be said of what is chosen.
+  bool get tries =>
+      delegated?.effort ??
+      (store.modelsOf(connection ?? store.own.firstOrNull?.id ?? '') ?? const []).any(
+        (m) => m.id == model.text.trim() && m.effort,
+      );
+
   /// In a copy of the folder of its own. Beside others it is, if nobody says otherwise.
   late bool apart = into != null;
   bool get worksApart => apart && access != Access.read;
@@ -282,6 +300,7 @@ class StartDraft extends ChangeNotifier {
         provider: other ? null : c!.provider,
         model: written.isEmpty ? null : written,
         connection: other ? account : c!.id,
+        effort: tries && effort.isNotEmpty ? effort : null,
         environment: withHands ? axiomTools : null,
       );
       final followed = [
@@ -300,7 +319,7 @@ class StartDraft extends ChangeNotifier {
         m = _Made(session, where);
         _made = m;
       }
-      final how = (x.provider, x.model, x.connection, x.environment, access);
+      final how = (x.provider, x.model, x.connection, x.effort, x.environment, access);
       if (m.agent == null) {
         m.agent = await store.addAgent(
           m.session,
@@ -435,6 +454,12 @@ class _StartPageState extends State<StartPage> {
         items: access,
         value: d.access,
         onChanged: (v) => d.change(() => d.access = v),
+      );
+      final effortSelect = AxSelect<String>(
+        label: 'Effort',
+        items: efforts,
+        value: d.effort,
+        onChanged: (v) => d.change(() => d.effort = v),
       );
       final runsWith = AxSelect<String>(
         label: 'Runs with',
@@ -601,7 +626,7 @@ class _StartPageState extends State<StartPage> {
                         d.fit();
                       }),
                     ),
-                  if (d.harness != 'axiom') accessSelect,
+                  if (d.harness != 'axiom') ...[if (d.tries) effortSelect, accessSelect],
                 ],
               ),
             ),
@@ -686,6 +711,7 @@ class _StartPageState extends State<StartPage> {
                         d.model.text = d.typed ? '' : v;
                       }),
                     ),
+                  if (d.tries) effortSelect,
                   accessSelect,
                   AxButton(label: 'Accounts', tone: AxTone.quiet, onPressed: widget.onAccounts),
                 ],

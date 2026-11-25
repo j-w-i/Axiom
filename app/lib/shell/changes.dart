@@ -1,10 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../host/host_store.dart';
 import '../host/proto.dart';
 import '../host/session_model.dart';
+import '../patterns/models.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
@@ -17,14 +19,27 @@ import 'start.dart';
 /// What has been changed in the session's folder since its last commit. Looked at when it is shown,
 /// when a run ends, and when its person asks.
 class ChangesView extends StatefulWidget {
-  const ChangesView(this.store, this.session, {super.key});
+  const ChangesView(
+    this.store,
+    this.session, {
+    required this.agent,
+    required this.draft,
+    super.key,
+  });
+
+  /// Who is told of what is said about a line, and where that is written.
+  final String agent;
+  final Draft draft;
   final HostStore store;
   final SessionModel session;
   @override
   State<ChangesView> createState() => _ChangesViewState();
 }
 
-class _ChangesViewState extends State<ChangesView> {
+class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
+  @override
+  (String, Draft) get told => (widget.agent, widget.draft);
+
   Changes? _all;
   List<(Changed, FileDiff)> _files = const [];
   String? _problem;
@@ -173,6 +188,7 @@ class _ChangesViewState extends State<ChangesView> {
   Widget _file(BuildContext context, (Changed, FileDiff) f) => _FileRow(
     f.$1,
     f.$2,
+    remarks: this,
     open: !_shut.contains(f.$1.path),
     onOpen: () => setState(() {
       _shut.contains(f.$1.path) ? _shut.remove(f.$1.path) : _shut.add(f.$1.path);
@@ -187,9 +203,15 @@ class _FileRow extends StatelessWidget {
     this.diff, {
     required this.open,
     required this.onOpen,
+    required this.remarks,
+    this.digest,
     this.leading,
     this.notes = const [],
   });
+  final _Remarks remarks;
+
+  /// Of which content it is.
+  final String? digest;
   final Changed file;
   final FileDiff diff;
   final bool open;
@@ -248,15 +270,28 @@ class _FileRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (leading case final l?)
-          Row(
-            children: [
-              l,
-              Expanded(child: row),
-            ],
-          )
-        else
-          row,
+        Row(
+          children: [
+            ?leading,
+            Expanded(child: row),
+            if (remarks._added == file.path)
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text('In your message', style: t.type.small.ink(c.ink3)),
+                ),
+              ),
+            if (open)
+              AxButton.icon(
+                AxIcon.edit,
+                label: 'Say something about $name',
+                tone: AxTone.quiet,
+                size: 24,
+                onPressed: () => remarks.begin(file.path, null),
+              ),
+          ],
+        ),
         for (final (note, look) in notes)
           Padding(
             padding: const EdgeInsets.fromLTRB(50, 0, 6, 5),
@@ -268,7 +303,12 @@ class _FileRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                DiffLines(lines),
+                DiffLines(
+                  lines,
+                  onLine: (l) => remarks.begin(file.path, l),
+                  at: remarks.lineOf(file.path, lines),
+                  note: remarks.isOn(file.path) ? remarks.editor(context, digest) : null,
+                ),
                 if (left > 0)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -278,6 +318,112 @@ class _FileRow extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// What a person says about a line of a file: written here, and added to what they are saying to the
+/// agent. Nothing is sent. One at a time; looking again does not lose it.
+mixin _Remarks<W extends StatefulWidget> on State<W> {
+  final _remark = TextEditingController(), _remarkFocus = FocusNode(debugLabel: 'remark');
+  String? _on;
+  DiffLine? _at;
+  String? _added;
+
+  /// Who it is for, and what is being said to them.
+  (String, Draft) get told;
+
+  @override
+  void dispose() {
+    _remark.dispose();
+    _remarkFocus.dispose();
+    super.dispose();
+  }
+
+  bool isOn(String path) => _on == path;
+
+  /// The line it is about, if it is there still.
+  DiffLine? lineOf(String path, List<DiffLine> lines) => _on != path || _at == null
+      ? null
+      : lines
+            .where((l) => l.kind == _at!.kind && l.number == _at!.number && l.text == _at!.text)
+            .firstOrNull;
+
+  /// [line]: null, about the whole file.
+  void begin(String path, DiffLine? line) {
+    setState(() {
+      _on = path;
+      _at = line;
+      _added = null;
+    });
+    _remarkFocus.requestFocus();
+  }
+
+  void _leave() => setState(() {
+    _on = null;
+    _at = null;
+    _remark.clear();
+  });
+
+  void _add(String? digest) {
+    final words = _remark.text.trim(), path = _on, l = _at;
+    // While an input method is composing, Enter is its own.
+    final composing = _remark.value.composing;
+    if (composing.isValid && !composing.isCollapsed) return;
+    if (words.isEmpty || path == null) return;
+    final sign = switch (l?.kind) {
+      DiffKind.add => '+',
+      DiffKind.remove => '-',
+      _ => ' ',
+    };
+    told.$2.add(
+      [
+        [
+          'On $path',
+          if (l != null) ', line ${l.number}',
+          if (digest != null) ' (as of ${digest.length > 12 ? digest.substring(0, 12) : digest})',
+          ':',
+        ].join(),
+        if (l != null) '    $sign ${l.text}',
+        words,
+      ].join('\n'),
+    );
+    _leave();
+    setState(() => _added = path);
+  }
+
+  Widget editor(BuildContext context, String? digest) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(56, 6, 10, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.enter): () => _add(digest),
+              const SingleActivator(LogicalKeyboardKey.escape): _leave,
+            },
+            child: AxField(
+              label: 'About ${_at == null ? 'the file' : 'line ${_at!.number}'}',
+              controller: _remark,
+              focusNode: _remarkFocus,
+              placeholder: 'For ${told.$1}',
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              AxButton(label: 'Add to your message', onPressed: () => _add(digest)),
+              AxButton(label: 'Cancel', tone: AxTone.quiet, onPressed: _leave),
+              Text('Nothing is sent yet.', style: t.type.small.ink(c.ink3)),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -296,7 +442,10 @@ class CopyView extends StatefulWidget {
   State<CopyView> createState() => _CopyViewState();
 }
 
-class _CopyViewState extends State<CopyView> {
+class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
+  @override
+  (String, Draft) get told => (widget.agent.name, widget.draft);
+
   CopyChanges? _all;
   Map<String, FileDiff?> _diffs = const {};
   String? _problem, _said;
@@ -417,12 +566,7 @@ class _CopyViewState extends State<CopyView> {
   Future<void> _renew() => _do(() async {
     final (taken, say, left) = await widget.store.renewCopy(widget.session.id, widget.agent.id);
     if (say != null) {
-      final was = widget.draft.text.text.trimRight();
-      final all = was.isEmpty ? say : '$was\n\n$say';
-      widget.draft.text.value = TextEditingValue(
-        text: all,
-        selection: TextSelection.collapsed(offset: all.length),
-      );
+      widget.draft.add(say);
     }
     if (!mounted) return;
     setState(() {
@@ -670,6 +814,8 @@ class _CopyViewState extends State<CopyView> {
     return _FileRow(
       f,
       _diffs[f.path] ?? FileDiff(f.path),
+      remarks: this,
+      digest: f.digest,
       open: !_shut.contains(f.path),
       onOpen: () => setState(() {
         _shut.contains(f.path) ? _shut.remove(f.path) : _shut.add(f.path);

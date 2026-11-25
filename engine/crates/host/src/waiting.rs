@@ -94,6 +94,13 @@ impl Waiting {
         }
     }
 
+    /// Who asked it.
+    pub fn asked(&self, session: &SessionId, request: &RequestId) -> Option<AgentId> {
+        let all = self.lock();
+        let one = all.iter().find(|(k, o)| k.1 == *request && o.session == *session);
+        one.map(|(_, o)| o.agent.clone())
+    }
+
     /// Told of each change, how many there are.
     pub fn watch(&self) -> watch::Receiver<usize> {
         self.changed.subscribe()
@@ -150,6 +157,8 @@ mod tests {
         w.note(&t, &[opened(3, "q2", Answerable::Live)]);
         assert_eq!(asked(&w), ["t q2", "s q1"], "the longest first");
         assert_eq!(w.list()[0].subject, "first q2");
+        assert_eq!(w.asked(&t, &RequestId("q2".into())), Some(AgentId("a".into())));
+        assert_eq!(w.asked(&s, &RequestId("q2".into())), None);
         assert!(told.has_changed().unwrap());
         assert_eq!(*told.borrow_and_update(), 2);
         // Another session's question of the same name is another.

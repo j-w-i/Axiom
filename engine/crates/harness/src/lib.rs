@@ -170,6 +170,13 @@ impl Harness {
         matches!(self, Harness::Claude(_))
     }
 
+    /// Whether it can be told how hard to try: low, medium or high, before it is started.
+    pub fn takes_effort(&self) -> bool {
+        // `--effort` and `model_reasoning_effort`: code.claude.com/docs/en/cli-reference and the
+        // app-server's `turn/start`, read 2026-11-25. Of an ACP agent it is known once it runs.
+        matches!(self, Harness::Claude(_) | Harness::Codex)
+    }
+
     /// Whether its terms allow only what a person themselves says.
     pub fn person_only(&self) -> bool {
         matches!(self, Harness::Acp(a) if a.person_only)

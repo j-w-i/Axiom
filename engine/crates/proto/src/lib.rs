@@ -424,6 +424,9 @@ pub struct HarnessInfo {
     pub needs_trust: bool,
     /// What it has a mode for.
     pub access: Vec<Access>,
+    /// It can be told how hard to try (`low`, `medium`, `high`).
+    #[serde(default)]
+    pub effort: bool,
     /// Axiom's tools can stand in place of its own (the environment `axiom`): then it is asked about
     /// and contained as Axiom's own agents are, and has every mode of access.
     #[serde(default)]
@@ -568,6 +571,9 @@ pub enum Call {
         answer: Answer,
         /// The question's digest, as it was shown.
         digest: String,
+        /// With a no: why, for whoever asked to read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        words: Option<String>,
     },
     /// What waits for a person, in all sessions, the longest first.
     #[serde(rename = "host.waiting")]
@@ -690,6 +696,9 @@ pub struct ModelInfo {
     /// Tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<u64>,
+    /// How hard it tries can be said (`low`, `medium`, `high`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub effort: bool,
 }
 fn one() -> f64 {
     1.0

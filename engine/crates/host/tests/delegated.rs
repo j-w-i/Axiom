@@ -145,7 +145,7 @@ impl T {
         .0
     }
     async fn answer(&mut self, request: RequestId, answer: Answer, digest: String) {
-        let call = Call::Answer { session: self.s.clone(), request, answer, digest };
+        let call = Call::Answer { session: self.s.clone(), request, answer, digest, words: None };
         self.c.call(call).await.unwrap();
     }
     /// The question whether it may be started.
@@ -247,6 +247,7 @@ async fn it_is_started_by_a_yes_works_asks_and_stays() {
         request: id.clone(),
         answer: Answer::Session,
         digest: digest.clone(),
+        words: None,
     });
     assert!(e.await.is_err());
     t.answer(id, Answer::Once, digest).await;
@@ -280,6 +281,47 @@ async fn it_is_started_by_a_yes_works_asks_and_stays() {
     let db = rusqlite::Connection::open(t.f.paths.journal()).unwrap();
     let n: i64 = db.query_row("select count(*) from frame", [], |r| r.get(0)).unwrap();
     assert!(n > 12, "{n}");
+}
+
+/// A program has no way to be told why with its no: it is told after. Not if it was not to be started.
+#[tokio::test]
+async fn why_not_is_told_after() {
+    let mut t = T::new(&acp(&[
+        hear("go\n\ngo"),
+        ask(5, "rm x"),
+        answered(5, "no"),
+        end(2, "end_turn"),
+        hear("I said no to what you asked for: keep x"),
+        words("Kept."),
+        end(3, "end_turn"),
+    ]))
+    .await;
+    let a = t.agent("goose", Access::Ask).await;
+    let no = |t: &T, request: RequestId, digest: String| Call::Answer {
+        session: t.s.clone(),
+        request,
+        answer: Answer::Deny,
+        digest,
+        words: Some("keep x".into()),
+    };
+    t.prompt(&a, "go").await;
+    let (id, digest, ..) = t.question().await;
+    let call = no(&t, id, digest);
+    t.c.call(call).await.unwrap();
+    let (o, e, _) = t.ended().await;
+    assert!(o == Outcome::Failed && e.unwrap().contains("did not allow"));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(t.c.call(Call::Status {}).await.unwrap()["runs"], 0, "nothing begins by itself");
+    t.prompt(&a, "go").await;
+    t.allow_start().await;
+    let (id, digest, ..) = t.question().await;
+    let call = no(&t, id, digest);
+    t.c.call(call).await.unwrap();
+    t.until(|b| match b {
+        Body::ItemEnded { text, .. } if text == "Kept." => Some(()),
+        _ => None,
+    })
+    .await;
 }
 
 #[tokio::test]

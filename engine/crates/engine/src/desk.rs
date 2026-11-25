@@ -16,7 +16,7 @@ pub struct Desk(Arc<Mutex<Inner>>);
 #[derive(Debug, Default)]
 struct Inner {
     requests: Requests,
-    waiting: HashMap<RequestId, oneshot::Sender<Option<Approval>>>,
+    waiting: HashMap<RequestId, oneshot::Sender<Result<Approval, String>>>,
     grants: Grants,
 }
 
@@ -25,7 +25,9 @@ struct Inner {
 pub struct Open {
     desk: Desk,
     pub id: RequestId,
-    answer: oneshot::Receiver<Option<Approval>>,
+    answer: oneshot::Receiver<Result<Approval, String>>,
+    /// Why a person said no, if they said so. Never a yes to anything.
+    pub why: String,
 }
 
 impl Desk {
@@ -43,7 +45,7 @@ impl Desk {
         let id = i.requests.open(ask)?;
         let (tx, answer) = oneshot::channel();
         i.waiting.insert(id.clone(), tx);
-        Ok(Open { desk: self.clone(), id, answer })
+        Ok(Open { desk: self.clone(), id, answer, why: String::new() })
     }
 
     /// A person's answer, from an authenticated client. `shown` is the digest of what they saw.
@@ -52,7 +54,15 @@ impl Desk {
         let approval = i.requests.answer(id, a, shown)?;
         let tx = i.waiting.remove(id).ok_or(NotAnswered::Gone)?;
         // Whoever asked may have gone this moment: then it was for nothing.
-        tx.send(approval).map_err(|_| NotAnswered::Gone)
+        tx.send(approval.ok_or_else(String::new)).map_err(|_| NotAnswered::Gone)
+    }
+
+    /// No, and why, for whoever asked to read.
+    pub fn deny(&self, id: &RequestId, why: String) -> Result<(), NotAnswered> {
+        let mut i = self.lock();
+        i.requests.answer(id, Answer::Deny, "")?;
+        let tx = i.waiting.remove(id).ok_or(NotAnswered::Gone)?;
+        tx.send(Err(why)).map_err(|_| NotAnswered::Gone)
     }
 
     /// Spends an approval on what it was given for.
@@ -69,7 +79,14 @@ impl Desk {
 impl Open {
     /// Waits for a person, however long.
     pub async fn wait(&mut self) -> Option<Approval> {
-        (&mut self.answer).await.ok().flatten()
+        match (&mut self.answer).await {
+            Ok(Ok(a)) => Some(a),
+            Ok(Err(why)) => {
+                self.why = why;
+                None
+            }
+            Err(_) => None,
+        }
     }
 }
 
@@ -106,7 +123,12 @@ mod tests {
         assert_eq!(d.answer(&oa.id, Answer::Once, &b.digest()), Err(NotAnswered::Changed));
         d.answer(&ob.id, Answer::Session, &b.digest()).unwrap();
         d.answer(&oa.id, Answer::Deny, "").unwrap();
-        assert!(oa.wait().await.is_none());
+        assert!(oa.wait().await.is_none() && oa.why.is_empty());
+        let mut oc = d.open(&a).unwrap();
+        d.deny(&oc.id, "not now".into()).unwrap();
+        assert!(oc.wait().await.is_none());
+        assert_eq!((oc.why.as_str(), d.allowed(&a)), ("not now", false));
+        assert_eq!(d.deny(&oc.id, String::new()), Err(NotAnswered::Gone));
         let ap = ob.wait().await.unwrap();
         assert!(d.spend(ap, &b) && d.allowed(&b) && !d.allowed(&a));
         d.forget();

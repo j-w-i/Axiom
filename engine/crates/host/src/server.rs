@@ -1557,8 +1557,22 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             }
             prompt(st, session, agent, text, key, None).await
         }
-        Call::Answer { session, request, answer, digest } => {
-            st.agents.answer(&session, &request, answer, &digest).map(|()| json!({}))
+        Call::Answer { session, request, answer, digest, words } => {
+            let words = words.filter(|w| !w.trim().is_empty());
+            let asked = st.waiting.asked(&session, &request);
+            st.agents.answer(&session, &request, answer, &digest, words.clone())?;
+            // A program of the person's own has no way to be told why with its no: it is told after.
+            if let (Some(words), Some(agent)) = (words, asked)
+                && let Ok(s) = setup(st, &session, &agent).await
+                && s.execution.harness != "axiom"
+                && !s.hands()
+                // Not if it was not to be started at all.
+                && st.agents.slot(&session, &agent).has_program().await
+            {
+                let text = format!("I said no to what you asked for: {words}");
+                prompt(st, session, agent, text, None, None).await?;
+            }
+            Ok(json!({}))
         }
         Call::Connections {} => {
             serde_json::to_value(st.agents.connections.list()).map_err(|e| internal(e.to_string()))
@@ -1602,7 +1616,11 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                     if let Some(n) = &mut name {
                         limits::clip(n, limits::TITLE);
                     }
-                    axiom_proto::ModelInfo { context: quirks(&id).context, name, id }
+                    {
+                        let q = quirks(&id);
+                        let effort = q.effort.is_some();
+                        axiom_proto::ModelInfo { context: q.context, name, effort, id }
+                    }
                 })
                 .collect();
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))

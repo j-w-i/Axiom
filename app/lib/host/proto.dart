@@ -308,6 +308,7 @@ class HarnessInfo {
     this.access = const [],
     this.accounts,
     this.hands = false,
+    this.effort = false,
   });
   HarnessInfo.decode(Json j)
     : id = j['id']! as String,
@@ -317,6 +318,7 @@ class HarnessInfo {
       needsTrust = j['needs_trust'] as bool? ?? true,
       accounts = j['accounts'] as String?,
       hands = j['hands'] as bool? ?? false,
+      effort = j['effort'] as bool? ?? false,
       access = [
         for (final a in j['access'] as List<Object?>? ?? const [])
           _enum(Access.values, a, Access.unknown),
@@ -325,6 +327,9 @@ class HarnessInfo {
 
   /// Null if it is not there or may not be started; then [problem] says why.
   final String? program, problem;
+
+  /// It can be told how hard to try.
+  final bool effort;
 
   /// Axiom's tools can stand in place of its own: the environment [axiomTools].
   final bool hands;
@@ -339,11 +344,15 @@ class HarnessInfo {
 
 /// What a provider says of a model.
 class ModelInfo {
-  const ModelInfo(this.id, {this.name, this.context});
+  const ModelInfo(this.id, {this.name, this.context, this.effort = false});
   ModelInfo.decode(Json j)
     : id = j['id']! as String,
       name = j['name'] as String?,
-      context = j['context'] as int?;
+      context = j['context'] as int?,
+      effort = j['effort'] as bool? ?? false;
+
+  /// How hard it tries can be said.
+  final bool effort;
   final String id;
   final String? name;
   final int? context;

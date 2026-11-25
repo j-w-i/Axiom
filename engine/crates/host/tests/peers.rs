@@ -124,7 +124,7 @@ impl T {
         .await
     }
     async fn answer(&mut self, request: RequestId, answer: Answer, digest: String) {
-        let call = Call::Answer { session: self.s.clone(), request, answer, digest };
+        let call = Call::Answer { session: self.s.clone(), request, answer, digest, words: None };
         self.c.call(call).await.unwrap();
     }
 }

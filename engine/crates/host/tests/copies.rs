@@ -134,7 +134,7 @@ impl T {
                     // Commands that write are asked about, however they are contained.
                     Body::RequestOpened { request, digest, .. } => {
                         let (session, answer) = (self.s.clone(), Answer::Once);
-                        let call = Call::Answer { session, request, answer, digest };
+                        let call = Call::Answer { session, request, answer, digest, words: None };
                         self.c.call(call).await.unwrap();
                     }
                     _ => {}
@@ -518,7 +518,9 @@ async fn telling_one_that_works_in_the_folder_is_asked_about() {
                         assert!(scope.contains(name), "{scope}");
                         let session = t.s.clone();
                         let answer = Answer::Deny;
-                        t.c.call(Call::Answer { session, request, answer, digest }).await.unwrap();
+                        t.c.call(Call::Answer { session, request, answer, digest, words: None })
+                            .await
+                            .unwrap();
                     }
                     Body::RunStarted { .. } => (runs, begun) = (runs + 1, true),
                     Body::RunEnded { .. } => runs -= 1,

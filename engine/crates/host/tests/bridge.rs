@@ -117,7 +117,7 @@ impl T {
         .await
     }
     async fn answer(&mut self, request: RequestId, answer: Answer, digest: String) {
-        let call = Call::Answer { session: self.s.clone(), request, answer, digest };
+        let call = Call::Answer { session: self.s.clone(), request, answer, digest, words: None };
         self.c.call(call).await.unwrap();
     }
     /// What the program was told to start.
@@ -263,7 +263,13 @@ async fn a_program_gives_others_work_and_is_told_what_came_of_it() {
     )
     .await;
     assert_eq!(t.closed().await, "expired");
-    let late = Call::Answer { session: t.s.clone(), request: id, answer: Answer::Once, digest };
+    let late = Call::Answer {
+        session: t.s.clone(),
+        request: id,
+        answer: Answer::Once,
+        digest,
+        words: None,
+    };
     assert!(t.c.call(late).await.is_err());
     assert_eq!(builds.requests().len(), 1);
     // On record, in order.
@@ -537,7 +543,13 @@ async fn its_tools_are_axioms_and_so_is_what_holds_them_back() {
     )
     .await;
     assert_ne!(t.closed().await, "allowed");
-    let late = Call::Answer { session: t.s.clone(), request: id, answer: Answer::Once, digest };
+    let late = Call::Answer {
+        session: t.s.clone(),
+        request: id,
+        answer: Answer::Once,
+        digest,
+        words: None,
+    };
     assert!(t.c.call(late).await.is_err());
     assert!(t.file("late").is_none());
     let v = t.c.call(Call::Audit { after: 0, limit: 20 }).await.unwrap();

@@ -171,6 +171,7 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
                 _ => return Err(USAGE.into()),
             },
             digest: digest.into(),
+            words: None,
         },
         ["cancel", s, r] => Call::Cancel { session: SessionId(s.into()), run: RunId(r.into()) },
         ["audit"] => Call::Audit { after: 0, limit: 200 },

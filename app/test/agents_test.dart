@@ -64,6 +64,7 @@ class Asked extends HostStore {
     name,
     if (x.harness != 'axiom') (x.harness, trust) else x.connection,
     ?x.environment,
+    if (x.effort case final e?) 'effort $e',
     if (x.harness != 'axiom' && x.connection != null) x.connection,
     x.model,
     access,
@@ -108,8 +109,8 @@ class Asked extends HostStore {
   /// Of each prompt.
   final keys = <String?>[];
   @override
-  Future<void> answer(String session, RequestOpened r, Answer a) =>
-      _do(['answer', session, r.request, r.digest, a], null);
+  Future<void> answer(String session, RequestOpened r, Answer a, {String? words}) =>
+      _do(['answer', session, r.request, r.digest, a, ?words], null);
   @override
   Future<void> cancel(String session, String run) => _do(['cancel', session, run], null);
   @override
@@ -121,6 +122,7 @@ class Asked extends HostStore {
         execution?.model,
         execution?.connection,
         ?execution?.environment,
+        ?execution?.effort,
         access,
       ], null);
   @override
@@ -1184,6 +1186,111 @@ void main() {
     expect(find.text('Its own model'), findsWidgets);
     expect(find.text('Its own sign-in'), findsWidgets);
     expect(s.calls.length, 1, reason: 'there is no account whose models could be asked for');
+  });
+
+  testWidgets('a no can say why, and is never a yes by that', (t) async {
+    final s = await shell(t, session: working(asks: true));
+    await settled(t);
+    await press(t, find.text('Say why not'));
+    expect(find.text('Allow once'), findsNothing);
+    await t.enterText(field('Why not'), 'use the Makefile');
+    await snap(t, 'why-not');
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settled(t);
+    expect(find.text('Allow once'), findsOneWidget);
+    await press(t, find.text('Say why not'));
+    expect(s.calls, isEmpty);
+    await t.enterText(field('Why not'), 'use the Makefile');
+    await press(t, find.text('Deny'));
+    expect(s.calls, [
+      ['answer', 's', 'q1', 'd-q1', Answer.deny, 'use the Makefile'],
+    ]);
+    // The next question is another: nothing of it has been said.
+    expect(field('Why not'), findsNothing);
+    await press(t, find.text('Say why not'));
+    expect(t.widget<EditableText>(field('Why not')).controller.text, isEmpty);
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settled(t);
+    expect(s.calls.last, ['answer', 's', 'q2', 'd-q2', Answer.deny]);
+  });
+
+  testWidgets('how hard it tries is chosen where that can be said', (t) async {
+    final s = await shell(t, session: working());
+    s.known = const [ModelInfo('claude-opus-5-5', effort: true), ModelInfo('plain')];
+    await t.tap(find.byType(ExecutionKey));
+    await settled(t);
+    await press(t, find.bySemanticsLabel('Effort: Usual effort'));
+    await press(t, find.bySemanticsLabel('High effort').last);
+    expect(s.calls.last, ['set', 's', 'a', 'claude-opus-5-5', 'c1', 'high', null]);
+    // A new one, and with a model that takes none.
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settled(t);
+    await press(t, find.bySemanticsLabel('New session').first);
+    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Folder'), '/w');
+    expect(find.bySemanticsLabel(RegExp('^Effort')), findsNothing);
+    await press(t, find.bySemanticsLabel('Model: none'));
+    await press(t, find.bySemanticsLabel('claude-opus-5-5').last);
+    await press(t, find.bySemanticsLabel('Effort: Usual effort'));
+    await press(t, find.bySemanticsLabel('Low effort').last);
+    await press(t, find.text('Start'));
+    expect(s.calls.firstWhere((c) => c.first == 'add'), contains('effort low'));
+    await press(t, find.bySemanticsLabel('New session').first);
+    await press(t, find.bySemanticsLabel(RegExp('^Model: ')));
+    await press(t, find.bySemanticsLabel('plain').last);
+    expect(find.bySemanticsLabel(RegExp('^Effort')), findsNothing);
+    await t.enterText(field('What should be done'), 'Do more.');
+    await settled(t);
+    s.calls.clear();
+    await press(t, find.text('Start'));
+    expect(
+      s.calls.firstWhere((c) => c.first == 'add' || c.first == 'set').join(' '),
+      isNot(contains('low')),
+    );
+  });
+
+  testWidgets('what is said about a line goes into the message, and is not sent', (t) async {
+    final s = await shell(t, session: working());
+    Changes now(String line) => Changes(
+      repository: true,
+      files: const [Changed('lib/cache.dart', 'changed')],
+      diff: '--- lib/cache.dart\n+++ lib/cache.dart\n@@ -4,2 +4,2 @@\n a\n-old\n+$line\n',
+    );
+    s.now = now('fresh');
+    await t.tap(find.text('Changes').last);
+    await settled(t);
+    await press(t, find.textContaining('fresh', findRichText: true));
+    expect(
+      find.byWidgetPredicate((w) => w is AxField && w.label == 'About line 5'),
+      findsOneWidget,
+    );
+    await t.enterText(field('About line 5'), 'why not const?');
+    await snap(t, 'remark');
+    // Looking again loses nothing; also when the line is not there any more.
+    await press(t, find.text('Look again'));
+    expect(t.widget<EditableText>(field('About line 5')).controller.text, 'why not const?');
+    s.now = now('other');
+    await press(t, find.text('Look again'));
+    expect(t.widget<EditableText>(field('About line 5')).controller.text, 'why not const?');
+    await press(t, find.text('Add to your message'));
+    expect(find.text('In your message'), findsOneWidget);
+    expect(s.calls.where((c) => c.first == 'prompt'), isEmpty);
+    // By the keyboard, about the file.
+    await press(t, find.bySemanticsLabel('Say something about lib/cache.dart'));
+    await t.enterText(field('About the file'), 'and test it');
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settled(t);
+    await t.tap(find.text('Conversation').last);
+    await settled(t);
+    final said = t
+        .widgetList<EditableText>(find.byType(EditableText))
+        .map((e) => e.controller.text)
+        .firstWhere((x) => x.isNotEmpty);
+    expect(
+      said,
+      'On lib/cache.dart, line 5:\n    + fresh\nwhy not const?\n\n'
+      'On lib/cache.dart:\nand test it',
+    );
   });
 
   group('what needs its person', () {

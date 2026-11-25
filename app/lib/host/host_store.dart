@@ -481,12 +481,15 @@ class HostStore extends ChangeNotifier {
         // A copy of the folder may have to be made first.
       }, _long);
 
-  Future<void> answer(String session, RequestOpened r, Answer a) => _live.call('request.answer', {
-    'session': session,
-    'request': r.request,
-    'answer': a.name,
-    'digest': r.digest,
-  });
+  /// [words]: with a no, why.
+  Future<void> answer(String session, RequestOpened r, Answer a, {String? words}) =>
+      _live.call('request.answer', {
+        'session': session,
+        'request': r.request,
+        'answer': a.name,
+        'digest': r.digest,
+        'words': ?words,
+      });
 
   Future<void> cancel(String session, String run) =>
       _live.call('run.cancel', {'session': session, 'run': run});

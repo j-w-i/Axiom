@@ -533,7 +533,13 @@ class _Display extends StatelessWidget {
                     draft: drafts.of(session.id, a.id),
                     key: ValueKey((session.id, a.id)),
                   )
-                : ChangesView(store, session, key: ValueKey(session.id)),
+                : ChangesView(
+                    store,
+                    session,
+                    agent: a.name,
+                    draft: drafts.of(session.id, a.id),
+                    key: ValueKey(session.id),
+                  ),
           )
         else
           Expanded(
