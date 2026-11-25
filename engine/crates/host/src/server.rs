@@ -36,6 +36,7 @@ use crate::{
     session::{Joined, Opened, Refused, Say, Session, encode, lines},
     signin::Signins,
     store::Store,
+    waiting::Waiting,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -123,6 +124,7 @@ struct State {
     token: String,
     store: Store,
     faults: Arc<Faults>,
+    waiting: Arc<Waiting>,
     /// What the check after an unclean end found wrong with the journal's file.
     damaged: OnceLock<String>,
     sessions: Mutex<HashMap<SessionId, Arc<Slot>>>,
@@ -212,8 +214,13 @@ impl State {
         match self.store.open(id.clone(), now_ms()).await {
             Ok(Some(seq)) => {
                 self.faults.clear(id, Access::Write);
-                let (s, opened) =
-                    Session::open(id.clone(), seq, self.store.clone(), self.faults.clone());
+                let (s, opened) = Session::open(
+                    id.clone(),
+                    seq,
+                    self.store.clone(),
+                    self.faults.clone(),
+                    self.waiting.clone(),
+                );
                 *slot = Some(opened);
                 Ok(Some(s))
             }
@@ -308,6 +315,7 @@ impl Host {
             store: Store::start(journal, &p.journal())?,
             token,
             faults: Arc::new(faults),
+            waiting: Arc::default(),
             damaged: OnceLock::new(),
             sessions: Mutex::default(),
             runs: Mutex::default(),
@@ -791,6 +799,7 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                         r.lines.set_limit(MAX_LINE);
                         let version = env!("CARGO_PKG_VERSION");
                         out.answer(req.id, Ok(json!({ "protocol": PROTOCOL, "version": version })));
+                        tokio::spawn(tells(st.waiting.watch(), out.clone()));
                     }
                     Err(e) => {
                         out.answer(req.id, Err(e));
@@ -839,6 +848,22 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                     None => return,
                 },
             }
+        }
+    }
+}
+
+/// What waits for a person is something else now: told as soon as there is room, the last word of it.
+async fn tells(mut waiting: watch::Receiver<usize>, out: Arc<Outbox>) {
+    loop {
+        tokio::select! {
+            c = waiting.changed() => if c.is_err() || !out.room().await {
+                return;
+            },
+            () = out.closed() => return,
+        }
+        let n = *waiting.borrow_and_update();
+        if !out.tell(&Message::Waiting { waiting: n }) {
+            return;
         }
     }
 }
@@ -1425,6 +1450,25 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let c = changes::changes(&st.agents, &session, folder).await?;
             serde_json::to_value(c).map_err(|e| internal(e.to_string()))
         }
+        Call::Waiting {} => {
+            let mut all = st.waiting.list();
+            let mut known: HashMap<SessionId, (String, Vec<(AgentId, String)>)> = HashMap::new();
+            for w in &mut all {
+                if !known.contains_key(&w.session) {
+                    let s = st.store.session(w.session.clone()).await;
+                    let title = s.ok().flatten().map(|s| s.title).unwrap_or_default();
+                    let agents = stored(st, &w.session).await.unwrap_or_default();
+                    known.insert(w.session.clone(), (title, agents));
+                }
+                if let Some((title, agents)) = known.get(&w.session) {
+                    w.title.clone_from(title);
+                    let setup = agents.iter().find(|a| a.0 == w.agent);
+                    let setup = setup.and_then(|a| serde_json::from_str::<Setup>(&a.1).ok());
+                    w.name = setup.map(|s| s.name).unwrap_or_default();
+                }
+            }
+            serde_json::to_value(all).map_err(|e| internal(e.to_string()))
+        }
         Call::CopyChanges { session, agent } => {
             let mut all = Vec::new();
             for (id, text) in stored(st, &session).await? {
@@ -1513,8 +1557,22 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             }
             prompt(st, session, agent, text, key, None).await
         }
-        Call::Answer { session, request, answer, digest } => {
-            st.agents.answer(&session, &request, answer, &digest).map(|()| json!({}))
+        Call::Answer { session, request, answer, digest, words } => {
+            let words = words.filter(|w| !w.trim().is_empty());
+            let asked = st.waiting.asked(&session, &request);
+            st.agents.answer(&session, &request, answer, &digest, words.clone())?;
+            // A program of the person's own has no way to be told why with its no: it is told after.
+            if let (Some(words), Some(agent)) = (words, asked)
+                && let Ok(s) = setup(st, &session, &agent).await
+                && s.execution.harness != "axiom"
+                && !s.hands()
+                // Not if it was not to be started at all.
+                && st.agents.slot(&session, &agent).has_program().await
+            {
+                let text = format!("I said no to what you asked for: {words}");
+                prompt(st, session, agent, text, None, None).await?;
+            }
+            Ok(json!({}))
         }
         Call::Connections {} => {
             serde_json::to_value(st.agents.connections.list()).map_err(|e| internal(e.to_string()))
@@ -1558,7 +1616,11 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                     if let Some(n) = &mut name {
                         limits::clip(n, limits::TITLE);
                     }
-                    axiom_proto::ModelInfo { context: quirks(&id).context, name, id }
+                    {
+                        let q = quirks(&id);
+                        let effort = q.effort.is_some();
+                        axiom_proto::ModelInfo { context: q.context, name, effort, id }
+                    }
                 })
                 .collect();
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
@@ -1612,6 +1674,18 @@ mod tests {
             args: None,
             args_cut: 0,
         })
+    }
+
+    #[tokio::test]
+    async fn who_is_gone_is_told_nothing_more() {
+        let (tx, rx) = watch::channel(0);
+        let out = Arc::new(Outbox::new(1 << 20));
+        let task = tokio::spawn(tells(rx, out.clone()));
+        tx.send_replace(3);
+        let line = timeout(Duration::from_secs(5), out.take()).await.unwrap().unwrap();
+        assert_eq!(line, b"{\"waiting\":3}\n");
+        out.close();
+        timeout(Duration::from_secs(5), task).await.unwrap().unwrap();
     }
 
     #[tokio::test]

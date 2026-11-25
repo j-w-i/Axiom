@@ -117,7 +117,7 @@ impl T {
         .await
     }
     async fn answer(&mut self, request: RequestId, answer: Answer, digest: String) {
-        let call = Call::Answer { session: self.s.clone(), request, answer, digest };
+        let call = Call::Answer { session: self.s.clone(), request, answer, digest, words: None };
         self.c.call(call).await.unwrap();
     }
     /// What the program was told to start.
@@ -263,7 +263,13 @@ async fn a_program_gives_others_work_and_is_told_what_came_of_it() {
     )
     .await;
     assert_eq!(t.closed().await, "expired");
-    let late = Call::Answer { session: t.s.clone(), request: id, answer: Answer::Once, digest };
+    let late = Call::Answer {
+        session: t.s.clone(),
+        request: id,
+        answer: Answer::Once,
+        digest,
+        words: None,
+    };
     assert!(t.c.call(late).await.is_err());
     assert_eq!(builds.requests().len(), 1);
     // On record, in order.
@@ -504,9 +510,19 @@ async fn its_tools_are_axioms_and_so_is_what_holds_them_back() {
     b.tool(3, "write", json!({"path": "n.txt", "content": "x\n"})).await;
     let (id, digest, subject) = t.question().await;
     assert!(subject.contains("+x"), "{subject}");
-    t.answer(id, Answer::Deny, digest).await;
+    let call = Call::Answer {
+        session: t.s.clone(),
+        request: id,
+        answer: Answer::Deny,
+        digest,
+        words: Some("not there".into()),
+    };
+    t.c.call(call).await.unwrap();
     let (said, ok) = b.told(3).await;
-    assert!(!ok && said.contains("a person said no") && t.file("n.txt").is_none());
+    assert!(!ok && said.contains("a person said no. They said: not there"), "{said}");
+    assert!(t.file("n.txt").is_none());
+    // It is told with its no, and not once more as if its person had spoken.
+    assert!(!history(&t.f, &t.s).iter().any(|b| format!("{b:?}").contains("I said no")));
     b.tool(4, "write", json!({"path": "n.txt", "content": "x\n"})).await;
     let (id, digest, _) = t.question().await;
     t.answer(id, Answer::Once, digest).await;
@@ -537,7 +553,13 @@ async fn its_tools_are_axioms_and_so_is_what_holds_them_back() {
     )
     .await;
     assert_ne!(t.closed().await, "allowed");
-    let late = Call::Answer { session: t.s.clone(), request: id, answer: Answer::Once, digest };
+    let late = Call::Answer {
+        session: t.s.clone(),
+        request: id,
+        answer: Answer::Once,
+        digest,
+        words: None,
+    };
     assert!(t.c.call(late).await.is_err());
     assert!(t.file("late").is_none());
     let v = t.c.call(Call::Audit { after: 0, limit: 20 }).await.unwrap();

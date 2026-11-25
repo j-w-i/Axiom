@@ -69,7 +69,8 @@ async fn claude_code_works_once() {
                     let start = what.starts_with("asks to start") && starts == 0;
                     starts += usize::from(start);
                     let answer = if start { Answer::Once } else { Answer::Deny };
-                    let call = Call::Answer { session: s.clone(), request, answer, digest };
+                    let call =
+                        Call::Answer { session: s.clone(), request, answer, digest, words: None };
                     c.call(call).await.unwrap();
                 }
                 Body::ItemStarted { kind, name, args, .. } => {

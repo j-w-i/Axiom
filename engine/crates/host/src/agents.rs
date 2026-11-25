@@ -75,6 +75,8 @@ const FOR_AGENTS: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 /// Longer ones are not followed.
 const INSTRUCTIONS: u64 = 64 * 1024;
 
+/// Of why a person said no.
+const WORDS: usize = 4096;
 /// Agents of one session.
 const MOST: usize = 64;
 /// What may wait for an agent that is at work.
@@ -297,17 +299,28 @@ impl Agents {
         r: &axiom_proto::RequestId,
         a: axiom_proto::Answer,
         digest: &str,
+        words: Option<String>,
     ) -> Result<(), WireError> {
+        let gone = |e: NotAnswered| {
+            let code =
+                if e == NotAnswered::Gone { ErrorCode::NotFound } else { ErrorCode::BadRequest };
+            WireError::new(code, e.to_string())
+        };
+        if let Some(words) = words {
+            if a != axiom_proto::Answer::Deny {
+                return Err(bad("a reason goes with a no"));
+            }
+            if limits::text_len(&words) > WORDS {
+                return Err(bad("a reason has at most 4096 bytes"));
+            }
+            return self.desk(s).deny(r, words).map_err(gone);
+        }
         let a = match a {
             axiom_proto::Answer::Once => axiom_policy::Answer::Once,
             axiom_proto::Answer::Session => axiom_policy::Answer::Session,
             axiom_proto::Answer::Deny => axiom_policy::Answer::Deny,
         };
-        self.desk(s).answer(r, a, digest).map_err(|e| {
-            let code =
-                if e == NotAnswered::Gone { ErrorCode::NotFound } else { ErrorCode::BadRequest };
-            WireError::new(code, e.to_string())
-        })
+        self.desk(s).answer(r, a, digest).map_err(gone)
     }
 
     /// Checks what an agent is to be, and says it as it will be kept.
@@ -1115,6 +1128,11 @@ impl Slot {
     /// What it has running in the background ends.
     pub fn stop_jobs(&self) {
         self.seen.1.end();
+    }
+
+    /// Of a delegated agent: its program runs.
+    pub async fn has_program(&self) -> bool {
+        self.attempt.lock().await.as_ref().is_some_and(|a| !a.is_closed())
     }
 
     pub fn seen(&self) -> Seen {

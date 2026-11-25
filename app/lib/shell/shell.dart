@@ -39,6 +39,26 @@ enum _View { work, start, agent, accounts }
 class _ShellState extends State<Shell> {
   String? _agent;
   String? _session;
+
+  /// An agent of a session that is being opened.
+  (String, String)? _wanted;
+
+  /// Where it is asked is where it is answered.
+  void _answer(Waits w) {
+    setState(() {
+      _view = _View.work;
+      _tab = 0;
+      if (widget.store.current?.id == w.session) {
+        _agent = w.agent;
+      } else {
+        _wanted = (w.session, w.agent);
+      }
+    });
+    if (widget.store.current?.id != w.session) {
+      _do('The session was not opened', () => widget.store.open(w.session));
+    }
+  }
+
   _View _view = _View.work;
 
   /// Of the agent's views, which.
@@ -117,7 +137,8 @@ class _ShellState extends State<Shell> {
           // An agent is chosen within its session only.
           if (_session != s.current?.id) {
             _session = s.current?.id;
-            _agent = null;
+            _agent = _wanted?.$1 == _session ? _wanted!.$2 : null;
+            _wanted = null;
           }
           final stale = s.phase != HostPhase.connected;
           return Row(
@@ -137,7 +158,9 @@ class _ShellState extends State<Shell> {
                     onAddAgent: () => _addAgent(s.current!.id),
                     onStart: () => _show(_View.start),
                     onAccounts: () => _show(_View.accounts),
+                    onAnswer: _answer,
                     onOpen: (id) {
+                      _wanted = null;
                       _show(_View.work);
                       _do('The session was not opened', () => s.open(id));
                     },
@@ -324,7 +347,9 @@ class _Side extends StatelessWidget {
     required this.onStart,
     required this.onAccounts,
     required this.onOpen,
+    required this.onAnswer,
   });
+  final ValueChanged<Waits> onAnswer;
   final HostStore store;
   final double inset;
   final String? agent;
@@ -376,6 +401,29 @@ class _Side extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
             children: [
+              if (store.needs.isNotEmpty) ...[
+                Semantics(
+                  liveRegion: true,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
+                    child: Text(
+                      store.needs.length == 1 ? 'Needs you' : 'Needs you · ${store.needs.length}',
+                      style: t.type.label.ink(c.attentionText),
+                    ),
+                  ),
+                ),
+                for (final w in store.needs)
+                  NeedsRow(
+                    key: ValueKey((w.session, w.request)),
+                    agent: w.name.isEmpty ? 'An agent' : oneLine(literal(w.name), 40),
+                    what: oneLine(literal(w.what), 60),
+                    subject: oneLine(literal(w.subject), 120),
+                    session: w.title.isEmpty ? 'Session' : oneLine(literal(w.title), 60),
+                    age: ageOf(w.at),
+                    onOpen: () => onAnswer(w),
+                  ),
+                const SizedBox(height: 12),
+              ],
               if (m != null) ...[
                 ListenableBuilder(
                   listenable: m,
@@ -407,7 +455,12 @@ class _Side extends StatelessWidget {
                 ),
               for (final s in others)
                 SessionRow(
-                  SessionView(id: s.id, title: oneLine(s.title), age: ageOf(s.updated)),
+                  SessionView(
+                    id: s.id,
+                    title: oneLine(s.title),
+                    age: ageOf(s.updated),
+                    working: s.running,
+                  ),
                   onOpen: () => onOpen(s.id),
                 ),
               if (store.older)
@@ -480,7 +533,13 @@ class _Display extends StatelessWidget {
                     draft: drafts.of(session.id, a.id),
                     key: ValueKey((session.id, a.id)),
                   )
-                : ChangesView(store, session, key: ValueKey(session.id)),
+                : ChangesView(
+                    store,
+                    session,
+                    agent: a.name,
+                    draft: drafts.of(session.id, a.id),
+                    key: ValueKey(session.id),
+                  ),
           )
         else
           Expanded(

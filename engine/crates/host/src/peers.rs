@@ -309,7 +309,7 @@ async fn asked(f: &Floor, desk: &Desk, ask: &Ask, what: &str) -> Result<RequestI
         Say::Event(Body::AgentState { agent: f.agent.clone(), state: AgentState::Running }),
     ];
     f.say(closed).await.map_err(|e| no(&e))?;
-    if yes { Ok(id) } else { Err("Not done: a person said no.".into()) }
+    if yes { Ok(id) } else { Err(axiom_engine::said_no(&open.why)) }
 }
 
 pub async fn perform(f: &Floor, args: &Value) -> Output {

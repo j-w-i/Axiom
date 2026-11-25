@@ -17,6 +17,16 @@ class Draft {
     return _key!;
   }
 
+  /// Adds to what is being written.
+  void add(String more) {
+    final was = text.text.trimRight();
+    final all = was.isEmpty ? more : '$was\n\n$more';
+    text.value = TextEditingValue(
+      text: all,
+      selection: TextSelection.collapsed(offset: all.length),
+    );
+  }
+
   /// It was heard: the same words again are said again.
   void heard() => _said = null;
 

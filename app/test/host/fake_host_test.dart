@@ -19,6 +19,9 @@ class FakeHost {
   List<Object> sessions = [];
   int created = 0, connections = 0;
 
+  /// The answer to `host.waiting`.
+  List<Object> needs = [];
+
   /// The answer to `host.status`; null answers nothing at all.
   Json? status = {'result': <String, Object?>{}};
 
@@ -59,6 +62,8 @@ class FakeHost {
           case 'session.list':
             h.listed.add(m['params']);
             say({'id': id, 'result': h.sessions});
+          case 'host.waiting':
+            say({'id': id, 'result': h.needs});
           case 'host.status':
             if (h.status case final s?) say({'id': id, ...s});
           case 'session.create':
@@ -318,6 +323,41 @@ void main() {
       expect(m.applied, greaterThan(12));
       s.dispose();
     });
+  });
+
+  test('what needs a person is asked for when it has changed, once at a time', () async {
+    final st = store();
+    addTearDown(st.dispose);
+    Json waits(String q) => {
+      'session': 's',
+      'title': 'T',
+      'agent': 'a',
+      'name': 'Lead',
+      'request': q,
+      'what': 'asks',
+      'subject': 'x',
+      'at': 1,
+    };
+    h.needs = [waits('q1')];
+    await st.start();
+    Future<void> until(int n) async {
+      for (var i = 0; i < 200 && st.needs.length != n; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(st.needs.length, n);
+    }
+
+    await until(1);
+    expect(st.needs.single.request, 'q1');
+    h.needs = [waits('q1'), waits('q2')];
+    for (var i = 0; i < 50; i++) {
+      h.last!.write('${json.encode({'waiting': 2})}\n');
+    }
+    await until(2);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    final asked = h.asked.where((m) => m == 'host.waiting').length;
+    expect(asked, lessThan(52), reason: 'never two at once');
+    expect(st.phase, HostPhase.connected);
   });
 
   test('closing with data in flight raises nothing', () async {

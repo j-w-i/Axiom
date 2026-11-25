@@ -424,7 +424,10 @@ async fn a_person_signs_in_and_their_plan_is_used() {
         (id.as_str(), "me@example.com", "chatgpt")
     );
     assert_eq!((c.secret, c.lasts, c.problem, c.url), (true, false, None, None));
-    assert_eq!(t.models(&id).await.unwrap(), json!([{"id": "gpt-a", "name": "GPT A"}]));
+    assert_eq!(
+        t.models(&id).await.unwrap(),
+        json!([{"id": "gpt-a", "name": "GPT A", "effort": true}])
+    );
     assert!(t.o.at("/v1/models")[0].0.contains("Bearer at-canary-1"));
     let asked = &t.o.at("/token")[0].1;
     assert_eq!((asked["code"].as_str(), asked["client_id"].as_str()), ("c-canary", CLIENT));

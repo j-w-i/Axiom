@@ -367,7 +367,7 @@ impl<S: Stage> Hands<'_, S> {
         if approval.is_some_and(|a| self.desk.spend(a, ask)) {
             return Ok(Ok(id));
         }
-        Ok(Err("Not done: a person said no. Do not try the same by another way; ask what they want instead.".into()))
+        Ok(Err(said_no(&open.why)))
     }
 
     async fn perform(
@@ -420,5 +420,14 @@ impl<S: Stage> Hands<'_, S> {
             }
         }
         done.ok_or_else(|| Halt::Failed("the tool failed".into()))
+    }
+}
+
+/// What a person's no says to a model.
+pub fn said_no(why: &str) -> String {
+    const NO: &str = "Not done: a person said no.";
+    match why.trim() {
+        "" => format!("{NO} Do not try the same by another way; ask what they want instead."),
+        why => format!("{NO} They said: {why}\nDo not try the same by another way."),
     }
 }

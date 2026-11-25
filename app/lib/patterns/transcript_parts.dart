@@ -134,8 +134,71 @@ class DiffBlock extends StatelessWidget {
 
 /// The lines of one file's change.
 class DiffLines extends StatelessWidget {
-  const DiffLines(this.lines, {super.key});
+  const DiffLines(this.lines, {super.key, this.onLine, this.at, this.note});
   final List<DiffLine> lines;
+
+  /// One of them was pressed.
+  final ValueChanged<DiffLine>? onLine;
+
+  /// What stands under one of them.
+  final DiffLine? at;
+  final Widget? note;
+
+  Widget _line(AxTheme t, DiffLine l) {
+    final c = t.colors;
+    final line = ColoredBox(
+      color: switch (l.kind) {
+        DiffKind.add => c.diffAdd,
+        DiffKind.remove => c.diffRemove,
+        DiffKind.same => const Color(0x00000000),
+      },
+      child: Row(
+        children: [
+          SizedBox(
+            width: 34,
+            child: Text(
+              '${l.number}',
+              textAlign: TextAlign.right,
+              style: t.type.codeSmall.ink(c.ink4),
+            ),
+          ),
+          SizedBox(
+            width: 22,
+            child: Text(
+              switch (l.kind) {
+                DiffKind.add => '+',
+                DiffKind.remove => '−',
+                DiffKind.same => '',
+              },
+              textAlign: TextAlign.center,
+              style: t.type.codeSmall.ink(l.kind == DiffKind.add ? c.doneText : c.faultText),
+            ),
+          ),
+          Expanded(
+            child: Text.rich(
+              highlight(literal(l.text), t.type.codeSmall, c),
+              style: t.type.codeSmall,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.fade,
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onLine == null) return line;
+    // The keyboard's way is the file's own button: hundreds of stops would be no way at all.
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        excludeFromSemantics: true,
+        onTap: () => onLine!(l),
+        child: line,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
@@ -148,49 +211,8 @@ class DiffLines extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final l in lines)
-                ColoredBox(
-                  color: switch (l.kind) {
-                    DiffKind.add => c.diffAdd,
-                    DiffKind.remove => c.diffRemove,
-                    DiffKind.same => const Color(0x00000000),
-                  },
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 34,
-                        child: Text(
-                          '${l.number}',
-                          textAlign: TextAlign.right,
-                          style: t.type.codeSmall.ink(c.ink4),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 22,
-                        child: Text(
-                          switch (l.kind) {
-                            DiffKind.add => '+',
-                            DiffKind.remove => '−',
-                            DiffKind.same => '',
-                          },
-                          textAlign: TextAlign.center,
-                          style: t.type.codeSmall.ink(
-                            l.kind == DiffKind.add ? c.doneText : c.faultText,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text.rich(
-                          highlight(literal(l.text), t.type.codeSmall, c),
-                          style: t.type.codeSmall,
-                          maxLines: 1,
-                          softWrap: false,
-                          overflow: TextOverflow.fade,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              if (note != null && at == null) note!,
+              for (final l in lines) ...[_line(t, l), if (note != null && identical(l, at)) note!],
             ],
           ),
         ),
@@ -281,7 +303,11 @@ class RequestBar extends StatefulWidget {
     required this.onDeny,
     super.key,
     this.room = maxHeight,
+    this.onDenyWith,
   });
+
+  /// No, and why.
+  final ValueChanged<String>? onDenyWith;
   final RequestView request;
   final VoidCallback onOnce, onAlways, onDeny;
 
@@ -295,7 +321,8 @@ class RequestBar extends StatefulWidget {
 class _RequestBarState extends State<RequestBar> {
   final _scroll = ScrollController();
   final _focus = FocusNode(debugLabel: 'request');
-  bool _focused = false;
+  final _why = TextEditingController(), _whyFocus = FocusNode(debugLabel: 'why not');
+  bool _focused = false, _says = false;
 
   /// Null until laid out: not knowing is not having seen.
   bool? _seen;
@@ -312,6 +339,8 @@ class _RequestBarState extends State<RequestBar> {
     // Any difference makes it another request, and nothing about it has been seen.
     if (old.request != widget.request) {
       _seen = null;
+      _says = false;
+      _why.clear();
       if (_scroll.hasClients) _scroll.jumpTo(0);
     }
   }
@@ -334,7 +363,22 @@ class _RequestBarState extends State<RequestBar> {
   void dispose() {
     _scroll.dispose();
     _focus.dispose();
+    _why.dispose();
+    _whyFocus.dispose();
     super.dispose();
+  }
+
+  void _say(bool on) {
+    setState(() => _says = on);
+    if (on) _whyFocus.requestFocus();
+  }
+
+  void _denyWith() {
+    // While an input method is composing, Enter is its own.
+    final composing = _why.value.composing;
+    if (composing.isValid && !composing.isCollapsed) return;
+    final why = _why.text.trim();
+    why.isEmpty ? widget.onDeny() : widget.onDenyWith!(why);
   }
 
   @override
@@ -401,6 +445,21 @@ class _RequestBarState extends State<RequestBar> {
           const SizedBox(height: 5),
           Text('There is more. Scroll to the end to allow this.', style: t.type.label.ink(c.ink2)),
         ],
+        if (_says) ...[
+          const SizedBox(height: 8),
+          CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.enter): _denyWith,
+              const SingleActivator(LogicalKeyboardKey.escape): () => _say(false),
+            },
+            child: AxField(
+              label: 'Why not',
+              controller: _why,
+              focusNode: _whyFocus,
+              placeholder: 'What it should do instead',
+            ),
+          ),
+        ],
       ],
     );
     final keys = Wrap(
@@ -408,10 +467,21 @@ class _RequestBarState extends State<RequestBar> {
       runSpacing: 6,
       alignment: WrapAlignment.end,
       children: [
-        AxButton(label: 'Deny', tone: AxTone.quiet, onPressed: widget.onDeny),
-        if (r.always case final a?)
+        if (widget.onDenyWith != null)
+          _says
+              ? AxButton(label: 'Back', tone: AxTone.quiet, onPressed: () => _say(false))
+              : AxButton(label: 'Say why not', tone: AxTone.quiet, onPressed: () => _say(true)),
+        AxButton(
+          label: 'Deny',
+          tone: _says ? AxTone.key : AxTone.quiet,
+          onPressed: _says ? _denyWith : widget.onDeny,
+        ),
+        if (_says)
+          const SizedBox.shrink()
+        else if (r.always case final a?)
           AxButton(label: oneLine(literal(a), 80), onPressed: ok ? widget.onAlways : null),
-        AxButton(label: 'Allow once', tone: AxTone.primary, onPressed: ok ? widget.onOnce : null),
+        if (!_says)
+          AxButton(label: 'Allow once', tone: AxTone.primary, onPressed: ok ? widget.onOnce : null),
       ],
     );
     return Semantics(

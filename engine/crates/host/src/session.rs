@@ -18,6 +18,7 @@ use crate::{
     faults::{Access, Faults},
     outbox::{Follower, Line, Put},
     store::Store,
+    waiting::Waiting,
 };
 
 /// Deltas wait at most this long to be joined with others of their item.
@@ -89,9 +90,15 @@ impl Opened {
 }
 
 impl Session {
-    pub fn open(id: SessionId, last_seq: u64, store: Store, faults: Arc<Faults>) -> (Self, Opened) {
+    pub fn open(
+        id: SessionId,
+        last_seq: u64,
+        store: Store,
+        faults: Arc<Faults>,
+        waiting: Arc<Waiting>,
+    ) -> (Self, Opened) {
         let (tx, rx) = mpsc::channel(256);
-        let task = tokio::spawn(Actor::new(id.clone(), last_seq, store, faults).run(rx));
+        let task = tokio::spawn(Actor::new(id.clone(), last_seq, store, faults, waiting).run(rx));
         let opened = Opened { id: id.clone(), tx: tx.downgrade(), task };
         (Self { id, tx }, opened)
     }
@@ -163,6 +170,7 @@ struct Actor {
     seq: u64,
     store: Store,
     faults: Arc<Faults>,
+    waiting: Arc<Waiting>,
     items: HashMap<ItemId, Item>,
     /// Items with pending text, oldest first.
     order: Vec<ItemId>,
@@ -176,12 +184,19 @@ struct Actor {
 }
 
 impl Actor {
-    fn new(id: SessionId, seq: u64, store: Store, faults: Arc<Faults>) -> Self {
+    fn new(
+        id: SessionId,
+        seq: u64,
+        store: Store,
+        faults: Arc<Faults>,
+        waiting: Arc<Waiting>,
+    ) -> Self {
         Self {
             id,
             seq,
             store,
             faults,
+            waiting,
             items: HashMap::new(),
             order: Vec::new(),
             recent: VecDeque::new(),
@@ -192,7 +207,13 @@ impl Actor {
         }
     }
 
-    async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
+    async fn run(mut self, rx: mpsc::Receiver<Cmd>) {
+        self.work(rx).await;
+        // Nobody is there any more who would hear an answer.
+        self.waiting.over(&self.id);
+    }
+
+    async fn work(&mut self, mut rx: mpsc::Receiver<Cmd>) {
         loop {
             let due = self.due;
             let timer = async move {
@@ -363,7 +384,12 @@ impl Actor {
                 _ => lines(&self.id, &encoded)?,
             };
             // Nothing is sent before it is in the journal.
+            let asked = |e: &&Event| {
+                matches!(e.body, Body::RequestOpened { .. } | Body::RequestClosed { .. })
+            };
+            let waits: Vec<Event> = events.iter().filter(asked).cloned().collect();
             self.store.append(self.id.clone(), events).await?;
+            self.waiting.note(&self.id, &waits);
             Ok::<_, axiom_journal::Error>((encoded, lines))
         }
         .await;
@@ -429,7 +455,7 @@ mod tests {
             store.create(id.clone(), "t".into(), None, 1).await.unwrap();
             let out = Arc::new(Outbox::new(limit));
             let f = Follower::begin(&out, &id);
-            let mut a = Actor::new(id, 1, store, Arc::default());
+            let mut a = Actor::new(id, 1, store, Arc::default(), Arc::default());
             assert!(matches!(a.join(f.clone(), 1), Joined::Yes));
             Self { a, out, f, path, _dir: dir }
         }
@@ -635,7 +661,8 @@ mod tests {
     async fn a_session_nobody_holds_ends_with_its_text_written() {
         let b = Bench::new(1 << 20).await;
         let (id, store) = (b.a.id.clone(), b.a.store.clone());
-        let (s, opened) = Session::open(id.clone(), 1, store.clone(), Arc::default());
+        let (s, opened) =
+            Session::open(id.clone(), 1, store.clone(), Arc::default(), Arc::default());
         let again = opened.session().unwrap();
         s.say(vec![start("p"), text("p", "pending")]).await.unwrap();
         drop(s);
@@ -646,6 +673,32 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), opened.end()).await.unwrap();
         let last = store.read(id, 2).await.unwrap();
         assert_eq!(last.into_iter().map(|e| e.body).collect::<Vec<_>>(), [delta("p", "pending")]);
+    }
+
+    /// Nobody is there to hear an answer: it is not waited for.
+    #[tokio::test]
+    async fn what_a_session_asked_goes_with_it() {
+        let b = Bench::new(1 << 20).await;
+        let waiting: Arc<Waiting> = Arc::default();
+        let (s, opened) =
+            Session::open(b.a.id.clone(), 1, b.a.store.clone(), Arc::default(), waiting.clone());
+        let ask = Say::Event(Body::RequestOpened {
+            request: axiom_proto::RequestId::new(),
+            agent: AgentId("a".into()),
+            what: "asks".into(),
+            subject: "x".into(),
+            scope: String::new(),
+            answerable: axiom_proto::Answerable::Live,
+            digest: String::new(),
+            item: None,
+            session: false,
+        });
+        s.say(vec![ask]).await.unwrap();
+        s.sync().await.unwrap();
+        assert_eq!(waiting.list().len(), 1);
+        drop(s);
+        tokio::time::timeout(Duration::from_secs(5), opened.end()).await.unwrap();
+        assert_eq!(waiting.list(), []);
     }
 
     #[tokio::test]
@@ -669,7 +722,8 @@ mod tests {
     #[tokio::test]
     async fn a_request_that_cannot_be_shown_whole_is_refused_with_all_that_came_with_it() {
         let b = Bench::new(1 << 20).await;
-        let (s, _opened) = Session::open(b.a.id.clone(), 1, b.a.store.clone(), Arc::default());
+        let (s, _opened) =
+            Session::open(b.a.id.clone(), 1, b.a.store.clone(), Arc::default(), Arc::default());
         let ask = |n, answerable| {
             Say::Event(Body::RequestOpened {
                 request: axiom_proto::RequestId::new(),

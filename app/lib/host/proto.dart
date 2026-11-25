@@ -267,6 +267,33 @@ class Moved {
   final List<(String, String)> left;
 }
 
+/// Something that waits for a person, wherever it is.
+class Waits {
+  const Waits(
+    this.session,
+    this.title,
+    this.agent,
+    this.name,
+    this.request,
+    this.what,
+    this.subject,
+    this.at,
+  );
+  Waits.decode(Json j)
+    : session = j['session']! as String,
+      title = j['title']! as String,
+      agent = j['agent']! as String,
+      name = j['name']! as String,
+      request = j['request']! as String,
+      what = j['what']! as String,
+      subject = j['subject']! as String,
+      at = j['at']! as int;
+
+  /// [subject]: how it begins. All of it is where it is asked.
+  final String session, title, agent, name, request, what, subject;
+  final int at;
+}
+
 /// The environment in which what an agent does is done by Axiom, whatever its harness.
 const axiomTools = 'axiom';
 
@@ -281,6 +308,7 @@ class HarnessInfo {
     this.access = const [],
     this.accounts,
     this.hands = false,
+    this.effort = false,
   });
   HarnessInfo.decode(Json j)
     : id = j['id']! as String,
@@ -290,6 +318,7 @@ class HarnessInfo {
       needsTrust = j['needs_trust'] as bool? ?? true,
       accounts = j['accounts'] as String?,
       hands = j['hands'] as bool? ?? false,
+      effort = j['effort'] as bool? ?? false,
       access = [
         for (final a in j['access'] as List<Object?>? ?? const [])
           _enum(Access.values, a, Access.unknown),
@@ -298,6 +327,9 @@ class HarnessInfo {
 
   /// Null if it is not there or may not be started; then [problem] says why.
   final String? program, problem;
+
+  /// It can be told how hard to try.
+  final bool effort;
 
   /// Axiom's tools can stand in place of its own: the environment [axiomTools].
   final bool hands;
@@ -312,11 +344,15 @@ class HarnessInfo {
 
 /// What a provider says of a model.
 class ModelInfo {
-  const ModelInfo(this.id, {this.name, this.context});
+  const ModelInfo(this.id, {this.name, this.context, this.effort = false});
   ModelInfo.decode(Json j)
     : id = j['id']! as String,
       name = j['name'] as String?,
-      context = j['context'] as int?;
+      context = j['context'] as int?,
+      effort = j['effort'] as bool? ?? false;
+
+  /// How hard it tries can be said.
+  final bool effort;
   final String id;
   final String? name;
   final int? context;
@@ -586,6 +622,7 @@ sealed class Message {
     }
     if (j case {'session': final String s, 'resync': final int n}) return Resync(s, n);
     if (j case {'session': final String s, 'fault': final String f}) return Fault(s, f);
+    if (j case {'waiting': final int n}) return WaitingChanged(n);
     if (j case {'id': final int id, 'error': final Json e}) {
       return Failed(id, e['code'] as String? ?? 'unknown', e['message'] as String? ?? '');
     }
@@ -598,6 +635,12 @@ class Events extends Message {
   const Events(this.session, this.events);
   final String session;
   final List<Event> events;
+}
+
+/// What waits for a person is something else now.
+class WaitingChanged extends Message {
+  const WaitingChanged(this.count);
+  final int count;
 }
 
 class Resync extends Message {

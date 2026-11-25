@@ -112,6 +112,7 @@ impl Known {
             problem: program.err().map(|e| e.to_string()),
             needs_trust: not.is_empty(),
             hands: self.harness.takes_hands(),
+            effort: self.harness.takes_effort(),
             accounts: crate::connections::provider_of(self.id).map(str::to_owned),
             access: trusted,
         }

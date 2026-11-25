@@ -82,11 +82,11 @@ class _TalkState extends State<Talk> {
     unawaited(_do(() => widget.store.models(c)));
   }
 
-  void _answer(RequestOpened r, Answer a) {
+  void _answer(RequestOpened r, Answer a, {String? words}) {
     setState(() => _answered.add(r.request));
     unawaited(
       _do(
-        () => widget.store.answer(widget.session.id, r, a),
+        () => widget.store.answer(widget.session.id, r, a, words: words),
         failed: () => _answered.remove(r.request),
       ),
     );
@@ -101,23 +101,33 @@ class _TalkState extends State<Talk> {
     final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
     final models = s.modelsOf(x.connection ?? '');
     final has = models?.any((m) => m.id == x.model) ?? false;
-    Execution with_({String? model, String? connection, String? provider, bool? axioms}) =>
-        Execution(
-          harness: x.harness,
-          provider: provider ?? x.provider,
-          model: model ?? x.model,
-          connection: connection == null
-              ? x.connection
-              : connection.isEmpty
-              ? null
-              : connection,
-          effort: x.effort,
-          environment: axioms == null
-              ? x.environment
-              : axioms
-              ? axiomTools
-              : null,
-        );
+    final tries = program?.effort ?? models?.any((m) => m.id == x.model && m.effort) ?? false;
+    Execution with_({
+      String? model,
+      String? connection,
+      String? provider,
+      bool? axioms,
+      String? effort,
+    }) => Execution(
+      harness: x.harness,
+      provider: provider ?? x.provider,
+      model: model ?? x.model,
+      connection: connection == null
+          ? x.connection
+          : connection.isEmpty
+          ? null
+          : connection,
+      effort: effort == null
+          ? x.effort
+          : effort.isEmpty
+          ? null
+          : effort,
+      environment: axioms == null
+          ? x.environment
+          : axioms
+          ? axiomTools
+          : null,
+    );
     void set({Execution? execution, Access? access}) => unawaited(
       _do(() => s.setAgent(widget.session.id, a.id, execution: execution, access: access)),
     );
@@ -143,6 +153,17 @@ class _TalkState extends State<Talk> {
             : 'The whole conversation has to be read again, none of it from the cache. Reasoning '
                   'this model kept is not carried over.',
       ),
+      if (tries || x.effort != null)
+        ExecutionChoice(
+          'Effort',
+          [
+            ...efforts,
+            if (x.effort case final e? when !efforts.any((i) => i.value == e))
+              AxMenuItem(e, oneLine(e, 30)),
+          ],
+          x.effort ?? '',
+          (v) => set(execution: with_(effort: v)),
+        ),
       ExecutionChoice(
         'Harness',
         [
@@ -282,6 +303,7 @@ class _TalkState extends State<Talk> {
                   onOnce: () => _answer(first, Answer.once),
                   onAlways: () => _answer(first, Answer.session),
                   onDeny: () => _answer(first, Answer.deny),
+                  onDenyWith: (words) => _answer(first, Answer.deny, words: words),
                 ),
               ],
             ),

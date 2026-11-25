@@ -168,6 +168,7 @@ class HostStore extends ChangeNotifier {
     // Nothing that is shown depends on it.
     unawaited(loadConnections().catchError((_) {}));
     unawaited(loadHarnesses().catchError((_) {}));
+    unawaited(loadNeeds());
     if (current case final c? when c.fault == null) await _follow(c);
     notifyListeners();
   }
@@ -243,6 +244,31 @@ class HostStore extends ChangeNotifier {
     }
     notifyListeners();
     if (link != null) await _follow(current!);
+  }
+
+  /// What waits for a person, in all sessions, the longest first.
+  List<Waits> needs = const [];
+  bool _asksNeeds = false, _needsAgain = false;
+
+  Future<void> loadNeeds() async {
+    if (_asksNeeds) {
+      _needsAgain = true;
+      return;
+    }
+    _asksNeeds = true;
+    try {
+      do {
+        _needsAgain = false;
+        final r = await _live.call('host.waiting');
+        if (_disposed) return;
+        needs = [for (final j in r! as List<Object?>) Waits.decode(j! as Json)];
+        notifyListeners();
+      } while (_needsAgain);
+    } on Object {
+      // It is asked for again with the next connection, or the next change.
+    } finally {
+      _asksNeeds = false;
+    }
   }
 
   /// Ways to reach providers, as the host has them.
@@ -455,12 +481,15 @@ class HostStore extends ChangeNotifier {
         // A copy of the folder may have to be made first.
       }, _long);
 
-  Future<void> answer(String session, RequestOpened r, Answer a) => _live.call('request.answer', {
-    'session': session,
-    'request': r.request,
-    'answer': a.name,
-    'digest': r.digest,
-  });
+  /// [words]: with a no, why.
+  Future<void> answer(String session, RequestOpened r, Answer a, {String? words}) =>
+      _live.call('request.answer', {
+        'session': session,
+        'request': r.request,
+        'answer': a.name,
+        'digest': r.digest,
+        'words': ?words,
+      });
 
   Future<void> cancel(String session, String run) =>
       _live.call('run.cancel', {'session': session, 'run': run});
@@ -511,6 +540,8 @@ class HostStore extends ChangeNotifier {
         current = SessionModel(c!.id);
         notifyListeners();
         unawaited(_follow(current!));
+      case WaitingChanged():
+        unawaited(loadNeeds());
       case Fault(:final session, :final words) when session == c?.id:
         c!.failed(words);
       case _:

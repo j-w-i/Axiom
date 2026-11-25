@@ -73,6 +73,32 @@ impl Outbox {
         }
     }
 
+    /// A word that is not an answer, to whoever is there. False if the client has gone.
+    pub fn tell(&self, m: &Message) -> bool {
+        let Ok(line) = serde_json::to_vec(m) else { return true };
+        let mut q = self.q();
+        if q.closed {
+            return false;
+        }
+        q.push(line.into());
+        drop(q);
+        self.ready.notify_one();
+        true
+    }
+
+    /// Resolves when nothing more goes in.
+    pub async fn closed(&self) {
+        loop {
+            let room = self.room.notified();
+            tokio::pin!(room);
+            room.as_mut().enable();
+            if self.q().closed {
+                return;
+            }
+            room.await;
+        }
+    }
+
     /// Waits until another answer may be put in. False if the client has gone.
     pub async fn room(&self) -> bool {
         loop {

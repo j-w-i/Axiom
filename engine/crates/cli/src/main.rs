@@ -20,6 +20,7 @@ mod plain;
 const USAGE: &str = "usage:
   axiom status
   axiom sessions
+  axiom waiting                                 what waits for a person
   axiom new TITLE [WORKSPACE]
   axiom replay SESSION SCRIPT [SPEED]
   axiom follow SESSION
@@ -109,6 +110,7 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
     let call = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         ["status"] => Call::Status {},
         ["sessions"] => Call::list(),
+        ["waiting"] => Call::Waiting {},
         ["new", title] => Call::SessionCreate { title: title.into(), workspace: None },
         ["new", title, w] => {
             let w = std::fs::canonicalize(w).map_err(|e| format!("{w}: {e}"))?;
@@ -169,6 +171,7 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
                 _ => return Err(USAGE.into()),
             },
             digest: digest.into(),
+            words: None,
         },
         ["cancel", s, r] => Call::Cancel { session: SessionId(s.into()), run: RunId(r.into()) },
         ["audit"] => Call::Audit { after: 0, limit: 200 },

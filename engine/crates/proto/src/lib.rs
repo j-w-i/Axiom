@@ -300,6 +300,21 @@ pub struct SessionInfo {
     pub running: bool,
 }
 
+/// Something that waits for a person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Waits {
+    pub session: SessionId,
+    pub title: String,
+    pub agent: AgentId,
+    pub name: String,
+    pub request: RequestId,
+    pub what: String,
+    /// The beginning of what it is about. All of it is where it is asked, and is answered there.
+    pub subject: String,
+    /// Since when.
+    pub at: u64,
+}
+
 /// What has been changed in a folder since its last commit.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Changes {
@@ -409,6 +424,9 @@ pub struct HarnessInfo {
     pub needs_trust: bool,
     /// What it has a mode for.
     pub access: Vec<Access>,
+    /// It can be told how hard to try (`low`, `medium`, `high`).
+    #[serde(default)]
+    pub effort: bool,
     /// Axiom's tools can stand in place of its own (the environment `axiom`): then it is asked about
     /// and contained as Axiom's own agents are, and has every mode of access.
     #[serde(default)]
@@ -553,7 +571,13 @@ pub enum Call {
         answer: Answer,
         /// The question's digest, as it was shown.
         digest: String,
+        /// With a no: why, for whoever asked to read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        words: Option<String>,
     },
+    /// What waits for a person, in all sessions, the longest first.
+    #[serde(rename = "host.waiting")]
+    Waiting {},
     #[serde(rename = "connection.list")]
     Connections {},
     /// Adds an account, a key or a server. The secret goes to the system's store and nowhere else.
@@ -672,6 +696,9 @@ pub struct ModelInfo {
     /// Tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<u64>,
+    /// How hard it tries can be said (`low`, `medium`, `high`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub effort: bool,
 }
 fn one() -> f64 {
     1.0
@@ -720,6 +747,11 @@ pub enum Message {
     Fault {
         session: SessionId,
         fault: String,
+    },
+    /// What waits for a person is something else now, and how many there are: `host.waiting` says
+    /// what. Sent to every client that has said hello.
+    Waiting {
+        waiting: usize,
     },
 }
 
