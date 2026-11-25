@@ -13,7 +13,7 @@ use tokio::{io::AsyncReadExt, sync::watch};
 use crate::{Output, shell, text::plain};
 
 /// Of one agent at a time.
-const MOST: usize = 8;
+pub const MOST: usize = 8;
 /// Output that has not been read; more pushes out the oldest.
 const KEPT: usize = 64 * 1024;
 

@@ -1001,3 +1001,82 @@ async fn what_was_not_seen_is_kept() {
     tokio::time::sleep(Duration::from_millis(2500)).await;
     assert!(needs(&mut t, 0).await.is_empty());
 }
+
+#[tokio::test]
+async fn the_limits_that_are_told_are_those_that_are_kept() {
+    let mut t = T::new(vec![text(&["thinking"]).hangs()]).await;
+    let told = t.c.call(Call::Limits {}).await.unwrap();
+    let told: Vec<Limit> = serde_json::from_value(told).unwrap();
+    let most = |what: &str| {
+        let l = told.iter().find(|l| l.what == what).unwrap_or_else(|| panic!("{what}"));
+        l.most
+    };
+    let n = |what: &str| usize::try_from(most(what).unwrap()).unwrap();
+
+    // Each once, in words, those of one kind together.
+    let mut kinds: Vec<&str> = told.iter().map(|l| l.of.as_str()).collect();
+    kinds.dedup();
+    let mut once = kinds.clone();
+    once.sort_unstable();
+    once.dedup();
+    assert_eq!(kinds.len(), once.len(), "{kinds:?}");
+    let mut whats: Vec<&str> = told.iter().map(|l| l.what.as_str()).collect();
+    whats.sort_unstable();
+    whats.dedup();
+    assert_eq!(whats.len(), told.len());
+    assert!(told.iter().all(|l| l.unit != Unit::Unknown && l.most != Some(0)));
+    assert_eq!(most("Output tokens"), None);
+
+    let refused = |r: Result<Value, ClientError>| match r {
+        Err(ClientError::Refused(e)) => e.code,
+        r => panic!("{r:?}"),
+    };
+    // Messages: as long as may be, and as many as may wait for an agent that is at work.
+    let a = t.agent(Access::Read).await;
+    let longest = n("One message to an agent");
+    assert_eq!(refused(t.prompt(&a, &"x".repeat(longest + 1)).await), ErrorCode::BadRequest);
+    t.prompt(&a, "go").await.unwrap();
+    // From here on it takes in nothing before its next step.
+    t.until(|b| matches!(b, Body::ItemDelta { .. }).then_some(())).await;
+    t.prompt(&a, &"x".repeat(longest)).await.unwrap();
+    for i in 1..n("Messages that wait for an agent at work") {
+        let v = t.prompt(&a, "more").await.unwrap_or_else(|e| panic!("{i}: {e}"));
+        assert_eq!(v["queued"], true);
+    }
+    assert_eq!(refused(t.prompt(&a, "one more").await), ErrorCode::Busy);
+
+    // Agents, one of which is there.
+    for _ in 1..n("Agents in a session") {
+        t.agent(Access::Read).await;
+    }
+    let call = Call::AgentAdd {
+        session: t.s.clone(),
+        name: "One more".into(),
+        execution: t.execution(),
+        access: Access::Read,
+        trust: false,
+        instructions: vec![],
+        apart: false,
+    };
+    assert_ne!(refused(t.c.call(call).await), ErrorCode::Internal);
+
+    // Accounts, one of which is there.
+    let add = || Call::ConnectionAdd {
+        name: "A".into(),
+        provider: "openai-compatible".into(),
+        url: Some("http://127.0.0.1:9".into()),
+        secret: None,
+    };
+    for _ in 1..n("Accounts and servers") {
+        t.c.call(add()).await.unwrap();
+    }
+    assert_ne!(refused(t.c.call(add()).await), ErrorCode::Internal);
+
+    // Clients, one of which is this.
+    let mut held = Vec::new();
+    for _ in 1..n("Windows and terminals connected") {
+        held.push(t.f.client().await);
+    }
+    let one_more = Client::connect(&t.f.paths, "test").await;
+    assert!(matches!(one_more, Err(ClientError::Refused(e)) if e.code == ErrorCode::Busy));
+}

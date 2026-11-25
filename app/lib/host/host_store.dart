@@ -456,6 +456,12 @@ class HostStore extends ChangeNotifier {
     return all;
   }
 
+  /// What the host keeps everything to.
+  Future<List<HostLimit>> limits() async {
+    final r = await _live.call('host.limits');
+    return [for (final j in r! as List<Object?>) HostLimit.decode(j! as Json)];
+  }
+
   /// What a folder would have agents told; for a person to read.
   Future<List<Instructions>> look(String path) async {
     final r = await _live.call('workspace.look', {'path': path});

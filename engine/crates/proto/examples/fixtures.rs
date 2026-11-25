@@ -143,6 +143,35 @@ fn main() -> Result<(), serde_json::Error> {
             }),
         },
         Message::Events { session: SessionId("s_1".into()), events: cut },
+        Message::Ok {
+            id: 4,
+            result: serde_json::to_value([
+                Limit {
+                    of: "A run".into(),
+                    what: "Steps".into(),
+                    most: Some(200),
+                    unit: Unit::Count,
+                },
+                Limit {
+                    of: "A run".into(),
+                    what: "Output tokens".into(),
+                    most: None,
+                    unit: Unit::Count,
+                },
+                Limit {
+                    of: "Files".into(),
+                    what: "One file".into(),
+                    most: Some(1024),
+                    unit: Unit::Bytes,
+                },
+                Limit {
+                    of: "Files".into(),
+                    what: "One command".into(),
+                    most: Some(600),
+                    unit: Unit::Seconds,
+                },
+            ])?,
+        },
         Message::Open { open: "/w".into() },
     ] {
         println!("{}", serde_json::to_string(&m)?);

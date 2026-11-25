@@ -18,7 +18,7 @@ use axiom_proto::{
 };
 use axiom_tools::{
     Site,
-    copy::{self, Files, From, Is, Most, Seen, Taking, Was, What, alike},
+    copy::{self, Files, From, Is, Seen, Taking, Was, What, alike},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -311,7 +311,7 @@ pub async fn ready(
             let own = a.copies.own(&folder, &s, &ag, true)?;
             let may = |p: &Place| site.reads(p);
             let from = From { folder: &own.folder, tracked: &tracked, may: &may, stop };
-            match copy::make(&from, &own.copy, Most::default()) {
+            match copy::make(&from, &own.copy, crate::limits::copied()) {
                 Ok((files, odd)) => {
                     own.keep(&Known { files, odd, ..Known::default() })?;
                     Ok(own.copy.to_string())
@@ -654,7 +654,7 @@ pub async fn renew(
         let beside = a.beside(&agent)?;
         let may = |p: &Place| site.reads(p);
         let from = From { folder: &own.folder, tracked: &tracked, may: &may, stop };
-        let news = copy::news(&from, &own.copy, &mut known.files, Most::default()).map_err(words)?;
+        let news = copy::news(&from, &own.copy, &mut known.files, crate::limits::copied()).map_err(words)?;
         let mut not: Vec<Value> = news.left.iter().map(|(p, w)| left(p, w.as_str())).collect();
         // On record before it is done: what is taken over is the folder's, and nobody's change.
         known.taking = news.taking;

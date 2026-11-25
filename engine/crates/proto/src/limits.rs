@@ -21,7 +21,8 @@ pub const TITLE: usize = 500;
 pub const WORKSPACE: usize = 4 * 1024;
 const NAME: usize = 500;
 const SCOPE: usize = 4 * 1024;
-const LONG: usize = 64 * 1024;
+/// What a request is about, and why a run failed.
+pub const LONG: usize = 64 * 1024;
 
 /// Bytes of `v` as JSON, without building it.
 pub fn encoded_len<T: Serialize + ?Sized>(v: &T) -> usize {
