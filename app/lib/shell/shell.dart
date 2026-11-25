@@ -28,6 +28,7 @@ import '../ui/tokens.dart';
 import '../ui/zoom.dart';
 import 'changes.dart';
 import 'drafts.dart';
+import 'drop.dart';
 import 'find.dart';
 import 'new_session.dart';
 import 'settings.dart';
@@ -37,8 +38,11 @@ import 'window.dart';
 
 /// The application's window, on what the host says. Nothing here is specimen data.
 class Shell extends StatefulWidget {
-  const Shell(this.store, {super.key, this.titleInset = 0});
+  const Shell(this.store, {super.key, this.titleInset = 0, this.drags});
   final HostStore store;
+
+  /// Folders that are dropped on the window.
+  final Drags? drags;
 
   /// Room for the window's own buttons.
   final double titleInset;
@@ -132,8 +136,9 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     });
   }
 
-  /// What a key was pressed for and did not come about.
+  /// What a key was pressed for and did not come about, or what is to be known of what did.
   String? _failed;
+  bool _well = false;
   Timer? _forget;
 
   void _show(_View v) => setState(() => _view = v);
@@ -324,11 +329,36 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     unawaited(f().catchError((Object e) => _say('$what: ${wordsOf(e)}')));
   }
 
-  void _say(String? failed) {
+  void _say(String? failed, {bool well = false}) {
     _forget?.cancel();
     if (!mounted) return;
-    setState(() => _failed = failed);
+    setState(() {
+      _failed = failed;
+      _well = well;
+    });
     if (failed != null) _forget = Timer(const Duration(seconds: 15), () => _say(null));
+  }
+
+  /// A folder that was asked for from outside: a session could begin there, and nothing does.
+  void _folder(String path) {
+    if (!mounted) return;
+    setState(() => _finding = false);
+    _startIn(path);
+  }
+
+  /// The folder that is held over the window.
+  String? _over;
+  void _held(String? folder) => mounted ? setState(() => _over = folder) : null;
+
+  int _drops = 0;
+  Future<void> _dropped(List<String> paths) async {
+    final n = ++_drops;
+    _held(null);
+    final d = await whatWasDropped(paths);
+    // Another has been dropped meanwhile.
+    if (!mounted || n != _drops) return;
+    if (d.folder case final f?) _folder(f);
+    _say(d.words, well: d.folder != null);
   }
 
   @override
@@ -336,9 +366,12 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_key);
-    widget.store.onFolder = (path) {
-      if (mounted) _startIn(path);
-    };
+    widget.store.onFolder = _folder;
+    widget.drags?.listen(
+      over: _held,
+      out: () => _held(null),
+      dropped: (paths) => unawaited(_dropped(paths)),
+    );
   }
 
   /// What came meanwhile is before its person now.
@@ -352,6 +385,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_key);
     widget.store.onFolder = null;
+    widget.drags?.stop();
     _changes?.dispose();
     _forget?.cancel();
     _drafts.dispose();
@@ -433,18 +467,28 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
               _View.settings => 'Settings',
               _View.work => null,
             };
-            final problem = switch (s) {
-              _ when stale && s.phase != HostPhase.starting =>
+            // What is said of the host goes before anything else.
+            final (problem, well) = switch (s) {
+              _ when stale && s.phase != HostPhase.starting => (
                 s.binary == null && s.current == null
                     ? 'axiom-host was not found beside the application'
                     : 'The host is not answering. Trying again.',
-              HostStore(:final damaged?) => 'The journal is damaged: ${oneLine(damaged, 200)}',
-              _ => _failed == null ? null : oneLine(_failed!, 200),
+                false,
+              ),
+              HostStore(:final damaged?) => (
+                'The journal is damaged: ${oneLine(damaged, 200)}',
+                false,
+              ),
+              _ => (_failed == null ? null : oneLine(_failed!, 200), _well),
             };
             final onList = beside || narrow ? null : () => setState(() => _list = true);
             final banner = problem == null
                 ? null
-                : _Banner(problem, inset: beside ? AxSpace.gutter : inset + AxSpace.edge);
+                : _Banner(
+                    problem,
+                    well: well,
+                    inset: beside ? AxSpace.gutter : inset + AxSpace.edge,
+                  );
             final content = switch (s) {
               // Kept while the host is away: what was written is not lost.
               _ when view == _View.start => StartPage(
@@ -513,7 +557,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                   // Kept when the window is made wider or narrower.
                   key: const ValueKey('display'),
                   child: FocusTraversalGroup(
-                    child: Padding(
+                    child: _DropPlace(
+                      _over,
                       padding: EdgeInsets.fromLTRB(beside ? 0 : 8, 8, 8, 8),
                       child: page == null && s.current != null && !narrow
                           ? content
@@ -528,6 +573,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                                       padding: const EdgeInsets.only(bottom: 8),
                                       child: _Strip(
                                         problem: narrow ? problem : null,
+                                        well: well,
                                         page: page,
                                         session: s.current,
                                         inset: beside ? 0 : inset,
@@ -575,6 +621,62 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
           },
         ),
       ),
+    );
+  }
+}
+
+/// What the window shows; while a folder is held over the window, where it would go.
+class _DropPlace extends StatelessWidget {
+  const _DropPlace(this.folder, {required this.padding, required this.child});
+  final String? folder;
+  final EdgeInsets padding;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Padding(padding: padding, child: child),
+        IgnorePointer(
+          child: AnimatedSwitcher(
+            duration: reducedMotion(context) ? Duration.zero : AxMotion.fade,
+            child: folder == null
+                ? const SizedBox.expand()
+                : Padding(
+                    padding: padding,
+                    child: AxCanvas(
+                      child: Center(
+                        child: Semantics(
+                          liveRegion: true,
+                          child: Padding(
+                            padding: const EdgeInsets.all(AxSpace.gutter),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'New session in ${folderName(folder!)}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: t.type.heading,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Drop the folder here. Nothing starts by itself.',
+                                  textAlign: TextAlign.center,
+                                  style: t.type.label.ink(c.ink3),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -741,8 +843,11 @@ class Where extends StatelessWidget {
 
 /// What has failed, over everything else.
 class _Banner extends StatelessWidget {
-  const _Banner(this.words, {required this.inset});
+  const _Banner(this.words, {required this.inset, required this.well});
   final String words;
+
+  /// Nothing has failed: it is only to be known.
+  final bool well;
   final double inset;
   @override
   Widget build(BuildContext context) {
@@ -751,7 +856,7 @@ class _Banner extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(inset, 14, AxSpace.gutter, 0),
       child: Row(
         children: [
-          const AxLamp(AgentState.failed),
+          if (well) AxGlyph(AxIcon.folder, color: c.ink3) else const AxLamp(AgentState.failed),
           const SizedBox(width: 10),
           Expanded(
             child: Semantics(
@@ -760,7 +865,7 @@ class _Banner extends StatelessWidget {
                 words,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: t.type.label.ink(c.faultText),
+                style: t.type.label.ink(well ? c.ink2 : c.faultText),
               ),
             ),
           ),
@@ -775,6 +880,7 @@ class _Banner extends StatelessWidget {
 class _Strip extends StatelessWidget {
   const _Strip({
     required this.problem,
+    required this.well,
     required this.page,
     required this.session,
     required this.inset,
@@ -791,6 +897,7 @@ class _Strip extends StatelessWidget {
   /// Leaves the page that is shown, if it can be left as it is.
   final VoidCallback? onLeave;
   final String? problem;
+  final bool well;
 
   /// The page that is shown, if it is not a session's.
   final String? page;
@@ -828,13 +935,13 @@ class _Strip extends StatelessWidget {
               problem!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: t.type.label.ink(c.faultText),
+              style: t.type.label.ink(well ? c.ink2 : c.faultText),
             ),
           );
     final failed = Row(
       children: [
         if (said != null) ...[
-          const AxLamp(AgentState.failed),
+          if (well) AxGlyph(AxIcon.folder, color: c.ink3) else const AxLamp(AgentState.failed),
           const SizedBox(width: 10),
           Expanded(child: said),
         ],
