@@ -1,0 +1,2 @@
+data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_current_temperature","args":{"location":"Paris"}},"thoughtSignature":"<Signature_A>"},{"functionCall":{"name":"get_current_temperature","args":{"location":"London"}}}]},"finishReason":"STOP"}]}
+

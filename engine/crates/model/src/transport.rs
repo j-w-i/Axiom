@@ -15,6 +15,7 @@ use reqwest::{
     redirect,
 };
 use serde::Deserialize;
+use serde_json::value::RawValue;
 
 use crate::{
     codec::{self, Decoder, EncodeError, Lost},
@@ -32,6 +33,9 @@ const ERROR_BODY: usize = 64 * 1024;
 /// Longest list of models.
 const LIST: usize = 4 * 1024 * 1024;
 const MODELS: usize = 10_000;
+/// Most pages of it, and how many models are asked for in each: as many as are given.
+const PAGES: usize = 10;
+const PAGE: &str = "1000";
 /// How long a finished answer may take to let go of its connection, which can then be used again.
 const DRAIN: Duration = Duration::from_millis(100);
 
@@ -105,12 +109,9 @@ impl Client {
     /// Sends the request and returns its answer once it has begun. Dropping this future, or the
     /// answer, closes the connection.
     pub async fn stream(&self, request: &Request) -> Result<Answer, CallError> {
+        let path = codec::path(self.profile.codec, &request.model)?;
         let encoded = codec::encode(request, &self.profile)?;
-        let path = match self.profile.codec {
-            Codec::Messages => "messages",
-            Codec::Chat => "chat/completions",
-        };
-        let answer = self.post(path, encoded.body).await.map_err(|e| self.sealed(e))?;
+        let answer = self.post(&path, encoded.body).await.map_err(|e| self.sealed(e))?;
         let quirks = self.profile.quirks(&request.model);
         Ok(Answer {
             request_id: request_id(answer.headers(), self.secret()),
@@ -126,45 +127,99 @@ impl Client {
         })
     }
 
-    /// What the server has. Only Chat Completions servers list it in one answer.
+    /// What the server has: all of it, or an error. OpenAI's list, and that of any server that speaks
+    /// its protocols, is one answer; Gemini's comes in pages.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, CallError> {
-        if self.profile.codec != Codec::Chat {
-            return Err(EncodeError::Unsupported("the list of models").into());
-        }
-        Ok(self.list().await.map_err(|e| self.sealed(e))?)
+        let list = match self.profile.codec {
+            Codec::Messages => return Err(EncodeError::Unsupported("the list of models").into()),
+            Codec::Chat | Codec::Responses => self.list().await,
+            Codec::Gemini => self.pages().await,
+        };
+        Ok(list.map_err(|e| self.sealed(e))?)
     }
 
     async fn list(&self) -> Result<Vec<ModelInfo>, Error> {
-        let url = self.endpoint.at("models").map_err(setup)?;
-        let request = self.request(self.http.get(url.clone()), &url, "application/json")?;
-        let mut answer = self.send(request).await?;
-        let body = read(&mut answer, LIST, self.options.idle).await?;
-        if body.len() > LIST {
-            return Err(Error::protocol(format!("the list of models is larger than {LIST} bytes")));
-        }
         #[derive(Deserialize)]
         struct List {
-            data: Vec<Box<serde_json::value::RawValue>>,
+            data: Vec<Box<RawValue>>,
         }
         #[derive(Deserialize)]
         struct Named {
             id: String,
         }
-        // Some servers answer an address they do not have with success and an error.
-        let odd = |e: serde_json::Error| match error::is_error(&text(&body)) {
-            true => with_head(Error::provider(None, &text(&body)), answer.headers()),
-            false => Error::protocol(format!("the list of models cannot be read: {e}")),
-        };
-        let list: List = serde_json::from_slice(&body).map_err(odd)?;
+        let url = self.endpoint.at("models").map_err(setup)?;
+        let page = self.page(&url, LIST).await?;
+        let list: List = page.read()?;
         if list.data.len() > MODELS {
-            return Err(Error::protocol(format!("the server lists more than {MODELS} models")));
+            return Err(too_many_models());
         }
         let mut models = Vec::with_capacity(list.data.len());
         for raw in list.data {
-            let Named { id } = serde_json::from_str(raw.get()).map_err(odd)?;
+            let Named { id } = page.model(&raw)?;
             models.push(ModelInfo { id, native: Json::from(&*raw) });
         }
         Ok(models)
+    }
+
+    /// Gemini's, of the models that can be asked as this crate asks (api-reference/models).
+    async fn pages(&self) -> Result<Vec<ModelInfo>, Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct List {
+            #[serde(default)]
+            models: Vec<Box<RawValue>>,
+            next_page_token: Option<String>,
+            /// A page without models and an error look alike else.
+            error: Option<serde::de::IgnoredAny>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Named {
+            name: String,
+            supported_generation_methods: Option<Vec<String>>,
+        }
+        let first = self.endpoint.at("models").map_err(setup)?;
+        let (mut models, mut token, mut room, mut seen) = (Vec::new(), None::<String>, LIST, 0);
+        for _ in 0..PAGES {
+            let mut url = first.clone();
+            url.query_pairs_mut().append_pair("pageSize", PAGE);
+            if let Some(token) = &token {
+                url.query_pairs_mut().append_pair("pageToken", token);
+            }
+            let page = self.page(&url, room).await?;
+            room -= page.body.len();
+            let list: List = page.read()?;
+            if list.error.is_some() {
+                return Err(page.error());
+            }
+            seen += list.models.len();
+            if seen > MODELS {
+                return Err(too_many_models());
+            }
+            for raw in list.models {
+                let named: Named = page.model(&raw)?;
+                let asked = |methods: Vec<String>| methods.iter().any(|m| m == "generateContent");
+                if named.supported_generation_methods.is_none_or(asked) {
+                    let id = named.name.strip_prefix("models/").unwrap_or(&named.name).to_owned();
+                    models.push(ModelInfo { id, native: Json::from(&*raw) });
+                }
+            }
+            token = list.next_page_token.filter(|t| !t.is_empty());
+            if token.is_none() {
+                return Ok(models);
+            }
+        }
+        Err(Error::protocol(format!("the list of models has more than {PAGES} pages")))
+    }
+
+    async fn page(&self, url: &Url, room: usize) -> Result<Page, Error> {
+        let request = self.request(self.http.get(url.clone()), url, "application/json")?;
+        let mut answer = self.send(request).await?;
+        let body = read(&mut answer, room, self.options.idle).await?;
+        if body.len() > room {
+            return Err(Error::protocol(format!("the list of models is larger than {LIST} bytes")));
+        }
+        Ok(Page { body, head: answer.headers().clone() })
     }
 
     async fn post(&self, path: &str, body: Vec<u8>) -> Result<Response, Error> {
@@ -240,6 +295,34 @@ impl Client {
     fn sealed(&self, e: Error) -> Error {
         e.sealed(self.secret())
     }
+}
+
+/// Of a list of models.
+struct Page {
+    body: Vec<u8>,
+    head: HeaderMap,
+}
+impl Page {
+    fn read<'a, T: Deserialize<'a>>(&'a self) -> Result<T, Error> {
+        serde_json::from_slice(&self.body).map_err(|e| self.odd(&e))
+    }
+    fn model<'a, T: Deserialize<'a>>(&self, raw: &'a RawValue) -> Result<T, Error> {
+        serde_json::from_str(raw.get()).map_err(|e| self.odd(&e))
+    }
+    /// Some servers answer an address they do not have with success and an error.
+    fn odd(&self, e: &serde_json::Error) -> Error {
+        match error::is_error(&text(&self.body)) {
+            true => self.error(),
+            false => Error::protocol(format!("the list of models cannot be read: {e}")),
+        }
+    }
+    fn error(&self) -> Error {
+        with_head(Error::provider(None, &text(&self.body)), &self.head)
+    }
+}
+
+fn too_many_models() -> Error {
+    Error::protocol(format!("the server lists more than {MODELS} models"))
 }
 
 /// A model a server has, and all it says of it.

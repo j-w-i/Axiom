@@ -40,6 +40,10 @@ pub enum Effort {
     OutputConfig,
     /// `reasoning_effort`
     ReasoningEffort,
+    /// `reasoning.effort`
+    Reasoning,
+    /// `generationConfig.thinkingConfig.thinkingLevel`
+    ThinkingLevel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +165,40 @@ impl Profile {
         }
     }
 
+    /// The OpenAI API with a key. From developers.openai.com/api/docs, read 2026-11-25: the effort
+    /// (guides/reasoning#reasoning-effort), and that reasoning a model cannot read is left out by the
+    /// API and is no error (guides/reasoning#reasoning-item-removal-across-requests).
+    pub fn openai() -> Self {
+        Self {
+            provider: "openai".into(),
+            codec: Codec::Responses,
+            base_url: Some("https://api.openai.com/v1".into()),
+            auth: Auth::Bearer,
+            headers: BTreeMap::new(),
+            quirks: Quirks {
+                effort: Some(Effort::Reasoning),
+                replay: Some(Replay::SameProvider),
+                ..Quirks::default()
+            },
+            models: BTreeMap::new(),
+        }
+    }
+
+    /// The Gemini API with a key. From aistudio.google.com, read 2026-11-25: the header
+    /// (api-reference), and the level (docs/thinking#thinking-levels), which models before Gemini 3
+    /// refuse. That one model reads what another signed is not said for this API.
+    pub fn gemini() -> Self {
+        Self {
+            provider: "gemini".into(),
+            codec: Codec::Gemini,
+            base_url: Some("https://generativelanguage.googleapis.com/v1beta".into()),
+            auth: Auth::Header("x-goog-api-key".into()),
+            headers: BTreeMap::new(),
+            quirks: Quirks { effort: Some(Effort::ThinkingLevel), ..Quirks::default() },
+            models: BTreeMap::new(),
+        }
+    }
+
     /// OpenRouter with a key. From openrouter.ai/docs, read 2026-11-25: the limit and the effort (the
     /// reference of chat completions), and that a message goes back as it came, with its reasoning and
     /// the details of it, whose chunks are concatenated in order
@@ -214,6 +252,7 @@ impl Profile {
             UPGRADE,
             USER_AGENT,
             HeaderName::from_static("x-api-key"),
+            HeaderName::from_static("x-goog-api-key"),
         ];
         let mut map = HeaderMap::new();
         for (name, value) in &self.headers {
@@ -278,6 +317,8 @@ mod tests {
     fn nothing_unknown_is_claimed() {
         for p in [
             Profile::anthropic(),
+            Profile::openai(),
+            Profile::gemini(),
             Profile::openrouter(),
             Profile::lm_studio(),
             Profile::openai_compatible("p", "https://e.com"),
@@ -291,6 +332,27 @@ mod tests {
     }
 
     #[test]
+    fn where_each_is_and_how_it_takes_a_key() {
+        let google = Auth::Header("x-goog-api-key".into());
+        for (p, codec, address, auth) in [
+            (Profile::openai(), Codec::Responses, "https://api.openai.com/v1", Auth::Bearer),
+            (
+                Profile::gemini(),
+                Codec::Gemini,
+                "https://generativelanguage.googleapis.com/v1beta",
+                google,
+            ),
+            (Profile::openrouter(), Codec::Chat, "https://openrouter.ai/api/v1", Auth::Bearer),
+        ] {
+            assert_eq!((p.codec, p.base_url.as_deref(), &p.auth), (codec, Some(address), &auth));
+            assert!(p.headers.is_empty());
+            let endpoint = crate::Endpoint::parse(address).unwrap();
+            let secret = crate::Secret::new("k".into());
+            assert!(crate::Credential::new(endpoint.origin(), &p.auth, secret).is_ok());
+        }
+    }
+
+    #[test]
     fn a_profile_cannot_carry_a_credential_or_reframe_a_message() {
         let mut p = Profile::openai_compatible("p", "https://e.com");
         p.auth = Auth::Header("X-Own".into());
@@ -298,6 +360,7 @@ mod tests {
             "authorization",
             "Authorization",
             "x-api-key",
+            "x-goog-api-key",
             "x-own",
             "cookie",
             "host",

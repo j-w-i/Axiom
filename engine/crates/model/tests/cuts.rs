@@ -13,16 +13,61 @@ use proptest::prelude::*;
 
 fn streams() -> Vec<(Codec, Vec<u8>)> {
     let chat = ["text", "tool", "tool-parallel", "tool-cut", "tool-no-args", "too-long", "length"];
+    let from = |codec, place: &str, names: &[&str]| -> Vec<_> {
+        names
+            .iter()
+            .map(|n| (codec, fixture(&format!("{place}-from-documentation/{n}.sse"))))
+            .collect()
+    };
     let messages = ["text", "tool", "thinking", "web-search", "error"];
+    let responses = ["text", "tool", "reasoning", "failed", "incomplete", "error"];
+    let gemini = ["text", "call", "parallel", "signed-text", "tool-combination", "continuation"];
     chat.iter()
         .map(|n| (Codec::Chat, recorded(n).1))
-        .chain(
-            messages.iter().map(|n| {
-                (Codec::Messages, fixture(&format!("messages-from-documentation/{n}.sse")))
-            }),
-        )
-        .chain([(Codec::Chat, made_up())])
+        .chain(from(Codec::Messages, "messages", &messages))
+        .chain(from(Codec::Responses, "responses", &responses))
+        .chain(from(Codec::Gemini, "gemini", &gemini))
+        .chain(from(Codec::Chat, "openrouter", &["reasoning", "error"]))
+        .chain([
+            (Codec::Chat, made_up()),
+            (Codec::Responses, made_up_responses()),
+            (Codec::Gemini, made_up_gemini()),
+        ])
         .collect()
+}
+
+/// What no documented answer has: items open together, calls at once, parts and events of other kinds,
+/// characters of several bytes.
+fn made_up_responses() -> Vec<u8> {
+    lines(
+        r#"
+        {"type":"response.created","response":{"id":"r","model":"m"}}
+        {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","summary":[]}}
+        {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"é"}
+        {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"a","name":"f"}}
+        {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":1,"delta":"…"}
+        {"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","call_id":"b","name":"g"}}
+        {"type":"response.function_call_arguments.delta","output_index":2,"delta":"{"}
+        {"type":"response.novel","output_index":1,"x":1}
+        {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"n\":"}
+        {"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","summary":[{"text":"é"},{"text":"… and"}],"encrypted_content":"e"}}
+        {"type":"response.output_item.done","output_index":2,"item":{"type":"function_call","call_id":"b","name":"g","arguments":"{}"}}
+        {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"a","name":"f","arguments":"{\"n\":1}"}}
+        {"type":"response.output_item.added","output_index":3,"item":{"type":"program"}}
+        {"type":"response.output_item.done","output_index":3,"item":{"type":"program","code":"1"}}
+        {"type":"response.completed","response":{"usage":{"input_tokens":1}}}"#,
+    )
+}
+fn made_up_gemini() -> Vec<u8> {
+    lines(
+        r#"
+        {"candidates":[{"content":{"parts":[{"text":"é","thought":true}]}}],"responseId":"r"}
+        {"candidates":[{"content":{"parts":[{"text":"…","thought":true,"thoughtSignature":"S"}]}}]}
+        {"candidates":[{"content":{"parts":[{"text":"a"}]}}],"usageMetadata":{"promptTokenCount":1}}
+        {"candidates":[{"content":{"parts":[{"text":"b"},{"novel":[1]},{"functionCall":{"name":"f","args":{"n":1}},"thoughtSignature":"S"}]}}]}
+        {"candidates":[{"content":{"parts":[{"functionCall":{"name":"f","args":{"n":2}}},{"text":"","thoughtSignature":"S"}]}}]}
+        {"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"totalTokenCount":3}}"#,
+    )
 }
 
 /// What no recorded answer has: tags, interleaved calls, members of its own.
@@ -41,6 +86,18 @@ fn made_up() -> Vec<u8> {
 
 fn quirks() -> Quirks {
     Quirks { think: Some(Think::Leading), ..Quirks::default() }
+}
+
+#[test]
+fn what_is_made_up_says_something() {
+    let calls = |codec, bytes: &[u8]| {
+        let (r, e) = reply(codec, &quirks(), bytes);
+        assert_eq!((e, r.complete), (None, true));
+        runs(&r)
+    };
+    assert_eq!(calls(Codec::Chat, &made_up()), 2);
+    assert_eq!(calls(Codec::Responses, &made_up_responses()), 2);
+    assert_eq!(calls(Codec::Gemini, &made_up_gemini()), 2);
 }
 
 #[test]
