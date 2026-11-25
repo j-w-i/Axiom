@@ -20,9 +20,8 @@ pub struct Tree {
     root: i32,
     /// Process and when it started: numbers are used again.
     known: BTreeMap<i32, u64>,
-    /// Our end of the mark.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    mark: OwnedFd,
+    /// Our end of the mark. The reaper has none.
+    mark: Option<OwnedFd>,
     done: bool,
 }
 
@@ -78,7 +77,7 @@ fn signal(pid: i32, sig: i32) -> bool {
 }
 
 impl Tree {
-    pub fn new(pid: u32, mark: OwnedFd) -> Self {
+    pub fn new(pid: u32, mark: Option<OwnedFd>) -> Self {
         let root = i32::try_from(pid).unwrap_or(0);
         let mut t = Self { root, known: BTreeMap::new(), mark, done: root <= 1 };
         if !t.done {
@@ -135,7 +134,7 @@ impl Tree {
         for _ in 0..1000 {
             self.look();
             #[cfg(target_os = "macos")]
-            for p in sys::holding(&self.mark) {
+            for p in self.mark.iter().flat_map(sys::holding) {
                 if let Some(at) = sys::started(p) {
                     self.known.insert(p, at);
                 }
@@ -143,20 +142,33 @@ impl Tree {
             let others = self.others();
             let root = self.known.get(&self.root).copied();
             let rooted = root.is_some() && sys::started(self.root) == root;
-            if others.is_empty() && !rooted && released(&self.mark, 0) {
+            if others.is_empty() && !rooted && self.released(0) {
                 break;
             }
             // Its group's number is nobody else's as long as one of the group lives.
-            if rooted || !others.is_empty() || !released(&self.mark, 0) {
+            if rooted || !others.is_empty() || !self.released(0) {
                 signal(-self.root, libc::SIGKILL);
             }
             for p in others {
                 signal(p, libc::SIGKILL);
                 seen.insert(p);
             }
-            released(&self.mark, 1);
+            self.released(1);
         }
         seen.len()
+    }
+}
+
+impl Tree {
+    /// Whether nobody holds the mark, within `ms`.
+    fn released(&self, ms: i32) -> bool {
+        match &self.mark {
+            Some(m) => released(m, ms),
+            None => {
+                std::thread::sleep(std::time::Duration::from_millis(ms.unsigned_abs().into()));
+                true
+            }
+        }
     }
 }
 

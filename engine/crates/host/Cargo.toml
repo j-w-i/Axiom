@@ -22,6 +22,7 @@ axiom-engine.workspace = true
 axiom-model.workspace = true
 axiom-policy.workspace = true
 axiom-tools.workspace = true
+axiom-spawn.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

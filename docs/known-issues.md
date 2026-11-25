@@ -40,4 +40,3 @@
 | K37 | A provider that sends keep-alive comments for ever holds an answer open: only silence has a limit | M2 |
 | K38 | macOS: a build that is not signed is another program to the keychain each time it is made, so its keys have to be added again. It never asks | signed builds, M7 |
 | K39 | A folder below one that is protected by name (`.claude/worktrees/x`, say) cannot be a workspace an agent writes to | M5, Axiom's own worktrees |
-| K40 | macOS: a host that is killed leaves the commands it had started running; they stay contained | M2 |

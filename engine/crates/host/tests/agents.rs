@@ -448,6 +448,95 @@ async fn models_and_connections_are_listed() {
     assert!(t.c.call(Call::ConnectionRemove { connection: t.connection.clone() }).await.is_err());
 }
 
+/// SI-24: a host that is killed takes with it what its agents were running.
+#[tokio::test]
+async fn a_killed_host_leaves_nothing_running() {
+    let m = format!("9{:05}", std::process::id() % 100_000);
+    let f = fixture();
+    let w = f.dir.path().join("w");
+    std::fs::create_dir(&w).unwrap();
+    let mut host = std::process::Command::new(env!("CARGO_BIN_EXE_axiom-host"))
+        .env("AXIOM_DATA", &f.paths.data)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut ready = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(host.stdout.take().unwrap()),
+        &mut ready,
+    )
+    .unwrap();
+    let script = format!(r#"{{"command":"sleep {m} & sleep {m}"}}"#);
+    let server = Server::start(vec![calls(&[("c1", "shell", &script)])]).await;
+    let mut c = f.client().await;
+    let v = c
+        .call(Call::ConnectionAdd {
+            name: "Fake".into(),
+            provider: "openai-compatible".into(),
+            url: Some(server.url.clone()),
+            secret: None,
+        })
+        .await
+        .unwrap();
+    let connection = v["connection"].as_str().map(str::to_owned);
+    let workspace = Some(w.to_str().unwrap().to_owned());
+    let v = c.call(Call::SessionCreate { title: "S".into(), workspace }).await.unwrap();
+    let session = SessionId(v["session"].as_str().unwrap().into());
+    let execution = Execution {
+        harness: "axiom".into(),
+        provider: None,
+        model: Some("m".into()),
+        connection,
+        effort: None,
+        environment: None,
+    };
+    c.call(Call::Follow { session: session.clone(), after: 0 }).await.unwrap();
+    let call = Call::AgentAdd {
+        session: session.clone(),
+        name: "L".into(),
+        execution,
+        access: Access::Work,
+    };
+    let agent = AgentId(c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
+    c.call(Call::Prompt { session: session.clone(), agent, text: "go".into() }).await.unwrap();
+    // It cannot be read completely, so it is asked about.
+    let (request, digest) = loop {
+        let m = c.next_within(LONG).await.unwrap().expect("the question");
+        if let Message::Events { events, .. } = m
+            && let Some(q) = events.into_iter().find_map(|e| match e.body {
+                Body::RequestOpened { request, digest, .. } => Some((request, digest)),
+                _ => None,
+            })
+        {
+            break q;
+        }
+    };
+    c.call(Call::Answer { session, request, answer: Answer::Once, digest }).await.unwrap();
+    let runs = || {
+        let o = std::process::Command::new("ps").args(["-axo", "stat=,args="]).output().unwrap();
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter(|l| {
+                !l.starts_with('Z')
+                    && l.trim_end().ends_with(&format!("sleep {m}"))
+                    && !l.contains("-c")
+            })
+            .count()
+    };
+    let now = std::time::Instant::now();
+    while runs() < 2 {
+        assert!(now.elapsed() < Duration::from_secs(20), "{}", runs());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    host.kill().unwrap();
+    host.wait().unwrap();
+    let now = std::time::Instant::now();
+    while runs() > 0 {
+        assert!(now.elapsed() < Duration::from_secs(10), "{} still run", runs());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// By hand: the whole way to a model of this machine.
 #[tokio::test]
 #[ignore = "needs LM Studio on this machine"]

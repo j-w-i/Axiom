@@ -70,6 +70,7 @@ dependencies = [
  "axiom-model",
  "axiom-policy",
  "axiom-proto",
+ "axiom-spawn",
  "axiom-tools",
  "keyring-core",
  "libc",

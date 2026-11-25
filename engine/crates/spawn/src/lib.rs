@@ -11,6 +11,8 @@ use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
 #[cfg(target_os = "linux")]
 mod bwrap;
+#[cfg(unix)]
+pub mod reaper;
 #[cfg(target_os = "macos")]
 mod seatbelt;
 #[cfg(unix)]
@@ -119,6 +121,8 @@ pub struct Ended {
 pub struct Running {
     child: Child,
     #[cfg(unix)]
+    root: Option<u32>,
+    #[cfg(unix)]
     tree: tree::Tree,
     /// Writable folders, with the protected names that were there.
     #[cfg(target_os = "linux")]
@@ -158,11 +162,15 @@ pub fn spawn(job: Job) -> Result<Running, SpawnError> {
     let mut child =
         tokio::process::Command::from(c).kill_on_drop(true).spawn().map_err(SpawnError::Start)?;
     #[cfg(unix)]
-    let tree = tree::Tree::new(child.id().unwrap_or(0), mark);
+    let tree = tree::Tree::new(child.id().unwrap_or(0), Some(mark));
+    #[cfg(unix)]
+    reaper::add(child.id());
     Ok(Running {
         stdin: child.stdin.take(),
         stdout: child.stdout.take(),
         stderr: child.stderr.take(),
+        #[cfg(unix)]
+        root: child.id(),
         #[cfg(unix)]
         tree,
         #[cfg(target_os = "linux")]
@@ -292,5 +300,7 @@ impl Running {
 impl Drop for Running {
     fn drop(&mut self) {
         self.kill();
+        #[cfg(unix)]
+        reaper::remove(self.root);
     }
 }

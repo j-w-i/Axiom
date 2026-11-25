@@ -26,6 +26,6 @@ Of `threat-model.md` §6. "Not yet" means that nothing in this build could break
 | 21 | not yet (K16) |
 | 22 | `spawn` takes absolute programs only; the host runs no git |
 | 23 | `engine/tests/run.rs` `it_works_until_there_is_nothing_to_do`, `killed_at_any_point…`; `policy/audit.rs` |
-| 24 | `policy/caps.rs`, `spawn/tests/tree.rs`, `engine/tests/run.rs` `a_run_has_an_end` |
+| 24 | `policy/caps.rs`, `spawn/tests/tree.rs`, `host/tests/agents.rs` `a_killed_host_leaves_nothing_running`, `engine/tests/run.rs` `a_run_has_an_end` |
 | 25 | not yet: nothing is installed |
 | 26 | the audit entry's `containment`; there is one value in this build |
