@@ -171,11 +171,25 @@ impl Command {
             text,
             rest: Some(rest),
             detail: json!({
+                "summary": match (timed_out, e.code) {
+                    (true, _) => "took too long".into(),
+                    (_, Some(0)) => seconds(took),
+                    (_, Some(c)) => format!("exit {c}, {}", seconds(took)),
+                    _ => "ended".into(),
+                },
                 "exit": e.code, "signal": e.signal, "timed_out": timed_out, "left": e.left,
                 "made": e.made.iter().map(|m| m.display().to_string()).collect::<Vec<_>>(),
                 "took": u64::try_from(took.as_millis()).unwrap_or(u64::MAX), "bytes": ends.total,
             }),
         }
+    }
+}
+
+fn seconds(d: Duration) -> String {
+    if d.as_secs() < 10 {
+        format!("{:.1} s", d.as_secs_f64())
+    } else {
+        format!("{} s", d.as_secs())
     }
 }
 

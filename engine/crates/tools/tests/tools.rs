@@ -129,6 +129,7 @@ async fn writing_and_editing() {
     assert!(o.ok, "{o:?}");
     assert_eq!(t.file("x/y/new.txt").as_deref(), Some("hi\n"));
     assert!(o.detail["diff"].as_str().unwrap().contains("+hi"));
+    assert_eq!(o.detail["summary"], "+1 −0");
     // What it wrote it knows.
     assert!(t.run("edit", json!({"path": "x/y/new.txt", "old": "hi", "new": "ho"})).await.ok);
     // What it has not read it does not write over.
@@ -306,6 +307,7 @@ async fn commands() {
     assert_eq!(o.text.trim(), t.root.join("home/w/src").display().to_string());
     let o = t.run("shell", json!({"command": "exit 3"})).await;
     assert!(!o.ok && o.text == "(exit 3)\n" && o.detail["exit"] == 3, "{o:?}");
+    assert!(o.detail["summary"].as_str().unwrap().starts_with("exit 3, 0."), "{o:?}");
     assert_eq!(t.run("shell", json!({"command": "true"})).await.text, "(no output)\n");
     let o = t.run("shell", json!({"command": "echo x > ../x"})).await;
     assert!(!o.ok && o.text.contains("sandbox may have"), "{o:?}");

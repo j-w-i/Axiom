@@ -1193,6 +1193,35 @@ String _bytes(int n) => n < 1000
     ? '${(n / 1000).round()} kB'
     : '${(n / 1000000).toStringAsFixed(1)} MB';
 
+/// What a call changed, file by file.
+class _Changes extends StatelessWidget {
+  const _Changes(this.diff);
+  final String diff;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    final (files, left) = readDiff(diff);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (path, lines) in files) ...[
+          if (files.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 4),
+              child: Text(oneLine(literal(path), 200), style: t.type.codeSmall.ink(c.ink3)),
+            ),
+          DiffLines(lines),
+        ],
+        if (left > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('$left more lines', style: t.type.small.ink(c.ink3)),
+          ),
+      ],
+    );
+  }
+}
+
 /// A tool call, as one line; its output opens under it.
 class ToolRow extends StatelessWidget {
   const ToolRow(this.item, {super.key, this.opened = false, this.onToggle});
@@ -1236,6 +1265,9 @@ class ToolRow extends StatelessWidget {
         : '';
     final name = item.name.isEmpty ? 'tool' : item.name;
     final output = item.plain;
+    final diff = result is Map && result['diff'] is String && (result['diff'] as String).isNotEmpty
+        ? result['diff'] as String
+        : null;
     final line = WorkLine(
       icon: ToolRow.iconOf(item.name),
       name: name[0].toUpperCase() + name.substring(1),
@@ -1271,7 +1303,9 @@ class ToolRow extends StatelessWidget {
                 builder: (_, s) =>
                     ColoredBox(color: s.hovered ? c.hover : c.bay.bottom, child: line),
               ),
-            if (opened && output.isNotEmpty)
+            if (opened && diff != null)
+              Padding(padding: const EdgeInsets.fromLTRB(22, 4, 0, 6), child: _Changes(diff))
+            else if (opened && output.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(22, 4, 0, 6),
                 child: Column(

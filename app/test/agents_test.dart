@@ -4,6 +4,7 @@ import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:axiom/patterns/context_gauge.dart';
 import 'package:axiom/patterns/execution.dart';
+import 'package:axiom/patterns/models.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/start.dart';
@@ -322,6 +323,69 @@ void main() {
     expect(find.byType(ContextGauge), findsOneWidget);
     expect(find.textContaining('claude-haiku-5-5', findRichText: true), findsWidgets);
     expect(s.current!.agents['a']!.access, Access.work);
+  });
+
+  testWidgets('what an agent changed is shown as a diff', (t) async {
+    final s = await shell(t, session: working());
+    const diff =
+        '--- a.txt\n+++ a.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+2\n three\n'
+        '--- (new)\n+++ b.txt\n@@ -0,0 +1 @@\n+new \u202Eline\n';
+    s.current!.apply([
+      const Event(70, 70, ItemStarted('w', 'r', 'a', ItemKind.tool, 'patch', {'patch': '…'})),
+      const Event(71, 71, ItemDelta('w', 'changed a.txt, b.txt')),
+      const Event(
+        72,
+        72,
+        ItemEnded('w', Outcome.completed, 'changed a.txt, b.txt', {
+          'ok': true,
+          'diff': diff,
+          'summary': '+2 −1',
+        }),
+      ),
+    ]);
+    await settled(t);
+    expect(find.text('+2 −1'), findsOneWidget);
+    expect(find.byType(DiffLines), findsNothing);
+    await t.tap(find.text('Patch'));
+    await settled(t);
+    expect(find.byType(DiffLines), findsNWidgets(2));
+    expect(find.text('b.txt'), findsOneWidget);
+    expect(find.textContaining('two', findRichText: true), findsOneWidget);
+    expect(find.textContaining(r'\u{202E}', findRichText: true), findsOneWidget);
+    await snap(t, 'diff');
+  });
+
+  test('a diff is read line by line, and no more than there is room for', () {
+    final (files, left) = readDiff(
+      '--- a\n+++ a\n@@ -10,2 +10,3 @@ fn x\n same\n-old\n+new\n+more\n@@ -90 +91 @@\n-x\n+y\n',
+    );
+    expect(files.single.$1, 'a');
+    expect(
+      [for (final l in files.single.$2) (l.kind, l.number, l.text)],
+      [
+        (DiffKind.same, 10, 'same'),
+        (DiffKind.remove, 11, 'old'),
+        (DiffKind.add, 11, 'new'),
+        (DiffKind.add, 12, 'more'),
+        (DiffKind.remove, 90, 'x'),
+        (DiffKind.add, 91, 'y'),
+      ],
+    );
+    expect(left, 0);
+    final gone = readDiff('--- b\n+++ (removed)\n@@ -1 +0,0 @@\n-x\n').$1.single;
+    expect(gone.$1, 'b');
+    final many = readDiff('--- a\n+++ a\n@@ -1 +1 @@\n${'+x\n' * 500}', most: 10);
+    expect([many.$1.single.$2.length, many.$2], [10, 490]);
+    for (final odd in [
+      '',
+      'nonsense',
+      '+++ a',
+      '@@',
+      '--- a\n+++ a\n+x',
+      '--- a\n+++ a\n@@ x @@\n+x',
+    ]) {
+      readDiff(odd);
+    }
   });
 
   testWidgets('a replayed agent is shown and not spoken to', (t) async {

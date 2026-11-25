@@ -116,7 +116,6 @@ class DiffBlock extends StatelessWidget {
   final List<DiffLine> lines;
   @override
   Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
     final add = lines.where((l) => l.kind == DiffKind.add).length;
     final rem = lines.where((l) => l.kind == DiffKind.remove).length;
     return Column(
@@ -125,66 +124,115 @@ class DiffBlock extends StatelessWidget {
       children: [
         WorkLine(icon: AxIcon.edit, name: 'Edit', detail: path, result: '+$add  −$rem'),
         const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AxRadius.key),
-          child: ColoredBox(
-            color: c.block.bottom,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final l in lines)
-                    ColoredBox(
-                      color: switch (l.kind) {
-                        DiffKind.add => c.diffAdd,
-                        DiffKind.remove => c.diffRemove,
-                        DiffKind.same => const Color(0x00000000),
-                      },
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 34,
-                            child: Text(
-                              '${l.number}',
-                              textAlign: TextAlign.right,
-                              style: t.type.codeSmall.ink(c.ink4),
-                            ),
-                          ),
-                          SizedBox(
-                            width: 22,
-                            child: Text(
-                              switch (l.kind) {
-                                DiffKind.add => '+',
-                                DiffKind.remove => '−',
-                                DiffKind.same => '',
-                              },
-                              textAlign: TextAlign.center,
-                              style: t.type.codeSmall.ink(
-                                l.kind == DiffKind.add ? c.doneText : c.faultText,
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Text.rich(
-                              highlight(literal(l.text), t.type.codeSmall, c),
-                              style: t.type.codeSmall,
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.fade,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
+        DiffLines(lines),
       ],
     );
   }
+}
+
+/// The lines of one file's change.
+class DiffLines extends StatelessWidget {
+  const DiffLines(this.lines, {super.key});
+  final List<DiffLine> lines;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AxRadius.key),
+      child: ColoredBox(
+        color: c.block.bottom,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final l in lines)
+                ColoredBox(
+                  color: switch (l.kind) {
+                    DiffKind.add => c.diffAdd,
+                    DiffKind.remove => c.diffRemove,
+                    DiffKind.same => const Color(0x00000000),
+                  },
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 34,
+                        child: Text(
+                          '${l.number}',
+                          textAlign: TextAlign.right,
+                          style: t.type.codeSmall.ink(c.ink4),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 22,
+                        child: Text(
+                          switch (l.kind) {
+                            DiffKind.add => '+',
+                            DiffKind.remove => '−',
+                            DiffKind.same => '',
+                          },
+                          textAlign: TextAlign.center,
+                          style: t.type.codeSmall.ink(
+                            l.kind == DiffKind.add ? c.doneText : c.faultText,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text.rich(
+                          highlight(literal(l.text), t.type.codeSmall, c),
+                          style: t.type.codeSmall,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.fade,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A unified diff, file by file. Lines beyond [most] are left out; the second part says how many.
+(List<(String, List<DiffLine>)>, int) readDiff(String text, {int most = 400}) {
+  final files = <(String, List<DiffLine>)>[];
+  var was = 0, now = 0, shown = 0, left = 0;
+  var from = '';
+  for (final l in text.split('\n')) {
+    if (l.startsWith('--- ')) {
+      from = l.substring(4);
+    } else if (l.startsWith('+++ ')) {
+      final to = l.substring(4);
+      files.add((to.startsWith('(') ? from : to, []));
+    } else if (l.startsWith('@@')) {
+      final m = RegExp(r'^@@ -(\d+)(?:,\d+)? \+(\d+)').firstMatch(l);
+      was = int.parse(m?.group(1) ?? '0');
+      now = int.parse(m?.group(2) ?? '0');
+    } else if (files.isNotEmpty && l.isNotEmpty) {
+      final kind = switch (l[0]) {
+        '+' => DiffKind.add,
+        '-' => DiffKind.remove,
+        ' ' => DiffKind.same,
+        _ => null,
+      };
+      if (kind == null) continue;
+      if (shown >= most) {
+        left++;
+        continue;
+      }
+      shown++;
+      files.last.$2.add(
+        DiffLine(kind, kind == DiffKind.remove ? was : now, cutTo(l.substring(1), 1000)),
+      );
+      if (kind != DiffKind.add) was++;
+      if (kind != DiffKind.remove) now++;
+    }
+  }
+  return (files, left);
 }
 
 /// A permission request. The subject is exact, whole and spelled out: what cannot be seen is escaped,

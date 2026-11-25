@@ -653,7 +653,11 @@ fn files(op: Op, site: &Site, seen: &Seen, stop: &AtomicBool) -> Output {
         |spot: &Spot, f: &dyn Fn(&walk::Look<'_>) -> Result<String, String>| match spot.folder() {
             Ok(d) => {
                 let look = walk::Look { dir: &d, place: &spot.place, may: &may, stop };
-                f(&look).map_or_else(Output::bad, Output::ok)
+                f(&look).map_or_else(Output::bad, |text| {
+                    // What begins with a bracket is said about the answer, not a part of it.
+                    let n = text.lines().filter(|l| !l.starts_with('(') && *l != "--").count();
+                    Output { detail: json!({"summary": count(n, "line")}), ..Output::ok(text) }
+                })
             }
             Err(e) => Output::bad(e),
         };
@@ -663,7 +667,11 @@ fn files(op: Op, site: &Site, seen: &Seen, stop: &AtomicBool) -> Output {
             Ok(c) => match std::str::from_utf8(&c.bytes) {
                 Ok(t) if !t.contains('\0') => {
                     seen.add(&spot.place, &c.digest);
-                    Output::ok(text::numbered(t, from, lines, READ))
+                    let n = t.lines().count();
+                    Output {
+                        detail: json!({"summary": count(n, "line")}),
+                        ..Output::ok(text::numbered(t, from, lines, READ))
+                    }
                 }
                 _ => Output::bad(format!(
                     "{} is not text ({} bytes)",
@@ -680,6 +688,17 @@ fn files(op: Op, site: &Site, seen: &Seen, stop: &AtomicBool) -> Output {
         Op::Change(all) => make(all, site, seen),
         Op::Shell(_) => Output::bad("the tool failed"),
     }
+}
+
+fn count(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
+/// Lines added and removed, as a diff has them.
+fn changed(diff: &str) -> String {
+    let lines =
+        |sign, head| diff.lines().filter(|l| l.starts_with(sign) && !l.starts_with(head)).count();
+    format!("+{} −{}", lines('+', "+++ "), lines('-', "--- "))
 }
 
 /// Makes all changes or, as far as can be, none.
@@ -745,7 +764,7 @@ fn make(all: Vec<Change>, site: &Site, seen: &Seen) -> Output {
         ok: true,
         text: format!("changed {}\n", names.join(", ")),
         rest: None,
-        detail: json!({"diff": shown}),
+        detail: json!({"diff": shown, "summary": changed(&shown)}),
     }
 }
 
