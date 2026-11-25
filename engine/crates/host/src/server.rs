@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, VecDeque},
     io,
     path::PathBuf,
+    pin::Pin,
     sync::{
         Arc, Mutex, MutexGuard, OnceLock, PoisonError,
         atomic::{AtomicU64, Ordering::Relaxed},
@@ -21,7 +22,7 @@ use tokio::{
 };
 
 use crate::{
-    agents::{self, Agents, Setup, Spoken},
+    agents::{self, Agents, Finished, Setup, Spoken, Switch, Told},
     connections::{Connections, MemoryVault, Vault},
     faults::{Access, Faults},
     log,
@@ -297,6 +298,8 @@ impl Host {
             over: watch::Sender::new(false),
             cfg,
         });
+        let switch: std::sync::Weak<dyn Switch> = Arc::downgrade(&st) as _;
+        let _ = st.agents.switch.set(switch);
         if unclean {
             check(&st)?;
         }
@@ -922,8 +925,14 @@ async fn prompt(
     agent: AgentId,
     text: String,
     key: Option<String>,
+    told: Option<Told>,
 ) -> Result<Value, WireError> {
     let slot = st.agents.slot(&session, &agent);
+    // As it is told, and as it is shown: by whom.
+    let (by, shown) = match &told {
+        Some(t) => (t.by.clone(), Some((t.by.clone(), t.text.clone()))),
+        None => (String::new(), None),
+    };
     let spoken = slot.speak().await?;
     // Looked for while nobody else can speak: said again, it is not heard again.
     if let Some(v) = key.as_deref().and_then(|k| slot.answered(k)) {
@@ -934,7 +943,8 @@ async fn prompt(
         Spoken::Heard(ear) => {
             // In the journal, and waiting to be heard, before it is said to be.
             let item = ItemId::new();
-            said(st, &session, axiom_engine::said(&item, &ear.run, &agent, &text)).await?;
+            let show = shown.as_ref().map_or(&text, |s| &s.1);
+            said(st, &session, axiom_engine::said(&item, &ear.run, &agent, show, &by)).await?;
             st.store
                 .put_pending(session, agent, item.clone(), text.clone())
                 .await
@@ -954,6 +964,11 @@ async fn prompt(
     if let Some(k) = &key {
         slot.remember(k.clone(), answer.clone());
     }
+    {
+        let mut chain = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
+        *chain = told.map(|t| t.chain).unwrap_or_default();
+        chain.push(agent.clone());
+    }
     // By itself: a client that leaves now does not leave a run that never ends.
     let (told, begun) = oneshot::channel();
     let st = st.clone();
@@ -966,7 +981,8 @@ async fn prompt(
             let rx = turnstile.enter(&run, &cancel);
             let mut a =
                 agents::Worker::load(&st.agents, &st.store, s.clone(), &agent, &setup, rx).await?;
-            a.begin(&run, Some(text)).await.map_err(refused)?;
+            let word = axiom_engine::Word { text, item: None, shown };
+            a.begin(&run, Some(word)).await.map_err(refused)?;
             Ok(a)
         };
         let mut a = match begin.await {
@@ -982,9 +998,19 @@ async fn prompt(
         };
         let _ = told.send(Ok(()));
         let (mut run, mut cancel, mut live) = (run, cancel, live);
+        let mut runs = Vec::new();
+        let (mut outcome, mut error, mut text);
         loop {
-            let mut inbox = a.run(run, cancel.clone()).await;
+            runs.push(run.clone());
+            let (mut inbox, e, last) = a.run(run, cancel.clone()).await;
+            (outcome, error, text) = (e.outcome, e.error, last);
             let stopped = *cancel.borrow();
+            if stopped {
+                // Who stops an agent stops what it began (SI-24).
+                for r in slot.forgive() {
+                    st.stop(&r);
+                }
+            }
             if !slot.after(&mut inbox, stopped).await {
                 break;
             }
@@ -1009,12 +1035,33 @@ async fn prompt(
                 break;
             }
         }
+        slot.finish(Finished { runs, outcome, error, text });
         // Its session before its place among what runs: what it said last is in the journal.
         drop(s);
         drop(live);
     });
     begun.await.map_err(|_| internal("the run did not start"))??;
     Ok(answer)
+}
+
+impl Switch for State {
+    fn tell(
+        self: Arc<Self>,
+        session: SessionId,
+        agent: AgentId,
+        told: Told,
+    ) -> Pin<Box<dyn Future<Output = Result<RunId, WireError>> + Send>> {
+        Box::pin(async move {
+            let text = axiom_engine::from_agent(&told.by, &told.text);
+            let v = prompt(&self, session, agent, text, None, Some(told)).await?;
+            Ok(RunId(v["run"].as_str().unwrap_or_default().to_owned()))
+        })
+    }
+    fn stop(&self, run: &RunId) {
+        if let Some((_, c)) = self.runs().live.get(run) {
+            let _ = c.send(true);
+        }
+    }
 }
 
 async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
@@ -1181,7 +1228,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             if text.trim().is_empty() || limits::text_len(&text) > limits::TEXT {
                 return Err(agents::bad("what is said has between 1 byte and 1 MiB"));
             }
-            prompt(st, session, agent, text, key).await
+            prompt(st, session, agent, text, key, None).await
         }
         Call::Answer { session, request, answer, digest } => {
             st.agents.answer(&session, &request, answer, &digest).map(|()| json!({}))

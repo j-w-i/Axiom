@@ -10,7 +10,7 @@ use axiom_model::{
     Accumulator, Args, Block, CallError, Class, Client, Content, Delta, Event, Message, Reply,
     Request, Retry, Role, Settings, Start, Stop, Tool,
 };
-use axiom_policy::{Ask, Verdict};
+use axiom_policy::{Ask, Verdict, rules::Decision};
 use axiom_proto::{
     AgentId, AgentState, Answerable, Body, ItemId, ItemKind, Outcome, Provenance, RequestId, RunId,
     Usage,
@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    Deed, Desk, Refused, Say, Stage, compact,
+    Deed, Desk, Other, Refused, Say, Stage, compact,
     context::{Context, Turn},
 };
 
@@ -60,6 +60,15 @@ pub struct Word {
     /// Where it is in the journal already, if it is: shown to who reads along, and waiting to be
     /// heard.
     pub item: Option<ItemId>,
+    /// If another agent says it: its name, and what is shown.
+    pub shown: Option<(String, String)>,
+}
+
+impl Word {
+    /// A person's, not said to the session yet.
+    pub fn new(text: String) -> Self {
+        Self { text, item: None, shown: None }
+    }
 }
 
 /// An agent, ready to run.
@@ -118,7 +127,8 @@ struct Ready {
 }
 
 /// The events of something a person said.
-pub fn said(item: &ItemId, run: &RunId, agent: &AgentId, text: &str) -> Vec<Say> {
+/// `by`: the name of the agent that says it, if it is not a person.
+pub fn said(item: &ItemId, run: &RunId, agent: &AgentId, text: &str, by: &str) -> Vec<Say> {
     let item = item.clone();
     vec![
         Say::Event(Body::ItemStarted {
@@ -126,7 +136,7 @@ pub fn said(item: &ItemId, run: &RunId, agent: &AgentId, text: &str) -> Vec<Say>
             run: run.clone(),
             agent: agent.clone(),
             kind: ItemKind::Prompt,
-            name: String::new(),
+            name: by.to_owned(),
             args: None,
             args_cut: 0,
         }),
@@ -167,7 +177,7 @@ async fn stopped(c: &mut Cancel) {
 impl<S: Stage> Agent<S> {
     /// Begins a run, with what a person said if it is not waiting in the conversation already. It is
     /// in the journal for good when this returns; if it cannot begin, it has ended.
-    pub async fn begin(&mut self, run: &RunId, prompt: Option<String>) -> Result<(), Refused> {
+    pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
         self.stage
             .say(vec![
                 Say::Event(Body::RunStarted { run: run.clone(), agent: self.id.clone() }),
@@ -188,9 +198,9 @@ impl<S: Stage> Agent<S> {
         Err(r)
     }
 
-    async fn opening(&mut self, run: &RunId, prompt: Option<String>) -> Result<(), Halt> {
-        if let Some(p) = prompt {
-            self.heard(run, Word { text: p, item: None }).await?;
+    async fn opening(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Halt> {
+        if let Some(w) = prompt {
+            self.heard(run, w).await?;
         }
         for f in std::mem::take(&mut self.not_followed) {
             let words = format!(
@@ -341,7 +351,11 @@ impl<S: Stage> Agent<S> {
             return Ok(());
         }
         if w.item.is_none() {
-            self.stage.say(said(&ItemId::new(), run, &self.id, &w.text)).await?;
+            let (by, text) = match &w.shown {
+                Some((by, text)) => (by.as_str(), text),
+                None => ("", &w.text),
+            };
+            self.stage.say(said(&ItemId::new(), run, &self.id, text, by)).await?;
             self.stage.sync().await?;
         }
         self.keep_turn(Turn::Message(Message::user(w.text)), w.item).await
@@ -793,6 +807,9 @@ impl<S: Stage> Agent<S> {
         args: &Value,
         cancel: &mut Cancel,
     ) -> Result<Output, Halt> {
+        if let Some(o) = self.other(tool, args, cancel).await? {
+            return self.others(item, tool, args, o, cancel).await;
+        }
         let (site, seen) = (self.site.clone(), self.seen.clone());
         let (t, a) = (tool.to_owned(), args.clone());
         // Files are looked at off the runtime's own threads.
@@ -818,7 +835,14 @@ impl<S: Stage> Agent<S> {
                 if self.desk.allowed(&ask) {
                     (step, verdict, None)
                 } else {
-                    match self.ask_person(item, tool, &ask, cancel).await? {
+                    let what = match tool {
+                        "shell" | "job" => "asks to run a command",
+                        "write" | "edit" | "patch" => "asks to change files",
+                        "read" | "list" | "glob" | "search" => "asks to look at files",
+                        "fetch" => "asks to read from the web",
+                        _ => "asks to use a tool",
+                    };
+                    match self.ask_person(item, what, &ask, cancel).await? {
                         Ok(id) => (step, verdict, Some((id, ask.digest()))),
                         Err(why) => {
                             return Ok(Output {
@@ -835,11 +859,84 @@ impl<S: Stage> Agent<S> {
         self.perform(item, tool, args, Ready { step, verdict, answered }, cancel).await
     }
 
+    async fn other(
+        &self,
+        tool: &str,
+        args: &Value,
+        cancel: &mut Cancel,
+    ) -> Result<Option<Other>, Halt> {
+        tokio::select! {
+            biased;
+            () = stopped(cancel) => Err(Halt::Unbegun),
+            () = self.stage.closed() => Err(Halt::Gone),
+            o = self.stage.judge(tool, args) => Ok(o),
+        }
+    }
+
+    /// A tool of the host's own.
+    async fn others(
+        &mut self,
+        item: &ItemId,
+        tool: &str,
+        args: &Value,
+        o: Other,
+        cancel: &mut Cancel,
+    ) -> Result<Output, Halt> {
+        let no = |text: String| Output { ok: false, text, rest: None, detail: Value::Null };
+        let mut answered = None;
+        match o.decision {
+            Decision::Deny => return Ok(no(format!("Not done: {}.", o.why))),
+            Decision::Allow => {}
+            Decision::Ask => {
+                let schema = self.specs.iter().find(|s| s.name == tool);
+                let ask = Ask {
+                    chain: self.site.chain.clone(),
+                    workspace: self.site.workspace.to_string(),
+                    tool: tool.into(),
+                    schema: schema.map(axiom_tools::schema_digest).unwrap_or_default(),
+                    subject: o.subject.clone(),
+                    scope: format!("{}. Asked because {}.", o.scope, o.why),
+                    unsandboxed: false,
+                };
+                if !self.desk.allowed(&ask) {
+                    match self.ask_person(item, &o.what, &ask, cancel).await? {
+                        Ok(id) => answered = Some((id, ask.digest())),
+                        Err(why) => return Ok(no(why)),
+                    }
+                }
+            }
+        }
+        if o.changes {
+            self.stage
+                .audit(Deed {
+                    chain: self.site.chain.clone(),
+                    workspace: self.site.workspace.to_string(),
+                    tool: tool.into(),
+                    subject: o.subject,
+                    decision: o.decision,
+                    rules: vec![],
+                    answered,
+                })
+                .await?;
+        }
+        self.stage.sync().await?;
+        let began = Instant::now();
+        let out = tokio::select! {
+            biased;
+            () = stopped(cancel) => return Err(Halt::Cancelled),
+            () = self.stage.closed() => return Err(Halt::Gone),
+            out = self.stage.perform(tool, args) => out,
+        };
+        // Others' work is not this run's own time.
+        self.waited += began.elapsed();
+        Ok(out)
+    }
+
     /// A person's yes, or the words for the model.
     async fn ask_person(
         &mut self,
         item: &ItemId,
-        tool: &str,
+        what: &str,
         ask: &Ask,
         cancel: &mut Cancel,
     ) -> Result<Result<RequestId, String>, Halt> {
@@ -848,13 +945,6 @@ impl<S: Stage> Agent<S> {
             Err(e) => return Ok(Err(format!("Not done: {e}."))),
         };
         let id = open.id.clone();
-        let what = match tool {
-            "shell" => "asks to run a command",
-            "write" | "edit" | "patch" => "asks to change files",
-            "read" | "list" | "glob" | "search" => "asks to look at files",
-            "fetch" => "asks to read from the web",
-            _ => "asks to use a tool",
-        };
         let opened = self
             .stage
             .say(vec![

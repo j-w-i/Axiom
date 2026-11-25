@@ -60,6 +60,16 @@ impl Context {
         self.kept.is_empty()
     }
 
+    /// What the agent said last, in words.
+    pub fn last(&self) -> String {
+        let last = self.kept.iter().rev().find(|m| m.role == Role::Assistant);
+        let texts = last.into_iter().flat_map(|m| &m.blocks).filter_map(|b| match &b.content {
+            Content::Text { text } => Some(text.as_str()),
+            _ => None,
+        });
+        texts.collect::<Vec<_>>().join("\n")
+    }
+
     /// The conversation in the one form every provider takes, whatever was cut short: what a person
     /// said in a row is one message, and right behind an answer's calls is one result for each, in
     /// their order. A call whose result was never kept gets one that says so: it is not done again.

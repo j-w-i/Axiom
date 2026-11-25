@@ -3,11 +3,14 @@
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    pin::Pin,
+    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak},
     time::Duration,
 };
 
-use axiom_engine::{Agent, Context, Deed, Desk, Limits, Refused, Retries, Say, Stage, Word};
+use axiom_engine::{
+    Agent, Context, Deed, Desk, Ended, Limits, Other, Refused, Retries, Say, Stage, Word,
+};
 use axiom_model::{Cache, Codec, Settings};
 use axiom_policy::{
     Access, Budget, Caps, Keep, Net, NotAnswered, Place, Policy, Profile, Reach, Tools,
@@ -15,10 +18,10 @@ use axiom_policy::{
     rules::Source,
 };
 use axiom_proto::{
-    AgentId, AgentState, Body, ErrorCode, Execution, HarnessInfo, Instructions, ItemId, RunId,
-    SessionId, WireError, limits, now_ms,
+    AgentId, AgentState, Body, ErrorCode, Execution, HarnessInfo, Instructions, ItemId, Outcome,
+    RunId, SessionId, WireError, limits, now_ms,
 };
-use axiom_tools::{Seen, Site};
+use axiom_tools::{Output, Seen, Site, Spec};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::{mpsc, watch};
@@ -27,6 +30,7 @@ use crate::{
     connections::Connections,
     delegated,
     paths::{Paths, private_dir},
+    peers,
     session::{self, Session},
     store::Store,
 };
@@ -81,8 +85,48 @@ pub struct Slot {
     /// The run it is in, and how to speak to it.
     live: Arc<tokio::sync::Mutex<Live>>,
     keys: Mutex<VecDeque<(String, Value)>>,
+    /// What its last runs came to.
+    pub last: watch::Sender<Option<Arc<Finished>>>,
+    /// Who began its run, from the session's own agent down, and itself.
+    pub chain: Mutex<Vec<AgentId>>,
+    /// Runs it began by telling others, whose end it has not been told.
+    pub owed: Mutex<HashMap<RunId, AgentId>>,
+    /// Who it waits for now.
+    pub waits: Mutex<Vec<AgentId>>,
+    /// Of a delegated agent: what it said last in this run.
+    pub said: Mutex<String>,
     /// Of a delegated agent: its program, if it runs.
     pub attempt: tokio::sync::Mutex<Option<mpsc::Sender<delegated::Turn>>>,
+}
+
+/// Runs that followed one another, and what they came to.
+#[derive(Debug)]
+pub struct Finished {
+    pub runs: Vec<RunId>,
+    pub outcome: Outcome,
+    pub error: Option<String>,
+    /// What it said last.
+    pub text: String,
+}
+
+/// How an agent reaches the others of its session. Given by the host once it runs.
+pub trait Switch: Send + Sync {
+    fn tell(
+        self: Arc<Self>,
+        session: SessionId,
+        agent: AgentId,
+        told: Told,
+    ) -> Pin<Box<dyn Future<Output = Result<RunId, WireError>> + Send>>;
+    fn stop(&self, run: &RunId);
+}
+
+/// What one agent says to another.
+#[derive(Debug, Clone)]
+pub struct Told {
+    pub by: String,
+    pub text: String,
+    /// The agents from the session's own to the one that says it.
+    pub chain: Vec<AgentId>,
 }
 
 impl Slot {
@@ -91,6 +135,7 @@ impl Slot {
         Arc::strong_count(self) == 1
             && self.live.try_lock().is_ok_and(|l| l.is_none())
             && self.seen.1.running().is_empty()
+            && self.owed.lock().is_ok_and(|o| o.is_empty())
             && self.attempt.try_lock().is_ok_and(|a| a.as_ref().is_none_or(|a| a.is_closed()))
     }
 }
@@ -118,6 +163,7 @@ pub struct Agents {
     pub connections: Connections,
     parties: Mutex<HashMap<SessionId, Party>>,
     audit: tokio::sync::Mutex<Option<Entry>>,
+    pub switch: OnceLock<Weak<dyn Switch>>,
     home: Option<PathBuf>,
     own: Vec<PathBuf>,
     scratch: PathBuf,
@@ -148,6 +194,7 @@ impl Agents {
             connections,
             parties: Mutex::default(),
             audit: tokio::sync::Mutex::default(),
+            switch: OnceLock::new(),
             home,
             own,
             scratch,
@@ -506,6 +553,16 @@ fn refused(r: session::Refused) -> Refused {
 }
 
 impl Stage for Floor {
+    fn others(&self) -> Vec<Spec> {
+        peers::specs()
+    }
+    async fn judge(&self, tool: &str, args: &Value) -> Option<Other> {
+        (tool == peers::TOOL).then_some(())?;
+        Some(peers::judge(self, args).await)
+    }
+    async fn perform(&self, _: &str, args: &Value) -> Output {
+        peers::perform(self, args).await
+    }
     async fn say(&self, all: Vec<Say>) -> Result<(), Refused> {
         self.session.say(all).await.map_err(refused)
     }
@@ -632,23 +689,31 @@ impl Worker {
         })))
     }
 
-    pub async fn begin(&mut self, run: &RunId, prompt: Option<String>) -> Result<(), Refused> {
+    pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
         match self {
             Self::Native(a) => a.begin(run, prompt).await,
             Self::Delegated(w) => w.begin(run, prompt).await,
         }
     }
 
-    /// Runs, and gives back what is still to be heard.
-    pub async fn run(self, run: RunId, cancel: watch::Receiver<bool>) -> mpsc::Receiver<Word> {
+    /// Runs, and gives back what is still to be heard, how it ended and what it said last.
+    pub async fn run(
+        self,
+        run: RunId,
+        cancel: watch::Receiver<bool>,
+    ) -> (mpsc::Receiver<Word>, Ended, String) {
         match self {
             Self::Native(mut a) => {
-                a.run(run, cancel).await;
-                a.inbox
+                let e = a.run(run, cancel).await;
+                let last = a.context.last();
+                (a.inbox, e, last)
             }
             Self::Delegated(mut w) => {
-                w.run(run, cancel).await;
-                w.inbox
+                let e = w.run(run, cancel).await;
+                let last = std::mem::take(
+                    &mut *w.slot.said.lock().unwrap_or_else(PoisonError::into_inner),
+                );
+                (w.inbox, e, last)
             }
         }
     }
@@ -698,14 +763,18 @@ pub async fn load(
         stop: Vec::new(),
         cache: if messages { Cache::Short } else { Cache::Off },
     };
+    let floor =
+        Floor { agents: agents.clone(), store: store.clone(), session, agent: agent.clone() };
+    let mut site = site;
+    let slot = agents.slot(&id, agent);
+    {
+        let chain = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
+        if !chain.is_empty() {
+            site.chain = chain.clone();
+        }
+    }
     let mut a = Agent {
         id: agent.clone(),
-        stage: Floor {
-            agents: agents.clone(),
-            store: store.clone(),
-            session,
-            agent: agent.clone(),
-        },
         desk: agents.desk(&id),
         client,
         model,
@@ -714,7 +783,12 @@ pub async fn load(
         site,
         seen: agents.slot(&id, agent).seen.clone(),
         context,
-        specs: axiom_tools::specs(),
+        specs: {
+            let mut all = axiom_tools::specs();
+            all.extend(floor.others());
+            all
+        },
+        stage: floor,
         instructions,
         not_followed: not,
         limits: Limits::default(),
@@ -747,7 +821,7 @@ pub struct Ear {
 
 impl Ear {
     pub fn tell(self, text: String, item: ItemId) -> RunId {
-        self.permit.send(Word { text, item: Some(item) });
+        self.permit.send(Word { text, item: Some(item), shown: None });
         self.run
     }
 }
@@ -809,6 +883,22 @@ impl Slot {
             };
         }
         Ok(Spoken::Start(Box::new(Turnstile { slot: live })))
+    }
+
+    /// What it began is nobody's any more.
+    pub fn forgive(&self) -> Vec<RunId> {
+        let mut owed = self.owed.lock().unwrap_or_else(PoisonError::into_inner);
+        owed.drain().map(|(r, _)| r).collect()
+    }
+
+    /// Whether it is in a run.
+    pub async fn busy(&self) -> bool {
+        self.live.lock().await.as_ref().is_some_and(|n| !n.tx.is_closed())
+    }
+
+    /// Its runs have ended: whoever waits for that is told.
+    pub fn finish(&self, f: Finished) {
+        self.last.send_replace(Some(Arc::new(f)));
     }
 
     /// What it has running began as what it was.

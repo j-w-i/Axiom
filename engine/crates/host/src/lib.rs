@@ -14,6 +14,7 @@ mod log;
 mod net;
 mod outbox;
 pub mod paths;
+mod peers;
 mod replay;
 mod server;
 mod session;

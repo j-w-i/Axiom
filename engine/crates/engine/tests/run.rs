@@ -401,7 +401,7 @@ async fn a_run_that_cannot_begin_has_ended() {
     let t = T::new(Access::Work, vec![]).await;
     let mut a = t.agent();
     t.stage.refuses_turns();
-    let r = a.begin(&axiom_proto::RunId::new(), Some("go".into())).await;
+    let r = a.begin(&axiom_proto::RunId::new(), Some(axiom_engine::Word::new("go".into()))).await;
     assert!(r.is_err());
     assert_eq!(t.stage.ended(), [Outcome::Failed]);
     assert!(a.context.is_empty());
@@ -549,9 +549,13 @@ async fn a_person_can_speak_while_it_works() {
     )
     .await;
     let mut a = t.agent();
-    t.inbox.try_send(Word { text: "also this".into(), item: None }).unwrap();
+    t.inbox.try_send(Word { text: "also this".into(), item: None, shown: None }).unwrap();
     t.inbox
-        .try_send(Word { text: "and that".into(), item: Some(axiom_proto::ItemId("i_9".into())) })
+        .try_send(Word {
+            text: "and that".into(),
+            item: Some(axiom_proto::ItemId("i_9".into())),
+            shown: None,
+        })
         .unwrap();
     let e = t.run(&mut a, "go").await;
     assert_eq!(e.outcome, Outcome::Completed);

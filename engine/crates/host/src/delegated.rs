@@ -5,11 +5,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, PoisonError},
     time::Duration,
 };
 
-use axiom_engine::{Deed, Ended, Refused, Say, Stage, Word, said};
+use axiom_engine::{Deed, Ended, FROM_AGENT, Refused, Say, Stage, Word, said};
 use axiom_harness::{
     Answer, By, ChoiceKind, Diff, Done, Error, Event, Events, Frame, Frames, Gone, Handle, Harness,
     KNOWN, Kind, Level, Lost, Program, Prompts, Question, Ready, Settled, Site, Start, Trust, Why,
@@ -165,7 +165,7 @@ impl From<Refused> for Halt {
 
 impl Worker {
     /// As [`axiom_engine::Agent::begin`].
-    pub async fn begin(&mut self, run: &RunId, prompt: Option<String>) -> Result<(), Refused> {
+    pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
         self.floor.say(begun(&self.floor, run)).await?;
         let Err(r) = self.opening(run, prompt).await else { return Ok(()) };
         let error = Some(r.to_string());
@@ -173,10 +173,14 @@ impl Worker {
         Err(r)
     }
 
-    async fn opening(&mut self, run: &RunId, prompt: Option<String>) -> Result<(), Refused> {
-        if let Some(text) = prompt {
+    async fn opening(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
+        if let Some(Word { text, shown, .. }) = prompt {
             let item = ItemId::new();
-            self.floor.say(said(&item, run, &self.floor.agent, &text)).await?;
+            let (by, show) = match &shown {
+                Some((by, show)) => (by.as_str(), show),
+                None => ("", &text),
+            };
+            self.floor.say(said(&item, run, &self.floor.agent, show, by)).await?;
             self.floor.sync().await?;
             self.floor.wait(&item, &text).await?;
             self.waits.push((item, text));
@@ -290,6 +294,7 @@ impl Worker {
             items: HashMap::new(),
             asked: JoinSet::new(),
             questions: HashMap::new(),
+            slot: self.slot.clone(),
             model: self.setup.execution.model.clone(),
             plan: None,
             limit: None,
@@ -384,6 +389,7 @@ struct Attempt {
     items: HashMap<String, Open>,
     asked: JoinSet<(String, RequestId, Ask, Option<Approval>)>,
     questions: HashMap<String, (AbortHandle, RequestId, Option<String>)>,
+    slot: Arc<Slot>,
     model: Option<String>,
     plan: Option<String>,
     limit: Option<String>,
@@ -397,6 +403,7 @@ struct Open {
     text: String,
     /// Text of it is not kept twice beyond this.
     long: bool,
+    prose: bool,
     diffs: Vec<Diff>,
 }
 
@@ -443,6 +450,7 @@ impl Attempt {
     async fn turn(&mut self, t: Turn) -> bool {
         let Turn { run, mut inbox, words, mut cancel, done } = t;
         self.run = Some(run.clone());
+        self.slot.said.lock().unwrap_or_else(PoisonError::into_inner).clear();
         let r = self.work(&mut inbox, words, &mut cancel).await;
         self.asked.abort_all();
         while self.asked.join_next().await.is_some() {}
@@ -539,7 +547,10 @@ impl Attempt {
         let text = text.join("\n\n");
         self.floor.heard(items).await?;
         let handle = self.handle.clone();
-        let prompt = handle.prompt(&text, By::Person);
+        // Whatever another agent has a part in is not a person's own words.
+        let by =
+            if words.iter().any(|w| w.1.starts_with(FROM_AGENT)) { By::Agent } else { By::Person };
+        let prompt = handle.prompt(&text, by);
         tokio::pin!(prompt);
         // What it says while it takes it is told meanwhile, or it would wait for us and we for it.
         let r = loop {
@@ -666,6 +677,11 @@ impl Attempt {
             }
             Event::Said { id } => {
                 if let Some(o) = self.items.remove(&id) {
+                    if o.prose && !o.text.is_empty() {
+                        let mut said =
+                            self.slot.said.lock().unwrap_or_else(PoisonError::into_inner);
+                        said.clone_from(&o.text);
+                    }
                     self.floor.say(vec![Say::End(o.item, Outcome::Completed, None)]).await?;
                 }
             }
@@ -678,7 +694,8 @@ impl Attempt {
                 let args = t.args.or_else(|| t.title.as_ref().map(|t| json!({ "title": t })));
                 let item = ItemId::new();
                 self.begin_item(&item, ItemKind::Tool, name, args, t.args_cut).await?;
-                let o = Open { item, text: String::new(), long: false, diffs: t.diffs };
+                let o =
+                    Open { item, text: String::new(), long: false, prose: false, diffs: t.diffs };
                 if let Some(old) = self.items.insert(t.id, o) {
                     let end = Say::End(old.item, Outcome::Interrupted, None);
                     self.floor.say(vec![end]).await?;
@@ -831,7 +848,8 @@ impl Attempt {
         if !self.items.contains_key(id) {
             let item = ItemId::new();
             self.begin_item(&item, kind, String::new(), None, 0).await?;
-            let o = Open { item, text: String::new(), long: false, diffs: vec![] };
+            let prose = kind == ItemKind::Prose;
+            let o = Open { item, text: String::new(), long: false, prose, diffs: vec![] };
             self.items.insert(id.to_owned(), o);
         }
         let Some(o) = self.items.get_mut(id) else { return Ok(()) };

@@ -376,7 +376,7 @@ impl T {
     ) -> Ended {
         let id = RunId::new();
         let run = async {
-            match a.begin(&id, Some(prompt.into())).await {
+            match a.begin(&id, Some(axiom_engine::Word::new(prompt.into()))).await {
                 Ok(()) => a.run(id, cancel).await,
                 Err(_) => Ended { outcome: Outcome::Interrupted, error: None },
             }
