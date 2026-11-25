@@ -31,12 +31,11 @@
 | K28 | If the journal's file is moved away the host stops, and the endings of what ran are lost | accepted |
 | K29 | A write lock held by another program during a stop costs up to 10 s, and endings may then be unwritten | accepted |
 | K30 | Engine, third review pass: a refused event leaves a replay's run open, a second lock soon after an exhausted outage fails at once, U+2060–U+206F count as emoji in the CLI's prose; four behaviours have no test (connection cap, growing script, lock inode, runtime shutdown limit) | M2 |
-| K31 | On Windows `flutter test` has hung on every run since `b63bdbf`, the commit that added `fake_host_test.dart`; unnoticed because a job cut off at its limit leaves no log and is not counted as failing. Cause not yet known; a hanging test now names itself | before merging M1 |
+| K31 | Windows, Unix sockets. (1) When one end shuts a socket while the other begins to wait for it the wake-up can be lost and both wait for good: the host's threads look instead of waiting (stress: 31 rounds without a hang, before that 2 to 16), and the app leaves a host that is silent for 30 s. (2) A Unix socket that Dart itself listens on can bring the machine to a stop when it is closed: only tests did that, and they go through `examples/relay.rs` there. Dart's own client socket could still lose a wake-up; then (1)'s 30 s apply | accepted |
 | K32 | The independent security review of M2 has not been done: the reviewing agent was stopped by its provider's safeguards before it began. Until it is, take the sandbox as tested by its author only | before M2 ends |
 | K33 | Linux: a protected name that does not exist yet can be made by a command; it is told to the person afterwards. No seccomp filter yet | M2 |
 | K34 | macOS: a process that closes every file it got, loses its parent and leaves its group between two looks outlives its command. It stays contained | accepted |
 | K35 | What a person says to a running agent is in the journal at once, but in the model's conversation only when the agent hears it: after a host that is killed in between it is shown and the model does not know it | M2 |
-| K36 | A connection to LM Studio may be answered by another model than was asked for (it says so only in the stream); the app does not compare them yet | M2 |
 | K37 | A provider that sends keep-alive comments for ever holds an answer open: only silence has a limit | M2 |
 | K38 | macOS: a build that is not signed is another program to the keychain each time it is made, so its keys have to be added again. It never asks | signed builds, M7 |
 | K39 | A folder below one that is protected by name (`.claude/worktrees/x`, say) cannot be a workspace an agent writes to | M5, Axiom's own worktrees |
