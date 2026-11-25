@@ -142,6 +142,17 @@ impl Store {
     ) -> Result<()> {
         self.write(move |j| j.put_pending(&id, &agent, &item, &body)).await
     }
+    pub async fn heard(&self, id: SessionId, agent: AgentId, items: Vec<ItemId>) -> Result<()> {
+        self.write(move |j| j.heard(&id, &agent, &items)).await
+    }
+    pub async fn put_frames(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        frames: Vec<(u64, String)>,
+    ) -> Result<()> {
+        self.write(move |j| j.put_frames(&id, &agent, &frames)).await
+    }
     pub async fn pending(&self, id: SessionId, agent: AgentId) -> Result<Vec<(ItemId, String)>> {
         self.read_with(move |r| r.pending(&id, &agent)).await
     }

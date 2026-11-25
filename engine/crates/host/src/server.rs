@@ -65,6 +65,8 @@ pub struct Config {
     /// Where agents have their temporary folders. Not inside the data directory, which they never
     /// see.
     pub scratch: PathBuf,
+    /// Where harnesses are looked for; `None`: where programs usually are.
+    pub programs: Option<Vec<PathBuf>>,
     pub vault: Arc<dyn Vault>,
 }
 impl Config {
@@ -79,6 +81,7 @@ impl Config {
             look_every: Duration::from_secs(3),
             home: home(),
             scratch,
+            programs: None,
             vault: Arc::new(MemoryVault::default()),
         }
     }
@@ -270,8 +273,14 @@ impl Host {
         private_file(&p.endpoint_file(), listener.path())?;
         private_file(&p.token(), &token)?;
         let connections = Connections::open(&p.data.join("connections.json"), cfg.vault.clone())?;
-        let agents =
-            Agents::new(connections, p, cfg.home.clone(), cfg.scratch.clone(), listener.path());
+        let agents = Agents::new(
+            connections,
+            p,
+            cfg.home.clone(),
+            cfg.scratch.clone(),
+            cfg.programs.clone(),
+            listener.path(),
+        );
         let st = Arc::new(State {
             agents: Arc::new(agents),
             store: Store::start(journal, &p.journal())?,
@@ -896,6 +905,7 @@ fn slow(c: &Call) -> bool {
         c,
         Call::Models { .. }
             | Call::Look { .. }
+            | Call::Harnesses {}
             | Call::ConnectionAdd { .. }
             | Call::ConnectionRemove { .. }
     )
@@ -952,7 +962,8 @@ async fn prompt(
         };
         let begin = async {
             let rx = turnstile.enter(&run, &cancel);
-            let mut a = agents::load(&st.agents, &st.store, s.clone(), &agent, &setup, rx).await?;
+            let mut a =
+                agents::Worker::load(&st.agents, &st.store, s.clone(), &agent, &setup, rx).await?;
             a.begin(&run, Some(text)).await.map_err(refused)?;
             Ok(a)
         };
@@ -970,9 +981,8 @@ async fn prompt(
         let _ = told.send(Ok(()));
         let (mut run, mut cancel, mut live) = (run, cancel, live);
         loop {
-            a.run(run, cancel.clone()).await;
+            let mut inbox = a.run(run, cancel.clone()).await;
             let stopped = *cancel.borrow();
-            let mut inbox = a.inbox;
             if !slot.after(&mut inbox, stopped).await {
                 break;
             }
@@ -983,7 +993,7 @@ async fn prompt(
                 let (l, c) = Live::new(&st, &session, &run)?;
                 (live, cancel) = (l, c);
                 slot.renamed(&run, &cancel).await;
-                agents::load(&st.agents, &st.store, s.clone(), &agent, &setup, inbox).await
+                agents::Worker::load(&st.agents, &st.store, s.clone(), &agent, &setup, inbox).await
             };
             a = match next.await {
                 Ok(a) => a,
@@ -1099,15 +1109,19 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             begun.await.map_err(|_| internal("the run did not start"))??;
             Ok(json!({ "run": run, "agent": agent }))
         }
-        Call::AgentAdd { session, name, execution, access, instructions } => {
+        Call::AgentAdd { session, name, execution, access, trust, instructions } => {
             let workspace = workspace(st, &session).await?;
             if agents::full(stored(st, &session).await?.len()) {
                 return Err(agents::bad("the session has as many agents as it may"));
             }
             let a = st.agents.clone();
-            let setup =
-                blocking(move || a.setup(name, execution, access, &workspace, instructions))
-                    .await??;
+            let written = a.written(&st.store).await?;
+            let setup = blocking(move || {
+                let resume = None;
+                let s = Setup { name, execution, access, workspace, instructions, trust, resume };
+                a.setup(s, &written)
+            })
+            .await??;
             let agent = AgentId::new();
             keep(st, &session, &agent, &setup).await?;
             if let Err(e) = said(st, &session, agents::added(&agent, &setup)).await {
@@ -1116,6 +1130,12 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 return Err(e);
             }
             Ok(json!({ "agent": agent }))
+        }
+        Call::Harnesses {} => {
+            let a = st.agents.clone();
+            let written = a.written(&st.store).await?;
+            let all = blocking(move || a.harnesses(&written)).await??;
+            serde_json::to_value(all).map_err(|e| internal(e.to_string()))
         }
         Call::Look { path } => {
             let a = st.agents.clone();
@@ -1127,23 +1147,19 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             // Nothing begins meanwhile.
             let _held = slot.hold().await?;
             let mut setup = setup(st, &session, &agent).await?;
+            if execution.as_ref().is_some_and(|e| e.harness != setup.execution.harness) {
+                // What it knows is in the harness it has.
+                return Err(agents::bad("an agent keeps its harness; add another agent instead"));
+            }
             setup.execution = execution.unwrap_or(setup.execution);
             setup.access = access.unwrap_or(setup.access);
             let a = st.agents.clone();
-            let setup = blocking(move || {
-                a.setup(
-                    setup.name,
-                    setup.execution,
-                    setup.access,
-                    &setup.workspace,
-                    setup.instructions,
-                )
-            })
-            .await??;
+            let written = a.written(&st.store).await?;
+            let setup = blocking(move || a.setup(setup, &written)).await??;
             keep(st, &session, &agent, &setup).await?;
             // What was allowed was allowed to it as it was.
             st.agents.desk(&session).forget();
-            slot.changed();
+            slot.changed().await;
             said(st, &session, agents::changed(&agent, &setup)).await?;
             Ok(json!({}))
         }

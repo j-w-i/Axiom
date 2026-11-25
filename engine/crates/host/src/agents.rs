@@ -15,8 +15,8 @@ use axiom_policy::{
     rules::Source,
 };
 use axiom_proto::{
-    AgentId, AgentState, Body, ErrorCode, Execution, Instructions, ItemId, RunId, SessionId,
-    WireError, limits, now_ms,
+    AgentId, AgentState, Body, ErrorCode, Execution, HarnessInfo, Instructions, ItemId, RunId,
+    SessionId, WireError, limits, now_ms,
 };
 use axiom_tools::{Seen, Site};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::{
     connections::Connections,
+    delegated,
     paths::{Paths, private_dir},
     session::{self, Session},
     store::Store,
@@ -42,6 +43,12 @@ pub struct Setup {
     /// Of the workspace, what a person has read and wants followed (T6): other content is not.
     #[serde(default)]
     pub instructions: Vec<Instructions>,
+    /// Of a delegated agent: the folder's own settings for its program may take effect.
+    #[serde(default)]
+    pub trust: bool,
+    /// Of a delegated agent: what to go on with.
+    #[serde(default)]
+    pub resume: Option<String>,
 }
 
 /// Files whose words are for agents, as they are named in the top folder of a workspace.
@@ -55,6 +62,8 @@ const MOST: usize = 64;
 const INBOX: usize = 32;
 /// Sessions whose agents are remembered beyond what the journal has.
 const PARTIES: usize = 1000;
+/// Sessions whose folders programs are not taken from.
+const WORKSPACES: u32 = 10_000;
 
 #[derive(Default)]
 struct Party {
@@ -69,6 +78,8 @@ pub struct Slot {
     /// The run it is in, and how to speak to it.
     live: Arc<tokio::sync::Mutex<Live>>,
     keys: Mutex<VecDeque<(String, Value)>>,
+    /// Of a delegated agent: its program, if it runs.
+    pub attempt: tokio::sync::Mutex<Option<mpsc::Sender<delegated::Turn>>>,
 }
 
 impl Slot {
@@ -77,6 +88,7 @@ impl Slot {
         Arc::strong_count(self) == 1
             && self.live.try_lock().is_ok_and(|l| l.is_none())
             && self.seen.1.running().is_empty()
+            && self.attempt.try_lock().is_ok_and(|a| a.as_ref().is_none_or(|a| a.is_closed()))
     }
 }
 
@@ -106,6 +118,7 @@ pub struct Agents {
     home: Option<PathBuf>,
     own: Vec<PathBuf>,
     scratch: PathBuf,
+    programs: Option<Vec<PathBuf>>,
     rules: PathBuf,
 }
 
@@ -122,6 +135,7 @@ impl Agents {
         paths: &Paths,
         home: Option<PathBuf>,
         scratch: PathBuf,
+        programs: Option<Vec<PathBuf>>,
         endpoint: &str,
     ) -> Self {
         let mut own = vec![paths.data.clone()];
@@ -134,6 +148,7 @@ impl Agents {
             home,
             own,
             scratch,
+            programs,
             rules: paths.data.join("policy.toml"),
         }
     }
@@ -178,26 +193,37 @@ impl Agents {
     }
 
     /// Checks what an agent is to be, and says it as it will be kept.
-    pub fn setup(
-        &self,
-        name: String,
-        execution: Execution,
-        access: axiom_proto::Access,
-        workspace: &str,
-        instructions: Vec<Instructions>,
-    ) -> Result<Setup, WireError> {
+    pub fn setup(&self, s: Setup, written: &Reach) -> Result<Setup, WireError> {
+        let Setup { name, execution, access, workspace, instructions, trust, resume } = s;
+        let workspace = workspace.as_str();
         let known =
             |i: &Instructions| FOR_AGENTS.contains(&i.path.as_str()) && i.digest.len() <= 128;
         if instructions.len() > FOR_AGENTS.len() || !instructions.iter().all(known) {
             return Err(bad("these are not instructions for agents"));
         }
-        let instructions =
+        let instructions: Vec<Instructions> =
             instructions.into_iter().map(|i| Instructions { text: None, ..i }).collect();
         if name.trim().is_empty() || limits::text_len(&name) > 200 {
             return Err(bad("an agent's name has between 1 and 200 bytes"));
         }
         if execution.harness != "axiom" {
-            return Err(bad("this host runs the harness axiom only"));
+            let known = delegated::known_as(&execution.harness)
+                .ok_or_else(|| bad("this host does not know the harness"))?;
+            if execution.connection.is_some() {
+                return Err(bad("this harness signs in by itself: it has no connection"));
+            }
+            if !instructions.is_empty() {
+                return Err(bad("this harness reads the folder's words for agents by itself"));
+            }
+            let workspace = real(Path::new(workspace))?.to_string();
+            let execution = Execution { provider: None, ..execution };
+            let setup = Setup { name, execution, access, workspace, instructions, trust, resume };
+            let site = self.site(&setup, &AgentId("check".into()), false)?;
+            let path = self.programs(&site.path)?;
+            known
+                .check(&setup, site.access, site.workspace.clone(), &path, written)
+                .map_err(bad)?;
+            return Ok(setup);
         }
         let (Some(c), Some(m)) = (&execution.connection, &execution.model) else {
             return Err(bad("an agent needs a connection and a model"));
@@ -210,7 +236,15 @@ impl Agents {
             return Err(bad("the effort cannot be set for this provider and model"));
         }
         let place = real(Path::new(workspace))?;
-        let setup = Setup { name, execution, access, workspace: place.to_string(), instructions };
+        let setup = Setup {
+            name,
+            execution,
+            access,
+            workspace: place.to_string(),
+            instructions,
+            trust: false,
+            resume: None,
+        };
         // What could not be contained later is refused now, in words.
         let site = self.site(&setup, &AgentId("check".into()), false)?;
         Profile::of(
@@ -221,6 +255,29 @@ impl Agents {
         )
         .map_err(|e| bad(e.to_string()))?;
         Ok(setup)
+    }
+
+    /// Where programs of the person's own are looked for.
+    fn programs(&self, usual: &[Place]) -> Result<Vec<Place>, WireError> {
+        match &self.programs {
+            Some(p) => p.iter().map(|p| real(p)).collect(),
+            None => Ok(usual.to_vec()),
+        }
+    }
+
+    /// Everything agents may write to: every session's folder, and their own.
+    pub async fn written(&self, store: &Store) -> Result<Reach, WireError> {
+        let all = store.sessions(WORKSPACES, 0).await.map_err(internal)?;
+        let folders =
+            all.into_iter().filter_map(|s| s.workspace).filter_map(|w| Place::new(w).ok());
+        let own = Place::new(plain_verbatim(self.scratch.clone())).ok();
+        Ok(Reach::of(folders.chain(own)))
+    }
+
+    pub fn harnesses(&self, written: &Reach) -> Result<Vec<HarnessInfo>, WireError> {
+        let home = self.home.as_deref().ok_or_else(|| bad("there is no home folder"))?;
+        let path = self.programs(&axiom_tools::system(&real(home)?).0)?;
+        Ok(delegated::known().iter().map(|k| k.info(&path, written)).collect())
     }
 
     /// Where an agent works and what it may. `make`: with its scratch folder.
@@ -330,6 +387,7 @@ impl Agents {
         store: &Store,
         session: &SessionId,
         d: Deed,
+        containment: Containment,
     ) -> axiom_journal::Result<()> {
         let mut last = self.audit.lock().await;
         if last.is_none()
@@ -350,7 +408,7 @@ impl Agents {
             decision: d.decision,
             rules: d.rules,
             answered: d.answered,
-            containment: Containment::Axiom,
+            containment,
             before: String::new(),
             digest: String::new(),
         }
@@ -449,10 +507,139 @@ impl Stage for Floor {
     }
     async fn audit(&self, deed: Deed) -> Result<(), Refused> {
         self.agents
-            .record(&self.store, &self.session.id, deed)
+            .record(&self.store, &self.session.id, deed, Containment::Axiom)
             .await
             .map_err(|e| Refused::This(format!("it cannot be put on record: {e}")))
     }
+}
+
+impl Floor {
+    /// Of what Axiom does not contain itself.
+    pub async fn record(&self, deed: Deed, c: Containment) -> Result<(), Refused> {
+        self.agents
+            .record(&self.store, &self.session.id, deed, c)
+            .await
+            .map_err(|e| Refused::This(format!("it cannot be put on record: {e}")))
+    }
+    /// What was said waits until it is heard.
+    pub async fn wait(&self, item: &ItemId, text: &str) -> Result<(), Refused> {
+        let (s, a) = (self.session.id.clone(), self.agent.clone());
+        self.store
+            .put_pending(s, a, item.clone(), text.to_owned())
+            .await
+            .map_err(|e| Refused::This(e.to_string()))
+    }
+    pub async fn heard(&self, items: Vec<ItemId>) -> Result<(), Refused> {
+        let (s, a) = (self.session.id.clone(), self.agent.clone());
+        self.store.heard(s, a, items).await.map_err(|e| Refused::This(e.to_string()))
+    }
+    /// Keeps what a delegated agent is to be gone on with. If that fails it begins anew, some day.
+    pub async fn resume(&self, with: String) {
+        let Ok(all) = self.store.agents(self.session.id.clone()).await else { return };
+        let Some((_, text)) = all.into_iter().find(|(a, _)| *a == self.agent) else { return };
+        let Ok(mut s) = serde_json::from_str::<Setup>(&text) else { return };
+        if s.resume.as_ref() == Some(&with) {
+            return;
+        }
+        s.resume = Some(with);
+        if let Ok(text) = serde_json::to_string(&s) {
+            let _ = self.store.put_agent(self.session.id.clone(), self.agent.clone(), text).await;
+        }
+    }
+}
+
+/// An agent ready to run.
+pub enum Worker {
+    Native(Box<Agent<Floor>>),
+    Delegated(Box<delegated::Worker>),
+}
+
+impl Worker {
+    pub async fn load(
+        agents: &Arc<Agents>,
+        store: &Store,
+        session: Session,
+        agent: &AgentId,
+        setup: &Setup,
+        inbox: mpsc::Receiver<Word>,
+    ) -> Result<Self, WireError> {
+        if setup.execution.harness == "axiom" {
+            let a = load(agents, store, session, agent, setup, inbox).await?;
+            return Ok(Self::Native(Box::new(a)));
+        }
+        let floor = Floor {
+            agents: agents.clone(),
+            store: store.clone(),
+            session: session.clone(),
+            agent: agent.clone(),
+        };
+        let waits = store.pending(session.id.clone(), agent.clone()).await.map_err(internal)?;
+        let written = agents.written(store).await?;
+        let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
+        let (known, site, access, workspace) = tokio::task::spawn_blocking(move || {
+            let known = delegated::known_as(&s.execution.harness)
+                .ok_or_else(|| bad("this host does not know the agent's harness"))?;
+            let site = a.site(&s, &ag, true)?;
+            let path = a.programs(&site.path)?;
+            let access = site.access;
+            let program =
+                known.check(&s, access, site.workspace.clone(), &path, &written).map_err(bad)?;
+            let site_of = axiom_harness::Site {
+                program,
+                path,
+                home: site.keep.home().clone(),
+                user: user()?,
+                tmp: site.scratch.clone(),
+                written,
+                limits: axiom_harness::Limits::default(),
+            };
+            Ok::<_, WireError>((known, site_of, access, site.workspace))
+        })
+        .await
+        .map_err(internal)??;
+        Ok(Self::Delegated(Box::new(delegated::Worker {
+            floor,
+            desk: agents.desk(&session.id),
+            slot: agents.slot(&session.id, agent),
+            setup: setup.clone(),
+            known,
+            site,
+            access,
+            workspace,
+            inbox,
+            waits,
+        })))
+    }
+
+    pub async fn begin(&mut self, run: &RunId, prompt: Option<String>) -> Result<(), Refused> {
+        match self {
+            Self::Native(a) => a.begin(run, prompt).await,
+            Self::Delegated(w) => w.begin(run, prompt).await,
+        }
+    }
+
+    /// Runs, and gives back what is still to be heard.
+    pub async fn run(self, run: RunId, cancel: watch::Receiver<bool>) -> mpsc::Receiver<Word> {
+        match self {
+            Self::Native(mut a) => {
+                a.run(run, cancel).await;
+                a.inbox
+            }
+            Self::Delegated(mut w) => {
+                w.run(run, cancel).await;
+                w.inbox
+            }
+        }
+    }
+}
+
+/// The person's name on this computer.
+fn user() -> Result<String, WireError> {
+    ["USER", "LOGNAME", "USERNAME"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .find(|v| !v.is_empty())
+        .ok_or_else(|| bad("this computer does not say who uses it"))
 }
 
 /// An agent ready to run, from the journal.
@@ -604,8 +791,10 @@ impl Slot {
     }
 
     /// What it has running began as what it was.
-    pub fn changed(&self) {
+    pub async fn changed(&self) {
         self.seen.1.end();
+        // Its program ends; what it was told is kept by the program, and gone on with.
+        *self.attempt.lock().await = None;
     }
 
     /// After a run: whether something was said too late for it that is to begin another. If not,

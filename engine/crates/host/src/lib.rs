@@ -8,6 +8,7 @@
 mod agents;
 pub mod client;
 pub mod connections;
+mod delegated;
 mod faults;
 mod log;
 mod net;

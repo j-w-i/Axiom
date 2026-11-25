@@ -600,9 +600,37 @@ fn what_was_said_waits_until_it_is_heard() {
     j.put_pending(&s, &a, &i("i4"), "four").unwrap();
     assert_eq!(texts(&a), ["one", "three", "four"]);
     assert_eq!(texts(&b), ["other"]);
+    j.heard(&s, &a, &[i("i1"), i("i4"), i("nobody")]).unwrap();
+    assert_eq!((texts(&a), texts(&b)), (vec!["three".to_string()], vec!["other".to_string()]));
     j.put_agent(&s, &a, "x").unwrap();
     j.remove_agent(&s, &a).unwrap();
     assert!(r.agents(&s).unwrap().is_empty());
     j.delete(&s).unwrap();
     assert!(texts(&a).is_empty());
+}
+
+#[test]
+fn the_last_frames_are_kept() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j.db");
+    let mut j = Journal::open(&p).unwrap();
+    let s = SessionId::new();
+    j.create(&s, "t", None, 1).unwrap();
+    let (a, b) = (AgentId("a".into()), AgentId("b".into()));
+    let r = Reader::open(&p).unwrap();
+    j.put_frames(&s, &b, &[(1, "other".into())]).unwrap();
+    let most = axiom_journal::FRAMES;
+    for n in 0..most + 10 {
+        j.put_frames(&s, &a, &[(n, format!("{n}"))]).unwrap();
+    }
+    let all = r.frames(&s, &a).unwrap();
+    assert_eq!(all.len() as u64, most);
+    assert_eq!((all[0].as_str(), all.last().unwrap().clone()), ("10", format!("{}", most + 9)));
+    let more: Vec<_> = (0..3).map(|n| (n, format!("x{n}"))).collect();
+    j.put_frames(&s, &a, &more).unwrap();
+    assert_eq!(r.frames(&s, &a).unwrap().last().unwrap(), "x2");
+    assert_eq!(r.frames(&s, &a).unwrap().len() as u64, most);
+    assert_eq!(r.frames(&s, &b).unwrap(), ["other"]);
+    j.delete(&s).unwrap();
+    assert!(r.frames(&s, &b).unwrap().is_empty());
 }

@@ -19,6 +19,7 @@ path = "src/main.rs"
 axiom-proto.workspace = true
 axiom-journal.workspace = true
 axiom-engine.workspace = true
+axiom-harness.workspace = true
 axiom-model.workspace = true
 axiom-policy.workspace = true
 axiom-tools.workspace = true

@@ -297,6 +297,23 @@ pub struct SessionInfo {
     pub running: bool,
 }
 
+/// A harness, as it was found without being run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessInfo {
+    pub id: String,
+    pub name: String,
+    /// The program, if it is there and may be started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    /// Why not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+    /// It cannot be told to ignore a folder's own settings for it.
+    pub needs_trust: bool,
+    /// What it has a mode for.
+    pub access: Vec<Access>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params")]
 pub enum Call {
@@ -351,13 +368,20 @@ pub enum Call {
     AgentAdd {
         session: SessionId,
         name: String,
-        /// `harness` is `axiom`; `connection` and `model` are needed.
+        /// With the harness `axiom`, `connection` and `model` are needed. Another is a program of the
+        /// person's own that signs in by itself ([`HarnessInfo`]): it has no connection.
         execution: Execution,
         access: Access,
+        /// The folder's own settings for such a program may take effect (SI-5).
+        #[serde(default)]
+        trust: bool,
         /// Instructions of the workspace a person has read and wants followed, by what they were.
         #[serde(default)]
         instructions: Vec<Instructions>,
     },
+    /// The harnesses this host can drive.
+    #[serde(rename = "harness.list")]
+    Harnesses {},
     /// What a folder's owner would have agents told. For a person to read: nothing of it is followed
     /// unless they say so.
     #[serde(rename = "workspace.look")]

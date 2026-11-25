@@ -74,7 +74,13 @@ const HOST_TABLES: &str = "create table agent(
        session text not null references session(id) on delete cascade,
        agent text not null, n integer not null, item text not null, body text not null,
        primary key(session, agent, n)) without rowid;
+     create table frame(
+       session text not null references session(id) on delete cascade,
+       agent text not null, n integer not null, at integer not null, body text not null,
+       primary key(session, agent, n)) without rowid;
      create table audit(seq integer primary key, body text not null);";
+/// Of what was said on an agent's wire, this much is kept: the last.
+pub const FRAMES: u64 = 2000;
 /// The planner would scan the whole session for these; `indexed by` makes it an error not to use
 /// the index.
 const FOLD: &str = "delete from event indexed by event_delta where session=? and delta_of=?";
@@ -373,6 +379,44 @@ impl Journal {
         })
     }
 
+    /// What a person said has gone to who hears it.
+    pub fn heard(&mut self, id: &SessionId, agent: &AgentId, items: &[ItemId]) -> Result<()> {
+        self.commit(Durability::Intent, |j| {
+            let mut q =
+                j.db.prepare_cached("delete from pending where session=? and agent=? and item=?")?;
+            for i in items {
+                q.execute(params![id.0, agent.0, i.0])?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Keeps what was said on an agent's wire, and forgets what is older than [`FRAMES`] of it.
+    pub fn put_frames(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        frames: &[(u64, String)],
+    ) -> Result<()> {
+        self.commit(Durability::Stream, |j| {
+            let last: u64 =
+                j.db.prepare_cached(
+                    "select coalesce(max(n), 0) from frame where session=? and agent=?",
+                )?
+                .query_row(params![id.0, agent.0], |r| r.get(0).map(as_u64))?;
+            let mut q = j.db.prepare_cached(
+                "insert into frame(session, agent, n, at, body) values(?,?,?,?,?)",
+            )?;
+            for (n, (at, body)) in (last + 1..).zip(frames) {
+                q.execute(params![id.0, agent.0, as_i64(n), as_i64(*at), body])?;
+            }
+            let old = (last + frames.len() as u64).saturating_sub(FRAMES);
+            j.db.prepare_cached("delete from frame where session=? and agent=? and n<=?")?
+                .execute(params![id.0, agent.0, as_i64(old)])?;
+            Ok(())
+        })
+    }
+
     /// Adds to an agent's conversation. `n` is its next number, from 0: a gap or a repeat is refused.
     /// What was `heard` with it waits no longer: both or neither.
     pub fn put_message(
@@ -480,6 +524,15 @@ impl Reader {
         }
         Ok(out)
     }
+    /// What was said on an agent's wire, as far as it is kept, in order.
+    pub fn frames(&self, id: &SessionId, agent: &AgentId) -> Result<Vec<String>> {
+        let mut q = self
+            .db
+            .prepare_cached("select body from frame where session=? and agent=? order by n")?;
+        let rows = q.query_map(params![id.0, agent.0], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// What a person said to an agent that it has not heard, in order.
     pub fn pending(&self, id: &SessionId, agent: &AgentId) -> Result<Vec<(ItemId, String)>> {
         let mut q = self.db.prepare_cached(

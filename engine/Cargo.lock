@@ -80,6 +80,7 @@ name = "axiom-host"
 version = "0.0.1"
 dependencies = [
  "axiom-engine",
+ "axiom-harness",
  "axiom-journal",
  "axiom-model",
  "axiom-policy",

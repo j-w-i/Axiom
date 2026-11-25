@@ -76,6 +76,7 @@ impl T {
             name: "Lead".into(),
             execution: self.execution(),
             access,
+            trust: false,
             instructions: self.instructions.clone(),
         };
         let v = self.c.call(call).await.unwrap();
@@ -456,6 +457,7 @@ async fn an_agent_nobody_was_told_of_is_not_there() {
         name: "A".into(),
         execution: e,
         access: Access::Read,
+        trust: false,
         instructions: vec![],
     };
     let (refused, kept) = (call(e), call(t.execution()));
@@ -504,6 +506,7 @@ async fn what_an_agent_may_not_be() {
         name: name.into(),
         execution: x,
         access,
+        trust: false,
         instructions: vec![],
     };
     for (x, why) in [
@@ -614,6 +617,7 @@ async fn instructions_are_followed_only_as_they_were_read() {
         name: "A".into(),
         execution: t.execution(),
         access: Access::Work,
+        trust: false,
         instructions: t.instructions.clone(),
     };
     assert!(t.c.call(call).await.is_err());
@@ -717,6 +721,7 @@ async fn a_killed_host_leaves_nothing_running() {
         name: "L".into(),
         execution,
         access: Access::Work,
+        trust: false,
         instructions: vec![],
     };
     let agent = AgentId(c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
@@ -783,6 +788,7 @@ async fn live_on_lm_studio() {
         name: "Lead".into(),
         execution: x,
         access: Access::Work,
+        trust: false,
         instructions: vec![],
     };
     let a = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());

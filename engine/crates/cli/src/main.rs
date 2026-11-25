@@ -143,6 +143,7 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
                 environment: None,
             },
             access: access(a)?,
+            trust: false,
             instructions: Vec::new(),
         },
         ["set", s, agent, a] => Call::AgentSet {
