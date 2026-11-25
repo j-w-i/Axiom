@@ -395,6 +395,13 @@ async fn what_came_of_it_is_delivered_by_itself() {
     assert!(shown);
     t.still().await;
     assert_eq!((runs(&t, &lead), runs(&t, &slow)), (2, 1));
+    // Its person is told once, when all of it has come to an end, and of what they began only.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let v = t.c.call(Call::Waiting {}).await.unwrap();
+    let all: Vec<Waits> = serde_json::from_value(v).unwrap();
+    let shown: Vec<(&str, &str)> =
+        all.iter().map(|w| (w.name.as_str(), w.subject.as_str())).collect();
+    assert_eq!(shown, [("Lead", "Now I know.")]);
     // Once: not with the next word either, nor by waiting, nor by another host.
     lead.server.add(wait());
     lead.server.add(text(&["ok"]));

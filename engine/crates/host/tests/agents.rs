@@ -139,6 +139,13 @@ impl T {
             .await;
         (o, e, all)
     }
+    async fn ended_with(&mut self, outcome: Outcome) {
+        loop {
+            if self.ended().await.0 == outcome {
+                return;
+            }
+        }
+    }
     async fn question(&mut self) -> (RequestId, String, String) {
         self.until(|b| match b {
             Body::RequestOpened {
@@ -826,7 +833,8 @@ async fn what_waits_for_a_person_is_one_queue() {
     let all: Vec<Waits> = serde_json::from_value(v).unwrap();
     let [w] = &all[..] else { panic!("{all:?}") };
     assert_eq!((&w.session, w.title.as_str()), (&t.s, "S"));
-    assert_eq!((&w.agent, w.name.as_str(), &w.request), (&a, "Lead", &request));
+    assert_eq!((&w.agent, w.name.as_str(), w.request.as_ref()), (&a, "Lead", Some(&request)));
+    assert_eq!(w.need, Need::Asks);
     assert!(w.subject.contains("touch made") && w.at > 0, "{w:?}");
     let (session, answer) = (t.s.clone(), Answer::Deny);
     t.c.call(Call::Answer { session, request, answer, digest, words: None }).await.unwrap();
@@ -888,4 +896,55 @@ async fn a_no_can_say_why() {
     t.c.call(call).await.unwrap();
     t.ended().await;
     assert_eq!(t.sent(&["a person said no. Do not try", "a person said no. They said"]), [1, 1]);
+}
+
+/// What an agent came to is kept for its person until they have seen it, or it is at work again.
+#[tokio::test]
+async fn what_was_not_seen_is_kept() {
+    async fn needs(t: &mut T, n: usize) -> Vec<(Need, String)> {
+        for _ in 0..80 {
+            let v = t.c.call(Call::Waiting {}).await.unwrap();
+            let all: Vec<Waits> = serde_json::from_value(v).unwrap();
+            if all.len() == n {
+                return all.into_iter().map(|w| (w.need, w.subject)).collect();
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("not {n} of them")
+    }
+    let mut t = T::new(vec![text(&["\n\nAll is done.\nMore of it."])]).await;
+    let a = t.agent(Access::Work).await;
+    t.prompt(&a, "go").await.unwrap();
+    t.ended().await;
+    assert_eq!(needs(&mut t, 1).await, [(Need::Finished, "All is done.".into())]);
+    // Another host knows it too.
+    t.restart().await;
+    assert_eq!(needs(&mut t, 1).await.len(), 1);
+    let seen = Call::Seen { session: t.s.clone(), agent: a.clone() };
+    t.c.call(seen.clone()).await.unwrap();
+    assert!(needs(&mut t, 0).await.is_empty());
+    t.c.call(seen).await.unwrap();
+    t.restart().await;
+    assert!(needs(&mut t, 0).await.is_empty());
+    // What failed, and what is spent.
+    t.server.add(status(401, r#"{"error":{"message":"no such key"}}"#));
+    t.prompt(&a, "go").await.unwrap();
+    t.ended_with(Outcome::Failed).await;
+    let all = needs(&mut t, 1).await;
+    assert!(all[0].0 == Need::Failed && all[0].1.contains("no such key"), "{all:?}");
+    t.server.add(status(402, r#"{"error":{"message":"nothing left"}}"#));
+    t.prompt(&a, "go").await.unwrap();
+    t.ended_with(Outcome::Failed).await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let all = needs(&mut t, 1).await;
+    assert!(all[0].0 == Need::Limit && all[0].1.contains("nothing left"), "{all:?}");
+    // At work again, it is behind it; what a person stops they know of.
+    t.server.add(text(&["thinking"]).hangs());
+    let v = t.prompt(&a, "go").await.unwrap();
+    assert!(needs(&mut t, 0).await.is_empty());
+    let run = RunId(v["run"].as_str().unwrap().into());
+    t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
+    t.ended_with(Outcome::Cancelled).await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(needs(&mut t, 0).await.is_empty());
 }

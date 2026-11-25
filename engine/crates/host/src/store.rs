@@ -153,6 +153,19 @@ impl Store {
     ) -> Result<()> {
         self.write(move |j| j.put_frames(&id, &agent, &frames)).await
     }
+    pub async fn put_unseen(
+        &self,
+        id: SessionId,
+        agent: AgentId,
+        kind: &'static str,
+        words: String,
+        at: u64,
+    ) -> Result<()> {
+        self.write(move |j| j.put_unseen(&id, &agent, kind, &words, at)).await
+    }
+    pub async fn drop_unseen(&self, id: SessionId, agent: AgentId) -> Result<()> {
+        self.write(move |j| j.drop_unseen(&id, &agent)).await
+    }
     pub async fn put_owed(
         &self,
         id: SessionId,

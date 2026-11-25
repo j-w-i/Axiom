@@ -87,6 +87,10 @@ const OWED_TABLES: &str = "create table owed(
      create table finished(
        session text not null references session(id) on delete cascade,
        agent text not null, body text not null,
+       primary key(session, agent)) without rowid;
+     create table unseen(
+       session text not null references session(id) on delete cascade,
+       agent text not null, kind text not null, words text not null, at integer not null,
        primary key(session, agent)) without rowid;";
 /// Of what was said on an agent's wire, this much is kept: the last.
 pub const FRAMES: u64 = 2000;
@@ -107,6 +111,16 @@ pub struct Journal {
     db: Connection,
     #[cfg(test)]
     synced: Vec<i64>,
+}
+
+/// What an agent came to that its person has not seen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unseen {
+    pub session: SessionId,
+    pub agent: AgentId,
+    pub kind: String,
+    pub words: String,
+    pub at: u64,
 }
 
 /// How much a commit must survive.
@@ -403,6 +417,33 @@ impl Journal {
         })
     }
 
+    /// What an agent came to that its person has not seen. Another in its place.
+    pub fn put_unseen(
+        &mut self,
+        id: &SessionId,
+        agent: &AgentId,
+        kind: &str,
+        words: &str,
+        at: u64,
+    ) -> Result<()> {
+        self.commit(Durability::Stream, |j| {
+            j.db.prepare_cached(
+                "insert or replace into unseen(session, agent, kind, words, at) values(?,?,?,?,?)",
+            )?
+            .execute(params![id.0, agent.0, kind, words, as_i64(at)])?;
+            Ok(())
+        })
+    }
+
+    /// Its person has seen it, or it is at work again.
+    pub fn drop_unseen(&mut self, id: &SessionId, agent: &AgentId) -> Result<()> {
+        self.commit(Durability::Stream, |j| {
+            j.db.prepare_cached("delete from unseen where session=? and agent=?")?
+                .execute(params![id.0, agent.0])?;
+            Ok(())
+        })
+    }
+
     /// An agent has told another to do something, and is owed its end.
     pub fn put_owed(
         &mut self,
@@ -651,6 +692,22 @@ impl Reader {
         )?;
         let rows = q.query_map(params![id.0, parent.0], |r| {
             Ok((RunId(r.get(0)?), AgentId(r.get(1)?), r.get(2)?))
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+    /// What has not been seen, of all sessions: whose, what it is, words for it, and since when.
+    pub fn unseen(&self) -> Result<Vec<Unseen>> {
+        let mut q = self
+            .db
+            .prepare_cached("select session, agent, kind, words, at from unseen order by at")?;
+        let rows = q.query_map([], |r| {
+            Ok(Unseen {
+                session: SessionId(r.get(0)?),
+                agent: AgentId(r.get(1)?),
+                kind: r.get(2)?,
+                words: r.get(3)?,
+                at: as_u64(r.get(4)?),
+            })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
@@ -995,6 +1052,26 @@ mod tests {
                     .unwrap();
             assert!(plan.contains("event_delta (session=? AND delta_of=?)"), "{plan}");
         }
+    }
+
+    #[test]
+    fn what_was_not_seen_is_one_for_each_agent() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("j");
+        let mut j = Journal::open(&path).unwrap();
+        let reader = Reader::open(&path).unwrap();
+        let (s, a, b) = (SessionId("s".into()), AgentId("a".into()), AgentId("b".into()));
+        j.create(&s, "t", None, 1).unwrap();
+        j.put_unseen(&s, &a, "finished", "x", 7).unwrap();
+        j.put_unseen(&s, &b, "failed", "y", 5).unwrap();
+        j.put_unseen(&s, &a, "failed", "z", 9).unwrap();
+        let all = |r: &Reader| -> Vec<(String, String, u64)> {
+            r.unseen().unwrap().into_iter().map(|u| (u.agent.0, u.words, u.at)).collect()
+        };
+        assert_eq!(all(&reader), [("b".into(), "y".into(), 5), ("a".into(), "z".into(), 9)]);
+        j.drop_unseen(&s, &a).unwrap();
+        j.drop_unseen(&s, &a).unwrap();
+        assert_eq!(all(&reader).len(), 1);
     }
 
     #[test]

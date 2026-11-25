@@ -95,6 +95,8 @@ class Asked extends HostStore {
   @override
   Future<List<Instructions>> look(String path) async =>
       words[path] ?? (throw const Failed(1, 'bad', 'x'));
+  @override
+  void seen(String session, String agent) => calls.add(['seen', session, agent]);
   Changes now = const Changes();
   @override
   Future<Changes> changes(String session) => _do(['changes', session], now);
@@ -1357,6 +1359,60 @@ void main() {
         ..notifyListeners();
       await settled(t);
       expect(find.textContaining('Needs you'), findsNothing);
+    });
+
+    testWidgets('what agents came to stays until it has been looked at', (t) async {
+      addTearDown(() => t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+      final s = await shell(t, session: working());
+      const done = Waits(
+        's',
+        'Fix the cache',
+        'a',
+        'Lead',
+        '',
+        '',
+        'All is done.',
+        1,
+        need: Need.finished,
+      );
+      const other = Waits('s2', 'Other', 'b', 'Ada', '', '', 'no such key', 2, need: Need.failed);
+      const spent = Waits('s3', 'Third', 'c', 'Cleo', '', '', '', 3, need: Need.limit);
+      // Nobody looks at the window.
+      for (final l in [AppLifecycleState.inactive, AppLifecycleState.hidden]) {
+        t.binding.handleAppLifecycleStateChanged(l);
+      }
+      s
+        ..needs = const [other, spent, done]
+        ..notifyListeners();
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await settled(t);
+      expect(s.calls, isEmpty);
+      expect(find.text('Needs you · 2'), findsOneWidget);
+      expect(find.text('Finished, not seen yet'), findsOneWidget);
+      for (final l in ['Ada failed', 'Cleo has reached a limit', 'Lead has finished']) {
+        expect(find.text(l), findsOneWidget, reason: l);
+      }
+      expect(find.bySemanticsLabel('Cleo has reached a limit, in Third'), findsOneWidget);
+      await snap(t, 'needs-unseen');
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await settled(t);
+      // The one that is before them; the others not.
+      expect(s.calls.toSet().map((c) => c.join(' ')), {'seen s a'});
+      // A page in front of it: it is not looked at.
+      s
+        ..calls.clear()
+        ..needs = const []
+        ..notifyListeners();
+      await settled(t);
+      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await settled(t);
+      s
+        ..needs = const [done]
+        ..notifyListeners();
+      await settled(t);
+      expect(s.calls, isEmpty);
+      await press(t, find.text('Lead has finished'));
+      expect(s.calls.first, ['seen', 's', 'a']);
     });
 
     testWidgets('a session that is opened by hand shows its first agent', (t) async {

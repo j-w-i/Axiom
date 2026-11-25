@@ -300,14 +300,36 @@ pub struct SessionInfo {
     pub running: bool,
 }
 
+/// What it is that waits for a person.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Need {
+    /// A question that is open.
+    #[default]
+    Asks,
+    /// Its run failed, and nobody has seen that.
+    Failed,
+    /// What it runs on is spent.
+    Limit,
+    /// It has finished, and nobody has seen that.
+    Finished,
+    #[serde(other)]
+    Unknown,
+}
+
 /// Something that waits for a person.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Waits {
+    #[serde(default)]
+    pub need: Need,
     pub session: SessionId,
     pub title: String,
     pub agent: AgentId,
     pub name: String,
-    pub request: RequestId,
+    /// Of a question.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<RequestId>,
+    #[serde(default)]
     pub what: String,
     /// The beginning of what it is about. All of it is where it is asked, and is answered there.
     pub subject: String,
@@ -575,7 +597,11 @@ pub enum Call {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         words: Option<String>,
     },
-    /// What waits for a person, in all sessions, the longest first.
+    /// A person has seen what an agent came to.
+    #[serde(rename = "agent.seen")]
+    Seen { session: SessionId, agent: AgentId },
+    /// What waits for a person, in all sessions: questions, the longest first, and what agents came
+    /// to that nobody has seen.
     #[serde(rename = "host.waiting")]
     Waiting {},
     #[serde(rename = "connection.list")]

@@ -22,7 +22,7 @@
 | K19 | A process of the same user that floods the socket makes some new connections fail; silent ones keep nobody out | accepted, same user only |
 | K20 | Text dropped past 1 MiB is marked after a crash but not counted | accepted |
 | K21 | A request that can be answered and is too long to show is refused by the host with a typed error; the engine must tell the agent so | M2 engine |
-| K22 | Schema 2 is one-way; hosts from before it and this one exclude each other by `run/lock` | accepted before 1.0 |
+| K22 | Schema 2, and 3 and 4 after it, are one-way; hosts from before it and this one exclude each other by `run/lock` | accepted before 1.0 |
 | K23 | The client lists the last 1 000 sessions | M4 |
 | K24 | Running lamps turn, so a frame is drawn on every refresh while an agent runs (6 paints of 12 × 10 px, nothing rebuilt); one scrolled just out of sight still counts. Reduced motion stops it | M2: measure power |
 | K25 | A table being written costs up to 20 ms per frame in a debug build near its cut at 4 000 characters | M2 |
@@ -36,6 +36,7 @@
 | K33 | Linux: a protected name that does not exist yet can be made by a command; it is told to the person afterwards. No seccomp filter yet | M2 |
 | K34 | macOS: a process that closes every file it got, loses its parent and leaves its group between two looks outlives its command. It stays contained | accepted |
 | K40 | Delegated agents (Claude Code, Codex, ACP) have been driven by scripted programs only. The owner said yes to one start of the real Claude Code on 2026-11-25; there was none on the computer to start (the Claude desktop app's own copy is not one a person installed). `host/tests/live.rs` does it, one start, tried out on the scripted program. Claude Code can only look or work, not ask first, because the switch for asking is not in its documentation | Claude Code installed and signed in |
+| K49 | What others came to begins at most 8 runs of an agent in a row without a person's word; how much they may cost is not limited yet (budgets, M6) | M6 |
 | K48 | Copies for agents: nothing removes one by itself, and a session has no end that would; `.axiom-work` in the home folder grows until a person throws them away. Agents cannot commit in them. On Windows links are not copied, and nothing there has run but the unit tests that compile. A folder that is itself a git worktree or submodule is copied without its history | M5 |
 | K47 | Signing in with ChatGPT is built on OpenAI's documentation (read 2026-11-25, a preview) and tried against a server of the tests only: nobody has signed in. How long what renews is, and so whether Windows' store takes it, is not documented; if it does not, the sign-in fails and is taken back. A crash between OpenAI's answer and the store loses the sign-in: one signs in again. How large a model's context is, OpenAI does not say there | the owner signs in once |
 | K46 | Claude Code with Axiom's tools in place of its own (`--tools ""`, our server, nothing else allowed) rests on its documentation and has been tried with a scripted program only. If it says at its start that it has any other tool, it is ended. Whether a plan may be used so by a product is not certain: decision 0007's written confirmation is wanted before launch | the owner's yes; before launch |

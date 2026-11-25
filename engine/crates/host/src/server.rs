@@ -36,7 +36,7 @@ use crate::{
     session::{Joined, Opened, Refused, Say, Session, encode, lines},
     signin::Signins,
     store::Store,
-    waiting::Waiting,
+    waiting::{self, Waiting},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -295,6 +295,8 @@ impl Host {
             faults.note(&id, Access::Write, &e);
         }
         let token = token()?;
+        let waiting = Arc::new(Waiting::default());
+        waiting.load(axiom_journal::Reader::open(&p.journal())?.unseen()?);
         let listener = Listener::bind(p)?;
         private_file(&p.endpoint_file(), listener.path())?;
         private_file(&p.token(), &token)?;
@@ -315,7 +317,7 @@ impl Host {
             store: Store::start(journal, &p.journal())?,
             token,
             faults: Arc::new(faults),
-            waiting: Arc::default(),
+            waiting,
             damaged: OnceLock::new(),
             sessions: Mutex::default(),
             runs: Mutex::default(),
@@ -1152,6 +1154,48 @@ fn deliver(
     })
 }
 
+/// How long after a run nothing of it is to have gone on, for a person to be told.
+const SETTLED: Duration = Duration::from_secs(2);
+
+/// Keeps, for its person, what an agent came to; if they were who began it, and it does not go on.
+async fn unseen(st: Arc<State>, session: SessionId, agent: AgentId) {
+    let slot = st.agents.slot(&session, &agent);
+    let end = slot.last.borrow().clone();
+    tokio::time::sleep(SETTLED).await;
+    let Some(end) = end else { return };
+    let same = slot.last.borrow().as_ref().is_some_and(|l| Arc::ptr_eq(l, &end));
+    // Of one that others told, they are told; one that is owed something goes on by itself.
+    let own = slot.chain.lock().unwrap_or_else(PoisonError::into_inner).len() <= 1;
+    let owed = !slot.owed().is_empty() && end.outcome == Outcome::Completed;
+    if !same || !own || owed || slot.busy().await {
+        return;
+    }
+    let error = end.error.as_deref().unwrap_or_default();
+    let (kind, words) = match end.outcome {
+        Outcome::Completed => (waiting::FINISHED, waiting::begins(&end.text)),
+        Outcome::Failed if error.starts_with("billing") => (waiting::LIMIT, waiting::begins(error)),
+        Outcome::Failed => (waiting::FAILED, waiting::begins(error)),
+        // A person did it, or the host is ending.
+        _ => return,
+    };
+    let at = now_ms();
+    let one = axiom_journal::Unseen {
+        session: session.clone(),
+        agent: agent.clone(),
+        kind: kind.into(),
+        words: words.clone(),
+        at,
+    };
+    let (id, a) = (session.clone(), agent.clone());
+    if st.store.put_unseen(id, a, kind, words, at).await.is_ok() {
+        st.waiting.unseen(one);
+        // It was spoken to this moment.
+        if slot.busy().await && st.waiting.seen(&session, &agent) {
+            let _ = st.store.drop_unseen(session, agent).await;
+        }
+    }
+}
+
 /// What an agent is owed and others have come to: at once no longer owed, and waiting to be heard.
 /// How it is shown.
 async fn collect(
@@ -1228,6 +1272,10 @@ async fn start(
         };
         let mut setup = setup;
         let begin = async {
+            // It is at work again: what it came to before is behind it.
+            if st.waiting.seen(&session, &agent) {
+                let _ = st.store.drop_unseen(session.clone(), agent.clone()).await;
+            }
             let (a, c) = (&st.agents, cancel.clone());
             setup = copies::ready(a, &st.store, &session, &agent, setup.clone(), c).await?;
             let owed = collect(&st, &session, &agent, &slot).await?;
@@ -1302,6 +1350,7 @@ async fn start(
         let parents =
             st.store.end_owed(session.clone(), agent.clone(), end.runs.clone(), body).await;
         slot.finish(end);
+        tokio::spawn(unseen(st.clone(), session.clone(), agent.clone()));
         for p in parents.unwrap_or_default().into_iter().chain([agent]) {
             tokio::spawn(deliver(st.clone(), session.clone(), p));
         }
@@ -1565,6 +1614,12 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let folder = workspace(st, &session).await?;
             let c = changes::changes(&st.agents, &session, folder).await?;
             serde_json::to_value(c).map_err(|e| internal(e.to_string()))
+        }
+        Call::Seen { session, agent } => {
+            if st.waiting.seen(&session, &agent) {
+                st.store.drop_unseen(session, agent).await.map_err(|e| internal(e.to_string()))?;
+            }
+            Ok(json!({}))
         }
         Call::Waiting {} => {
             let mut all = st.waiting.list();
