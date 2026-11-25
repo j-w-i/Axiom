@@ -462,14 +462,15 @@ async fn silence_is_counted_from_when_it_could_speak() {
     let mut w = world(&acp_1(&[
         hear_prompt(),
         json!({"say": big, "times": 2}),
-        json!({"sleep": 2000}),
+        // Longer than it may be silent, and so short that a slow machine can write the two first.
+        json!({"sleep": 2700}),
         end_turn("end_turn"),
     ]));
-    w.limits.silence = Some(ms(1000));
+    w.limits.silence = Some(ms(2000));
     let mut r = w.run(&acp(), Access::Ask);
     r.ready().await;
     r.prompt("go").await;
-    tokio::time::sleep(ms(1500)).await;
+    tokio::time::sleep(ms(2500)).await;
     assert_eq!(r.done().await.outcome, Outcome::Completed);
     r.handle.cancel().await.unwrap();
     r.closed().await;
