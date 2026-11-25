@@ -65,8 +65,12 @@ dependencies = [
 name = "axiom-host"
 version = "0.0.1"
 dependencies = [
+ "axiom-engine",
  "axiom-journal",
+ "axiom-model",
+ "axiom-policy",
  "axiom-proto",
+ "axiom-tools",
  "libc",
  "rusqlite",
  "serde",
@@ -75,6 +79,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "uds_windows",
+ "zeroize",
 ]
 
 [[package]]

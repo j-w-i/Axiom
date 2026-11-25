@@ -106,10 +106,25 @@ async fn stopped(c: &mut Cancel) {
 }
 
 impl<S: Stage> Agent<S> {
+    /// Begins a run with what a person said. It is in the journal for good when this returns.
+    pub async fn begin(&mut self, run: &RunId, prompt: String) -> Result<(), Refused> {
+        self.stage
+            .say(vec![
+                Say::Event(Body::RunStarted { run: run.clone(), agent: self.id.clone() }),
+                Say::Event(Body::AgentState { agent: self.id.clone(), state: AgentState::Running }),
+            ])
+            .await?;
+        match self.heard(run, prompt).await {
+            Ok(()) => self.stage.sync().await,
+            Err(Halt::Failed(why)) => Err(Refused::This(why)),
+            Err(Halt::Cancelled | Halt::Gone) => Err(Refused::Closed),
+        }
+    }
+
     /// Runs until the agent is done, cancelled, or cannot go on. How it ended is in the journal when
-    /// this returns. `run.started` is said by who starts it.
-    pub async fn run(&mut self, run: RunId, prompt: String, mut cancel: Cancel) -> Ended {
-        let r = self.go(&run, prompt, &mut cancel).await;
+    /// this returns.
+    pub async fn run(&mut self, run: RunId, mut cancel: Cancel) -> Ended {
+        let r = self.go(&run, &mut cancel).await;
         let (outcome, error) = match r {
             Ok(()) => (Outcome::Completed, None),
             Err(Halt::Cancelled) => (Outcome::Cancelled, None),
@@ -131,10 +146,9 @@ impl<S: Stage> Agent<S> {
         Ended { outcome, error }
     }
 
-    async fn go(&mut self, run: &RunId, prompt: String, cancel: &mut Cancel) -> Result<(), Halt> {
+    async fn go(&mut self, run: &RunId, cancel: &mut Cancel) -> Result<(), Halt> {
         let began = Instant::now();
         let mut output = 0;
-        self.heard(run, prompt).await?;
         for _ in 0..self.limits.steps {
             if *cancel.borrow() {
                 return Err(Halt::Cancelled);

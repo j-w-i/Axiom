@@ -32,6 +32,23 @@ impl Paths {
         Some(Self { data })
     }
 
+    /// Where agents' temporary folders go: the platform's place for what may be lost. `None`: beside
+    /// the data directory, which was chosen.
+    pub fn caches() -> Option<PathBuf> {
+        let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+        if var("AXIOM_DATA").is_some() {
+            None
+        } else if cfg!(target_os = "macos") {
+            var("HOME").map(|h| h.join("Library/Caches/Axiom/scratch"))
+        } else if cfg!(windows) {
+            var("LOCALAPPDATA").map(|h| h.join("Axiom-scratch"))
+        } else {
+            var("XDG_CACHE_HOME")
+                .or_else(|| var("HOME").map(|h| h.join(".cache")))
+                .map(|h| h.join("axiom/scratch"))
+        }
+    }
+
     pub fn run(&self) -> PathBuf {
         self.data.join("run")
     }

@@ -7,8 +7,7 @@ use std::{
     time::Duration,
 };
 
-use axiom_proto::{Body, Event, ItemId, Outcome, SessionId, events_line, limits, now_ms};
-use serde_json::Value;
+use axiom_proto::{Body, Event, ItemId, SessionId, events_line, limits, now_ms};
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -32,11 +31,7 @@ const TOGETHER: usize = 64;
 /// Says that text is being dropped, until the item ends and the number is known.
 const CUT: &str = "\n[more is not kept]";
 
-pub enum Say {
-    Event(Body),
-    Text(ItemId, String),
-    End(ItemId, Outcome, Option<Value>),
-}
+pub use axiom_engine::Say;
 
 pub enum Joined {
     Yes,
@@ -476,7 +471,7 @@ mod tests {
         Say::Text(id(i), t.into())
     }
     fn end(i: &str) -> Say {
-        Say::End(id(i), Outcome::Completed, None)
+        Say::End(id(i), axiom_proto::Outcome::Completed, None)
     }
     fn delta(i: &str, t: &str) -> Body {
         Body::ItemDelta { item: id(i), text: t.into() }
@@ -633,7 +628,7 @@ mod tests {
         let sent = tokio::time::timeout(Duration::from_secs(5), b.out.take()).await;
         let line = String::from_utf8(sent.unwrap().unwrap()).unwrap();
         let want = serde_json::json!({ "session": s.id, "fault": words });
-        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), want);
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&line).unwrap(), want);
     }
 
     #[tokio::test]

@@ -230,6 +230,9 @@ mod tests {
             subject: "ls\n-- Completed \nsafe\u{202e}txt".into(),
             scope: "this\nfolder".into(),
             answerable: Answerable::Live,
+            digest: String::new(),
+            item: None,
+            session: false,
         };
         assert_eq!(
             screen(vec![ask]),

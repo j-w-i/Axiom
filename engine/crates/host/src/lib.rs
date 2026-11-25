@@ -5,7 +5,9 @@
 //! - every queue is bounded; a client that cannot keep up is told to resynchronise;
 //! - the listener is local, owned by one user, and needs a token (SI-20).
 
+mod agents;
 pub mod client;
+pub mod connections;
 mod faults;
 mod log;
 mod net;

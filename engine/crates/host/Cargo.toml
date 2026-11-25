@@ -18,10 +18,15 @@ path = "src/main.rs"
 [dependencies]
 axiom-proto.workspace = true
 axiom-journal.workspace = true
+axiom-engine.workspace = true
+axiom-model.workspace = true
+axiom-policy.workspace = true
+axiom-tools.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+zeroize.workspace = true
 
 # One constant (O_NONBLOCK); tokio and getrandom have the crate in the tree anyway.
 [target.'cfg(unix)'.dependencies]

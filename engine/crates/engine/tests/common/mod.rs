@@ -1,7 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, dead_code)]
 
+mod server;
+pub use server::*;
+
 use std::{
-    collections::VecDeque,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -12,185 +14,7 @@ use axiom_model::{Client, Endpoint, Options, Profile, Settings};
 use axiom_policy::{Access, Budget, Caps, Keep, Net, Place, Policy, Reach, Tools};
 use axiom_proto::{AgentId, Body, ItemId, ItemKind, Outcome, RequestId, RunId};
 use axiom_tools::{Seen, Site, specs, system};
-use serde_json::{Value, json};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    sync::{mpsc, watch},
-};
-
-/// One answer of the server.
-#[derive(Clone)]
-pub struct Reply {
-    status: u16,
-    headers: Vec<(String, String)>,
-    body: Vec<String>,
-    /// The connection ends before the answer does.
-    pub cut: bool,
-    hang: bool,
-}
-impl Reply {
-    pub fn header(mut self, k: &str, v: &str) -> Self {
-        self.headers.push((k.into(), v.into()));
-        self
-    }
-    /// After what it says, nothing more comes.
-    pub fn hangs(mut self) -> Self {
-        self.hang = true;
-        self
-    }
-}
-
-fn data(v: Value) -> String {
-    format!("data: {v}\n\n")
-}
-fn chunk(delta: Value, finish: Value) -> String {
-    data(
-        json!({"id": "x", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}),
-    )
-}
-fn ends(finish: &str) -> Vec<String> {
-    vec![
-        chunk(json!({}), json!(finish)),
-        data(
-            json!({"id": "x", "choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 5, "total_tokens": 55}}),
-        ),
-        "data: [DONE]\n\n".into(),
-    ]
-}
-fn sse(body: Vec<String>) -> Reply {
-    Reply {
-        status: 200,
-        headers: vec![("content-type".into(), "text/event-stream".into())],
-        body,
-        cut: false,
-        hang: false,
-    }
-}
-pub fn text(parts: &[&str]) -> Reply {
-    let mut b: Vec<String> =
-        parts.iter().map(|p| chunk(json!({"content": p}), Value::Null)).collect();
-    b.extend(ends("stop"));
-    sse(b)
-}
-pub fn cut(part: &str) -> Reply {
-    Reply { cut: true, ..sse(vec![chunk(json!({"content": part}), Value::Null)]) }
-}
-pub fn calls(all: &[(&str, &str, &str)]) -> Reply {
-    let mut b: Vec<String> = all
-        .iter()
-        .enumerate()
-        .map(|(i, (id, name, args))| {
-            chunk(
-                json!({"tool_calls": [{"index": i, "id": id, "type": "function", "function": {"name": name, "arguments": args}}]}),
-                Value::Null,
-            )
-        })
-        .collect();
-    b.extend(ends("tool_calls"));
-    sse(b)
-}
-pub fn status(code: u16, body: &str) -> Reply {
-    Reply {
-        status: code,
-        headers: vec![("content-type".into(), "application/json".into())],
-        body: vec![body.into()],
-        cut: false,
-        hang: false,
-    }
-}
-
-#[derive(Clone)]
-pub struct Server {
-    pub url: String,
-    script: Arc<Mutex<VecDeque<Reply>>>,
-    requests: Arc<Mutex<Vec<Value>>>,
-    closed: Arc<Mutex<usize>>,
-}
-
-impl Server {
-    pub async fn start(script: Vec<Reply>) -> Self {
-        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let s = Self {
-            url: format!("http://127.0.0.1:{}/v1", l.local_addr().unwrap().port()),
-            script: Arc::new(Mutex::new(script.into())),
-            requests: Arc::default(),
-            closed: Arc::default(),
-        };
-        let me = s.clone();
-        tokio::spawn(async move {
-            while let Ok((mut c, _)) = l.accept().await {
-                let me = me.clone();
-                tokio::spawn(async move { me.serve(&mut c).await });
-            }
-        });
-        s
-    }
-    async fn serve(&self, c: &mut tokio::net::TcpStream) -> Option<()> {
-        let mut buf = Vec::new();
-        let head = loop {
-            let mut b = [0; 8192];
-            let n = c.read(&mut b).await.ok().filter(|n| *n > 0)?;
-            buf.extend_from_slice(&b[..n]);
-            if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                break i + 4;
-            }
-        };
-        let text = String::from_utf8_lossy(&buf[..head]).to_lowercase();
-        let len: usize =
-            text.lines().find_map(|l| l.strip_prefix("content-length: "))?.trim().parse().ok()?;
-        while buf.len() < head + len {
-            let mut b = [0; 8192];
-            let n = c.read(&mut b).await.ok().filter(|n| *n > 0)?;
-            buf.extend_from_slice(&b[..n]);
-        }
-        self.requests.lock().unwrap().push(serde_json::from_slice(&buf[head..head + len]).ok()?);
-        let r = self
-            .script
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_else(|| status(418, "no more answers"));
-        let mut h = format!(
-            "HTTP/1.1 {} X\r\ntransfer-encoding: chunked\r\nconnection: close\r\n",
-            r.status
-        );
-        for (k, v) in &r.headers {
-            h += &format!("{k}: {v}\r\n");
-        }
-        c.write_all(format!("{h}\r\n").as_bytes()).await.ok()?;
-        for b in &r.body {
-            if (r.cut || r.hang) && (b.contains("finish_reason\":\"") || b.contains("[DONE]")) {
-                break;
-            }
-            c.write_all(format!("{:x}\r\n{b}\r\n", b.len()).as_bytes()).await.ok()?;
-            c.flush().await.ok()?;
-        }
-        if r.hang {
-            let mut b = [0; 16];
-            let _ = c.read(&mut b).await;
-            *self.closed.lock().unwrap() += 1;
-            return None;
-        }
-        if !r.cut {
-            c.write_all(b"0\r\n\r\n").await.ok()?;
-        }
-        Some(())
-    }
-    pub fn add(&self, r: Reply) {
-        self.script.lock().unwrap().push_back(r);
-    }
-    pub fn requests(&self) -> Vec<Value> {
-        self.requests.lock().unwrap().clone()
-    }
-    pub async fn closed(&self) {
-        let now = Instant::now();
-        while *self.closed.lock().unwrap() == 0 {
-            assert!(now.elapsed() < Duration::from_secs(20));
-            tokio::time::sleep(Duration::from_millis(1)).await;
-        }
-    }
-}
+use tokio::sync::{mpsc, watch};
 
 #[derive(Default)]
 struct Kept {
@@ -482,7 +306,13 @@ impl T {
         prompt: &str,
         cancel: watch::Receiver<bool>,
     ) -> Ended {
-        let run = a.run(RunId::new(), prompt.into(), cancel);
+        let id = RunId::new();
+        let run = async {
+            match a.begin(&id, prompt.into()).await {
+                Ok(()) => a.run(id, cancel).await,
+                Err(_) => Ended { outcome: Outcome::Interrupted, error: None },
+            }
+        };
         tokio::time::timeout(Duration::from_secs(60), run).await.expect("it ends")
     }
     pub fn file(&self, s: &str) -> Option<String> {
