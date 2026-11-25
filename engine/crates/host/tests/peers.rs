@@ -471,6 +471,46 @@ async fn it_is_held_for_one_that_failed() {
     assert_eq!(heard(&lead, "has finished"), 1, "only what it was told before");
     t.still().await;
     assert_eq!(runs(&t, &lead), n + 1);
+    t.restart().await;
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "and then").await;
+    t.end_of(&run).await;
+    assert_eq!(heard(&lead, "of this session, Slow"), 1, "nor by another host");
+}
+
+/// One that goes on without asking is told when it has ended; one that asked is not told again.
+#[tokio::test]
+async fn it_is_told_when_its_own_run_ends() {
+    let mut t = T::new().await;
+    let lead = t
+        .agent(
+            "Lead",
+            Access::Work,
+            vec![
+                tell("Quick", "x"),
+                calls(&[("c", "shell", r#"{"command":"sleep 2"}"#)]),
+                text(&["Busy until now."]),
+                text(&["Now I know."]),
+            ],
+        )
+        .await;
+    let quick = t.agent("Quick", Access::Read, vec![text(&["the answer"])]).await;
+    let run = t.prompt(&lead, "go").await;
+    assert_eq!(t.end_of(&run).await, Outcome::Completed);
+    assert_eq!(t.next_end(&lead).await, Outcome::Completed);
+    assert_eq!((heard(&lead, "the answer"), runs(&t, &lead)), (1, 2));
+    quick.server.add(text(&["another answer"]));
+    for r in [tell("Quick", "y"), wait(), text(&["ok"])] {
+        lead.server.add(r);
+    }
+    let run = t.prompt(&lead, "and").await;
+    t.end_of(&run).await;
+    t.restart().await;
+    t.log.clear();
+    lead.server.add(text(&["ok"]));
+    let run = t.prompt(&lead, "and").await;
+    t.end_of(&run).await;
+    assert_eq!((heard(&lead, "another answer"), runs(&t, &lead)), (1, 1));
 }
 
 /// What was on when the host ended is told as that, and nothing begins by itself after it.
@@ -516,6 +556,28 @@ async fn what_was_cut_short_is_told_as_that() {
     assert_eq!(heard(&lead, "the host ended meanwhile"), 1);
 }
 
+/// What another said before is no answer to what it was told now.
+#[tokio::test]
+async fn an_old_answer_is_not_a_new_one() {
+    let mut t = T::new().await;
+    let lead = t
+        .agent(
+            "Lead",
+            Access::Work,
+            vec![tell("Other", "x"), wait(), tell("Other", "y"), wait(), text(&["ok"])],
+        )
+        .await;
+    t.agent("Other", Access::Read, vec![text(&["the old answer"]), status(401, "no such key")])
+        .await;
+    let run = t.prompt(&lead, "go").await;
+    t.end_of(&run).await;
+    assert!(
+        told(&lead).contains("Other failed") && !told(&lead).contains("the old answer"),
+        "{}",
+        told(&lead)
+    );
+}
+
 /// Agents do not keep each other going for ever with nobody there.
 #[tokio::test]
 async fn it_does_not_go_on_for_ever() {
@@ -544,6 +606,13 @@ async fn it_does_not_go_on_for_ever() {
     t.end_of(&run).await;
     t.still().await;
     assert_eq!(runs(&t, &lead), 10);
+    // And from there on it goes by itself again.
+    for r in [tell("Echo", "again"), text(&["told"]), text(&["thanks"])] {
+        lead.server.add(r);
+    }
+    let run = t.prompt(&lead, "go on").await;
+    t.end_of(&run).await;
+    assert_eq!(t.next_end(&lead).await, Outcome::Completed);
 }
 
 /// SI-24.

@@ -917,8 +917,10 @@ impl Worker {
     ) -> (mpsc::Receiver<Word>, Ended, String) {
         match self {
             Self::Native(mut a) => {
+                let before = a.context.answers();
                 let e = a.run(run, cancel).await;
-                let last = a.context.last();
+                // Of this run: what it said before is no answer to what it was told now.
+                let last = a.context.last_since(before);
                 (a.inbox, e, last)
             }
             Self::Delegated(mut w) => {

@@ -998,6 +998,39 @@ mod tests {
     }
 
     #[test]
+    fn what_is_owed_is_told_once() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("j");
+        let mut j = Journal::open(&path).unwrap();
+        let reader = Reader::open(&path).unwrap();
+        let s = SessionId("s".into());
+        j.create(&s, "t", None, 1).unwrap();
+        let (a, b, c) = (AgentId("a".into()), AgentId("b".into()), AgentId("c".into()));
+        let run = |r: &str| RunId(r.into());
+        j.put_owed(&s, &a, &run("r1"), &c).unwrap();
+        j.put_owed(&s, &a, &run("r1"), &c).unwrap();
+        j.put_owed(&s, &b, &run("r1"), &c).unwrap();
+        j.put_owed(&s, &a, &run("r2"), &b).unwrap();
+        let of = |p: &AgentId| reader.owed(&s, p).unwrap();
+        assert_eq!(of(&a), [(run("r1"), c.clone(), None), (run("r2"), b.clone(), None)]);
+        let told = j.end_owed(&s, &c, &[run("r1"), run("r9")], "done").unwrap();
+        assert_eq!(told, [a.clone(), b.clone()]);
+        // What it came to first stands; what it came to last is another matter.
+        assert!(j.end_owed(&s, &c, &[run("r1")], "later").unwrap().is_empty());
+        assert_eq!(of(&b)[0].2.as_deref(), Some("done"));
+        assert_eq!(reader.finished(&s, &c).unwrap().as_deref(), Some("later"));
+        assert_eq!(reader.finished(&s, &a).unwrap(), None);
+        let item = |i: &str, r: &str| (vec![run(r)], ItemId(i.into()), format!("text {i}"));
+        let first = [item("i1", "r1"), item("i2", "r2")];
+        assert_eq!(j.deliver(&s, &a, &first).unwrap(), [ItemId("i1".into()), ItemId("i2".into())]);
+        assert!(j.deliver(&s, &a, &first).unwrap().is_empty(), "once");
+        assert_eq!(reader.pending(&s, &a).unwrap().len(), 2);
+        assert!(of(&a).is_empty() && of(&b).len() == 1);
+        j.drop_owed(&s, &b, &[run("r1")]).unwrap();
+        assert!(of(&b).is_empty());
+    }
+
+    #[test]
     fn another_process_that_holds_the_file_is_a_passing_error() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("j");
