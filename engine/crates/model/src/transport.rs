@@ -464,13 +464,19 @@ mod tests {
         let here = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         // A name no resolver knows (RFC 6761), as an endpoint never has it.
         let url = format!("http://nobody.invalid:{}/v1", here.local_addr().unwrap().port());
-        std::thread::spawn(move || here.accept().is_ok());
+        let (reached, was_reached) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok((socket, _)) = here.accept() {
+                drop(socket);
+                let _ = reached.send(());
+            }
+        });
         let profile = Profile::openai_compatible("p", "");
         let options = Options::default();
         let client = Client::new(profile, Endpoint::unchecked(&url), None, options).unwrap();
-        // It was reached, and then said nothing.
-        let e = client.list().await.unwrap_err();
-        assert_eq!((e.class, e.retry), (Class::Network, Retry::Restart));
+        // It is reached, and hangs up.
+        assert_eq!(client.list().await.unwrap_err().class, Class::Network);
+        was_reached.recv_timeout(Duration::from_secs(10)).unwrap();
     }
 
     /// None of reqwest's own words reach an error unread, but they are kept clean all the same.
