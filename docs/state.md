@@ -40,8 +40,17 @@ Steps 1–16 are done; the owner chose B for D1, D3, D4 and D5 (2026-11-25). D2 
 ## In progress: what was said and not heard (`m5/unheard`)
 Number 5 of `research/t3code-comparison.md`. Done: in the journal what waits is taken back or heard and never both (`take_back`, `heard`, `put_message`); the loop and the delegated programs tell nobody what was taken back and do not wait for an answer to it. Not done: the call a client takes it back with, the event that says what waits and what does not any more, the run that would begin (`Slot::after`) for something that is no longer there, what other agents have said (not a person's to take back), changing it, and all of the client. Nothing of it can be reached yet, and the two engine changes have no test of their own yet.
 
+## The look, round 12 (`design/flat`)
+Built 2026-11-25 on the owner's yes to pictures (`design/system.md`, history). In the pictures and not in the app, because the host has nothing for it: a plan, levels of use per service in the header, a terminal, renaming and removing sessions. The folder window (`file_selector`, by the Flutter team, BSD: a person had to type a whole path) has been opened by nobody. `spec-fable.md` is older than this and describes what was before.
+
+## The material, round 13 (`design/tactile`, on `design/flat`)
+Unitable's depth on round 12's layout, at the owner's word (2026-11-25). Not measured: what the outlines cost a frame on a display (K1).
+
+## Modern, rounds 14 to 19 (`design/modern`, on `design/tactile`)
+Built on the owner's word (2026-11-25). In the pictures and not in the app, because the host has nothing for it: the plan, the terminals and the levels of use. The panel of the app holds what has changed. Accepted by the owner at round 19 ("this looks great"). The fifteen goldens were recorded again with their yes (2026-11-25): every one of them shows the new look. Opened once in a real window with the owner's yes (2026-11-25, macOS 27 arm64, release, specimen content, 120 Hz, Impeller): scrolling, build p99 2.0 ms and raster p99 3.3 ms; everything painted again, 3.7 and 4.5 ms; the first frame 63 ms. Opened again with their yes and photographed: the buttons are on the header's line (26, where they were 16 against 33), shades show no rings. Dragging by the header reaches the system (`MoveArea`; nothing did before), shown by events sent to a real window, not by a hand. Full screen has been looked at by nobody (K8).
+
 ## Next
-1. Owner: say whether a real window may be opened once, when convenient, to check chrome and frame times.
+1. Owner: drag the window by its header and try full screen (K8).
 2. Owner: say whether the real Claude Code or Codex on this computer may be started once, to see a delegated agent work (K40).
 3. Owner: sign in with ChatGPT once, if wanted (K47).
 4. Somebody with the standing to do it: the security review (K32).

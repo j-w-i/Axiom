@@ -1,65 +1,64 @@
 import 'package:flutter/widgets.dart';
 
+import 'icon_data.dart';
 import 'svg_path.dart';
 import 'tokens.dart';
 
-/// Axiom's own icons: 16-unit grid, 1.35 stroke, round joins, drawn from path data.
+/// Icons, drawn for the size they are shown at: 16, and 12 for chevrons and checks. Each has an outline
+/// and a full shape, for what is chosen. They are Fluent's (`THIRD_PARTY.md`).
 enum AxIcon {
-  play('M5 3.5 L12.5 8 L5 12.5 Z'),
-  pause('M5.5 4 V12 M10.5 4 V12'),
-  stop('M4.5 4.5 H11.5 V11.5 H4.5 Z'),
-  send('M3 8 H12 M8.5 4.5 L12 8 L8.5 11.5'),
-  search('M7 2.8 A4.2 4.2 0 1 0 7 11.2 A4.2 4.2 0 1 0 7 2.8 M10.2 10.2 L13.2 13.2'),
-  file('M4 2.5 H9.5 L12 5 V13.5 H4 Z M9.5 2.5 V5 H12'),
-  edit('M3 13 L3.6 10.2 L10.6 3.2 L12.8 5.4 L5.8 12.4 Z'),
-  terminal('M2.5 3.5 H13.5 V12.5 H2.5 Z M5 6.2 L7 8 L5 9.8 M8 10 H11'),
-  branch('M5 3 V13 M5 10 C5 7.5 11 8.5 11 5 M11 5 V3'),
-  plus('M8 3.5 V12.5 M3.5 8 H12.5'),
-  check('M3.5 8.5 L6.5 11.5 L12.5 4.8'),
-  down('M4.5 6.5 L8 10 L11.5 6.5'),
-  right('M6.5 4.5 L10 8 L6.5 11.5'),
-  shield('M8 2.5 L12.8 4.3 V8 C12.8 11 10.4 12.8 8 13.6 C5.6 12.8 3.2 11 3.2 8 V4.3 Z'),
-  attach('M11.5 7 L7.5 11 A2.4 2.4 0 0 1 4.1 7.6 L8.6 3.1 A1.6 1.6 0 0 1 10.9 5.4 L6.6 9.7'),
-  web(
-    'M8 2.5 A5.5 5.5 0 1 0 8 13.5 A5.5 5.5 0 1 0 8 2.5 M2.5 8 H13.5 M8 2.5 C10.5 5 10.5 11 8 13.5 C5.5 11 5.5 5 8 2.5',
-  ),
-  delegate('M4.5 3 V6.5 C4.5 8.5 11.5 7.5 11.5 10 V13 M9.5 11 L11.5 13 L13.5 11'),
-  close('M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5'),
-  list('M3 4.5 H13 M3 8 H13 M3 11.5 H9'),
-  think('M3 11 C5 11 5 5 8 5 C11 5 11 11 13 11'),
-  strips('M3 3.5 V12.5 M6.4 3.5 V12.5 M9.7 3.5 V12.5 M13 3.5 V12.5'),
-  lanes('M2.5 4.5 H8 M5.5 8 H11 M9 11.5 H13.5'),
-  warn('M8 3 L13.5 12.8 H2.5 Z M8 6.8 V9.4 M8 11 V11.1'),
-  more('M4 8 H4.1 M8 8 H8.1 M12 8 H12.1');
+  play,
+  pause,
+  stop,
+  up,
+  search,
+  file,
+  edit,
+  terminal,
+  branch,
+  plus,
+  check,
+  down,
+  right,
+  shield,
+  attach,
+  web,
+  delegate,
+  close,
+  list,
+  think,
+  warn,
+  folder,
+  account,
+  sidebar,
+  panel,
+  comment,
+  chat,
+  refresh,
+  more;
 
-  const AxIcon(this.data);
+  (double, String, String) get _data => iconData[name]!;
 
-  /// The hue of the kind of work an icon stands for, if it stands for one.
-  Color? kind(AxColors c) => switch (this) {
-    file || list => c.kindRead,
-    edit => c.kindEdit,
-    search => c.kindSearch,
-    terminal => c.kindRun,
-    web => c.kindWeb,
-    think || delegate => c.kindThink,
-    shield || warn => c.attentionText,
-    _ => null,
-  };
-  final String data;
-  static final _cache = <AxIcon, Path>{};
-  Path get path => _cache[this] ??= svgPath(data);
+  /// The size it is drawn for, and shown at.
+  double get size => _data.$1;
+
+  static final _cache = <(AxIcon, bool), Path>{};
+  Path path({required bool filled}) =>
+      _cache[(this, filled)] ??= svgPath(filled ? _data.$3 : _data.$2);
 }
 
 class AxGlyph extends StatelessWidget {
-  const AxGlyph(this.icon, {super.key, this.size = 14, this.color, this.filled = false});
+  const AxGlyph(this.icon, {super.key, this.size, this.color, this.filled = false});
   final AxIcon icon;
-  final double size;
+
+  /// If it is not the size it is drawn for.
+  final double? size;
   final Color? color;
   final bool filled;
   @override
   Widget build(BuildContext context) => ExcludeSemantics(
     child: CustomPaint(
-      size: Size.square(size),
+      size: Size.square(size ?? icon.size),
       painter: _GlyphPainter(icon, color ?? Ax.of(context).colors.ink3, filled),
     ),
   );
@@ -75,16 +74,8 @@ class _GlyphPainter extends CustomPainter {
     // Square and centred, whatever box it is given.
     final k = s.shortestSide;
     c.translate((s.width - k) / 2, (s.height - k) / 2);
-    c.scale(k / 16);
-    c.drawPath(
-      icon.path,
-      Paint()
-        ..color = color
-        ..style = filled ? PaintingStyle.fill : PaintingStyle.stroke
-        ..strokeWidth = icon == AxIcon.more ? 2 : 1.35
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
+    c.scale(k / icon.size);
+    c.drawPath(icon.path(filled: filled), Paint()..color = color);
   }
 
   @override

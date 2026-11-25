@@ -352,7 +352,7 @@ void main() {
   testWidgets('a panel that grows stays on the side it opened on', (t) async {
     await mount(
       t,
-      const Align(alignment: Alignment(-1, .05), child: Owner()),
+      const Align(alignment: Alignment(-1, -.4), child: Owner()),
       size: const Size(900, 600),
       dpr: 1,
     );
@@ -468,17 +468,9 @@ void main() {
       expect(find.text('58k'), findsOneWidget, reason: 'what is free');
     });
 
-    testWidgets('its level has the hue of its service', (t) async {
-      const hue = Color(0xFF123456);
-      await mount(
-        t,
-        const Align(
-          alignment: Alignment.bottomLeft,
-          child: ContextGauge(ContextView(share: .4, provenance: Provenance.reported), hue: hue),
-        ),
-        dpr: 1,
-      );
-      expect(t.widget<AxMeter>(find.byType(AxMeter)).color, hue);
+    testWidgets('its level is neutral: how full it is belongs to no service', (t) async {
+      await show(t, const ContextView(share: .4, provenance: Provenance.reported));
+      expect(t.widget<AxRing>(find.byType(AxRing)).color, isNull);
     });
 
     testWidgets('an unknown level is not a number', (t) async {
@@ -587,7 +579,6 @@ void main() {
           name: 'An agent with a very long name indeed, longer than anyone needs',
           state: AgentState.running,
           mark: ServiceMark.claude,
-          tabs: const [('Conversation', null), ('Changes', '3'), ('Terminal', null)],
           trailing: const Text('Opus 5.5   replay', maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ),
@@ -597,8 +588,9 @@ void main() {
     );
     expect(t.takeException(), isNull);
     final name = t.getRect(find.textContaining('An agent'));
-    expect(name.right, lessThan(t.getRect(find.text('Conversation').last).left));
-    expect(t.getRect(find.text('Terminal').last).right, lessThanOrEqualTo(760));
+    final end = t.getRect(find.text('Opus 5.5   replay'));
+    expect(name.right, lessThan(end.left));
+    expect(end.right, closeTo(744, 1));
   });
 
   testWidgets('the bar fits at any width, with everything in it', (t) async {
@@ -615,7 +607,6 @@ void main() {
                   name: name,
                   state: AgentState.running,
                   mark: ServiceMark.claude,
-                  tabs: const [('Conversation', null), ('Changes', '3'), ('Terminal', null)],
                   trailing: const ContextGauge(
                     ContextView(
                       share: .71,
@@ -635,44 +626,5 @@ void main() {
         }
       }
     }
-  });
-
-  testWidgets('its views can be chosen', (t) async {
-    final got = <int>[];
-    await mount(
-      t,
-      Align(
-        alignment: Alignment.topLeft,
-        child: AgentBar(
-          name: 'Builder',
-          state: AgentState.running,
-          tabs: const [('Conversation', null), ('Changes', '3')],
-          onTab: got.add,
-        ),
-      ),
-      dpr: 1,
-    );
-    await t.tap(find.text('Changes').last);
-    expect(got, [1]);
-    expect(find.byType(AxLamp), findsOneWidget);
-  });
-
-  testWidgets('the name and the views share a line', (t) async {
-    await mount(
-      t,
-      const Align(
-        alignment: Alignment.topLeft,
-        child: AgentBar(
-          name: 'Builder',
-          state: AgentState.running,
-          mark: ServiceMark.openai,
-          tabs: [('Conversation', null)],
-        ),
-      ),
-      dpr: 1,
-    );
-    final a = t.getCenter(find.text('Builder')).dy;
-    final b = t.getCenter(find.text('Conversation').last).dy;
-    expect((a - b).abs(), lessThan(.6));
   });
 }

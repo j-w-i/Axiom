@@ -4,6 +4,7 @@ import 'package:axiom/patterns/execution.dart';
 import 'package:axiom/patterns/usage.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'shot.dart';
@@ -34,6 +35,17 @@ void main() {
     await t.pump();
     await tap(find.byType(ContextGauge));
     await snap(t, 'context-open');
+  });
+  testWidgets('workbench, what has changed, and a terminal', (t) async {
+    await mount(t, const Workbench());
+    await t.tap(find.bySemanticsLabel(RegExp('^src/auth/refresh.ts')));
+    await t.pump(const Duration(milliseconds: 600));
+    await snap(t, 'workbench-changes');
+    await mount(t, const Workbench(key: ValueKey(1), terminal: true));
+    await snap(t, 'workbench-terminal');
+    await t.tap(find.bySemanticsLabel('Hide the panel'));
+    await t.pump(const Duration(milliseconds: 600));
+    await snap(t, 'workbench-bare');
   });
   testWidgets('workbench, narrow', (t) async {
     await mount(t, const Workbench(), size: const Size(820, 700));

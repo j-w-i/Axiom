@@ -45,7 +45,7 @@ const agents = [
   AgentView(
     id: 'builder',
     name: 'Builder',
-    state: AgentState.running,
+    state: AgentState.asking,
     model: 'GPT-5.6',
     harness: 'Codex',
     connection: 'ChatGPT Pro, work',
@@ -55,7 +55,7 @@ const agents = [
     filesChanged: 3,
     recent: [
       ActivityView(AxIcon.terminal, 'pnpm test auth', detail: '2 failed', failed: true),
-      ActivityView(AxIcon.edit, 'Editing refresh.ts'),
+      ActivityView(AxIcon.shield, 'Asks to run a command'),
     ],
   ),
   AgentView(
@@ -74,7 +74,7 @@ const agents = [
   AgentView(
     id: 'tester',
     name: 'Tester',
-    state: AgentState.asking,
+    state: AgentState.waiting,
     model: 'Qwen3 4B',
     harness: 'Axiom',
     connection: 'LM Studio, this Mac',
@@ -82,7 +82,7 @@ const agents = [
     context: .16,
     recent: [
       ActivityView(AxIcon.terminal, 'vitest', detail: '118 passed'),
-      ActivityView(AxIcon.shield, 'Asks to run a migration'),
+      ActivityView(AxIcon.list, 'Waits for Builder'),
     ],
   ),
   AgentView(
@@ -99,11 +99,11 @@ const agents = [
 ];
 
 const request = RequestView(
-  agent: 'Tester',
+  agent: 'Builder',
   what: 'asks to run outside the sandbox',
   subject: 'pnpm db:migrate --env test',
   scope: 'Writes db/test.sqlite. No network.',
-  always: 'Allow in this worktree',
+  always: 'Allow for this session',
 );
 
 const services = [
@@ -178,6 +178,11 @@ const services = [
   ),
 ];
 
+const changed = [
+  ('src/auth/refresh.ts', 7, 2),
+  ('src/auth/inflight.ts', 31, 0),
+  ('test/refresh.test.ts', 19, 0),
+];
 const diff = [
   DiffLine(DiffKind.same, 41, 'async refresh(account: Account) {'),
   DiffLine(DiffKind.remove, 42, '  if (!expired(session.token)) return session;'),
@@ -262,7 +267,7 @@ const session = SessionView(
     TaskView('Design note', TaskState.done, owner: 'Architect'),
     TaskView('Failing test', TaskState.done, owner: 'Tester'),
     TaskView('Single-flight guard', TaskState.active, owner: 'Builder'),
-    TaskView('Migrate sessions', TaskState.asking, owner: 'Tester'),
+    TaskView('Migrate sessions', TaskState.todo, owner: 'Tester'),
     TaskView('Independent review', TaskState.todo, owner: 'Reviewer'),
   ],
 );
@@ -322,17 +327,15 @@ SessionModel transcript() {
         'map keyed by account.\n\n```ts\nasync refresh(account: Account) {\n  return this.inflight.run'
         '(account.id, async () => {\n    await using lock = await this.locks.acquire(account.id);\n    '
         'const session = await this.store.read(account.id);\n    if (!expired(session.token)) return '
-        'session;\n  });\n}\n```\n\nBoth writers now go through one entry point:\n\n- the store keeps '
-        'its interface\n- nothing outside `auth` changes',
+        'session;\n  });\n}\n```',
   );
   work('i', 'edit', {'path': 'src/auth/refresh.ts'}, '+7 −2');
   work('j', 'edit', {'path': 'src/auth/inflight.ts'}, '+31 −0');
-  work('k', 'fetch', {'path': 'developer.mozilla.org/…/Symbol/asyncDispose'}, '12 KB');
   e.add(const p.ItemStarted('l', 'r', 'builder', p.ItemKind.prose, '', null));
   e.add(
     const p.ItemDelta(
       'l',
-      'Now the migration. It adds a `rotated_at` column, and Tester will run it agai',
+      'Both writers now go through one entry point. Next is the migration, which adds a `rotated_at` column.',
     ),
   );
   return SessionModel('s1')..apply([for (final b in e) p.Event(++n, n, b)]);

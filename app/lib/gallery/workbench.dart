@@ -1,24 +1,28 @@
 import 'package:flutter/widgets.dart';
 
 import '../patterns/agent_bar.dart';
+import '../patterns/beside.dart';
 import '../patterns/composer.dart';
 import '../patterns/context_gauge.dart';
 import '../patterns/execution.dart';
+import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/transcript_view.dart';
 import '../patterns/usage.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
-import '../ui/status.dart';
+import '../ui/marks.dart';
+import '../ui/overlay.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'specimen.dart' as s;
 
 /// The components at work together, on specimen content. It proves the system, not the product.
 class Workbench extends StatefulWidget {
-  const Workbench({super.key, this.titleInset = 78});
+  const Workbench({super.key, this.titleInset = 92, this.panel = true, this.terminal = false});
   final double titleInset;
+  final bool panel, terminal;
   @override
   State<Workbench> createState() => _WorkbenchState();
 }
@@ -26,7 +30,9 @@ class Workbench extends StatefulWidget {
 class _WorkbenchState extends State<Workbench> {
   final _transcript = s.transcript();
   String _agent = 'builder';
-  int _tab = 0;
+  late bool _panel = widget.panel, _terminal = widget.terminal;
+  final _opened = <String>{};
+  var _sizes = Beside.usual;
   bool _request = true;
   final _choice = {
     'Harness': 'codex',
@@ -47,7 +53,6 @@ class _WorkbenchState extends State<Workbench> {
         ('Harness', s.harnessesForGpt),
         ('Account', s.otherConnections[_choice['Model']] ?? s.connections),
         ('Effort', s.efforts),
-        ('Access', s.access),
       ])
         ExecutionChoice(
           k,
@@ -74,9 +79,8 @@ class _WorkbenchState extends State<Workbench> {
         ),
     ];
     final mark = agent.id == 'builder' ? choices.first.item?.mark : agent.mark;
-    return Surface(
-      c.chassis,
-      radius: 0,
+    return ColoredBox(
+      color: c.chassis.fill,
       child: LayoutBuilder(
         builder: (context, box) {
           final wide = box.maxWidth >= 860;
@@ -85,122 +89,46 @@ class _WorkbenchState extends State<Workbench> {
             children: [
               if (wide)
                 SizedBox(
-                  width: box.maxWidth >= 1080 ? 264 : 224,
+                  width: box.maxWidth >= 1080 ? 264 : 228,
                   child: FocusTraversalGroup(
                     child: _Side(
                       inset: widget.titleInset,
                       selected: _agent,
                       onSelect: (id) => setState(() => _agent = id),
+                      active: _active,
+                      onUse: (name, id) => setState(() => _active[name] = id),
                     ),
                   ),
                 ),
               Expanded(
                 child: FocusTraversalGroup(
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: 44,
-                        child: Row(
-                          children: [
-                            SizedBox(width: wide ? 10 : widget.titleInset),
-                            Expanded(
-                              child: Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      '3 running',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: t.type.label.ink(c.ink3),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  const AxLamp(AgentState.asking),
-                                  const SizedBox(width: 7),
-                                  Flexible(
-                                    child: Text(
-                                      '1 asking',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: t.type.label.ink(c.attentionText),
-                                    ),
-                                  ),
-                                ],
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(wide ? 0 : 8, 8, 8, 8),
+                    child: AxCanvas(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _bar(agent, mark, wide: wide),
+                          Expanded(
+                            child: LayoutBuilder(
+                              builder: (context, room) => Beside(
+                                main: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(child: _talk(choices, agent.name, agent.id)),
+                                    if (_terminal && _panel) _drawer(context),
+                                  ],
+                                ),
+                                panel: _panel && Beside.fits(room.maxWidth) ? _side() : null,
+                                wide: _opened.isNotEmpty && !_folded.contains('files'),
+                                sizes: _sizes,
+                                onSizes: (v) => setState(() => _sizes = v),
                               ),
                             ),
-                            if (box.maxWidth >= 1000)
-                              for (final v in s.services)
-                                UsageKey(
-                                  s.ServiceViewX(v).withActive(_active[v.name]!),
-                                  onUse: (id) => setState(() => _active[v.name] = id),
-                                  onLink: () {},
-                                ),
-                            const SizedBox(width: 4),
-                            AxButton.icon(
-                              AxIcon.search,
-                              label: 'Find or run',
-                              shortcut: '⌘K',
-                              tone: AxTone.quiet,
-                              onPressed: () {},
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(wide ? 0 : 8, 0, 8, 8),
-                          child: Surface(
-                            c.bay,
-                            radius: AxRadius.bay,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                AgentBar(
-                                  name: agent.name,
-                                  state: agent.state,
-                                  mark: mark,
-                                  tabs: const [
-                                    ('Conversation', null),
-                                    ('Changes', '3'),
-                                    ('Terminal', null),
-                                  ],
-                                  index: _tab,
-                                  onTab: (i) => setState(() => _tab = i),
-                                ),
-                                ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
-                                Expanded(
-                                  child: TranscriptView(
-                                    _transcript.agents[_agent] ?? _transcript.agents['builder']!,
-                                  ),
-                                ),
-                                if (_request)
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                                    child: RequestBar(
-                                      s.request,
-                                      onOnce: () => setState(() => _request = false),
-                                      onAlways: () => setState(() => _request = false),
-                                      onDeny: () => setState(() => _request = false),
-                                    ),
-                                  ),
-                                Composer(
-                                  placeholder:
-                                      'Steer ${agent.name}. It reads this after the current tool call.',
-                                  action: 'Queue',
-                                  leading: [
-                                    ExecutionKey(choices, of: agent.id),
-                                    ContextGauge(s.contextView, hue: mark?.color(c)),
-                                  ],
-                                  onAttach: () {},
-                                  onSubmit: (_) => true,
-                                ),
-                              ],
-                            ),
                           ),
-                        ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -210,55 +138,266 @@ class _WorkbenchState extends State<Workbench> {
       ),
     );
   }
+
+  Widget _bar(AgentView agent, ServiceMark? mark, {required bool wide}) => AgentBar(
+    name: agent.name,
+    state: agent.state,
+    mark: mark,
+    inset: wide ? AxSpace.gutter : widget.titleInset,
+    trailing: _panelKey(),
+  );
+
+  Widget _panelKey() => PanelKey(open: _panel, onPressed: () => setState(() => _panel = !_panel));
+
+  final _folded = <String>{};
+  void _fold(String name) =>
+      setState(() => _folded.contains(name) ? _folded.remove(name) : _folded.add(name));
+
+  Widget _side() {
+    final t = Ax.of(context);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(8, 0, AxSpace.edge, AxSpace.edge),
+      children: [
+        PlanView(s.session.tasks, folded: _folded.contains('plan'), onFold: () => _fold('plan')),
+        PanelHeading(
+          '3 changed files',
+          const ChangedBy(57, 2),
+          folded: _folded.contains('files'),
+          onFold: () => _fold('files'),
+        ),
+        if (!_folded.contains('files'))
+          for (final (i, (path, a, r)) in s.changed.indexed)
+            CardPart(
+              first: i == 0,
+              last: i == s.changed.length - 1,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: ChangedRow(
+                      path,
+                      added: a,
+                      removed: r,
+                      open: _opened.contains(path),
+                      onPressed: () => setState(
+                        () => _opened.contains(path) ? _opened.remove(path) : _opened.add(path),
+                      ),
+                    ),
+                  ),
+                  if (_opened.contains(path))
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(10, 0, 10, 10),
+                      child: DiffLines(s.diff),
+                    ),
+                  if (i < s.changed.length - 1)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: AxSpace.card),
+                      child: Hairline(),
+                    ),
+                ],
+              ),
+            ),
+        const SizedBox(height: 6),
+        PanelGroup(
+          'Terminals',
+          AxButton.icon(
+            AxIcon.plus,
+            label: 'New terminal',
+            tone: AxTone.quiet,
+            size: 26,
+            onPressed: () {},
+          ),
+          [
+            PanelRow(
+              AxIcon.terminal,
+              'pnpm test auth',
+              state: 'running',
+              open: _terminal,
+              onPressed: () => setState(() => _terminal = !_terminal),
+            ),
+            PanelRow(AxIcon.terminal, 'pnpm dev', state: ':5173', onPressed: () {}),
+          ],
+          acts: true,
+          folded: _folded.contains('terminals'),
+          onFold: () => _fold('terminals'),
+        ),
+        SizedBox(height: t.density.row / 4),
+      ],
+    );
+  }
+
+  Widget _drawer(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AxSpace.edge, 0, 8, AxSpace.edge),
+      child: Surface(
+        c.block,
+        radius: AxRadius.card,
+        child: SizedBox(
+          height: 180,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AxSpace.card, 8, 9, 2),
+                child: Row(
+                  children: [
+                    AxGlyph(AxIcon.terminal, color: c.ink3),
+                    const SizedBox(width: 9),
+                    Expanded(child: Text('pnpm test auth', style: t.type.code.ink(c.ink1))),
+                    AxButton.icon(
+                      AxIcon.close,
+                      label: 'Close the terminal',
+                      tone: AxTone.quiet,
+                      size: 26,
+                      onPressed: () => setState(() => _terminal = false),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(AxSpace.card, 2, AxSpace.card, 12),
+                  child: Text(
+                    '  PASS  src/auth/refresh.test.ts (6)\n'
+                    '  PASS  src/auth/inflight.test.ts (4)\n'
+                    '  Tests 10 passed\n\n'
+                    '  Waiting for file changes',
+                    style: t.type.code.ink(c.ink2),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _talk(List<ExecutionChoice> choices, String name, String id) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Expanded(child: TranscriptView(_transcript.agents[_agent] ?? _transcript.agents['builder']!)),
+      LayoutBuilder(
+        builder: (context, box) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            AxSpace.beside(box.maxWidth),
+            0,
+            AxSpace.beside(box.maxWidth),
+            16,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_request) ...[
+                RequestBar(
+                  s.request,
+                  onOnce: () => setState(() => _request = false),
+                  onAlways: () => setState(() => _request = false),
+                  onDeny: () => setState(() => _request = false),
+                ),
+                const SizedBox(height: 8),
+              ],
+              Composer(
+                placeholder: 'Message $name',
+                action: 'Queue',
+                leading: [
+                  ExecutionKey(choices, of: id),
+                  AxSelect<String>(
+                    label: 'Access',
+                    quiet: true,
+                    icon: AxIcon.shield,
+                    items: s.access,
+                    value: _choice['Access']!,
+                    onChanged: (v) => setState(() => _choice['Access'] = v),
+                  ),
+                  const ContextGauge(s.contextView),
+                ],
+                onAttach: () {},
+                onStop: () {},
+                onSubmit: (_) => true,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
 }
 
 class _Side extends StatelessWidget {
-  const _Side({required this.inset, required this.selected, required this.onSelect});
+  const _Side({
+    required this.inset,
+    required this.selected,
+    required this.onSelect,
+    required this.active,
+    required this.onUse,
+  });
+  final Map<String, String> active;
+  final void Function(String service, String account) onUse;
   final double inset;
   final String selected;
   final ValueChanged<String> onSelect;
   @override
   Widget build(BuildContext context) {
-    final t = Ax.of(context), c = t.colors;
+    final t = Ax.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 44,
+          height: 52,
           child: Padding(
-            padding: EdgeInsets.only(left: inset, right: 9),
+            padding: EdgeInsets.only(left: inset, right: 10),
             child: Row(
               children: [
-                const AxMark(size: 17),
+                const AxMark(size: 18),
                 const SizedBox(width: 9),
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(text: 'Axiom', style: t.type.uiStrong),
-                        const WidgetSpan(child: SizedBox(width: 10)),
-                        const TextSpan(text: 'web-store'),
-                      ],
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.type.ui.ink(c.ink3),
-                  ),
-                ),
+                Expanded(child: Text('Axiom', style: t.type.uiStrong.copyWith(fontSize: 14))),
                 AxButton.icon(
-                  AxIcon.plus,
-                  label: 'New session',
+                  AxIcon.sidebar,
+                  label: 'Hide the sidebar',
                   tone: AxTone.quiet,
+                  iconFilled: true,
                   onPressed: () {},
                 ),
               ],
             ),
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
+          child: Column(
+            children: [
+              NavRow(AxIcon.plus, 'New session', keys: '⌘N', act: true, onPressed: () {}),
+              const SizedBox(height: 3),
+              NavRow(AxIcon.search, 'Search', keys: '⌘K', onPressed: () {}),
+            ],
+          ),
+        ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 20),
             children: [
+              const SideHeading('Needs you'),
+              NeedsRow(
+                agent: 'Builder',
+                what: 'asks to run a command',
+                subject: s.request.subject,
+                session: s.session.title,
+                age: 'now',
+                onOpen: () {},
+              ),
+              SideHeading(
+                'web-store',
+                act: AxButton.icon(
+                  AxIcon.plus,
+                  label: 'New session in web-store',
+                  tone: AxTone.quiet,
+                  size: 28,
+                  onPressed: () {},
+                ),
+              ),
               SessionPanel(
                 session: s.session,
                 selected: selected,
@@ -267,12 +406,30 @@ class _Side extends StatelessWidget {
                 onPause: (_) {},
                 onStop: (_) {},
               ),
-              const SizedBox(height: 14),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                child: Text('Other sessions', style: t.type.label.ink(c.ink3)),
-              ),
               for (final o in s.otherSessions) SessionRow(o, onOpen: () {}),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Limits are an account's, and stand with the accounts.
+              Row(
+                children: [
+                  for (final v in s.services)
+                    Flexible(
+                      child: UsageKey(
+                        s.ServiceViewX(v).withActive(active[v.name]!),
+                        onUse: (id) => onUse(v.name, id),
+                        onLink: () {},
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              NavRow(AxIcon.account, 'Accounts', keys: '⌘,', onPressed: () {}),
             ],
           ),
         ),

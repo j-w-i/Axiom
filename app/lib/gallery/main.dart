@@ -8,7 +8,11 @@ import 'sheets.dart';
 import 'workbench.dart';
 
 /// The component gallery: `flutter run -t lib/gallery/main.dart` (opens a window).
-void main() => runApp(const AxiomApp(home: Gallery()));
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Shades.load();
+  runApp(const AxiomApp(home: Gallery()));
+}
 
 class Gallery extends StatefulWidget {
   const Gallery({super.key});
@@ -29,7 +33,7 @@ class _GalleryState extends State<Gallery> {
       child: MediaQuery(
         data: MediaQuery.of(context).copyWith(disableAnimations: _still ? true : null),
         child: Surface(
-          theme.colors.chassis,
+          theme.colors.bay,
           radius: 0,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -69,7 +73,7 @@ class _GalleryState extends State<Gallery> {
                   ],
                 ),
               ),
-              const Seam(),
+              const Hairline(),
               Expanded(
                 child: _page < sheets.length
                     ? SingleChildScrollView(child: sheets[_page].$2(context))
