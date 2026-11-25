@@ -13,6 +13,7 @@ import '../patterns/models.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
+import '../ui/icons.dart';
 import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/status.dart';
@@ -33,8 +34,12 @@ class Talk extends StatefulWidget {
     this.room = double.infinity,
     this.onAgent,
     this.onStop,
+    this.drafts,
     super.key,
   });
+
+  /// Where what could not be said to a new agent is kept.
+  final Drafts? drafts;
 
   /// Ends the run that is on.
   final VoidCallback? onStop;
@@ -80,6 +85,81 @@ class _TalkState extends State<Talk> {
       await s.prompt(session, agent, text, key: d.keyFor(text));
       d.heard();
     });
+  }
+
+  /// Makes the branch, and says it there.
+  Future<bool> _branch(Branching b, String text) {
+    final d = widget.draft, s = widget.store;
+    final session = widget.session, of = widget.agent;
+    final drafts = widget.drafts, show = widget.onAgent;
+    return _do(() async {
+      final files = b.withFiles;
+      final name = nextName(of.name, session.agents.values.map((a) => a.name));
+      final agent = await s.branch(session.id, of.id, b.item, name, files: files);
+      d.cancelBranch();
+      show?.call(agent);
+      // From here on it is the new one's: also what goes wrong.
+      final there = drafts?.of(session.id, agent);
+      try {
+        await s.prompt(session.id, agent, text, key: freshKey());
+      } on Object catch (e) {
+        there
+          ?..add(text)
+          ..problem.value = wordsOf(e);
+      }
+    });
+  }
+
+  Widget _branchHeader(BuildContext context, Branching b) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AxSpace.edge, 8, 8, 0),
+      child: Row(
+        children: [
+          AxGlyph(AxIcon.branch, color: c.ink2),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                b.words != null
+                    ? 'Said differently, in a new branch'
+                    : 'In a new branch, from this answer on',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.ui.ink(c.ink2),
+              ),
+            ),
+          ),
+          AxButton(
+            label: 'Cancel',
+            tone: AxTone.quiet,
+            size: 24,
+            onPressed: widget.draft.cancelBranch,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// What the branch works in.
+  Widget _branchFiles(BuildContext context, Branching b) {
+    final t = Ax.of(context), c = t.colors;
+    final words = switch (b) {
+      Branching(apart: false) => 'In the same folder. Its files stay as they are.',
+      Branching(files: false) => 'In a fresh copy of the folder. Its files then are not kept.',
+      _ => null,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: words != null
+          ? Text(words, style: t.type.small.ink(c.ink3))
+          : AxCheck(
+              label: 'With its files as they were then',
+              value: b.withFiles,
+              onChanged: (v) => setState(() => b.withFiles = v),
+            ),
+    );
   }
 
   /// The models of the account, if they have not been asked for.
@@ -248,12 +328,13 @@ class _TalkState extends State<Talk> {
   }
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
-    valueListenable: widget.draft.problem,
-    builder: (context, problem, _) => _build(context, problem),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([widget.draft.problem, widget.draft.branching]),
+    builder: (context, _) =>
+        _build(context, widget.draft.problem.value, widget.draft.branching.value),
   );
 
-  Widget _build(BuildContext context, String? problem) {
+  Widget _build(BuildContext context, String? problem, Branching? branch) {
     final t = Ax.of(context), c = t.colors;
     final s = widget.store, a = widget.agent;
     final asked = [
@@ -359,55 +440,66 @@ class _TalkState extends State<Talk> {
                 ),
               ),
             Composer(
-              key: ValueKey(a.id),
-              placeholder: works
+              key: ValueKey((a.id, branch)),
+              // The keyboard goes where the words are.
+              autofocus: branch != null,
+              header: branch == null ? null : _branchHeader(context, branch),
+              placeholder: branch != null
+                  ? 'Message the new branch'
+                  : works
                   ? 'Message ${a.name}. Sent before its next step'
                   : 'Message ${a.name}',
-              action: works ? 'Queue' : 'Send',
+              action: works && branch == null ? 'Queue' : 'Send',
               enabled: widget.live,
               onStop: widget.onStop,
               leading: [
-                ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
-                _access(s, a),
-                if (a.context != null)
-                  ContextGauge(
-                    ContextView(
-                      share: a.context,
-                      provenance: switch (a.contextKnown) {
-                        Known.reported => Provenance.reported,
-                        Known.measured => Provenance.measured,
-                        Known.estimated => Provenance.estimated,
-                        Known.unknown => Provenance.unknown,
-                      },
+                if (branch != null)
+                  _branchFiles(context, branch)
+                else ...[
+                  ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
+                  _access(s, a),
+                  if (a.context != null)
+                    ContextGauge(
+                      ContextView(
+                        share: a.context,
+                        provenance: switch (a.contextKnown) {
+                          Known.reported => Provenance.reported,
+                          Known.measured => Provenance.measured,
+                          Known.estimated => Provenance.estimated,
+                          Known.unknown => Provenance.unknown,
+                        },
+                      ),
                     ),
-                  ),
-                if (plan)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          'Using ChatGPT plan',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.small.ink(c.ink3),
+                  if (plan)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            'Using ChatGPT plan',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.type.small.ink(c.ink3),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      AxButton(
-                        label: 'Manage usage',
-                        // At the plan's limit it is the main act: OpenAI asks that of whoever uses a
-                        // plan. Nothing else is taken in the plan's place.
-                        tone: (a.error ?? '').startsWith('billing') ? AxTone.primary : AxTone.quiet,
-                        size: 24,
-                        onPressed: usage,
-                      ),
-                    ],
-                  ),
+                        const SizedBox(width: 6),
+                        AxButton(
+                          label: 'Manage usage',
+                          // At the plan's limit it is the main act: OpenAI asks that of whoever uses a
+                          // plan. Nothing else is taken in the plan's place.
+                          tone: (a.error ?? '').startsWith('billing')
+                              ? AxTone.primary
+                              : AxTone.quiet,
+                          size: 24,
+                          onPressed: usage,
+                        ),
+                      ],
+                    ),
+                ],
               ],
               controller: widget.draft.text,
-              onSubmit: _say,
+              onSubmit: branch == null ? _say : (text) => _branch(branch, text),
               earlier: () => widget.agent.said,
             ),
           ],

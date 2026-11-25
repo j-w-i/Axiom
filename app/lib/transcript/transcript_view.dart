@@ -165,8 +165,18 @@ class TranscriptRows {
 /// block being written rebuilds alone, at most once per frame. What is being read stays where it is;
 /// at the end, the view follows.
 class TranscriptView extends StatefulWidget {
-  const TranscriptView(this.agent, {super.key, this.onLink, this.onQuote, this.takes = false});
+  const TranscriptView(
+    this.agent, {
+    super.key,
+    this.onLink,
+    this.onQuote,
+    this.onBranch,
+    this.takes = false,
+  });
   final AgentModel agent;
+
+  /// Goes on from an item in another conversation.
+  final void Function(ItemModel)? onBranch;
 
   /// What was said can be copied whole, and quoted if somebody takes it.
   final bool takes;
@@ -434,6 +444,8 @@ class TranscriptViewState extends State<TranscriptView> {
               onToggle: _toggle,
               takes: widget.takes,
               onQuote: widget.onQuote == null ? null : _quote,
+              onBranch: widget.onBranch,
+              canBranch: widget.agent.canBranch,
             ),
           ),
         ),
@@ -657,9 +669,12 @@ class _RowView extends StatelessWidget {
     this.onLink,
     this.takes = false,
     this.onQuote,
+    this.onBranch,
+    this.canBranch,
   });
   final bool takes;
-  final void Function(ItemModel)? onQuote;
+  final void Function(ItemModel)? onQuote, onBranch;
+  final bool Function(ItemModel)? canBranch;
   final List<TranscriptRow> rows;
   final int at;
   final bool Function(ItemModel) opened;
@@ -672,6 +687,8 @@ class _RowView extends StatelessWidget {
       : Taking(
           text: () => i.source,
           onQuote: onQuote == null ? null : () => onQuote!(i),
+          onBranch: onBranch == null || !(canBranch?.call(i) ?? false) ? null : () => onBranch!(i),
+          branch: i.kind == ItemKind.prompt ? 'Edit' : 'Branch',
           stops: stops,
           child: w,
         );

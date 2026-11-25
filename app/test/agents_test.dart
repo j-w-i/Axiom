@@ -117,6 +117,38 @@ class Asked extends HostStore {
     return _do(['prompt', session, agent, text], null);
   }
 
+  BranchInfo place = const BranchInfo(apart: false);
+  @override
+  Future<BranchInfo> lookBranch(String session, String agent, String item) =>
+      _do(['look branch', session, agent, item], place);
+  @override
+  Future<String> branch(
+    String session,
+    String agent,
+    String item,
+    String name, {
+    bool files = false,
+  }) async {
+    await _do(['branch', session, agent, item, name, if (files) 'files'], null);
+    // As the host says it before it answers.
+    current?.apply([
+      Event(
+        current!.seq + 1,
+        1,
+        AgentAdded(
+          'a_new',
+          name,
+          current!.agents[agent]!.execution,
+          null,
+          access: Access.ask,
+          apart: place.apart,
+          from: Branched(agent, item),
+        ),
+      ),
+    ]);
+    return 'a_new';
+  }
+
   /// Of each prompt.
   final keys = <String?>[];
   @override

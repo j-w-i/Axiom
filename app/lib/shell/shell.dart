@@ -1291,6 +1291,25 @@ class _Display extends StatelessWidget {
   final String? agent;
   final bool stale;
   final VoidCallback onAgain;
+
+  /// What is written next to an agent goes to a branch of it.
+  Future<void> _branchAt(AgentModel a, ItemModel i) async {
+    final d = drafts.of(session.id, a.id)..problem.value = null;
+    try {
+      final info = await store.lookBranch(session.id, a.id, i.id);
+      d.branchAt(
+        Branching(
+          i.id,
+          apart: info.apart,
+          files: info.files,
+          words: i.kind == ItemKind.prompt ? i.source : null,
+        ),
+      );
+    } on Object catch (e) {
+      d.problem.value = wordsOf(e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: session,
@@ -1389,6 +1408,7 @@ class _Display extends StatelessWidget {
                       key: view,
                       takes: true,
                       onQuote: acts ? (q) => drafts.of(session.id, a.id).add(q) : null,
+                      onBranch: acts && !stale ? (i) => unawaited(_branchAt(a, i)) : null,
                     ),
                   ),
                 ),
@@ -1417,6 +1437,7 @@ class _Display extends StatelessWidget {
                             session,
                             a,
                             draft: drafts.of(session.id, a.id),
+                            drafts: drafts,
                             live: !stale,
                             onAgent: onAgent,
                             onStop: switch (a.run) {
