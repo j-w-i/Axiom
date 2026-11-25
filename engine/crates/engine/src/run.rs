@@ -2,7 +2,6 @@
 
 use std::{
     collections::HashSet,
-    pin::Pin,
     time::{Duration, Instant},
 };
 
@@ -10,18 +9,15 @@ use axiom_model::{
     Accumulator, Args, Block, CallError, Class, Client, Content, Delta, Event, Message, Reply,
     Request, Retry, Role, Settings, Start, Stop, Tool,
 };
-use axiom_policy::{Ask, Verdict, rules::Decision};
-use axiom_proto::{
-    AgentId, AgentState, Answerable, Body, ItemId, ItemKind, Outcome, Provenance, RequestId, RunId,
-    Usage,
-};
-use axiom_tools::{Output, Plan, Seen, Site, Spec, Step};
-use serde_json::{Value, json};
+use axiom_proto::{AgentId, AgentState, Body, ItemId, ItemKind, Outcome, Provenance, RunId, Usage};
+use axiom_tools::{Seen, Site, Spec};
+use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    Deed, Desk, Other, Refused, Say, Stage, compact,
+    Desk, Refused, Say, Stage, compact,
     context::{Context, Turn},
+    hands::{Done, Hands, begins},
 };
 
 /// How far a run may go.
@@ -116,15 +112,7 @@ pub struct Ended {
 }
 
 /// For a call that was stopped while a person was asked: nothing of it was begun.
-const ASKED: &str = "Not done: the run was stopped while a person was being asked.";
-
-/// A call that may be done, and why.
-struct Ready {
-    step: Step,
-    verdict: Verdict,
-    /// The question a person answered, and the digest of what they saw.
-    answered: Option<(RequestId, String)>,
-}
+pub(crate) const ASKED: &str = "Not done: the run was stopped while a person was being asked.";
 
 /// The events of something a person said.
 /// `by`: the name of the agent that says it, if it is not a person.
@@ -146,7 +134,7 @@ pub fn said(item: &ItemId, run: &RunId, agent: &AgentId, text: &str, by: &str) -
 }
 
 /// Why a run stops before the agent is done.
-enum Halt {
+pub(crate) enum Halt {
     Cancelled,
     /// Cancelled before anything of the call was begun.
     Unbegun,
@@ -165,9 +153,9 @@ impl From<Refused> for Halt {
     }
 }
 
-type Cancel = watch::Receiver<bool>;
+pub(crate) type Cancel = watch::Receiver<bool>;
 
-async fn stopped(c: &mut Cancel) {
+pub(crate) async fn stopped(c: &mut Cancel) {
     if c.wait_for(|c| *c).await.is_err() {
         // Nobody can cancel it any more.
         std::future::pending::<()>().await;
@@ -384,11 +372,6 @@ impl<S: Stage> Agent<S> {
         Ok(self.stage.say(say).await?)
     }
 
-    async fn state(&self, state: AgentState) -> Result<(), Halt> {
-        let b = Body::AgentState { agent: self.id.clone(), state };
-        Ok(self.stage.say(vec![Say::Event(b)]).await?)
-    }
-
     fn item(
         &self,
         run: &RunId,
@@ -397,15 +380,7 @@ impl<S: Stage> Agent<S> {
         name: &str,
         args: Option<Value>,
     ) -> Body {
-        Body::ItemStarted {
-            item: item.clone(),
-            run: run.clone(),
-            agent: self.id.clone(),
-            kind,
-            name: name.into(),
-            args,
-            args_cut: 0,
-        }
+        begins(&self.id, run, item, kind, name, args)
     }
 
     /// On the drive before anything follows from it.
@@ -709,78 +684,28 @@ impl<S: Stage> Agent<S> {
                 }
                 continue;
             }
-            let item = ItemId::new();
-            let args = match &c.args {
-                Args::Ready(a) => Some(Value::Object(a.clone())),
-                _ => Some(Value::String(c.raw.clone())),
+            let shown = match &c.args {
+                Args::Ready(a) => Value::Object(a.clone()),
+                _ => Value::String(c.raw.clone()),
             };
-            // Intent before effect: on the drive before it is looked at any further.
-            self.stage
-                .say(vec![Say::Event(self.item(run, &item, ItemKind::Tool, &c.name, args))])
-                .await?;
-            let out = match c.ready() {
-                None => {
-                    let why = match &c.args {
-                        Args::Broken(why) => why.clone(),
-                        _ => "the answer ended inside it".into(),
-                    };
-                    Ok(Output {
-                        ok: false,
-                        text: format!("Not done: {why}."),
-                        rest: None,
-                        detail: Value::Null,
-                    })
-                }
-                Some(call) => {
-                    let args = Value::Object(call.args().clone());
-                    self.call(&item, call.name(), &args, cancel).await
-                }
+            let args = match (c.ready(), &c.args) {
+                (Some(call), _) => Ok(Value::Object(call.args().clone())),
+                (None, Args::Broken(why)) => Err(why.clone()),
+                (None, _) => Err("the answer ended inside it".into()),
             };
-            let (text, failed) = match out {
-                Ok(o) => {
-                    let outcome = if o.ok { Outcome::Completed } else { Outcome::Failed };
-                    let made: Vec<String> = o.detail["made"]
-                        .as_array()
-                        .map(|m| m.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
-                        .unwrap_or_default();
-                    let mut result = o.detail;
-                    if !result.is_object() {
-                        result = json!({});
-                    }
-                    result["ok"] = o.ok.into();
-                    self.stage
-                        .say(vec![
-                            Say::Text(item.clone(), o.rest.unwrap_or_else(|| o.text.clone())),
-                            Say::End(item, outcome, Some(result)),
-                        ])
-                        .await?;
-                    if !made.is_empty() {
-                        let words = format!(
-                            "This command made {}. Other programs take orders from such files: look \
-                             at them before you open the folder elsewhere.",
-                            made.join(", ")
-                        );
-                        self.notice(run, &words).await?;
-                    }
-                    (o.text, !o.ok)
-                }
-                Err(Halt::Unbegun) => {
-                    self.stage.say(vec![Say::End(item, Outcome::Cancelled, None)]).await?;
-                    halt = Some(Halt::Cancelled);
-                    (ASKED.into(), true)
-                }
-                Err(Halt::Cancelled) => {
-                    self.stage.say(vec![Say::End(item, Outcome::Cancelled, None)]).await?;
-                    halt = Some(Halt::Cancelled);
-                    ("Stopped by a person while it was being done. It may have been done in part.".into(), true)
-                }
-                Err(Halt::Gone) => return Err(Halt::Gone),
-                Err(h @ (Halt::Failed(_) | Halt::Full(_))) => {
-                    self.stage.say(vec![Say::End(item, Outcome::Failed, None)]).await?;
-                    halt = Some(h);
-                    ("Not done: Axiom could not go on.".into(), true)
-                }
+            let hands = Hands {
+                id: &self.id,
+                stage: &self.stage,
+                desk: &self.desk,
+                site: &self.site,
+                seen: &self.seen,
+                specs: &self.specs,
             };
+            let mut waited = Duration::ZERO;
+            let done = hands.one(run, &c.name, shown, args, cancel, &mut waited).await;
+            self.waited += waited;
+            let Done { text, failed, halt: stop } = done?;
+            halt = stop;
             if c.ready().is_some() {
                 self.result(&c.id, &text, failed).await?;
             } else {
@@ -798,261 +723,5 @@ impl<S: Stage> Agent<S> {
     async fn result(&mut self, id: &str, text: &str, failed: bool) -> Result<(), Halt> {
         let blocks = vec![Block::result(id, text, failed)];
         self.remember(Turn::Message(Message { role: Role::User, blocks })).await
-    }
-
-    async fn call(
-        &mut self,
-        item: &ItemId,
-        tool: &str,
-        args: &Value,
-        cancel: &mut Cancel,
-    ) -> Result<Output, Halt> {
-        if let Some(o) = self.other(tool, args, cancel).await? {
-            return self.others(item, tool, args, o, cancel).await;
-        }
-        let (site, seen) = (self.site.clone(), self.seen.clone());
-        let (t, a) = (tool.to_owned(), args.clone());
-        // Files are looked at off the runtime's own threads.
-        let plan = tokio::task::spawn_blocking(move || axiom_tools::plan(&t, &a, &site, &seen));
-        // Planning changes nothing: whoever stops does not wait for it.
-        let plan = tokio::select! {
-            biased;
-            () = stopped(cancel) => return Err(Halt::Unbegun),
-            () = self.stage.closed() => return Err(Halt::Gone),
-            p = plan => p.map_err(|_| Halt::Failed("the tool failed".into()))?,
-        };
-        let (step, verdict, answered) = match plan {
-            Plan::No(why) => {
-                return Ok(Output {
-                    ok: false,
-                    text: format!("Not done: {why}."),
-                    rest: None,
-                    detail: Value::Null,
-                });
-            }
-            Plan::Go(step, verdict) => (step, verdict, None),
-            Plan::Ask(ask, step, verdict) => {
-                if self.desk.allowed(&ask) {
-                    (step, verdict, None)
-                } else {
-                    let what = match tool {
-                        "shell" | "job" => "asks to run a command",
-                        "write" | "edit" | "patch" => "asks to change files",
-                        "read" | "list" | "glob" | "search" => "asks to look at files",
-                        "fetch" => "asks to read from the web",
-                        _ => "asks to use a tool",
-                    };
-                    match self.ask_person(item, what, &ask, cancel).await? {
-                        Ok(id) => (step, verdict, Some((id, ask.digest()))),
-                        Err(why) => {
-                            return Ok(Output {
-                                ok: false,
-                                text: why,
-                                rest: None,
-                                detail: Value::Null,
-                            });
-                        }
-                    }
-                }
-            }
-        };
-        self.perform(item, tool, args, Ready { step, verdict, answered }, cancel).await
-    }
-
-    async fn other(
-        &self,
-        tool: &str,
-        args: &Value,
-        cancel: &mut Cancel,
-    ) -> Result<Option<Other>, Halt> {
-        tokio::select! {
-            biased;
-            () = stopped(cancel) => Err(Halt::Unbegun),
-            () = self.stage.closed() => Err(Halt::Gone),
-            o = self.stage.judge(tool, args) => Ok(o),
-        }
-    }
-
-    /// A tool of the host's own.
-    async fn others(
-        &mut self,
-        item: &ItemId,
-        tool: &str,
-        args: &Value,
-        o: Other,
-        cancel: &mut Cancel,
-    ) -> Result<Output, Halt> {
-        let no = |text: String| Output { ok: false, text, rest: None, detail: Value::Null };
-        let mut answered = None;
-        match o.decision {
-            Decision::Deny => return Ok(no(format!("Not done: {}.", o.why))),
-            Decision::Allow => {}
-            Decision::Ask => {
-                let schema = self.specs.iter().find(|s| s.name == tool);
-                let ask = Ask {
-                    chain: self.site.chain.clone(),
-                    workspace: self.site.workspace.to_string(),
-                    tool: tool.into(),
-                    schema: schema.map(axiom_tools::schema_digest).unwrap_or_default(),
-                    subject: o.subject.clone(),
-                    scope: format!("{}. Asked because {}.", o.scope, o.why),
-                    unsandboxed: false,
-                };
-                if !self.desk.allowed(&ask) {
-                    match self.ask_person(item, &o.what, &ask, cancel).await? {
-                        Ok(id) => answered = Some((id, ask.digest())),
-                        Err(why) => return Ok(no(why)),
-                    }
-                }
-            }
-        }
-        if o.changes {
-            self.stage
-                .audit(Deed {
-                    chain: self.site.chain.clone(),
-                    workspace: self.site.workspace.to_string(),
-                    tool: tool.into(),
-                    subject: o.subject,
-                    decision: o.decision,
-                    rules: vec![],
-                    answered,
-                })
-                .await?;
-        }
-        self.stage.sync().await?;
-        let began = Instant::now();
-        let out = tokio::select! {
-            biased;
-            () = stopped(cancel) => return Err(Halt::Cancelled),
-            () = self.stage.closed() => return Err(Halt::Gone),
-            out = self.stage.perform(tool, args) => out,
-        };
-        // Others' work is not this run's own time.
-        self.waited += began.elapsed();
-        Ok(out)
-    }
-
-    /// A person's yes, or the words for the model.
-    async fn ask_person(
-        &mut self,
-        item: &ItemId,
-        what: &str,
-        ask: &Ask,
-        cancel: &mut Cancel,
-    ) -> Result<Result<RequestId, String>, Halt> {
-        let mut open = match self.desk.open(ask) {
-            Ok(o) => o,
-            Err(e) => return Ok(Err(format!("Not done: {e}."))),
-        };
-        let id = open.id.clone();
-        let opened = self
-            .stage
-            .say(vec![
-                Say::Event(Body::RequestOpened {
-                    request: id.clone(),
-                    agent: self.id.clone(),
-                    what: what.into(),
-                    subject: ask.subject.clone(),
-                    scope: ask.scope.clone(),
-                    answerable: Answerable::Live,
-                    digest: ask.digest(),
-                    item: Some(item.clone()),
-                    session: !ask.unsandboxed,
-                }),
-                Say::Event(Body::AgentState { agent: self.id.clone(), state: AgentState::Asking }),
-            ])
-            .await;
-        match opened {
-            Ok(()) => {}
-            Err(Refused::Closed) => return Err(Halt::Gone),
-            // Longer than a person can be shown whole.
-            Err(Refused::This(why)) => {
-                return Ok(Err(format!("Not done: {why}. Make it smaller, in several steps.")));
-            }
-        }
-        self.stage.sync().await?;
-        let asked = Instant::now();
-        let answer = tokio::select! {
-            biased;
-            () = stopped(cancel) => None,
-            () = self.stage.closed() => return Err(Halt::Gone),
-            a = open.wait() => Some(a),
-        };
-        self.waited += asked.elapsed();
-        let cancelled = answer.is_none();
-        let approval = answer.flatten();
-        let words = if cancelled {
-            "expired"
-        } else if approval.is_some() {
-            "allowed"
-        } else {
-            "deny"
-        };
-        self.stage
-            .say(vec![Say::Event(Body::RequestClosed {
-                request: id.clone(),
-                answer: words.into(),
-            })])
-            .await?;
-        if cancelled {
-            return Err(Halt::Unbegun);
-        }
-        self.state(AgentState::Running).await?;
-        if approval.is_some_and(|a| self.desk.spend(a, ask)) {
-            return Ok(Ok(id));
-        }
-        Ok(Err("Not done: a person said no. Do not try the same by another way; ask what they want instead.".into()))
-    }
-
-    async fn perform(
-        &mut self,
-        item: &ItemId,
-        tool: &str,
-        args: &Value,
-        Ready { step, verdict, answered }: Ready,
-        cancel: &mut Cancel,
-    ) -> Result<Output, Halt> {
-        if step.changes() {
-            self.stage
-                .audit(Deed {
-                    chain: self.site.chain.clone(),
-                    workspace: self.site.workspace.to_string(),
-                    tool: tool.into(),
-                    subject: args.to_string(),
-                    decision: verdict.decision,
-                    rules: verdict.rules,
-                    answered,
-                })
-                .await?;
-        }
-        self.stage.sync().await?;
-        let (site, seen) = (self.site.clone(), self.seen.clone());
-        let (heard, mut hears) = mpsc::channel(16);
-        let mut work: Pin<Box<dyn Future<Output = Output> + Send>> =
-            Box::pin(async move { step.run(&site, &seen, heard).await });
-        // What comes after the work has ended is still said before its end.
-        let mut done = None;
-        let mut open = true;
-        loop {
-            tokio::select! {
-                biased;
-                () = self.stage.closed(), if done.is_none() => {
-                    drop(work);
-                    return Err(Halt::Gone);
-                }
-                () = stopped(cancel), if done.is_none() => {
-                    // Ends what it started.
-                    drop(work);
-                    return Err(Halt::Cancelled);
-                }
-                more = hears.recv(), if open => match more {
-                    Some(t) => self.stage.say(vec![Say::Text(item.clone(), t)]).await?,
-                    None => open = false,
-                },
-                o = &mut work, if done.is_none() => done = Some(o),
-                else => break,
-            }
-        }
-        done.ok_or_else(|| Halt::Failed("the tool failed".into()))
     }
 }
