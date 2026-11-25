@@ -13,6 +13,7 @@ import 'package:axiom/shell/drafts.dart';
 import 'package:axiom/shell/outside.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/start.dart';
+import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/overlay.dart';
@@ -1198,6 +1199,8 @@ void main() {
     await settled(t);
     // It is the one that is shown.
     expect(find.text('Say something to Reviewer'), findsOneWidget);
+    expect(find.text('Nothing has been said to Reviewer yet.'), findsOneWidget);
+    expect(find.byType(TranscriptView), findsNothing);
     await snap(t, 'two-agents');
     await t.tap(find.byType(ExecutionKey));
     await settled(t);

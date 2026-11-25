@@ -661,7 +661,21 @@ class _Display extends StatelessWidget {
               builder: (context, box) => Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(child: TranscriptView(a)),
+                  Expanded(
+                    child: ListenableBuilder(
+                      listenable: a,
+                      builder: (context, full) => a.last != null || a.ended != null
+                          ? full!
+                          : Padding(
+                              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                              child: Text(
+                                'Nothing has been said to ${a.name} yet.',
+                                style: Ax.of(context).type.ui.ink(c.ink3),
+                              ),
+                            ),
+                      child: TranscriptView(a),
+                    ),
+                  ),
                   // In a window too small for all of it, its end is in sight and the rest scrolls.
                   ConstrainedBox(
                     constraints: BoxConstraints(maxHeight: box.maxHeight),
