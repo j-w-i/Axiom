@@ -5,6 +5,7 @@
 use std::{
     collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -20,7 +21,7 @@ use serde_json::value::RawValue;
 use crate::{
     codec::{self, Decoder, EncodeError, Lost},
     error::{self, Class, Error, Retry},
-    profile::Profile,
+    profile::{Listing, Profile},
     secret::{Credential, Endpoint, Secret, SetupError},
     sse,
     types::*,
@@ -70,12 +71,33 @@ pub enum CallError {
     Provider(#[from] Error),
 }
 
+/// What has a credential that does not last: asked before each request, it gives one that is good now.
+pub trait Renew: Send + Sync {
+    fn now(&self) -> Pin<Box<dyn Future<Output = Result<Arc<Credential>, Error>> + Send + '_>>;
+}
+
+#[derive(Clone)]
+enum Source {
+    None,
+    Fixed(Arc<Credential>),
+    Renewed(Arc<dyn Renew>),
+}
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Source::None => f.write_str("None"),
+            Source::Fixed(c) => c.fmt(f),
+            Source::Renewed(_) => f.write_str("Renewed"),
+        }
+    }
+}
+
 /// One connection: a provider, where it is, and the credential for it.
 #[derive(Debug, Clone)]
 pub struct Client {
     http: reqwest::Client,
     endpoint: Endpoint,
-    credential: Option<Arc<Credential>>,
+    source: Source,
     profile: Arc<Profile>,
     headers: HeaderMap,
     options: Options,
@@ -98,8 +120,27 @@ impl Client {
         }
         let http = build(&endpoint, &options)?;
         let headers = profile.checked_headers()?;
-        let (credential, profile) = (credential.map(Arc::new), Arc::new(profile));
-        Ok(Self { http, endpoint, credential, profile, headers, options })
+        let source = credential.map_or(Source::None, |c| Source::Fixed(Arc::new(c)));
+        Ok(Self { http, endpoint, source, profile: Arc::new(profile), headers, options })
+    }
+
+    /// With a credential that is renewed. What it gives is sent to its own origin only, as any is.
+    pub fn renewed(
+        profile: Profile,
+        endpoint: Endpoint,
+        source: Arc<dyn Renew>,
+        options: Options,
+    ) -> Result<Self, SetupError> {
+        let c = Self::new(profile, endpoint, None, options)?;
+        Ok(Self { source: Source::Renewed(source), ..c })
+    }
+
+    async fn credential(&self) -> Result<Option<Arc<Credential>>, Error> {
+        match &self.source {
+            Source::None => Ok(None),
+            Source::Fixed(c) => Ok(Some(c.clone())),
+            Source::Renewed(r) => r.now().await.map(Some),
+        }
     }
 
     pub fn profile(&self) -> &Profile {
@@ -111,10 +152,14 @@ impl Client {
     pub async fn stream(&self, request: &Request) -> Result<Answer, CallError> {
         let path = codec::path(self.profile.codec, &request.model)?;
         let encoded = codec::encode(request, &self.profile)?;
-        let answer = self.post(&path, encoded.body).await.map_err(|e| self.sealed(e))?;
+        let credential = self.credential().await.map_err(|e| e.sealed(None))?;
+        let answer = self
+            .post(&path, encoded.body, credential.as_ref())
+            .await
+            .map_err(|e| sealed(e, credential.as_ref()))?;
         let quirks = self.profile.quirks(&request.model);
         Ok(Answer {
-            request_id: request_id(answer.headers(), self.secret()),
+            request_id: request_id(answer.headers(), credential.as_ref().map(|c| c.secret())),
             response: Some(answer),
             sse: sse::Decoder::new(EVENT),
             decoder: Decoder::new(self.profile.codec, &quirks),
@@ -122,7 +167,7 @@ impl Client {
             ready: VecDeque::new(),
             failed: None,
             idle: self.options.idle,
-            credential: self.credential.clone(),
+            credential,
             lost: encoded.lost,
         })
     }
@@ -130,15 +175,48 @@ impl Client {
     /// What the server has: all of it, or an error. OpenAI's list, and that of any server that speaks
     /// its protocols, is one answer; Gemini's comes in pages.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, CallError> {
-        let list = match self.profile.codec {
-            Codec::Messages => return Err(EncodeError::Unsupported("the list of models").into()),
-            Codec::Chat | Codec::Responses => self.list().await,
-            Codec::Gemini => self.pages().await,
+        if self.profile.codec == Codec::Messages {
+            return Err(EncodeError::Unsupported("the list of models").into());
+        }
+        let credential = self.credential().await.map_err(|e| e.sealed(None))?;
+        let c = credential.as_ref();
+        let list = match (self.profile.codec, self.profile.listing) {
+            (_, Listing::Slugs) => self.slugs(c).await,
+            (Codec::Gemini, _) => self.pages(c).await,
+            _ => self.list(c).await,
         };
-        Ok(list.map_err(|e| self.sealed(e))?)
+        Ok(list.map_err(|e| sealed(e, c))?)
     }
 
-    async fn list(&self) -> Result<Vec<ModelInfo>, Error> {
+    /// Those that are to be offered, in the server's order.
+    async fn slugs(&self, c: Option<&Arc<Credential>>) -> Result<Vec<ModelInfo>, Error> {
+        #[derive(Deserialize)]
+        struct List {
+            models: Vec<Box<RawValue>>,
+        }
+        #[derive(Deserialize)]
+        struct Named {
+            slug: String,
+            #[serde(default)]
+            visibility: Option<String>,
+        }
+        let url = self.endpoint.at("models").map_err(setup)?;
+        let page = self.page(&url, LIST, c).await?;
+        let list: List = page.read()?;
+        if list.models.len() > MODELS {
+            return Err(too_many_models());
+        }
+        let mut models = Vec::new();
+        for raw in list.models {
+            let m: Named = page.model(&raw)?;
+            if m.visibility.as_deref() == Some("list") {
+                models.push(ModelInfo { id: m.slug, native: Json::from(&*raw) });
+            }
+        }
+        Ok(models)
+    }
+
+    async fn list(&self, c: Option<&Arc<Credential>>) -> Result<Vec<ModelInfo>, Error> {
         #[derive(Deserialize)]
         struct List {
             data: Vec<Box<RawValue>>,
@@ -148,7 +226,7 @@ impl Client {
             id: String,
         }
         let url = self.endpoint.at("models").map_err(setup)?;
-        let page = self.page(&url, LIST).await?;
+        let page = self.page(&url, LIST, c).await?;
         let list: List = page.read()?;
         if list.data.len() > MODELS {
             return Err(too_many_models());
@@ -162,7 +240,7 @@ impl Client {
     }
 
     /// Gemini's, of the models that can be asked as this crate asks (api-reference/models).
-    async fn pages(&self) -> Result<Vec<ModelInfo>, Error> {
+    async fn pages(&self, c: Option<&Arc<Credential>>) -> Result<Vec<ModelInfo>, Error> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct List {
@@ -186,7 +264,7 @@ impl Client {
             if let Some(token) = &token {
                 url.query_pairs_mut().append_pair("pageToken", token);
             }
-            let page = self.page(&url, room).await?;
+            let page = self.page(&url, room, c).await?;
             room -= page.body.len();
             let list: List = page.read()?;
             if list.error.is_some() {
@@ -212,8 +290,13 @@ impl Client {
         Err(Error::protocol(format!("the list of models has more than {PAGES} pages")))
     }
 
-    async fn page(&self, url: &Url, room: usize) -> Result<Page, Error> {
-        let request = self.request(self.http.get(url.clone()), url, "application/json")?;
+    async fn page(
+        &self,
+        url: &Url,
+        room: usize,
+        c: Option<&Arc<Credential>>,
+    ) -> Result<Page, Error> {
+        let request = self.request(self.http.get(url.clone()), url, "application/json", c)?;
         let mut answer = self.send(request).await?;
         let body = read(&mut answer, room, self.options.idle).await?;
         if body.len() > room {
@@ -222,10 +305,15 @@ impl Client {
         Ok(Page { body, head: answer.headers().clone() })
     }
 
-    async fn post(&self, path: &str, body: Vec<u8>) -> Result<Response, Error> {
+    async fn post(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+        c: Option<&Arc<Credential>>,
+    ) -> Result<Response, Error> {
         let url = self.endpoint.at(path).map_err(setup)?;
         let request = self
-            .request(self.http.post(url.clone()), &url, "text/event-stream")?
+            .request(self.http.post(url.clone()), &url, "text/event-stream", c)?
             .header(header::CONTENT_TYPE, "application/json")
             .body(body);
         let mut answer = self.send(request).await?;
@@ -252,11 +340,12 @@ impl Client {
         request: reqwest::RequestBuilder,
         url: &Url,
         accept: &'static str,
+        credential: Option<&Arc<Credential>>,
     ) -> Result<reqwest::RequestBuilder, Error> {
         let mut request = request
             .headers(self.headers.clone())
             .header(header::ACCEPT, HeaderValue::from_static(accept));
-        if let Some(credential) = &self.credential {
+        if let Some(credential) = credential {
             let (name, value) = credential.header(url).map_err(setup)?;
             request = request.header(name, value);
         }
@@ -288,13 +377,10 @@ impl Client {
         let body = read(&mut answer, ERROR_BODY, self.options.idle).await.unwrap_or_default();
         Err(with_head(Error::provider(Some(status.as_u16()), &text(&body)), answer.headers()))
     }
+}
 
-    fn secret(&self) -> Option<&Secret> {
-        self.credential.as_ref().map(|c| c.secret())
-    }
-    fn sealed(&self, e: Error) -> Error {
-        e.sealed(self.secret())
-    }
+fn sealed(e: Error, c: Option<&Arc<Credential>>) -> Error {
+    e.sealed(c.map(|c| c.secret()))
 }
 
 /// Of a list of models.
@@ -421,7 +507,7 @@ impl Answer {
     }
 }
 
-fn build(endpoint: &Endpoint, options: &Options) -> Result<reqwest::Client, SetupError> {
+pub(crate) fn build(endpoint: &Endpoint, options: &Options) -> Result<reqwest::Client, SetupError> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let tls = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()
@@ -529,7 +615,7 @@ fn not_sent(e: &reqwest::Error, options: &Options) -> Error {
 }
 
 /// What went wrong at the bottom. The layers above add the address and say "error" again.
-fn innermost(e: &dyn std::error::Error) -> String {
+pub(crate) fn innermost(e: &dyn std::error::Error) -> String {
     let mut e = e;
     while let Some(source) = e.source() {
         e = source;
@@ -558,7 +644,7 @@ mod tests {
         let options = Options::default();
         let client = Client::new(profile, Endpoint::unchecked(&url), None, options).unwrap();
         // It is reached, and hangs up.
-        assert_eq!(client.list().await.unwrap_err().class, Class::Network);
+        assert_eq!(client.list(None).await.unwrap_err().class, Class::Network);
         was_reached.recv_timeout(Duration::from_secs(10)).unwrap();
     }
 
@@ -577,7 +663,10 @@ mod tests {
             let client =
                 Client::new(profile, endpoint, Some(credential), Options::default()).unwrap();
             let url = client.endpoint.at("models").unwrap();
-            let request = client.request(client.http.get(url.clone()), &url, "x").unwrap();
+            let request = {
+                let c = client.credential().await.unwrap();
+                client.request(client.http.get(url.clone()), &url, "x", c.as_ref()).unwrap()
+            };
             let mut shown = format!("{request:?} {client:?}");
             let request = request.build().unwrap();
             shown += &format!("{request:?}");

@@ -40,7 +40,7 @@ pub(super) fn encode(
         .with("model", &request.model)?
         .with("store", &false)?
         .with("stream", &true)?;
-    if let Some(max) = settings.max_output {
+    if let Some(max) = settings.max_output.filter(|_| quirks.no_limit != Some(true)) {
         body.put("max_output_tokens", &max)?;
     }
     if !settings.stop.is_empty() {

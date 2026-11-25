@@ -12,6 +12,16 @@ use crate::{
     types::Codec,
 };
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Listing {
+    /// `data`, each with an `id`.
+    #[default]
+    Data,
+    /// `models`, each with a `slug`, a `display_name` and a `visibility`.
+    Slugs,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
@@ -26,6 +36,9 @@ pub struct Profile {
     /// Sent with every request. Never a secret.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
+    /// How its list of models is written.
+    #[serde(default)]
+    pub listing: Listing,
     #[serde(default)]
     pub quirks: Quirks,
     /// By model id. What a model does not say is said by `quirks`.
@@ -82,6 +95,9 @@ pub struct Quirks {
     pub context: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output: Option<u64>,
+    /// The request may not limit the answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_limit: Option<bool>,
     /// Where the effort goes; nowhere if absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
@@ -122,6 +138,7 @@ impl Quirks {
         Quirks {
             context: self.context.or(base.context),
             max_output: self.max_output.or(base.max_output),
+            no_limit: self.no_limit.or(base.no_limit),
             effort: self.effort.or(base.effort),
             cache_markers: self.cache_markers.or(base.cache_markers),
             replay: self.replay.or(base.replay),
@@ -155,6 +172,7 @@ impl Profile {
             base_url: Some("https://api.anthropic.com/v1".into()),
             auth: Auth::Header("x-api-key".into()),
             headers: BTreeMap::from([("anthropic-version".into(), "2026-10-21".into())]),
+            listing: Listing::Data,
             quirks: Quirks {
                 effort: Some(Effort::OutputConfig),
                 cache_markers: Some(true),
@@ -175,12 +193,25 @@ impl Profile {
             base_url: Some("https://api.openai.com/v1".into()),
             auth: Auth::Bearer,
             headers: BTreeMap::new(),
+            listing: Listing::Data,
             quirks: Quirks {
                 effort: Some(Effort::Reasoning),
                 replay: Some(Replay::SameProvider),
                 ..Quirks::default()
             },
             models: BTreeMap::new(),
+        }
+    }
+
+    /// A ChatGPT plan, with what signing in gave ([`crate::chatgpt`]): the Responses API at the same
+    /// address, where some of the body is refused (siwc/token-sharing-open-source, read 2026-11-25).
+    pub fn chatgpt() -> Self {
+        let own = Self::openai();
+        Self {
+            provider: "chatgpt".into(),
+            quirks: Quirks { no_limit: Some(true), ..own.quirks },
+            listing: Listing::Slugs,
+            ..own
         }
     }
 
@@ -194,6 +225,7 @@ impl Profile {
             base_url: Some("https://generativelanguage.googleapis.com/v1beta".into()),
             auth: Auth::Header("x-goog-api-key".into()),
             headers: BTreeMap::new(),
+            listing: Listing::Data,
             quirks: Quirks { effort: Some(Effort::ThinkingLevel), ..Quirks::default() },
             models: BTreeMap::new(),
         }
@@ -223,6 +255,7 @@ impl Profile {
             base_url: Some(base_url.into()),
             auth: Auth::Bearer,
             headers: BTreeMap::new(),
+            listing: Listing::Data,
             quirks: Quirks::default(),
             models: BTreeMap::new(),
         }
@@ -286,6 +319,7 @@ mod tests {
             replay_reasoning: Some(true),
             think: Some(Think::Open),
             empty_args: Some(true),
+            no_limit: Some(true),
             body: BTreeMap::from([("a".into(), Value::from(1)), ("b".into(), Value::from(1))]),
         };
         let mut p = Profile::openai_compatible("p", "https://e.com/v1");
