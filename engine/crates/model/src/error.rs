@@ -93,6 +93,7 @@ impl Error {
         let class = specific(code, &told)
             .or_else(|| status.map(by_status))
             .or_else(|| generic(code))
+            .or_else(|| told.status.map(by_status))
             .unwrap_or(Class::Server);
         let retry = match (class, status) {
             (Class::RateLimit | Class::Overloaded, Some(_)) => Retry::Safe,
@@ -156,11 +157,13 @@ fn clean(text: &str, longest: usize) -> String {
     out
 }
 
-/// What an error body says, in the shapes seen: Anthropic's, OpenAI's, LM Studio's (a string), and
-/// those of common Python servers (`detail`, `message`).
+/// What an error body says, in the shapes seen: Anthropic's, OpenAI's, Google's, OpenRouter's, LM
+/// Studio's (a string), and those of common Python servers (`detail`, `message`).
 #[derive(Default)]
 struct Told {
     code: Option<String>,
+    /// The status as the body has it, which is all there is of one in a stream.
+    status: Option<u16>,
     message: Option<String>,
     request_id: Option<String>,
 }
@@ -178,12 +181,19 @@ impl Told {
             Value::String(s) => Some(s.clone()),
             e => string(e.get("message")).or_else(|| string(e.get("detail"))),
         };
-        // A code says more than a type; Anthropic's is one level down and has only some.
+        // A code says more than a type; Anthropic's is one level down and has only some. Google's
+        // and OpenRouter's codes are numbers, and what they mean is elsewhere.
+        let reason = || error.get("details")?.as_array()?.iter().find_map(|d| d.get("reason"));
         let code = string(error.pointer("/details/error_code"))
+            .or_else(|| string(reason()))
+            .or_else(|| string(error.pointer("/metadata/error_type")))
             .or_else(|| string(error.get("code")))
-            .or_else(|| string(error.get("type")));
+            .or_else(|| string(error.get("status")))
+            .or_else(|| string(error.get("type")).filter(|t| t != "error"));
+        let number = error.get("code").and_then(Value::as_u64);
         Self {
             code,
+            status: number.and_then(|n| u16::try_from(n).ok()).filter(|n| (400..600).contains(n)),
             message: text(error).or_else(|| Some(value.to_string())),
             request_id: string(value.get("request_id")),
         }
@@ -192,11 +202,21 @@ impl Told {
 
 fn specific(code: &str, told: &Told) -> Option<Class> {
     match code {
-        "billing_error" | "insufficient_quota" | "enforced_spend_limit_reached" => {
-            return Some(Class::Billing);
-        }
+        "billing_error"
+        | "insufficient_quota"
+        | "enforced_spend_limit_reached"
+        | "credit_balance_exhausted"
+        | "organization_spend_limit_exceeded"
+        | "project_spend_limit_exceeded"
+        | "organization_usage_limit_exceeded"
+        | "payment_required" => return Some(Class::Billing),
         "context_length_exceeded" | "request_too_large" => return Some(Class::ContextTooLong),
-        "overloaded_error" => return Some(Class::Overloaded),
+        "overloaded_error" | "server_is_overloaded" | "provider_overloaded" => {
+            return Some(Class::Overloaded);
+        }
+        // Google answers 400 to this and OpenRouter 403 to these.
+        "API_KEY_INVALID" => return Some(Class::Auth),
+        "content_policy_violation" | "refusal" => return Some(Class::BadRequest),
         _ => {}
     }
     // Only words tell these from other bad requests.
@@ -204,9 +224,15 @@ fn specific(code: &str, told: &Told) -> Option<Class> {
     if message.starts_with("you have reached your specified") {
         return Some(Class::Billing);
     }
-    let too_long =
-        ["prompt is too long", "maximum context length", "context length", "context window"];
-    let vague = ["context length", "context window"];
+    // The last is Gemini's, from memory: its documentation has no words for it.
+    let too_long = [
+        "prompt is too long",
+        "maximum context length",
+        "context length",
+        "context window",
+        "input token count",
+    ];
+    let vague = ["context length", "context window", "input token count"];
     let exceeded = ["exceed", "greater than", "too long", "larger than", "overflow", "not enough"];
     too_long
         .iter()
@@ -232,11 +258,29 @@ fn by_status(status: u16) -> Class {
 
 fn generic(code: &str) -> Option<Class> {
     Some(match code {
-        "authentication_error" | "permission_error" | "invalid_api_key" => Class::Auth,
-        "rate_limit_error" | "rate_limit_exceeded" => Class::RateLimit,
-        "invalid_request_error" | "not_found_error" | "conflict_error" | "model_not_found" => {
-            Class::BadRequest
+        "authentication_error"
+        | "permission_error"
+        | "invalid_api_key"
+        | "authentication"
+        | "permission_denied"
+        | "UNAUTHENTICATED"
+        | "PERMISSION_DENIED" => Class::Auth,
+        "rate_limit_error" | "rate_limit_exceeded" | "slow_down" | "RESOURCE_EXHAUSTED" => {
+            Class::RateLimit
         }
+        "UNAVAILABLE" => Class::Overloaded,
+        "invalid_request_error"
+        | "not_found_error"
+        | "conflict_error"
+        | "model_not_found"
+        | "invalid_request"
+        | "invalid_prompt"
+        | "data_residency_mismatch"
+        | "bio_policy"
+        | "misalignment_policy_violation"
+        | "INVALID_ARGUMENT"
+        | "FAILED_PRECONDITION"
+        | "NOT_FOUND" => Class::BadRequest,
         _ => return None,
     })
 }
@@ -365,6 +409,9 @@ mod tests {
                 r#"{{"type":"error","error":{{"type":"{kind}","message":"{message}"}},"request_id":"req_1"}}"#
             )
         };
+        let openai = |kind: &str, code: &str| {
+            format!(r#"{{"error":{{"message":"m","type":"{kind}","param":null,"code":"{code}"}}}}"#)
+        };
         for (status, body, class, retry) in [
             (Some(400), anthropic("invalid_request_error", "bad"), BadRequest, Never),
             (Some(400), anthropic("invalid_request_error", "prompt is too long: 2 tokens > 1 maximum"), ContextTooLong, Never),
@@ -396,6 +443,25 @@ mod tests {
             (Some(500), anthropic("overloaded_error", "Overloaded"), Overloaded, Safe),
             (Some(418), String::new(), BadRequest, Never),
             (Some(304), String::new(), Protocol, Never),
+            // developers.openai.com/api/docs/guides/error-codes: the type may be the same for all.
+            (Some(429), openai("insufficient_quota", "credit_balance_exhausted"), Billing, Never),
+            (Some(429), openai("insufficient_quota", "organization_spend_limit_exceeded"), Billing, Never),
+            (Some(429), openai("x", "project_spend_limit_exceeded"), Billing, Never),
+            (Some(429), openai("x", "organization_usage_limit_exceeded"), Billing, Never),
+            (Some(429), openai("rate_limit_error", "slow_down"), RateLimit, Safe),
+            (Some(503), openai("service_unavailable_error", "server_is_overloaded"), Overloaded, Safe),
+            (Some(400), openai("invalid_request_error", "invalid_json_schema"), BadRequest, Never),
+            (Some(400), r#"{"error":{"code":400,"message":"The input token count (9) exceeds the maximum number of tokens allowed (8).","status":"INVALID_ARGUMENT"}}"#.into(), ContextTooLong, Never),
+            (Some(400), r#"{"error":{"code":400,"message":"the input token count is a fine thing","status":"INVALID_ARGUMENT"}}"#.into(), BadRequest, Never),
+            (Some(400), r#"{"error":{"code":400,"message":"m","status":"INVALID_ARGUMENT","details":[{"@type":"x"},{"reason":"API_KEY_INVALID"}]}}"#.into(), Auth, Never),
+            // The answer's status, not the one in the body; and in a stream the body's, if it is one.
+            (Some(500), r#"{"error":{"code":429,"message":"m"}}"#.into(), Server, Restart),
+            (None, r#"{"error":{"code":429,"message":"m"}}"#.into(), RateLimit, Restart),
+            (None, r#"{"error":{"code":502,"message":"m"}}"#.into(), Server, Restart),
+            (None, r#"{"error":{"code":401,"message":"m"}}"#.into(), Auth, Never),
+            (None, r#"{"error":{"code":70936,"message":"m"}}"#.into(), Server, Restart),
+            (None, r#"{"error":{"code":600,"message":"m"}}"#.into(), Server, Restart),
+            (None, r#"{"error":{"code":399,"message":"m"}}"#.into(), Server, Restart),
             (None, anthropic("overloaded_error", "Overloaded"), Overloaded, Restart),
             (None, anthropic("rate_limit_error", "x"), RateLimit, Restart),
             (None, anthropic("invalid_request_error", "x"), BadRequest, Never),
