@@ -127,3 +127,106 @@ async fn a_signal_ends_it_even_while_nobody_reads() {
         assert_eq!(c.wait().unwrap().code(), Some(code));
     }
 }
+
+#[allow(dead_code)]
+#[path = "../../engine/tests/common/server.rs"]
+mod server;
+
+struct Asked {
+    f: Fixture,
+    server: server::Server,
+    session: SessionId,
+    agent: String,
+}
+
+/// An agent on a server that answers from a script.
+async fn asked(script: Vec<server::Reply>) -> Asked {
+    let f = fixture();
+    let server = server::Server::start(script).await;
+    let w = f.dir.path().join("w");
+    std::fs::create_dir(&w).unwrap();
+    let w = std::fs::canonicalize(w).unwrap();
+    let c = &mut f.client().await;
+    let call =
+        Call::SessionCreate { title: "t".into(), workspace: Some(w.to_str().unwrap().to_owned()) };
+    let session = SessionId(c.call(call).await.unwrap()["session"].as_str().unwrap().into());
+    let call = Call::ConnectionAdd {
+        name: "here".into(),
+        provider: "openai-compatible".into(),
+        url: Some(server.url.clone()),
+        secret: None,
+    };
+    let v = c.call(call).await.unwrap();
+    let connection = v["connection"].as_str().unwrap().to_owned();
+    let o = f.run(&["agent", &session.0, "Lead", &connection, "m", "ask"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    let agent = v["agent"].as_str().unwrap().to_owned();
+    Asked { f, server, session, agent }
+}
+impl Asked {
+    fn say(&self, json: bool, text: &str) -> (Option<i32>, String, String) {
+        let mut args = vec!["say", "--wait", &self.session.0, &self.agent, text];
+        if json {
+            args.insert(0, "--json");
+        }
+        let o = self.f.run(&args);
+        (o.status.code(), clean(&o.stdout), clean(&o.stderr))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_script_waits_for_the_answer() {
+    let t = asked(vec![server::text(&["One", " answer."])]).await;
+    assert_eq!(t.say(false, "first"), (Some(0), "One answer.\n".into(), String::new()));
+    // The answer to this, not the one before.
+    t.server.add(server::text(&["Another."]));
+    let (code, out, _) = t.say(true, "--json");
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(
+        (code, &v["text"], &v["outcome"]),
+        (Some(0), &"Another.".into(), &"completed".into())
+    );
+    assert_eq!(out.lines().count(), 1);
+    assert!(t.server.requests()[1]["messages"].to_string().contains("--json"), "words are words");
+    let (code, _, err) = t.say(false, "nobody answers this");
+    assert_eq!(code, Some(2), "{err}");
+    assert!(!err.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wait_ends_when_a_person_is_asked_and_answers_nothing() {
+    let call = server::calls(&[("c1", "shell", r#"{"command":"touch made"}"#)]);
+    let t = asked(vec![call, server::text(&["Done."])]).await;
+    let (code, _, err) = t.say(false, "make it");
+    assert_eq!(code, Some(3), "{err}");
+    assert!(err.contains("touch made"), "{err}");
+    // Said while it is asked: the same.
+    let (code, out, _) = t.say(true, "and this");
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(code, Some(3));
+    assert!(v["request"].as_str().is_some_and(|r| !r.is_empty()), "{v}");
+    let waits = t.f.run(&["--json", "waiting"]);
+    let v: serde_json::Value = serde_json::from_slice(&waits.stdout).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1, "it is asked still");
+    assert_eq!(clean(&waits.stdout).lines().count(), 1);
+    assert!(!t.f.dir.path().join("w/made").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn events_are_lines_of_json() {
+    let t = asked(vec![server::text(&["Said\nin two lines."])]).await;
+    assert_eq!(t.say(false, "go").0, Some(0));
+    let mut p = t.f.command(&["--json", "follow", &t.session.0]).spawn().unwrap();
+    let out = std::io::BufReader::new(p.stdout.take().unwrap());
+    let mut found = false;
+    for l in std::io::BufRead::lines(out) {
+        let v: serde_json::Value = serde_json::from_str(&l.unwrap()).unwrap();
+        found = found || v["body"]["text"] == "Said\nin two lines.";
+        if v["body"]["type"] == "run.ended" {
+            break;
+        }
+    }
+    p.kill().unwrap();
+    p.wait().unwrap();
+    assert!(found);
+}

@@ -9,15 +9,15 @@ use std::{
 
 use axiom_host::{client::Client, paths::Paths, signal};
 use axiom_proto::{
-    Access, AgentId, Answer, Answerable, Body, Call, Event, Execution, Message, Outcome, RequestId,
-    RunId, SecretText, SessionId,
+    Access, AgentId, Answer, Answerable, Body, Call, Event, Execution, ItemKind, Message, Outcome,
+    RequestId, RunId, SecretText, SessionId,
 };
 use plain::{block, json, line};
 use serde_json::Value;
 
 mod plain;
 
-const USAGE: &str = "usage:
+const USAGE: &str = "usage: axiom [--json] COMMAND      --json: one line for each answer or event
   axiom status
   axiom sessions
   axiom waiting                                 what waits for a person
@@ -30,7 +30,9 @@ const USAGE: &str = "usage:
   axiom models CONNECTION
   axiom agent SESSION NAME CONNECTION MODEL read|ask|work
   axiom set SESSION AGENT read|ask|work
-  axiom say SESSION AGENT TEXT
+  axiom say [--wait] SESSION AGENT TEXT         --wait: prints the answer, and ends with
+                                                0 done, 2 failed or cut short,
+                                                3 a person is asked; 1 as ever
   axiom compact SESSION AGENT
   axiom answer SESSION REQUEST DIGEST once|session|deny
   axiom cancel SESSION RUN
@@ -84,7 +86,7 @@ fn start(args: Vec<String>) -> io::Result<ExitCode> {
         let stop = signal::stop()?;
         Ok(tokio::select! {
             r = finished => match r {
-                Ok(Ok(())) => ExitCode::SUCCESS,
+                Ok(Ok(code)) => ExitCode::from(code),
                 Ok(Err(e)) if pipe(e.as_ref()) => ExitCode::SUCCESS,
                 Ok(Err(e)) => fail(e.as_ref()),
                 Err(e) => fail(&e),
@@ -107,8 +109,18 @@ fn fail(e: &(dyn std::error::Error + 'static)) -> ExitCode {
     ExitCode::FAILURE
 }
 
-async fn run(args: Vec<String>) -> Result<(), Error> {
-    let call = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+async fn run(args: Vec<String>) -> Result<u8, Error> {
+    // Before the command only, or an agent could not be told "--json".
+    let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let compact = args.first() == Some(&"--json");
+    if compact {
+        args.remove(0);
+    }
+    let wait = args.starts_with(&["say", "--wait"]) && args.len() == 5;
+    if wait {
+        args.remove(1);
+    }
+    let call = match args[..] {
         ["status"] => Call::Status {},
         ["sessions"] => Call::list(),
         ["waiting"] => Call::Waiting {},
@@ -193,12 +205,16 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
         .map_err(|e| no(&e))?
         .map_err(|e| no(&e))?;
     if let Call::SessionList { .. } = call {
-        return print(&Value::Array(sessions(&mut c).await?));
+        return print(&Value::Array(sessions(&mut c).await?), compact);
+    }
+    if wait && let Call::Prompt { session, agent, .. } = &call {
+        let of = (session.clone(), agent.clone());
+        return waited(&mut c, call, of, compact).await;
     }
     let follow = matches!(call, Call::Follow { .. });
     let answer = c.call(call).await?;
     if !follow {
-        return print(&answer);
+        return print(&answer, compact);
     }
     let mut shown = HashMap::new();
     loop {
@@ -206,7 +222,11 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
             Message::Events { events, .. } => {
                 let mut out = io::stdout().lock();
                 for e in events {
-                    event(&mut out, &mut shown, e)?;
+                    if compact {
+                        writeln!(out, "{}", json(&serde_json::to_string(&e)?))?;
+                    } else {
+                        event(&mut out, &mut shown, e)?;
+                    }
                 }
                 out.flush()?;
             }
@@ -230,10 +250,167 @@ async fn sessions(c: &mut Client) -> Result<Vec<Value>, Error> {
     }
 }
 
-fn print(v: &Value) -> Result<(), Error> {
+fn print(v: &Value, compact: bool) -> Result<u8, Error> {
     let mut out = io::stdout().lock();
-    writeln!(out, "{}", json(&serde_json::to_string_pretty(v)?))?;
-    Ok(out.flush()?)
+    let text = if compact { serde_json::to_string(v)? } else { serde_json::to_string_pretty(v)? };
+    writeln!(out, "{}", json(&text))?;
+    out.flush()?;
+    Ok(0)
+}
+
+/// After what is said too late for a run, how long another may take to begin.
+const SETTLED: Duration = Duration::from_secs(2);
+const FAILED: u8 = 2;
+const ASKS: u8 = 3;
+
+/// What has come of what was said.
+#[derive(Debug, PartialEq)]
+enum End {
+    Ran(Outcome, Option<String>),
+    /// A person is asked: nothing here answers (SI-2).
+    Asks {
+        request: RequestId,
+        what: String,
+        subject: String,
+    },
+}
+
+/// Follows one agent from what is said to it to the end of it.
+struct Watch {
+    agent: AgentId,
+    items: HashMap<String, String>,
+    said: String,
+    /// The run that is on, from the first that is told.
+    run: Option<RunId>,
+}
+impl Watch {
+    fn event(&mut self, body: Body) -> Option<End> {
+        match body {
+            Body::RunStarted { run, agent } if agent == self.agent => self.run = Some(run),
+            Body::ItemStarted { item, agent, kind: ItemKind::Prose, .. } if agent == self.agent => {
+                self.items.insert(item.0, String::new());
+            }
+            Body::ItemEnded { item, text, .. } if self.items.remove(&item.0).is_some() => {
+                self.said = text;
+            }
+            Body::RequestOpened { request, agent, what, subject, .. } if agent == self.agent => {
+                return Some(End::Asks { request, what, subject });
+            }
+            Body::RunEnded { run, outcome, error } if self.run.as_ref() == Some(&run) => {
+                self.run = None;
+                return Some(End::Ran(outcome, error));
+            }
+            _ => {}
+        }
+        None
+    }
+}
+
+/// Says something and waits for what comes of it.
+async fn waited(
+    c: &mut Client,
+    call: Call,
+    of: (SessionId, AgentId),
+    compact: bool,
+) -> Result<u8, Error> {
+    let (session, agent) = of;
+    // From before it is said, so that nothing of it is missed.
+    let known = sessions(c).await?;
+    let known = known.iter().find(|s| s["id"] == session.0.as_str());
+    let after = known.and_then(|s| s["last_seq"].as_u64()).unwrap_or(0);
+    let told = c.call(call).await?;
+    let queued = told["queued"] == true;
+    let run = RunId(told["run"].as_str().unwrap_or_default().into());
+    let mut w = Watch { agent, items: HashMap::new(), said: String::new(), run: Some(run) };
+    // What it was asked before this was said.
+    if queued {
+        let waits = c.call(Call::Waiting {}).await?;
+        let waits = waits.as_array().cloned().unwrap_or_default();
+        let one = waits.iter().find(|x| {
+            x["need"] == "asks"
+                && x["session"] == session.0.as_str()
+                && x["agent"] == w.agent.0.as_str()
+        });
+        if let Some(x) = one {
+            let text = |k: &str| x[k].as_str().unwrap_or_default().to_owned();
+            let (request, what) = (RequestId(text("request")), text("what"));
+            return ends(&w, End::Asks { request, what, subject: text("subject") }, compact);
+        }
+    }
+    c.call(Call::Follow { session, after }).await?;
+    let mut end = None;
+    loop {
+        // One that was told while it worked may have heard it, or goes on with it in another run.
+        let next = match &end {
+            Some(_) => match tokio::time::timeout(SETTLED, c.next()).await {
+                Ok(m) => m?,
+                Err(_) => break,
+            },
+            None => c.next().await?,
+        };
+        match next {
+            Message::Events { events, .. } => {
+                for e in events {
+                    if let Some(x) = w.event(e.body) {
+                        end = Some(x);
+                    } else if w.run.is_some() {
+                        end = None;
+                    }
+                    let last = matches!(end, Some(End::Asks { .. })) || (end.is_some() && !queued);
+                    if last && let Some(end) = end {
+                        return ends(&w, end, compact);
+                    }
+                }
+            }
+            Message::Resync { .. } => {
+                return Err("fell behind; what comes of it is not known".into());
+            }
+            Message::Fault { fault, .. } => return Err(fault.into()),
+            _ => {}
+        }
+    }
+    match end {
+        Some(end) => ends(&w, end, compact),
+        None => Err("what comes of it is not known".into()),
+    }
+}
+
+fn ends(w: &Watch, end: End, compact: bool) -> Result<u8, Error> {
+    let mut out = io::stdout().lock();
+    let code = match &end {
+        End::Ran(Outcome::Completed, _) => 0,
+        End::Ran(..) => FAILED,
+        End::Asks { .. } => ASKS,
+    };
+    if compact {
+        let v = match &end {
+            End::Ran(outcome, error) => {
+                serde_json::json!({"outcome": outcome, "error": error, "text": w.said})
+            }
+            End::Asks { request, what, subject } => {
+                serde_json::json!({"request": request, "what": what, "subject": subject})
+            }
+        };
+        writeln!(out, "{}", json(&serde_json::to_string(&v)?))?;
+    } else {
+        if !w.said.is_empty() {
+            writeln!(out, "{}", block(&w.said))?;
+        }
+        out.flush()?;
+        match end {
+            End::Ran(Outcome::Completed, _) => {}
+            End::Ran(outcome, error) => {
+                let why = line(&error.unwrap_or_default());
+                writeln!(io::stderr(), "axiom: {outcome:?} {why}")?;
+            }
+            End::Asks { request, what, subject } => {
+                let (r, what, subject) = (line(&request.0), line(&what), line(&subject));
+                writeln!(io::stderr(), "axiom: a person is asked ({r}): {what}: {subject}")?;
+            }
+        }
+    }
+    out.flush()?;
+    Ok(code)
 }
 
 /// `shown` is the text of each unfinished item that is on the screen.
