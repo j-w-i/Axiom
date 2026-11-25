@@ -28,6 +28,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::{
     connections::{self, Connections},
+    copies::{self, Copies},
     delegated, mcp,
     paths::{Paths, private_dir, private_file},
     peers,
@@ -56,6 +57,17 @@ pub struct Setup {
     /// Of a delegated agent: its program has run.
     #[serde(default)]
     pub began: bool,
+    /// It works in a copy of the folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apart: Option<Apart>,
+}
+
+/// Of which folder, and whether there is one yet: then that is its workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Apart {
+    pub folder: String,
+    pub made: bool,
 }
 
 /// Files whose words are for agents, as they are named in the top folder of a workspace.
@@ -67,6 +79,8 @@ const INSTRUCTIONS: u64 = 64 * 1024;
 const MOST: usize = 64;
 /// What may wait for an agent that is at work.
 const INBOX: usize = 32;
+/// How long what an agent began may take to end.
+const STILL: Duration = Duration::from_secs(15);
 /// Sessions whose agents are remembered beyond what the journal has.
 const PARTIES: usize = 1000;
 /// Sessions whose folders programs are not taken from.
@@ -97,6 +111,8 @@ pub struct Slot {
     pub said: Mutex<String>,
     /// Of a delegated agent: its program, if it runs.
     pub attempt: tokio::sync::Mutex<Option<mpsc::Sender<delegated::Turn>>>,
+    /// Programs of its that have not ended, also those nobody speaks to any more.
+    pub stays: watch::Sender<usize>,
 }
 
 /// Runs that followed one another, and what they came to.
@@ -156,6 +172,11 @@ pub struct Told {
 }
 
 impl Setup {
+    /// The folder its work is for, wherever it works.
+    pub fn folder(&self) -> &str {
+        self.apart.as_ref().map_or(&self.workspace, |a| &a.folder)
+    }
+
     /// A program of the person's own that works with Axiom's tools in place of its own.
     pub fn hands(&self) -> bool {
         self.execution.environment.as_deref() == Some(AXIOM)
@@ -210,6 +231,7 @@ pub struct Agents {
     scratch: PathBuf,
     programs: Option<Vec<PathBuf>>,
     rules: PathBuf,
+    pub copies: Copies,
 }
 
 pub fn bad(words: impl Into<String>) -> WireError {
@@ -240,6 +262,7 @@ impl Agents {
             grants: Mutex::default(),
             data: paths.data.clone(),
             bridge: bridge.and_then(|b| real_file(&b)),
+            copies: Copies::new(&paths.data, home.as_deref()),
             home,
             own,
             scratch,
@@ -289,7 +312,8 @@ impl Agents {
 
     /// Checks what an agent is to be, and says it as it will be kept.
     pub fn setup(&self, s: Setup, written: &Reach) -> Result<Setup, WireError> {
-        let Setup { name, execution, access, workspace, instructions, trust, resume, began } = s;
+        let Setup { name, execution, access, workspace, instructions, trust, .. } = s;
+        let (resume, began, apart) = (s.resume, s.began, s.apart);
         let workspace = workspace.as_str();
         let known =
             |i: &Instructions| FOR_AGENTS.contains(&i.path.as_str()) && i.digest.len() <= 128;
@@ -320,8 +344,17 @@ impl Agents {
             }
             let workspace = real(Path::new(workspace))?.to_string();
             let execution = Execution { provider: None, ..execution };
-            let setup =
-                Setup { name, execution, access, workspace, instructions, trust, resume, began };
+            let setup = Setup {
+                name,
+                execution,
+                access,
+                workspace,
+                instructions,
+                trust,
+                resume,
+                began,
+                apart,
+            };
             let site = self.site(&setup, &AgentId("check".into()), false)?;
             let path = self.programs(&site.path)?;
             known
@@ -349,6 +382,7 @@ impl Agents {
             trust: false,
             resume: None,
             began: false,
+            apart,
         };
         // What could not be contained later is refused now, in words.
         let site = self.site(&setup, &AgentId("check".into()), false)?;
@@ -380,6 +414,7 @@ impl Agents {
             trust: false,
             resume: None,
             began: false,
+            apart: None,
         };
         self.site(&s, who, true)
     }
@@ -407,7 +442,8 @@ impl Agents {
         let folders =
             all.into_iter().filter_map(|s| s.workspace).filter_map(|w| Place::new(w).ok());
         let own = Place::new(plain_verbatim(self.scratch.clone())).ok();
-        Ok(Reach::of(folders.chain(own)))
+        let copies = self.copies.root().and_then(|r| real(&r).ok());
+        Ok(Reach::of(folders.chain(own).chain(copies)))
     }
 
     pub fn harnesses(&self, written: &Reach) -> Result<Vec<HarnessInfo>, WireError> {
@@ -452,7 +488,8 @@ impl Agents {
         let (path, system) = axiom_tools::system(&home);
         let write =
             if access == Access::Read { Reach::none() } else { Reach::of([workspace.clone()]) };
-        let policy = self.policy(&workspace)?;
+        // The rules are the folder's, also where one works in a copy of it.
+        let policy = self.policy(&real(Path::new(s.folder()))?)?;
         Ok(Site {
             caps: Caps {
                 read: Reach::of([workspace.clone(), scratch.clone()]),
@@ -472,6 +509,23 @@ impl Agents {
             path,
             chain: vec![agent.clone()],
         })
+    }
+
+    /// In the agent's own folder, where it is shown the folder's side of a clash.
+    pub fn beside(&self, agent: &AgentId) -> Result<Place, WireError> {
+        private_dir(&self.scratch).map_err(internal)?;
+        let mut at = real(&self.scratch)?;
+        for n in [plain(&agent.0).as_str(), "project"] {
+            at = at.join(n).map_err(|e| bad(e.to_string()))?;
+            private_dir(at.as_path()).map_err(internal)?;
+            if real(at.as_path())? != at {
+                return Err(bad("the agent's own folder leads elsewhere"));
+            }
+        }
+        // What was there the last time is not this time's.
+        std::fs::remove_dir_all(at.as_path()).map_err(internal)?;
+        private_dir(at.as_path()).map_err(internal)?;
+        Ok(at)
     }
 
     /// What a folder would have agents told, for a person to read.
@@ -553,7 +607,7 @@ impl Agents {
     }
 
     /// Adds to the audit record (SI-23).
-    async fn record(
+    pub async fn record(
         &self,
         store: &Store,
         session: &SessionId,
@@ -622,11 +676,11 @@ fn followed(workspace: &Place, all: &[Instructions]) -> (String, Vec<String>) {
 }
 
 /// A name for a folder, from an id that may be anybody's.
-fn plain(id: &str) -> String {
+pub fn plain(id: &str) -> String {
     id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(64).collect()
 }
 
-fn real(p: &Path) -> Result<Place, WireError> {
+pub fn real(p: &Path) -> Result<Place, WireError> {
     if !p.is_absolute() {
         return Err(bad(format!("{} is not an absolute path", p.display())));
     }
@@ -781,7 +835,11 @@ impl Worker {
             let site = a.site(&s, &ag, true)?;
             let path = a.programs(&site.path)?;
             let access = site.access;
-            let words = s.hands().then(|| axiom_engine::context::system(&site, HANDS));
+            let told = match s.apart {
+                Some(_) => format!("{HANDS}\n\n{}", copies::WORDS),
+                None => HANDS.to_owned(),
+            };
+            let words = s.hands().then(|| axiom_engine::context::system(&site, &told));
             let program =
                 known.check(&s, access, site.workspace.clone(), &path, &written).map_err(bad)?;
             let config = match &s.execution.connection {
@@ -893,7 +951,11 @@ pub async fn load(
     // Links, folders, the system's store: off the runtime's own threads.
     let (client, site, (instructions, not)) = tokio::task::spawn_blocking(move || {
         let site = a.site(&s, &ag, true)?;
-        let told = followed(&site.workspace, &s.instructions);
+        // The folder's, as a person read them: not what the agent may have made of its copy.
+        let mut told = followed(&real(Path::new(s.folder()))?, &s.instructions);
+        if s.apart.is_some() {
+            told.0 = format!("{}\n\n{}", copies::WORDS, told.0);
+        }
         Ok::<_, WireError>((a.connections.client(&connection)?, site, told))
     })
     .await
@@ -1076,6 +1138,20 @@ impl Slot {
         *self.attempt.lock().await = None;
     }
 
+    /// The same, and nothing of it runs any more.
+    pub async fn still(&self) -> Result<(), WireError> {
+        self.changed().await;
+        let mut stays = self.stays.subscribe();
+        let ended = async {
+            self.seen.1.ended().await;
+            let _ = stays.wait_for(|n| *n == 0).await;
+        };
+        tokio::time::timeout(STILL, ended).await.map_err(|_| {
+            WireError::new(ErrorCode::Busy, "something the agent began still runs; try again")
+        })?;
+        Ok(())
+    }
+
     /// After a run: whether something was said too late for it that is to begin another. If not,
     /// the place is free.
     pub async fn after(&self, rx: &mut mpsc::Receiver<Word>, stopped: bool) -> bool {
@@ -1125,6 +1201,7 @@ pub fn added(agent: &AgentId, s: &Setup) -> Vec<Say> {
             execution: s.execution.clone(),
             parent: None,
             access: Some(s.access),
+            apart: s.apart.is_some(),
         }),
         Say::Event(Body::AgentState { agent: agent.clone(), state: AgentState::Waiting }),
     ]

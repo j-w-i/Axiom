@@ -73,6 +73,7 @@ impl T {
             access,
             trust: false,
             instructions: vec![],
+            apart: false,
         };
         let v = self.c.call(call).await.unwrap();
         A { id: AgentId(v["agent"].as_str().unwrap().into()), server }
@@ -370,6 +371,7 @@ async fn a_delegated_agent_is_told_with_a_yes() {
         access: Access::Ask,
         trust: true,
         instructions: vec![],
+        apart: false,
     };
     t.c.call(call).await.unwrap();
     let run = t.prompt(&lead, "go").await;

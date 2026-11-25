@@ -78,6 +78,7 @@ impl T {
             access,
             trust: false,
             instructions: self.instructions.clone(),
+            apart: false,
         };
         let v = self.c.call(call).await.unwrap();
         AgentId(v["agent"].as_str().unwrap().into())
@@ -452,6 +453,7 @@ async fn an_agent_nobody_was_told_of_is_not_there() {
         access: Access::Read,
         trust: false,
         instructions: vec![],
+        apart: false,
     };
     let (refused, kept) = (call(e), call(t.execution()));
     assert!(t.c.call(refused).await.unwrap_err().to_string().contains("effort"));
@@ -501,6 +503,7 @@ async fn what_an_agent_may_not_be() {
         access,
         trust: false,
         instructions: vec![],
+        apart: false,
     };
     for (x, why) in [
         (Execution { harness: "codex".into(), ..ok.clone() }, "harness"),
@@ -612,6 +615,7 @@ async fn instructions_are_followed_only_as_they_were_read() {
         access: Access::Work,
         trust: false,
         instructions: t.instructions.clone(),
+        apart: false,
     };
     assert!(t.c.call(call).await.is_err());
 }
@@ -716,6 +720,7 @@ async fn a_killed_host_leaves_nothing_running() {
         access: Access::Work,
         trust: false,
         instructions: vec![],
+        apart: false,
     };
     let agent = AgentId(c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
     c.call(Call::Prompt { session: session.clone(), agent, text: "go".into(), key: None })
@@ -783,6 +788,7 @@ async fn live_on_lm_studio() {
         access: Access::Work,
         trust: false,
         instructions: vec![],
+        apart: false,
     };
     let a = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
     t.prompt(&a, "Write a file hello.txt that says hello. Then say you are done.").await.unwrap();

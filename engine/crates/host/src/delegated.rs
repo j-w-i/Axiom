@@ -354,7 +354,12 @@ impl Worker {
         }
         self.setup.began = true;
         self.floor.began().await;
-        tokio::spawn(attempt.stay(rx));
+        let slot = self.slot.clone();
+        slot.stays.send_modify(|n| *n += 1);
+        tokio::spawn(async move {
+            attempt.stay(rx).await;
+            slot.stays.send_modify(|n| *n -= 1);
+        });
         *self.slot.attempt.lock().await = Some(tx.clone());
         Ok(tx)
     }

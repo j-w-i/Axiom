@@ -3,6 +3,7 @@
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use axiom_host::{Config, client::Client};
@@ -89,6 +90,7 @@ impl T {
             access,
             trust,
             instructions: vec![],
+            apart: false,
         }
     }
     async fn agent(&mut self, harness: &str, access: Access) -> AgentId {
@@ -330,6 +332,7 @@ async fn what_a_delegated_agent_may_not_be() {
         access,
         trust,
         instructions,
+        apart: false,
     };
     let x = Execution { connection: Some("c_1".into()), ..execution.clone() };
     assert!(t.c.call(with(x, vec![])).await.unwrap_err().to_string().contains("one account"));
@@ -340,6 +343,16 @@ async fn what_a_delegated_agent_may_not_be() {
     std::fs::remove_file(t.f.dir.path().join("bin/goose")).unwrap();
     std::fs::copy(FAKE, t.f.dir.path().join("w/goose")).unwrap();
     std::os::unix::fs::symlink(t.at("w/goose"), t.f.dir.path().join("bin/goose")).unwrap();
+    let (session, agent) = (t.s.clone(), a.clone());
+    let e = t.c.call(Call::Prompt { session, agent, text: "x".into(), key: None }).await;
+    assert!(e.unwrap_err().to_string().contains("inside what an agent may write"));
+    // Nor one that lies where agents have their copies.
+    let copies = t.f.dir.path().join("home/.axiom-work/s");
+    std::fs::create_dir_all(&copies).unwrap();
+    std::fs::copy(FAKE, copies.join("goose")).unwrap();
+    std::fs::remove_file(t.f.dir.path().join("bin/goose")).unwrap();
+    std::os::unix::fs::symlink(t.at("home/.axiom-work/s/goose"), t.f.dir.path().join("bin/goose"))
+        .unwrap();
     let (session, agent) = (t.s.clone(), a.clone());
     let e = t.c.call(Call::Prompt { session, agent, text: "x".into(), key: None }).await;
     assert!(e.unwrap_err().to_string().contains("inside what an agent may write"));
@@ -536,6 +549,36 @@ async fn it_goes_on_where_it_was_after_the_host_is_gone() {
     assert!(log.iter().all(|e| e.containment == axiom_policy::audit::Containment::Harness));
 }
 
+/// A program of the person's own starts in the copy; where it is gone on with, it is there too.
+#[tokio::test]
+async fn it_starts_in_its_own_copy() {
+    let mut t = T::new(&claude(&turn("go", "One."))).await;
+    std::fs::write(t.f.dir.path().join("w/a.txt"), "a").unwrap();
+    let mut call = t.add("claude", Access::Work, false);
+    if let Call::AgentAdd { apart, .. } = &mut call {
+        *apart = true;
+    }
+    let a = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
+    let copy = format!("{}/.axiom-work/{}/{}", t.at("home"), t.s.0, a.0);
+    t.prompt(&a, "go").await;
+    t.allow_start().await;
+    let (o, e, _) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None), "{}", t.heard());
+    let cwd = |t: &T| {
+        let seen = std::fs::read_to_string(t.f.dir.path().join("bin/seen.json")).unwrap();
+        serde_json::from_str::<Value>(&seen).unwrap()["cwd"].as_str().unwrap().to_owned()
+    };
+    assert_eq!(cwd(&t), copy);
+    assert!(Path::new(&copy).join("a.txt").exists());
+    t.restart().await;
+    t.script(&claude(&turn("more", "Two.")));
+    t.prompt(&a, "more").await;
+    let (subject, _) = t.allow_start().await;
+    assert!(subject.contains("--resume "), "{subject}");
+    t.ended().await;
+    assert_eq!(cwd(&t), copy);
+}
+
 /// PR-4: several accounts of one service, each where the program itself keeps them apart.
 #[tokio::test]
 async fn a_second_account_is_kept_apart() {
@@ -566,7 +609,7 @@ async fn a_second_account_is_kept_apart() {
         (Some("claude-code"), None, None)
     );
     let with = |t: &T, harness: &str, access, connection: &str| match t.add(harness, access, true) {
-        Call::AgentAdd { session, name, execution, access, trust, instructions } => {
+        Call::AgentAdd { session, name, execution, access, trust, instructions, apart } => {
             Call::AgentAdd {
                 session,
                 name,
@@ -574,6 +617,7 @@ async fn a_second_account_is_kept_apart() {
                 access,
                 trust,
                 instructions,
+                apart,
             }
         }
         _ => panic!(),

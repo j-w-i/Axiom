@@ -256,6 +256,10 @@ impl Server {
     pub fn add(&self, r: Reply) {
         self.script.lock().unwrap().push_back(r);
     }
+    /// What was still to be answered is not.
+    pub fn clear(&self) {
+        self.script.lock().unwrap().clear();
+    }
     pub fn requests(&self) -> Vec<Value> {
         self.requests.lock().unwrap().clone()
     }

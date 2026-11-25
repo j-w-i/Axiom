@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
+pub mod copy;
 pub mod edit;
 pub mod fs;
 pub mod jobs;
@@ -51,6 +52,11 @@ impl Site {
             return None;
         }
         self.path.iter().filter_map(|d| d.join(name).ok()).find(|p| p.as_path().is_file())
+    }
+
+    /// Whether an agent here reads it without a question.
+    pub fn reads(&self, p: &Place) -> bool {
+        self.judge(Action::Read(p)).decision == Decision::Allow
     }
 
     fn judge(&self, a: Action<'_>) -> Verdict {

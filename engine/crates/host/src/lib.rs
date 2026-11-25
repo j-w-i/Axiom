@@ -9,6 +9,7 @@ mod agents;
 mod changes;
 pub mod client;
 pub mod connections;
+mod copies;
 mod delegated;
 mod faults;
 mod log;

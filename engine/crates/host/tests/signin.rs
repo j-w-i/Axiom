@@ -737,6 +737,7 @@ async fn an_agent_works_on_it() {
         access: axiom_proto::Access::Read,
         trust: false,
         instructions: vec![],
+        apart: false,
     };
     let agent = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
     for over in [false, true] {

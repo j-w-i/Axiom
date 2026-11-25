@@ -179,6 +179,10 @@ class StartDraft extends ChangeNotifier {
     }
   }
 
+  /// In a copy of the folder of its own. Beside others it is, if nobody says otherwise.
+  late bool apart = into != null;
+  bool get worksApart => apart && access != Access.read;
+
   /// Of a program: another account than its first.
   String? account;
 
@@ -284,7 +288,12 @@ class StartDraft extends ChangeNotifier {
         for (final w in words)
           if (!other && follow.contains(w.path)) w,
       ];
-      final as = [harness, '$trust', for (final w in followed) '${w.path} ${w.digest}'].join('\n');
+      final as = [
+        harness,
+        '$trust',
+        '$worksApart',
+        for (final w in followed) '${w.path} ${w.digest}',
+      ].join('\n');
       var m = _made;
       if (m == null || m.folder != where || (m.agent != null && m.follows != as)) {
         final session = into ?? await store.create(oneLine(text, 80), workspace: where);
@@ -300,6 +309,7 @@ class StartDraft extends ChangeNotifier {
           access,
           instructions: followed,
           trust: other && trust,
+          apart: worksApart,
         );
         m
           ..how = how
@@ -693,6 +703,22 @@ class _StartPageState extends State<StartPage> {
                 ),
               ),
           ],
+          if (d.access != Access.read)
+            FormPart(
+              null,
+              note: other == null || d.withHands
+                  ? 'What it changes there gets into the folder when you bring it in.'
+                  : 'What it changes there gets into the folder when you bring it in. It is outside '
+                        'Axiom\'s sandbox: the copy is where it begins, and not where it has to stay.',
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: AxCheck(
+                  label: 'Work in a copy of the folder',
+                  value: d.apart,
+                  onChanged: (v) => d.change(() => d.apart = v),
+                ),
+              ),
+            ),
           Row(
             children: [
               AxButton(

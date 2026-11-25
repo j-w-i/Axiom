@@ -83,6 +83,7 @@ impl T {
             access,
             trust: true,
             instructions: vec![],
+            apart: false,
         };
         AgentId(self.c.call(call).await.unwrap()["agent"].as_str().unwrap().into())
     }
@@ -401,6 +402,7 @@ async fn with_hands(access: Access) -> (T, AgentId, RunId) {
         access,
         trust: false,
         instructions: vec![],
+        apart: false,
     };
     // Its own way of asking is in no documentation; Axiom's needs none.
     let own = add(Execution { environment: None, ..execution.clone() }, Access::Ask);

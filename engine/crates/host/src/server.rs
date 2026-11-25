@@ -23,9 +23,10 @@ use tokio::{
 };
 
 use crate::{
-    agents::{self, Agents, Finished, Holder, Setup, Spoken, Switch, Told},
+    agents::{self, Agents, Apart, Finished, Holder, Setup, Spoken, Switch, Told},
     changes,
     connections::{Connections, MemoryVault, Vault},
+    copies,
     faults::{Access, Faults},
     log,
     net::{self, Boxed, Listener},
@@ -144,6 +145,13 @@ type Slot = tokio::sync::Mutex<Option<Opened>>;
 struct Runs {
     closing: bool,
     live: HashMap<RunId, (SessionId, watch::Sender<bool>)>,
+    /// What else is not to be ended in the middle.
+    at_work: usize,
+}
+impl Runs {
+    fn quiet(&self) -> bool {
+        self.live.is_empty() && self.at_work == 0
+    }
 }
 
 impl State {
@@ -157,7 +165,7 @@ impl State {
     /// Nothing starts after this. False, and no change, if it would disturb something.
     fn close(&self, force: bool) -> bool {
         let mut runs = self.runs();
-        if !force && !runs.live.is_empty() {
+        if !force && !runs.quiet() {
             return false;
         }
         runs.closing = true;
@@ -410,7 +418,7 @@ impl Host {
                 let changed = st.changed.notified();
                 tokio::pin!(changed);
                 changed.as_mut().enable();
-                if st.runs().live.is_empty() {
+                if st.runs().quiet() {
                     break;
                 }
                 changed.await;
@@ -528,7 +536,7 @@ async fn idle(st: &State) {
     };
     loop {
         let changed = st.changed.notified();
-        let quiet = st.connections.load(Relaxed) == 0 && st.runs().live.is_empty();
+        let quiet = st.connections.load(Relaxed) == 0 && st.runs().quiet();
         if quiet {
             tokio::select! {
                 () = tokio::time::sleep(d) => return,
@@ -811,19 +819,21 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                     following.remove(&session);
                     out.answer(req.id, Ok(json!({})));
                 }
-                (true, call) if slow(&call) => match many.clone().try_acquire_owned() {
-                    Ok(place) => {
-                        let (st, out) = (st.clone(), out.clone());
-                        tokio::spawn(async move {
-                            out.answer(req.id, handle(&st, call).await);
-                            drop(place);
-                        });
+                (true, call) if slow(&call) || copies_first(st, &call).await => {
+                    match many.clone().try_acquire_owned() {
+                        Ok(place) => {
+                            let (st, out) = (st.clone(), out.clone());
+                            tokio::spawn(async move {
+                                out.answer(req.id, handle(&st, call).await);
+                                drop(place);
+                            });
+                        }
+                        Err(_) => out.answer(
+                            req.id,
+                            Err(WireError::new(ErrorCode::Busy, "too much is asked at once")),
+                        ),
                     }
-                    Err(_) => out.answer(
-                        req.id,
-                        Err(WireError::new(ErrorCode::Busy, "too much is asked at once")),
-                    ),
-                },
+                }
                 (true, call) => match r.during(handle(st, call)).await {
                     Some(answer) => out.answer(req.id, answer),
                     None => return,
@@ -924,6 +934,44 @@ async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(f).await.map_err(|e| internal(e.to_string()))
 }
 
+/// Done to its end, also when who asked is gone.
+async fn to_its_end<F>(
+    st: &Arc<State>,
+    f: impl FnOnce(Arc<State>) -> F + Send + 'static,
+) -> Result<Value, WireError>
+where
+    F: Future<Output = Result<Value, WireError>> + Send + 'static,
+{
+    let at_work = AtWork::new(st)?;
+    let work = f(st.clone());
+    let work = tokio::spawn(async move {
+        let r = work.await;
+        drop(at_work);
+        r
+    });
+    work.await.map_err(|e| internal(e.to_string()))?
+}
+
+/// Something the host does not end in the middle of.
+struct AtWork(Arc<State>);
+impl AtWork {
+    fn new(st: &Arc<State>) -> Result<Self, WireError> {
+        let mut runs = st.runs();
+        if runs.closing {
+            return Err(WireError::new(ErrorCode::Busy, "the host is stopping"));
+        }
+        runs.at_work += 1;
+        drop(runs);
+        Ok(Self(st.clone()))
+    }
+}
+impl Drop for AtWork {
+    fn drop(&mut self) {
+        self.0.runs().at_work -= 1;
+        self.0.changed.notify_waiters();
+    }
+}
+
 /// The folder a session is about.
 async fn workspace(st: &Arc<State>, id: &SessionId) -> Result<String, WireError> {
     let s = st.store.session(id.clone()).await.map_err(|e| internal(e.to_string()))?;
@@ -975,9 +1023,21 @@ fn slow(c: &Call) -> bool {
             | Call::Look { .. }
             | Call::Harnesses {}
             | Call::Changes { .. }
+            | Call::CopyChanges { .. }
+            | Call::CopyBring { .. }
+            | Call::CopyBack { .. }
+            | Call::CopyRenew { .. }
+            | Call::CopyRemove { .. }
             | Call::ConnectionAdd { .. }
             | Call::ConnectionRemove { .. }
     )
+}
+
+/// What is said to an agent whose copy of the folder is still to be made.
+async fn copies_first(st: &Arc<State>, c: &Call) -> bool {
+    let Call::Prompt { session, agent, .. } = c else { return false };
+    let s = setup(st, session, agent).await;
+    s.is_ok_and(|s| s.apart.is_some_and(|a| !a.made))
 }
 
 /// Most bytes of a client's own name for a prompt.
@@ -1041,7 +1101,10 @@ async fn prompt(
             axiom_engine::Refused::Closed => st.closed(&session),
             axiom_engine::Refused::This(why) => internal(why),
         };
+        let mut setup = setup;
         let begin = async {
+            let (a, c) = (&st.agents, cancel.clone());
+            setup = copies::ready(a, &st.store, &session, &agent, setup.clone(), c).await?;
             let rx = turnstile.enter(&run, &cancel);
             let mut a =
                 agents::Worker::load(&st.agents, &st.store, s.clone(), &agent, &setup, rx).await?;
@@ -1318,7 +1381,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             begun.await.map_err(|_| internal("the run did not start"))??;
             Ok(json!({ "run": run, "agent": agent }))
         }
-        Call::AgentAdd { session, name, execution, access, trust, instructions } => {
+        Call::AgentAdd { session, name, execution, access, trust, instructions, apart } => {
             let workspace = workspace(st, &session).await?;
             if agents::full(stored(st, &session).await?.len()) {
                 return Err(agents::bad("the session has as many agents as it may"));
@@ -1327,6 +1390,13 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let written = a.written(&st.store).await?;
             let setup = blocking(move || {
                 let (resume, began) = (None, false);
+                let apart = match apart {
+                    true => {
+                        let folder = agents::real(workspace.as_ref())?.to_string();
+                        Some(Apart { folder, made: false })
+                    }
+                    false => None,
+                };
                 let s = Setup {
                     name,
                     execution,
@@ -1336,6 +1406,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                     trust,
                     resume,
                     began,
+                    apart,
                 };
                 a.setup(s, &written)
             })
@@ -1353,6 +1424,49 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let folder = workspace(st, &session).await?;
             let c = changes::changes(&st.agents, &session, folder).await?;
             serde_json::to_value(c).map_err(|e| internal(e.to_string()))
+        }
+        Call::CopyChanges { session, agent } => {
+            let mut all = Vec::new();
+            for (id, text) in stored(st, &session).await? {
+                all.push((id, serde_json::from_str(&text).map_err(|e| internal(e.to_string()))?));
+            }
+            let c = copies::shown(&st.agents, session, agent, all).await?;
+            serde_json::to_value(c).map_err(|e| internal(e.to_string()))
+        }
+        Call::CopyBring { session, agent, files } => {
+            let s = setup(st, &session, &agent).await?;
+            to_its_end(st, move |st| async move {
+                copies::bring(&st.agents, &st.store, session, agent, s, files).await
+            })
+            .await
+        }
+        Call::CopyBack { session, agent, back } => {
+            let s = setup(st, &session, &agent).await?;
+            to_its_end(st, move |st| async move {
+                copies::back(&st.agents, &st.store, session, agent, s, back).await
+            })
+            .await
+        }
+        Call::CopyRenew { session, agent } => {
+            to_its_end(st, move |st| async move {
+                let slot = st.agents.slot(&session, &agent);
+                let _held = slot.hold().await?;
+                slot.still().await?;
+                let s = setup(&st, &session, &agent).await?;
+                copies::renew(&st.agents, &st.store, session, agent, s).await
+            })
+            .await
+        }
+        Call::CopyRemove { session, agent, lose } => {
+            to_its_end(st, move |st| async move {
+                let slot = st.agents.slot(&session, &agent);
+                let _held = slot.hold().await?;
+                slot.still().await?;
+                let s = setup(&st, &session, &agent).await?;
+                copies::remove(&st.agents, &st.store, session, agent, s, lose).await?;
+                Ok(json!({}))
+            })
+            .await
         }
         Call::Harnesses {} => {
             let a = st.agents.clone();

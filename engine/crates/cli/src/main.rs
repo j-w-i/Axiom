@@ -145,6 +145,7 @@ async fn run(args: Vec<String>) -> Result<(), Error> {
             access: access(a)?,
             trust: false,
             instructions: Vec::new(),
+            apart: false,
         },
         ["set", s, agent, a] => Call::AgentSet {
             session: SessionId(s.into()),

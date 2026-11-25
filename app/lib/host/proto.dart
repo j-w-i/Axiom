@@ -162,6 +162,111 @@ class Changed {
   final String path, what;
 }
 
+/// What an agent has changed in its own copy of the folder.
+class CopyChanges {
+  const CopyChanges({
+    this.made = false,
+    this.files = const [],
+    this.whole = true,
+    this.ignored = 0,
+    this.odd = 0,
+    this.back,
+  });
+  CopyChanges.decode(Json j)
+    : made = j['made']! as bool,
+      files = [for (final f in j['files']! as List<Object?>) CopyFile.decode(f! as Json)],
+      whole = j['whole']! as bool,
+      ignored = j['ignored'] as int? ?? 0,
+      odd = j['odd'] as int? ?? 0,
+      back = switch (j['back']) {
+        {'id': final String id, 'files': final int n} => (id, n),
+        _ => null,
+      };
+
+  /// There is one: it has been spoken to.
+  final bool made, whole;
+  final List<CopyFile> files;
+
+  /// What git ignores and only the copy has, and what cannot be listed or was not copied.
+  final int ignored, odd;
+
+  /// The last that was brought in, and for how many files that can be put back.
+  final (String, int)? back;
+}
+
+class CopyFile extends Changed {
+  const CopyFile(
+    super.path,
+    super.what, {
+    this.digest,
+    this.run = false,
+    this.there,
+    this.diff,
+    this.clash = false,
+    this.unsettled = false,
+    this.never,
+    this.runs = false,
+    this.others = const [],
+  });
+  CopyFile.decode(Json j)
+    : digest = j['digest'] as String?,
+      run = j['run'] as bool? ?? false,
+      there = j['there'] as String?,
+      diff = j['diff'] as String?,
+      clash = j['clash'] as bool? ?? false,
+      unsettled = j['unsettled'] as bool? ?? false,
+      never = j['never'] as String?,
+      runs = j['runs'] as bool? ?? false,
+      others = [for (final o in j['others'] as List<Object?>? ?? const []) o! as String],
+      super(j['path']! as String, j['what']! as String);
+
+  /// What the copy has now, and the folder; null if it has none.
+  final String? digest, there;
+
+  /// It can be run.
+  final bool run;
+
+  /// What bringing it in would do to the folder; null if that cannot be shown.
+  final String? diff;
+
+  /// The folder's own has changed too: it is not brought in.
+  final bool clash;
+
+  /// The folder's own had changed too when the copy was brought up to date, and its agent has not
+  /// touched it since.
+  final bool unsettled;
+
+  /// Why it is never brought in.
+  final String? never;
+
+  /// It runs when someone builds, tests or installs.
+  final bool runs;
+
+  /// Other agents that have changed it in their own copies.
+  final List<String> others;
+  bool get can => !clash && never == null;
+
+  /// Without anything that somebody should look at first.
+  bool get plain => can && !runs && !unsettled && diff != null;
+
+  /// As it was shown.
+  Json encode() => {'path': path, 'digest': ?digest, if (run) 'run': true, 'there': ?there};
+}
+
+/// What was done, and what was not, each with why.
+class Moved {
+  const Moved(this.done, this.left);
+  Moved.decode(Json j, String done)
+    : done = [for (final f in j[done]! as List<Object?>) f! as String],
+      left = leftOf(j);
+  static List<(String, String)> leftOf(Json j) => [
+    for (final f in j['left']! as List<Object?>)
+      ((f! as Json)['path']! as String, (f as Json)['why']! as String),
+  ];
+  final List<String> done;
+  final List<(String, String)> left;
+}
+
 /// The environment in which what an agent does is done by Axiom, whatever its harness.
 const axiomTools = 'axiom';
 
@@ -245,6 +350,7 @@ sealed class Body {
           Execution.decode(j['execution']! as Json),
           j['parent'] as String?,
           access: j['access'] == null ? null : _enum(Access.values, j['access'], Access.unknown),
+          apart: j['apart'] as bool? ?? false,
         ),
         'agent.changed' => AgentChanged(
           j['agent']! as String,
@@ -331,7 +437,17 @@ class SessionTitled extends Body {
 }
 
 class AgentAdded extends Body {
-  const AgentAdded(this.agent, this.name, this.execution, this.parent, {this.access});
+  const AgentAdded(
+    this.agent,
+    this.name,
+    this.execution,
+    this.parent, {
+    this.access,
+    this.apart = false,
+  });
+
+  /// It works in a copy of the folder of its own.
+  final bool apart;
   final String agent, name;
   final Execution execution;
   final String? parent;
