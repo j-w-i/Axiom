@@ -9,6 +9,10 @@ enum Command {
   find('Search', LogicalKeyboardKey.keyK),
   findHere('Find in the conversation', LogicalKeyboardKey.keyF),
   accounts('Accounts', LogicalKeyboardKey.comma),
+  settings('Settings', LogicalKeyboardKey.comma, shift: true),
+  larger('Larger text', LogicalKeyboardKey.equal),
+  smaller('Smaller text', LogicalKeyboardKey.minus),
+  usual('Usual text size', LogicalKeyboardKey.digit0),
   panel('Show or hide the panel', LogicalKeyboardKey.keyD),
   list('Show or hide the sidebar', LogicalKeyboardKey.keyB),
   next('Next session', LogicalKeyboardKey.tab, control: true),
@@ -35,7 +39,8 @@ enum Command {
   /// With Shift; with Control on every system; with neither Control nor Command.
   final bool shift, control, bare;
 
-  static bool get _mac => defaultTargetPlatform == TargetPlatform.macOS;
+  static bool get isMac => defaultTargetPlatform == TargetPlatform.macOS;
+  static bool get _mac => isMac;
 
   /// As it is written beside what it does.
   String get keys {

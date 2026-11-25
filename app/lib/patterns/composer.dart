@@ -7,6 +7,7 @@ import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
+import '../ui/prefs.dart';
 import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
@@ -139,6 +140,9 @@ class _ComposerState extends State<Composer> {
     if (!enter || e is! KeyDownEvent || k.isShiftPressed || k.isAltPressed) {
       return KeyEventResult.ignored;
     }
+    // With the command key it is sent either way; without, if Enter sends.
+    final held = Command.isMac ? k.isMetaPressed : k.isControlPressed;
+    if (!held && !PrefsScope.of(context).enterSends) return KeyEventResult.ignored;
     final v = _text.value;
     if (v.composing.isValid && !v.composing.isCollapsed) return KeyEventResult.ignored;
     unawaited(_submit());

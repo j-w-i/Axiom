@@ -58,7 +58,8 @@ class AxGlyph extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ExcludeSemantics(
     child: CustomPaint(
-      size: Size.square(size ?? icon.size),
+      // It belongs to the words beside it, and is as large as they are.
+      size: Size.square(MediaQuery.textScalerOf(context).scale(size ?? icon.size)),
       painter: _GlyphPainter(icon, color ?? Ax.of(context).colors.ink3, filled),
     ),
   );

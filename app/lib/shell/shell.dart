@@ -20,6 +20,7 @@ import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
 import '../ui/overlay.dart';
+import '../ui/prefs.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
 import '../ui/surface.dart';
@@ -28,6 +29,7 @@ import 'changes.dart';
 import 'drafts.dart';
 import 'find.dart';
 import 'new_session.dart';
+import 'settings.dart';
 import 'start.dart';
 import 'talk.dart';
 import 'window.dart';
@@ -44,7 +46,7 @@ class Shell extends StatefulWidget {
 }
 
 /// What the display shows.
-enum _View { work, start, agent, accounts }
+enum _View { work, start, agent, accounts, settings }
 
 class _ShellState extends State<Shell> with WidgetsBindingObserver {
   String? _agent;
@@ -179,6 +181,11 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     _answer(all[(at + 1) % all.length]);
   }
 
+  void _prefs(Prefs Function(Prefs) f) {
+    final all = PrefsScope.maybeOf(context);
+    if (all != null) all.value = f(all.value);
+  }
+
   bool _run(Command c) {
     switch (c) {
       case Command.start:
@@ -187,6 +194,14 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
         setState(() => _finding = !_finding);
       case Command.accounts:
         _show(_View.accounts);
+      case Command.settings:
+        _show(_View.settings);
+      case Command.larger:
+        _prefs((p) => p.sized(1));
+      case Command.smaller:
+        _prefs((p) => p.sized(-1));
+      case Command.usual:
+        _prefs((p) => p.copyWith(text: 1));
       case Command.panel:
         if (_panel(context) case final open?) _change(!open);
       case Command.list:
@@ -229,7 +244,11 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   }
 
   List<Found> _everything(HostStore s) => [
-    for (final (c, icon) in [(Command.start, AxIcon.plus), (Command.accounts, AxIcon.account)])
+    for (final (c, icon) in [
+      (Command.start, AxIcon.plus),
+      (Command.accounts, AxIcon.account),
+      (Command.settings, AxIcon.list),
+    ])
       Found(c.label, () => _run(c), icon: icon, keys: c.keys),
     if (s.current case final m?) ...[
       if (m.workspace != null)
@@ -271,7 +290,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     for (final c in Command.values)
       if (switch (c) {
         Command.panel => _panel(context) != null,
-        Command.list => true,
+        Command.list || Command.larger || Command.smaller || Command.usual => true,
         Command.next || Command.previous => s.sessions.length > 1,
         Command.request => s.needs.any((w) => w.need == Need.asks),
         Command.stop || Command.findHere || Command.model || Command.access => _commands.can(c),
@@ -382,6 +401,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
               onAddAgent: () => _addAgent(s.current!.id),
               onStart: _startIn,
               onFind: () => setState(() => _finding = true),
+              onSettings: () => _show(_View.settings),
               onAccounts: () => _show(_View.accounts),
               onHide: () => setState(() => _list = false),
               onAnswer: _answer,
@@ -391,6 +411,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
               _View.start => 'New session',
               _View.agent => 'New agent',
               _View.accounts => 'Accounts',
+              _View.settings => 'Settings',
               _View.work => null,
             };
             final problem = switch (s) {
@@ -427,6 +448,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                 onAccounts: () => _show(_View.accounts),
                 onCancel: _back,
               ),
+              _ when _view == _View.settings => const SettingsPage(),
               _ when _view == _View.accounts => AccountsPage(
                 s,
                 onDone: () => _show(s.current == null ? _View.start : _View.work),
@@ -500,7 +522,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                                         onStart: () => _startIn(null),
                                         onLeave: switch (_view) {
                                           _View.start when s.current != null => _back,
-                                          _View.agent => _back,
+                                          _View.agent ||
+                                          _View.settings when s.current != null => _back,
                                           _ => null,
                                         },
                                         onAccounts: () => _show(_View.accounts),
@@ -909,6 +932,7 @@ class _Side extends StatelessWidget {
     required this.onAgent,
     required this.onAddAgent,
     required this.onStart,
+    required this.onSettings,
     required this.onAccounts,
     required this.onOpen,
     required this.onAnswer,
@@ -930,7 +954,7 @@ class _Side extends StatelessWidget {
 
   /// In this folder, if one is named.
   final ValueChanged<String?> onStart;
-  final VoidCallback onAddAgent, onAccounts;
+  final VoidCallback onSettings, onAddAgent, onAccounts;
 
   void _then(VoidCallback f) {
     close?.call();
@@ -1137,12 +1161,25 @@ class _Side extends StatelessWidget {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
-          child: NavRow(
-            AxIcon.account,
-            'Accounts',
-            keys: Command.accounts.keys,
-            selected: view == _View.accounts,
-            onPressed: onAccounts,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              NavRow(
+                AxIcon.list,
+                'Settings',
+                keys: Command.settings.keys,
+                selected: view == _View.settings,
+                onPressed: onSettings,
+              ),
+              const SizedBox(height: 3),
+              NavRow(
+                AxIcon.account,
+                'Accounts',
+                keys: Command.accounts.keys,
+                selected: view == _View.accounts,
+                onPressed: onAccounts,
+              ),
+            ],
           ),
         ),
       ],

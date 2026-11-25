@@ -123,8 +123,9 @@ class FormPart extends StatelessWidget {
   }
 }
 
-class _Page extends StatelessWidget {
-  const _Page({required this.children, this.problem});
+/// A page beside the work: what is set up there, in one column.
+class PageFrame extends StatelessWidget {
+  const PageFrame(this.children, {super.key, this.problem});
   final List<Widget> children;
   final String? problem;
   @override
@@ -612,208 +613,205 @@ class _AccountsPageState extends State<AccountsPage> {
           _name.text.trim().isNotEmpty &&
           (!own || _url.text.trim().isNotEmpty) &&
           (from == null || _key.text.trim().isNotEmpty);
-      return _Page(
-        problem: _problem,
-        children: [
-          if (widget.store.connections.isNotEmpty) ...[
-            Card([
-              for (final x in widget.store.connections)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        if (markOf(x.provider, null) case final m?)
-                          AxServiceMark(m, size: 16)
-                        else
-                          AxGlyph(AxIcon.web, color: c.ink3),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                oneLine(x.name, 80),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: t.type.uiMedium,
-                              ),
-                              Text(
-                                [
-                                  providerName(x.provider),
-                                  if (x.url case final u?) oneLine(u, 60),
-                                  switch (x) {
-                                    Connection(signIn: _?) => 'its own sign-in',
-                                    Connection(plan: true, lasts: true) => 'signed in',
-                                    Connection(plan: true) => 'signed in until the host stops',
-                                    Connection(lasts: true) => 'key in the system\'s store',
-                                    Connection(secret: true) => 'key until the host stops',
-                                    _ => 'no key',
-                                  },
-                                ].join(' · '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: t.type.small.ink(c.ink3),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        if (_leaving == x.id) ...[
-                          AxButton(
-                            label: 'Keep',
-                            autofocus: true,
-                            onPressed: () => setState(() => _leaving = null),
-                          ),
-                          const SizedBox(width: 8),
-                          AxButton(
-                            label: 'Remove ${oneLine(x.name, 30)}',
-                            onPressed: _busy
-                                ? null
-                                : () => unawaited(
-                                    _do(() async {
-                                      final ended = await widget.store.disconnect(x.id);
-                                      _leaving = null;
-                                      if (ended == false) {
-                                        _problem =
-                                            'It is removed here. OpenAI did not confirm that it is signed '
-                                            'out there: Axiom can be disconnected in ChatGPT\'s settings.';
-                                      }
-                                    }),
-                                  ),
-                          ),
-                        ] else
-                          AxButton(
-                            label: 'Remove',
-                            onPressed: _busy ? null : () => setState(() => _leaving = x.id),
-                          ),
-                      ],
-                    ),
-                    if (x.problem case final p?)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 28, top: 8),
-                        child: Row(
+      return PageFrame(problem: _problem, [
+        if (widget.store.connections.isNotEmpty) ...[
+          Card([
+            for (final x in widget.store.connections)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      if (markOf(x.provider, null) case final m?)
+                        AxServiceMark(m, size: 16)
+                      else
+                        AxGlyph(AxIcon.web, color: c.ink3),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(child: Text(visible(p), style: t.type.small.ink(c.faultText))),
-                            const SizedBox(width: 10),
-                            AxButton(
-                              label: 'Sign in again',
-                              onPressed: _busy ? null : () => unawaited(_signIn(again: x.id)),
+                            Text(
+                              oneLine(x.name, 80),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.type.uiMedium,
+                            ),
+                            Text(
+                              [
+                                providerName(x.provider),
+                                if (x.url case final u?) oneLine(u, 60),
+                                switch (x) {
+                                  Connection(signIn: _?) => 'its own sign-in',
+                                  Connection(plan: true, lasts: true) => 'signed in',
+                                  Connection(plan: true) => 'signed in until the host stops',
+                                  Connection(lasts: true) => 'key in the system\'s store',
+                                  Connection(secret: true) => 'key until the host stops',
+                                  _ => 'no key',
+                                },
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.type.small.ink(c.ink3),
                             ),
                           ],
                         ),
                       ),
-                    if (x.signIn case final command?)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 28, top: 8),
-                        child: _SignIn(command, leaving: _leaving == x.id),
+                      const SizedBox(width: 10),
+                      if (_leaving == x.id) ...[
+                        AxButton(
+                          label: 'Keep',
+                          autofocus: true,
+                          onPressed: () => setState(() => _leaving = null),
+                        ),
+                        const SizedBox(width: 8),
+                        AxButton(
+                          label: 'Remove ${oneLine(x.name, 30)}',
+                          onPressed: _busy
+                              ? null
+                              : () => unawaited(
+                                  _do(() async {
+                                    final ended = await widget.store.disconnect(x.id);
+                                    _leaving = null;
+                                    if (ended == false) {
+                                      _problem =
+                                          'It is removed here. OpenAI did not confirm that it is signed '
+                                          'out there: Axiom can be disconnected in ChatGPT\'s settings.';
+                                    }
+                                  }),
+                                ),
+                        ),
+                      ] else
+                        AxButton(
+                          label: 'Remove',
+                          onPressed: _busy ? null : () => setState(() => _leaving = x.id),
+                        ),
+                    ],
+                  ),
+                  if (x.problem case final p?)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 28, top: 8),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(visible(p), style: t.type.small.ink(c.faultText))),
+                          const SizedBox(width: 10),
+                          AxButton(
+                            label: 'Sign in again',
+                            onPressed: _busy ? null : () => unawaited(_signIn(again: x.id)),
+                          ),
+                        ],
                       ),
-                  ],
-                ),
-            ]),
-            const SizedBox(height: 24),
-          ],
-          Semantics(header: true, child: Text('Add an account', style: t.type.title)),
-          const SizedBox(height: 12),
-          FormPart(
-            null,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: AxSelect<String>(
-                label: 'Add',
-                named: false,
-                items: [
-                  for (final p in const [
-                    'lm-studio',
-                    'anthropic',
-                    'openai',
-                    'gemini',
-                    'openrouter',
-                    'openai-compatible',
-                    'chatgpt',
-                  ].followedBy(programs))
-                    AxMenuItem(p, providerName(p), mark: markOf(p, null)),
+                    ),
+                  if (x.signIn case final command?)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 28, top: 8),
+                      child: _SignIn(command, leaving: _leaving == x.id),
+                    ),
                 ],
-                value: _provider,
-                onChanged: (v) => setState(() {
-                  _provider = v;
-                  _problem = null;
-                  _key.clear();
-                }),
               ),
-            ),
-          ),
-          if (signin != null && (plan || signin.again != null || !signin.waits))
-            _Signing(
-              signin,
-              opened: _opened,
-              onOpen: () => unawaited(_do(() async => _opened = await browse(signin.url))),
-              onClose: () => unawaited(_do(widget.store.cancelSignin)),
-            )
-          else if (plan)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Text(
-                'You sign in with OpenAI, in your browser. Axiom\'s own agents then work on your '
-                'plan: there is no key, and nothing is billed to an API account. Axiom keeps what '
-                'OpenAI gives it in the system\'s store.',
-                style: t.type.label.ink(c.ink3),
-              ),
-            ),
-          if (!plan)
-            FormPart(
-              'Name',
-              child: AxField(label: 'Name', controller: _name, placeholder: 'To tell it apart'),
-            ),
-          if (own)
-            FormPart(
-              'Address',
-              note: 'Up to and including /v1. Without https only on this machine.',
-              child: AxField(
-                label: 'Address',
-                controller: _url,
-                mono: true,
-                placeholder: 'https://example.com/v1',
-              ),
-            ),
-          if (program)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Text(
-                'Claude Code keeps this account in its own folder. You sign in yourself, in a terminal, '
-                'with the command shown once it is added. Agents use it only where you choose it.',
-                style: t.type.label.ink(c.ink3),
-              ),
-            ),
-          if (_provider != 'lm-studio' && !program && !plan)
-            FormPart(
-              'Key',
-              note: from != null
-                  ? 'An API key from $from. It goes to the system\'s store.'
-                  : 'If the server needs one. It goes to the system\'s store.',
-              child: AxField(label: 'Key', controller: _key, secret: true, mono: true),
-            ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              AxButton(label: 'Done', onPressed: widget.onDone),
-              const SizedBox(width: 8),
-              if (plan)
-                AxButton(
-                  label: 'Continue with ChatGPT',
-                  tone: AxTone.primary,
-                  onPressed: _busy || (signin?.waits ?? false) ? null : () => unawaited(_signIn()),
-                )
-              else
-                AxButton(
-                  label: 'Add',
-                  tone: AxTone.primary,
-                  onPressed: ready ? () => unawaited(_add()) : null,
-                ),
-            ],
-          ),
+          ]),
+          const SizedBox(height: 24),
         ],
-      );
+        Semantics(header: true, child: Text('Add an account', style: t.type.title)),
+        const SizedBox(height: 12),
+        FormPart(
+          null,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: AxSelect<String>(
+              label: 'Add',
+              named: false,
+              items: [
+                for (final p in const [
+                  'lm-studio',
+                  'anthropic',
+                  'openai',
+                  'gemini',
+                  'openrouter',
+                  'openai-compatible',
+                  'chatgpt',
+                ].followedBy(programs))
+                  AxMenuItem(p, providerName(p), mark: markOf(p, null)),
+              ],
+              value: _provider,
+              onChanged: (v) => setState(() {
+                _provider = v;
+                _problem = null;
+                _key.clear();
+              }),
+            ),
+          ),
+        ),
+        if (signin != null && (plan || signin.again != null || !signin.waits))
+          _Signing(
+            signin,
+            opened: _opened,
+            onOpen: () => unawaited(_do(() async => _opened = await browse(signin.url))),
+            onClose: () => unawaited(_do(widget.store.cancelSignin)),
+          )
+        else if (plan)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(
+              'You sign in with OpenAI, in your browser. Axiom\'s own agents then work on your '
+              'plan: there is no key, and nothing is billed to an API account. Axiom keeps what '
+              'OpenAI gives it in the system\'s store.',
+              style: t.type.label.ink(c.ink3),
+            ),
+          ),
+        if (!plan)
+          FormPart(
+            'Name',
+            child: AxField(label: 'Name', controller: _name, placeholder: 'To tell it apart'),
+          ),
+        if (own)
+          FormPart(
+            'Address',
+            note: 'Up to and including /v1. Without https only on this machine.',
+            child: AxField(
+              label: 'Address',
+              controller: _url,
+              mono: true,
+              placeholder: 'https://example.com/v1',
+            ),
+          ),
+        if (program)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Claude Code keeps this account in its own folder. You sign in yourself, in a terminal, '
+              'with the command shown once it is added. Agents use it only where you choose it.',
+              style: t.type.label.ink(c.ink3),
+            ),
+          ),
+        if (_provider != 'lm-studio' && !program && !plan)
+          FormPart(
+            'Key',
+            note: from != null
+                ? 'An API key from $from. It goes to the system\'s store.'
+                : 'If the server needs one. It goes to the system\'s store.',
+            child: AxField(label: 'Key', controller: _key, secret: true, mono: true),
+          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            AxButton(label: 'Done', onPressed: widget.onDone),
+            const SizedBox(width: 8),
+            if (plan)
+              AxButton(
+                label: 'Continue with ChatGPT',
+                tone: AxTone.primary,
+                onPressed: _busy || (signin?.waits ?? false) ? null : () => unawaited(_signIn()),
+              )
+            else
+              AxButton(
+                label: 'Add',
+                tone: AxTone.primary,
+                onPressed: ready ? () => unawaited(_add()) : null,
+              ),
+          ],
+        ),
+      ]);
     },
   );
 }
