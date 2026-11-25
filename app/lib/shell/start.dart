@@ -20,7 +20,14 @@ String wordsOf(Object e) => switch (e) {
 };
 
 ServiceMark? markOf(String? provider, String? model) =>
-    ServiceMark.of(model) ?? (provider == 'anthropic' ? ServiceMark.claude : null);
+    ServiceMark.of(model) ??
+    switch (provider) {
+      'anthropic' => ServiceMark.claude,
+      'openai' => ServiceMark.openai,
+      'gemini' => ServiceMark.gemini,
+      'openrouter' => ServiceMark.openrouter,
+      _ => null,
+    };
 
 const accessItems = [
   AxMenuItem(Access.read, 'Only look', detail: 'changes nothing'),
@@ -327,9 +334,21 @@ class _StartPageState extends State<StartPage> {
 
 String providerName(String p) => switch (p) {
   'anthropic' => 'Anthropic API',
+  'openai' => 'OpenAI API',
+  'gemini' => 'Gemini API',
+  'openrouter' => 'OpenRouter',
   'lm-studio' => 'LM Studio on this machine',
   'openai-compatible' => 'OpenAI-compatible server',
   _ => oneLine(p, 40),
+};
+
+/// Where a key for a provider comes from, if it answers no one without.
+String? _keyFrom(String p) => switch (p) {
+  'anthropic' => 'the Anthropic console',
+  'openai' => 'the OpenAI platform',
+  'gemini' => 'Google AI Studio',
+  'openrouter' => 'OpenRouter',
+  _ => null,
 };
 
 /// Accounts, keys and servers. Several for one provider is normal (PR-4).
@@ -396,12 +415,12 @@ class _AccountsPageState extends State<AccountsPage> {
     listenable: widget.store,
     builder: (context, _) {
       final t = Ax.of(context), c = t.colors;
-      final own = _provider == 'openai-compatible', anthropic = _provider == 'anthropic';
+      final own = _provider == 'openai-compatible', from = _keyFrom(_provider);
       final ready =
           !_busy &&
           _name.text.trim().isNotEmpty &&
           (!own || _url.text.trim().isNotEmpty) &&
-          (!anthropic || _key.text.trim().isNotEmpty);
+          (from == null || _key.text.trim().isNotEmpty);
       return _Page(
         title: 'Accounts and servers',
         problem: _problem,
@@ -480,7 +499,14 @@ class _AccountsPageState extends State<AccountsPage> {
               child: AxSelect<String>(
                 label: 'Add',
                 items: [
-                  for (final p in const ['lm-studio', 'anthropic', 'openai-compatible'])
+                  for (final p in const [
+                    'lm-studio',
+                    'anthropic',
+                    'openai',
+                    'gemini',
+                    'openrouter',
+                    'openai-compatible',
+                  ])
                     AxMenuItem(p, providerName(p), mark: markOf(p, null)),
                 ],
                 value: _provider,
@@ -514,8 +540,8 @@ class _AccountsPageState extends State<AccountsPage> {
           if (_provider != 'lm-studio')
             FormPart(
               'Key',
-              note: anthropic
-                  ? 'An API key from the Anthropic console. It goes to the system\'s store.'
+              note: from != null
+                  ? 'An API key from $from. It goes to the system\'s store.'
                   : 'If the server needs one. It goes to the system\'s store.',
               child: AxField(label: 'Key', controller: _key, secret: true, mono: true),
             ),

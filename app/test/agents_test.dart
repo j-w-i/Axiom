@@ -365,6 +365,40 @@ void main() {
     expect(find.text('Work'), findsNothing);
   });
 
+  testWidgets('a provider that needs a key is not added without one', (t) async {
+    final s = await shell(t, accounts: false);
+    await t.tap(find.bySemanticsLabel('Accounts and servers'));
+    await settled(t);
+    Finder field(String l) => find.descendant(
+      of: find.byWidgetPredicate((w) => w is AxField && w.label == l),
+      matching: find.byType(EditableText),
+    );
+    for (final (kind, name, from) in const [
+      ('openai', 'OpenAI API', 'the OpenAI platform'),
+      ('gemini', 'Gemini API', 'Google AI Studio'),
+      ('openrouter', 'OpenRouter', 'OpenRouter'),
+    ]) {
+      await t.tap(find.bySemanticsLabel(RegExp('^Add: ')));
+      await settled(t);
+      await t.tap(find.bySemanticsLabel(name).last);
+      await settled(t);
+      expect(find.text('An API key from $from. It goes to the system\'s store.'), findsOneWidget);
+      expect(field('Address'), findsNothing, reason: 'a key goes to its provider and nowhere else');
+      await t.enterText(field('Name'), 'Mine');
+      await settled(t);
+      await t.tap(find.widgetWithText(AxButton, 'Add'));
+      await settled(t);
+      expect(s.calls.where((c) => c.contains(kind)), isEmpty);
+      await t.enterText(field('Key'), 'sk-secret');
+      await settled(t);
+      await t.tap(find.widgetWithText(AxButton, 'Add'));
+      await settled(t);
+      expect(s.calls.last, ['connect', 'Mine', kind, null, 'sk-secret']);
+      expect(find.textContaining('$name · '), findsWidgets);
+      expect(markOf(kind, null)?.label, name.split(' ').first);
+    }
+  });
+
   testWidgets('fits a small window at twice the text', (t) async {
     final s = Asked()
       ..current = working(asks: true)
