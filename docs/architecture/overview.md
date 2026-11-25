@@ -24,7 +24,7 @@ Why two processes, why Rust, why this wire: decisions 0002–0004, measured in `
 | **Model** | a capability set at a provider | `claude-opus-5-5` | a provider |
 | **Connection** | one account or key, with a lane (key, plan sign-in, installed harness), identity and limits; any number per provider | "Claude Max, personal" | a provider setting |
 | **Harness** | who runs the loop | Axiom native, Codex, Claude Code | a model |
-| **Environment** | where effects happen: folder, worktree, sandbox, network policy | worktree `refresh-guard`, no network | a permission mode |
+| **Environment** | where effects happen: folder, copy of it, sandbox, network policy | its own copy, no network | a permission mode |
 
 An **agent** is one choice of each, plus effort, tools, access and a parent. Illegal combinations are
 computed from declared capabilities and explained in the menu, never silently repaired.
