@@ -1000,6 +1000,7 @@ pub async fn load(
     let waits = store.pending(id.clone(), agent.clone()).await.map_err(internal)?;
     let quirks = client.profile().quirks(&model);
     let messages = client.profile().codec == Codec::Messages;
+    let marks = matches!(client.profile().codec, Codec::Messages | Codec::Converse);
     let settings = Settings {
         max_output: quirks
             .max_output
@@ -1007,7 +1008,7 @@ pub async fn load(
             .or(messages.then_some(8192)),
         effort: setup.execution.effort.clone(),
         stop: Vec::new(),
-        cache: if messages { Cache::Short } else { Cache::Off },
+        cache: if marks { Cache::Short } else { Cache::Off },
     };
     let floor =
         Floor { agents: agents.clone(), store: store.clone(), session, agent: agent.clone() };

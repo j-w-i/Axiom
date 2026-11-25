@@ -127,6 +127,8 @@ fn profile(provider: &str, url: Option<&str>) -> Option<Profile> {
         "openai" => Some(Profile::openai()),
         "gemini" => Some(Profile::gemini()),
         "openrouter" => Some(Profile::openrouter()),
+        // At an endpoint of Amazon's: the key is for no one else.
+        "bedrock" => url.filter(|u| Profile::is_bedrock(u)).map(|_| Profile::bedrock()),
         "lm-studio" => Some(Profile::lm_studio()),
         "openai-compatible" => Some(Profile::openai_compatible("openai-compatible", url?)),
         _ => None,
@@ -230,8 +232,18 @@ impl Connections {
             }
             return self.keep(name, provider, None, None, None);
         }
-        let p = profile(&provider, url.as_deref())
-            .ok_or_else(|| bad("the provider is not one that can be added, or needs an address"))?;
+        let p = profile(&provider, url.as_deref()).ok_or_else(|| {
+            bad(match provider.as_str() {
+                "bedrock" => {
+                    "a connection to Amazon Bedrock has the address of a region, \
+                     https://bedrock-runtime.REGION.amazonaws.com"
+                }
+                _ => "the provider is not one that can be added, or needs an address",
+            })
+        })?;
+        if provider == "bedrock" && secret.is_none() {
+            return Err(bad("a connection to Amazon Bedrock has a key"));
+        }
         if keyed(&provider) && (url.is_some() || secret.is_none()) {
             return Err(bad("a connection to this provider has a key and no address"));
         }
@@ -424,6 +436,7 @@ mod tests {
         }
     }
     const CANARY: &str = "sk-canary-81723";
+    const BEDROCK: &str = "https://bedrock-runtime.us-east-1.amazonaws.com";
 
     #[test]
     fn several_for_one_provider_and_no_secret_in_the_file() {
@@ -476,6 +489,22 @@ mod tests {
     }
 
     #[test]
+    fn a_bedrock_key_goes_to_its_region() {
+        let t = T::new();
+        let c = t.open();
+        let (key, url) = (Some(CANARY.to_owned()), Some(BEDROCK.to_owned()));
+        let id = c.add("Mine".into(), "bedrock".into(), url, key).unwrap();
+        assert_eq!(t.open().client(&id).unwrap().profile().provider, "bedrock");
+        let text = std::fs::read_to_string(t.file()).unwrap();
+        assert!(!text.contains(CANARY) && text.contains(BEDROCK));
+        // Nor to what somebody made of the file.
+        let other = text.replace(BEDROCK, "https://evil.example");
+        std::fs::write(t.file(), other).unwrap();
+        let e = t.open().client(&id).unwrap_err();
+        assert!(!format!("{e:?}").contains(CANARY));
+    }
+
+    #[test]
     fn what_cannot_be_used_is_not_kept() {
         let t = T::new();
         let c = t.open();
@@ -497,6 +526,12 @@ mod tests {
             ("x", "openrouter", None, None),
             ("x", "openrouter", Some("https://evil.example/v1"), Some(CANARY)),
             ("x", "OpenAI", None, Some(CANARY)),
+            ("x", "bedrock", None, Some(CANARY)),
+            ("x", "bedrock", Some(BEDROCK), None),
+            ("x", "bedrock", Some("us-east-1"), Some(CANARY)),
+            ("x", "bedrock", Some("https://bedrock.us-east-1.amazonaws.com"), Some(CANARY)),
+            ("x", "bedrock", Some("https://bedrock-runtime.x.evil.example"), Some(CANARY)),
+            ("x", "bedrock", Some("http://bedrock-runtime.x.amazonaws.com"), Some(CANARY)),
         ] {
             let e =
                 c.add(name.into(), provider.into(), url.map(Into::into), secret.map(Into::into));
