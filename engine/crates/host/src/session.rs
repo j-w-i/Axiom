@@ -675,6 +675,32 @@ mod tests {
         assert_eq!(last.into_iter().map(|e| e.body).collect::<Vec<_>>(), [delta("p", "pending")]);
     }
 
+    /// Nobody is there to hear an answer: it is not waited for.
+    #[tokio::test]
+    async fn what_a_session_asked_goes_with_it() {
+        let b = Bench::new(1 << 20).await;
+        let waiting: Arc<Waiting> = Arc::default();
+        let (s, opened) =
+            Session::open(b.a.id.clone(), 1, b.a.store.clone(), Arc::default(), waiting.clone());
+        let ask = Say::Event(Body::RequestOpened {
+            request: axiom_proto::RequestId::new(),
+            agent: AgentId("a".into()),
+            what: "asks".into(),
+            subject: "x".into(),
+            scope: String::new(),
+            answerable: axiom_proto::Answerable::Live,
+            digest: String::new(),
+            item: None,
+            session: false,
+        });
+        s.say(vec![ask]).await.unwrap();
+        s.sync().await.unwrap();
+        assert_eq!(waiting.list().len(), 1);
+        drop(s);
+        tokio::time::timeout(Duration::from_secs(5), opened.end()).await.unwrap();
+        assert_eq!(waiting.list(), []);
+    }
+
     #[tokio::test]
     async fn a_burst_shares_its_commits() {
         let mut b = Bench::new(1 << 20).await;

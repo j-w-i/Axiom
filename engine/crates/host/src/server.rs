@@ -1659,6 +1659,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn who_is_gone_is_told_nothing_more() {
+        let (tx, rx) = watch::channel(0);
+        let out = Arc::new(Outbox::new(1 << 20));
+        let task = tokio::spawn(tells(rx, out.clone()));
+        tx.send_replace(3);
+        let line = timeout(Duration::from_secs(5), out.take()).await.unwrap().unwrap();
+        assert_eq!(line, b"{\"waiting\":3}\n");
+        out.close();
+        timeout(Duration::from_secs(5), task).await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn a_session_is_not_opened_again_before_it_is_closed() {
         let d = tempfile::tempdir().unwrap();
         let (st, _host) = host(&d);

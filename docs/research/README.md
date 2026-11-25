@@ -37,6 +37,8 @@ Roo Code is archived and Continue unmaintained; they are references, not upstrea
 5. Provenance on every usage number.
 6. Honest lanes: which account, which harness, which policy, on screen.
 
+`t3code-comparison.md` (2026-11-25): what T3 Code does better than what we have built, ranked, and what we keep.
+
 ## Reusable, with attribution
 Codex `apply-patch` and sandbox policies (Apache-2.0); Vibe Kanban executors (Apache-2.0); T3 coalescer and delegated-mode logic (MIT); Aider's model settings and repo-map method (Apache-2.0); models.dev data (MIT); Monty (MIT).
 
