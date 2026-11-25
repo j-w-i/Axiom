@@ -96,17 +96,28 @@ List<String> cramped(RenderObject root) {
   return bad;
 }
 
-/// Writes build/shots/[name].png for a person to look at.
-Future<void> snap(WidgetTester t, String name) async {
-  debugDisableShadows = false;
-  final r = stage.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+/// With the shades a person sees. Tests draw them as hard shapes otherwise.
+Future<void> shaded(WidgetTester t, Future<void> Function() look) async {
+  final r = stage.currentContext!.findRenderObject()!;
   void dirty(RenderObject o) {
     o.markNeedsPaint();
     o.visitChildren(dirty);
   }
 
-  dirty(r);
-  await t.pump();
+  debugDisableShadows = false;
+  try {
+    dirty(r);
+    await t.pump();
+    await look();
+  } finally {
+    debugDisableShadows = true;
+    dirty(r);
+  }
+}
+
+/// Writes build/shots/[name].png for a person to look at.
+Future<void> snap(WidgetTester t, String name) => shaded(t, () async {
+  final r = stage.currentContext!.findRenderObject()! as RenderRepaintBoundary;
   expect(cramped(r), isEmpty, reason: name);
   await t.runAsync(() async {
     final img = await r.toImage(pixelRatio: t.view.devicePixelRatio);
@@ -115,8 +126,4 @@ Future<void> snap(WidgetTester t, String name) async {
       ..createSync(recursive: true)
       ..writeAsBytesSync(b!.buffer.asUint8List());
   });
-  debugDisableShadows = true;
-  dirty(r);
-  await t.pump();
-  expect(cramped(r), isEmpty, reason: name);
-}
+});
