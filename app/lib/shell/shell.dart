@@ -26,6 +26,7 @@ import 'drafts.dart';
 import 'find.dart';
 import 'start.dart';
 import 'talk.dart';
+import 'window.dart';
 
 /// The application's window, on what the host says. Nothing here is specimen data.
 class Shell extends StatefulWidget {
@@ -401,21 +402,23 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 if (!narrow) ?banner,
-                                Container(
-                                  height: 44,
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: _Strip(
-                                    problem: narrow ? problem : null,
-                                    page: page,
-                                    session: s.current,
-                                    inset: beside ? 0 : widget.titleInset,
-                                    needs: s.needs,
-                                    list: narrow ? side : null,
-                                    onList: onList,
-                                    onAnswer: _answer,
-                                    onStart: () => _startIn(null),
-                                    onAccounts: () => _show(_View.accounts),
-                                    onFind: () => setState(() => _finding = true),
+                                MoveArea(
+                                  child: Container(
+                                    height: 44,
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: _Strip(
+                                      problem: narrow ? problem : null,
+                                      page: page,
+                                      session: s.current,
+                                      inset: beside ? 0 : widget.titleInset,
+                                      needs: s.needs,
+                                      list: narrow ? side : null,
+                                      onList: onList,
+                                      onAnswer: _answer,
+                                      onStart: () => _startIn(null),
+                                      onAccounts: () => _show(_View.accounts),
+                                      onFind: () => setState(() => _finding = true),
+                                    ),
                                   ),
                                 ),
                                 Expanded(child: content),
@@ -960,32 +963,34 @@ class _Side extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          height: 52,
-          child: Padding(
-            // On the line of what stands on the canvas.
-            padding: EdgeInsets.only(left: inset == 0 ? 20 : inset + 20, right: 10),
-            child: Row(
-              children: [
-                const AxMark(size: 18),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    'Axiom',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.type.uiStrong.copyWith(fontSize: 14),
+        MoveArea(
+          child: SizedBox(
+            height: 52,
+            child: Padding(
+              // On the line of what stands on the canvas.
+              padding: EdgeInsets.only(left: inset == 0 ? 20 : inset + 20, right: 10),
+              child: Row(
+                children: [
+                  const AxMark(size: 18),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      'Axiom',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.uiStrong.copyWith(fontSize: 14),
+                    ),
                   ),
-                ),
-                AxButton.icon(
-                  AxIcon.sidebar,
-                  label: 'Hide the sidebar',
-                  shortcut: _ShellState.keysOf('B'),
-                  tone: AxTone.quiet,
-                  iconFilled: true,
-                  onPressed: onHide,
-                ),
-              ],
+                  AxButton.icon(
+                    AxIcon.sidebar,
+                    label: 'Hide the sidebar',
+                    shortcut: _ShellState.keysOf('B'),
+                    tone: AxTone.quiet,
+                    iconFilled: true,
+                    onPressed: onHide,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1142,23 +1147,25 @@ class _Display extends StatelessWidget {
       children: [
         ?banner,
         if (!small)
-          SizedBox(
-            height: 44,
-            child: Padding(
-              padding: EdgeInsets.only(left: inset, right: 14, bottom: 8),
-              child: Row(
-                children: [
-                  if (onList case final f?) ...[
-                    AxButton.icon(
-                      AxIcon.sidebar,
-                      label: 'Show the sidebar',
-                      tone: AxTone.quiet,
-                      onPressed: f,
-                    ),
-                    const SizedBox(width: 12),
+          MoveArea(
+            child: SizedBox(
+              height: 44,
+              child: Padding(
+                padding: EdgeInsets.only(left: inset, right: 14, bottom: 8),
+                child: Row(
+                  children: [
+                    if (onList case final f?) ...[
+                      AxButton.icon(
+                        AxIcon.sidebar,
+                        label: 'Show the sidebar',
+                        tone: AxTone.quiet,
+                        onPressed: f,
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Expanded(child: Where(session)),
                   ],
-                  Expanded(child: Where(session)),
-                ],
+                ),
               ),
             ),
           ),
@@ -1293,7 +1300,7 @@ class _Display extends StatelessWidget {
         // The transcript between these two looks after itself.
         ListenableBuilder(
           listenable: Listenable.merge([a, changes]),
-          builder: (context, _) => _bar(context, a),
+          builder: (context, _) => MoveArea(child: _bar(context, a)),
         ),
         Expanded(child: all),
       ],

@@ -5,9 +5,11 @@ import 'package:axiom/patterns/session_panel.dart';
 import 'package:axiom/shell/find.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/start.dart';
+import 'package:axiom/shell/window.dart';
 import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/tokens.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -63,6 +65,40 @@ void main() {
     expect(find.textContaining('runs twice.', findRichText: true), findsOneWidget);
     s.dispose();
   });
+
+  testWidgets('the window is moved by its header, and what is pressed there is pressed', (t) async {
+    final was = window, asked = <String>[];
+    window = (what) async => asked.add(what);
+    addTearDown(() => window = was);
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s, titleInset: 72), size: const Size(1100, 700), dpr: 1);
+    for (final at in [find.text('Axiom'), find.byType(MoveArea).last]) {
+      await t.drag(at, const Offset(40, 10), kind: PointerDeviceKind.mouse, warnIfMissed: false);
+      await t.pump();
+      expect(asked, ['move']);
+      asked.clear();
+    }
+    final empty = t.getTopRight(find.text('Axiom')) + const Offset(-2, 6);
+    await t.tapAt(empty, kind: PointerDeviceKind.mouse);
+    await t.pump(const Duration(seconds: 1));
+    await t.tapAt(empty, kind: PointerDeviceKind.mouse);
+    await t.pump(const Duration(seconds: 1));
+    expect(asked, isEmpty, reason: 'two single clicks');
+    await t.tapAt(empty, kind: PointerDeviceKind.mouse);
+    await t.pump(const Duration(milliseconds: 50));
+    await t.tapAt(empty, kind: PointerDeviceKind.mouse);
+    await t.pump(const Duration(seconds: 1));
+    expect(asked, ['zoom']);
+    asked.clear();
+    // Nor is a key held back, or taken for the header.
+    final key = find.bySemanticsLabel('Hide the sidebar');
+    await t.tap(key, kind: PointerDeviceKind.mouse);
+    await t.pump();
+    expect(key, findsNothing);
+    expect(asked, isEmpty);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets('says that the journal is damaged, on one line, and that the list was cut', (
     t,
