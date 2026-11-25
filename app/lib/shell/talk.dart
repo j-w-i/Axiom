@@ -11,11 +11,13 @@ import '../patterns/execution.dart';
 import '../patterns/models.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
+import '../ui/controls.dart';
 import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/status.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'outside.dart';
 import 'start.dart';
 
 /// What an agent asks, and where it is spoken to. Only for an agent that can act: a replayed one is
@@ -240,6 +242,14 @@ class _TalkState extends State<Talk> {
     ];
     final works = a.phase == AgentPhase.running || a.phase == AgentPhase.asking;
     final first = asked.firstOrNull;
+    final plan = s.connections.any((x) => x.id == a.execution.connection && x.plan);
+    // The plan's own limit. Nothing else is taken in its place: that is the person's to choose.
+    final spent = plan && problem == null && (a.error?.startsWith('billing') ?? false);
+    void usage() => unawaited(
+      _do(() async {
+        if (!await browse(planUsage)) throw Failed(0, 'browser', 'it is at $planUsage');
+      }),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -294,6 +304,10 @@ class _TalkState extends State<Talk> {
                       style: t.type.ui.ink(c.faultText),
                     ),
                   ),
+                  if (spent) ...[
+                    const SizedBox(width: 10),
+                    AxButton(label: 'Manage usage', tone: AxTone.primary, onPressed: usage),
+                  ],
                 ],
               ),
             ),
@@ -319,6 +333,23 @@ class _TalkState extends State<Talk> {
                   },
                 ),
                 hue: markOf(a.execution.provider, a.execution.model, a.execution.harness)?.color(c),
+              ),
+            if (plan)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      'Using ChatGPT plan',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.small.ink(c.ink3),
+                    ),
+                  ),
+                  if (!spent)
+                    AxButton(label: 'Manage usage', tone: AxTone.quiet, size: 24, onPressed: usage),
+                ],
               ),
           ],
           controller: widget.draft.text,

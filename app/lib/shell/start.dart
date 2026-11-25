@@ -15,6 +15,7 @@ import '../ui/overlay.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'outside.dart';
 
 /// What the host said, in a sentence.
 String wordsOf(Object e) => switch (e) {
@@ -36,7 +37,7 @@ ServiceMark? markOf(String? provider, String? model, [String? harness]) =>
     switch (provider) {
       'anthropic' => ServiceMark.claude,
       'claude-code' => ServiceMark.claudecode,
-      'openai' => ServiceMark.openai,
+      'openai' || 'chatgpt' => ServiceMark.openai,
       'gemini' => ServiceMark.gemini,
       'openrouter' => ServiceMark.openrouter,
       _ => null,
@@ -727,6 +728,7 @@ class _StartPageState extends State<StartPage> {
 String providerName(String p) => switch (p) {
   'anthropic' => 'Anthropic API',
   'openai' => 'OpenAI API',
+  'chatgpt' => 'ChatGPT plan',
   'gemini' => 'Gemini API',
   'openrouter' => 'OpenRouter',
   'claude-code' => 'Claude Code, another account',
@@ -759,6 +761,9 @@ class _AccountsPageState extends State<AccountsPage> {
   String _provider = 'lm-studio';
   String? _problem, _leaving;
   bool _busy = false;
+
+  /// The browser was opened for the sign-in that is on.
+  bool _opened = false;
 
   @override
   void initState() {
@@ -803,12 +808,20 @@ class _AccountsPageState extends State<AccountsPage> {
     _url.clear();
   });
 
+  /// Only for a person's press: it opens their browser.
+  Future<void> _signIn({String? again}) => _do(() async {
+    final s = await widget.store.beginSignin(again: again);
+    _opened = await browse(s.url);
+  });
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.store,
     builder: (context, _) {
       final t = Ax.of(context), c = t.colors;
-      final own = _provider == 'openai-compatible', from = _keyFrom(_provider);
+      final own = _provider == 'openai-compatible', plan = _provider == 'chatgpt';
+      final signin = widget.store.signin;
+      final from = _keyFrom(_provider);
       final programs = [
         for (final h in widget.store.harnesses)
           if (h.program != null && h.accounts != null) h.accounts!,
@@ -849,6 +862,8 @@ class _AccountsPageState extends State<AccountsPage> {
                             if (x.url case final u?) oneLine(u, 60),
                             switch (x) {
                               Connection(signIn: _?) => 'its own sign-in',
+                              Connection(plan: true, lasts: true) => 'signed in',
+                              Connection(plan: true) => 'signed in until the host stops',
                               Connection(lasts: true) => 'key in the system\'s store',
                               Connection(secret: true) => 'key until the host stops',
                               _ => 'no key',
@@ -876,8 +891,13 @@ class _AccountsPageState extends State<AccountsPage> {
                           ? null
                           : () => unawaited(
                               _do(() async {
-                                await widget.store.disconnect(x.id);
+                                final ended = await widget.store.disconnect(x.id);
                                 _leaving = null;
+                                if (ended == false) {
+                                  _problem =
+                                      'It is removed here. OpenAI did not confirm that it is signed '
+                                      'out there: Axiom can be disconnected in ChatGPT\'s settings.';
+                                }
                               }),
                             ),
                     ),
@@ -890,6 +910,20 @@ class _AccountsPageState extends State<AccountsPage> {
                 ],
               ),
             ),
+            if (x.problem case final p?)
+              Padding(
+                padding: const EdgeInsets.only(left: 24, bottom: 12),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(visible(p), style: t.type.small.ink(c.faultText))),
+                    const SizedBox(width: 10),
+                    AxButton(
+                      label: 'Sign in again',
+                      onPressed: _busy ? null : () => unawaited(_signIn(again: x.id)),
+                    ),
+                  ],
+                ),
+              ),
             if (x.signIn case final command?)
               Padding(
                 padding: const EdgeInsets.only(left: 24, bottom: 12),
@@ -911,6 +945,7 @@ class _AccountsPageState extends State<AccountsPage> {
                     'gemini',
                     'openrouter',
                     'openai-compatible',
+                    'chatgpt',
                   ].followedBy(programs))
                     AxMenuItem(p, providerName(p), mark: markOf(p, null)),
                 ],
@@ -923,14 +958,32 @@ class _AccountsPageState extends State<AccountsPage> {
               ),
             ),
           ),
-          FormPart(
-            'Name',
-            child: AxField(
-              label: 'Name',
-              controller: _name,
-              placeholder: 'So you can tell it apart',
+          if (signin != null && (plan || signin.again != null || !signin.waits))
+            _Signing(
+              signin,
+              opened: _opened,
+              onOpen: () => unawaited(_do(() async => _opened = await browse(signin.url))),
+              onClose: () => unawaited(_do(widget.store.cancelSignin)),
+            )
+          else if (plan)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(
+                'You sign in with OpenAI, in your browser. Axiom\'s own agents then work on your '
+                'plan: there is no key, and nothing is billed to an API account. Axiom keeps what '
+                'OpenAI gives it in the system\'s store.',
+                style: t.type.label.ink(c.ink3),
+              ),
             ),
-          ),
+          if (!plan)
+            FormPart(
+              'Name',
+              child: AxField(
+                label: 'Name',
+                controller: _name,
+                placeholder: 'So you can tell it apart',
+              ),
+            ),
           if (own)
             FormPart(
               'Address',
@@ -952,7 +1005,7 @@ class _AccountsPageState extends State<AccountsPage> {
                 style: t.type.label.ink(c.ink3),
               ),
             ),
-          if (_provider != 'lm-studio' && !program)
+          if (_provider != 'lm-studio' && !program && !plan)
             FormPart(
               'Key',
               note: from != null
@@ -962,12 +1015,19 @@ class _AccountsPageState extends State<AccountsPage> {
             ),
           Row(
             children: [
-              AxButton(
-                label: 'Add',
-                icon: AxIcon.plus,
-                tone: AxTone.primary,
-                onPressed: ready ? () => unawaited(_add()) : null,
-              ),
+              if (plan)
+                AxButton(
+                  label: 'Continue with ChatGPT',
+                  tone: AxTone.primary,
+                  onPressed: _busy || (signin?.waits ?? false) ? null : () => unawaited(_signIn()),
+                )
+              else
+                AxButton(
+                  label: 'Add',
+                  icon: AxIcon.plus,
+                  tone: AxTone.primary,
+                  onPressed: ready ? () => unawaited(_add()) : null,
+                ),
               const SizedBox(width: 8),
               AxButton(label: 'Done', tone: AxTone.quiet, onPressed: widget.onDone),
             ],
@@ -976,6 +1036,95 @@ class _AccountsPageState extends State<AccountsPage> {
       );
     },
   );
+}
+
+/// A sign-in that waits for its person, or how it ended.
+class _Signing extends StatefulWidget {
+  const _Signing(this.signin, {required this.opened, required this.onOpen, required this.onClose});
+  final Signin signin;
+  final bool opened;
+  final VoidCallback onOpen, onClose;
+  @override
+  State<_Signing> createState() => _SigningState();
+}
+
+class _SigningState extends State<_Signing> {
+  bool _copied = false;
+
+  @override
+  void didUpdateWidget(_Signing old) {
+    super.didUpdateWidget(old);
+    if (old.signin.id != widget.signin.id) _copied = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors, s = widget.signin;
+    final (words, more) = switch (s) {
+      Signin(connection: _?) when s.again == null => (
+        'You\'re using your ChatGPT plan',
+        'What Axiom\'s agents do with this account counts towards your plan\'s limits.',
+      ),
+      Signin(connection: _?) => ('You are signed in again', null),
+      Signin(:final problem?) => ('You are not signed in', visible(problem)),
+      Signin(finishing: true) => ('Signing in…', null),
+      _ when widget.opened => ('Go on in your browser', 'Axiom notices when you are done there.'),
+      _ => (
+        'Open the address in your browser',
+        'It could not be opened from here. It is for a browser on this computer.',
+      ),
+    };
+    return Semantics(
+      liveRegion: true,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Surface(
+          c.block,
+          radius: AxRadius.key,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(words, style: t.type.uiStrong),
+                if (more case final m?) ...[
+                  const SizedBox(height: 3),
+                  Text(m, style: t.type.small.ink(s.problem == null ? c.ink3 : c.faultText)),
+                ],
+                if (!s.finishing) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (s.waits) ...[
+                        AxButton(
+                          label: widget.opened ? 'Open it again' : 'Open it',
+                          onPressed: widget.onOpen,
+                        ),
+                        AxButton(
+                          label: _copied ? 'Copied' : 'Copy the address',
+                          onPressed: () async {
+                            await Clipboard.setData(ClipboardData(text: s.url));
+                            if (mounted) setState(() => _copied = true);
+                          },
+                        ),
+                      ],
+                      AxButton(
+                        label: s.waits ? 'Cancel' : (s.problem == null ? 'Got it' : 'Close'),
+                        tone: AxTone.quiet,
+                        onPressed: widget.onClose,
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// How an account of a program is signed in to: by its person, in their own terminal.

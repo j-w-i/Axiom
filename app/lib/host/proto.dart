@@ -64,6 +64,7 @@ class Connection {
     this.secret = false,
     this.lasts = false,
     this.signIn,
+    this.problem,
   });
   Connection.decode(Json j)
     : id = j['id']! as String,
@@ -72,7 +73,14 @@ class Connection {
       url = j['url'] as String?,
       secret = j['secret'] as bool? ?? false,
       lasts = j['lasts'] as bool? ?? false,
-      signIn = j['sign_in'] as String?;
+      signIn = j['sign_in'] as String?,
+      problem = j['problem'] as String?;
+
+  /// Why it cannot be used until somebody signs in to it again.
+  final String? problem;
+
+  /// A plan that is signed in to here, and not a key.
+  bool get plan => provider == 'chatgpt';
 
   /// Of an account of a program of the person's own: the command they sign in with, in a terminal.
   final String? signIn;
@@ -82,6 +90,34 @@ class Connection {
   /// Whether it has a secret, and whether the system keeps it when the host stops. The secret itself
   /// never comes back.
   final bool secret, lasts;
+}
+
+/// A sign-in on its way. [connection], [problem]: how it ended.
+class Signin {
+  const Signin(
+    this.id,
+    this.url,
+    this.again, {
+    this.finishing = false,
+    this.connection,
+    this.problem,
+  });
+  final String id, url;
+
+  /// The account that is signed in to again.
+  final String? again;
+
+  /// Its person is done in the browser.
+  final bool finishing;
+  final String? connection, problem;
+  bool get waits => connection == null && problem == null;
+
+  Signin told(Json j) => switch (j['state']) {
+    'done' => Signin(id, url, again, connection: j['connection']! as String),
+    'failed' => Signin(id, url, again, problem: j['problem']! as String),
+    'finishing' => Signin(id, url, again, finishing: true),
+    _ => this,
+  };
 }
 
 /// Words of a folder for agents: a file, and which content of it.

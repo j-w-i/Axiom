@@ -9,9 +9,11 @@ import 'package:axiom/patterns/execution.dart';
 import 'package:axiom/patterns/models.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
 import 'package:axiom/shell/drafts.dart';
+import 'package:axiom/shell/outside.dart';
 import 'package:axiom/shell/shell.dart';
 import 'package:axiom/shell/start.dart';
 import 'package:axiom/ui/controls.dart';
+import 'package:axiom/ui/marks.dart';
 import 'package:axiom/ui/overlay.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/services.dart';
@@ -111,9 +113,33 @@ class Asked extends HostStore {
   }
 
   @override
-  Future<void> disconnect(String id) async {
+  Future<bool?> disconnect(String id) async {
     await _do(['disconnect', id], null);
     connections = connections.where((c) => c.id != id).toList();
+    notifyListeners();
+    return ended;
+  }
+
+  /// What the host says of signing out.
+  bool? ended;
+
+  @override
+  Future<Signin> beginSignin({String? again}) async {
+    final n = await _do(['sign in', again], '${calls.length}');
+    signin = Signin('n$n', 'https://auth.openai.com/api/accounts/authorize?state=x', again);
+    notifyListeners();
+    return signin!;
+  }
+
+  void toldOfSignin(Json j) {
+    signin = signin!.told(j);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> cancelSignin() async {
+    await _do(['cancel sign-in', signin?.id], null);
+    signin = null;
     notifyListeners();
   }
 
@@ -664,6 +690,198 @@ void main() {
     HarnessInfo('codex', 'Codex', problem: 'codex is not in any of the folders'),
     HarnessInfo('qwen', 'Qwen Code', problem: 'qwen is not in any of the folders'),
   ];
+
+  group('a ChatGPT plan', () {
+    const mine = Connection('c7', 'me@example.com', 'chatgpt', secret: true, lasts: true);
+    final opened = <String>[];
+    var can = true;
+    setUp(() {
+      opened.clear();
+      can = true;
+      opens = (u) async {
+        opened.add('$u');
+        return can;
+      };
+    });
+    tearDown(() => opens = (u) => throw StateError('a test would have opened $u'));
+
+    Future<Asked> page(WidgetTester t) async {
+      final s = await shell(t, accounts: false);
+      await t.tap(find.bySemanticsLabel('Accounts and servers'));
+      await settled(t);
+      return s;
+    }
+
+    Future<void> choose(WidgetTester t) async {
+      await t.tap(find.bySemanticsLabel(RegExp('^Add: ')));
+      await settled(t);
+      await t.tap(find.bySemanticsLabel('ChatGPT plan').last);
+      await settled(t);
+    }
+
+    testWidgets('is signed in to in the person\'s own browser, when they say so', (t) async {
+      final s = await page(t);
+      await choose(t);
+      expect(find.byType(AxField), findsNothing, reason: 'no name and no key');
+      expect(find.widgetWithText(AxButton, 'Add'), findsNothing);
+      expect(opened, isEmpty);
+      await snap(t, 'accounts-plan');
+      await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
+      expect(s.calls, [
+        ['sign in', null],
+      ]);
+      expect(opened, ['https://auth.openai.com/api/accounts/authorize?state=x']);
+      expect(find.text('Go on in your browser'), findsOneWidget);
+      final again = t.widget<AxButton>(find.widgetWithText(AxButton, 'Continue with ChatGPT'));
+      expect(again.onPressed, isNull, reason: 'one at a time');
+      await snap(t, 'accounts-plan-waits');
+      await press(t, find.widgetWithText(AxButton, 'Open it again'));
+      expect((opened.length, s.calls.length), (2, 1));
+      String? copied;
+      t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (m) async {
+        if (m.method == 'Clipboard.setData') copied = (m.arguments as Map)['text'] as String;
+        return null;
+      });
+      await press(t, find.widgetWithText(AxButton, 'Copy the address'));
+      expect(copied, opened.first);
+      expect(find.text('Copied'), findsOneWidget);
+
+      s.toldOfSignin({'state': 'finishing'});
+      await settled(t);
+      expect(find.text('Signing in…'), findsOneWidget);
+      s.connections = [mine];
+      s.toldOfSignin({'state': 'done', 'connection': 'c7'});
+      await settled(t);
+      expect(find.text('You\'re using your ChatGPT plan'), findsOneWidget);
+      expect(find.text('ChatGPT plan · signed in'), findsOneWidget);
+      await snap(t, 'accounts-plan-done');
+      await press(t, find.widgetWithText(AxButton, 'Got it'));
+      expect(find.text('You\'re using your ChatGPT plan'), findsNothing);
+      expect(markOf('chatgpt', null), ServiceMark.openai);
+    });
+
+    testWidgets('a sign-in can be given up, fail, and be left for later', (t) async {
+      final s = await page(t);
+      await choose(t);
+      await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
+      await press(t, find.widgetWithText(AxButton, 'Cancel'));
+      expect(s.calls.last, ['cancel sign-in', 'n0']);
+      expect(find.text('Go on in your browser'), findsNothing);
+      // What cannot be opened from here is opened by hand.
+      can = false;
+      await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
+      expect(find.text('Open the address in your browser'), findsOneWidget);
+      s.toldOfSignin({'state': 'failed', 'problem': 'the sign-in was not allowed'});
+      await settled(t);
+      expect(find.text('the sign-in was not allowed'), findsOneWidget);
+      await press(t, find.widgetWithText(AxButton, 'Close'));
+      expect(find.text('You are not signed in'), findsNothing);
+      // Another page, and back: it is on still.
+      await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
+      await press(t, find.bySemanticsLabel('New session').first);
+      await press(t, find.bySemanticsLabel('Accounts and servers'));
+      s.toldOfSignin({'state': 'done', 'connection': 'c7'});
+      await settled(t);
+      expect(find.text('You\'re using your ChatGPT plan'), findsOneWidget);
+      // The host does not begin one.
+      await press(t, find.widgetWithText(AxButton, 'Got it'));
+      await choose(t);
+      s.failure = const Failed(1, 'busy', 'other sign-ins are waiting');
+      await press(t, find.widgetWithText(AxButton, 'Continue with ChatGPT'));
+      expect(find.text('other sign-ins are waiting'), findsOneWidget);
+    });
+
+    testWidgets('is signed in to again, and out of', (t) async {
+      final s = await page(t);
+      s
+        ..connections = const [
+          Connection('c7', 'me', 'chatgpt', secret: true, problem: 'it has ended; sign in again'),
+        ]
+        ..notifyListeners();
+      await settled(t);
+      expect(find.text('ChatGPT plan · signed in until the host stops'), findsOneWidget);
+      expect(find.text('it has ended; sign in again'), findsOneWidget);
+      await snap(t, 'accounts-plan-ended');
+      await press(t, find.widgetWithText(AxButton, 'Sign in again'));
+      expect(s.calls.last, ['sign in', 'c7']);
+      // Also with another provider chosen below.
+      expect(find.text('Go on in your browser'), findsOneWidget);
+      s.toldOfSignin({'state': 'done', 'connection': 'c7'});
+      await settled(t);
+      expect(find.text('You are signed in again'), findsOneWidget);
+      await press(t, find.widgetWithText(AxButton, 'Got it'));
+      s.ended = false;
+      await press(t, find.text('Remove'));
+      await press(t, find.text('Remove me'));
+      expect(find.textContaining('OpenAI did not confirm'), findsOneWidget);
+    });
+
+    testWidgets('what it is used for says so, and where its limit is', (t) async {
+      final s = await shell(t, session: working());
+      expect(find.text('Using ChatGPT plan'), findsNothing);
+      s.connections = [key, mine];
+      s.current!.apply([
+        const Event(91, 91, AgentStateChanged('a', AgentPhase.done)),
+        const Event(
+          92,
+          92,
+          AgentChanged(
+            'a',
+            Execution(harness: 'axiom', provider: 'chatgpt', model: 'gpt-5.6', connection: 'c7'),
+            Access.ask,
+          ),
+        ),
+      ]);
+      s.notifyListeners();
+      await settled(t);
+      expect(find.text('Using ChatGPT plan'), findsOneWidget);
+      await snap(t, 'plan-in-use');
+      await press(t, find.text('Manage usage'));
+      expect(opened, ['https://chatgpt.com/settings/usage']);
+      can = false;
+      await press(t, find.text('Manage usage'));
+      expect(find.textContaining('https://chatgpt.com/settings/usage'), findsOneWidget);
+      can = true;
+      await press(t, find.text('Manage usage'));
+      expect(find.textContaining('https://chatgpt.com'), findsNothing);
+      // At the limit it is the first thing to do.
+      s.current!.apply([
+        const Event(93, 93, RunStarted('r2', 'a')),
+        const Event(
+          94,
+          94,
+          RunEnded('r2', Outcome.failed, 'billing (429): You have reached your usage limit.'),
+        ),
+      ]);
+      s.notifyListeners();
+      await settled(t);
+      final manage = find.widgetWithText(AxButton, 'Manage usage');
+      await snap(t, 'plan-used-up');
+      expect(manage, findsOneWidget);
+      expect(t.widget<AxButton>(manage).tone, AxTone.primary);
+    });
+
+    test('only OpenAI\'s own pages are opened', () async {
+      expect(await browse(planUsage), isTrue);
+      for (final bad in [
+        'http://auth.openai.com/x',
+        'https://auth.openai.com.evil.example/x',
+        'https://evil.example/auth.openai.com',
+        'https://auth.openai.com@evil.example/',
+        'https://u:p@auth.openai.com/',
+        'https://auth.openai.com:444/',
+        'file:///etc/passwd',
+        'javascript:alert(1)',
+        'auth.openai.com',
+        ':',
+      ]) {
+        expect(await browse(bad), isFalse, reason: bad);
+      }
+      expect(opened, [planUsage]);
+      opens = (u) => throw PlatformException(code: 'x');
+      expect(await browse(planUsage), isFalse);
+    });
+  });
 
   testWidgets('a session can run with a program of the person\'s own', (t) async {
     final s = await shell(t, accounts: false);
@@ -1248,7 +1466,15 @@ void main() {
     testWidgets('fits ${size.width.round()} by ${size.height.round()} at $scale', (t) async {
       final s = Asked()
         ..current = working(asks: true)
-        ..connections = const [key];
+        ..connections = const [
+          Connection(
+            'c1',
+            'a-rather-long-name@example.com',
+            'chatgpt',
+            problem: 'it has ended; sign in again',
+          ),
+        ]
+        ..signin = const Signin('n', 'https://auth.openai.com/x', 'c1');
       addTearDown(s.dispose);
       await mount(
         t,

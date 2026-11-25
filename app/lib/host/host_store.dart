@@ -299,10 +299,66 @@ class HostStore extends ChangeNotifier {
     return (r! as Json)['connection']! as String;
   }
 
-  Future<void> disconnect(String id) async {
-    await _live.call('connection.remove', {'connection': id});
+  /// Whether it is signed out of there too, for an account of a plan.
+  Future<bool?> disconnect(String id) async {
+    final r = await _live.call('connection.remove', {'connection': id});
     _models.remove(id);
     await loadConnections();
+    return (r! as Json)['ended'] as bool?;
+  }
+
+  /// The sign-in that is on, or how the last one ended until somebody has seen it.
+  Signin? signin;
+  Timer? _asksSignin;
+
+  /// Begins one; [again]: to an account there is. What is opened in the browser is its `url`.
+  Future<Signin> beginSignin({String? again}) async {
+    await cancelSignin();
+    final r = (await _live.call('signin.begin', {'connection': ?again}))! as Json;
+    final s = signin = Signin(r['signin']! as String, r['url']! as String, again);
+    _asksSignin = Timer.periodic(const Duration(seconds: 1), (_) => unawaited(_askSignin(s.id)));
+    notifyListeners();
+    return s;
+  }
+
+  Future<void> _askSignin(String id) async {
+    final s = signin;
+    if (s == null || s.id != id || !s.waits) return;
+    Signin now;
+    try {
+      now = s.told((await _live.call('signin.state', {'signin': id}))! as Json);
+    } on Failed catch (e) {
+      now = s.told({'state': 'failed', 'problem': e.message});
+    } on LinkClosed {
+      // It is asked again when the host answers.
+      return;
+    }
+    if (_disposed || signin?.id != id) return;
+    if (now.waits && now.finishing == s.finishing) return;
+    signin = now;
+    if (!now.waits) _asksSignin?.cancel();
+    notifyListeners();
+    if (now.connection case final c?) {
+      _models.remove(c);
+      try {
+        await loadConnections();
+      } on Object {
+        // The list is asked for again with the next connection.
+      }
+    }
+  }
+
+  Future<void> cancelSignin() async {
+    _asksSignin?.cancel();
+    final s = signin;
+    signin = null;
+    notifyListeners();
+    if (s == null || !s.waits) return;
+    try {
+      await _live.call('signin.cancel', {'signin': s.id});
+    } on Object {
+      // It ends by itself.
+    }
   }
 
   /// What was last heard of a connection's models; null before that.
@@ -483,6 +539,7 @@ class HostStore extends ChangeNotifier {
     _disposed = true;
     _retry?.cancel();
     _drainTimer?.cancel();
+    _asksSignin?.cancel();
     _drop();
     super.dispose();
   }
