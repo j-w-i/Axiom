@@ -137,6 +137,8 @@ struct State {
     changed: Notify,
     /// Connections end.
     over: watch::Sender<bool>,
+    /// The folder a person asked for last in a terminal.
+    open: watch::Sender<String>,
     agents: Arc<Agents>,
     signins: Arc<Signins>,
 }
@@ -327,6 +329,7 @@ impl Host {
             stop: Notify::new(),
             changed: Notify::new(),
             over: watch::Sender::new(false),
+            open: watch::Sender::new(String::new()),
             cfg,
         });
         let switch: std::sync::Weak<dyn Switch> = Arc::downgrade(&st) as _;
@@ -795,13 +798,16 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                     });
                 }
                 (false, call) => match hello(st, call) {
-                    Ok(client) => {
+                    Ok((client, window)) => {
                         _place = Some(client);
                         stranger = None;
                         r.lines.set_limit(MAX_LINE);
                         let version = env!("CARGO_PKG_VERSION");
                         out.answer(req.id, Ok(json!({ "protocol": PROTOCOL, "version": version })));
                         tokio::spawn(tells(st.waiting.watch(), out.clone()));
+                        if window {
+                            tokio::spawn(opens(st.open.subscribe(), out.clone()));
+                        }
                     }
                     Err(e) => {
                         out.answer(req.id, Err(e));
@@ -870,6 +876,22 @@ async fn tells(mut waiting: watch::Receiver<usize>, out: Arc<Outbox>) {
     }
 }
 
+/// A folder is to be shown: the last that was asked for.
+async fn opens(mut open: watch::Receiver<String>, out: Arc<Outbox>) {
+    loop {
+        tokio::select! {
+            c = open.changed() => if c.is_err() || !out.room().await {
+                return;
+            },
+            () = out.closed() => return,
+        }
+        let path = open.borrow_and_update().clone();
+        if !out.tell(&Message::Open { open: path }) {
+            return;
+        }
+    }
+}
+
 /// The number of a request that could not be read, without reading the rest of it.
 fn id_of(line: &[u8]) -> u64 {
     #[derive(Deserialize)]
@@ -880,8 +902,9 @@ fn id_of(line: &[u8]) -> u64 {
 }
 
 /// A place among the clients, for who shows the token.
-fn hello(st: &State, call: Call) -> Result<OwnedSemaphorePermit, WireError> {
-    let Call::Hello { token, protocol, .. } = call else {
+/// A place, and whether the client has a window.
+fn hello(st: &State, call: Call) -> Result<(OwnedSemaphorePermit, bool), WireError> {
+    let Call::Hello { token, protocol, client } = call else {
         return Err(WireError::new(ErrorCode::Unauthorised, "say hello first"));
     };
     if !same(&token, &st.token) {
@@ -891,10 +914,9 @@ fn hello(st: &State, call: Call) -> Result<OwnedSemaphorePermit, WireError> {
         let m = format!("this host speaks protocol {PROTOCOL}, the client {protocol}");
         return Err(WireError::new(ErrorCode::Protocol, m));
     }
-    st.clients
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| WireError::new(ErrorCode::Busy, "too many clients"))
+    let place = st.clients.clone().try_acquire_owned();
+    let place = place.map_err(|_| WireError::new(ErrorCode::Busy, "too many clients"))?;
+    Ok((place, client.starts_with(axiom_proto::WINDOW)))
 }
 
 /// Opens a session and reads the first page, so that what cannot be read is an error answer.
@@ -1730,6 +1752,17 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             slot.changed().await;
             said(st, &session, agents::changed(&agent, &setup)).await?;
             Ok(json!({}))
+        }
+        Call::Open { path } => {
+            // A folder, by its whole name: what a window is given is what will be worked in.
+            let whole = path.len() <= 4096 && std::path::Path::new(&path).is_absolute();
+            let there = whole && tokio::fs::metadata(&path).await.is_ok_and(|m| m.is_dir());
+            if !there {
+                return Err(agents::bad("a folder is opened by its whole path"));
+            }
+            let windows = st.open.receiver_count();
+            st.open.send_replace(path);
+            Ok(json!({ "windows": windows }))
         }
         Call::Compact { session, agent } => {
             if setup(st, &session, &agent).await?.execution.harness != "axiom" {

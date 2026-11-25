@@ -608,6 +608,10 @@ pub enum Call {
     /// to that nobody has seen.
     #[serde(rename = "host.waiting")]
     Waiting {},
+    /// Shows a folder in the windows that are open, as where a session could begin. Nothing begins,
+    /// and nothing is allowed. Answers with how many windows there are.
+    #[serde(rename = "window.open")]
+    Open { path: String },
     #[serde(rename = "connection.list")]
     Connections {},
     /// Adds an account, a key or a server. The secret goes to the system's store and nowhere else.
@@ -783,7 +787,14 @@ pub enum Message {
     Waiting {
         waiting: usize,
     },
+    /// A person asked in a terminal for this folder to be shown. Only to windows.
+    Open {
+        open: String,
+    },
 }
+
+/// How a client that has a window says hello.
+pub const WINDOW: &str = "axiom-app/";
 
 /// What `host.status` says of a session it cannot read or write.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

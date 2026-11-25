@@ -128,7 +128,6 @@ async fn a_signal_ends_it_even_while_nobody_reads() {
     }
 }
 
-#[allow(dead_code)]
 #[path = "../../engine/tests/common/server.rs"]
 mod server;
 
@@ -229,4 +228,36 @@ async fn events_are_lines_of_json() {
     p.kill().unwrap();
     p.wait().unwrap();
     assert!(found);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_is_shown_in_the_windows_and_nothing_begins() {
+    let f = fixture();
+    let folder = f.dir.path().to_str().unwrap().to_owned();
+    f.client().await;
+    let o = f.run(&["open", &folder]);
+    assert_eq!(o.status.code(), Some(1), "a terminal is no window");
+    assert!(clean(&o.stderr).contains("no window"));
+    let window = Client::connect(&f.paths, "axiom-app/test");
+    let mut window = tokio::time::timeout(Duration::from_secs(10), window).await.unwrap().unwrap();
+    assert_eq!(f.run(&["open", &folder]).status.code(), Some(0));
+    let real = std::fs::canonicalize(&folder).unwrap();
+    loop {
+        let m = tokio::time::timeout(Duration::from_secs(10), window.next()).await.unwrap();
+        if let axiom_proto::Message::Open { open } = m.unwrap() {
+            assert_eq!(std::path::Path::new(&open), real);
+            break;
+        }
+    }
+    for bad in ["no/such/folder", "script"] {
+        f.script("x");
+        assert_eq!(
+            f.run(&["open", f.dir.path().join(bad).to_str().unwrap()]).status.code(),
+            Some(1)
+        );
+    }
+    let call = Call::Open { path: "relative".into() };
+    assert!(f.client().await.call(call).await.is_err());
+    let all = f.client().await.call(Call::list()).await.unwrap();
+    assert!(all.as_array().unwrap().is_empty(), "nothing has begun");
 }

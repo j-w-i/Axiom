@@ -143,6 +143,7 @@ fn main() -> Result<(), serde_json::Error> {
             }),
         },
         Message::Events { session: SessionId("s_1".into()), events: cut },
+        Message::Open { open: "/w".into() },
     ] {
         println!("{}", serde_json::to_string(&m)?);
     }

@@ -528,6 +528,21 @@ void main() {
     }
   });
 
+  testWidgets('a folder asked for in a terminal is where a session could begin', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    expect(find.byType(StartPage), findsNothing);
+    s.onFolder!('/me/from-a-terminal');
+    await t.pump();
+    expect(find.byType(StartPage), findsOneWidget);
+    expect(find.textContaining('from-a-terminal'), findsWidgets);
+    await t.pumpWidget(const SizedBox());
+    expect(s.onFolder, isNull);
+    s.dispose();
+  });
+
   testWidgets('everything can be found, and gone to by the keyboard', (t) async {
     final opened = <String>[];
     final s = Opens(opened)

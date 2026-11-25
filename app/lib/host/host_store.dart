@@ -246,6 +246,9 @@ class HostStore extends ChangeNotifier {
     if (link != null) await _follow(current!);
   }
 
+  /// A folder was asked for in a terminal. It is shown as where a session could begin.
+  void Function(String path)? onFolder;
+
   /// What waits for a person, in all sessions, the longest first.
   List<Waits> needs = const [];
   bool _asksNeeds = false, _needsAgain = false;
@@ -564,6 +567,8 @@ class HostStore extends ChangeNotifier {
         unawaited(_follow(current!));
       case WaitingChanged():
         unawaited(loadNeeds());
+      case FolderOpened(:final path):
+        onFolder?.call(path);
       case Fault(:final session, :final words) when session == c?.id:
         c!.failed(words);
       case _:

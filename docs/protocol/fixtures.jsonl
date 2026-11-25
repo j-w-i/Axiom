@@ -6,3 +6,4 @@
 {"session":"s_1","fault":"cannot be read"}
 {"id":3,"result":{"clients":1,"damaged":"why","faults":[{"session":"s_1","words":"w"}],"pid":4,"runs":0,"version":"0"}}
 {"session":"s_1","events":[{"seq":13,"at":1013,"body":{"type":"item.started","item":"i_2","run":"r_1","agent":"a_1","kind":"tool","name":"write","args_cut":300000}},{"seq":14,"at":1014,"body":{"type":"item.ended","item":"i_2","outcome":"completed","text":"","result_cut":400000}}]}
+{"open":"/w"}

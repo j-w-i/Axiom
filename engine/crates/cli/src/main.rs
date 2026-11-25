@@ -34,6 +34,7 @@ const USAGE: &str = "usage: axiom [--json] COMMAND      --json: one line for eac
                                                 0 done, 2 failed or cut short,
                                                 3 a person is asked; 1 as ever
   axiom compact SESSION AGENT
+  axiom open FOLDER                             in the window, ready for a new session
   axiom answer SESSION REQUEST DIGEST once|session|deny
   axiom cancel SESSION RUN
   axiom audit [AFTER]
@@ -168,6 +169,10 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
             execution: None,
             access: Some(access(a)?),
         },
+        ["open", path] => {
+            let path = std::fs::canonicalize(path).map_err(|e| format!("{path}: {e}"))?;
+            Call::Open { path: path.display().to_string() }
+        }
         ["compact", s, agent] => {
             Call::Compact { session: SessionId(s.into()), agent: AgentId(agent.into()) }
         }
@@ -212,7 +217,11 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
         return waited(&mut c, call, of, compact).await;
     }
     let follow = matches!(call, Call::Follow { .. });
+    let opens = matches!(call, Call::Open { .. });
     let answer = c.call(call).await?;
+    if opens && answer["windows"] == 0 {
+        return Err("no window is open".into());
+    }
     if !follow {
         return print(&answer, compact);
     }

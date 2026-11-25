@@ -188,7 +188,7 @@ class HostLink {
         }
       case Resync(:final session) || Fault(:final session):
         if (!_fences.containsKey(session)) _messages.add(x);
-      case WaitingChanged():
+      case WaitingChanged() || FolderOpened():
         _messages.add(x);
     }
   }

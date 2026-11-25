@@ -387,7 +387,8 @@ async fn room_is_made_between_runs_when_nothing_waits() {
     };
     let e = t.c.call(call.clone()).await.unwrap_err().to_string();
     assert!(e.contains("at work"), "{e}");
-    // Nor while something waits: that is to be answered.
+    // Nor while something waits: that is to be answered. What comes before it is asked is heard.
+    t.until(|b| matches!(b, Body::ItemStarted { kind: ItemKind::Prose, .. }).then_some(())).await;
     t.prompt(&a, "third;").await.unwrap();
     let run = RunId(v["run"].as_str().unwrap().into());
     t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();

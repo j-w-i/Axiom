@@ -323,6 +323,9 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_key);
+    widget.store.onFolder = (path) {
+      if (mounted) _startIn(path);
+    };
   }
 
   /// What came meanwhile is before its person now.
@@ -335,6 +338,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_key);
+    widget.store.onFolder = null;
     _changes?.dispose();
     _forget?.cancel();
     _drafts.dispose();
