@@ -484,13 +484,7 @@ async fn real_programs_work_in_the_sandbox() {
             "printf '#include <stdio.h>\\nint main(){printf(\"42\");}' > c.c && cc c.c -o c && ./c",
         ),
     ] {
-        if std::process::Command::new("sh")
-            .args(["-c", &format!("command -v {p}")])
-            .output()
-            .unwrap()
-            .status
-            .success()
-        {
+        if t.site.path.iter().any(|d| d.as_path().join(p).exists()) {
             let o = t.run("shell", json!({"command": c})).await;
             ran.push((p, o.ok, o.text));
         }
