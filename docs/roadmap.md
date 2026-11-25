@@ -36,8 +36,8 @@ Order: policy+spawn → Anthropic Messages codec → Chat codec (local servers) 
 - capability matrix computed by `probe()`; absent features are absent in the UI
 - trust gate before spawn; containment owner displayed; account, lane and policy displayed; quota only where reported
 - Axiom's tools offered to harnesses by MCP with the caller's capabilities
-- programs: one of the person's own (W-8), path, arguments and environment (W-9), an agent's list of things to do (W-10), plan first (W-23), choosing a model (W-29), what a model can be told (W-30)
-- cost and provenance on the wire and in the journal, before any view (W-27's first step)
+- [x] programs: one of the person's own (W-8), path, arguments and environment (W-9), an agent's list of things to do (W-10), plan first (W-23), choosing a model (W-29), what a model can be told (W-30)
+- [x] cost and provenance on the wire and in the journal, before any view (W-27's first step)
 
 ## M4 Advanced tooling ← M2
 - repo map and symbol index; LSP; persistent terminals; Git and worktrees through the hardened wrapper; MCP client; browser
