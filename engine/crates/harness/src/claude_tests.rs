@@ -149,7 +149,7 @@ fn which_version_it_says() {
 #[test]
 fn what_it_can_do() {
     let c = caps(Prompts::Refused);
-    assert!(!c.approvals && c.resume && c.interrupt && c.usage && c.quota && !c.plan);
+    assert!(!c.approvals && c.resume && c.interrupt && c.usage && c.quota && c.plan);
     assert_eq!(c.access, [Access::Read, Access::Work]);
     assert_eq!((c.steer, c.models), (Steer::Yes, Names::Any));
     let c = caps(Prompts::Stdio);
@@ -586,6 +586,32 @@ fn what_else_it_asks_for_is_refused() {
     d.hear(json!({"type": "control_request", "request": {"subtype": "can_use_tool"}}));
     assert_eq!(d.told(), ["unknown a question without an id"]);
     assert!(d.sent().is_empty());
+}
+
+/// Its list, told when what makes it was done; not what its own agents have.
+#[test]
+fn a_list_of_things_to_do() {
+    let mut d = at_work();
+    let call = |id: &str, parent: Value| {
+        json!({"type": "assistant", "uuid": "u", "session_id": "s", "parent_tool_use_id": parent,
+            "message": {"id": id, "type": "message", "role": "assistant", "content": [
+                {"type": "tool_use", "id": id, "name": "TaskCreate", "input": {"subject": "Look", "description": "d"}}]}})
+    };
+    let done = |id: &str, parent: Value| {
+        json!({"type": "user", "uuid": "u", "session_id": "s", "parent_tool_use_id": parent,
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "content": "ok"}]},
+            "tool_use_result": {"task": {"id": "1", "subject": "Look"}}})
+    };
+    d.hear(call("c1", Value::Null));
+    d.hear(done("c1", Value::Null));
+    d.hear(call("c2", json!("parent")));
+    d.hear(done("c2", json!("parent")));
+    let mut refused = done("c3", Value::Null);
+    refused["message"]["content"][0]["is_error"] = json!(true);
+    d.hear(call("c3", Value::Null));
+    d.hear(refused);
+    let plans: Vec<_> = d.told().into_iter().filter(|t| t.starts_with("plan")).collect();
+    assert_eq!(plans, ["plan tasks [(\"Look\", Todo)] None"]);
 }
 
 #[test]

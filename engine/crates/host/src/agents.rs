@@ -29,7 +29,7 @@ use crate::{
     copies::{self, Copies},
     delegated, mcp,
     paths::{Paths, private_dir, private_file},
-    peers,
+    peers, planning,
     programs::{How, Programs, Said},
     session::{self, Session},
     store::Store,
@@ -780,14 +780,22 @@ fn refused(r: session::Refused) -> Refused {
 
 impl Stage for Floor {
     fn others(&self) -> Vec<Spec> {
-        peers::specs()
+        let mut all = peers::specs();
+        all.push(planning::todo());
+        all
     }
     async fn judge(&self, tool: &str, args: &Value) -> Option<Other> {
-        (tool == peers::TOOL).then_some(())?;
-        Some(peers::judge(self, args).await)
+        match tool {
+            peers::TOOL => Some(peers::judge(self, args).await),
+            planning::TODO => Some(planning::judge(args)),
+            _ => None,
+        }
     }
-    async fn perform(&self, _: &str, args: &Value) -> Output {
-        peers::perform(self, args).await
+    async fn perform(&self, tool: &str, args: &Value) -> Output {
+        match tool {
+            planning::TODO => planning::perform(self, args).await,
+            _ => peers::perform(self, args).await,
+        }
     }
     async fn say(&self, all: Vec<Say>) -> Result<(), Refused> {
         self.session.say(all).await.map_err(refused)
@@ -821,6 +829,10 @@ impl Floor {
             .record(&self.store, &self.session.id, deed, c)
             .await
             .map_err(|e| Refused::This(format!("it cannot be put on record: {e}")))
+    }
+    /// The run it is in.
+    pub async fn run(&self) -> Option<RunId> {
+        self.agents.slot(&self.session.id, &self.agent).now().await.map(|n| n.0)
     }
     /// Where this agent works.
     pub async fn workspace(&self) -> Option<String> {
@@ -995,7 +1007,7 @@ impl Worker {
 }
 
 /// For a model whose program describes other tools than it has.
-const HANDS: &str = "Your only tools are those of the server axiom (read, write, edit, patch, list, glob, search, shell, job, fetch, agent). What is said elsewhere of other tools does not apply: you have none of them. A call may wait for a person's answer.";
+const HANDS: &str = "Your only tools are those of the server axiom (read, write, edit, patch, list, glob, search, shell, job, fetch, agent, todo). What is said elsewhere of other tools does not apply: you have none of them. A call may wait for a person's answer.";
 
 /// Where an agent works, and under whom.
 pub async fn site_of(

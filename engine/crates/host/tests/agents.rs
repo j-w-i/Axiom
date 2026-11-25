@@ -512,6 +512,50 @@ async fn room_is_made_between_runs_when_nothing_waits() {
 }
 
 /// A client that did not see the answer says it again under the same name.
+/// Its own list of things to do: shown, not asked about, and nothing depends on it.
+#[tokio::test]
+async fn it_shows_what_it_means_to_do() {
+    let list = r#"{"steps":[{"text":"Look","state":"done"},{"text":"Do","state":"doing"}]}"#;
+    let mut t = T::new(vec![
+        calls(&[("c1", "todo", list), ("c2", "todo", r#"{"steps":[{"text":"x"}]}"#)]),
+        calls(&[("c3", "todo", r#"{"steps":[]}"#)]),
+        text(&["Done."]),
+    ])
+    .await;
+    // Also one that may change nothing.
+    let a = t.agent(Access::Read).await;
+    t.prompt(&a, "go").await.unwrap();
+    let (o, e, all) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None));
+    let told: Vec<_> = all
+        .iter()
+        .filter_map(|b| match b {
+            Body::Todo { agent, run, steps, text: None } => {
+                assert!(*agent == a && run.is_some());
+                Some(steps.iter().map(|s| (s.text.as_str(), s.state)).collect::<Vec<_>>())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(told, [vec![("Look", TodoState::Done), ("Do", TodoState::Doing)], vec![]]);
+    let ends: Vec<_> = all
+        .iter()
+        .filter_map(|b| match b {
+            Body::ItemEnded { result: Some(r), outcome, .. } => {
+                Some((*outcome, r["summary"].as_str().unwrap_or_default().to_owned()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ends[0], (Outcome::Completed, "1 of 2 done".into()));
+    assert_eq!(ends[1].0, Outcome::Failed, "what is not a list is told to the model");
+    assert_eq!(ends[2], (Outcome::Completed, "nothing".into()));
+    assert!(!all.iter().any(|b| matches!(b, Body::RequestOpened { .. })));
+    let asked = t.server.requests();
+    assert!(asked[0]["tools"].to_string().contains("\"todo\""));
+    assert!(asked[1]["messages"].to_string().contains("state is todo, doing or done"));
+}
+
 #[tokio::test]
 async fn a_prompt_of_one_name_is_heard_once() {
     let mut t = T::new(vec![text(&["thinking"]).hangs()]).await;

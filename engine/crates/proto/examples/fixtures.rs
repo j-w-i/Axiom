@@ -114,6 +114,16 @@ fn main() -> Result<(), serde_json::Error> {
             cut: true,
             aside: true,
         },
+        Body::Todo {
+            agent: AgentId("a_1".into()),
+            run: Some(RunId("r_1".into())),
+            steps: vec![
+                Todo { text: "Look".into(), state: TodoState::Done },
+                Todo { text: "Do".into(), state: TodoState::Doing },
+                Todo { text: "Say".into(), state: TodoState::Todo },
+            ],
+            text: Some("# P".into()),
+        },
     ];
     let cut = vec![
         Event {

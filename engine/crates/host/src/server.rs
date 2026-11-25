@@ -32,7 +32,7 @@ use crate::{
     net::{self, Boxed, Listener},
     outbox::{Follower, Outbox},
     paths::{Lock, Paths, Same, private_dir, private_file},
-    peers,
+    peers, planning,
     programs::{Programs, Said},
     replay,
     session::{Joined, Opened, Refused, Say, Session, encode, lines},
@@ -1556,6 +1556,9 @@ impl Switch for State {
 fn specs_of(who: &Holder) -> Vec<axiom_tools::Spec> {
     let mut all = if who.all { axiom_tools::specs() } else { Vec::new() };
     all.extend(peers::specs());
+    if who.all {
+        all.push(planning::todo());
+    }
     all
 }
 

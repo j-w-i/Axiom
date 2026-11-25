@@ -498,7 +498,7 @@ async fn its_tools_are_axioms_and_so_is_what_holds_them_back() {
         names,
         [
             "read", "write", "edit", "patch", "list", "glob", "search", "shell", "job", "fetch",
-            "agent"
+            "agent", "todo"
         ]
     );
     assert!(tools.iter().all(|t| t["_meta"]["anthropic/maxResultSizeChars"] == 200_000));

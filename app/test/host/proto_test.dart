@@ -60,6 +60,12 @@ void main() {
     expect([cost.provenance, cost.of], [Known.estimated, Covers.session]);
     final total = u.totals.single;
     expect([total.model, total.usage.output, total.cost], ['m-1', 8, null]);
+    final todo = b[TodoSaid]! as TodoSaid;
+    expect([todo.agent, todo.run, todo.text], ['a_1', 'r_1', '# P']);
+    expect(
+      [for (final s in todo.steps) (s.text, s.state)],
+      [('Look', TodoState.done), ('Do', TodoState.doing), ('Say', TodoState.todo)],
+    );
     expect((messages[1] as Resync).last, 9);
     final s = SessionInfo.decode(
       ((messages[2] as Answered).result! as List<Object?>).first! as Json,

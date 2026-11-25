@@ -2263,6 +2263,51 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
+  testWidgets('what an agent says it means to do ticks off beside it', (t) async {
+    final s = Asked()
+      ..current = working()
+      ..connections = const [key];
+    addTearDown(s.dispose);
+    await mount(t, Shell(s), size: const Size(1280, 820), dpr: 2);
+    await settled(t);
+    expect(
+      find.bySemanticsLabel('Show the panel'),
+      findsOneWidget,
+      reason: 'there is nothing in it',
+    );
+    var n = 70;
+    Future<void> says(List<Todo> steps, {String? text}) async {
+      s.current!.apply([Event(n++, n, TodoSaid('a', steps, text: text))]);
+      await settled(t);
+    }
+
+    await says(const [
+      Todo('Read the cache', TodoState.done),
+      Todo('Make it \u202eforget', TodoState.doing),
+      Todo('Test it', TodoState.todo),
+    ]);
+    expect(find.bySemanticsLabel('Hide the panel'), findsOneWidget);
+    expect(find.text('1 of 3'), findsOneWidget);
+    expect(find.bySemanticsLabel('Read the cache, done'), findsOneWidget);
+    expect(find.bySemanticsLabel('Test it, to do'), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('forget, active')), findsOneWidget);
+    expect(find.textContaining('\u202e'), findsNothing, reason: 'what hides is shown');
+    await snap(t, 'panel-plan');
+    // Nobody works on it: it is not being done, whatever was said.
+    final run = s.current!.agents['a']!.run!;
+    s.current!.apply([Event(n++, n, RunEnded(run, Outcome.completed, null))]);
+    await settled(t);
+    expect(find.bySemanticsLabel(RegExp('forget, to do')), findsOneWidget);
+    await press(t, find.text('Plan'));
+    expect(find.bySemanticsLabel('Test it, to do'), findsNothing);
+    // Words without steps are a plan too, and none at all is none.
+    await says(const [], text: 'First this, then that.');
+    await press(t, find.text('Plan'));
+    expect(find.textContaining('First this'), findsOneWidget);
+    await says(const []);
+    expect(find.text('Plan'), findsNothing);
+  });
+
   testWidgets('what has changed is beside the conversation, where there is room', (t) async {
     final s = Asked()
       ..current = working()

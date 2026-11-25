@@ -12,15 +12,15 @@ use std::{
 use axiom_engine::{Deed, Ended, FROM_AGENT, Refused, Say, Stage, Word, said};
 use axiom_harness::{
     Answer, By, ChoiceKind, Diff, Done, Error, Event, Events, Frame, Frames, Gone, Handle, Harness,
-    KNOWN, Kind, Level, Lost, NotFound, Program, Prompts, Question, Ready, Server, Settled, Site,
-    Start, Trust, Why, find, find::take,
+    KNOWN, Kind, Level, Lost, NotFound, Program, Progress, Prompts, Question, Ready, Server,
+    Settled, Site, Start, Trust, Why, find, find::take,
 };
 use axiom_policy::{
     Access, Approval, Ask, Place, Reach, Unsandboxed, audit::Containment, rules::Decision,
 };
 use axiom_proto::{
     AgentState, Answerable, Body, HarnessInfo, ItemId, ItemKind, Lane, Outcome, Provenance,
-    RequestId, RunId, Usage, UsedOn, limits,
+    RequestId, RunId, Todo, TodoState, Usage, UsedOn, limits,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -490,7 +490,7 @@ struct Attempt {
     /// As it says.
     runs_on: Option<String>,
     connection: Option<String>,
-    plan: Option<String>,
+    plan: Option<axiom_harness::Plan>,
     limit: Option<String>,
     /// A turn that ended before it was followed.
     early: Option<Done>,
@@ -882,18 +882,30 @@ impl Attempt {
                 self.floor.say(vec![Say::Event(body)]).await?;
             }
             Event::Plan(p) => {
-                let mark = |p| match p {
-                    axiom_harness::Progress::Done => "[x]",
-                    axiom_harness::Progress::Doing => "[~]",
-                    _ => "[ ]",
-                };
-                let steps: Vec<String> =
-                    p.steps.iter().map(|(t, s)| format!("{} {t}", mark(*s))).collect();
-                let text = p.text.unwrap_or_default() + &steps.join("\n");
-                if !text.is_empty() && Some(&text) != self.plan.as_ref() {
-                    self.notice(&format!("Its plan:\n{text}")).await?;
-                    self.plan = Some(text);
+                // Told again as it was, it is not said again.
+                if self.plan.as_ref() == Some(&p) {
+                    return Ok(());
                 }
+                // One that is gone takes nothing with it but itself.
+                let gone = p.steps.is_empty() && p.text.as_ref().is_none_or(String::is_empty);
+                if gone && self.plan.as_ref().is_none_or(|q| q.id != p.id) {
+                    return Ok(());
+                }
+                let state = |s| match s {
+                    Progress::Todo => TodoState::Todo,
+                    Progress::Doing => TodoState::Doing,
+                    Progress::Done => TodoState::Done,
+                    Progress::Unknown => TodoState::Unknown,
+                };
+                let steps = p.steps.iter().take(limits::STEPS);
+                let body = Body::Todo {
+                    agent: self.floor.agent.clone(),
+                    run: self.run.clone(),
+                    steps: steps.map(|(t, s)| Todo { text: t.clone(), state: state(*s) }).collect(),
+                    text: p.text.clone().filter(|t| !t.is_empty()),
+                };
+                self.plan = Some(p);
+                self.floor.say(vec![Say::Event(body)]).await?;
             }
             Event::Notice { level, text } if level != Level::Info => self.notice(&text).await?,
             Event::NotHeard { why } => {

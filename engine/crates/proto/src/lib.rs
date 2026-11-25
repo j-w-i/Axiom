@@ -245,6 +245,23 @@ pub struct ModelTotal {
     pub cost: Option<Cost>,
 }
 
+/// One of the things an agent means to do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Todo {
+    pub text: String,
+    pub state: TodoState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoState {
+    Todo,
+    Doing,
+    Done,
+    #[serde(other)]
+    Unknown,
+}
+
 fn not(b: &bool) -> bool {
     !*b
 }
@@ -395,6 +412,19 @@ pub enum Body {
         /// Not for the conversation itself, but to summarise it.
         #[serde(default, skip_serializing_if = "not")]
         aside: bool,
+    },
+    /// What an agent means to do, as it says itself: all of it, in place of what it said before.
+    /// Without steps and text there is none any more.
+    #[serde(rename = "todo")]
+    Todo {
+        agent: AgentId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+        #[serde(default)]
+        steps: Vec<Todo>,
+        /// Markdown.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
     /// Something newer than this build.
     #[serde(untagged)]
@@ -1114,6 +1144,7 @@ pub const KNOWN: &[&str] = &[
     "request.opened",
     "request.closed",
     "usage",
+    "todo",
 ];
 
 impl Body {

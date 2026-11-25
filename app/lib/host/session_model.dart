@@ -91,6 +91,11 @@ class AgentModel extends ChangeNotifier {
   final int since;
   AgentPhase phase = AgentPhase.waiting;
   ItemModel? last;
+
+  /// What it says that it means to do. Its claim, and nothing more.
+  List<Todo> steps = const [];
+  String? stepsText;
+  bool get plans => steps.isNotEmpty || stepsText != null;
   double? context;
   Known contextKnown = Known.unknown;
 
@@ -310,6 +315,13 @@ class SessionModel extends ChangeNotifier {
           a
             ..context = usage.context
             ..contextKnown = provenance;
+          touched.add(a);
+        }
+      case TodoSaid(:final agent, :final steps, :final text):
+        if (agents[agent] case final a?) {
+          a
+            ..steps = steps
+            ..stepsText = text;
           touched.add(a);
         }
       case UnknownBody():

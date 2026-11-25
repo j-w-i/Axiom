@@ -21,6 +21,7 @@ pub mod frames;
 mod ledger;
 mod rpc;
 mod talk;
+mod tasks;
 #[cfg(test)]
 mod test;
 pub mod vars;

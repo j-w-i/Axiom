@@ -602,6 +602,12 @@ sealed class Body {
           cut: j['cut'] as bool? ?? false,
           aside: j['aside'] as bool? ?? false,
         ),
+        'todo' => TodoSaid(
+          j['agent']! as String,
+          [for (final s in (j['steps'] as List<Object?>?) ?? const []) Todo.decode(s! as Json)],
+          run: j['run'] as String?,
+          text: j['text'] as String?,
+        ),
         _ => UnknownBody('$type'),
       };
     } on TypeError {
@@ -623,6 +629,7 @@ sealed class Body {
     'request.opened',
     'request.closed',
     'usage',
+    'todo',
   };
 }
 
@@ -791,6 +798,29 @@ class UsageReported extends Body {
 
   /// Not for the conversation itself, but to summarise it.
   final bool aside;
+}
+
+enum TodoState { todo, doing, done, unknown }
+
+/// One of the things an agent means to do.
+class Todo {
+  const Todo(this.text, this.state);
+  Todo.decode(Json j)
+    : text = j['text']! as String,
+      state = _enum(TodoState.values, j['state'], TodoState.unknown);
+  final String text;
+  final TodoState state;
+}
+
+/// What an agent means to do, as it says itself: all of it, in place of what it said before.
+class TodoSaid extends Body {
+  const TodoSaid(this.agent, this.steps, {this.run, this.text});
+  final String agent;
+  final List<Todo> steps;
+  final String? run;
+
+  /// Markdown.
+  final String? text;
 }
 
 class UnknownBody extends Body {

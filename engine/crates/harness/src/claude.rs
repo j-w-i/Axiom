@@ -21,6 +21,7 @@ use crate::{
     Server, Start, Trust,
     event::*,
     talk::{Keep, Out, Talk, Word, has, id, list, loose, owned, text},
+    tasks::Tasks,
     vars::only,
 };
 
@@ -176,7 +177,7 @@ pub(crate) fn caps(p: Prompts) -> Caps {
         approvals: p == Prompts::Stdio,
         usage: true,
         quota: true,
-        plan: false,
+        plan: true,
         access,
         models: Names::Any,
         efforts: Names::Any,
@@ -238,6 +239,7 @@ pub(crate) struct Claude {
     /// same id.
     blocks: BTreeMap<String, u64>,
     error: Option<String>,
+    tasks: Tasks,
 }
 
 const MESSAGES: usize = 64;
@@ -264,6 +266,7 @@ impl Claude {
             streaming: None,
             blocks: BTreeMap::new(),
             error: None,
+            tasks: Tasks::default(),
         }
     }
 
@@ -577,8 +580,12 @@ impl Claude {
         }
     }
 
-    fn tool(&self, b: &Value, parent: &Option<String>, o: &mut Out) {
+    fn tool(&mut self, b: &Value, parent: &Option<String>, o: &mut Out) {
         let Some(id) = id(b, "/id") else { return o.unknown("a tool call without an id", b) };
+        // What its own agents mean to do is theirs.
+        if parent.is_none() {
+            self.tasks.called(&id, text(b, "/name").unwrap_or_default(), b.pointer("/input"));
+        }
         o.event(Event::ToolStarted(Box::new(Tool {
             id,
             name: owned(b, "/name").unwrap_or_default(),
@@ -588,7 +595,7 @@ impl Claude {
         })));
     }
 
-    fn results(&self, v: &Value, o: &mut Out) {
+    fn results(&mut self, v: &Value, o: &mut Out) {
         // Told again; or only text, which is on record.
         if v.pointer("/isReplay") == Some(&json!(true)) {
             return;
@@ -601,7 +608,7 @@ impl Claude {
         }
     }
 
-    fn ended(&self, b: &Value, structured: &Value, o: &mut Out) {
+    fn ended(&mut self, b: &Value, structured: &Value, o: &mut Out) {
         let Some(id) = id(b, "/tool_use_id") else {
             return o.unknown("a result without its call", b);
         };
@@ -613,8 +620,12 @@ impl Claude {
         let failed = b.pointer("/is_error") == Some(&json!(true));
         let outcome = if failed { Outcome::Failed } else { Outcome::Completed };
         let diffs = patch(structured).into_iter().collect();
+        let plan = self.tasks.ended(&id, !failed, structured);
         let end = ToolEnd { id, outcome, output, output_cut: 0, diffs, error: None };
         o.event(Event::ToolEnded(Box::new(end)));
+        if let Some(p) = plan {
+            o.event(Event::Plan(p));
+        }
     }
 
     fn result(&mut self, v: &Value, o: &mut Out) {

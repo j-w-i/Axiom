@@ -917,3 +917,46 @@ async fn how_a_program_is_started() {
     let (o, e, _) = t.ended().await;
     assert!(o == Outcome::Failed && e.unwrap().contains("inside what an agent may write"));
 }
+
+/// What it means to do is shown as it says it, all of it, and in place of what it said before.
+#[tokio::test]
+async fn its_list_of_things_to_do() {
+    let plan = |of: &[(&str, &str)]| {
+        let entries: Vec<Value> = of
+            .iter()
+            .map(|(t, s)| json!({"content": t, "priority": "high", "status": s}))
+            .collect();
+        say(json!({"sessionUpdate": "plan", "entries": entries}))
+    };
+    let mut t = T::new(&acp(&[
+        hear("go"),
+        plan(&[("Look", "in_progress"), ("Do", "pending")]),
+        plan(&[("Look", "in_progress"), ("Do", "pending")]),
+        plan(&[("Look", "completed"), ("Do", "odd")]),
+        plan(&[]),
+        end(2, "end_turn"),
+    ]))
+    .await;
+    let a = t.agent("goose", Access::Ask).await;
+    t.prompt(&a, "go").await;
+    t.allow_start().await;
+    let (o, _, all) = t.ended().await;
+    assert_eq!(o, Outcome::Completed);
+    let told: Vec<Vec<(String, TodoState)>> = all
+        .iter()
+        .filter_map(|b| match b {
+            Body::Todo { steps, run, agent, text: None } => {
+                assert!(run.is_some() && *agent == a);
+                Some(steps.iter().map(|s| (s.text.clone(), s.state)).collect())
+            }
+            _ => None,
+        })
+        .collect();
+    let s = |t: &str, x| (t.to_owned(), x);
+    use TodoState::{Doing, Done, Todo, Unknown};
+    assert_eq!(
+        told,
+        [vec![s("Look", Doing), s("Do", Todo)], vec![s("Look", Done), s("Do", Unknown)], vec![]]
+    );
+    assert!(texts(&all, ItemKind::Notice).is_empty());
+}

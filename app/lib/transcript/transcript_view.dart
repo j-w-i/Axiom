@@ -1389,6 +1389,7 @@ class ToolRow extends StatelessWidget {
     'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => AxIcon.terminal,
     'fetch' || 'webfetch' || 'websearch' => AxIcon.web,
     'delegate' || 'agent' || 'task' => AxIcon.delegate,
+    'todo' || 'todowrite' || 'taskcreate' || 'taskupdate' || 'tasklist' => AxIcon.list,
     _ => AxIcon.more,
   };
 
@@ -1405,6 +1406,10 @@ class ToolRow extends StatelessWidget {
     'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => ('Running', 'Ran'),
     'fetch' || 'webfetch' || 'websearch' => ('Fetching', 'Fetched'),
     'delegate' || 'agent' || 'task' => ('Working with another agent', 'Worked with another agent'),
+    'todo' ||
+    'todowrite' ||
+    'taskcreate' ||
+    'taskupdate' => ('Updating its plan', 'Updated its plan'),
     _ => null,
   };
 
@@ -1431,7 +1436,9 @@ class ToolRow extends StatelessWidget {
     for (final k in const ['path', 'file_path', 'command', 'pattern', 'url', 'query', 'title']) {
       if (args[k] case final v?) return '$v';
     }
-    return '${args.values.firstOrNull ?? ''}';
+    // A list is not a line, and is shown where it belongs.
+    final first = args.values.firstOrNull;
+    return first is List || first is Map ? '' : '${first ?? ''}';
   }
 
   @override

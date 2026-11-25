@@ -99,7 +99,9 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     if (m == null || a?.access == null || _view != _View.work || m.fault != null) return null;
     // Of itself where there is room, if there is anything in it.
     return _changing ??
-        (MediaQuery.sizeOf(context).width >= _roomy && !a!.apart && _changesOf(m).files.isNotEmpty);
+        (MediaQuery.sizeOf(context).width >= _roomy &&
+            !a!.apart &&
+            (a.plans || _changesOf(m).files.isNotEmpty));
   }
 
   static const _roomy = 1180.0;
@@ -1582,9 +1584,10 @@ class _Display extends StatelessWidget {
       ),
     );
     final all = ListenableBuilder(
-      listenable: changes,
+      listenable: Listenable.merge([changes, a]),
       child: talk,
       builder: (context, talk) {
+        final lead = [if (a.plans) AgentPlan(a, key: ValueKey((a.id, 'plan')))];
         final panel = !open()
             ? null
             : CallbackShortcuts(
@@ -1598,12 +1601,14 @@ class _Display extends StatelessWidget {
                             session,
                             a,
                             draft: drafts.of(session.id, a.id),
+                            lead: lead,
                             key: ValueKey((session.id, a.id)),
                           )
                         : ChangesView(
                             changes,
                             agent: a.name,
                             draft: drafts.of(session.id, a.id),
+                            lead: lead,
                             key: ValueKey(session.id),
                           ),
                   ),
@@ -1698,6 +1703,53 @@ class _Display extends StatelessWidget {
           if (acts) ...[const SizedBox(width: 6), panelKey()],
         ],
       ),
+    );
+  }
+}
+
+/// What an agent says that it means to do.
+class AgentPlan extends StatefulWidget {
+  const AgentPlan(this.agent, {super.key});
+  final AgentModel agent;
+  @override
+  State<AgentPlan> createState() => _AgentPlanState();
+}
+
+class _AgentPlanState extends State<AgentPlan> {
+  bool _folded = false;
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors, a = widget.agent;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (a.steps.isEmpty)
+          PanelHeading(
+            'Plan',
+            null,
+            folded: _folded,
+            onFold: () => setState(() => _folded = !_folded),
+          )
+        else
+          PlanView(
+            [
+              for (final s in a.steps)
+                TaskView(oneLine(literal(s.text), 200), switch (s.state) {
+                  TodoState.done => TaskState.done,
+                  // A run that has ended does nothing any more, whatever it said last.
+                  TodoState.doing when a.run != null => TaskState.active,
+                  _ => TaskState.todo,
+                }),
+            ],
+            folded: _folded,
+            onFold: () => setState(() => _folded = !_folded),
+          ),
+        if (a.stepsText case final words? when !_folded)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, AxSpace.card, 10),
+            child: Text(visible(cutTo(words, 4000)), style: t.type.ui.ink(c.ink2)),
+          ),
+      ],
     );
   }
 }

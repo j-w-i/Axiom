@@ -21,6 +21,11 @@ pub const TITLE: usize = 500;
 pub const WORKSPACE: usize = 4 * 1024;
 const NAME: usize = 500;
 const SCOPE: usize = 4 * 1024;
+/// Of an agent's list of things to do: how many, and each.
+pub const STEPS: usize = 100;
+const STEP: usize = 500;
+/// Of an agent's plan in words.
+const PLAN: usize = 16 * 1024;
 /// Models of one report.
 pub const TOTALS: usize = 64;
 /// What a request is about, and why a run failed.
@@ -216,6 +221,13 @@ impl Body {
                     }
                 }
             }
+            Body::Todo { steps, text, .. } => {
+                steps.truncate(STEPS);
+                for s in steps {
+                    clip(&mut s.text, STEP);
+                }
+                clip_opt(text, PLAN);
+            }
             Body::RequestOpened { .. } | Body::AgentState { .. } | Body::RunStarted { .. } => {}
         }
     }
@@ -355,6 +367,12 @@ mod tests {
                 ],
                 cut: true,
                 aside: true,
+            },
+            Body::Todo {
+                agent: AgentId(id("a")),
+                run: None,
+                steps: vec![Todo { text: nul(), state: TodoState::Doing }; 5000],
+                text: some(),
             },
             Body::Unknown(json!({ "type": nul(), "x": nul() })),
         ]
