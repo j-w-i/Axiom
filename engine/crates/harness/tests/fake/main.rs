@@ -87,6 +87,9 @@ fn main() {
             let b: Vec<u8> = b.iter().map(|x| u8::try_from(x.as_u64().unwrap()).unwrap()).collect();
             out(&b);
         }
+        if let Some(f) = s["touch"].as_str() {
+            std::fs::write(dir.join(f), "").unwrap();
+        }
         if let Some(ms) = s["sleep"].as_u64() {
             std::thread::sleep(Duration::from_millis(ms));
         }

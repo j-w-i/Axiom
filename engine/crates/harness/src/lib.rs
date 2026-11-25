@@ -222,13 +222,10 @@ async fn version(site: &Site, token: Unsandboxed, p: Prompts) -> Result<Probe, E
     let mut first = out.take(4096);
     let read = timeout(site.limits.opening, first.read_to_end(&mut said)).await;
     drop(first);
-    let ended = r.stop(site.limits.stop).await;
+    let _ = r.stop(site.limits.stop).await;
     let bad = |w: &str| Err(Error::Probe(w.to_owned()));
     if read.is_err() {
         return bad("it did not answer in time");
-    }
-    if !ended.is_ok_and(|e| e.code == Some(0)) && said.is_empty() {
-        return bad("it does not say which version it is");
     }
     let said = String::from_utf8_lossy(&said).into_owned();
     let Some(version) = claude::version(&said) else {

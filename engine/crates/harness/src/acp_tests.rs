@@ -298,6 +298,20 @@ fn a_mode_that_is_not_taken_is_the_end() {
     d.hear(reply(2, json!({"configOptions": [select("a", "mode", "ask", &["ask", "plan"], 2)]})));
     assert_eq!(d.ends().0, Why::Boundary);
     assert!(d.told().is_empty(), "it was never ready");
+    // Without saying what it took; or not keeping it when the model is set.
+    let both = |mode: &str, model: &str| json!({"configOptions": [select("a", "mode", mode, &["ask", "plan"], 2), select("b", "model", model, &["m1", "m2"], 2)]});
+    let mut d = make();
+    open(&mut d, 2, both("ask", "m1"));
+    d.hear(reply(2, json!({})));
+    assert_eq!(d.ends().0, Why::Boundary);
+    let mut s = start(Access::Read);
+    s.model = Some("m2".into());
+    let mut d = D::new(a.talk(&site(), Some(s)));
+    open(&mut d, 2, both("ask", "m1"));
+    d.hear(reply(2, both("plan", "m1")));
+    d.hear(reply(3, both("ask", "m2")));
+    assert_eq!(d.ends(), (Why::Boundary, "it did not keep the mode plan".into()));
+    assert!(d.told().is_empty());
     let mut d = make();
     open(
         &mut d,
@@ -353,6 +367,22 @@ fn an_agent_that_asks_nobody_is_not_used() {
         assert_eq!(d.ends().0, Why::Boundary);
         assert!(d.told().is_empty());
     }
+    // By a switch, as the documentation's own example has one.
+    let brave = |on: bool| {
+        json!({"configId": "brave_mode", "name": "Brave Mode", "type": "boolean", "currentValue": on,
+            "description": "Skip confirmation prompts and act autonomously"})
+    };
+    let mut d = opened(2, json!({"configOptions": [brave(true)]}));
+    assert_eq!(d.ends(), (Why::Boundary, "it is set not to ask: Brave Mode".into()));
+    assert!(d.told().is_empty());
+    let mut d = opened(2, json!({"configOptions": [brave(false)]}));
+    assert!(d.end.is_none());
+    let mut u = json!({"sessionUpdate": "config_option_update", "configOptions": [brave(false)]});
+    d.hear(update(u.clone()));
+    assert!(d.end.is_none());
+    u["configOptions"] = json!([brave(true)]);
+    d.hear(update(u));
+    assert_eq!(d.ends().0, Why::Boundary);
     // Nor one that becomes so.
     let mut d = at_work(1);
     d.hear(update(json!({"sessionUpdate": "current_mode_update", "currentModeId": "plan"})));

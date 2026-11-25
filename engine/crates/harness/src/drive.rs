@@ -405,26 +405,19 @@ impl<F: Frames> Attempt<F> {
         let mut o = Out::default();
         match c {
             Command::Prompt(text, by, reply) => {
-                let r = if !self.ready {
-                    Err(Refused::NotReady)
-                } else if self.g.person_only && by != By::Person {
+                let r = if self.g.person_only && by != By::Person {
                     Err(Refused::PersonOnly)
                 } else if self.stopping.is_some() {
                     Err(Refused::Busy)
                 } else {
                     self.g.talk.prompt(&text, by, &mut o)
                 };
-                if r.is_ok() {
-                    self.heard = Instant::now();
-                }
                 self.take(o).await;
                 let _ = reply.send(r);
             }
             Command::Answer(id, a, reply) => {
                 let r = self.g.talk.answer(&id, &a, &mut o);
                 if r.is_ok() {
-                    self.answers.remove(&id);
-                    self.heard = Instant::now();
                     o.event(Event::AskClosed { id, how: Settled::Answered });
                 }
                 self.take(o).await;
@@ -468,7 +461,7 @@ impl<F: Frames> Attempt<F> {
         }
         let mut o = Out::default();
         match read {
-            Some(v) if v.is_object() => self.g.talk.heard(v, &mut o),
+            Some(v) => self.g.talk.heard(v, &mut o),
             _ => o.bad = true,
         }
         if o.bad {
@@ -591,6 +584,7 @@ impl<F: Frames> Attempt<F> {
     }
 
     fn deliver(&mut self, p: Option<OwnedSemaphorePermit>) {
+        // Every prompt and every answer makes one: from then on it is its turn to speak.
         self.heard = Instant::now();
         if let Some(p) = p
             && let Some(e) = self.waiting.pop_front()
