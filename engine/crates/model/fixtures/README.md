@@ -28,3 +28,42 @@ last event where the page leaves it out, and that `web-search` is made whole whe
 the blocks between index 3 and 17 are left out, the last one's `content_block_stop` having index 3. Identifiers and signatures are the page's own,
 shortened by it. Bodies of errors in the tests are from `api/errors` and `api/rate-limits`, the redacted block is in the form of
 `build-with-claude/thinking`. The API's real behaviour has not been tested.
+
+## `responses-from-documentation/`: from documentation, not recorded
+There is no OpenAI key here. Read on 2026-11-25 (the Markdown form of each page, which has `.md` at its end), data on one line each:
+
+| Name | Page | What was done to it |
+|------|------|---------------------|
+| `text` | <https://developers.openai.com/api/reference/resources/responses/methods/create>, example "Streaming" | As printed. The page leaves out all pieces of the text but the first, and says so in a comment of the stream |
+| `tool` | <https://developers.openai.com/api/docs/guides/function-calling#streaming>, "Output events" | As printed, which has neither begin nor end; the reference's example of `response.completed` ends it |
+| `reasoning` | <https://developers.openai.com/api/docs/guides/reasoning#reasoning-summaries> | **Put together**: the page prints the answer whole. Its items, in the events of the reference's examples, the text of each in one piece |
+| `failed`, `incomplete`, `error` | <https://developers.openai.com/api/reference/resources/responses/streaming-events>, examples | As printed |
+| `models.json` | <https://developers.openai.com/api/reference/resources/models/methods/list>, example | As printed |
+
+No page prints a reasoning item with `encrypted_content`; the tests make theirs up. Error codes in the tests are from `guides/error-codes` and
+the reference's `ResponseError`.
+
+## `gemini-from-documentation/`: from documentation, not recorded
+There is no Gemini key here. Read on 2026-11-25 (`.md?generate-content=true`). The pages print answers of the method that does not stream, or the
+pieces of one that does, never the events; each is one event here:
+
+| Name | Page | What was done to it |
+|------|------|---------------------|
+| `text` | <https://aistudio.google.com/docs/text-generation#text-only-response> | The two pieces printed; `usageMetadata`, which has `...` there, left out; `finishReason` added to the second |
+| `call`, `parallel`, `signed-text` | <https://aistudio.google.com/docs/thought-signatures> | The "Model response" of the sequential, the parallel and the text example, made a candidate that ended with `STOP`; comments left out, and `thought_signature` of the last written as the API does |
+| `tool-combination` | <https://aistudio.google.com/docs/tool-combination#example> | The model's turn of the request printed there, made a candidate |
+| `continuation` | <https://aistudio.google.com/docs/long-decode#option-2-loop> | As printed |
+| `error.json` | <https://aistudio.google.com/docs/api-errors#error-schema> | As printed |
+
+Members are those of <https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta>, revision 20261123. Signatures are the pages' own
+placeholders. That a stream ends with its connection and without a mark is not written anywhere that was read.
+
+## `openrouter-from-documentation/`: from documentation, not recorded
+There is no OpenRouter key here. Read on 2026-11-25:
+
+| Name | Page | What was done to it |
+|------|------|---------------------|
+| `error` | <https://openrouter.ai/docs/api_reference/errors-and-debugging#mid-stream-errors> | As printed |
+| `reasoning` | <https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#streaming-response> | **Put together**: that piece, then the last events of <https://openrouter.ai/docs/api_reference/streaming#the-final-usage-chunk-chat-completions>, whose `...` are left out and whose `usage` is the example of <https://openrouter.ai/docs/cookbook/administration/usage-accounting>; before them the comment that page says is sent |
+
+The APIs' real behaviour has not been tested.

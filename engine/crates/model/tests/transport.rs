@@ -124,6 +124,139 @@ async fn anthropic_is_asked_its_own_way() {
 }
 
 #[tokio::test]
+async fn openai_is_asked_its_own_way() {
+    let body = fixture("responses-from-documentation/tool.sse");
+    let s = Server::new(vec![send(STREAM), Step::Send(body)]).await;
+    let c = client_with(Profile::openai(), &s.url(), Options::default());
+    let (r, e) = all(begins(&c).await).await;
+    assert_eq!((e, r.message.calls().count(), r.complete), (None, 1, true));
+    let [asked] = s.asked().try_into().unwrap();
+    assert!(asked.head.starts_with("POST /v1/responses HTTP/1.1\r\n"));
+    assert_eq!(asked.header("authorization"), Some(format!("Bearer {KEY}").as_str()));
+    assert!(asked.body.starts_with(br#"{"model":"m","store":false,"stream":true,"#));
+}
+
+#[tokio::test]
+async fn gemini_is_asked_its_own_way() {
+    let body = fixture("gemini-from-documentation/parallel.sse");
+    let s = Server::new(vec![send(STREAM), Step::Send(body)]).await;
+    let c = client_with(Profile::gemini(), &s.url(), Options::default());
+    let mut r = request();
+    r.model = "gemini-4_x.0-Hydrogen".into();
+    let answer = timeout(LONG, c.stream(&r)).await.unwrap().unwrap();
+    // It ends with the connection, and that is an end since it had said why it stopped.
+    let (reply, e) = all(answer).await;
+    assert_eq!((e, reply.message.calls().count(), reply.complete), (None, 2, true));
+    let [asked] = s.asked().try_into().unwrap();
+    assert!(asked.head.starts_with(
+        "POST /v1/models/gemini-4_x.0-Hydrogen:streamGenerateContent?alt=sse HTTP/1.1\r\n"
+    ));
+    // The key is in its header and nowhere else.
+    assert_eq!(asked.header("x-goog-api-key"), Some(KEY));
+    assert_eq!(asked.header("authorization"), None);
+    assert_eq!(asked.head.matches(KEY).count(), 1);
+}
+
+#[tokio::test]
+async fn gemini_that_hangs_up_before_it_stopped_is_cut_short() {
+    let half =
+        r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"f","args":{}}}]}}]}"#;
+    let s = Server::new(vec![send(STREAM), send(format!("{half}\n\n")), Step::Drop]).await;
+    let c = client_with(Profile::gemini(), &s.url(), Options::default());
+    let (r, e) = all(begins(&c).await).await;
+    assert_eq!((e.unwrap().class, r.complete), (Class::CutShort, false));
+    assert_eq!(r.message.calls().count(), 0);
+    // After it did, how the connection ends does not matter.
+    let head =
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+    let stop = format!("{half}\n\ndata: {{\"candidates\":[{{\"finishReason\":\"STOP\"}}]}}\n\n");
+    let s =
+        Server::new(vec![send(head), send(format!("{:x}\r\n{stop}\r\n", stop.len())), Step::Drop])
+            .await;
+    let c = client_with(Profile::gemini(), &s.url(), Options::default());
+    let (r, e) = all(begins(&c).await).await;
+    assert_eq!((e, r.complete, r.message.calls().count()), (None, true, 1));
+}
+
+#[tokio::test]
+async fn a_models_name_cannot_change_where_a_request_goes() {
+    let s = Server::new(vec![]).await;
+    let c = client_with(Profile::gemini(), &s.url(), Options::default());
+    for bad in [
+        "",
+        ".",
+        "..",
+        "...",
+        "a/b",
+        "../x",
+        "a:b",
+        "a?b",
+        "a#b",
+        "a%2fb",
+        "a b",
+        "a\n",
+        "//evil",
+        "é",
+        "a\\b",
+        "a&b",
+        "models/m",
+        "m:generateContent?x=",
+        "a@b",
+        "a\0",
+    ] {
+        let mut r = request();
+        r.model = bad.into();
+        let e = c.stream(&r).await.unwrap_err();
+        assert_eq!(e, CallError::Encode(EncodeError::BadModel(bad.into())), "{bad:?}");
+    }
+    assert!(s.asked().is_empty());
+}
+
+#[tokio::test]
+async fn openrouter_is_asked_its_own_way() {
+    let body = fixture("openrouter-from-documentation/reasoning.sse");
+    let s = Server::new(vec![send(STREAM), Step::Send(body)]).await;
+    let c = client_with(Profile::openrouter(), &s.url(), Options::default());
+    let (r, e) = all(begins(&c).await).await;
+    assert_eq!((e, r.complete), (None, true));
+    let [asked] = s.asked().try_into().unwrap();
+    assert!(asked.head.starts_with("POST /v1/chat/completions HTTP/1.1\r\n"));
+    assert_eq!(asked.header("authorization"), Some(format!("Bearer {KEY}").as_str()));
+    for none in ["http-referer", "x-title", "x-openrouter-title"] {
+        assert_eq!(asked.header(none), None);
+    }
+}
+
+#[tokio::test]
+async fn googles_errors() {
+    let page = fixture("gemini-from-documentation/error.json");
+    let answer = |status: &str, body: Vec<u8>| {
+        vec![send(head(status, "content-type: application/json\r\n")), Step::Send(body)]
+    };
+    // A wrong key is a bad request there.
+    let s = Server::new(answer("400 Bad Request", page)).await;
+    let c = client_with(Profile::gemini(), &s.url(), Options::default());
+    let e = fails(&c).await;
+    assert_eq!((e.class, e.retry, e.status), (Class::Auth, Retry::Never, Some(400)));
+    assert_eq!(e.code.as_deref(), Some("API_KEY_INVALID"));
+    for (status, name, class, retry) in [
+        (400, "INVALID_ARGUMENT", Class::BadRequest, Retry::Never),
+        (402, "RESOURCE_EXHAUSTED", Class::Billing, Retry::Never),
+        (403, "PERMISSION_DENIED", Class::Auth, Retry::Never),
+        (429, "RESOURCE_EXHAUSTED", Class::RateLimit, Retry::Safe),
+        (500, "INTERNAL", Class::Server, Retry::Restart),
+        (503, "UNAVAILABLE", Class::Overloaded, Retry::Safe),
+        (504, "DEADLINE_EXCEEDED", Class::Server, Retry::Restart),
+    ] {
+        let body = format!(r#"{{"error":{{"code":{status},"message":"m","status":"{name}"}}}}"#);
+        let s = Server::new(answer(&format!("{status} x"), body.into_bytes())).await;
+        let c = client_with(Profile::gemini(), &s.url(), Options::default());
+        let e = fails(&c).await;
+        assert_eq!((e.class, e.retry, e.code.as_deref()), (class, retry, Some(name)));
+    }
+}
+
+#[tokio::test]
 async fn without_a_credential_none_is_sent() {
     let s = Server::new(vec![send(STREAM), send([STOP, DONE].concat())]).await;
     let url = format!("http://localhost:{}/v1", s.addr.port());
@@ -260,7 +393,12 @@ async fn a_server_that_repeats_the_credential_does_not_get_it_into_an_error() {
         ways.push(json(status, format!("{}{KEY}", "x".repeat(64 * 1024 - 10))));
     }
     for (n, way) in ways.into_iter().enumerate() {
-        for codec in [Profile::openai_compatible("p", "x"), Profile::anthropic()] {
+        for codec in [
+            Profile::openai_compatible("p", "x"),
+            Profile::anthropic(),
+            Profile::openai(),
+            Profile::gemini(),
+        ] {
             let s = Server::new(way.clone()).await;
             let c = client_with(codec, &s.url(), Options::default());
             // `fails`, `all` and `clean` look for the credential.
@@ -269,7 +407,7 @@ async fn a_server_that_repeats_the_credential_does_not_get_it_into_an_error() {
                 Ok(answer) => all(answer).await.1,
             };
             assert!(failed.is_some(), "{n}");
-            if c.profile().codec == axiom_model::Codec::Chat {
+            if c.profile().codec != axiom_model::Codec::Messages {
                 provider(timeout(LONG, c.list_models()).await.unwrap().unwrap_err());
             }
         }
@@ -772,6 +910,114 @@ async fn models() {
 
     let e = anthropic("http://127.0.0.1:1/v1").list_models().await.unwrap_err();
     assert_eq!(e, CallError::Encode(EncodeError::Unsupported("the list of models")));
+}
+
+#[tokio::test]
+async fn openais_models() {
+    let s = Server::new(vec![
+        send(head("200 OK", "content-type: application/json\r\n")),
+        Step::Send(fixture("responses-from-documentation/models.json")),
+    ])
+    .await;
+    let c = client_with(Profile::openai(), &s.url(), Options::default());
+    let got = timeout(LONG, c.list_models()).await.unwrap().unwrap();
+    let ids: Vec<&str> = got.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["model-id-0", "model-id-1", "model-id-2"]);
+    assert!(got[2].native.get().contains(r#""shutdown_date": "2026-10-23""#));
+    assert!(s.asked()[0].head.starts_with("GET /v1/models HTTP/1.1\r\n"));
+}
+
+/// Pages, one for each connection.
+async fn paged(pages: Vec<String>) -> (Result<Vec<axiom_model::ModelInfo>, Error>, Vec<String>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1beta", listener.local_addr().unwrap());
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = asked.clone();
+    let server = tokio::spawn(async move {
+        for page in pages {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut raw = Vec::new();
+            while !raw.ends_with(b"\r\n\r\n") {
+                let mut buf = [0; 4096];
+                let n = socket.read(&mut buf).await.unwrap();
+                raw.extend_from_slice(&buf[..n]);
+            }
+            seen.lock().unwrap().push(String::from_utf8(raw).unwrap());
+            let head = head("200 OK", "content-type: application/json\r\n");
+            let _ = socket.write_all(head.as_bytes()).await;
+            let _ = socket.write_all(page.as_bytes()).await;
+        }
+    });
+    let c = client_with(Profile::gemini(), &url, Options::default());
+    let got = timeout(LONG, c.list_models()).await.unwrap().map_err(provider);
+    server.abort();
+    let asked = asked.lock().unwrap().clone();
+    (got, asked)
+}
+
+#[tokio::test]
+async fn geminis_models_come_in_pages() {
+    let first = r#"{"models":[{"name":"models/a","supportedGenerationMethods":["countTokens","generateContent"],"inputTokenLimit":1},{"name":"models/embeds","supportedGenerationMethods":["embedContent"]},{"name":"models/none","supportedGenerationMethods":[]}],"nextPageToken":"p&2 /=é"}"#;
+    let second = r#"{"models":[{"name":"b"},{"name":"tunedModels/c"}],"nextPageToken":""}"#;
+    let (got, asked) = paged(vec![first.into(), second.into(), "{}".into()]).await;
+    let got = got.unwrap();
+    // Those that can be asked as the codec asks; and what says nothing of it.
+    let ids: Vec<&str> = got.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["a", "b", "tunedModels/c"]);
+    assert!(got[0].native.get().contains(r#""inputTokenLimit":1"#));
+    // The server's token is a value and nothing more.
+    let lines: Vec<&str> = asked.iter().map(|a| a.lines().next().unwrap()).collect();
+    assert_eq!(
+        lines,
+        [
+            "GET /v1beta/models?pageSize=1000 HTTP/1.1",
+            "GET /v1beta/models?pageSize=1000&pageToken=p%262+%2F%3D%C3%A9 HTTP/1.1",
+        ]
+    );
+    assert!(asked.iter().all(|a| a.contains(&format!("x-goog-api-key: {KEY}\r\n"))));
+    // No list is an empty one.
+    assert_eq!(paged(vec!["{}".into()]).await.0.unwrap(), []);
+}
+
+#[tokio::test]
+async fn geminis_models_are_bounded() {
+    let class = |r: Result<Vec<_>, Error>| r.unwrap_err();
+    // A list without an end.
+    let page = |n: usize| {
+        format!(r#"{{"models":[{}],"nextPageToken":"t"}}"#, vec![r#"{"name":"m"}"#; n].join(","))
+    };
+    let (got, asked) = paged(vec![page(1); 12]).await;
+    let e = class(got);
+    assert_eq!((e.class, asked.len()), (Class::Protocol, 10));
+    assert_eq!(e.message, "the list of models has more than 10 pages");
+    // As many as there may be, and one more.
+    let mut pages = vec![page(1_000); 9];
+    pages.push(format!(r#"{{"models":[{}]}}"#, vec![r#"{"name":"m"}"#; 1_000].join(",")));
+    assert_eq!(paged(pages.clone()).await.0.unwrap().len(), 10_000);
+    pages[0] = page(1_001);
+    assert!(class(paged(pages).await.0).message.contains("more than 10000 models"));
+    // What cannot be asked is counted too: it has to be read.
+    let none = r#"{"name":"m","supportedGenerationMethods":[]}"#;
+    let many = format!(r#"{{"models":[{}]}}"#, vec![none; 10_001].join(","));
+    assert_eq!(class(paged(vec![many]).await.0).class, Class::Protocol);
+    // All pages together.
+    let big = format!(r#"{{"models":[],"x":"{}","nextPageToken":"t"}}"#, "x".repeat(2 << 20));
+    let (got, asked) = paged(vec![big; 4]).await;
+    assert_eq!(class(got).message, "the list of models is larger than 4194304 bytes");
+    assert_eq!(asked.len(), 2);
+    for bad in
+        ["[]", "", "<html>", r#"{"models":[{}]}"#, r#"{"models":[{"name":7}]}"#, r#"{"models":7}"#]
+    {
+        assert_eq!(class(paged(vec![bad.into()]).await.0).class, Class::Protocol, "{bad}");
+    }
+    let e = class(
+        paged(vec![r#"{"error":{"code":403,"message":"m","status":"PERMISSION_DENIED"}}"#.into()])
+            .await
+            .0,
+    );
+    // It has no list, and is not read as an empty one.
+    assert_eq!((e.class, e.message.as_str()), (Class::Auth, "m"));
 }
 
 /// Every recorded answer, through the whole of it, as the server framed it.

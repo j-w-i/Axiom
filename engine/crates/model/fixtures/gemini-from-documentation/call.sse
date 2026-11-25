@@ -1,0 +1,2 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"check_flight","args":{"flight":"AA100"}},"thoughtSignature":"<Signature A>"}]},"finishReason":"STOP"}]}
+

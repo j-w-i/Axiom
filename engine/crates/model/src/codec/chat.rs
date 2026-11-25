@@ -154,7 +154,12 @@ fn assistant(
             (_, Some(native)) if quirks.replay_reasoning == Some(true) => {
                 let members: Object = serde_json::from_str(native.get())?;
                 for (key, value) in members.members() {
-                    more.set(key, value.clone());
+                    // Reasoning on both sides of a text is one member again.
+                    let texts = more.read::<String>(key).zip(members.read::<String>(key));
+                    match texts {
+                        Some((before, after)) => more.put(key, &(before + &after))?,
+                        None => more.set(key, value.clone()),
+                    }
                 }
             }
             (Content::Reasoning { .. }, _) => lose(n, Loss::Reasoning),
@@ -584,14 +589,20 @@ fn stop(reason: String) -> Stop {
 
 fn count(told: &Value) -> Usage {
     let count = |path: &str| told.pointer(path).and_then(Value::as_u64);
-    let (prompt, cache_read) =
-        (count("/prompt_tokens"), count("/prompt_tokens_details/cached_tokens"));
+    let (prompt, cache_read, cache_write) = (
+        count("/prompt_tokens"),
+        count("/prompt_tokens_details/cached_tokens"),
+        count("/prompt_tokens_details/cache_write_tokens"),
+    );
     Usage {
         prompt,
-        // The prompt counts what was read from a cache; without that, what was not is unknown.
-        uncached: prompt.zip(cache_read).and_then(|(all, read)| all.checked_sub(read)),
+        // The prompt counts what was read from a cache, and what was written where that is told;
+        // without the first, what was not is unknown.
+        uncached: prompt
+            .zip(cache_read)
+            .and_then(|(all, read)| all.checked_sub(read)?.checked_sub(cache_write.unwrap_or(0))),
         cache_read,
-        cache_write: None,
+        cache_write,
         cache_write_long: None,
         output: count("/completion_tokens"),
         reasoning: count("/completion_tokens_details/reasoning_tokens"),

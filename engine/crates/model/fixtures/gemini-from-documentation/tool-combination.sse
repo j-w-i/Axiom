@@ -1,0 +1,2 @@
+data: {"candidates":[{"content":{"parts":[{"thoughtSignature":"...","toolCall":{"toolType":"GOOGLE_SEARCH_WEB","args":{"queries":["northernmost city in the United States"]},"id":"a7b3k9p2"}},{"thoughtSignature":"...","toolResponse":{"toolType":"GOOGLE_SEARCH_WEB","response":{"search_suggestions":"..."},"id":"a7b3k9p2"}},{"functionCall":{"name":"getWeather","args":{"city":"Utqiaġvik, Alaska"},"id":"m4q8z1v6"},"thoughtSignature":"..."}],"role":"model"},"finishReason":"STOP"}]}
+

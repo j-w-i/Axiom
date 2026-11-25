@@ -89,10 +89,18 @@ fn internal(words: impl std::fmt::Display) -> WireError {
 fn profile(provider: &str, url: Option<&str>) -> Option<Profile> {
     match provider {
         "anthropic" => Some(Profile::anthropic()),
+        "openai" => Some(Profile::openai()),
+        "gemini" => Some(Profile::gemini()),
+        "openrouter" => Some(Profile::openrouter()),
         "lm-studio" => Some(Profile::lm_studio()),
         "openai-compatible" => Some(Profile::openai_compatible("openai-compatible", url?)),
         _ => None,
     }
+}
+
+/// Those that are always at their own address and answer no one without a key.
+fn keyed(provider: &str) -> bool {
+    matches!(provider, "anthropic" | "openai" | "gemini" | "openrouter")
 }
 
 impl Connections {
@@ -148,8 +156,8 @@ impl Connections {
         let secret = secret.transpose()?;
         let p = profile(&provider, url.as_deref())
             .ok_or_else(|| bad("the provider is not one that can be added, or needs an address"))?;
-        if provider == "anthropic" && (url.is_some() || secret.is_none()) {
-            return Err(bad("a connection to Anthropic has a key and no address"));
+        if keyed(&provider) && (url.is_some() || secret.is_none()) {
+            return Err(bad("a connection to this provider has a key and no address"));
         }
         let address =
             url.clone().or_else(|| p.base_url.clone()).ok_or_else(|| bad("needs an address"))?;
@@ -266,6 +274,29 @@ mod tests {
     }
 
     #[test]
+    fn a_key_goes_to_its_providers_own_address() {
+        let t = T::new();
+        let c = t.open();
+        for (provider, address) in [
+            ("anthropic", "https://api.anthropic.com/v1"),
+            ("openai", "https://api.openai.com/v1"),
+            ("gemini", "https://generativelanguage.googleapis.com/v1beta"),
+            ("openrouter", "https://openrouter.ai/api/v1"),
+        ] {
+            let id = c.add("Mine".into(), provider.into(), None, Some(CANARY.into())).unwrap();
+            let client = t.open().client(&id).unwrap();
+            assert_eq!(client.profile().provider, provider);
+            assert_eq!(client.profile().base_url.as_deref(), Some(address));
+            let listed = c.list().into_iter().find(|k| k.id == id).unwrap();
+            assert_eq!(
+                (listed.provider.as_str(), listed.url, listed.secret),
+                (provider, None, true)
+            );
+        }
+        assert!(!std::fs::read_to_string(t.file()).unwrap().contains(CANARY));
+    }
+
+    #[test]
     fn what_cannot_be_used_is_not_kept() {
         let t = T::new();
         let c = t.open();
@@ -280,6 +311,13 @@ mod tests {
             ("x", "openai-compatible", Some("https://u:p@far.example"), None),
             ("x", "anthropic", None, Some(" ")),
             ("x", "anthropic", None, Some("a\nb")),
+            ("x", "openai", None, None),
+            ("x", "openai", Some("https://api.openai.com/v1"), Some(CANARY)),
+            ("x", "gemini", None, None),
+            ("x", "gemini", Some("https://evil.example/v1"), Some(CANARY)),
+            ("x", "openrouter", None, None),
+            ("x", "openrouter", Some("https://evil.example/v1"), Some(CANARY)),
+            ("x", "OpenAI", None, Some(CANARY)),
         ] {
             let e =
                 c.add(name.into(), provider.into(), url.map(Into::into), secret.map(Into::into));
