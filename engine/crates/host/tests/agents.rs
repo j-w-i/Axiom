@@ -82,14 +82,34 @@ impl T {
         AgentId(v["agent"].as_str().unwrap().into())
     }
     async fn prompt(&mut self, a: &AgentId, text: &str) -> Result<Value, ClientError> {
-        self.c
-            .call(Call::Prompt {
-                session: self.s.clone(),
-                agent: a.clone(),
-                text: text.into(),
-                key: None,
-            })
-            .await
+        self.prompt_named(a, text, None).await
+    }
+    async fn prompt_named(
+        &mut self,
+        a: &AgentId,
+        text: &str,
+        key: Option<&str>,
+    ) -> Result<Value, ClientError> {
+        let (session, agent, key) = (self.s.clone(), a.clone(), key.map(str::to_owned));
+        self.c.call(Call::Prompt { session, agent, text: text.into(), key }).await
+    }
+    /// The host goes, and another takes its place.
+    async fn restart(&mut self) {
+        self.c.call(Call::Shutdown { force: true }).await.unwrap();
+        for _ in 0..500 {
+            if !self.f.paths.token().exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        self.f.serve_with(config(&self.f, &self.vault));
+        self.c = self.f.client().await;
+        self.c.call(Call::Follow { session: self.s.clone(), after: 0 }).await.unwrap();
+    }
+    /// How often each was sent to the model the last time.
+    fn sent(&self, what: &[&str]) -> Vec<usize> {
+        let last = self.server.requests().last().unwrap()["messages"].to_string();
+        what.iter().map(|w| last.matches(w).count()).collect()
     }
     /// Events until one that `f` takes.
     async fn until<R>(&mut self, mut f: impl FnMut(&Body) -> Option<R>) -> (R, Vec<Body>) {
@@ -257,6 +277,8 @@ async fn it_is_spoken_to_and_stopped_while_it_works() {
     t.prompt(&a, "go on").await.unwrap();
     let (o, _, all) = t.ended().await;
     assert_eq!(o, Outcome::Completed);
+    // What had been said to it is not lost, nor said twice.
+    assert_eq!(t.sent(&["and this", "go on"]), [1, 1]);
     assert!(all.iter().any(|b| matches!(b, Body::AgentChanged { access: Some(Access::Read), .. })));
 }
 
@@ -288,6 +310,115 @@ async fn what_is_said_too_late_for_a_run_begins_another() {
     }
 }
 
+/// What is said between a stop and the end of what is stopped begins a run by itself.
+#[tokio::test]
+async fn what_is_said_after_a_stop_is_heard() {
+    for _ in 0..8 {
+        let mut t = T::new(vec![text(&["thinking"]).hangs(), text(&["ok"])]).await;
+        let a = t.agent(Access::Work).await;
+        let v = t.prompt(&a, "first;").await.unwrap();
+        t.until(|b| matches!(b, Body::ItemStarted { kind: ItemKind::Prose, .. }).then_some(()))
+            .await;
+        let run = RunId(v["run"].as_str().unwrap().into());
+        t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
+        t.prompt(&a, "second;").await.unwrap();
+        assert_eq!(t.ended().await.0, Outcome::Cancelled);
+        assert_eq!(t.ended().await.0, Outcome::Completed);
+        assert_eq!(t.sent(&["first;", "second;"]), [1, 1]);
+    }
+}
+
+#[tokio::test]
+async fn what_was_not_heard_when_the_host_went_is_heard_after() {
+    let mut t = T::new(vec![text(&["thinking"]).hangs()]).await;
+    let a = t.agent(Access::Work).await;
+    t.prompt(&a, "first;").await.unwrap();
+    let q = t.prompt(&a, "second;").await.unwrap();
+    assert_eq!(q["queued"], true);
+    t.restart().await;
+    t.server.add(text(&["ok"]));
+    t.prompt(&a, "third;").await.unwrap();
+    while t.ended().await.0 != Outcome::Completed {}
+    assert_eq!(t.sent(&["first;", "second;", "third;"]), [1, 1, 1]);
+    // Once: it is not heard again.
+    t.restart().await;
+    t.server.add(text(&["ok"]));
+    t.prompt(&a, "fourth;").await.unwrap();
+    while t.sent(&["fourth;"]) != [1] {
+        t.ended().await;
+    }
+    assert_eq!(t.sent(&["first;", "second;", "third;"]), [1, 1, 1]);
+}
+
+/// A client that did not see the answer says it again under the same name.
+#[tokio::test]
+async fn a_prompt_of_one_name_is_heard_once() {
+    let mut t = T::new(vec![text(&["thinking"]).hangs()]).await;
+    let a = t.agent(Access::Work).await;
+    let v = t.prompt_named(&a, "first;", Some("k1")).await.unwrap();
+    assert_eq!(t.prompt_named(&a, "first;", Some("k1")).await.unwrap(), v);
+    let q = t.prompt_named(&a, "second;", Some("k2")).await.unwrap();
+    assert_eq!(t.prompt_named(&a, "second;", Some("k2")).await.unwrap(), q);
+    assert_eq!((v["queued"].as_bool(), q["queued"].as_bool()), (Some(false), Some(true)));
+    let run = RunId(v["run"].as_str().unwrap().into());
+    t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
+    t.ended().await;
+    t.server.add(text(&["ok"]));
+    t.prompt(&a, "third;").await.unwrap();
+    while t.ended().await.0 != Outcome::Completed {}
+    assert_eq!(t.sent(&["first;", "second;", "third;"]), [1, 1, 1]);
+    assert!(t.prompt_named(&a, "x", Some(&"k".repeat(101))).await.is_err());
+}
+
+/// One slow provider does not hold up everything else that a client asks.
+#[tokio::test]
+async fn a_client_is_answered_while_a_provider_is_slow() {
+    let mut t = T::new(vec![text(&["thinking"]).hangs()]).await;
+    let a = t.agent(Access::Work).await;
+    let v = t.prompt(&a, "go").await.unwrap();
+    t.until(|b| matches!(b, Body::ItemStarted { kind: ItemKind::Prose, .. }).then_some(())).await;
+    for id in 900..905 {
+        t.server.add(text(&["x"]).hangs());
+        let call = Call::Models { connection: t.connection.clone() };
+        let mut b = serde_json::to_vec(&Request { id, call }).unwrap();
+        b.push(b'\n');
+        t.c.send_raw(&b).await.unwrap();
+    }
+    let now = std::time::Instant::now();
+    let run = RunId(v["run"].as_str().unwrap().into());
+    t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
+    assert!(now.elapsed() < Duration::from_secs(5), "{:?}", now.elapsed());
+    // And not more of them than four.
+    loop {
+        match t.c.next_within(Duration::from_secs(5)).await.unwrap().expect("an answer") {
+            Message::Err { id, error } => {
+                assert_eq!((id, error.code), (904, ErrorCode::Busy));
+                break;
+            }
+            Message::Ok { id, .. } => panic!("{id} was answered"),
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_agent_nobody_was_told_of_is_not_there() {
+    let mut t = T::new(vec![]).await;
+    let mut e = t.execution();
+    e.effort = Some("high".into());
+    let s = t.s.clone();
+    let call = |e| Call::AgentAdd {
+        session: s.clone(),
+        name: "A".into(),
+        execution: e,
+        access: Access::Read,
+        instructions: vec![],
+    };
+    let (refused, kept) = (call(e), call(t.execution()));
+    assert!(t.c.call(refused).await.unwrap_err().to_string().contains("effort"));
+    t.c.call(kept).await.unwrap();
+}
+
 #[tokio::test]
 async fn after_the_host_is_gone_the_agent_goes_on_from_what_is_kept() {
     let t = T::new(vec![
@@ -302,16 +433,7 @@ async fn after_the_host_is_gone_the_agent_goes_on_from_what_is_kept() {
         t.ended().await;
         (t, a)
     };
-    t.c.call(Call::Shutdown { force: true }).await.unwrap();
-    for _ in 0..500 {
-        if !t.f.paths.token().exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    t.f.serve_with(config(&t.f, &t.vault));
-    t.c = t.f.client().await;
-    t.c.call(Call::Follow { session: t.s.clone(), after: 0 }).await.unwrap();
+    t.restart().await;
     t.server.add(text(&["I remember."]));
     t.prompt(&a, "still there?").await.unwrap();
     let (_, _, all) = t.ended().await;

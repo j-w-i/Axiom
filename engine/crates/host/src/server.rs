@@ -939,8 +939,8 @@ async fn prompt(
     let run = RunId::new();
     let (live, cancel) = Live::new(st, &session, &run)?;
     let answer = json!({ "run": run, "queued": false });
-    if let Some(k) = key {
-        slot.remember(k, answer.clone());
+    if let Some(k) = &key {
+        slot.remember(k.clone(), answer.clone());
     }
     // By itself: a client that leaves now does not leave a run that never ends.
     let (told, begun) = oneshot::channel();
@@ -959,6 +959,9 @@ async fn prompt(
         let mut a = match begin.await {
             Ok(a) => a,
             Err(e) => {
+                if let Some(k) = key {
+                    slot.forget(&k);
+                }
                 slot.leave().await;
                 let _ = told.send(Err(e));
                 return;

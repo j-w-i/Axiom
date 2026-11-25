@@ -545,6 +545,12 @@ impl Slot {
         }
     }
 
+    /// What was said under this name came to nothing.
+    pub fn forget(&self, key: &str) {
+        let mut keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
+        keys.retain(|(k, _)| k != key);
+    }
+
     /// Nothing is said, and nothing begins, while this is held.
     pub async fn hold(&self) -> Result<impl Sized + use<>, WireError> {
         let live = self.live.clone().lock_owned().await;
