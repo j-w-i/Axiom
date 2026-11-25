@@ -102,7 +102,10 @@ async fn dropping_ends_it() {
 async fn it_is_asked_first_if_there_is_time() {
     let f = fixture();
     let m = mark(5);
-    let script = format!("trap 'echo bye > src/bye; exit 3' TERM; echo up; sleep {m} & wait");
+    // Not `wait`: a signal that comes just before it is heard only when what it waits for has ended.
+    let script = format!(
+        "trap 'echo bye > src/bye; exit 3' TERM; sleep {m} & echo up; while :; do sleep 0.05; done"
+    );
     let mut r = spawn(f.job(&script, f.profile())).unwrap();
     lines(&mut r, 1).await;
     let e = r.stop(Duration::from_secs(10)).await.unwrap();
