@@ -331,6 +331,80 @@ async fn an_agent_has_only_its_tools() {
     assert_eq!((t.file("made"), t.stage.deeds().len()), (None, 0));
 }
 
+#[tokio::test]
+async fn a_full_window_is_made_room_in() {
+    // Each answer of the script says 55 tokens were used, of 60.
+    let t = T::new(
+        Access::Work,
+        vec![
+            calls(&[("c1", "read", r#"{"path":"a.txt"}"#)]),
+            text(&["Notes: the file has two lines."]),
+            calls(&[("c2", "edit", r#"{"path":"a.txt","old":"two","new":"2"}"#)]),
+            text(&["Notes: it must be read first."]),
+            text(&["Done."]),
+        ],
+    )
+    .await;
+    let mut a = t.agent();
+    a.window = Some(60);
+    let e = t.run(&mut a, "Make it 2.").await;
+    assert_eq!((e.outcome, e.error), (Outcome::Completed, None));
+    let r = t.server.requests();
+    assert_eq!(r.len(), 5);
+    // The summary is asked for aside: without tools, and with everything told.
+    assert!(r[1].get("tools").is_none_or(|t| t.as_array().is_none_or(Vec::is_empty)));
+    let told = r[1]["messages"].to_string();
+    assert!(told.contains("Make it 2.") && told.contains("Agent calls read"), "{told}");
+    // The agent goes on from its notes and what the person said.
+    let m = r[2]["messages"].as_array().unwrap();
+    assert_eq!(m.len(), 2, "the system's words and the notes");
+    let notes = m[1]["content"].as_str().unwrap();
+    assert!(
+        notes.contains("Notes: the file has two lines.") && notes.ends_with("Make it 2."),
+        "{notes}"
+    );
+    // What it knew of the file went with the conversation.
+    assert!(r[3]["messages"].to_string().contains("read a.txt before"));
+    assert_eq!(t.stage.texts(ItemKind::Prose), ["Done."], "the notes are not shown as its words");
+    assert!(t.stage.texts(ItemKind::Notice)[0].contains("summarised"));
+    // Kept so: the next host goes on from the same.
+    let (c, new) = Context::load(&t.stage.turns()).unwrap();
+    assert!(new.is_empty());
+    assert_eq!(c.messages(), a.context.messages());
+}
+
+#[tokio::test]
+async fn what_is_too_long_is_summarised_once_and_then_fails() {
+    let long = || {
+        status(
+            400,
+            r#"{"error":{"message":"maximum context length exceeded","code":"context_length_exceeded"}}"#,
+        )
+    };
+    let t = T::new(
+        Access::Work,
+        vec![text(&["one"]), long(), long(), text(&["Notes."]), text(&["two"])],
+    )
+    .await;
+    let mut a = t.agent();
+    a.window = None;
+    t.run(&mut a, "first").await;
+    let e = t.run(&mut a, "second").await;
+    assert_eq!((e.outcome, e.error), (Outcome::Completed, None));
+    let r = t.server.requests();
+    assert_eq!(r.len(), 5, "the summary was itself too long once, and asked for with less");
+    assert!(r[3]["messages"].to_string().len() <= r[2]["messages"].to_string().len());
+    let t = T::new(Access::Work, vec![text(&["one"]), long(), text(&["Notes."]), long()]).await;
+    let mut a = t.agent();
+    t.run(&mut a, "first").await;
+    let e = t.run(&mut a, "second").await;
+    assert!(e.outcome == Outcome::Failed && e.error.unwrap().contains("context"));
+    let t = T::new(Access::Work, vec![long()]).await;
+    let e = t.run(&mut t.agent(), "a single thing that is too long").await;
+    assert_eq!(e.outcome, Outcome::Failed);
+    assert_eq!(t.server.requests().len(), 1, "there is nothing to leave out");
+}
+
 /// The host is killed at every point there is. Whatever was done is on record, and nothing is done
 /// twice when the agent goes on.
 #[tokio::test]

@@ -8,6 +8,7 @@ use axiom_policy::rules::Decision;
 use axiom_proto::{AgentId, Body, ItemId, Outcome, RequestId};
 use serde_json::Value;
 
+mod compact;
 pub mod context;
 pub mod desk;
 mod run;

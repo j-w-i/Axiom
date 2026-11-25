@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    Deed, Desk, Refused, Say, Stage,
+    Deed, Desk, Refused, Say, Stage, compact,
     context::{Context, Turn},
 };
 
@@ -72,6 +72,14 @@ pub struct Agent<S: Stage> {
     pub retries: Retries,
     /// What a person says meanwhile.
     pub inbox: mpsc::Receiver<String>,
+    /// Share of the window in use, as the last answer had it.
+    pub fill: Option<f64>,
+}
+
+fn fill(r: &Reply, window: Option<u64>) -> Option<f64> {
+    let (p, o) = r.usage.prompt.zip(r.usage.output)?;
+    let w = window.filter(|w| *w > 0)?;
+    Some((p + o) as f64 / w as f64)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +92,8 @@ pub struct Ended {
 enum Halt {
     Cancelled,
     Failed(String),
+    /// What is sent is too long for the model.
+    Full(String),
     /// Nobody to say anything to.
     Gone,
 }
@@ -116,7 +126,7 @@ impl<S: Stage> Agent<S> {
             .await?;
         match self.heard(run, prompt).await {
             Ok(()) => self.stage.sync().await,
-            Err(Halt::Failed(why)) => Err(Refused::This(why)),
+            Err(Halt::Failed(why) | Halt::Full(why)) => Err(Refused::This(why)),
             Err(Halt::Cancelled | Halt::Gone) => Err(Refused::Closed),
         }
     }
@@ -128,7 +138,7 @@ impl<S: Stage> Agent<S> {
         let (outcome, error) = match r {
             Ok(()) => (Outcome::Completed, None),
             Err(Halt::Cancelled) => (Outcome::Cancelled, None),
-            Err(Halt::Failed(why)) => (Outcome::Failed, Some(why)),
+            Err(Halt::Failed(why) | Halt::Full(why)) => (Outcome::Failed, Some(why)),
             Err(Halt::Gone) => return Ended { outcome: Outcome::Interrupted, error: None },
         };
         let state = match outcome {
@@ -153,6 +163,10 @@ impl<S: Stage> Agent<S> {
             if *cancel.borrow() {
                 return Err(Halt::Cancelled);
             }
+            if self.fill.is_some_and(|f| f >= compact::FULL) {
+                self.make_room(run, cancel, "the conversation fills the model's window".into())
+                    .await?;
+            }
             let mut more = Vec::new();
             while let Ok(m) = self.inbox.try_recv() {
                 more.push(m);
@@ -166,9 +180,30 @@ impl<S: Stage> Agent<S> {
             if self.limits.output_tokens.is_some_and(|most| output >= most) {
                 return Err(Halt::Failed("the run has used as many tokens as it may".into()));
             }
-            let reply = self.answer(run, cancel).await?;
+            let mut reply = match self.answer(run, cancel).await {
+                Err(Halt::Full(words)) => {
+                    // Once: what is too long after that stays so.
+                    self.make_room(run, cancel, words).await?;
+                    self.answer(run, cancel).await.map_err(|e| match e {
+                        Halt::Full(words) => Halt::Failed(words),
+                        e => e,
+                    })?
+                }
+                r => r?,
+            };
             output += reply.usage.output.unwrap_or(0);
             self.usage(&reply).await?;
+            self.fill = fill(&reply, self.window);
+            if reply.stop == Some(Stop::ContextFull) {
+                // What it had said is not whole; it says it again, from its notes.
+                self.make_room(run, cancel, "the model's context is full".into()).await?;
+                reply = self.answer(run, cancel).await.map_err(|e| match e {
+                    Halt::Full(words) => Halt::Failed(words),
+                    e => e,
+                })?;
+                self.usage(&reply).await?;
+                self.fill = fill(&reply, self.window);
+            }
             let stop = reply.stop.clone();
             let message = reply.message;
             self.remember(Turn::Message(message.clone())).await?;
@@ -285,16 +320,75 @@ impl<S: Stage> Agent<S> {
         })
     }
 
+    /// Has the model write down what matters, and goes on from that.
+    async fn make_room(
+        &mut self,
+        run: &RunId,
+        cancel: &mut Cancel,
+        why: String,
+    ) -> Result<(), Halt> {
+        let messages = self.context.messages().to_vec();
+        if messages.len() < 2 {
+            // There is nothing to leave out: what was said is itself too long.
+            return Err(Halt::Failed(why));
+        }
+        let mut most = compact::room(self.window);
+        for _ in 0..4 {
+            let request = compact::request(&self.model, &self.settings, &messages, most);
+            let reply = match self.ask(run, &request, cancel, true).await {
+                Err(Halt::Full(_)) => {
+                    most /= 2;
+                    continue;
+                }
+                r => r?,
+            };
+            let summary: String = reply
+                .message
+                .blocks
+                .iter()
+                .filter_map(|b| match &b.content {
+                    Content::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if summary.trim().is_empty() {
+                return Err(Halt::Failed(format!("{why}, and the model wrote no summary")));
+            }
+            self.remember(Turn::Compacted { summary: compact::notes(&summary, &messages) }).await?;
+            // What it knew of files went with the conversation.
+            self.seen.forget();
+            self.fill = None;
+            return self
+                .notice(run, &format!("The conversation was summarised, because {why}."))
+                .await;
+        }
+        Err(Halt::Failed(format!("{why}, and it cannot be summarised either")))
+    }
+
     /// Asks the model, again if that may help. What came of a try that failed is marked as such.
     async fn answer(&mut self, run: &RunId, cancel: &mut Cancel) -> Result<Reply, Halt> {
         let request = self.request()?;
+        self.ask(run, &request, cancel, false).await
+    }
+
+    /// `aside`: not a part of the conversation, and not shown as one.
+    async fn ask(
+        &mut self,
+        run: &RunId,
+        request: &Request,
+        cancel: &mut Cancel,
+        aside: bool,
+    ) -> Result<Reply, Halt> {
         let mut tries = 0;
         loop {
-            let (retry, class, words, after) = match self.one(run, &request, cancel).await? {
+            let (retry, class, words, after) = match self.one(run, request, cancel, aside).await? {
                 Ok(r) => return Ok(r),
                 Err(CallError::Encode(e)) => return Err(Halt::Failed(e.to_string())),
                 Err(CallError::Provider(e)) => (e.retry, e.class, e.to_string(), e.retry_after),
             };
+            if class == Class::ContextTooLong {
+                return Err(Halt::Full(words));
+            }
             tries += 1;
             if retry == Retry::Never || tries > self.retries.most {
                 return Err(Halt::Failed(words));
@@ -335,6 +429,7 @@ impl<S: Stage> Agent<S> {
         run: &RunId,
         request: &Request,
         cancel: &mut Cancel,
+        aside: bool,
     ) -> Result<Result<Reply, CallError>, Halt> {
         let mut answer = tokio::select! {
             biased;
@@ -354,6 +449,9 @@ impl<S: Stage> Agent<S> {
                     // The connection closes first.
                     drop(answer);
                     self.end_all(&mut items, Outcome::Cancelled).await?;
+                    if aside {
+                        return Err(Halt::Cancelled);
+                    }
                     return self.keep(fold.finish()).await;
                 }
                 e = answer.next() => e,
@@ -366,7 +464,9 @@ impl<S: Stage> Agent<S> {
             if fold.push(&e).is_err() {
                 return Err(Halt::Failed("the answer cannot be read".into()));
             }
-            self.show(run, &e, &mut items).await?;
+            if !aside {
+                self.show(run, &e, &mut items).await?;
+            }
         };
         if let Some(e) = failed {
             self.end_all(&mut items, Outcome::Failed).await?;
@@ -443,11 +543,7 @@ impl<S: Stage> Agent<S> {
         if *u == axiom_model::Usage::default() {
             return Ok(());
         }
-        let full = u.prompt.zip(u.output).map(|(p, o)| p + o);
-        let context = full
-            .zip(self.window)
-            .filter(|(_, w)| *w > 0)
-            .map(|(f, w)| (f as f64 / w as f64).min(1.0));
+        let context = fill(r, self.window).map(|f| f.min(1.0));
         let usage = Usage {
             input: u.uncached.or(u.prompt),
             cache_read: u.cache_read,
@@ -514,7 +610,7 @@ impl<S: Stage> Agent<S> {
                     ("Stopped by a person while it was being done. It may have been done in part.".into(), true)
                 }
                 Err(Halt::Gone) => return Err(Halt::Gone),
-                Err(h @ Halt::Failed(_)) => {
+                Err(h @ (Halt::Failed(_) | Halt::Full(_))) => {
                     self.stage.say(vec![Say::End(item, Outcome::Failed, None)]).await?;
                     halt = Some(h);
                     ("Not done: Axiom could not go on.".into(), true)
@@ -557,7 +653,7 @@ impl<S: Stage> Agent<S> {
                 if self.desk.allowed(&ask) {
                     (step, verdict, None)
                 } else {
-                    match self.ask(item, tool, &ask, cancel).await? {
+                    match self.ask_person(item, tool, &ask, cancel).await? {
                         Ok(id) => (step, verdict, Some((id, ask.digest()))),
                         Err(why) => {
                             return Ok(Output { ok: false, text: why, detail: Value::Null });
@@ -570,7 +666,7 @@ impl<S: Stage> Agent<S> {
     }
 
     /// A person's yes, or the words for the model.
-    async fn ask(
+    async fn ask_person(
         &self,
         item: &ItemId,
         tool: &str,

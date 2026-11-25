@@ -422,6 +422,7 @@ pub async fn load(
         specs: axiom_tools::specs(),
         instructions: String::new(),
         limits: Limits::default(),
+        fill: None,
         retries: Retries::default(),
         inbox,
     })

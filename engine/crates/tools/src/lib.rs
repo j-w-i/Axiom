@@ -75,6 +75,12 @@ impl Seen {
             m.insert(p.clone(), digest.to_owned());
         }
     }
+    /// Everything has to be read again.
+    pub fn forget(&self) {
+        if let Ok(mut m) = self.0.lock() {
+            m.clear();
+        }
+    }
     fn digest(&self, p: &Place) -> Option<String> {
         self.0.lock().ok()?.get(p).cloned()
     }
