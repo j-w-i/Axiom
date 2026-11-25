@@ -2,7 +2,12 @@
 //! (unless the caller names a proxy) or decompressed. HTTP/1.1, so that dropping an answer closes its
 //! connection and the provider can stop.
 
-use std::{collections::VecDeque, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use reqwest::{
     Response, Url,
@@ -34,7 +39,7 @@ const DRAIN: Duration = Duration::from_millis(100);
 pub struct Options {
     /// Name, connection and TLS.
     pub connect: Duration,
-    /// From there to the answer's head. A model may be loaded or a long prompt read in this time.
+    /// All of it to the answer's head. A model may be loaded or a long prompt read in this time.
     pub first_byte: Duration,
     /// Between one piece of the answer and the next.
     pub idle: Duration,
@@ -205,7 +210,7 @@ impl Client {
 
     /// The answer's head, if it is one of success.
     async fn send(&self, request: reqwest::RequestBuilder) -> Result<Response, Error> {
-        let limit = self.options.connect + self.options.first_byte;
+        let limit = self.options.first_byte;
         let mut answer = match tokio::time::timeout(limit, request.send()).await {
             Err(_) => return Err(timeout(Class::Network, "the provider did not answer", limit)),
             Ok(Err(e)) => return Err(not_sent(&e, &self.options)),
@@ -356,12 +361,10 @@ fn build(endpoint: &Endpoint, options: &Options) -> Result<reqwest::Client, Setu
         .pool_idle_timeout(Duration::from_secs(30));
     if endpoint.is_plain() {
         // Whatever a resolver says of `localhost`, it is this machine.
-        let port = endpoint.port();
-        let here = [
-            SocketAddr::from(([127, 0, 0, 1], port)),
-            SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], port)),
-        ];
-        builder = builder.resolve_to_addrs("localhost", &here);
+        let (host, port) = endpoint.host();
+        let here =
+            [(IpAddr::V4(Ipv4Addr::LOCALHOST), port), (IpAddr::V6(Ipv6Addr::LOCALHOST), port)];
+        builder = builder.resolve_to_addrs(host, &here.map(SocketAddr::from));
     }
     if let Some(proxy) = &options.proxy {
         let url = Url::parse(proxy).map_err(|_| SetupError::BadProxy)?;
@@ -455,6 +458,26 @@ fn innermost(e: &dyn std::error::Error) -> String {
 mod tests {
     use super::*;
     use crate::secret::Auth;
+
+    #[tokio::test]
+    async fn a_plain_address_is_this_machine_whatever_a_resolver_says() {
+        let here = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        // A name no resolver knows (RFC 6761), as an endpoint never has it.
+        let url = format!("http://nobody.invalid:{}/v1", here.local_addr().unwrap().port());
+        let (reached, was_reached) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok((socket, _)) = here.accept() {
+                drop(socket);
+                let _ = reached.send(());
+            }
+        });
+        let profile = Profile::openai_compatible("p", "");
+        let options = Options::default();
+        let client = Client::new(profile, Endpoint::unchecked(&url), None, options).unwrap();
+        // It is reached, and hangs up.
+        assert_eq!(client.list().await.unwrap_err().class, Class::Network);
+        was_reached.recv_timeout(Duration::from_secs(10)).unwrap();
+    }
 
     /// None of reqwest's own words reach an error unread, but they are kept clean all the same.
     #[tokio::test]

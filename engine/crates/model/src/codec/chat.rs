@@ -530,10 +530,7 @@ impl Decoder {
                 args = "{}";
                 out.push(Event::Delta { block, delta: Delta::Args(args.to_owned()) });
             }
-            let native = match call.broken {
-                None => whole(&call, args).ok(),
-                Some(_) => None,
-            };
+            let native = whole(&call, args).ok();
             out.push(Event::BlockStop { block, native, broken: call.broken });
         }
         for u in std::mem::take(&mut self.unknown) {

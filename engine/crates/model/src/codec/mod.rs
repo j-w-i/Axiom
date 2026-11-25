@@ -149,7 +149,7 @@ impl Decoder {
             Inner::Chat(d) => d.event(event, out),
         };
         self.ended = done.is_err() || out.last() == Some(&Event::End);
-        done.map_err(Error::mid_stream)
+        done
     }
 
     /// The stream is over. If the provider had not said that it was done, the answer is cut short.

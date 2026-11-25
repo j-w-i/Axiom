@@ -22,9 +22,6 @@ fn endpoint(url: &str) -> Endpoint {
 fn key(url: &str, auth: &Auth) -> Credential {
     Credential::new(endpoint(url).origin(), auth, Secret::new(KEY.into())).unwrap()
 }
-fn short() -> Options {
-    Options { connect: SHORT, first_byte: SHORT, idle: SHORT, proxy: None }
-}
 fn client_with(profile: Profile, url: &str, options: Options) -> Client {
     let credential = key(url, &profile.auth);
     Client::new(profile, endpoint(url), Some(credential), options).unwrap()
@@ -160,6 +157,7 @@ async fn redirects_are_not_followed_and_leak_nothing() {
             let e = fails(&client(&s.url())).await;
             assert_eq!((e.class, e.retry), (Class::Protocol, Retry::Never));
             assert_eq!(e.status, status[..3].parse().ok());
+            assert!(e.message.contains("redirect, which is never followed"));
             assert_eq!(s.asked().len(), 1);
         }
     }
@@ -508,33 +506,38 @@ async fn no_answer_at_all() {
 #[tokio::test]
 async fn a_server_that_stalls_is_left() {
     let never = || Step::Wait(Arc::new(Notify::new()));
-    let stalled = |steps| async move {
+    // A server that may be slow, but answers, has all the time it needs: only what is being waited
+    // for in vain is short.
+    let no_head = || Options { connect: LONG, first_byte: SHORT, idle: LONG, proxy: None };
+    let no_more = || Options { connect: LONG, first_byte: LONG, idle: SHORT, proxy: None };
+    let stalled = |options, steps| async move {
         let s = Server::new(steps).await;
-        let c = client_with(Profile::openai_compatible("p", "x"), &s.url(), short());
+        let c = client_with(Profile::openai_compatible("p", "x"), &s.url(), options);
         match timeout(LONG, c.stream(&request())).await.unwrap() {
             Err(e) => provider(e),
             Ok(answer) => all(answer).await.1.unwrap(),
         }
     };
-    let e = stalled(vec![never()]).await;
+    let e = stalled(no_head(), vec![never()]).await;
     assert_eq!((e.class, e.retry), (Class::Network, Retry::Restart));
-    assert_eq!(e.message, "the provider did not answer for 0.5 s");
-    let e = stalled(vec![send("HTTP/1.1 200 OK\r\n"), never()]).await;
+    assert_eq!(e.message, "the provider did not answer for 0.25 s");
+    let e = stalled(no_head(), vec![send("HTTP/1.1 200 OK\r\n"), never()]).await;
     assert_eq!(e.class, Class::Network);
-    let e = stalled(vec![send(STREAM), never()]).await;
+    let e = stalled(no_more(), vec![send(STREAM), never()]).await;
     assert_eq!((e.class, e.retry), (Class::CutShort, Retry::Restart));
     assert_eq!(e.message, "nothing more came for 0.25 s");
-    let e = stalled(vec![send(STREAM), send(HI), never()]).await;
+    let e = stalled(no_more(), vec![send(STREAM), send(HI), never()]).await;
     assert_eq!((e.class, e.retry), (Class::CutShort, Retry::Restart));
     // The status is enough when the words do not come.
-    let e = stalled(vec![send(head("429 x", "retry-after: 5\r\n")), send("{"), never()]).await;
+    let slow = send(head("429 x", "retry-after: 5\r\n"));
+    let e = stalled(no_more(), vec![slow, send("{"), never()]).await;
     assert_eq!((e.class, e.retry_after), (Class::RateLimit, Some(Duration::from_secs(5))));
-    let e =
-        stalled(vec![send(head("200 OK", "content-type: application/json\r\n")), never()]).await;
+    let slow = send(head("200 OK", "content-type: application/json\r\n"));
+    let e = stalled(no_more(), vec![slow, never()]).await;
     assert_eq!((e.class, e.retry), (Class::CutShort, Retry::Restart));
-    // Said why it stopped, and then nothing: an end.
-    let s = Server::new(vec![send(STREAM), send([HI, STOP].concat()), never()]).await;
-    let c = client_with(Profile::openai_compatible("p", "x"), &s.url(), short());
+    // Said why it stopped, and then nothing: an end. All of it is sent at once.
+    let s = Server::new(vec![send([STREAM, HI, STOP].concat()), never()]).await;
+    let c = client_with(Profile::openai_compatible("p", "x"), &s.url(), no_more());
     let (r, e) = all(begins(&c).await).await;
     assert!(r.complete && e.is_none());
     // Said it was done, and holds on to the connection: nobody waits for it.
@@ -634,6 +637,44 @@ async fn an_error_in_the_stream_has_the_heads_id_and_is_cleaned() {
     assert_eq!((e.class, e.retry), (Class::Overloaded, Retry::Restart));
     assert_eq!((e.message.as_str(), e.request_id.as_deref()), ("a [31mb", Some("req_head")));
     assert_eq!(text(&r), "hi");
+}
+
+/// The end of a body often comes just after the end of the answer. Waiting for it, for a moment, keeps
+/// the connection, and with it a TLS handshake per turn. When it is free again is the machine's to
+/// say, so this asks until it was.
+#[tokio::test]
+async fn a_finished_answer_leaves_its_connection_to_the_next() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let taken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = taken.clone();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut buf = [0; 4096];
+                while matches!(socket.read(&mut buf).await, Ok(n) if n > 0) {
+                    let body = [STOP, DONE].concat();
+                    let head = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n";
+                    let first = format!("{head}{:x}\r\n{body}\r\n", body.len());
+                    let _ = socket.write_all(first.as_bytes()).await;
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    let _ = socket.write_all(b"0\r\n\r\n").await;
+                }
+            });
+        }
+    });
+    let c = client(&url);
+    for n in 1..=50 {
+        let (r, e) = all(begins(&c).await).await;
+        assert!(r.complete && e.is_none());
+        if taken.load(std::sync::atomic::Ordering::SeqCst) < n {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(n as u64)).await;
+    }
+    panic!("no connection was used twice");
 }
 
 // Cancelling.
