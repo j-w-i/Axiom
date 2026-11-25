@@ -421,6 +421,24 @@ async fn what_came_of_it_is_delivered_by_itself() {
     assert!(told(&lead).contains("the answer"), "{}", told(&lead));
 }
 
+/// Who still waits for another has not come to an end for its person.
+#[tokio::test]
+async fn its_person_is_told_when_all_has_ended() {
+    let mut t = T::new().await;
+    let script = vec![tell("Slow", "x"), text(&["told"]), text(&["Now I know."])];
+    let lead = t.agent("Lead", Access::Work, script).await;
+    let sleep = calls(&[("c", "shell", r#"{"command":"sleep 4"}"#)]);
+    t.agent("Slow", Access::Work, vec![sleep, text(&["the answer"])]).await;
+    let run = t.prompt(&lead, "go").await;
+    t.end_of(&run).await;
+    tokio::time::sleep(Duration::from_millis(2800)).await;
+    assert_eq!(t.c.call(Call::Waiting {}).await.unwrap(), json!([]));
+    t.next_end(&lead).await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let v = t.c.call(Call::Waiting {}).await.unwrap();
+    assert_eq!(v.as_array().map(Vec::len), Some(1), "{v}");
+}
+
 #[tokio::test]
 async fn ends_that_come_together_are_told_together() {
     let mut t = T::new().await;
