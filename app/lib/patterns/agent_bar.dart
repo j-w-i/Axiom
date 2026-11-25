@@ -2,100 +2,91 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
-import '../ui/controls.dart';
 import '../ui/marks.dart';
 import '../ui/status.dart';
-import '../ui/surface.dart';
 import '../ui/tokens.dart';
 
-/// The bar over a display: the agent in a section of its own, its views beside it.
+/// What stands over a conversation: the agent, and at the other end what can be done here.
 class AgentBar extends StatelessWidget {
   const AgentBar({
     required this.name,
     required this.state,
     super.key,
     this.mark,
-    this.tabs = const [],
-    this.index = 0,
-    this.onTab,
     this.trailing,
+    this.lead,
+    this.said = false,
+    this.where,
+    this.inset = AxSpace.gutter,
+    this.height = 44,
   });
   final String name;
   final AgentState state;
   final ServiceMark? mark;
-  final List<(String, String?)> tabs;
-  final int index;
-  final ValueChanged<int>? onTab;
   final Widget? trailing;
 
+  /// What is at the other end is words, and not a key.
+  final bool said;
+
+  /// Before the agent; after its name, where it is.
+  final Widget? lead, where;
+  final double inset, height;
+
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, box) {
-      final t = Ax.of(context), c = t.colors;
-      final words = MediaQuery.textScalerOf(context).scale(13) * 1.35;
-      final wide = box.maxWidth.isFinite ? math.min(260.0, box.maxWidth * .42) : 260.0;
-      final views = tabs.isEmpty
-          ? const SizedBox.shrink()
-          : SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: AxTabs(tabs: tabs, index: index, onChanged: onTab ?? (_) {}),
-            );
-      return SizedBox(
-        height: math.max(40, math.max(words, t.density.control.toDouble()) + 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ConstrainedBox(
-              constraints: BoxConstraints(minWidth: math.min(132, wide), maxWidth: wide),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: c.plate.bottom,
-                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(AxRadius.bay - 1)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 18, 0),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (mark case final m?) ...[
-                        AxServiceMark(m, size: 14, labelled: true),
-                        const SizedBox(width: 9),
-                      ],
-                      Flexible(
-                        child: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.uiStrong,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      AxLamp(state),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const Seam(vertical: true),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(right: trailing == null ? 6 : 24),
+  Widget build(BuildContext context) {
+    final t = Ax.of(context);
+    final words = MediaQuery.textScalerOf(context).scale(13) * 1.4;
+    return LayoutBuilder(
+      builder: (context, box) => SizedBox(
+        height: math.max(height, math.max(words, t.density.control) + 12),
+        child: Padding(
+          // On the line of the window's own buttons.
+          padding: EdgeInsets.only(
+            left: inset,
+            right: said ? AxSpace.gutter : AxSpace.edge,
+            bottom: 8,
+          ),
+          child: Row(
+            children: [
+              Expanded(
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Flexible(flex: 3, child: views),
-                    if (trailing case final w?) ...[
-                      const SizedBox(width: 12),
+                    ?lead,
+                    if (mark case final m?) ...[
+                      AxServiceMark(m, size: 17, labelled: true),
+                      const SizedBox(width: 10),
+                    ],
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.type.uiStrong.copyWith(fontSize: 14),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    AxLamp(state),
+                    if (where case final w?) ...[
+                      const SizedBox(width: 14),
                       Flexible(flex: 2, child: w),
                     ],
                   ],
                 ),
               ),
-            ),
-          ],
+              if (trailing case final w?) ...[
+                const SizedBox(width: 12),
+                // As wide as it is; the name gives way first, down to a part of the bar.
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: box.maxWidth.isFinite ? box.maxWidth * .6 : double.infinity,
+                  ),
+                  child: w,
+                ),
+              ],
+            ],
+          ),
         ),
-      );
-    },
-  );
+      ),
+    );
+  }
 }

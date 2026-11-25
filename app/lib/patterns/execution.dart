@@ -15,7 +15,19 @@ import '../ui/tokens.dart';
 /// One part of how an agent is run. Model, harness, account, effort and access are separate because
 /// they are separate (docs/architecture/overview.md, "Five things, never one").
 class ExecutionChoice {
-  const ExecutionChoice(this.label, this.items, this.value, this.onChanged, {this.cost});
+  const ExecutionChoice(
+    this.label,
+    this.items,
+    this.value,
+    this.onChanged, {
+    this.cost,
+    this.write,
+    this.written,
+  });
+
+  /// Takes one that is not among them, as it is written; [written]: the one that was.
+  final ValueChanged<String>? write;
+  final AxMenuItem<String>? written;
   final String label, value;
   final List<AxMenuItem<String>> items;
   final ValueChanged<String> onChanged;
@@ -24,7 +36,7 @@ class ExecutionChoice {
   /// about before it is made.
   final String? Function(String value)? cost;
 
-  AxMenuItem<String>? get item => items.where((e) => e.value == value).firstOrNull;
+  AxMenuItem<String>? get item => items.where((e) => e.value == value).firstOrNull ?? written;
 }
 
 /// The agent's execution as one key: what it runs on, and everything about it when opened. [choices]
@@ -42,11 +54,13 @@ class ExecutionKey extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    final hue = choices.first.item?.mark?.color(c);
-    final words = [for (final ch in choices.take(2)) ?ch.item?.label];
+    final words = [
+      choices.first.item?.label ?? 'Choose a ${choices.first.label.toLowerCase()}',
+      for (final ch in choices.skip(1).take(1)) ?ch.item?.label,
+    ];
     return AxPopover(
       key: ValueKey(of),
-      width: 372,
+      width: 440,
       anchor: (context, open, toggle) => Pressable(
         label: 'Runs on ${words.join(', ')}. Change',
         expanded: open,
@@ -56,7 +70,11 @@ class ExecutionKey extends StatelessWidget {
         },
         builder: (context, s) => DecoratedBox(
           decoration: BoxDecoration(
-            color: open || s.hovered ? c.tinted(hue) : null,
+            color: open
+                ? c.selected
+                : s.hovered
+                ? c.hover
+                : null,
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
           child: ConstrainedBox(
@@ -74,7 +92,10 @@ class ExecutionKey extends StatelessWidget {
                     child: Text.rich(
                       TextSpan(
                         children: [
-                          TextSpan(text: words.firstOrNull ?? 'Choose a model'),
+                          TextSpan(
+                            text: words.first,
+                            style: TextStyle(fontVariations: t.type.labelStrong.fontVariations),
+                          ),
                           if (words.length > 1)
                             TextSpan(
                               text: '   ${words[1]}',
@@ -91,9 +112,8 @@ class ExecutionKey extends StatelessWidget {
                   SpringTo(
                     target: open ? 1 : 0,
                     spring: AxMotion.snap,
-                    builder: (_, v, child) =>
-                        Transform.rotate(angle: 3.1416 * (1 - v), child: child),
-                    child: AxGlyph(AxIcon.down, size: 9, color: open ? c.ink1 : c.ink3),
+                    builder: (_, v, child) => Transform.rotate(angle: 3.1416 * v, child: child),
+                    child: AxGlyph(AxIcon.down, color: open ? c.ink1 : c.ink3),
                   ),
                 ],
               ),
@@ -122,7 +142,8 @@ class ExecutionPanel extends StatefulWidget {
 }
 
 class _ExecutionPanelState extends State<ExecutionPanel> {
-  String? _open;
+  /// What has to be chosen first is open.
+  late String? _open = widget.choices.first.item == null ? widget.choices.first.label : null;
   _Question? _asked;
 
   /// The keyboard stays in the panel: on a question when one is asked, and on the part it was
@@ -273,7 +294,7 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
               target: open ? 1 : 0,
               spring: AxMotion.snap,
               builder: (_, v, child) => Transform.rotate(angle: v * 1.5708, child: child),
-              child: AxGlyph(AxIcon.right, size: 9, color: c.ink4),
+              child: AxGlyph(AxIcon.right, color: c.ink3),
             ),
           ],
         ),
@@ -285,7 +306,10 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
               value: ch.value,
               builder: (context, shown) => Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [for (final i in shown) ..._item(context, ch, i)],
+                children: [
+                  for (final i in shown) ..._item(context, ch, i),
+                  if (ch.write case final f?) _Write(ch, onChanged: f, onDone: () => _close(ch)),
+                ],
               ),
             ),
           ),
@@ -312,7 +336,7 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: i.value == ch.value
-                  ? AxGlyph(AxIcon.check, size: 12, color: i.mark?.color(c) ?? c.liveText)
+                  ? AxGlyph(AxIcon.check, color: i.mark?.color(c) ?? c.liveText)
                   : null,
             ),
           ),
@@ -385,7 +409,7 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: t.density.row + 1),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: AxSpace.row, vertical: 3),
             child: Row(children: children),
           ),
         ),
@@ -424,7 +448,7 @@ class _Cost extends StatelessWidget {
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
+            padding: const EdgeInsets.fromLTRB(AxSpace.row, 9, AxSpace.row, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -458,4 +482,37 @@ class _Cost extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One that is not listed, by the name it has where it is.
+class _Write extends StatefulWidget {
+  const _Write(this.choice, {required this.onChanged, required this.onDone});
+  final ExecutionChoice choice;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onDone;
+  @override
+  State<_Write> createState() => _WriteState();
+}
+
+class _WriteState extends State<_Write> {
+  late final _text = TextEditingController(text: widget.choice.written?.value);
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(0, 4, 0, 2),
+    child: AxField(
+      label: '${widget.choice.label} name',
+      controller: _text,
+      mono: true,
+      placeholder: widget.choice.items.isEmpty ? 'As the provider calls it' : 'Another, by name',
+      autofocus: widget.choice.items.isEmpty,
+      onChanged: (v) => widget.onChanged(v.trim()),
+      onSubmitted: (_) => widget.onDone(),
+    ),
+  );
 }

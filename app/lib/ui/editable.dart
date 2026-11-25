@@ -99,7 +99,7 @@ class _AxEditableState extends State<AxEditable>
                             widget.placeholder,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: widget.style.ink(widget.enabled ? c.ink4 : c.idle),
+                            style: widget.style.ink(widget.enabled ? c.ink3 : c.idle),
                           ),
                         ),
                       ),
@@ -167,9 +167,9 @@ class AxContextMenu extends StatelessWidget {
       delegate: _At(anchors.primaryAnchor),
       child: Surface(
         c.overlay,
-        radius: AxRadius.overlay,
+        radius: AxRadius.card,
         child: Padding(
-          padding: const EdgeInsets.all(5),
+          padding: const EdgeInsets.all(AxSpace.menu),
           child: IntrinsicWidth(
             child: Column(
               mainAxisSize: MainAxisSize.min,

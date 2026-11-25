@@ -1,10 +1,16 @@
 import 'package:axiom/host/host_store.dart';
 import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
+import 'package:axiom/patterns/session_panel.dart';
+import 'package:axiom/shell/find.dart';
+import 'package:axiom/shell/new_session.dart';
 import 'package:axiom/shell/shell.dart';
+import 'package:axiom/shell/start.dart';
+import 'package:axiom/shell/window.dart';
 import 'package:axiom/transcript/transcript_view.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/tokens.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -47,7 +53,7 @@ void main() {
       ..phase = HostPhase.connected
       ..current = recorded();
     await mount(t, Shell(s), size: const Size(1100, 700));
-    expect(find.text('Double token rotation'), findsOneWidget);
+    expect(find.text('Double token rotation'), findsOneWidget, reason: 'said once');
     expect(find.text('Builder'), findsWidgets);
     expect(find.text('Opus 5.5   replay'), findsOneWidget, reason: 'a replay is called one');
     expect(find.text('220 lines'), findsOneWidget);
@@ -60,6 +66,40 @@ void main() {
     expect(find.textContaining('runs twice.', findRichText: true), findsOneWidget);
     s.dispose();
   });
+
+  testWidgets('the window is moved by its header, and what is pressed there is pressed', (t) async {
+    final was = window, asked = <String>[];
+    window = (what) async => asked.add(what);
+    addTearDown(() => window = was);
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s, titleInset: 72), size: const Size(1100, 700), dpr: 1);
+    for (final at in [find.text('Axiom'), find.byType(MoveArea).last]) {
+      await t.drag(at, const Offset(40, 10), kind: PointerDeviceKind.mouse, warnIfMissed: false);
+      await t.pump();
+      expect(asked, ['move']);
+      asked.clear();
+    }
+    final empty = t.getTopRight(find.text('Axiom')) + const Offset(-2, 6);
+    await t.tapAt(empty, kind: PointerDeviceKind.mouse);
+    await t.pump(const Duration(seconds: 1));
+    await t.tapAt(empty, kind: PointerDeviceKind.mouse);
+    await t.pump(const Duration(seconds: 1));
+    expect(asked, isEmpty, reason: 'two single clicks');
+    await t.tapAt(empty, kind: PointerDeviceKind.mouse);
+    await t.pump(const Duration(milliseconds: 50));
+    await t.tapAt(empty, kind: PointerDeviceKind.mouse);
+    await t.pump(const Duration(seconds: 1));
+    expect(asked, ['zoom']);
+    asked.clear();
+    // Nor is a key held back, or taken for the header.
+    final key = find.bySemanticsLabel('Hide the sidebar');
+    await t.tap(key, kind: PointerDeviceKind.mouse);
+    await t.pump();
+    expect(key, findsNothing);
+    expect(asked, isEmpty);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets('says that the journal is damaged, on one line, and that the list was cut', (
     t,
@@ -95,7 +135,7 @@ void main() {
     // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
     s.notifyListeners();
     await t.pump();
-    expect(find.text('No sessions yet'), findsOneWidget);
+    expect(find.byType(StartPage), findsOneWidget, reason: 'one begins');
     s.dispose();
   });
 
@@ -119,12 +159,12 @@ void main() {
     s.dispose();
   });
 
-  testWidgets('the title row of the session and of the display share a line', (t) async {
+  testWidgets('the window\'s name and what it shows share a line', (t) async {
     final s = store()
       ..phase = HostPhase.connected
       ..current = recorded();
     await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
-    final a = t.getCenter(find.text('Double token rotation')).dy;
+    final a = t.getCenter(find.text('Axiom')).dy;
     final b = t.getCenter(find.text('Builder').last).dy;
     expect((a - b).abs(), lessThan(1.1));
     s.dispose();
@@ -201,7 +241,7 @@ void main() {
       ..notifyListeners();
     await t.pump();
     expect(t.takeException(), isNull);
-    expect(find.text('No sessions yet'), findsOneWidget);
+    expect(find.byType(StartPage), findsOneWidget, reason: 'one begins');
     s.dispose();
   });
 
@@ -215,26 +255,34 @@ void main() {
     ]) {
       final s = store()
         ..phase = HostPhase.connected
-        ..current = (SessionModel('s')..apply([Event(1, 1, SessionCreated('Work', path))]));
+        ..current = (SessionModel('s')
+          ..apply([
+            Event(1, 1, SessionCreated('Work', path)),
+            const Event(2, 2, AgentAdded('a', 'Ada', x, null, access: Access.ask)),
+          ]));
       await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+      // Over its sessions in the list; over the display once the list is put away.
+      expect(find.bySemanticsLabel('Folder $path'), findsOneWidget);
       expect(find.text(last), findsOneWidget, reason: path);
-      expect(find.bySemanticsLabel(RegExp('^Folder ')), findsOneWidget);
-      expect(find.widgetWithText(AxButton, 'Accounts'), findsOneWidget);
-      expect(find.bySemanticsLabel('Accounts and servers'), findsNothing);
+      await t.tap(find.bySemanticsLabel('Hide the sidebar'));
+      await t.pump();
+      expect(find.bySemanticsLabel('Folder $path'), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
+      await t.tap(find.bySemanticsLabel('Show the sidebar'));
+      await t.pump();
       s
         ..damaged = 'row 3'
         ..notifyListeners();
       await t.pump();
-      expect(find.text(last), findsNothing);
       expect(find.textContaining('The journal is damaged'), findsOneWidget);
       s.dispose();
     }
     final s = store()..phase = HostPhase.connected;
     await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
     expect(find.bySemanticsLabel(RegExp('^Folder ')), findsNothing, reason: 'nothing is open');
-    await t.tap(find.widgetWithText(AxButton, 'Accounts'));
+    await t.tap(find.bySemanticsLabel('Accounts'));
     await t.pump();
-    expect(find.text('Accounts and servers'), findsOneWidget);
+    expect(find.byType(AccountsPage), findsOneWidget);
     s.dispose();
   });
 
@@ -258,12 +306,12 @@ void main() {
     expect(find.text('Other work'), findsNothing);
     expect(t.getRect(find.byType(TranscriptView)).left, lessThan(10));
     expect(find.bySemanticsLabel('New session'), findsOneWidget);
-    expect(find.bySemanticsLabel('Accounts and servers'), findsOneWidget);
+    expect(find.bySemanticsLabel('Accounts'), findsOneWidget);
     await snap(t, 'shell-narrow');
     await t.sendKeyEvent(LogicalKeyboardKey.tab);
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     await t.pumpAndSettle();
-    expect(find.text('Double token rotation'), findsOneWidget);
+    expect(find.byType(SessionPanel), findsOneWidget);
     expect(find.text('Other work'), findsOneWidget);
     expect(t.takeException(), isNull);
     await snap(t, 'shell-narrow-open');
@@ -288,12 +336,155 @@ void main() {
     expect(find.text('2 asking'), findsOneWidget);
     expect(find.bySemanticsLabel('2 asking, open the first'), findsOneWidget);
     // Wider, the list is beside it again, at 224 and at 264.
-    for (final (width, left) in [(860.0, 224.0), (1079.0, 224.0), (1080.0, 264.0)]) {
+    for (final (width, left) in [(860.0, 228.0), (1079.0, 228.0), (1080.0, 264.0)]) {
       await mount(t, Shell(s, titleInset: 58), size: Size(width, 520));
-      expect(find.bySemanticsLabel('Sessions'), findsNothing);
+      expect(find.byWidgetPredicate((w) => w is AxButton && w.label == 'Sessions'), findsNothing);
       expect(find.text('Other work'), findsWidgets);
       expect(t.getRect(find.byType(TranscriptView)).left, closeTo(left, 2));
     }
+    s.dispose();
+  });
+
+  SessionInfo info(String id, String title, String? folder, int created, {int updated = 1}) =>
+      SessionInfo.decode({
+        'id': id,
+        'title': title,
+        'workspace': folder,
+        'created': created,
+        'updated': updated,
+        'last_seq': 1,
+        'running': false,
+      });
+
+  testWidgets('sessions stand under their folders, and stay where they are', (t) async {
+    final opened = <String>[];
+    final s = Opens(opened)
+      ..phase = HostPhase.connected
+      ..sessions = [
+        // As the host lists them: the last used first.
+        info('a', 'First of web', '/me/web', 1, updated: 9),
+        info('b', 'Of the other web', '/you/web', 2, updated: 8),
+        info('c', 'Second of web', '/me/web', 3, updated: 7),
+        info('d', 'Nowhere', null, 4, updated: 6),
+      ];
+    await mount(t, Shell(s), size: const Size(1100, 900), dpr: 1);
+    await t.pump();
+    opened.clear();
+    List<double> places() => [
+      for (final x in ['No folder', 'Nowhere', 'me/web', 'Second of web', 'First of web'])
+        t.getTopLeft(find.text(x).first).dy,
+    ];
+    final before = places();
+    expect(before, [...before]..sort());
+    // Two folders of one name are told apart, and said whole.
+    expect(find.text('you/web'), findsOneWidget);
+    expect(find.bySemanticsLabel('Folder /you/web'), findsOneWidget);
+    await t.tap(find.text('First of web'));
+    expect(opened, ['a']);
+    s
+      ..current = (SessionModel('a')
+        ..apply([
+          const Event(1, 1, SessionCreated('First of web', '/me/web')),
+          const Event(2, 2, AgentAdded('x', 'Ada', x, null, access: Access.ask)),
+        ]))
+      // It has been used since: that moves nothing.
+      ..sessions = [...s.sessions.reversed]
+      ..notifyListeners();
+    await t.pump();
+    expect(places(), before);
+    expect(
+      t.getTopLeft(find.byType(AgentRow)).dy,
+      greaterThan(t.getTopLeft(find.text('First of web').first).dy),
+    );
+    // A new one in that folder.
+    await t.tap(find.bySemanticsLabel('New session in you/web'));
+    await t.pump();
+    expect(find.bySemanticsLabel('Folder: /you/web'), findsOneWidget);
+    s.dispose();
+  });
+
+  Future<void> keys(WidgetTester t, LogicalKeyboardKey k) async {
+    await t.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await t.sendKeyEvent(k);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await t.pump();
+    await t.pump();
+  }
+
+  testWidgets('the window\'s own keys, and the way back from a page', (t) async {
+    final s = store()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s), size: const Size(1100, 700), dpr: 1);
+    await keys(t, LogicalKeyboardKey.keyN);
+    expect(find.byType(StartPage), findsOneWidget);
+    // Nothing of a session is chosen while a page is shown.
+    expect(t.widget<AgentRow>(find.byType(AgentRow)).selected, isFalse);
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await t.pump();
+    expect(find.byType(StartPage), findsNothing);
+    await keys(t, LogicalKeyboardKey.keyN);
+    await t.tap(find.bySemanticsLabel('Cancel'));
+    await t.pump();
+    expect(find.byType(TranscriptView), findsOneWidget);
+    await keys(t, LogicalKeyboardKey.comma);
+    expect(find.byType(AccountsPage), findsOneWidget);
+    await t.tap(find.text('Done'));
+    await t.pump();
+    await keys(t, LogicalKeyboardKey.keyB);
+    expect(find.byType(SessionPanel), findsNothing);
+    expect(t.getRect(find.byType(TranscriptView)).left, lessThan(9));
+    await t.tap(find.bySemanticsLabel('Show the sidebar'));
+    await t.pump();
+    expect(find.byType(SessionPanel), findsOneWidget);
+    s.dispose();
+  });
+
+  testWidgets('everything can be found, and gone to by the keyboard', (t) async {
+    final opened = <String>[];
+    final s = Opens(opened)
+      ..phase = HostPhase.connected
+      ..current = recorded()
+      ..sessions = [
+        info('p', 'Queue backpressure', '/me/web', 1),
+        info('q', 'Release notes', '/me/docs', 2),
+        for (var k = 0; k < 60; k++) info('n$k', 'Numbered $k', null, 3 + k),
+      ];
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 2);
+    await keys(t, LogicalKeyboardKey.keyK);
+    expect(find.text('Search sessions and actions'), findsOneWidget);
+    expect(find.textContaining(' more'), findsOneWidget, reason: 'what is not shown is counted');
+    await snap(t, 'find');
+    final field = find.descendant(of: find.byType(SearchBox), matching: find.byType(EditableText));
+    await t.enterText(field, 'docs');
+    await t.pump();
+    expect(
+      find.descendant(of: find.byType(SearchBox), matching: find.text('Queue backpressure')),
+      findsNothing,
+    );
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.pump();
+    expect(opened, ['q']);
+    expect(find.byType(SearchBox), findsNothing);
+    // The arrows choose; Escape leaves things as they are.
+    await keys(t, LogicalKeyboardKey.keyK);
+    await t.enterText(field, 'numbered');
+    await t.pump();
+    await t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await t.pump();
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.pump();
+    expect(opened, ['q', 'n2']);
+    await keys(t, LogicalKeyboardKey.keyK);
+    await t.enterText(field, 'no such thing');
+    await t.pump();
+    expect(find.text('No results'), findsOneWidget);
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await t.pump();
+    expect(find.byType(SearchBox), findsNothing);
+    expect(opened, ['q', 'n2']);
     s.dispose();
   });
 

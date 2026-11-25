@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:axiom/ui/surface.dart';
 import 'package:axiom/ui/tokens.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -10,7 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Loads the real fonts, so a rendered image shows what a person would see. Offscreen only: no
 /// test opens a window.
 Future<void> loadFonts() async {
-  for (final (family, file) in [('Archivo', 'Archivo'), ('Spline Sans Mono', 'SplineSansMono')]) {
+  for (final (family, file) in [('Inter', 'Inter'), ('JetBrains Mono', 'JetBrainsMono')]) {
     final l = FontLoader(family)
       ..addFont(Future.value(ByteData.sublistView(File('fonts/$file.ttf').readAsBytesSync())));
     await l.load();
@@ -32,6 +33,7 @@ Future<void> mount(
   t.view.physicalSize = size * dpr;
   addTearDown(t.view.reset);
   await t.runAsync(loadFonts);
+  await t.runAsync(Shades.load);
   await t.pumpWidget(
     RepaintBoundary(
       key: stage,
@@ -59,17 +61,64 @@ Future<void> mount(
   await t.pump(const Duration(milliseconds: 300));
 }
 
-/// Writes build/shots/[name].png for a person to look at.
-Future<void> snap(WidgetTester t, String name) async {
-  debugDisableShadows = false;
-  final r = stage.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+/// Words of a card that stand nearer to its side than what is in a chip does: they look as if they
+/// were cut off. As wide as they are, and not as their box is.
+List<String> cramped(RenderObject root) {
+  final bad = <String>[];
+  Rect at(RenderBox b, Rect r) => MatrixUtils.transformRect(b.getTransformTo(root), r);
+  void words(RenderObject o, void Function(Rect, String) f) => o.visitChildren((c) {
+    if (c is RenderOffstage && c.offstage) return;
+    if (c is RenderParagraph) {
+      final all = c.text.toPlainText(includeSemanticsLabels: false);
+      final sel = TextSelection(baseOffset: 0, extentOffset: all.length);
+      for (final b in c.getBoxesForSelection(sel)) {
+        f(at(c, b.toRect()), all);
+      }
+    }
+    words(c, f);
+  });
+  void walk(RenderObject o) {
+    if (o is RenderOffstage && o.offstage) return;
+    if ((o is RenderSurface || o is RenderCardPart) && (o as RenderBox).size.height >= 30) {
+      final r = at(o, Offset.zero & o.size);
+      words(o, (w, said) {
+        // What goes out of sight sideways is cut for that.
+        if (said.trim().isEmpty || w.left < r.left || w.right > r.right || w.width < 4) return;
+        if (w.left - r.left < AxSpace.chip || r.right - w.right < AxSpace.chip) {
+          bad.add('$said: ${w.left - r.left} and ${r.right - w.right} of ${o.size}');
+        }
+      });
+    }
+    o.visitChildren(walk);
+  }
+
+  walk(root);
+  return bad;
+}
+
+/// With the shades a person sees. Tests draw them as hard shapes otherwise.
+Future<void> shaded(WidgetTester t, Future<void> Function() look) async {
+  final r = stage.currentContext!.findRenderObject()!;
   void dirty(RenderObject o) {
     o.markNeedsPaint();
     o.visitChildren(dirty);
   }
 
-  dirty(r);
-  await t.pump();
+  debugDisableShadows = false;
+  try {
+    dirty(r);
+    await t.pump();
+    await look();
+  } finally {
+    debugDisableShadows = true;
+    dirty(r);
+  }
+}
+
+/// Writes build/shots/[name].png for a person to look at.
+Future<void> snap(WidgetTester t, String name) => shaded(t, () async {
+  final r = stage.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+  expect(cramped(r), isEmpty, reason: name);
   await t.runAsync(() async {
     final img = await r.toImage(pixelRatio: t.view.devicePixelRatio);
     final b = await img.toByteData(format: ui.ImageByteFormat.png);
@@ -77,7 +126,4 @@ Future<void> snap(WidgetTester t, String name) async {
       ..createSync(recursive: true)
       ..writeAsBytesSync(b!.buffer.asUint8List());
   });
-  debugDisableShadows = true;
-  dirty(r);
-  await t.pump();
-}
+});

@@ -141,7 +141,7 @@ void main() {
         ];
         expect(borders, hasLength(!on && outlined ? 1 : 0), reason: '$tone, $on');
         for (final b in borders) {
-          expect(b, Border.all(color: AxColors.dark.bayRule));
+          expect(b, Border.all(color: AxColors.dark.meterTrack));
         }
       }
     }
@@ -311,7 +311,7 @@ void main() {
     expect(got, isEmpty);
     await t.pump(AxMotion.settle);
     await t.tap(find.text('Deny'));
-    await t.tap(find.text('Allow in this worktree'));
+    await t.tap(find.text('Allow for this session'));
     await t.tap(find.text('Allow once'));
     expect(got, ['deny', 'always', 'once']);
   });
@@ -715,6 +715,69 @@ void main() {
       await t.pump();
     }
 
+    testWidgets('what is answered is stopped here, and never by a click meant to send', (t) async {
+      Future<void> settle() async {
+        await t.pump();
+        await t.pump(AxMotion.settle);
+        await t.pump();
+      }
+
+      var stops = 0, working = false;
+      final words = TextEditingController();
+      addTearDown(words.dispose);
+      late StateSetter again;
+      sent = [];
+      await put(
+        t,
+        SizedBox(
+          width: 600,
+          child: StatefulBuilder(
+            builder: (context, set) {
+              again = set;
+              return Composer(
+                placeholder: 'Say',
+                action: 'Send',
+                controller: words,
+                onStop: working ? () => stops++ : null,
+                onSubmit: (s) {
+                  sent.add(s);
+                  again(() => working = true);
+                  return true;
+                },
+              );
+            },
+          ),
+        ),
+      );
+      expect(find.bySemanticsLabel('Stop'), findsNothing);
+      await t.enterText(find.byType(EditableText), 'one');
+      await settle();
+      final at = t.getCenter(find.bySemanticsLabel('Send'));
+      await t.tapAt(at);
+      await t.pump();
+      // The second click of two falls on what has taken its place.
+      expect(t.getCenter(find.bySemanticsLabel('Stop')), at);
+      await t.tapAt(at);
+      await t.pump();
+      expect(sent, ['one']);
+      expect(stops, 0);
+      await settle();
+      await t.tapAt(at);
+      expect(stops, 1);
+      // With something written there are both, and sending is where it was.
+      await t.enterText(find.byType(EditableText), 'two');
+      await settle();
+      expect(t.getCenter(find.bySemanticsLabel('Send')), at);
+      await t.tap(find.bySemanticsLabel('Stop'));
+      expect(sent, ['one']);
+      expect(stops, 2);
+      await t.tapAt(at);
+      await t.pump();
+      expect(sent, ['one', 'two']);
+      words.clear();
+      await settle();
+    });
+
     testWidgets('Enter sends, Shift+Enter does not, the keypad works', (t) async {
       await show(t);
       await t.enterText(find.byType(EditableText), 'one');
@@ -885,7 +948,7 @@ void main() {
     expect(shapes.length, AgentState.values.length);
   });
 
-  testWidgets('a session holds its agents and its plan; keys appear on hover', (t) async {
+  testWidgets('a session holds its agents; keys appear on hover', (t) async {
     final picked = <String>[], paused = <String>[];
     await put(
       t,
@@ -901,7 +964,6 @@ void main() {
       ),
     );
     expect(find.byType(AgentRow), findsNWidgets(6));
-    expect(find.byType(TaskRow), findsNWidgets(7));
     await t.tap(find.textContaining('Surveyor', findRichText: true).first);
     expect(picked, ['surveyor']);
     expect(find.bySemanticsLabel('Pause Lead'), findsNothing);
@@ -911,9 +973,42 @@ void main() {
     await t.pump();
     await t.tap(find.byType(AxButton).first);
     expect(paused, ['lead']);
-    await t.tap(find.text('Plan'));
+  });
+
+  testWidgets('the thumb of a trough is under what is chosen, and slides there', (t) async {
+    var i = 0;
+    Future<void> show({required bool still}) => put(
+      t,
+      StatefulBuilder(
+        builder: (_, set) => AxTabs(
+          tabs: const [('Conversation', null), ('Changes', '3'), ('Terminal', null)],
+          index: i,
+          onChanged: (x) => set(() => i = x),
+        ),
+      ),
+      still: still,
+    );
+    await show(still: true);
+    await t.tap(find.text('Terminal'));
+    await t.pump();
+    expect(i, 2);
+    expect(t.binding.hasScheduledFrame, isFalse, reason: 'reduced motion jumps');
+    await show(still: false);
+    await t.tap(find.text('Conversation'));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 16));
+    expect(i, 0, reason: 'chosen at once');
+    expect(t.binding.hasScheduledFrame, isTrue, reason: 'and on its way');
     await t.pumpAndSettle();
-    expect(find.byType(TaskRow), findsNothing);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('a plan says how far it is, and how each part stands', (t) async {
+    await put(t, SizedBox(height: 500, child: PlanView(s.session.tasks)));
+    expect(find.byType(TaskRow), findsNWidgets(7));
+    expect(find.text('4 of 7'), findsOneWidget);
+    expect(find.bySemanticsLabel('Single-flight guard, active, Builder'), findsOneWidget);
+    expect(find.bySemanticsLabel('Failing test, done, Tester'), findsOneWidget);
   });
 
   testWidgets('reduced motion stops the lamp', (t) async {
@@ -935,7 +1030,7 @@ void main() {
               RequestBar(s.request, onOnce: () {}, onAlways: () {}, onDeny: () {}),
               Wrap(
                 children: [
-                  AxButton(label: 'A longer label', icon: AxIcon.send, onPressed: () {}),
+                  AxButton(label: 'A longer label', icon: AxIcon.up, onPressed: () {}),
                   const AxKeycap('⌘K'),
                 ],
               ),
@@ -961,8 +1056,8 @@ void main() {
       );
       sizes.add(t.getSize(find.byType(AxButton)).height);
       final p = t.renderObject<RenderParagraph>(find.text('Run'));
-      expect(p.text.style!.fontSize, 12);
+      expect(p.text.style!.fontSize, 13);
     }
-    expect(sizes, [24, 28, 32]);
+    expect(sizes, [26, 30, 34]);
   });
 }

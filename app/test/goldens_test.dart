@@ -65,6 +65,10 @@ class Tolerant extends LocalFileComparator {
   }
 }
 
+/// As a person sees it.
+Future<void> same(WidgetTester t, String golden) =>
+    shaded(t, () => expectLater(find.byKey(stage), matchesGoldenFile(golden)));
+
 void main() {
   setUpAll(() {
     final base = goldenFileComparator as LocalFileComparator;
@@ -77,7 +81,7 @@ void main() {
         await mount(
           t,
           Surface(
-            c.chassis,
+            c.bay,
             radius: 0,
             child: Builder(
               builder: (x) => SingleChildScrollView(
@@ -92,10 +96,7 @@ void main() {
         );
         expect(t.takeException(), isNull);
         await snap(t, 'sheet-${name.toLowerCase()}-$theme');
-        await expectLater(
-          find.byKey(stage),
-          matchesGoldenFile('goldens/${name.toLowerCase()}-$theme.png'),
-        );
+        await same(t, 'goldens/${name.toLowerCase()}-$theme.png');
       });
     }
     for (final size in const [Size(1440, 900), Size(1100, 700), Size(820, 640)]) {
@@ -108,10 +109,7 @@ void main() {
           dpr: 1,
         );
         expect(t.takeException(), isNull, reason: 'no overflow');
-        await expectLater(
-          find.byKey(stage),
-          matchesGoldenFile('goldens/workbench-${size.width.round()}-$theme.png'),
-        );
+        await same(t, 'goldens/workbench-${size.width.round()}-$theme.png');
       });
     }
   }
@@ -127,7 +125,7 @@ void main() {
       await t.pump(const Duration(milliseconds: 50));
       await t.pump(const Duration(milliseconds: 600));
     }
-    await expectLater(find.byKey(stage), matchesGoldenFile('goldens/execution-dark.png'));
+    await same(t, 'goldens/execution-dark.png');
   });
 
   testWidgets('the comparison sees one pixel of movement', (t) async {

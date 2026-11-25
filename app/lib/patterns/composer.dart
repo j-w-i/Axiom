@@ -6,9 +6,12 @@ import 'package:flutter/widgets.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
+import '../ui/press.dart';
+import '../ui/surface.dart';
 import '../ui/tokens.dart';
 
-/// Writing sits on the display itself. Enter sends, Shift+Enter breaks the line.
+/// Where an agent is written to: one card, with how the agent runs under the words. Enter sends,
+/// Shift+Enter breaks the line.
 class Composer extends StatefulWidget {
   const Composer({
     required this.placeholder,
@@ -17,9 +20,29 @@ class Composer extends StatefulWidget {
     super.key,
     this.controller,
     this.onAttach,
+    this.onStop,
     this.enabled = true,
     this.leading = const [],
+    this.label,
+    this.header,
+    this.ready,
+    this.autofocus = false,
+    this.high = 25,
   });
+
+  /// What it is heard as, if not by its placeholder.
+  final String? label;
+
+  /// What stands over the words.
+  final Widget? header;
+
+  /// Whether it can be sent, where that is not only whether something is written: then what is
+  /// written stays until its taker clears it.
+  final bool? ready;
+  final bool autofocus;
+
+  /// How high it is with nothing in it.
+  final double high;
   final String placeholder, action;
 
   /// What is being written, if it is kept elsewhere.
@@ -31,6 +54,10 @@ class Composer extends StatefulWidget {
   /// Whether there is anybody to send it to; writing goes on either way.
   final bool enabled;
   final VoidCallback? onAttach;
+
+  /// Ends what is being answered. While nothing is written it stands where sending does, and beside
+  /// that otherwise.
+  final VoidCallback? onStop;
 
   /// What stands under the words: how the agent runs, how full its context is.
   final List<Widget> leading;
@@ -46,6 +73,9 @@ class _ComposerState extends State<Composer> {
     super.initState();
     _text.addListener(_changed);
     _focus.addListener(_changed);
+    if (widget.autofocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? _focus.requestFocus() : null);
+    }
   }
 
   void _changed() => setState(() {});
@@ -74,7 +104,11 @@ class _ComposerState extends State<Composer> {
 
   Future<void> _submit() async {
     final written = _text.text, s = written.trim();
-    if (s.isEmpty || !widget.enabled) return;
+    if (!widget.enabled || !(widget.ready ?? s.isNotEmpty)) return;
+    if (widget.ready != null) {
+      await widget.onSubmit(s);
+      return;
+    }
     _text.clear();
     final taken = await widget.onSubmit(s);
     if (taken || !(mounted || widget.controller != null)) return;
@@ -89,66 +123,97 @@ class _ComposerState extends State<Composer> {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ColoredBox(color: _focus.hasFocus ? c.live : c.bayRule, child: const SizedBox(height: 1)),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 13, 24, 4),
-          child: Focus(
-            canRequestFocus: false,
-            skipTraversal: true,
-            onKeyEvent: _key,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _focus.requestFocus,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 25, maxHeight: 220),
-                child: AxEditable(
-                  label: widget.placeholder,
-                  placeholder: widget.placeholder,
-                  controller: _text,
-                  focusNode: _focus,
-                  style: t.type.prose,
+    final empty = _text.text.trim().isEmpty;
+    return Surface(
+      c.written,
+      radius: AxRadius.written,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ?widget.header,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AxSpace.edge, 13, AxSpace.edge, 6),
+            child: Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: _key,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _focus.requestFocus,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: widget.high, maxHeight: 220),
+                  child: AxEditable(
+                    label: widget.label ?? widget.placeholder,
+                    placeholder: widget.placeholder,
+                    controller: _text,
+                    focusNode: _focus,
+                    style: t.type.prose,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 2, 14, 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 2,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: widget.leading,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AxSpace.chip, 2, 10, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Wrap(
+                    spacing: 2,
+                    runSpacing: 2,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: widget.leading,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              if (widget.onAttach != null)
-                AxButton.icon(
-                  AxIcon.attach,
-                  label: 'Attach',
-                  tone: AxTone.quiet,
-                  onPressed: widget.onAttach,
+                const SizedBox(width: 12),
+                if (widget.onAttach != null)
+                  AxButton.icon(
+                    AxIcon.attach,
+                    label: 'Attach',
+                    tone: AxTone.quiet,
+                    onPressed: widget.onAttach,
+                  ),
+                const SizedBox(width: 4),
+                // A click meant to send does not stop, nor the other way round.
+                Settle(
+                  stamp: (widget.onStop == null, empty),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.onStop case final stop?) ...[
+                        AxButton.icon(
+                          AxIcon.stop,
+                          key: const ValueKey('stop'),
+                          label: 'Stop',
+                          iconFilled: true,
+                          tone: AxTone.key,
+                          round: true,
+                          size: 30,
+                          onPressed: stop,
+                        ),
+                        if (!empty) const SizedBox(width: 6),
+                      ],
+                      if (!empty || widget.onStop == null)
+                        AxButton.icon(
+                          AxIcon.up,
+                          key: const ValueKey('send'),
+                          label: widget.action,
+                          tone: AxTone.primary,
+                          round: true,
+                          size: 30,
+                          onPressed: (widget.ready ?? !empty) && widget.enabled
+                              ? () => unawaited(_submit())
+                              : null,
+                        ),
+                    ],
+                  ),
                 ),
-              const SizedBox(width: 6),
-              AxButton(
-                label: widget.action,
-                icon: AxIcon.send,
-                tone: AxTone.primary,
-                onPressed: _text.text.trim().isEmpty || !widget.enabled
-                    ? null
-                    : () => unawaited(_submit()),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

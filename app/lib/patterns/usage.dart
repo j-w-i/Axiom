@@ -5,6 +5,7 @@ import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/status.dart';
+import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'models.dart';
 
@@ -26,7 +27,7 @@ class UsageKey extends StatelessWidget {
     final tight = known.firstOrNull ?? acc.windows.firstOrNull;
     return AxPopover(
       width: 312,
-      alignEnd: true,
+      alignEnd: false,
       anchor: (context, open, toggle) => Pressable(
         label: '${service.name} usage, ${acc.name}',
         expanded: open,
@@ -36,49 +37,39 @@ class UsageKey extends StatelessWidget {
             color: open || s.hovered ? c.tinted(hue) : null,
             borderRadius: BorderRadius.circular(AxRadius.key),
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 112, maxWidth: 190, minHeight: 30),
-              child: IntrinsicWidth(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Row(
-                      children: [
-                        if (service.mark case final m?) ...[
-                          AxServiceMark(m, size: 12),
-                          const SizedBox(width: 6),
-                        ],
-                        Text(service.name, style: t.type.small.ink(open ? c.ink1 : c.ink2)),
-                        const SizedBox(width: 4),
-                        AxGlyph(AxIcon.down, size: 8, color: open || s.hovered ? c.ink2 : c.ink4),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: t.density.control, maxWidth: 220),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AxSpace.row),
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  final room = box.maxWidth >= 68;
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (service.mark case final m?) ...[
+                        AxServiceMark(m, size: 15),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            tight?.text ?? '–',
-                            maxLines: 1,
-                            textAlign: TextAlign.end,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.type.small.ink(c.ink3),
-                          ),
-                        ),
                       ],
-                    ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 3,
-                      child: AxMeter(
-                        label: '${service.name}, ${acc.name}',
-                        value: tight?.used,
-                        provenance: tight?.provenance ?? Provenance.unknown,
-                        thickness: 2,
-                        color: hue,
+                      if (room)
+                        AxRing(
+                          label: '${service.name}, ${acc.name}',
+                          value: tight?.used,
+                          provenance: tight?.provenance ?? Provenance.unknown,
+                          color: hue,
+                        ),
+                      if (room) const SizedBox(width: 7),
+                      Flexible(
+                        child: Text(
+                          tight?.used == null ? '–' : tight!.text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.type.label.ink(open || s.hovered ? c.ink1 : c.ink2),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -101,8 +92,8 @@ class UsageKey extends StatelessWidget {
             ),
           ],
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-            child: ColoredBox(color: c.bayRule, child: const SizedBox(height: 1)),
+            padding: const EdgeInsets.fromLTRB(AxSpace.row, 8, AxSpace.row, 4),
+            child: const Hairline(),
           ),
           Pressable(
             label: 'Link another ${service.name} account',
@@ -116,14 +107,14 @@ class UsageKey extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AxRadius.key),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: AxSpace.row, vertical: 6),
                 child: Row(
                   children: [
                     SizedBox(
                       width: 20,
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: AxGlyph(AxIcon.plus, size: 12, color: hue ?? c.ink3),
+                        child: AxGlyph(AxIcon.plus, color: hue ?? c.ink3),
                       ),
                     ),
                     Expanded(
@@ -167,7 +158,7 @@ class _Account extends StatelessWidget {
           borderRadius: BorderRadius.circular(AxRadius.key),
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
+          padding: const EdgeInsets.fromLTRB(AxSpace.row, 8, AxSpace.row, 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -177,7 +168,7 @@ class _Account extends StatelessWidget {
                 child: active
                     ? Align(
                         alignment: Alignment.centerLeft,
-                        child: AxGlyph(AxIcon.check, size: 13, color: hue ?? c.liveText),
+                        child: AxGlyph(AxIcon.check, color: hue ?? c.liveText),
                       )
                     : null,
               ),
@@ -225,7 +216,7 @@ class _Account extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           '${w.provenance.words[0].toUpperCase()}${w.provenance.words.substring(1)}',
-                          style: t.type.caption.ink(c.ink4),
+                          style: t.type.caption.ink(c.ink3),
                         ),
                       ],
                     ],

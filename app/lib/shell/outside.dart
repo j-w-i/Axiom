@@ -1,3 +1,4 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -22,5 +23,19 @@ Future<bool> browse(String address) async {
     return await opens(u);
   } on Object {
     return false;
+  }
+}
+
+/// How a person is shown the system's own window for a folder. Tests take its place: they open none.
+@visibleForTesting
+Future<String?> Function(String? at) folders = (at) =>
+    getDirectoryPath(initialDirectory: at, confirmButtonText: 'Choose');
+
+/// The folder a person chose, or null. Only because they pressed something that says so.
+Future<String?> chooseFolder(String at) async {
+  try {
+    return await folders(at.isEmpty ? null : at);
+  } on Object {
+    return null;
   }
 }
