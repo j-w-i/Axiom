@@ -126,6 +126,9 @@ class Changed {
   final String path, what;
 }
 
+/// The environment in which what an agent does is done by Axiom, whatever its harness.
+const axiomTools = 'axiom';
+
 /// A program of the person's own that the host can drive.
 class HarnessInfo {
   const HarnessInfo(
@@ -136,6 +139,7 @@ class HarnessInfo {
     this.needsTrust = false,
     this.access = const [],
     this.accounts,
+    this.hands = false,
   });
   HarnessInfo.decode(Json j)
     : id = j['id']! as String,
@@ -144,6 +148,7 @@ class HarnessInfo {
       problem = j['problem'] as String?,
       needsTrust = j['needs_trust'] as bool? ?? true,
       accounts = j['accounts'] as String?,
+      hands = j['hands'] as bool? ?? false,
       access = [
         for (final a in j['access'] as List<Object?>? ?? const [])
           _enum(Access.values, a, Access.unknown),
@@ -152,6 +157,9 @@ class HarnessInfo {
 
   /// Null if it is not there or may not be started; then [problem] says why.
   final String? program, problem;
+
+  /// Axiom's tools can stand in place of its own: the environment [axiomTools].
+  final bool hands;
 
   /// What an account of it beside the first is called as a provider, if there can be any.
   final String? accounts;

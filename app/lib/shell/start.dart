@@ -164,6 +164,20 @@ class StartDraft extends ChangeNotifier {
   /// The folder's own settings for that may take effect.
   bool trust = false;
 
+  /// Of a program: Axiom's tools in place of its own, where it can be told so.
+  bool hands = true;
+  bool get withHands => hands && (delegated?.hands ?? false);
+
+  /// What it may be, as it is set up now.
+  List<Access> get can => withHands ? Access.values : delegated?.access ?? Access.values;
+
+  void fit() {
+    // The least it has a mode for, if not the one that is chosen.
+    if (!can.contains(access)) {
+      access = [Access.ask, Access.read, Access.work].where(can.contains).firstOrNull ?? access;
+    }
+  }
+
   /// Of a program: another account than its first.
   String? account;
 
@@ -177,11 +191,7 @@ class StartDraft extends ChangeNotifier {
     account = null;
     typed = false;
     model.clear();
-    final can = delegated?.access ?? Access.values;
-    // The least it has a mode for, if not the one that is chosen.
-    if (!can.contains(access)) {
-      access = [Access.ask, Access.read, Access.work].where(can.contains).firstOrNull ?? access;
-    }
+    fit();
   });
   String? connection, problem;
   Access access = Access.ask;
@@ -267,6 +277,7 @@ class StartDraft extends ChangeNotifier {
         provider: other ? null : c!.provider,
         model: written.isEmpty ? null : written,
         connection: other ? account : c!.id,
+        environment: withHands ? axiomTools : null,
       );
       final followed = [
         for (final w in words)
@@ -279,7 +290,7 @@ class StartDraft extends ChangeNotifier {
         m = _Made(session, where);
         _made = m;
       }
-      final how = (x.provider, x.model, x.connection, access);
+      final how = (x.provider, x.model, x.connection, x.environment, access);
       if (m.agent == null) {
         m.agent = await store.addAgent(
           m.session,
@@ -398,12 +409,12 @@ class _StartPageState extends State<StartPage> {
           !d.busy &&
           (d.harness == 'axiom'
               ? chosen != null && filled(d.model)
-              : other != null && (!other.needsTrust || d.trust)) &&
+              : other != null && (d.withHands || !other.needsTrust || d.trust)) &&
           (adds ? filled(d.name) : filled(d.say) && filled(d.folder)) &&
           s.phase == HostPhase.connected;
       final access = [
         for (final i in accessItems)
-          if (other == null || other.access.contains(i.value))
+          if (other == null || d.can.contains(i.value))
             i
           else
             AxMenuItem(i.value, i.label, enabled: false, why: '${other.name} has no mode for it'),
@@ -556,6 +567,29 @@ class _StartPageState extends State<StartPage> {
                       value: d.account ?? '',
                       onChanged: (v) => d.change(() => d.account = v.isEmpty ? null : v),
                     ),
+                  if (other?.hands ?? false)
+                    AxSelect<bool>(
+                      label: 'Tools',
+                      items: [
+                        const AxMenuItem(
+                          true,
+                          'Axiom\'s',
+                          detail: 'asked about and contained by Axiom',
+                          mark: ServiceMark.axiom,
+                        ),
+                        AxMenuItem(
+                          false,
+                          'Its own',
+                          detail: 'outside Axiom\'s sandbox',
+                          mark: markOf(null, null, d.harness),
+                        ),
+                      ],
+                      value: d.hands,
+                      onChanged: (v) => d.change(() {
+                        d.hands = v;
+                        d.fit();
+                      }),
+                    ),
                   if (d.harness != 'axiom') accessSelect,
                 ],
               ),
@@ -570,23 +604,24 @@ class _StartPageState extends State<StartPage> {
                 placeholder: 'Its own choice',
               ),
             ),
-            FormPart(
-              null,
-              note: other == null
-                  ? 'It is not on this computer any more.'
-                  : other.needsTrust
-                  ? '${other.name} cannot be told to ignore what the folder says. Those settings can '
-                        'name programs that it starts.'
-                  : 'Those settings can name programs that it starts.',
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: AxCheck(
-                  label: 'Let the folder\'s own settings for it take effect',
-                  value: d.trust,
-                  onChanged: (v) => d.change(() => d.trust = v),
+            if (!d.withHands)
+              FormPart(
+                null,
+                note: other == null
+                    ? 'It is not on this computer any more.'
+                    : other.needsTrust
+                    ? '${other.name} cannot be told to ignore what the folder says. Those settings can '
+                          'name programs that it starts.'
+                    : 'Those settings can name programs that it starts.',
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AxCheck(
+                    label: 'Let the folder\'s own settings for it take effect',
+                    value: d.trust,
+                    onChanged: (v) => d.change(() => d.trust = v),
+                  ),
                 ),
               ),
-            ),
           ] else if (all.isEmpty)
             FormPart(
               'Account',
@@ -674,6 +709,9 @@ class _StartPageState extends State<StartPage> {
                 child: Text(
                   d.harness == 'axiom'
                       ? 'Commands run contained: no network, writing only in the folder.'
+                      : d.withHands
+                      ? 'Its model and your sign-in; Axiom\'s tools, questions and sandbox. You are asked '
+                            'before it is started.'
                       : 'It runs outside Axiom\'s sandbox. You are asked before it is started.',
                   style: t.type.small.ink(c.ink3),
                 ),

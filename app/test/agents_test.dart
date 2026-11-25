@@ -60,6 +60,7 @@ class Asked extends HostStore {
     session,
     name,
     if (x.harness != 'axiom') (x.harness, trust) else x.connection,
+    ?x.environment,
     if (x.harness != 'axiom' && x.connection != null) x.connection,
     x.model,
     access,
@@ -89,7 +90,15 @@ class Asked extends HostStore {
   Future<void> cancel(String session, String run) => _do(['cancel', session, run], null);
   @override
   Future<void> setAgent(String session, String agent, {Execution? execution, Access? access}) =>
-      _do(['set', session, agent, execution?.model, execution?.connection, access], null);
+      _do([
+        'set',
+        session,
+        agent,
+        execution?.model,
+        execution?.connection,
+        ?execution?.environment,
+        access,
+      ], null);
   @override
   Future<String> connect(String name, String provider, {String? url, String? secret}) async {
     final id = await _do(['connect', name, provider, url, secret], 'c_new');
@@ -693,6 +702,83 @@ void main() {
     'claude-code',
     signIn: "CLAUDE_CONFIG_DIR='/data/accounts/c9' claude auth login",
   );
+
+  const handy = [
+    HarnessInfo(
+      'claude',
+      'Claude Code',
+      program: '/usr/local/bin/claude',
+      access: [Access.read, Access.work],
+      hands: true,
+    ),
+  ];
+
+  testWidgets('a program can work with Axiom\'s tools in place of its own', (t) async {
+    final s = await shell(t);
+    s.harnesses = handy;
+    await press(t, find.bySemanticsLabel('New session').first);
+    await press(t, find.bySemanticsLabel('Runs with: Axiom'));
+    await press(t, find.bySemanticsLabel('Claude Code').last);
+    // Contained by Axiom unless its person says otherwise, and with every access.
+    expect(find.bySemanticsLabel('Tools: Axiom\'s'), findsOneWidget);
+    expect(find.bySemanticsLabel('Access: Ask first'), findsOneWidget);
+    expect(find.byType(AxCheck), findsNothing, reason: 'the folder\'s settings have no say');
+    await snap(t, 'start-hands');
+    await press(t, find.bySemanticsLabel('Tools: Axiom\'s'));
+    await press(t, find.bySemanticsLabel('Its own').last);
+    expect(find.bySemanticsLabel('Access: Only look'), findsOneWidget, reason: 'it cannot ask');
+    expect(find.byType(AxCheck), findsOneWidget);
+    await press(t, find.bySemanticsLabel('Tools: Its own'));
+    await press(t, find.bySemanticsLabel('Axiom\'s').last);
+    await t.enterText(field('What should be done'), 'Do it.');
+    await t.enterText(field('Folder'), '/w');
+    await settled(t);
+    s.calls.clear();
+    await press(t, find.text('Start'));
+    expect(s.calls.where((c) => c.first == 'add').single, [
+      'add',
+      's_new',
+      'Lead',
+      ('claude', false),
+      'axiom',
+      null,
+      Access.read,
+    ]);
+  });
+
+  testWidgets('giving a program its own tools says what that means', (t) async {
+    final s = await shell(t, session: working());
+    s.harnesses = handy;
+    void set(Access access) {
+      const x = Execution(harness: 'claude', environment: 'axiom');
+      s.current!.apply([
+        Event(s.current!.seq + 1, 9, const AgentStateChanged('a', AgentPhase.done)),
+        Event(s.current!.seq + 2, 9, AgentChanged('a', x, access)),
+      ]);
+      s.notifyListeners();
+    }
+
+    set(Access.ask);
+    await settled(t);
+    await t.tap(find.byType(ExecutionKey));
+    await settled(t);
+    await press(t, find.bySemanticsLabel('Tools: Axiom\'s'));
+    expect(find.text('it has no mode for this access'), findsOneWidget);
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settled(t);
+    set(Access.work);
+    await settled(t);
+    await t.tap(find.byType(ExecutionKey));
+    await settled(t);
+    await press(t, find.bySemanticsLabel('Tools: Axiom\'s'));
+    await press(t, find.bySemanticsLabel('Its own').last);
+    expect(find.textContaining('outside Axiom\'s sandbox and without'), findsOneWidget);
+    await t.pump(AxMotion.settle);
+    await press(t, find.text('Change to Its own'));
+    expect(s.calls, [
+      ['set', 's', 'a', null, null, null],
+    ]);
+  });
 
   testWidgets('a program can have several accounts', (t) async {
     final s = await shell(t);

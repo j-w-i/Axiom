@@ -93,22 +93,29 @@ class _TalkState extends State<Talk> {
   List<ExecutionChoice> _choices(HostStore s, AgentModel a) {
     final x = a.execution;
     final other = x.harness != 'axiom';
-    final can = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull?.access : null;
+    final program = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull : null;
+    final hands = x.environment == axiomTools;
+    final can = hands ? null : program?.access;
     final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
     final models = s.modelsOf(x.connection ?? '');
     final has = models?.any((m) => m.id == x.model) ?? false;
-    Execution with_({String? model, String? connection, String? provider}) => Execution(
-      harness: x.harness,
-      provider: provider ?? x.provider,
-      model: model ?? x.model,
-      connection: connection == null
-          ? x.connection
-          : connection.isEmpty
-          ? null
-          : connection,
-      effort: x.effort,
-      environment: x.environment,
-    );
+    Execution with_({String? model, String? connection, String? provider, bool? axioms}) =>
+        Execution(
+          harness: x.harness,
+          provider: provider ?? x.provider,
+          model: model ?? x.model,
+          connection: connection == null
+              ? x.connection
+              : connection.isEmpty
+              ? null
+              : connection,
+          effort: x.effort,
+          environment: axioms == null
+              ? x.environment
+              : axioms
+              ? axiomTools
+              : null,
+        );
     void set({Execution? execution, Access? access}) => unawaited(
       _do(() => s.setAgent(widget.session.id, a.id, execution: execution, access: access)),
     );
@@ -172,6 +179,33 @@ class _TalkState extends State<Talk> {
             : 'The other account does not know this conversation: it begins anew there. Nothing is '
                   'sent from one account to the other.',
       ),
+      if (program?.hands ?? hands)
+        ExecutionChoice(
+          'Tools',
+          [
+            const AxMenuItem(
+              'axiom',
+              'Axiom\'s',
+              detail: 'asked about and contained',
+              mark: ServiceMark.axiom,
+            ),
+            AxMenuItem(
+              '',
+              'Its own',
+              detail: 'outside Axiom\'s sandbox',
+              mark: markOf(null, null, x.harness),
+              // It would not be refused only when it is started.
+              enabled: !hands || (program?.access.contains(a.access) ?? false),
+              why: 'it has no mode for this access',
+            ),
+          ],
+          hands ? 'axiom' : '',
+          (v) => set(execution: with_(axioms: v.isNotEmpty)),
+          cost: (v) => v.isNotEmpty
+              ? null
+              : '${s.harnessName(x.harness)} then works with its own tools, outside Axiom\'s sandbox '
+                    'and without Axiom\'s questions.',
+        ),
       ExecutionChoice(
         'Access',
         [
