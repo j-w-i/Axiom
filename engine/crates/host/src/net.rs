@@ -155,12 +155,20 @@ mod unix {
 /// Windows has Unix sockets but no way to wait for them with tokio's sockets, so each connection
 /// gets two threads that carry its bytes. There are a few clients, not thousands. The socket lies
 /// in the user's own application data, which other users cannot enter; the token does the rest.
+///
+/// The threads never wait inside the system: they look, and look again a little later. When one end
+/// shuts a socket while the other begins to wait for it, Windows can lose the wake-up, and then both
+/// wait for good (seen in CI; K31).
 #[cfg(windows)]
 mod windows {
     use std::{
-        io::{Read, Write},
+        io::{ErrorKind, Read, Write},
         net::Shutdown,
         pin::Pin,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering::Relaxed},
+        },
         task::{Context, Poll},
         time::Duration,
     };
@@ -182,16 +190,45 @@ mod windows {
         place: Place,
     }
 
+    /// Between two looks: short while something happens, longer while nothing does.
+    #[derive(Default)]
+    struct Pause(u32);
+    impl Pause {
+        const LONGEST: Duration = Duration::from_millis(10);
+        fn wait(&mut self) {
+            // At first only lets others run: what is asked for is mostly about to come.
+            if self.0 < 50 {
+                std::thread::yield_now();
+            } else {
+                let ms = Duration::from_millis(1 << (self.0 - 50).min(10) / 3);
+                std::thread::sleep(ms.min(Self::LONGEST));
+            }
+            self.0 = self.0.saturating_add(1);
+        }
+    }
+
     impl Listener {
         pub fn bind(paths: &Paths) -> io::Result<Self> {
             let mut place = Place::new(paths)?;
             let sock = UnixListener::bind(&place.path)?;
+            sock.set_nonblocking(true)?;
             place.made()?;
             // One at a time: the rest wait in the system's queue until the host wants them.
             let (tx, rx) = mpsc::channel(1);
             std::thread::Builder::new().name("accept".into()).spawn(move || {
                 // The host decides what an error means; it waits before it asks again.
-                while tx.blocking_send(sock.accept().map(|(s, _)| s)).is_ok() {}
+                while !tx.is_closed() {
+                    let r = match sock.accept() {
+                        Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                            std::thread::sleep(Pause::LONGEST);
+                            continue;
+                        }
+                        r => r.map(|(s, _)| s),
+                    };
+                    if tx.blocking_send(r).is_err() {
+                        break;
+                    }
+                }
             })?;
             Ok(Self { rx, place })
         }
@@ -215,20 +252,19 @@ mod windows {
     /// How long bytes already written may take to reach a peer after the host let go of it.
     const LINGER: Duration = Duration::from_secs(2);
 
-    /// Our end of the threads' pipe. Letting go of it releases them, even from a blocked call.
+    /// Our end of the threads' pipe. Letting go of it releases them.
     struct Carried {
         io: DuplexStream,
-        sock: Option<UnixStream>,
+        over: Arc<AtomicBool>,
         rt: Handle,
     }
     impl Drop for Carried {
         fn drop(&mut self) {
-            if let Some(s) = self.sock.take() {
-                self.rt.spawn(async move {
-                    tokio::time::sleep(LINGER).await;
-                    let _ = s.shutdown(Shutdown::Both);
-                });
-            }
+            let over = self.over.clone();
+            self.rt.spawn(async move {
+                tokio::time::sleep(LINGER).await;
+                over.store(true, Relaxed);
+            });
         }
     }
     impl AsyncRead for Carried {
@@ -256,37 +292,60 @@ mod windows {
         }
     }
 
+    /// Does `f` until it does not have to wait, or it is over.
+    fn looking<T>(over: &AtomicBool, mut f: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+        let mut pause = Pause::default();
+        loop {
+            match f() {
+                Err(e) if e.kind() == ErrorKind::WouldBlock && !over.load(Relaxed) => pause.wait(),
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                r => return r,
+            }
+        }
+    }
+
     pub fn carry(s: Raw) -> io::Result<Boxed> {
         let rt = Handle::current();
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
         let (mut from_us, mut to_us) = tokio::io::split(theirs);
-        let (mut rd, mut wr, sock) = (s.try_clone()?, s.try_clone()?, s);
-        let h = rt.clone();
+        let (mut rd, mut wr) = (s.try_clone()?, s);
+        rd.set_nonblocking(true)?;
+        wr.set_nonblocking(true)?;
+        let over = Arc::new(AtomicBool::new(false));
+        let (h, o) = (rt.clone(), over.clone());
         std::thread::Builder::new().name("socket in".into()).spawn(move || {
             let mut buf = vec![0u8; 64 * 1024];
-            while let Ok(n) = rd.read(&mut buf) {
+            while let Ok(n) = looking(&o, || rd.read(&mut buf)) {
                 if n == 0 || h.block_on(to_us.write_all(&buf[..n])).is_err() {
                     break;
                 }
             }
             let _ = h.block_on(to_us.shutdown());
         })?;
-        let h = rt.clone();
+        let (h, o) = (rt.clone(), over.clone());
         let out = std::thread::Builder::new().name("socket out".into()).spawn(move || {
             let mut buf = vec![0u8; 64 * 1024];
-            while let Ok(n) = h.block_on(from_us.read(&mut buf)) {
-                if n == 0 || wr.write_all(&buf[..n]).is_err() {
+            'all: while let Ok(n) = h.block_on(from_us.read(&mut buf)) {
+                let mut left = &buf[..n];
+                if n == 0 {
                     break;
                 }
+                while !left.is_empty() {
+                    match looking(&o, || wr.write(left)) {
+                        Ok(0) | Err(_) => break 'all,
+                        Ok(n) => left = &left[n..],
+                    }
+                }
             }
-            // Also wakes the other thread.
+            // The other thread sees it when it next looks, and so does the peer.
             let _ = wr.shutdown(Shutdown::Both);
+            o.store(true, Relaxed);
         });
         if let Err(e) = out {
-            let _ = sock.shutdown(Shutdown::Both);
+            over.store(true, Relaxed);
             return Err(e);
         }
-        Ok(Box::new(Carried { io: ours, sock: Some(sock), rt }))
+        Ok(Box::new(Carried { io: ours, over, rt }))
     }
 
     pub async fn connect(paths: &Paths) -> io::Result<Boxed> {
