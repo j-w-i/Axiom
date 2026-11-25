@@ -11,6 +11,7 @@ use std::{
 };
 
 use axiom_journal::{Journal, Reader};
+use axiom_model::chatgpt::Places;
 use axiom_proto::*;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -22,7 +23,7 @@ use tokio::{
 };
 
 use crate::{
-    agents::{self, Agents, Finished, Setup, Spoken, Switch, Told},
+    agents::{self, Agents, Finished, Holder, Setup, Spoken, Switch, Told},
     changes,
     connections::{Connections, MemoryVault, Vault},
     faults::{Access, Faults},
@@ -30,8 +31,9 @@ use crate::{
     net::{self, Boxed, Listener},
     outbox::{Follower, Outbox},
     paths::{Lock, Paths, Same, private_dir, private_file},
-    replay,
+    peers, replay,
     session::{Joined, Opened, Refused, Say, Session, encode, lines},
+    signin::Signins,
     store::Store,
 };
 
@@ -69,7 +71,11 @@ pub struct Config {
     pub scratch: PathBuf,
     /// Where harnesses are looked for; `None`: where programs usually are.
     pub programs: Option<Vec<PathBuf>>,
+    /// The host's own program, if installed programs are to have tools of Axiom's.
+    pub bridge: Option<PathBuf>,
     pub vault: Arc<dyn Vault>,
+    /// Where a ChatGPT plan is signed in to and used.
+    pub chatgpt: Places,
 }
 impl Config {
     pub fn new(paths: Paths) -> Self {
@@ -84,7 +90,9 @@ impl Config {
             home: home(),
             scratch,
             programs: None,
+            bridge: None,
             vault: Arc::new(MemoryVault::default()),
+            chatgpt: Places::default(),
         }
     }
 }
@@ -127,6 +135,7 @@ struct State {
     /// Connections end.
     over: watch::Sender<bool>,
     agents: Arc<Agents>,
+    signins: Arc<Signins>,
 }
 
 type Slot = tokio::sync::Mutex<Option<Opened>>;
@@ -274,17 +283,20 @@ impl Host {
         let listener = Listener::bind(p)?;
         private_file(&p.endpoint_file(), listener.path())?;
         private_file(&p.token(), &token)?;
-        let connections = Connections::open(&p.data.join("connections.json"), cfg.vault.clone())?;
+        let file = p.data.join("connections.json");
+        let connections = Connections::open(&file, cfg.vault.clone(), cfg.chatgpt.clone())?;
         let agents = Agents::new(
-            connections,
+            Arc::new(connections),
             p,
             cfg.home.clone(),
             cfg.scratch.clone(),
             cfg.programs.clone(),
+            cfg.bridge.clone(),
             listener.path(),
         );
         let st = Arc::new(State {
             agents: Arc::new(agents),
+            signins: Arc::default(),
             store: Store::start(journal, &p.journal())?,
             token,
             faults: Arc::new(faults),
@@ -406,6 +418,7 @@ impl Host {
         })
         .await;
         // What runs between runs: it ends, and lets its session go.
+        st.signins.end();
         st.agents.end().await;
         // The last answers and events reach whoever still reads.
         st.over.send_replace(true);
@@ -671,6 +684,9 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
     // The place this connection takes: a stranger's, until it shows the token.
     let mut stranger = Some(stranger);
     let mut _place = None;
+    // An installed program's: nothing is opened for it but its own tool, and that ends with it.
+    let mut peer: Option<String> = None;
+    let mut asked = JoinSet::new();
     // Keeps what is followed open.
     let mut following: HashMap<SessionId, Session> = HashMap::new();
     let many = Arc::new(Semaphore::new(SLOW));
@@ -714,6 +730,52 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                 }
             };
             match (stranger.is_none(), req.call) {
+                (false, Call::PeerHello { grant }) => {
+                    let place = st.clients.clone().try_acquire_owned();
+                    match (st.agents.granted(&grant), place) {
+                        (Some(who), Ok(place)) => {
+                            _place = Some(place);
+                            peer = Some(grant);
+                            stranger = None;
+                            out.answer(req.id, Ok(json!({ "tools": tools_of(&who) })));
+                        }
+                        (None, _) => {
+                            let e = WireError::new(ErrorCode::Unauthorised, "wrong key");
+                            out.answer(req.id, Err(e));
+                            return;
+                        }
+                        (_, Err(_)) => {
+                            let e = WireError::new(ErrorCode::Busy, "too many clients");
+                            out.answer(req.id, Err(e));
+                            return;
+                        }
+                    }
+                }
+                (true, call) if peer.is_some() => {
+                    while asked.try_join_next().is_some() {}
+                    // Asked for each time: the key may be gone by now.
+                    let who = peer.as_deref().and_then(|k| st.agents.granted(k));
+                    let Some(who) = who else {
+                        let e =
+                            WireError::new(ErrorCode::Unauthorised, "the key is not good any more");
+                        out.answer(req.id, Err(e));
+                        return;
+                    };
+                    let Call::Peer { tool, args } = call else {
+                        let words = "this key opens nothing else";
+                        out.answer(req.id, Err(WireError::new(ErrorCode::Unauthorised, words)));
+                        continue;
+                    };
+                    if asked.len() >= SLOW {
+                        let words = "too much is asked at once";
+                        out.answer(req.id, Err(WireError::new(ErrorCode::Busy, words)));
+                        continue;
+                    }
+                    let (st, out) = (st.clone(), out.clone());
+                    asked.spawn(async move {
+                        out.answer(req.id, by_peer(&st, who, tool, args).await);
+                    });
+                }
                 (false, call) => match hello(st, call) {
                     Ok(client) => {
                         _place = Some(client);
@@ -1008,6 +1070,7 @@ async fn prompt(
             (outcome, error, text) = (e.outcome, e.error, last);
             let stopped = *cancel.borrow();
             if stopped {
+                slot.stop_jobs();
                 // Who stops an agent stops what it began (SI-24).
                 for r in slot.forgive() {
                     st.stop(&r);
@@ -1066,9 +1129,104 @@ impl Switch for State {
     }
 }
 
+fn specs_of(who: &Holder) -> Vec<axiom_tools::Spec> {
+    let mut all = if who.all { axiom_tools::specs() } else { Vec::new() };
+    all.extend(peers::specs());
+    all
+}
+
+/// As they are told to the program.
+fn tools_of(who: &Holder) -> Vec<Value> {
+    let shown = |s: axiom_tools::Spec| json!({"name": s.name, "description": s.description, "schema": s.schema});
+    specs_of(who).into_iter().map(shown).collect()
+}
+
+/// What an installed program asks for.
+async fn by_peer(
+    st: &Arc<State>,
+    who: Holder,
+    tool: String,
+    args: Value,
+) -> Result<Value, WireError> {
+    let Holder { session, agent, all } = who.clone();
+    if !all && tool != peers::TOOL {
+        return Err(WireError::new(ErrorCode::Unauthorised, "this key opens nothing else"));
+    }
+    let s = st.open(&session).await?;
+    let floor =
+        agents::Floor { agents: st.agents.clone(), store: st.store.clone(), session: s, agent };
+    let desk = st.agents.desk(&session);
+    if !all {
+        let o = peers::call(&floor, &desk, &args).await;
+        return Ok(json!({"ok": o.ok, "text": o.text}));
+    }
+    // As one of Axiom's own agents, in the run it is in: nothing is done outside one.
+    let slot = st.agents.slot(&session, &floor.agent);
+    let Some((run, run_cancel)) = slot.now().await else {
+        return Err(agents::bad("the agent is in no run"));
+    };
+    let setup = setup(st, &session, &floor.agent).await?;
+    let site = agents::site_of(&st.agents, &setup, &floor.agent, &slot).await?;
+    // Stopped by a person, or no longer waited for: either way it ends in order, with its end said.
+    let (gone, cancel) = watch::channel(false);
+    let _gone = Leaves(gone);
+    let work = tokio::spawn(async move {
+        let mut cancel = either(run_cancel, cancel);
+        let specs = specs_of(&who);
+        let seen = slot.seen();
+        let hands = axiom_engine::Hands {
+            id: &floor.agent,
+            stage: &floor,
+            desk: &desk,
+            site: &site,
+            seen: &seen,
+            specs: &specs,
+        };
+        hands.tool(&run, &tool, &args, &mut cancel).await
+    });
+    match work.await {
+        Ok(Ok((text, ok))) => Ok(json!({"ok": ok, "text": text})),
+        Ok(Err(e)) => Err(agents::bad(e.to_string())),
+        Err(_) => Err(internal("the tool failed")),
+    }
+}
+
+/// Says that nobody waits any more.
+struct Leaves(watch::Sender<bool>);
+impl Drop for Leaves {
+    fn drop(&mut self) {
+        let _ = self.0.send(true);
+    }
+}
+
+/// True once one of them is.
+fn either(a: watch::Receiver<bool>, b: watch::Receiver<bool>) -> watch::Receiver<bool> {
+    let (tx, rx) = watch::channel(*a.borrow() || *b.borrow());
+    // One that nobody can make true any more says nothing of the other.
+    let is = |mut r: watch::Receiver<bool>| async move {
+        if r.wait_for(|x| *x).await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::spawn(async move {
+        tokio::select! {
+            () = is(a) => {}
+            () = is(b) => {}
+            () = tx.closed() => return,
+        }
+        let _ = tx.send(true);
+        // As long as somebody looks at it.
+        tx.closed().await;
+    });
+    rx
+}
+
 async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
     match call {
-        Call::Hello { .. } => Err(WireError::new(ErrorCode::BadRequest, "already said hello")),
+        Call::Hello { .. } | Call::PeerHello { .. } => {
+            Err(WireError::new(ErrorCode::BadRequest, "already said hello"))
+        }
+        Call::Peer { .. } => Err(agents::bad("only an agent's own program may ask that")),
         Call::Follow { .. } | Call::Unfollow { .. } => Err(internal("handled by the connection")),
         Call::Status {} => {
             let mut status = json!({
@@ -1216,6 +1374,10 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 // What it knows is in the harness it has.
                 return Err(agents::bad("an agent keeps its harness; add another agent instead"));
             }
+            if execution.as_ref().is_some_and(|e| e.connection != setup.execution.connection) {
+                // What was said is kept with the account it was said on.
+                setup.resume = None;
+            }
             setup.execution = execution.unwrap_or(setup.execution);
             setup.access = access.unwrap_or(setup.access);
             let a = st.agents.clone();
@@ -1250,10 +1412,20 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             Ok(json!({ "connection": id }))
         }
         Call::ConnectionRemove { connection } => {
-            let a = st.agents.clone();
-            blocking(move || a.connections.remove(&connection)).await??;
-            Ok(json!({}))
+            // To its end, also when who asked is gone.
+            let leave = tokio::spawn(st.agents.connections.clone().leave(connection));
+            let ended = leave.await.map_err(|e| internal(e.to_string()))??;
+            Ok(ended.map_or_else(|| json!({}), |e| json!({ "ended": e })))
         }
+        Call::SigninBegin { connection } => {
+            let c = st.agents.connections.clone();
+            let (signin, url) = st.signins.begin(c, connection).await?;
+            Ok(json!({ "signin": signin, "url": url }))
+        }
+        Call::SigninState { signin } => {
+            serde_json::to_value(st.signins.state(&signin)?).map_err(|e| internal(e.to_string()))
+        }
+        Call::SigninCancel { signin } => st.signins.cancel(&signin).map(|()| json!({})),
         Call::Models { connection } => {
             let a = st.agents.clone();
             let client = blocking(move || a.connections.client(&connection)).await??;
@@ -1267,9 +1439,12 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let all: Vec<_> = all
                 .into_iter()
                 .map(|m| {
-                    let mut id = m.id;
+                    let (mut id, mut name) = (m.id, m.name);
                     limits::clip(&mut id, limits::TITLE);
-                    axiom_proto::ModelInfo { context: quirks(&id).context, name: None, id }
+                    if let Some(n) = &mut name {
+                        limits::clip(n, limits::TITLE);
+                    }
+                    axiom_proto::ModelInfo { context: quirks(&id).context, name, id }
                 })
                 .collect();
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))

@@ -381,7 +381,14 @@ impl Client {
             });
             return;
         };
-        let mut params = json!({"cwd": s.workspace.as_str(), "mcpServers": []});
+        // Version 1's own form; what version 2 takes is a preview still.
+        let servers: Vec<Value> = s
+            .tools
+            .iter()
+            .filter(|_| self.version == 1)
+            .map(|t| json!({"name": t.name, "command": t.command.as_str(), "args": t.args, "env": []}))
+            .collect();
+        let mut params = json!({"cwd": s.workspace.as_str(), "mcpServers": servers});
         let method = match &s.resume {
             None => "session/new",
             Some(_) if !self.caps.resume => {

@@ -12,10 +12,12 @@ use serde_json::Value;
 mod compact;
 pub mod context;
 pub mod desk;
+mod hands;
 mod run;
 
 pub use context::{Context, Turn};
 pub use desk::Desk;
+pub use hands::Hands;
 pub use run::{Agent, Ended, Limits, Retries, Word, said};
 
 /// What is said to the session.

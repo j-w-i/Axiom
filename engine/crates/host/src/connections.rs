@@ -8,12 +8,18 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
-use axiom_model::{Client, Credential, Endpoint, Options, Profile, Secret};
+use axiom_model::{
+    Client, Credential, Endpoint, Options, Profile, Secret,
+    chatgpt::{Known, Places, Signed},
+};
 use axiom_proto::{Connection, ErrorCode, WireError, limits};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::paths::private_file;
+use crate::{
+    paths::{private_dir, private_file},
+    plan::Plans,
+};
 
 /// Cleared when it is dropped.
 pub type Text = Zeroizing<String>;
@@ -61,6 +67,19 @@ struct Kept {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     url: Option<String>,
     secret: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<Whose>,
+}
+
+/// Of a plan that was signed in to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Whose {
+    /// What Axiom is called for this account.
+    client: String,
+    subject: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
 }
 
 fn secret_of(t: &Text) -> Secret {
@@ -72,16 +91,32 @@ const MOST: usize = 200;
 const NAME: usize = 200;
 const SECRET: usize = 16 * 1024;
 
+/// A program's own accounts, as providers.
+const PROGRAMS: &[(&str, &str, &str, &str)] =
+    &[("claude-code", "claude", "CLAUDE_CONFIG_DIR", "claude auth login")];
+
+/// What an account of the harness is called as a provider.
+pub fn provider_of(harness: &str) -> Option<&'static str> {
+    PROGRAMS.iter().find(|p| p.1 == harness).map(|p| p.0)
+}
+
+/// What a plan is called as a provider. There is one only by signing in.
+const PLAN: &str = "chatgpt";
+
 pub struct Connections {
+    pub plans: Arc<Plans>,
+    /// Where programs keep accounts beside their first: a folder for each. What is in them is the
+    /// programs' own; nothing here reads it.
+    accounts: PathBuf,
     file: PathBuf,
     vault: Arc<dyn Vault>,
     all: Mutex<Vec<Kept>>,
 }
 
-fn bad(words: impl Into<String>) -> WireError {
+pub(crate) fn bad(words: impl Into<String>) -> WireError {
     WireError::new(ErrorCode::BadRequest, words)
 }
-fn internal(words: impl std::fmt::Display) -> WireError {
+pub(crate) fn internal(words: impl std::fmt::Display) -> WireError {
     WireError::new(ErrorCode::Internal, words.to_string())
 }
 
@@ -105,14 +140,17 @@ fn keyed(provider: &str) -> bool {
 
 impl Connections {
     /// As they were kept. A file that cannot be read is an error: nothing is written over it.
-    pub fn open(file: &Path, vault: Arc<dyn Vault>) -> io::Result<Self> {
+    pub fn open(file: &Path, vault: Arc<dyn Vault>, places: Places) -> io::Result<Self> {
         let all = match std::fs::read_to_string(file) {
             Ok(t) => serde_json::from_str(&t)
                 .map_err(|e| io::Error::other(format!("{}: {e}", file.display())))?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
         };
-        Ok(Self { file: file.into(), vault, all: Mutex::new(all) })
+        let accounts = file.with_file_name("accounts");
+        let name = file.with_file_name("installation");
+        let plans = Arc::new(Plans::new(places, vault.clone(), name));
+        Ok(Self { plans, accounts, file: file.into(), vault, all: Mutex::new(all) })
     }
 
     fn lock(&self) -> MutexGuard<'_, Vec<Kept>> {
@@ -131,9 +169,39 @@ impl Connections {
             provider: k.provider.clone(),
             url: k.url.clone(),
             secret: k.secret,
-            lasts: k.secret && self.vault.lasts(),
+            lasts: k.secret && self.vault.lasts() && self.plans.saved(&k.id),
+            sign_in: self.sign_in(k),
+            problem: self.plans.problem(&k.id),
         };
         self.lock().iter().map(shown).collect()
+    }
+
+    fn folder(&self, id: &str) -> PathBuf {
+        self.accounts.join(id)
+    }
+
+    /// For the person's own terminal: nothing here signs in, or sees what that gives.
+    fn sign_in(&self, k: &Kept) -> Option<String> {
+        let p = PROGRAMS.iter().find(|p| p.0 == k.provider)?;
+        let dir = self.folder(&k.id).display().to_string();
+        Some(if cfg!(windows) {
+            format!("$env:{}='{}'; {}", p.2, dir.replace('\'', "''"), p.3)
+        } else {
+            format!("{}='{}' {}", p.2, dir.replace('\'', "'\\''"), p.3)
+        })
+    }
+
+    /// Where a program keeps an account of this harness.
+    pub fn account(&self, id: &str, harness: &str) -> Result<PathBuf, WireError> {
+        let k = self.lock().iter().find(|k| k.id == id).cloned();
+        let k = k.ok_or_else(|| WireError::new(ErrorCode::NotFound, "no such account"))?;
+        if provider_of(harness) != Some(k.provider.as_str()) {
+            return Err(bad("this account is not one of that program"));
+        }
+        let dir = self.folder(id);
+        private_dir(&self.accounts).map_err(internal)?;
+        private_dir(&dir).map_err(internal)?;
+        Ok(dir)
     }
 
     pub fn add(
@@ -154,6 +222,14 @@ impl Connections {
             Ok(s)
         });
         let secret = secret.transpose()?;
+        if PROGRAMS.iter().any(|p| p.0 == provider) {
+            if url.is_some() || secret.is_some() {
+                return Err(bad(
+                    "the program signs in by itself: it is given no address and no key",
+                ));
+            }
+            return self.keep(name, provider, None, None, None);
+        }
         let p = profile(&provider, url.as_deref())
             .ok_or_else(|| bad("the provider is not one that can be added, or needs an address"))?;
         if keyed(&provider) && (url.is_some() || secret.is_none()) {
@@ -167,6 +243,18 @@ impl Connections {
             Credential::new(endpoint.origin(), &p.auth, secret_of(s))
                 .map_err(|e| bad(e.to_string()))?;
         }
+        self.keep(name, provider, url, secret, None)
+    }
+
+    fn keep(
+        &self,
+        name: String,
+        provider: String,
+        url: Option<String>,
+        secret: Option<Text>,
+        account: Option<Whose>,
+    ) -> Result<String, WireError> {
+        let program = PROGRAMS.iter().any(|p| p.0 == provider);
         let mut all = self.lock();
         if all.len() >= MOST {
             return Err(bad("there are as many connections as there may be"));
@@ -175,8 +263,14 @@ impl Connections {
         if let Some(s) = &secret {
             self.vault.put(&id, s).map_err(internal)?;
         }
+        if program {
+            // There when it is signed in to.
+            private_dir(&self.accounts).map_err(internal)?;
+            private_dir(&self.folder(&id)).map_err(internal)?;
+        }
         let mut next = all.clone();
-        next.push(Kept { id: id.clone(), name, provider, url, secret: secret.is_some() });
+        let kept = Kept { id: id.clone(), name, provider, url, secret: secret.is_some(), account };
+        next.push(kept);
         if let Err(e) = self.write(&next) {
             let _ = self.vault.remove(&id);
             return Err(e);
@@ -185,8 +279,86 @@ impl Connections {
         Ok(id)
     }
 
+    fn one(&self, id: &str) -> Result<Kept, WireError> {
+        let k = self.lock().iter().find(|k| k.id == id).cloned();
+        k.ok_or_else(|| WireError::new(ErrorCode::NotFound, "no such connection"))
+    }
+
+    /// An account that is to be signed in to again.
+    pub fn known(&self, id: &str) -> Result<Known, WireError> {
+        let k = self.one(id)?.account.ok_or_else(|| bad("this is not an account of a plan"))?;
+        Ok(Known { client: k.client, subject: k.subject, email: k.email })
+    }
+
+    /// Keeps what a sign-in gave, for an account there is or as another.
+    pub async fn signed_in(
+        self: Arc<Self>,
+        again: Option<String>,
+        s: Signed,
+    ) -> Result<String, WireError> {
+        let account = Whose { client: s.client, subject: s.person.subject, email: s.person.email };
+        let mut held = match &again {
+            Some(id) => Some(self.plans.hold(id).await),
+            None => None,
+        };
+        let (this, refresh) = (self.clone(), s.tokens.refresh.clone());
+        let keep = move || match again {
+            Some(id) => this.signed_in_again(id, &refresh, account),
+            None => {
+                let mut name = account.email.clone().unwrap_or_else(|| "ChatGPT".into());
+                limits::clip(&mut name, NAME);
+                this.keep(name, PLAN.into(), None, Some(refresh), Some(account))
+            }
+        };
+        let id = tokio::task::spawn_blocking(keep).await.map_err(internal)??;
+        let mut live = match held.take() {
+            Some(l) => l,
+            None => self.plans.hold(&id).await,
+        };
+        self.plans.begin(&id, &mut live, s.tokens).map_err(internal)?;
+        Ok(id)
+    }
+
+    fn signed_in_again(
+        &self,
+        id: String,
+        refresh: &Text,
+        account: Whose,
+    ) -> Result<String, WireError> {
+        let mut all = self.lock();
+        let Some(at) = all.iter().position(|k| k.id == id && k.account.is_some()) else {
+            return Err(WireError::new(ErrorCode::NotFound, "the account was removed"));
+        };
+        self.vault.put(&id, refresh).map_err(internal)?;
+        let mut next = all.clone();
+        next[at].account = Some(account);
+        self.write(&next)?;
+        *all = next;
+        Ok(id)
+    }
+
+    /// Takes a connection out. Of an account that was signed in to: whether it is certain that it
+    /// is signed out of there too.
+    pub async fn leave(self: Arc<Self>, id: String) -> Result<Option<bool>, WireError> {
+        let account = self.one(&id)?.account;
+        let mut live = match &account {
+            Some(_) => Some(self.plans.hold(&id).await),
+            None => None,
+        };
+        let mut ended = None;
+        if let (Some(live), Some(a)) = (&mut live, &account) {
+            ended = Some(self.plans.end(&id, live, &a.client).await);
+        }
+        let (this, name) = (self.clone(), id.clone());
+        tokio::task::spawn_blocking(move || this.remove(&name)).await.map_err(internal)??;
+        if let Some(live) = &mut live {
+            self.plans.forget(&id, live);
+        }
+        Ok(ended)
+    }
+
     /// The secret goes first: one without a connection would stay for good.
-    pub fn remove(&self, id: &str) -> Result<(), WireError> {
+    fn remove(&self, id: &str) -> Result<(), WireError> {
         let mut all = self.lock();
         let Some(at) = all.iter().position(|k| k.id == id) else {
             return Err(WireError::new(ErrorCode::NotFound, "no such connection"));
@@ -203,8 +375,15 @@ impl Connections {
 
     /// A client for it.
     pub fn client(&self, id: &str) -> Result<Client, WireError> {
-        let k = self.lock().iter().find(|k| k.id == id).cloned();
-        let k = k.ok_or_else(|| WireError::new(ErrorCode::NotFound, "no such connection"))?;
+        let k = self.one(id)?;
+        if let Some(a) = k.account {
+            let plans = self.plans.clone();
+            let endpoint =
+                Endpoint::parse(&plans.places.resource).map_err(|e| bad(e.to_string()))?;
+            let account = Arc::new(plans.account(k.id, a.client));
+            return Client::renewed(Profile::chatgpt(), endpoint, account, Options::default())
+                .map_err(|e| bad(e.to_string()));
+        }
         let p = profile(&k.provider, k.url.as_deref())
             .ok_or_else(|| bad("the provider is not known"))?;
         let address =
@@ -241,7 +420,7 @@ mod tests {
             self.d.path().join("connections.json")
         }
         fn open(&self) -> Connections {
-            Connections::open(&self.file(), self.vault.clone()).unwrap()
+            Connections::open(&self.file(), self.vault.clone(), Places::default()).unwrap()
         }
     }
     const CANARY: &str = "sk-canary-81723";
@@ -326,7 +505,7 @@ mod tests {
         }
         assert!(c.list().is_empty() && t.vault.lock().is_empty() && !t.file().exists());
         std::fs::write(t.file(), "{").unwrap();
-        assert!(Connections::open(&t.file(), t.vault.clone()).is_err());
+        assert!(Connections::open(&t.file(), t.vault.clone(), Places::default()).is_err());
     }
 
     /// A store that takes nothing: the connection is not made.
@@ -345,8 +524,17 @@ mod tests {
             }
         }
         let t = T::new();
-        let c = Connections::open(&t.file(), Arc::new(No)).unwrap();
+        let c = Connections::open(&t.file(), Arc::new(No), Places::default()).unwrap();
         let e = c.add("x".into(), "anthropic".into(), None, Some(CANARY.into())).unwrap_err();
         assert!(e.message.contains("locked") && c.list().is_empty());
+    }
+
+    /// One place says how, another where: they are of one mind.
+    #[test]
+    fn programs_with_accounts_are_those_that_document_it() {
+        for k in crate::delegated::known() {
+            let here = PROGRAMS.iter().find(|p| p.1 == k.id).map(|p| p.2);
+            assert_eq!(here, k.harness.accounts(), "{}", k.id);
+        }
     }
 }

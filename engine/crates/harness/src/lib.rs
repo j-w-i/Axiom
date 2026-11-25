@@ -56,6 +56,9 @@ pub struct Site {
     pub tmp: Place,
     /// Workspaces, and everything else an agent may write to.
     pub written: Reach,
+    /// Where the program keeps what is its own, if that is another place than usual: an account
+    /// beside the person's first ([`Harness::accounts`]).
+    pub config: Option<Place>,
     pub limits: Limits,
 }
 
@@ -80,6 +83,24 @@ pub struct Start {
     pub resume: Option<String>,
     pub trust: Trust,
     pub by: By,
+    /// A server of Axiom's own that it is given, if it can be and may act.
+    pub tools: Option<Server>,
+    /// That server's tools in place of its own, all of which are off: what it does, it asks that
+    /// server for. Whoever is behind it judges and contains.
+    pub hands: bool,
+    /// Words for the model, in a file of the host's: what it works with and where.
+    pub system: Option<Place>,
+}
+
+/// A Model Context Protocol server on standard streams.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Server {
+    pub name: String,
+    /// The one tool it has, if it stands beside the program's own.
+    pub tool: String,
+    pub command: Place,
+    /// No secret: they are seen by other users of the computer.
+    pub args: Vec<String>,
 }
 
 /// A started attempt.
@@ -107,6 +128,9 @@ impl Harness {
                 return Err(Error::BadValue(what, v.clone()));
             }
         }
+        if s.hands && (!self.takes_hands() || s.tools.is_none()) {
+            return Err(Error::NoHands);
+        }
         if self.person_only() && s.by != By::Person {
             return Err(Error::PersonOnly);
         }
@@ -122,6 +146,30 @@ impl Harness {
         }
     }
 
+    /// What the program itself documents for keeping several accounts apart: a variable that names
+    /// the folder of one. Only where its documentation says that logins are kept apart by it.
+    pub fn accounts(&self) -> Option<&'static str> {
+        match self {
+            // code.claude.com/docs/en/authentication, read 2026-11-25.
+            Harness::Claude(_) => Some("CLAUDE_CONFIG_DIR"),
+            // CODEX_HOME moves its files; whether it parts what is in the system's store is not said.
+            Harness::Codex | Harness::Acp(_) => None,
+        }
+    }
+
+    /// Whether it can be given a server of Axiom's own, by what it documents.
+    pub fn takes_tools(&self) -> bool {
+        // Codex: the form of what it takes at a thread's start is nowhere documented.
+        !matches!(self, Harness::Codex)
+    }
+
+    /// Whether all of its own tools can be switched off, so that it has only those it is given. Where
+    /// its documentation says so.
+    pub fn takes_hands(&self) -> bool {
+        // `--tools ""`: code.claude.com/docs/en/cli-reference, read 2026-11-25.
+        matches!(self, Harness::Claude(_))
+    }
+
     /// Whether its terms allow only what a person themselves says.
     pub fn person_only(&self) -> bool {
         matches!(self, Harness::Acp(a) if a.person_only)
@@ -131,7 +179,7 @@ impl Harness {
     /// workspace: the token is for that.
     pub async fn probe(&self, site: &Site, token: Unsandboxed) -> Result<Probe, Error> {
         let talk: Box<dyn Talk> = match self {
-            Harness::Claude(p) => return version(site, token, *p).await,
+            Harness::Claude(p) => return version(self, site, token, *p).await,
             Harness::Acp(a) => Box::new(a.talk(site, None)),
             Harness::Codex => Box::new(codex::Codex::new(site, None)),
         };
@@ -139,7 +187,7 @@ impl Harness {
             Harness::Acp(a) => a.checked()?,
             _ => codex::ARGS.map(String::from).into(),
         };
-        let process = run(site, args, &site.tmp, true, token)?;
+        let process = run(self, site, args, &site.tmp, false, true, token)?;
         let (tx, rx) = oneshot::channel();
         let given = drive::Given {
             process,
@@ -177,14 +225,14 @@ impl Harness {
             }
         }
         let read_only = s.access == Access::Read;
-        let cwd = s.workspace.clone();
+        let (cwd, hands) = (s.workspace.clone(), s.hands);
         let talk: Box<dyn Talk> = match self {
             Harness::Acp(a) => Box::new(a.talk(site, Some(s))),
             Harness::Codex => Box::new(codex::Codex::new(site, Some(s))),
             Harness::Claude(p) => Box::new(claude::Claude::new(*p, s, &l)),
         };
         let given = drive::Given {
-            process: run(site, l.args, &cwd, true, token)?,
+            process: run(self, site, l.args, &cwd, hands, true, token)?,
             talk,
             frames,
             limits: site.limits.clone(),
@@ -198,25 +246,42 @@ impl Harness {
 }
 
 fn run(
+    harness: &Harness,
     site: &Site,
     args: Vec<String>,
     cwd: &Place,
+    hands: bool,
     stdin: bool,
     token: Unsandboxed,
 ) -> Result<Running, Error> {
+    let mut env = Env::harness(&site.path, &site.home, &site.user, &site.tmp)?;
+    if let Some(c) = &site.config {
+        // Nothing would keep it apart: it is not started as if something did.
+        let name = harness.accounts().ok_or(Error::OneAccount)?;
+        env.set(name, c.as_str())?;
+    }
+    if hands {
+        // Otherwise the tools it is given are put off until a tool of its own finds them.
+        env.set("ENABLE_TOOL_SEARCH", "false")?;
+    }
     Ok(spawn(Job {
         program: site.program.place().clone(),
         args,
         cwd: cwd.clone(),
-        env: Env::harness(&site.path, &site.home, &site.user, &site.tmp)?,
+        env,
         stdin,
         contain: Contain::None(token),
     })?)
 }
 
 /// What `--version` says: the only thing Claude Code is asked without work.
-async fn version(site: &Site, token: Unsandboxed, p: Prompts) -> Result<Probe, Error> {
-    let mut r = run(site, vec!["--version".into()], &site.tmp, false, token)?;
+async fn version(
+    harness: &Harness,
+    site: &Site,
+    token: Unsandboxed,
+    p: Prompts,
+) -> Result<Probe, Error> {
+    let mut r = run(harness, site, vec!["--version".into()], &site.tmp, false, false, token)?;
     let out = r.stdout.take().ok_or(Error::NoPipe)?;
     let mut said = Vec::new();
     let mut first = out.take(4096);

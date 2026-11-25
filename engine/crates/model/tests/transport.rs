@@ -1043,3 +1043,88 @@ async fn recorded_answers_through_the_transport() {
         assert_eq!(got, (calls, class), "{name}");
     }
 }
+
+// A credential that does not last.
+
+struct Gives {
+    at: String,
+    asked: std::sync::atomic::AtomicUsize,
+    fails: bool,
+}
+impl axiom_model::Renew for Gives {
+    fn now(
+        &self,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Arc<Credential>, Error>> + Send + '_>> {
+        Box::pin(async move {
+            let n = self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fails {
+                return Err(Error::new(Class::Auth, Retry::Never, "sign in again"));
+            }
+            let secret = Secret::new(format!("{KEY}-{n}"));
+            Ok(Arc::new(
+                Credential::new(endpoint(&self.at).origin(), &Auth::Bearer, secret).unwrap(),
+            ))
+        })
+    }
+}
+fn renewed(url: &str, made_for: &str, fails: bool) -> (Client, Arc<Gives>) {
+    let g = Arc::new(Gives { at: made_for.into(), asked: 0.into(), fails });
+    let c = Client::renewed(Profile::chatgpt(), endpoint(url), g.clone(), Options::default());
+    (c.unwrap(), g)
+}
+
+#[tokio::test]
+async fn a_credential_that_is_renewed_is_asked_for_before_each_request() {
+    let body = fixture("responses-from-documentation/tool.sse");
+    let models = r#"{"models":[
+        {"slug":"b","display_name":"B","visibility":"list"},
+        {"slug":"hidden","display_name":"H","visibility":"hide"},
+        {"slug":"odd","display_name":"O"},
+        {"slug":"a","display_name":"A","visibility":"list"}]}"#;
+    let json = |status, body: String| {
+        let h = head(status, "content-type: application/json\r\nconnection: close\r\n");
+        Server::new(vec![send(h), send(body)])
+    };
+    let s = json("200 OK", models.into()).await;
+    let (c, g) = renewed(&s.url(), &s.url(), false);
+    for n in 0..3 {
+        let list = c.list_models().await.unwrap();
+        assert_eq!(list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert!(list[0].native.get().contains("display_name"));
+        assert!(s.asked()[n].head.starts_with("GET /v1/models HTTP"));
+    }
+    for (n, a) in s.asked().iter().enumerate() {
+        assert_eq!(a.header("authorization"), Some(format!("Bearer {KEY}-{n}").as_str()));
+    }
+    assert_eq!(g.asked.load(std::sync::atomic::Ordering::SeqCst), 3);
+
+    let s = Server::new(vec![send(STREAM), Step::Send(body)]).await;
+    let (c, _) = renewed(&s.url(), &s.url(), false);
+    let (r, e) = all(begins(&c).await).await;
+    assert_eq!((e, r.message.calls().count()), (None, 1));
+    let [asked] = s.asked().try_into().unwrap();
+    assert!(asked.head.starts_with("POST /v1/responses HTTP"));
+    assert_eq!(asked.header("authorization"), Some(format!("Bearer {KEY}-0").as_str()));
+    // What a plan refuses in a request is not in it, though it was asked for here.
+    let sent: serde_json::Value = serde_json::from_slice(&asked.body).unwrap();
+    let keys: Vec<&str> = sent.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["input", "model", "store", "stream"]);
+    assert!(!format!("{c:?}").contains("anary"));
+
+    // What it was is kept out of what the server says.
+    let s = json("401 x", format!(r#"{{"error":{{"message":"not {KEY}-0"}}}}"#)).await;
+    let (c, _) = renewed(&s.url(), &s.url(), false);
+    assert_eq!(fails(&c).await.class, Class::Auth);
+}
+
+#[tokio::test]
+async fn without_one_nothing_is_sent() {
+    let s = Server::new(vec![]).await;
+    let (c, _) = renewed(&s.url(), &s.url(), true);
+    assert_eq!(fails(&c).await.message, "sign in again");
+    assert!(c.list_models().await.is_err());
+    // Nor one made for somewhere else.
+    let (c, _) = renewed(&s.url(), "https://api.openai.com/v1", false);
+    assert_eq!(fails(&c).await.class, Class::BadRequest);
+    assert!(c.list_models().await.is_err() && s.asked().is_empty());
+}

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:axiom/shell/outside.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A widget test that hangs is named within a minute. Flutter's own limit is ten, and three of
@@ -9,5 +10,7 @@ Future<void> testExecutable(FutureOr<void> Function() main) async {
   if (binding is AutomatedTestWidgetsFlutterBinding) {
     binding.defaultTestTimeout = const Timeout(Duration(minutes: 1));
   }
+  // No test opens anything.
+  opens = (u) => throw StateError('a test would have opened $u');
   await main();
 }

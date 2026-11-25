@@ -191,7 +191,7 @@ Each is stated so that a type, a module boundary or a test can enforce it.
 - **SI-17** Labels (origin, taint) are attached at ingestion and only ever union; summarisation, memory and agent messages preserve them.
 - **SI-18** A tainted context holding private data cannot use an exfil-capable tool without fresh approval.
 - **SI-19** Tool grants are keyed on (principal, tool identity, schema hash, argument shape, workspace); any change invalidates.
-- **SI-20** No listener on any IP address. Local IPC authenticates the peer's OS identity and a per-launch token.
+- **SI-20** No listener on any IP address, except on `127.0.0.1` while a sign-in waits for its person (decision 0013). Local IPC authenticates the peer's OS identity and a per-launch token.
 - **SI-21** Workspace id is part of every storage key; retrieval APIs take a workspace capability, not an id.
 - **SI-22** Engine git and tool binaries are absolute, resolved outside writable roots; git runs only through the hardened wrapper.
 - **SI-23** Every privileged action is written to the append-only audit log before it happens, with the originating agent chain.

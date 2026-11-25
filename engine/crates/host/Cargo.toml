@@ -51,6 +51,8 @@ keyring-core = "1"
 windows-native-keyring-store = { version = "1", default-features = false }
 
 [dev-dependencies]
+# The sign-in's tests sign identity tokens; axiom-model has it anyway.
+ring = "0.17"
 # Tests damage and lock the journal behind the host's back.
 rusqlite.workspace = true
 tempfile.workspace = true

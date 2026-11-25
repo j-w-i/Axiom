@@ -23,6 +23,7 @@ pub fn site() -> Site {
         user: "me".into(),
         tmp: place("tmp"),
         written: Reach::none(),
+        config: None,
         limits: Limits::default(),
     }
 }
@@ -36,6 +37,9 @@ pub fn start(access: Access) -> Start {
         resume: None,
         trust: Trust::Given,
         by: By::Person,
+        tools: None,
+        hands: false,
+        system: None,
     }
 }
 

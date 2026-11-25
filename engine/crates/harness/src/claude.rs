@@ -18,7 +18,7 @@ use axiom_proto::{Outcome, Provenance, Usage};
 use serde_json::{Value, json};
 
 use crate::{
-    Start, Trust,
+    Server, Start, Trust,
     event::*,
     talk::{Keep, Out, Talk, Word, has, id, list, loose, owned, text},
 };
@@ -50,7 +50,45 @@ fn mode(a: Access) -> &'static str {
     }
 }
 
+/// The model's loop alone: it has no tools but the server's, and reads no settings but its person's.
+fn hands(s: &Start, server: &Server) -> Result<Vec<String>, Error> {
+    let config = json!({"mcpServers": {server.name.as_str():
+        {"type": "stdio", "command": server.command.as_str(), "args": server.args}}});
+    let mut args: Vec<String> = [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        // Whatever is not allowed here is refused; whoever is behind the server does the asking.
+        "--permission-mode",
+        "dontAsk",
+        "--permission-prompts",
+        "none",
+        "--tools",
+        "",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--mcp-config",
+    ]
+    .map(String::from)
+    .into();
+    args.extend([config.to_string(), "--allowedTools".into(), format!("mcp__{}__*", server.name)]);
+    if let Some(f) = &s.system {
+        args.extend(["--append-system-prompt-file".into(), f.to_string()]);
+    }
+    Ok(args)
+}
+
 pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
+    if let (true, Some(server)) = (s.hands, &s.tools) {
+        let mut args = hands(s, server)?;
+        chosen(&mut args, s)?;
+        return Ok(Launch { args, containment: Containment::None });
+    }
     if s.access == Access::Ask && p == Prompts::Refused {
         return Err(Error::NoMode(s.access));
     }
@@ -84,11 +122,25 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
             containment = Containment::Harness;
         }
     }
+    // Who only looks has no tools of servers; whoever is asked about none of them could not use it.
+    if let Some(t) = s.tools.as_ref().filter(|_| s.access == Access::Work) {
+        let server = json!({"mcpServers": {t.name.as_str():
+            {"type": "stdio", "command": t.command.as_str(), "args": t.args}}});
+        add(&["--mcp-config", &server.to_string()]);
+        add(&["--allowedTools", &format!("mcp__{}__{}", t.name, t.tool)]);
+    }
     if s.trust == Trust::Withheld {
         // It shows no trust dialog in this mode, and runs what a project's settings and `.mcp.json`
         // name. So it reads neither.
         add(&["--setting-sources", "user"]);
     }
+    chosen(&mut args, s)?;
+    Ok(Launch { args, containment })
+}
+
+/// What a person chose, and the session to go on with.
+fn chosen(args: &mut Vec<String>, s: &Start) -> Result<(), Error> {
+    let mut add = |all: &[&str]| args.extend(all.iter().map(|a| (*a).to_owned()));
     if let Some(m) = &s.model {
         add(&["--model", m]);
     }
@@ -102,7 +154,7 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
             add(&["--session-id", &fresh]);
         }
     }
-    Ok(Launch { args, containment })
+    Ok(())
 }
 
 pub(crate) fn caps(p: Prompts) -> Caps {
@@ -159,6 +211,8 @@ struct Asked {
 pub(crate) struct Claude {
     prompts: Prompts,
     mode: &'static str,
+    /// What the names of all its tools begin with, if it has only those it was given.
+    only: Option<String>,
     model: Option<String>,
     session: String,
     caps: Caps,
@@ -187,7 +241,8 @@ impl Claude {
         let made = made.and_then(|i| l.args.get(i + 1)).cloned();
         Self {
             prompts,
-            mode: mode(s.access),
+            mode: if s.hands { "dontAsk" } else { mode(s.access) },
+            only: s.tools.as_ref().filter(|_| s.hands).map(|t| format!("mcp__{}__", t.name)),
             model: s.model,
             session: s.resume.or(made).unwrap_or_default(),
             caps: caps(prompts),
@@ -374,6 +429,15 @@ impl Claude {
                 self.cancels_queued = list(v, "/capabilities")
                     .iter()
                     .any(|c| c.as_str() == Some("interrupt_cancel_queued_v1"));
+                // Who was told to have only these, has only these.
+                if let Some(only) = &self.only
+                    && let Some(own) = list(v, "/tools")
+                        .iter()
+                        .find(|t| !t.as_str().is_some_and(|t| t.starts_with(only.as_str())))
+                {
+                    let own: String = own.to_string().chars().take(80).collect();
+                    o.end(Why::Boundary, format!("it has a tool it was told not to have: {own}"));
+                }
                 let mode = text(v, "/permissionMode").unwrap_or("none it names");
                 if !self.keeps_to(mode) {
                     o.end(

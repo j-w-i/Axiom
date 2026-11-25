@@ -8,9 +8,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use axiom_engine::Other;
-use axiom_policy::rules::Decision;
-use axiom_proto::{Access, AgentId, Outcome, RunId};
+use axiom_engine::{Deed, Desk, Other, Say, Stage};
+use axiom_policy::{Ask, audit::Containment, rules::Decision};
+use axiom_proto::{Access, AgentId, AgentState, Answerable, Body, Outcome, RequestId, RunId};
 use axiom_tools::{Output, Spec};
 use serde_json::{Value, json};
 
@@ -201,6 +201,109 @@ fn bad(text: impl Into<String>) -> Output {
 }
 fn good(text: String, summary: String) -> Output {
     Output { ok: true, text, rest: None, detail: json!({ "summary": summary }) }
+}
+
+/// A call that did not come through Axiom's own loop: judged, asked about, put on record and done in
+/// the same way. Dropped, nothing more of it is done.
+pub async fn call(f: &Floor, desk: &Desk, args: &Value) -> Output {
+    let o = judge(f, args).await;
+    let slot = f.agents.slot(&f.session.id, &f.agent);
+    let mut answered = None;
+    match o.decision {
+        Decision::Deny => return bad(format!("Not done: {}.", o.why)),
+        Decision::Allow => {}
+        Decision::Ask => {
+            let ask = Ask {
+                chain: chain(f, &slot),
+                workspace: f.workspace().await.unwrap_or_default(),
+                tool: TOOL.into(),
+                schema: specs().first().map(axiom_tools::schema_digest).unwrap_or_default(),
+                subject: o.subject.clone(),
+                scope: format!("{}. Asked because {}.", o.scope, o.why),
+                unsandboxed: false,
+            };
+            if !desk.allowed(&ask) {
+                match asked(f, desk, &ask, &o.what).await {
+                    Ok(id) => answered = Some((id, ask.digest())),
+                    Err(why) => return bad(why),
+                }
+            }
+        }
+    }
+    if o.changes {
+        let deed = Deed {
+            chain: chain(f, &slot),
+            workspace: f.workspace().await.unwrap_or_default(),
+            tool: TOOL.into(),
+            subject: o.subject,
+            decision: o.decision,
+            rules: vec![],
+            answered,
+        };
+        // What is done is the host's own doing, but for a program that nothing of Axiom's holds back.
+        if let Err(e) = f.record(deed, Containment::None).await {
+            return bad(format!("Not done: {e}."));
+        }
+    }
+    if let Err(e) = f.sync().await {
+        return bad(format!("Not done: {e}."));
+    }
+    perform(f, args).await
+}
+
+/// Takes the question back, if whoever asked goes before it is answered.
+struct Shown<'a> {
+    f: &'a Floor,
+    id: Option<RequestId>,
+}
+impl Drop for Shown<'_> {
+    fn drop(&mut self) {
+        if let Some(request) = self.id.take() {
+            let (f, agent) = (self.f.clone(), self.f.agent.clone());
+            tokio::spawn(async move {
+                let closed = Body::RequestClosed { request, answer: "expired".into() };
+                let state = Body::AgentState { agent, state: AgentState::Running };
+                let _ = f.say(vec![Say::Event(closed), Say::Event(state)]).await;
+            });
+        }
+    }
+}
+
+async fn asked(f: &Floor, desk: &Desk, ask: &Ask, what: &str) -> Result<RequestId, String> {
+    let no = |e: &dyn std::fmt::Display| format!("Not done: {e}.");
+    let mut open = desk.open(ask).map_err(|e| no(&e))?;
+    let id = open.id.clone();
+    let opened = vec![
+        Say::Event(Body::RequestOpened {
+            request: id.clone(),
+            agent: f.agent.clone(),
+            what: what.into(),
+            subject: ask.subject.clone(),
+            scope: ask.scope.clone(),
+            answerable: Answerable::Live,
+            digest: ask.digest(),
+            item: None,
+            session: true,
+        }),
+        Say::Event(Body::AgentState { agent: f.agent.clone(), state: AgentState::Asking }),
+    ];
+    f.say(opened).await.map_err(|e| no(&e))?;
+    let mut shown = Shown { f, id: Some(id.clone()) };
+    f.sync().await.map_err(|e| no(&e))?;
+    let approval = tokio::select! {
+        biased;
+        () = f.closed() => return Err("Not done: the session is closed.".into()),
+        a = open.wait() => a,
+    };
+    let yes = approval.is_some_and(|a| desk.spend(a, ask));
+    shown.id = None;
+    let answer = if yes { "allowed" } else { "denied" };
+    let closed = vec![
+        Say::Event(Body::RequestClosed { request: id.clone(), answer: answer.into() }),
+        Say::Event(Body::AgentState { agent: f.agent.clone(), state: AgentState::Running }),
+    ];
+    f.say(closed).await.map_err(|e| no(&e))?;
+    if yes { Ok(id) } else { Err("Not done: a person said no.".into()) }
 }
 
 pub async fn perform(f: &Floor, args: &Value) -> Output {

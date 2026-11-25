@@ -63,6 +63,8 @@ class Connection {
     this.url,
     this.secret = false,
     this.lasts = false,
+    this.signIn,
+    this.problem,
   });
   Connection.decode(Json j)
     : id = j['id']! as String,
@@ -70,13 +72,52 @@ class Connection {
       provider = j['provider']! as String,
       url = j['url'] as String?,
       secret = j['secret'] as bool? ?? false,
-      lasts = j['lasts'] as bool? ?? false;
+      lasts = j['lasts'] as bool? ?? false,
+      signIn = j['sign_in'] as String?,
+      problem = j['problem'] as String?;
+
+  /// Why it cannot be used until somebody signs in to it again.
+  final String? problem;
+
+  /// A plan that is signed in to here, and not a key.
+  bool get plan => provider == 'chatgpt';
+
+  /// Of an account of a program of the person's own: the command they sign in with, in a terminal.
+  final String? signIn;
   final String id, name, provider;
   final String? url;
 
   /// Whether it has a secret, and whether the system keeps it when the host stops. The secret itself
   /// never comes back.
   final bool secret, lasts;
+}
+
+/// A sign-in on its way. [connection], [problem]: how it ended.
+class Signin {
+  const Signin(
+    this.id,
+    this.url,
+    this.again, {
+    this.finishing = false,
+    this.connection,
+    this.problem,
+  });
+  final String id, url;
+
+  /// The account that is signed in to again.
+  final String? again;
+
+  /// Its person is done in the browser.
+  final bool finishing;
+  final String? connection, problem;
+  bool get waits => connection == null && problem == null;
+
+  Signin told(Json j) => switch (j['state']) {
+    'done' => Signin(id, url, again, connection: j['connection']! as String),
+    'failed' => Signin(id, url, again, problem: j['problem']! as String),
+    'finishing' => Signin(id, url, again, finishing: true),
+    _ => this,
+  };
 }
 
 /// Words of a folder for agents: a file, and which content of it.
@@ -121,6 +162,9 @@ class Changed {
   final String path, what;
 }
 
+/// The environment in which what an agent does is done by Axiom, whatever its harness.
+const axiomTools = 'axiom';
+
 /// A program of the person's own that the host can drive.
 class HarnessInfo {
   const HarnessInfo(
@@ -130,6 +174,8 @@ class HarnessInfo {
     this.problem,
     this.needsTrust = false,
     this.access = const [],
+    this.accounts,
+    this.hands = false,
   });
   HarnessInfo.decode(Json j)
     : id = j['id']! as String,
@@ -137,6 +183,8 @@ class HarnessInfo {
       program = j['program'] as String?,
       problem = j['problem'] as String?,
       needsTrust = j['needs_trust'] as bool? ?? true,
+      accounts = j['accounts'] as String?,
+      hands = j['hands'] as bool? ?? false,
       access = [
         for (final a in j['access'] as List<Object?>? ?? const [])
           _enum(Access.values, a, Access.unknown),
@@ -145,6 +193,12 @@ class HarnessInfo {
 
   /// Null if it is not there or may not be started; then [problem] says why.
   final String? program, problem;
+
+  /// Axiom's tools can stand in place of its own: the environment [axiomTools].
+  final bool hands;
+
+  /// What an account of it beside the first is called as a provider, if there can be any.
+  final String? accounts;
 
   /// It cannot be told to ignore a folder's own settings for it.
   final bool needsTrust;

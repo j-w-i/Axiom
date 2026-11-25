@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../host/host_store.dart';
@@ -14,6 +15,7 @@ import '../ui/overlay.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'outside.dart';
 
 /// What the host said, in a sentence.
 String wordsOf(Object e) => switch (e) {
@@ -34,7 +36,8 @@ ServiceMark? markOf(String? provider, String? model, [String? harness]) =>
     } ??
     switch (provider) {
       'anthropic' => ServiceMark.claude,
-      'openai' => ServiceMark.openai,
+      'claude-code' => ServiceMark.claudecode,
+      'openai' || 'chatgpt' => ServiceMark.openai,
       'gemini' => ServiceMark.gemini,
       'openrouter' => ServiceMark.openrouter,
       _ => null,
@@ -162,6 +165,23 @@ class StartDraft extends ChangeNotifier {
   /// The folder's own settings for that may take effect.
   bool trust = false;
 
+  /// Of a program: Axiom's tools in place of its own, where it can be told so.
+  bool hands = true;
+  bool get withHands => hands && (delegated?.hands ?? false);
+
+  /// What it may be, as it is set up now.
+  List<Access> get can => withHands ? Access.values : delegated?.access ?? Access.values;
+
+  void fit() {
+    // The least it has a mode for, if not the one that is chosen.
+    if (!can.contains(access)) {
+      access = [Access.ask, Access.read, Access.work].where(can.contains).firstOrNull ?? access;
+    }
+  }
+
+  /// Of a program: another account than its first.
+  String? account;
+
   HarnessInfo? get delegated =>
       harness == 'axiom' ? null : store.harnesses.where((h) => h.id == harness).firstOrNull;
 
@@ -169,13 +189,10 @@ class StartDraft extends ChangeNotifier {
     harness = id;
     problem = null;
     trust = false;
+    account = null;
     typed = false;
     model.clear();
-    final can = delegated?.access ?? Access.values;
-    // The least it has a mode for, if not the one that is chosen.
-    if (!can.contains(access)) {
-      access = [Access.ask, Access.read, Access.work].where(can.contains).firstOrNull ?? access;
-    }
+    fit();
   });
   String? connection, problem;
   Access access = Access.ask;
@@ -260,7 +277,8 @@ class StartDraft extends ChangeNotifier {
         harness: harness,
         provider: other ? null : c!.provider,
         model: written.isEmpty ? null : written,
-        connection: other ? null : c!.id,
+        connection: other ? account : c!.id,
+        environment: withHands ? axiomTools : null,
       );
       final followed = [
         for (final w in words)
@@ -273,7 +291,7 @@ class StartDraft extends ChangeNotifier {
         m = _Made(session, where);
         _made = m;
       }
-      final how = (x.provider, x.model, x.connection, access);
+      final how = (x.provider, x.model, x.connection, x.environment, access);
       if (m.agent == null) {
         m.agent = await store.addAgent(
           m.session,
@@ -365,7 +383,7 @@ class _StartPageState extends State<StartPage> {
     builder: (context, _) {
       final s = d.store;
       final t = Ax.of(context), c = t.colors;
-      final all = s.connections;
+      final all = s.own;
       final chosen = all.where((x) => x.id == d.connection).firstOrNull ?? all.firstOrNull;
       if (chosen != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) => d.ask(chosen.id));
@@ -380,6 +398,11 @@ class _StartPageState extends State<StartPage> {
         for (final h in s.harnesses)
           if (h.program != null) h,
       ];
+      // Those that most people would look for: that they are not there is said.
+      final missing = [
+        for (final h in s.harnesses)
+          if (h.program == null && const {'claude', 'codex'}.contains(h.id)) h,
+      ];
       final other = d.delegated;
       final adds = d.into != null;
       bool filled(TextEditingController x) => x.text.trim().isNotEmpty;
@@ -387,12 +410,12 @@ class _StartPageState extends State<StartPage> {
           !d.busy &&
           (d.harness == 'axiom'
               ? chosen != null && filled(d.model)
-              : other != null && (!other.needsTrust || d.trust)) &&
+              : other != null && (d.withHands || !other.needsTrust || d.trust)) &&
           (adds ? filled(d.name) : filled(d.say) && filled(d.folder)) &&
           s.phase == HostPhase.connected;
       final access = [
         for (final i in accessItems)
-          if (other == null || other.access.contains(i.value))
+          if (other == null || d.can.contains(i.value))
             i
           else
             AxMenuItem(i.value, i.label, enabled: false, why: '${other.name} has no mode for it'),
@@ -418,6 +441,16 @@ class _StartPageState extends State<StartPage> {
               oneLine(h.name, 40),
               detail: 'its own sign-in',
               mark: markOf(null, null, h.id),
+            ),
+          for (final h in missing)
+            AxMenuItem(
+              h.id,
+              oneLine(h.name, 40),
+              mark: markOf(null, null, h.id),
+              enabled: false,
+              why: h.problem != null && !h.problem!.contains('is not in any of')
+                  ? oneLine(h.problem!, 80)
+                  : 'not on this computer',
             ),
         ],
         value: d.harness,
@@ -516,13 +549,50 @@ class _StartPageState extends State<StartPage> {
                   ],
                 ),
               ),
-          if (here.isNotEmpty || d.harness != 'axiom')
+          if (here.isNotEmpty || missing.isNotEmpty || d.harness != 'axiom')
             FormPart(
               null,
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: [runsWith, if (d.harness != 'axiom') accessSelect],
+                children: [
+                  runsWith,
+                  if (s.accountsOf(d.harness).isNotEmpty)
+                    AxSelect<String>(
+                      label: 'Account',
+                      items: [
+                        const AxMenuItem('', 'Its own sign-in'),
+                        for (final x in s.accountsOf(d.harness))
+                          AxMenuItem(x.id, oneLine(x.name, 60), mark: markOf(x.provider, null)),
+                      ],
+                      value: d.account ?? '',
+                      onChanged: (v) => d.change(() => d.account = v.isEmpty ? null : v),
+                    ),
+                  if (other?.hands ?? false)
+                    AxSelect<bool>(
+                      label: 'Tools',
+                      items: [
+                        const AxMenuItem(
+                          true,
+                          'Axiom\'s',
+                          detail: 'asked about and contained by Axiom',
+                          mark: ServiceMark.axiom,
+                        ),
+                        AxMenuItem(
+                          false,
+                          'Its own',
+                          detail: 'outside Axiom\'s sandbox',
+                          mark: markOf(null, null, d.harness),
+                        ),
+                      ],
+                      value: d.hands,
+                      onChanged: (v) => d.change(() {
+                        d.hands = v;
+                        d.fit();
+                      }),
+                    ),
+                  if (d.harness != 'axiom') accessSelect,
+                ],
               ),
             ),
           if (d.harness != 'axiom') ...[
@@ -535,23 +605,24 @@ class _StartPageState extends State<StartPage> {
                 placeholder: 'Its own choice',
               ),
             ),
-            FormPart(
-              null,
-              note: other == null
-                  ? 'It is not on this computer any more.'
-                  : other.needsTrust
-                  ? '${other.name} cannot be told to ignore what the folder says. Those settings can '
-                        'name programs that it starts.'
-                  : 'Those settings can name programs that it starts.',
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: AxCheck(
-                  label: 'Let the folder\'s own settings for it take effect',
-                  value: d.trust,
-                  onChanged: (v) => d.change(() => d.trust = v),
+            if (!d.withHands)
+              FormPart(
+                null,
+                note: other == null
+                    ? 'It is not on this computer any more.'
+                    : other.needsTrust
+                    ? '${other.name} cannot be told to ignore what the folder says. Those settings can '
+                          'name programs that it starts.'
+                    : 'Those settings can name programs that it starts.',
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AxCheck(
+                    label: 'Let the folder\'s own settings for it take effect',
+                    value: d.trust,
+                    onChanged: (v) => d.change(() => d.trust = v),
+                  ),
                 ),
               ),
-            ),
           ] else if (all.isEmpty)
             FormPart(
               'Account',
@@ -639,6 +710,9 @@ class _StartPageState extends State<StartPage> {
                 child: Text(
                   d.harness == 'axiom'
                       ? 'Commands run contained: no network, writing only in the folder.'
+                      : d.withHands
+                      ? 'Its model and your sign-in; Axiom\'s tools, questions and sandbox. You are asked '
+                            'before it is started.'
                       : 'It runs outside Axiom\'s sandbox. You are asked before it is started.',
                   style: t.type.small.ink(c.ink3),
                 ),
@@ -654,8 +728,10 @@ class _StartPageState extends State<StartPage> {
 String providerName(String p) => switch (p) {
   'anthropic' => 'Anthropic API',
   'openai' => 'OpenAI API',
+  'chatgpt' => 'ChatGPT plan',
   'gemini' => 'Gemini API',
   'openrouter' => 'OpenRouter',
+  'claude-code' => 'Claude Code, another account',
   'lm-studio' => 'LM Studio on this machine',
   'openai-compatible' => 'OpenAI-compatible server',
   _ => oneLine(p, 40),
@@ -685,6 +761,9 @@ class _AccountsPageState extends State<AccountsPage> {
   String _provider = 'lm-studio';
   String? _problem, _leaving;
   bool _busy = false;
+
+  /// The browser was opened for the sign-in that is on.
+  bool _opened = false;
 
   @override
   void initState() {
@@ -729,12 +808,25 @@ class _AccountsPageState extends State<AccountsPage> {
     _url.clear();
   });
 
+  /// Only for a person's press: it opens their browser.
+  Future<void> _signIn({String? again}) => _do(() async {
+    final s = await widget.store.beginSignin(again: again);
+    _opened = await browse(s.url);
+  });
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.store,
     builder: (context, _) {
       final t = Ax.of(context), c = t.colors;
-      final own = _provider == 'openai-compatible', from = _keyFrom(_provider);
+      final own = _provider == 'openai-compatible', plan = _provider == 'chatgpt';
+      final signin = widget.store.signin;
+      final from = _keyFrom(_provider);
+      final programs = [
+        for (final h in widget.store.harnesses)
+          if (h.program != null && h.accounts != null) h.accounts!,
+      ];
+      final program = programs.contains(_provider);
       final ready =
           !_busy &&
           _name.text.trim().isNotEmpty &&
@@ -744,7 +836,7 @@ class _AccountsPageState extends State<AccountsPage> {
         title: 'Accounts and servers',
         problem: _problem,
         children: [
-          for (final x in widget.store.connections)
+          for (final x in widget.store.connections) ...[
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
@@ -769,6 +861,9 @@ class _AccountsPageState extends State<AccountsPage> {
                             providerName(x.provider),
                             if (x.url case final u?) oneLine(u, 60),
                             switch (x) {
+                              Connection(signIn: _?) => 'its own sign-in',
+                              Connection(plan: true, lasts: true) => 'signed in',
+                              Connection(plan: true) => 'signed in until the host stops',
                               Connection(lasts: true) => 'key in the system\'s store',
                               Connection(secret: true) => 'key until the host stops',
                               _ => 'no key',
@@ -796,8 +891,13 @@ class _AccountsPageState extends State<AccountsPage> {
                           ? null
                           : () => unawaited(
                               _do(() async {
-                                await widget.store.disconnect(x.id);
+                                final ended = await widget.store.disconnect(x.id);
                                 _leaving = null;
+                                if (ended == false) {
+                                  _problem =
+                                      'It is removed here. OpenAI did not confirm that it is signed '
+                                      'out there: Axiom can be disconnected in ChatGPT\'s settings.';
+                                }
                               }),
                             ),
                     ),
@@ -810,6 +910,26 @@ class _AccountsPageState extends State<AccountsPage> {
                 ],
               ),
             ),
+            if (x.problem case final p?)
+              Padding(
+                padding: const EdgeInsets.only(left: 24, bottom: 12),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(visible(p), style: t.type.small.ink(c.faultText))),
+                    const SizedBox(width: 10),
+                    AxButton(
+                      label: 'Sign in again',
+                      onPressed: _busy ? null : () => unawaited(_signIn(again: x.id)),
+                    ),
+                  ],
+                ),
+              ),
+            if (x.signIn case final command?)
+              Padding(
+                padding: const EdgeInsets.only(left: 24, bottom: 12),
+                child: _SignIn(command, leaving: _leaving == x.id),
+              ),
+          ],
           if (widget.store.connections.isNotEmpty) const SizedBox(height: 18),
           FormPart(
             null,
@@ -825,7 +945,8 @@ class _AccountsPageState extends State<AccountsPage> {
                     'gemini',
                     'openrouter',
                     'openai-compatible',
-                  ])
+                    'chatgpt',
+                  ].followedBy(programs))
                     AxMenuItem(p, providerName(p), mark: markOf(p, null)),
                 ],
                 value: _provider,
@@ -837,14 +958,32 @@ class _AccountsPageState extends State<AccountsPage> {
               ),
             ),
           ),
-          FormPart(
-            'Name',
-            child: AxField(
-              label: 'Name',
-              controller: _name,
-              placeholder: 'So you can tell it apart',
+          if (signin != null && (plan || signin.again != null || !signin.waits))
+            _Signing(
+              signin,
+              opened: _opened,
+              onOpen: () => unawaited(_do(() async => _opened = await browse(signin.url))),
+              onClose: () => unawaited(_do(widget.store.cancelSignin)),
+            )
+          else if (plan)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(
+                'You sign in with OpenAI, in your browser. Axiom\'s own agents then work on your '
+                'plan: there is no key, and nothing is billed to an API account. Axiom keeps what '
+                'OpenAI gives it in the system\'s store.',
+                style: t.type.label.ink(c.ink3),
+              ),
             ),
-          ),
+          if (!plan)
+            FormPart(
+              'Name',
+              child: AxField(
+                label: 'Name',
+                controller: _name,
+                placeholder: 'So you can tell it apart',
+              ),
+            ),
           if (own)
             FormPart(
               'Address',
@@ -856,7 +995,17 @@ class _AccountsPageState extends State<AccountsPage> {
                 placeholder: 'https://example.com/v1',
               ),
             ),
-          if (_provider != 'lm-studio')
+          if (program)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(
+                'Your own Claude Code keeps it in a folder of its own. You sign in to it yourself, in '
+                'a terminal, with the command that is shown once it is added. Agents use an account '
+                'only where you choose it.',
+                style: t.type.label.ink(c.ink3),
+              ),
+            ),
+          if (_provider != 'lm-studio' && !program && !plan)
             FormPart(
               'Key',
               note: from != null
@@ -866,12 +1015,19 @@ class _AccountsPageState extends State<AccountsPage> {
             ),
           Row(
             children: [
-              AxButton(
-                label: 'Add',
-                icon: AxIcon.plus,
-                tone: AxTone.primary,
-                onPressed: ready ? () => unawaited(_add()) : null,
-              ),
+              if (plan)
+                AxButton(
+                  label: 'Continue with ChatGPT',
+                  tone: AxTone.primary,
+                  onPressed: _busy || (signin?.waits ?? false) ? null : () => unawaited(_signIn()),
+                )
+              else
+                AxButton(
+                  label: 'Add',
+                  icon: AxIcon.plus,
+                  tone: AxTone.primary,
+                  onPressed: ready ? () => unawaited(_add()) : null,
+                ),
               const SizedBox(width: 8),
               AxButton(label: 'Done', tone: AxTone.quiet, onPressed: widget.onDone),
             ],
@@ -880,4 +1036,153 @@ class _AccountsPageState extends State<AccountsPage> {
       );
     },
   );
+}
+
+/// A sign-in that waits for its person, or how it ended.
+class _Signing extends StatefulWidget {
+  const _Signing(this.signin, {required this.opened, required this.onOpen, required this.onClose});
+  final Signin signin;
+  final bool opened;
+  final VoidCallback onOpen, onClose;
+  @override
+  State<_Signing> createState() => _SigningState();
+}
+
+class _SigningState extends State<_Signing> {
+  bool _copied = false;
+
+  @override
+  void didUpdateWidget(_Signing old) {
+    super.didUpdateWidget(old);
+    if (old.signin.id != widget.signin.id) _copied = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors, s = widget.signin;
+    final (words, more) = switch (s) {
+      Signin(connection: _?) when s.again == null => (
+        'You\'re using your ChatGPT plan',
+        'What Axiom\'s agents do with this account counts towards your plan\'s limits.',
+      ),
+      Signin(connection: _?) => ('You are signed in again', null),
+      Signin(:final problem?) => ('You are not signed in', visible(problem)),
+      Signin(finishing: true) => ('Signing in…', null),
+      _ when widget.opened => ('Go on in your browser', 'Axiom notices when you are done there.'),
+      _ => (
+        'Open the address in your browser',
+        'It could not be opened from here. It is for a browser on this computer.',
+      ),
+    };
+    return Semantics(
+      liveRegion: true,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Surface(
+          c.block,
+          radius: AxRadius.key,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(words, style: t.type.uiStrong),
+                if (more case final m?) ...[
+                  const SizedBox(height: 3),
+                  Text(m, style: t.type.small.ink(s.problem == null ? c.ink3 : c.faultText)),
+                ],
+                if (!s.finishing) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (s.waits) ...[
+                        AxButton(
+                          label: widget.opened ? 'Open it again' : 'Open it',
+                          onPressed: widget.onOpen,
+                        ),
+                        AxButton(
+                          label: _copied ? 'Copied' : 'Copy the address',
+                          onPressed: () async {
+                            await Clipboard.setData(ClipboardData(text: s.url));
+                            if (mounted) setState(() => _copied = true);
+                          },
+                        ),
+                      ],
+                      AxButton(
+                        label: s.waits ? 'Cancel' : (s.problem == null ? 'Got it' : 'Close'),
+                        tone: AxTone.quiet,
+                        onPressed: widget.onClose,
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// How an account of a program is signed in to: by its person, in their own terminal.
+class _SignIn extends StatefulWidget {
+  const _SignIn(this.command, {required this.leaving});
+  final String command;
+
+  /// It is about to be removed here.
+  final bool leaving;
+  @override
+  State<_SignIn> createState() => _SignInState();
+}
+
+class _SignInState extends State<_SignIn> {
+  bool _copied = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Surface(
+                c.block,
+                radius: AxRadius.key,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  child: Text(
+                    // Whole: it is what its person is about to run.
+                    literal(widget.command),
+                    style: t.type.codeSmall.ink(c.ink2),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            AxButton(
+              label: _copied ? 'Copied' : 'Copy to sign in',
+              tone: AxTone.quiet,
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: widget.command));
+                if (mounted) setState(() => _copied = true);
+              },
+            ),
+          ],
+        ),
+        if (widget.leaving)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Removing it here does not sign it out, and leaves its folder.',
+              style: t.type.small.ink(c.ink3),
+            ),
+          ),
+      ],
+    );
+  }
 }

@@ -333,6 +333,13 @@ pub struct HarnessInfo {
     pub needs_trust: bool,
     /// What it has a mode for.
     pub access: Vec<Access>,
+    /// Axiom's tools can stand in place of its own (the environment `axiom`): then it is asked about
+    /// and contained as Axiom's own agents are, and has every mode of access.
+    #[serde(default)]
+    pub hands: bool,
+    /// What an account of it beside the first is called as a provider, if there can be any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -341,6 +348,12 @@ pub enum Call {
     /// Must be the first line on a connection.
     #[serde(rename = "hello")]
     Hello { token: String, client: String, protocol: u32 },
+    /// Instead of `hello`, from a program an agent is: opens `peer.call` for it and nothing else.
+    #[serde(rename = "peer.hello")]
+    PeerHello { grant: String },
+    /// A call of one of the tools its answer named.
+    #[serde(rename = "peer.call")]
+    Peer { tool: String, args: serde_json::Value },
     #[serde(rename = "host.status")]
     Status {},
     /// Stops the host if nothing runs, or always with `force`.
@@ -390,7 +403,8 @@ pub enum Call {
         session: SessionId,
         name: String,
         /// With the harness `axiom`, `connection` and `model` are needed. Another is a program of the
-        /// person's own that signs in by itself ([`HarnessInfo`]): it has no connection.
+        /// person's own that signs in by itself ([`HarnessInfo`]): its connection, if it has one, is
+        /// another account of that program.
         execution: Execution,
         access: Access,
         /// The folder's own settings for such a program may take effect (SI-5).
@@ -453,8 +467,21 @@ pub enum Call {
         #[serde(default)]
         secret: Option<SecretText>,
     },
+    /// Of an account that was signed in to here, it is signed out of as well.
     #[serde(rename = "connection.remove")]
     ConnectionRemove { connection: String },
+    /// Signs in to a ChatGPT plan, or again to an account of one. Answers with an address for the
+    /// person's browser, which nothing here opens.
+    #[serde(rename = "signin.begin")]
+    SigninBegin {
+        #[serde(default)]
+        connection: Option<String>,
+    },
+    #[serde(rename = "signin.state")]
+    SigninState { signin: String },
+    /// Only while it waits for a person.
+    #[serde(rename = "signin.cancel")]
+    SigninCancel { signin: String },
     /// What can be used through a connection. Asks the provider.
     #[serde(rename = "model.list")]
     Models { connection: String },
@@ -500,6 +527,30 @@ pub struct Connection {
     /// Whether that is in the system's store, and not only as long as the host runs.
     #[serde(default)]
     pub lasts: bool,
+    /// Of an account of a program of the person's own: the command they sign in with, in a terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<String>,
+    /// Why it cannot be used until somebody signs in to it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
+/// How far a sign-in is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Signin {
+    /// For a person, in their browser.
+    Waiting,
+    /// They are done there.
+    Finishing,
+    Done {
+        connection: String,
+    },
+    Failed {
+        problem: String,
+    },
+    #[serde(other)]
+    Unknown,
 }
 
 /// Words of a workspace for agents: a file, and which content of it.

@@ -89,6 +89,7 @@ dependencies = [
  "axiom-tools",
  "keyring-core",
  "libc",
+ "ring",
  "rusqlite",
  "security-framework",
  "serde",
@@ -119,6 +120,7 @@ version = "0.0.1"
 dependencies = [
  "proptest",
  "reqwest",
+ "ring",
  "rustls",
  "rustls-platform-verifier",
  "serde",

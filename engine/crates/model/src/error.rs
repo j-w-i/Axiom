@@ -67,7 +67,7 @@ pub struct Error {
 }
 
 impl Error {
-    pub(crate) fn new(class: Class, retry: Retry, message: impl AsRef<str>) -> Self {
+    pub fn new(class: Class, retry: Retry, message: impl AsRef<str>) -> Self {
         Self {
             class,
             retry,
@@ -209,7 +209,18 @@ fn specific(code: &str, told: &Told) -> Option<Class> {
         | "organization_spend_limit_exceeded"
         | "project_spend_limit_exceeded"
         | "organization_usage_limit_exceeded"
-        | "payment_required" => return Some(Class::Billing),
+        | "payment_required"
+        // A plan's own limit: waiting is its person's to decide, and nothing is tried again for it.
+        | "subscription_sharing_usage_limit_exceeded" => return Some(Class::Billing),
+        "subscription_sharing_user_not_eligible"
+        | "subscription_sharing_invalid_user"
+        | "chatpass_v2_scope_not_authorized"
+        | "chatpass_v2_invalid_authorization_context" => return Some(Class::Auth),
+        "subscription_sharing_usage_unavailable" | "subscription_sharing_user_unavailable" => {
+            return Some(Class::Overloaded);
+        }
+        "subscription_sharing_unsupported_capability"
+        | "subscription_sharing_route_not_supported" => return Some(Class::BadRequest),
         "context_length_exceeded" | "request_too_large" => return Some(Class::ContextTooLong),
         "overloaded_error" | "server_is_overloaded" | "provider_overloaded" => {
             return Some(Class::Overloaded);
@@ -450,6 +461,16 @@ mod tests {
             (Some(429), openai("x", "organization_usage_limit_exceeded"), Billing, Never),
             (Some(429), openai("rate_limit_error", "slow_down"), RateLimit, Safe),
             (Some(503), openai("service_unavailable_error", "server_is_overloaded"), Overloaded, Safe),
+            // A ChatGPT plan's (siwc/token-sharing-open-source): a limit is never tried again.
+            (Some(429), openai("x", "subscription_sharing_usage_limit_exceeded"), Billing, Never),
+            (Some(403), openai("x", "subscription_sharing_user_not_eligible"), Auth, Never),
+            (Some(400), openai("x", "subscription_sharing_invalid_user"), Auth, Never),
+            (Some(400), openai("x", "chatpass_v2_scope_not_authorized"), Auth, Never),
+            (Some(400), openai("x", "chatpass_v2_invalid_authorization_context"), Auth, Never),
+            (Some(503), openai("x", "subscription_sharing_usage_unavailable"), Overloaded, Safe),
+            (Some(503), openai("x", "subscription_sharing_user_unavailable"), Overloaded, Safe),
+            (Some(400), openai("x", "subscription_sharing_unsupported_capability"), BadRequest, Never),
+            (Some(404), openai("x", "subscription_sharing_route_not_supported"), BadRequest, Never),
             (Some(400), openai("invalid_request_error", "invalid_json_schema"), BadRequest, Never),
             (Some(400), r#"{"error":{"code":400,"message":"The input token count (9) exceeds the maximum number of tokens allowed (8).","status":"INVALID_ARGUMENT"}}"#.into(), ContextTooLong, Never),
             (Some(400), r#"{"error":{"code":400,"message":"the input token count is a fine thing","status":"INVALID_ARGUMENT"}}"#.into(), BadRequest, Never),

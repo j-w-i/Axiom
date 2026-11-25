@@ -94,6 +94,29 @@ fn version_2_is_asked_for_and_what_is_chosen_is_spoken() {
 }
 
 #[test]
+fn a_server_is_given_in_the_form_that_is_settled() {
+    for (v, given) in [(1, true), (2, false)] {
+        let tools = Some(crate::Server {
+            name: "axiom".into(),
+            tool: "agent".into(),
+            command: crate::test::place("bin/axiom-host"),
+            args: vec!["--mcp".into(), "/f".into()],
+        });
+        let mut d = D::new(agent().talk(&site(), Some(Start { tools, ..start(Access::Ask) })));
+        d.sent();
+        d.hear(reply(0, hello(v)));
+        let want = match given {
+            true => {
+                json!([{"name": "axiom", "command": crate::test::place("bin/axiom-host").as_str(),
+                "args": ["--mcp", "/f"], "env": []}])
+            }
+            false => json!([]),
+        };
+        assert_eq!(d.one()["params"]["mcpServers"], want, "{v}");
+    }
+}
+
+#[test]
 fn an_agent_that_does_not_know_version_2_is_asked_again() {
     // An old one that trips over the words, and a new one that only has another version.
     for (code, data) in

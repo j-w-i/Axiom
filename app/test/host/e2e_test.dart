@@ -109,6 +109,49 @@ void main() {
     l.close();
   });
 
+  test('a sign-in waits for the browser and no longer than it is wanted', () async {
+    final store = HostStore(paths: paths, binary: null, spawn: false);
+    addTearDown(store.dispose);
+    await store.start();
+    // Nothing is opened, and nobody outside this machine is asked anything.
+    final first = await store.beginSignin();
+    final url = Uri.parse(first.url);
+    expect((url.scheme, url.host), ('https', 'auth.openai.com'));
+    final back = Uri.parse(url.queryParameters['redirect_uri']!);
+    expect((back.host, back.path), ('127.0.0.1', '/auth/callback'));
+    Future<String> come(Map<String, String> q) async {
+      final a = back.replace(queryParameters: q);
+      final s = await Socket.connect(InternetAddress.loopbackIPv4, back.port);
+      s.write('GET ${a.path}?${a.query} HTTP/1.1\r\nHost: 127.0.0.1:${back.port}\r\n\r\n');
+      final all = await s.cast<List<int>>().transform(utf8.decoder).join();
+      s.destroy();
+      return all.substring(0, 12);
+    }
+
+    expect(await come({'state': 'x', 'error': 'access_denied'}), 'HTTP/1.1 404');
+    expect(store.signin?.waits, isTrue);
+    final state = url.queryParameters['state']!;
+    expect(await come({'state': state, 'error': 'access_denied'}), 'HTTP/1.1 200');
+    for (var n = 0; n < 100 && store.signin!.waits; n++) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(store.signin?.problem, contains('not allowed'));
+    final second = await store.beginSignin();
+    expect(second.id, isNot(first.id));
+    await store.cancelSignin();
+    expect(store.signin, isNull);
+    final port = Uri.parse(Uri.parse(second.url).queryParameters['redirect_uri']!).port;
+    for (var n = 0; ; n++) {
+      try {
+        (await Socket.connect(InternetAddress.loopbackIPv4, port)).destroy();
+      } on SocketException {
+        break;
+      }
+      expect(n, lessThan(100), reason: 'it listens still');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  });
+
   test('closing closes the socket at once, and leaves nothing behind', () async {
     final watch = await link();
     Future<int> clients() async => ((await watch.call('host.status'))! as Json)['clients']! as int;

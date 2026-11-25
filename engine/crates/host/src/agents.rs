@@ -27,9 +27,9 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    connections::Connections,
-    delegated,
-    paths::{Paths, private_dir},
+    connections::{self, Connections},
+    delegated, mcp,
+    paths::{Paths, private_dir, private_file},
     peers,
     session::{self, Session},
     store::Store,
@@ -109,6 +109,32 @@ pub struct Finished {
     pub text: String,
 }
 
+/// Who holds a key, and what it opens: the tool `agent`, or all an agent of Axiom's has.
+#[derive(Debug, Clone)]
+pub struct Holder {
+    pub session: SessionId,
+    pub agent: AgentId,
+    pub all: bool,
+}
+
+/// A key that is good until this is dropped.
+pub struct Grant {
+    agents: Arc<Agents>,
+    key: String,
+    pub file: PathBuf,
+    /// What the program's model is told.
+    pub words: Option<PathBuf>,
+}
+impl Drop for Grant {
+    fn drop(&mut self) {
+        let mut all = self.agents.grants.lock().unwrap_or_else(PoisonError::into_inner);
+        all.remove(&self.key);
+        for f in [Some(&self.file), self.words.as_ref()].into_iter().flatten() {
+            let _ = std::fs::remove_file(f);
+        }
+    }
+}
+
 /// How an agent reaches the others of its session. Given by the host once it runs.
 pub trait Switch: Send + Sync {
     fn tell(
@@ -128,6 +154,16 @@ pub struct Told {
     /// The agents from the session's own to the one that says it.
     pub chain: Vec<AgentId>,
 }
+
+impl Setup {
+    /// A program of the person's own that works with Axiom's tools in place of its own.
+    pub fn hands(&self) -> bool {
+        self.execution.environment.as_deref() == Some(AXIOM)
+    }
+}
+
+/// The environment in which what an agent does is done by Axiom.
+pub const AXIOM: &str = "axiom";
 
 impl Slot {
     /// Nobody uses it, or is about to, and nothing runs in it.
@@ -160,10 +196,15 @@ struct Now {
 const KEYS: usize = 64;
 
 pub struct Agents {
-    pub connections: Connections,
+    pub connections: Arc<Connections>,
     parties: Mutex<HashMap<SessionId, Party>>,
     audit: tokio::sync::Mutex<Option<Entry>>,
     pub switch: OnceLock<Weak<dyn Switch>>,
+    /// What opens the tool `agent` for an installed program, while its attempt lives.
+    grants: Mutex<HashMap<String, Holder>>,
+    data: PathBuf,
+    /// The program that gives installed programs the tool `agent`: the host's own.
+    bridge: Option<Place>,
     home: Option<PathBuf>,
     own: Vec<PathBuf>,
     scratch: PathBuf,
@@ -180,11 +221,12 @@ fn internal(words: impl std::fmt::Display) -> WireError {
 
 impl Agents {
     pub fn new(
-        connections: Connections,
+        connections: Arc<Connections>,
         paths: &Paths,
         home: Option<PathBuf>,
         scratch: PathBuf,
         programs: Option<Vec<PathBuf>>,
+        bridge: Option<PathBuf>,
         endpoint: &str,
     ) -> Self {
         let mut own = vec![paths.data.clone()];
@@ -195,6 +237,9 @@ impl Agents {
             parties: Mutex::default(),
             audit: tokio::sync::Mutex::default(),
             switch: OnceLock::new(),
+            grants: Mutex::default(),
+            data: paths.data.clone(),
+            bridge: bridge.and_then(|b| real_file(&b)),
             home,
             own,
             scratch,
@@ -259,11 +304,19 @@ impl Agents {
         if execution.harness != "axiom" {
             let known = delegated::known_as(&execution.harness)
                 .ok_or_else(|| bad("this host does not know the harness"))?;
-            if execution.connection.is_some() {
-                return Err(bad("this harness signs in by itself: it has no connection"));
+            if let Some(c) = &execution.connection {
+                if connections::provider_of(&execution.harness).is_none() {
+                    return Err(bad("this harness has one account: its own sign-in"));
+                }
+                self.connections.account(c, &execution.harness)?;
             }
             if !instructions.is_empty() {
                 return Err(bad("this harness reads the folder's words for agents by itself"));
+            }
+            match execution.environment.as_deref() {
+                None => {}
+                Some(AXIOM) if known.harness.takes_hands() && self.bridge.is_some() => {}
+                _ => return Err(bad("this harness has no such environment")),
             }
             let workspace = real(Path::new(workspace))?.to_string();
             let execution = Execution { provider: None, ..execution };
@@ -464,6 +517,41 @@ impl Agents {
         Ok(policy)
     }
 
+    /// A key for one agent's program, and the file that holds it. Both go with what is returned.
+    pub fn grant(
+        self: &Arc<Self>,
+        s: &SessionId,
+        a: &AgentId,
+        scratch: &Place,
+        all: bool,
+        words: Option<&str>,
+    ) -> Result<Grant, String> {
+        let mut b = [0u8; 32];
+        axiom_proto::random(&mut b)?;
+        let key: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        let file = scratch.as_path().join(format!("peer-{}.json", &key[..12]));
+        let way = mcp::Way { data: self.data.clone(), grant: key.clone() };
+        let text = serde_json::to_string(&way).map_err(|e| e.to_string())?;
+        private_file(&file, &text).map_err(|e| e.to_string())?;
+        self.grants
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.clone(), Holder { session: s.clone(), agent: a.clone(), all });
+        // Whatever goes wrong from here on, the key and its file go again.
+        let mut grant = Grant { agents: self.clone(), key, file, words: None };
+        if let Some(w) = words {
+            let f = grant.file.with_extension("md");
+            private_file(&f, w).map_err(|e| e.to_string())?;
+            grant.words = Some(f);
+        }
+        Ok(grant)
+    }
+
+    /// Whose key it is.
+    pub fn granted(&self, key: &str) -> Option<Holder> {
+        self.grants.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()
+    }
+
     /// Adds to the audit record (SI-23).
     async fn record(
         &self,
@@ -550,6 +638,11 @@ fn real(p: &Path) -> Result<Place, WireError> {
     Place::new(&c).map_err(|e| bad(format!("{}: {e}", p.display())))
 }
 
+fn real_file(p: &Path) -> Option<Place> {
+    let c = plain_verbatim(std::fs::canonicalize(p).ok()?);
+    c.is_file().then(|| Place::new(c).ok()).flatten()
+}
+
 /// Windows says what it found in a form that is not used here.
 fn plain_verbatim(p: PathBuf) -> PathBuf {
     match p.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
@@ -614,6 +707,12 @@ impl Floor {
             .await
             .map_err(|e| Refused::This(format!("it cannot be put on record: {e}")))
     }
+    /// Where this agent works.
+    pub async fn workspace(&self) -> Option<String> {
+        let all = self.store.agents(self.session.id.clone()).await.ok()?;
+        let (_, text) = all.into_iter().find(|(a, _)| *a == self.agent)?;
+        Some(serde_json::from_str::<Setup>(&text).ok()?.workspace)
+    }
     /// What was said waits until it is heard.
     pub async fn wait(&self, item: &ItemId, text: &str) -> Result<(), Refused> {
         let (s, a) = (self.session.id.clone(), self.agent.clone());
@@ -676,16 +775,22 @@ impl Worker {
         let waits = store.pending(session.id.clone(), agent.clone()).await.map_err(internal)?;
         let written = agents.written(store).await?;
         let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
-        let (known, site, access, workspace) = tokio::task::spawn_blocking(move || {
+        let (known, site, access, workspace, words) = tokio::task::spawn_blocking(move || {
             let known = delegated::known_as(&s.execution.harness)
                 .ok_or_else(|| bad("this host does not know the agent's harness"))?;
             let site = a.site(&s, &ag, true)?;
             let path = a.programs(&site.path)?;
             let access = site.access;
+            let words = s.hands().then(|| axiom_engine::context::system(&site, HANDS));
             let program =
                 known.check(&s, access, site.workspace.clone(), &path, &written).map_err(bad)?;
+            let config = match &s.execution.connection {
+                Some(c) => Some(real(&a.connections.account(c, &s.execution.harness)?)?),
+                None => None,
+            };
             let site_of = axiom_harness::Site {
                 program,
+                config,
                 path,
                 home: site.keep.home().clone(),
                 user: user()?,
@@ -693,7 +798,7 @@ impl Worker {
                 written,
                 limits: axiom_harness::Limits::default(),
             };
-            Ok::<_, WireError>((known, site_of, access, site.workspace))
+            Ok::<_, WireError>((known, site_of, access, site.workspace, words))
         })
         .await
         .map_err(internal)??;
@@ -706,6 +811,8 @@ impl Worker {
             site,
             access,
             workspace,
+            bridge: agents.bridge.clone(),
+            words,
             inbox,
             waits,
         })))
@@ -739,6 +846,26 @@ impl Worker {
             }
         }
     }
+}
+
+/// For a model whose program describes other tools than it has.
+const HANDS: &str = "Your only tools are those of the server axiom (read, write, edit, patch, list, glob, search, shell, job, fetch, agent). What is said elsewhere of other tools does not apply: you have none of them. A call may wait for a person's answer.";
+
+/// Where an agent works, and under whom.
+pub async fn site_of(
+    agents: &Arc<Agents>,
+    setup: &Setup,
+    agent: &AgentId,
+    slot: &Slot,
+) -> Result<Site, WireError> {
+    let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
+    let mut site =
+        tokio::task::spawn_blocking(move || a.site(&s, &ag, true)).await.map_err(internal)??;
+    let chain = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
+    if !chain.is_empty() {
+        site.chain.clone_from(&chain);
+    }
+    Ok(site)
 }
 
 /// The person's name on this computer.
@@ -913,6 +1040,25 @@ impl Slot {
         owed.drain().map(|(r, _)| r).collect()
     }
 
+    /// The run it is in, and what stops that.
+    pub async fn now(&self) -> Option<(RunId, watch::Receiver<bool>)> {
+        self.live
+            .lock()
+            .await
+            .as_ref()
+            .filter(|n| !n.tx.is_closed())
+            .map(|n| (n.run.clone(), n.cancel.clone()))
+    }
+
+    /// What it has running in the background ends.
+    pub fn stop_jobs(&self) {
+        self.seen.1.end();
+    }
+
+    pub fn seen(&self) -> Seen {
+        self.seen.clone()
+    }
+
     /// Whether it is in a run.
     pub async fn busy(&self) -> bool {
         self.live.lock().await.as_ref().is_some_and(|n| !n.tx.is_closed())
@@ -925,7 +1071,7 @@ impl Slot {
 
     /// What it has running began as what it was.
     pub async fn changed(&self) {
-        self.seen.1.end();
+        self.stop_jobs();
         // Its program ends; what it was told is kept by the program, and gone on with.
         *self.attempt.lock().await = None;
     }

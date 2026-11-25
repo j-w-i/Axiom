@@ -11,11 +11,13 @@ import '../patterns/execution.dart';
 import '../patterns/models.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
+import '../ui/controls.dart';
 import '../ui/marks.dart';
 import '../ui/overlay.dart';
 import '../ui/status.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'outside.dart';
 import 'start.dart';
 
 /// What an agent asks, and where it is spoken to. Only for an agent that can act: a replayed one is
@@ -74,7 +76,9 @@ class _TalkState extends State<Talk> {
   /// The models of the account, if they have not been asked for.
   void _look() {
     final c = widget.agent.execution.connection;
-    if (c == null || widget.store.modelsOf(c) != null) return;
+    // A program's account lists nothing.
+    if (c == null || widget.agent.execution.harness != 'axiom') return;
+    if (widget.store.modelsOf(c) != null) return;
     unawaited(_do(() => widget.store.models(c)));
   }
 
@@ -91,18 +95,29 @@ class _TalkState extends State<Talk> {
   List<ExecutionChoice> _choices(HostStore s, AgentModel a) {
     final x = a.execution;
     final other = x.harness != 'axiom';
-    final can = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull?.access : null;
+    final program = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull : null;
+    final hands = x.environment == axiomTools;
+    final can = hands ? null : program?.access;
     final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
     final models = s.modelsOf(x.connection ?? '');
     final has = models?.any((m) => m.id == x.model) ?? false;
-    Execution with_({String? model, String? connection, String? provider}) => Execution(
-      harness: x.harness,
-      provider: provider ?? x.provider,
-      model: model ?? x.model,
-      connection: connection ?? x.connection,
-      effort: x.effort,
-      environment: x.environment,
-    );
+    Execution with_({String? model, String? connection, String? provider, bool? axioms}) =>
+        Execution(
+          harness: x.harness,
+          provider: provider ?? x.provider,
+          model: model ?? x.model,
+          connection: connection == null
+              ? x.connection
+              : connection.isEmpty
+              ? null
+              : connection,
+          effort: x.effort,
+          environment: axioms == null
+              ? x.environment
+              : axioms
+              ? axiomTools
+              : null,
+        );
     void set({Execution? execution, Access? access}) => unawaited(
       _do(() => s.setAgent(widget.session.id, a.id, execution: execution, access: access)),
     );
@@ -146,19 +161,53 @@ class _TalkState extends State<Talk> {
           if (other) const AxMenuItem('', 'Its own sign-in'),
           if (connection == null && x.connection != null)
             AxMenuItem(x.connection!, 'Removed', enabled: false, why: 'add it again'),
-          for (final c in other ? const <Connection>[] : s.connections)
+          for (final c in other ? s.accountsOf(x.harness) : s.own)
             AxMenuItem(
               c.id,
               oneLine(c.name, 60),
               detail: providerName(c.provider),
               mark: markOf(c.provider, null),
-              enabled: c.provider == x.provider,
-              why: c.provider == x.provider ? null : 'another provider: choose its model first',
+              enabled: other || c.provider == x.provider,
+              why: other || c.provider == x.provider
+                  ? null
+                  : 'another provider: choose its model first',
             ),
         ],
         x.connection ?? '',
         (v) => set(execution: with_(connection: v)),
+        // What was said stays with the account it was said on.
+        cost: (_) => !other || a.items.isEmpty
+            ? null
+            : 'The other account does not know this conversation: it begins anew there. Nothing is '
+                  'sent from one account to the other.',
       ),
+      if (program?.hands ?? hands)
+        ExecutionChoice(
+          'Tools',
+          [
+            const AxMenuItem(
+              'axiom',
+              'Axiom\'s',
+              detail: 'asked about and contained',
+              mark: ServiceMark.axiom,
+            ),
+            AxMenuItem(
+              '',
+              'Its own',
+              detail: 'outside Axiom\'s sandbox',
+              mark: markOf(null, null, x.harness),
+              // It would not be refused only when it is started.
+              enabled: !hands || (program?.access.contains(a.access) ?? false),
+              why: 'it has no mode for this access',
+            ),
+          ],
+          hands ? 'axiom' : '',
+          (v) => set(execution: with_(axioms: v.isNotEmpty)),
+          cost: (v) => v.isNotEmpty
+              ? null
+              : '${s.harnessName(x.harness)} then works with its own tools, outside Axiom\'s sandbox '
+                    'and without Axiom\'s questions.',
+        ),
       ExecutionChoice(
         'Access',
         [
@@ -193,6 +242,14 @@ class _TalkState extends State<Talk> {
     ];
     final works = a.phase == AgentPhase.running || a.phase == AgentPhase.asking;
     final first = asked.firstOrNull;
+    final plan = s.connections.any((x) => x.id == a.execution.connection && x.plan);
+    // The plan's own limit. Nothing else is taken in its place: that is the person's to choose.
+    final spent = plan && problem == null && (a.error?.startsWith('billing') ?? false);
+    void usage() => unawaited(
+      _do(() async {
+        if (!await browse(planUsage)) throw Failed(0, 'browser', 'it is at $planUsage');
+      }),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -247,6 +304,10 @@ class _TalkState extends State<Talk> {
                       style: t.type.ui.ink(c.faultText),
                     ),
                   ),
+                  if (spent) ...[
+                    const SizedBox(width: 10),
+                    AxButton(label: 'Manage usage', tone: AxTone.primary, onPressed: usage),
+                  ],
                 ],
               ),
             ),
@@ -272,6 +333,23 @@ class _TalkState extends State<Talk> {
                   },
                 ),
                 hue: markOf(a.execution.provider, a.execution.model, a.execution.harness)?.color(c),
+              ),
+            if (plan)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      'Using ChatGPT plan',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.type.small.ink(c.ink3),
+                    ),
+                  ),
+                  if (!spent)
+                    AxButton(label: 'Manage usage', tone: AxTone.quiet, size: 24, onPressed: usage),
+                ],
               ),
           ],
           controller: widget.draft.text,

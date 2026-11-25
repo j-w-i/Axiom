@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::*;
-use crate::test::{Desk, start};
+use crate::{
+    Harness,
+    test::{Desk, place, start},
+};
 
 type D = Desk<Claude>;
 
@@ -692,4 +695,100 @@ fn control_requests_that_nobody_answers_end_it() {
     assert!(d.end.is_none());
     d.interrupt();
     assert_eq!(d.ends().0, Why::Deaf);
+}
+
+#[test]
+fn it_is_given_a_server_where_it_may_act() {
+    let tools = Some(crate::Server {
+        name: "axiom".into(),
+        tool: "agent".into(),
+        command: place("bin/axiom-host"),
+        args: vec!["--mcp".into(), "/tmp/a file".into()],
+    });
+    for (access, given) in [(Access::Work, true), (Access::Read, false)] {
+        let s = Start { tools: tools.clone(), ..start(access) };
+        let l = Harness::Claude(Prompts::Refused).launch(&s).unwrap();
+        let at = l.args.iter().position(|a| a == "--mcp-config");
+        assert_eq!(at.is_some(), given, "{access:?}");
+        let Some(at) = at else { continue };
+        let v: Value = serde_json::from_str(&l.args[at + 1]).unwrap();
+        let server = &v["mcpServers"]["axiom"];
+        assert_eq!(server["args"], json!(["--mcp", "/tmp/a file"]));
+        assert_eq!(server["command"], place("bin/axiom-host").as_str());
+        assert!(server.get("env").is_none());
+        // Its one tool, and no other.
+        let allowed = l.args.iter().position(|a| a == "--allowedTools").unwrap();
+        assert_eq!(l.args[allowed + 1], "mcp__axiom__agent");
+    }
+    // None of the folder's own comes with it.
+    let s = Start { tools, trust: Trust::Withheld, ..start(Access::Work) };
+    let l = Harness::Claude(Prompts::Refused).launch(&s).unwrap();
+    let at = l.args.iter().position(|a| a == "--setting-sources").unwrap();
+    assert_eq!(l.args[at + 1], "user");
+}
+
+#[test]
+fn with_hands_it_has_nothing_else() {
+    let server = crate::Server {
+        name: "axiom".into(),
+        tool: "agent".into(),
+        command: place("bin/axiom-host"),
+        args: vec!["--mcp".into(), "/f".into()],
+    };
+    let with = |access| Start {
+        tools: Some(server.clone()),
+        hands: true,
+        system: Some(place("words.md")),
+        ..start(access)
+    };
+    // Every access: whoever is behind the server does the asking.
+    for access in [Access::Read, Access::Ask, Access::Work] {
+        let s = Start { trust: Trust::Withheld, ..with(access) };
+        let l = Harness::Claude(Prompts::Refused).launch(&s).unwrap();
+        let after = |k: &str| {
+            let at = l.args.iter().position(|a| a == k).unwrap_or_else(|| panic!("{k}"));
+            l.args[at + 1].as_str()
+        };
+        assert_eq!(after("--tools"), "");
+        assert_eq!(after("--permission-mode"), "dontAsk");
+        assert_eq!(after("--allowedTools"), "mcp__axiom__*");
+        assert_eq!(after("--setting-sources"), "user");
+        assert_eq!(after("--append-system-prompt-file"), place("words.md").as_str());
+        assert!(l.args.iter().any(|a| a == "--strict-mcp-config"));
+        assert!(!l.args.iter().any(|a| a == "--settings" || a == "acceptEdits"));
+        assert_eq!(l.containment, Containment::None);
+    }
+    let none = Start { tools: None, ..with(Access::Work) };
+    assert!(matches!(Harness::Claude(Prompts::Refused).launch(&none), Err(Error::NoHands)));
+    assert!(matches!(Harness::Codex.launch(&with(Access::Work)), Err(Error::NoHands)));
+    // What it says it has is compared with that.
+    for (tools, mode, why) in [
+        (json!([]), "dontAsk", None),
+        (json!(["mcp__axiom__read", "mcp__axiom__shell"]), "dontAsk", None),
+        (
+            json!(["mcp__axiom__read", "Bash"]),
+            "dontAsk",
+            Some("a tool it was told not to have: \"Bash\""),
+        ),
+        (json!(["mcp__axiomatic"]), "dontAsk", Some("told not to have")),
+        (json!([7]), "dontAsk", Some("told not to have")),
+        (json!([]), "acceptEdits", Some("runs in the mode")),
+    ] {
+        let s = Start { resume: Some("s1".into()), ..with(Access::Work) };
+        let l = launch(Prompts::Refused, &s).unwrap();
+        let mut d = D::new(Claude::new(Prompts::Refused, s, &l));
+        d.hear(begun());
+        d.told();
+        d.sent();
+        d.prompt("go").unwrap();
+        d.told();
+        d.hear(json!({"type": "system", "subtype": "init", "uuid": "u", "session_id": "s1", "claude_code_version": "2.1.330", "cwd": "/w", "tools": tools, "model": "m", "permissionMode": mode}));
+        match why {
+            None => assert!(d.end.is_none(), "{tools}"),
+            Some(w) => {
+                let (why, words) = d.end.take().unwrap_or_else(|| panic!("{tools} was let be"));
+                assert!(why == Why::Boundary && words.contains(w), "{words}");
+            }
+        }
+    }
 }
