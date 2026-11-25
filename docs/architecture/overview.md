@@ -60,7 +60,7 @@ ordered that has not been begun.
 | `axiom-model` | codecs, transports, quirk profiles, usage | – |
 | `axiom-tools` | native tools: planned, judged, then done exactly so | spawn, policy, proto |
 | `axiom-engine` | native loop: context, compaction, asking a person | model, tools, policy, proto |
-| `axiom-harness` | adapter contract, ACP client, native adapters (M3) | spawn, proto |
+| `axiom-harness` | adapter contract, ACP client, native adapters (M3) | spawn, policy, proto |
 | `axiom-orchestra` | delegation, tasks, worktrees (M5) | engine, harness |
 | `axiom-host` | sockets, subscriptions, lifecycle | all |
 | `axiom-cli` | command line | proto, host (its client and paths) |
