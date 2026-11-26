@@ -190,7 +190,10 @@ class TranscriptViewState extends State<TranscriptView> {
   /// Changes when the origin is moved outright, so that nothing laid out from the old one is kept.
   int _epoch = 0;
   Key get _center => ValueKey(('now', _epoch));
-  late final _end = _EndController(() => _atEnd, _settle);
+  late final _end = _EndController(() => _atEnd && _pressed == 0, _settle);
+
+  /// Pointers held down on it: text being chosen is not moved from under the pointer.
+  int _pressed = 0;
   ScrollController get scroll => _end;
   late TranscriptRows _rows;
 
@@ -525,59 +528,64 @@ class TranscriptViewState extends State<TranscriptView> {
         child: Stack(
           children: [
             Positioned.fill(
-              child: SelectableRegion(
-                focusNode: _focus,
-                selectionControls: axSelectionControls,
-                onSelectionChanged: (v) => _selected = v?.plainText ?? '',
-                contextMenuBuilder: (context, s) => AxContextMenu(
-                  anchors: s.contextMenuAnchors,
-                  items: [
-                    ...s.contextMenuButtonItems,
-                    if (widget.onQuote case final take? when _selected.trim().isNotEmpty)
-                      ContextMenuButtonItem(
-                        label: 'Quote',
-                        onPressed: () {
-                          // Whatever is selected here is of this agent's conversation.
-                          take(quoted('the conversation with $_whose', _selected));
-                          s.hideToolbar();
-                        },
-                      ),
-                  ],
-                ),
-                child: CustomScrollView(
-                  controller: scroll,
-                  center: _center,
-                  physics: const ClampingScrollPhysics(),
-                  scrollCacheExtent: const ScrollCacheExtent.pixels(400),
-                  slivers: [
-                    SliverPadding(
-                      key: ValueKey(('before', _epoch)),
-                      padding: side,
-                      sliver: SliverList.builder(
-                        itemCount: _pivot,
-                        itemBuilder: (_, i) => row(_pivot - 1 - i),
-                        findChildIndexCallback: (k) => find(k, _pivot - 1, -1),
-                      ),
-                    ),
-                    SliverPadding(
-                      key: _center,
-                      padding: side,
-                      sliver: SliverList.builder(
-                        itemCount: n - _pivot,
-                        itemBuilder: (_, i) => row(_pivot + i),
-                        findChildIndexCallback: (k) => find(k, _pivot, 1),
-                      ),
-                    ),
-                    SliverPadding(
-                      padding: side.copyWith(bottom: 28),
-                      sliver: SliverToBoxAdapter(
-                        child: ListenableBuilder(
-                          listenable: a,
-                          builder: (context, _) => _Ending(a),
+              child: Listener(
+                onPointerDown: (_) => _pressed++,
+                onPointerUp: (_) => _pressed--,
+                onPointerCancel: (_) => _pressed--,
+                child: SelectableRegion(
+                  focusNode: _focus,
+                  selectionControls: axSelectionControls,
+                  onSelectionChanged: (v) => _selected = v?.plainText ?? '',
+                  contextMenuBuilder: (context, s) => AxContextMenu(
+                    anchors: s.contextMenuAnchors,
+                    items: [
+                      ...s.contextMenuButtonItems,
+                      if (widget.onQuote case final take? when _selected.trim().isNotEmpty)
+                        ContextMenuButtonItem(
+                          label: 'Quote',
+                          onPressed: () {
+                            // Whatever is selected here is of this agent's conversation.
+                            take(quoted('the conversation with $_whose', _selected));
+                            s.hideToolbar();
+                          },
+                        ),
+                    ],
+                  ),
+                  child: CustomScrollView(
+                    controller: scroll,
+                    center: _center,
+                    physics: const ClampingScrollPhysics(),
+                    scrollCacheExtent: const ScrollCacheExtent.pixels(400),
+                    slivers: [
+                      SliverPadding(
+                        key: ValueKey(('before', _epoch)),
+                        padding: side,
+                        sliver: SliverList.builder(
+                          itemCount: _pivot,
+                          itemBuilder: (_, i) => row(_pivot - 1 - i),
+                          findChildIndexCallback: (k) => find(k, _pivot - 1, -1),
                         ),
                       ),
-                    ),
-                  ],
+                      SliverPadding(
+                        key: _center,
+                        padding: side,
+                        sliver: SliverList.builder(
+                          itemCount: n - _pivot,
+                          itemBuilder: (_, i) => row(_pivot + i),
+                          findChildIndexCallback: (k) => find(k, _pivot, 1),
+                        ),
+                      ),
+                      SliverPadding(
+                        padding: side.copyWith(bottom: 28),
+                        sliver: SliverToBoxAdapter(
+                          child: ListenableBuilder(
+                            listenable: a,
+                            builder: (context, _) => _Ending(a),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
