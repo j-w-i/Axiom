@@ -226,7 +226,8 @@ class HostStore extends ChangeNotifier {
 
   Future<String> create(String title, {String? workspace}) async {
     final r = await _live.call('session.create', {'title': title, 'workspace': ?workspace});
-    await refresh();
+    // It is made: a list that fails to come must not make its person make it again.
+    await refresh().catchError((Object _) {});
     return (r! as Json)['session']! as String;
   }
 
@@ -424,7 +425,8 @@ class HostStore extends ChangeNotifier {
       'url': ?url,
       'secret': ?secret,
     });
-    await loadConnections();
+    // It is added: a list that fails to come must not make its person add it again.
+    await loadConnections().catchError((Object _) {});
     return (r! as Json)['connection']! as String;
   }
 
