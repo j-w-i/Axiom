@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -62,6 +63,23 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
       WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? close() : null);
     }
     _room = room;
+    final p = Scrollable.maybeOf(context)?.position;
+    if (identical(p, _scrolled)) return;
+    _scrolled?.removeListener(_moved);
+    _scrolled = p?..addListener(_moved);
+  }
+
+  /// What the anchor is scrolled in: it moves the anchor too.
+  ScrollPosition? _scrolled;
+
+  void _moved() {
+    if (!_ctl.isShowing) return;
+    // A scroll may be set while the window is laid out, where nothing may be built anew.
+    if (WidgetsBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? close() : null);
+    } else {
+      close();
+    }
   }
 
   void toggle() => _ctl.isShowing ? close() : open();
@@ -89,6 +107,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _scrolled?.removeListener(_moved);
     _scope.dispose();
     super.dispose();
   }
