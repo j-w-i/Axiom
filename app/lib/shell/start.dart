@@ -454,7 +454,10 @@ class StartDraft extends ChangeNotifier {
           .then(
             (_) {},
             onError: (Object e) {
-              if (_asked == id) change(() => problem = wordsOf(e));
+              if (_asked != id) return;
+              // Asked again when it is chosen again.
+              _asked = null;
+              change(() => problem = wordsOf(e));
             },
           ),
     );
