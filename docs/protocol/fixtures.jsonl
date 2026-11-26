@@ -7,6 +7,6 @@
 {"id":3,"result":{"clients":1,"damaged":"why","faults":[{"session":"s_1","words":"w"}],"pid":4,"runs":0,"version":"0"}}
 {"session":"s_1","events":[{"seq":13,"at":1013,"body":{"type":"item.started","item":"i_2","run":"r_1","agent":"a_1","kind":"tool","name":"write","args_cut":300000}},{"seq":14,"at":1014,"body":{"type":"item.ended","item":"i_2","outcome":"completed","text":"","result_cut":400000}}]}
 {"id":4,"result":[{"most":200,"of":"A run","unit":"count","what":"Steps"},{"of":"A run","unit":"count","what":"Output tokens"},{"most":1024,"of":"Files","unit":"bytes","what":"One file"},{"most":600,"of":"Files","unit":"seconds","what":"One command"}]}
-{"id":7,"result":[{"at":9,"connection":"c_2","harness":"axiom","models":[{"adaptive":true,"context":1000,"effort":true,"efforts":["low","max"],"id":"m","name":"M","speeds":["fast"]}]}]}
+{"id":7,"result":[{"at":9,"connection":"c_2","harness":"axiom","models":[{"adaptive":true,"context":1000,"default_effort":"max","effort":true,"efforts":["low","max"],"id":"m","name":"M","speeds":["fast"]}]}]}
 {"id":8,"result":[{"account":"c_2","args":["a"],"harness":"claude","name":"N","path":"/p","vars":[{"lasts":true,"name":"A","value":"1"},{"lasts":false,"name":"B"}]}]}
 {"open":"/w"}

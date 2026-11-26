@@ -1045,6 +1045,9 @@ pub struct ModelInfo {
     /// As the model's provider calls them, the least first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub efforts: Vec<String>,
+    /// Which of `efforts` it tries at when it is told none, where that is said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
     /// It is asked to think as much as it needs, as every model is that is known to take that. Not a
     /// choice.
     #[serde(default, skip_serializing_if = "not")]

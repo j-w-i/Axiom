@@ -12,6 +12,9 @@ pub struct About {
     pub efforts: Option<Vec<String>>,
     /// It can be told to think as much as it needs.
     pub adaptive: Option<bool>,
+    /// The effort it tries at when told none.
+    #[serde(default)]
+    pub default_effort: Option<String>,
 }
 
 const MOST: usize = 12;
@@ -33,7 +36,12 @@ pub(crate) fn anthropic(m: &Value) -> About {
         of.into_iter().filter(takes).map(str::to_owned).collect()
     });
     let adaptive = has("thinking/types/adaptive");
-    About { context: m.get("max_input_tokens").and_then(Value::as_u64), efforts, adaptive }
+    About {
+        context: m.get("max_input_tokens").and_then(Value::as_u64),
+        efforts,
+        adaptive,
+        default_effort: None,
+    }
 }
 
 /// A ChatGPT plan's list, where it says which efforts a model takes (`supported_reasoning_levels`, as
@@ -43,7 +51,8 @@ pub(crate) fn chatgpt(m: &Value) -> About {
         .get("supported_reasoning_levels")
         .and_then(Value::as_array)
         .map(|all| all.iter().take(MOST).filter_map(|l| l.get("effort").and_then(word)).collect());
-    About { efforts, ..About::default() }
+    let default_effort = m.get("default_reasoning_level").and_then(word);
+    About { efforts, default_effort, ..About::default() }
 }
 
 /// aistudio.google.com/api-reference/models and /docs/thinking, read 2026-11-26: the list says whether
@@ -62,7 +71,12 @@ pub(crate) fn gemini(id: &str, m: &Value) -> About {
         Some(false) => Some(Vec::new()),
         _ => levels.map(|l| l.iter().map(|s| (*s).to_owned()).collect()),
     };
-    About { context: m.get("inputTokenLimit").and_then(Value::as_u64), efforts, adaptive: None }
+    About {
+        context: m.get("inputTokenLimit").and_then(Value::as_u64),
+        efforts,
+        adaptive: None,
+        default_effort: None,
+    }
 }
 
 /// openrouter.ai/docs/guides/best-practices/reasoning-tokens, read 2026-11-26: `reasoning` is there if
@@ -92,7 +106,12 @@ pub(crate) fn openrouter(m: &Value) -> About {
         None | Some(Value::Null) if m.get("supported_parameters").is_some() => Some(Vec::new()),
         _ => None,
     };
-    About { context: m.get("context_length").and_then(Value::as_u64), efforts, adaptive: None }
+    About {
+        context: m.get("context_length").and_then(Value::as_u64),
+        efforts,
+        adaptive: None,
+        default_effort: None,
+    }
 }
 
 #[cfg(test)]
@@ -143,8 +162,9 @@ mod tests {
     fn as_a_chatgpt_plan_lists() {
         let levels = json!({"supported_reasoning_levels": [
             {"effort": "low", "description": "x"}, {"effort": "xhigh"}, {"effort": "no such word!"}, {}
-        ]});
+        ], "default_reasoning_level": "xhigh"});
         assert_eq!(chatgpt(&levels).efforts, all(&["low", "xhigh"]));
+        assert_eq!(chatgpt(&levels).default_effort.as_deref(), Some("xhigh"));
         assert_eq!(
             chatgpt(&json!({"slug": "m"})),
             About::default(),

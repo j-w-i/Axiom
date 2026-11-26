@@ -1189,6 +1189,7 @@ fn offered(c: &Caps) -> Option<Vec<ModelInfo>> {
             id: m.id.clone(),
             name: m.label.clone(),
             effort: !efforts.is_empty(),
+            default_effort: m.default_effort.clone().filter(|e| efforts.contains(e)),
             efforts,
             speeds: if m.fast { vec!["fast".into()] } else { Vec::new() },
             ..ModelInfo::default()

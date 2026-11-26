@@ -229,6 +229,7 @@ fn main() -> Result<(), serde_json::Error> {
                     context: Some(1000),
                     effort: true,
                     efforts: vec!["low".into(), "max".into()],
+                    default_effort: Some("max".into()),
                     adaptive: true,
                     speeds: vec!["fast".into()],
                 }],

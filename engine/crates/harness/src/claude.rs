@@ -387,6 +387,7 @@ impl Claude {
     fn models(&mut self, v: &Value) {
         let mut all = vec![];
         let mut every: Vec<Name> = vec![];
+        // It does not say which effort it begins with; its page does.
         for m in list(v, "/response/response/models").iter().take(200) {
             let Some(id) = id(m, "/value") else { continue };
             let efforts: Vec<String> = list(m, "/supportedEffortLevels")
@@ -400,7 +401,8 @@ impl Claude {
                 }
             }
             let fast = m.pointer("/supportsFastMode") == Some(&json!(true));
-            all.push(Name { id, label: owned(m, "/displayName"), efforts, fast });
+            let default_effort = default_effort(&id, &efforts);
+            all.push(Name { id, label: owned(m, "/displayName"), efforts, default_effort, fast });
         }
         if !all.is_empty() {
             (self.caps.models, self.caps.efforts) = (Names::Of(all), Names::Of(every));
@@ -812,3 +814,22 @@ fn limit(v: &Value, o: &mut Out) {
 #[cfg(test)]
 #[path = "claude_tests.rs"]
 mod tests;
+
+/// The effort Claude Code uses for a model when it is told none (code.claude.com/docs/en/model-config,
+/// "Adjust effort level", read 2026-11-26): `medium` for Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku
+/// 5.5, which its names `fable`, `opus`, `sonnet` and `haiku` stand for now; `xhigh` for Opus 4.7;
+/// `high` for the others that take an effort. One it does not say it takes is no default.
+pub fn default_effort(model: &str, efforts: &[String]) -> Option<String> {
+    let current = ["fable", "opus", "sonnet", "haiku"];
+    let medium = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+    let named =
+        |all: &[&str]| all.iter().any(|m| model == *m || model.starts_with(&format!("{m}[")));
+    let e = if named(&current) || named(&medium) {
+        "medium"
+    } else if model.starts_with("claude-opus-4-7") {
+        "xhigh"
+    } else {
+        "high"
+    };
+    efforts.iter().any(|x| x == e).then(|| e.to_owned())
+}

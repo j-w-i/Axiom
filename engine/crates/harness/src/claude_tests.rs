@@ -791,3 +791,20 @@ fn it_is_given_a_server_where_it_may_act() {
     let at = l.args.iter().position(|a| a == "--setting-sources").unwrap();
     assert_eq!(l.args[at + 1], "user");
 }
+
+#[test]
+fn the_effort_it_begins_with_is_as_its_page_says() {
+    let all: Vec<String> = ["low", "medium", "high", "xhigh", "max"].map(str::to_owned).into();
+    let of = |m: &str| default_effort(m, &all);
+    for m in ["opus", "sonnet", "fable", "haiku", "opus[1m]", "claude-opus-5-5", "claude-haiku-5-5"]
+    {
+        assert_eq!(of(m).as_deref(), Some("medium"), "{m}");
+    }
+    assert_eq!(of("claude-opus-4-7").as_deref(), Some("xhigh"));
+    for m in ["claude-opus-5", "claude-sonnet-4-6", "claude-opus-4-8"] {
+        assert_eq!(of(m).as_deref(), Some("high"), "{m}");
+    }
+    // Not one it says the model takes.
+    assert_eq!(default_effort("opus", &["low".into(), "max".into()]), None);
+    assert_eq!(default_effort("opus", &[]), None);
+}

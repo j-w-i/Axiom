@@ -129,6 +129,9 @@ pub struct Quirks {
     /// What it can be, the least first, where that is the same for all it is said of.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub efforts: Option<Vec<String>>,
+    /// Which of them it tries at when it is told none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
     /// Where it is told to think as much as it needs; nowhere if absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<Thinking>,
@@ -184,6 +187,7 @@ impl Quirks {
             no_limit: self.no_limit.or(base.no_limit),
             effort: self.effort.or(base.effort),
             efforts: self.efforts.clone().or(base.efforts.clone()),
+            default_effort: self.default_effort.clone().or(base.default_effort.clone()),
             thinking: self.thinking.or(base.thinking),
             speeds: self.speeds.clone().or(base.speeds.clone()),
             cache_markers: self.cache_markers.or(base.cache_markers),
@@ -229,6 +233,9 @@ impl Profile {
             listing: Listing::Capabilities,
             quirks: Quirks {
                 effort: Some(Effort::OutputConfig),
+                // build-with-claude/effort, read 2026-11-26: `high` where it is not said, and not of
+                // Opus 5.5 and Haiku 5.5.
+                default_effort: Some("high".into()),
                 thinking: Some(Thinking::Adaptive),
                 cache_markers: Some(true),
                 replay: Some(Replay::SameProvider),
@@ -236,12 +243,21 @@ impl Profile {
             },
             // build-with-claude/fast-mode, read 2026-11-26: those that take it without a header that
             // asks for what is not settled yet.
-            models: ["claude-fable-5-2", "claude-mythos-5-2", "claude-opus-5-5"]
-                .map(|m| {
-                    let fast = Some(vec!["fast".to_owned()]);
-                    (m.to_owned(), Quirks { speeds: fast, ..Quirks::default() })
-                })
-                .into(),
+            models: [
+                ("claude-fable-5-2", true, "high"),
+                ("claude-mythos-5-2", true, "high"),
+                ("claude-opus-5-5", true, "medium"),
+                ("claude-haiku-5-5", false, "medium"),
+            ]
+            .map(|(m, fast, by_default)| {
+                let quirks = Quirks {
+                    speeds: fast.then(|| vec!["fast".to_owned()]),
+                    default_effort: Some(by_default.into()),
+                    ..Quirks::default()
+                };
+                (m.to_owned(), quirks)
+            })
+            .into(),
         }
     }
 
@@ -255,6 +271,13 @@ impl Profile {
         let levels = |l: &[&str]| Quirks {
             efforts: Some(l.iter().map(|s| (*s).to_owned()).collect()),
             ..Quirks::default()
+        };
+        // Where a page says which it tries at when told none.
+        let by_default = |m: &str| match m {
+            "gpt-6.1-sol" | "gpt-6.1-terra" | "gpt-6-sol" | "gpt-6-luna" | "gpt-5.6-sol"
+            | "gpt-5.5" => Some("medium".to_owned()),
+            "gpt-5.4" => Some("none".to_owned()),
+            _ => None,
         };
         let (all, no_none, no_max) = (
             ["none", "low", "medium", "high", "xhigh", "max"],
@@ -274,7 +297,7 @@ impl Profile {
             ("gpt-5.4", &no_max),
             ("gpt-5.3-codex", &["low", "medium", "high", "xhigh"]),
         ]
-        .map(|(m, l)| (m.to_owned(), levels(l)))
+        .map(|(m, l)| (m.to_owned(), Quirks { default_effort: by_default(m), ..levels(l) }))
         .into();
         Self {
             provider: "openai".into(),
@@ -358,8 +381,10 @@ impl Profile {
         let adaptive = Quirks {
             effort: Some(Effort::AdaptiveThinking),
             efforts: levels(&["low", "medium", "high", "xhigh", "max"]),
+            default_effort: Some("high".into()),
             ..claude.clone()
         };
+        let medium = Quirks { default_effort: Some("medium".into()), ..adaptive.clone() };
         let four_six =
             Quirks { efforts: levels(&["low", "medium", "high", "max"]), ..adaptive.clone() };
         let nova = Quirks { cache_points: Some(CachePoints::NotTools), ..claude.clone() };
@@ -370,9 +395,7 @@ impl Profile {
             &[
                 "anthropic.claude-fable-5-2",
                 "anthropic.claude-mythos-5-2",
-                "anthropic.claude-haiku-5-5",
                 "anthropic.claude-sonnet-5-5",
-                "anthropic.claude-opus-5-5",
                 "anthropic.claude-fable-5-1",
                 "anthropic.claude-mythos-5-1",
                 "anthropic.claude-fable-5",
@@ -386,6 +409,7 @@ impl Profile {
         );
         let four_six =
             of(&["anthropic.claude-opus-4-6-v1", "anthropic.claude-sonnet-4-6"], &four_six);
+        let medium = of(&["anthropic.claude-haiku-5-5", "anthropic.claude-opus-5-5"], &medium);
         let claude = of(
             &[
                 "anthropic.claude-opus-4-5-20251101-v1:0",
@@ -410,7 +434,13 @@ impl Profile {
             headers: BTreeMap::new(),
             listing: Listing::Data,
             quirks: Quirks::default(),
-            models: adaptive.into_iter().chain(four_six).chain(claude).chain(nova).collect(),
+            models: adaptive
+                .into_iter()
+                .chain(medium)
+                .chain(four_six)
+                .chain(claude)
+                .chain(nova)
+                .collect(),
         }
     }
 
@@ -495,6 +525,7 @@ mod tests {
             max_output: Some(2),
             effort: Some(Effort::OutputConfig),
             efforts: Some(vec!["e".into()]),
+            default_effort: Some("e".into()),
             thinking: Some(Thinking::Adaptive),
             speeds: Some(vec!["s".into()]),
             cache_markers: Some(true),

@@ -27,7 +27,7 @@ mod test;
 pub mod vars;
 
 pub use acp::{Acp, KNOWN, Known};
-pub use claude::Prompts;
+pub use claude::{Prompts, default_effort as claude_default_effort};
 pub use drive::{Events, Handle, Limits, MOST_LINE, MOST_PROMPT, MOST_SUBJECT};
 pub use event::*;
 pub use find::{NotFound, Program, find};

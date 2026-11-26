@@ -262,7 +262,10 @@ impl Codex {
                     every.push(Name { id: e.clone(), ..Name::default() });
                 }
             }
-            all.push(Name { id, label: owned(m, "/displayName"), efforts, fast: false });
+            let default_effort =
+                crate::talk::id(m, "/defaultReasoningEffort").filter(|e| efforts.contains(e));
+            let label = owned(m, "/displayName");
+            all.push(Name { id, label, efforts, default_effort, fast: false });
         }
         if !all.is_empty() {
             (self.caps.models, self.caps.efforts) = (Names::Of(all), Names::Of(every));

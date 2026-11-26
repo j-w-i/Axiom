@@ -411,6 +411,7 @@ class ModelInfo {
     this.name,
     this.context,
     this.efforts = const [],
+    this.defaultEffort,
     this.speeds = const [],
   });
   ModelInfo.decode(Json j)
@@ -418,10 +419,14 @@ class ModelInfo {
       name = j['name'] as String?,
       context = j['context'] as int?,
       efforts = [for (final e in j['efforts'] as List<Object?>? ?? const []) e! as String],
+      defaultEffort = j['default_effort'] as String?,
       speeds = [for (final e in j['speeds'] as List<Object?>? ?? const []) e! as String];
 
   /// How hard it can be told to try, the least first; how fast it can be beside the standard.
   final List<String> efforts, speeds;
+
+  /// Which of [efforts] it tries at when it is told none, where that is said.
+  final String? defaultEffort;
 
   final String id;
   final String? name;

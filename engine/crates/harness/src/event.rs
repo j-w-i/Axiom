@@ -57,6 +57,8 @@ pub struct Name {
     pub label: Option<String>,
     /// The efforts this model takes, where that depends on it.
     pub efforts: Vec<String>,
+    /// The one of them it tries at when told none, where that is known.
+    pub default_effort: Option<String>,
     /// It can be faster than the standard, for a price.
     pub fast: bool,
 }

@@ -27,12 +27,17 @@ pub struct Catalogue {
 /// Claude Code's own names for models, where it has not said any itself (code.claude.com/docs/en/
 /// model-config, read 2026-11-26).
 fn documented() -> ModelList {
-    let one = |id: &str, name: &str| ModelInfo {
-        id: id.into(),
-        name: Some(name.into()),
-        efforts: ["low", "medium", "high", "xhigh", "max"].map(str::to_owned).into(),
-        effort: true,
-        ..ModelInfo::default()
+    let one = |id: &str, name: &str| {
+        let efforts: Vec<String> =
+            ["low", "medium", "high", "xhigh", "max"].map(str::to_owned).into();
+        ModelInfo {
+            id: id.into(),
+            name: Some(name.into()),
+            default_effort: axiom_harness::claude_default_effort(id, &efforts),
+            efforts,
+            effort: true,
+            ..ModelInfo::default()
+        }
     };
     ModelList {
         harness: "claude".into(),
@@ -118,12 +123,16 @@ pub fn about(p: &axiom_model::Profile, m: axiom_model::ModelInfo) -> ModelInfo {
             ["low", "medium", "high"].map(str::to_owned).into()
         }),
     };
+    // Only one that can be chosen.
+    let default_effort =
+        m.about.default_effort.or(q.default_effort).filter(|e| efforts.contains(e));
     ModelInfo {
         id: m.id,
         name: m.name,
         context: m.about.context.or(q.context),
         effort: !efforts.is_empty(),
         efforts,
+        default_effort,
         adaptive: q.thinking.is_some() && m.about.adaptive == Some(true),
         speeds: q.speeds.unwrap_or_default(),
     }
@@ -146,6 +155,8 @@ pub fn fit(mut m: ModelInfo) -> ModelInfo {
             limits::clip(w, 100);
         }
     }
+    // One of them, or not said.
+    m.default_effort = m.default_effort.take().filter(|e| m.efforts.contains(e));
     m
 }
 
@@ -201,6 +212,7 @@ mod tests {
             context: Some(9),
             efforts: Some(vec!["low".into(), "max".into()]),
             adaptive: Some(true),
+            default_effort: None,
         };
         let a = Profile::anthropic();
         let m = of(&a, "claude-opus-5-5", said());
@@ -226,7 +238,24 @@ mod tests {
             words(&of(&Profile::chatgpt(), "gpt-6-luna", none())),
             "none low medium high xhigh max"
         );
+        // Which it tries at when told none, where its page says, and only one it can be told.
+        let by_default = |p: &Profile, id: &str| {
+            let every = ["none", "low", "medium", "high", "xhigh", "max"].map(str::to_owned);
+            let all = axiom_model::About { efforts: Some(every.into()), ..none() };
+            of(p, id, all).default_effort
+        };
+        assert_eq!(by_default(&a, "claude-opus-5-5").as_deref(), Some("medium"));
+        assert_eq!(by_default(&a, "claude-haiku-5-5").as_deref(), Some("medium"));
+        assert_eq!(by_default(&a, "claude-sonnet-5-5").as_deref(), Some("high"));
+        assert_eq!(of(&a, "claude-opus-5-5", said()).default_effort, None, "it takes no medium");
+        assert_eq!(by_default(&o, "gpt-6.1-sol").as_deref(), Some("medium"));
+        assert_eq!(by_default(&o, "gpt-5.4").as_deref(), Some("none"));
+        assert_eq!(by_default(&o, "gpt-6.2-sol"), None, "its page does not say");
+        let listed = axiom_model::About { default_effort: Some("low".into()), ..said() };
+        assert_eq!(of(&a, "claude-opus-5-5", listed).default_effort.as_deref(), Some("low"));
         let b = Profile::bedrock();
+        assert_eq!(by_default(&b, "anthropic.claude-opus-5-5").as_deref(), Some("medium"));
+        assert_eq!(by_default(&b, "anthropic.claude-sonnet-4-6").as_deref(), Some("high"));
         assert_eq!(
             words(&of(&b, "anthropic.claude-opus-5-5", none())),
             "low medium high xhigh max"
