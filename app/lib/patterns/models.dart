@@ -111,10 +111,28 @@ class ServiceView {
 enum DiffKind { same, add, remove }
 
 class DiffLine {
-  const DiffLine(this.kind, this.number, this.text);
+  const DiffLine(this.kind, this.number, this.text, {this.was = 0, this.start = false});
   final DiffKind kind;
+
+  /// Where it is now; of a removed line, where it was.
   final int number;
   final String text;
+
+  /// Of a line that is the same on both sides: where it was. 0 where that is not known.
+  final int was;
+
+  /// The first line of a part of the diff that does not follow on from the one before.
+  final bool start;
+
+  @override
+  bool operator ==(Object other) =>
+      other is DiffLine &&
+      other.kind == kind &&
+      other.number == number &&
+      other.text == text &&
+      other.was == was;
+  @override
+  int get hashCode => Object.hash(kind, number, text, was);
 }
 
 enum TaskState { todo, active, asking, done, blocked }
