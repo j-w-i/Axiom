@@ -481,6 +481,11 @@ void main() {
       await shell(t, s);
       await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')).first);
       await settled(t);
+      // Not made there yet (decision 0022): nothing offers one.
+      if (!Terminals.made) {
+        expect(find.bySemanticsLabel('New terminal'), findsNothing);
+        return;
+      }
       await press(t, find.bySemanticsLabel('New terminal'));
       expect(s.calls.last, ['terminal', 's']);
       expect(find.byType(TerminalView), findsOneWidget);
