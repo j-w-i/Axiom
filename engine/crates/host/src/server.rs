@@ -1114,6 +1114,11 @@ fn slow(c: &Call) -> bool {
             | Call::TerminalScreen { .. }
             | Call::TerminalOpen { .. }
             | Call::TerminalClose { .. }
+            | Call::BrowserOpen { .. }
+            | Call::BrowserView { .. }
+            | Call::BrowserPoint { .. }
+            | Call::BrowserClose { .. }
+            | Call::BrowserSize { .. }
     )
 }
 
@@ -2290,6 +2295,87 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 let _ = (session, cols, rows, command);
                 Err(agents::bad("terminals are not made on Windows yet"))
             }
+        }
+        Call::Browsers {} => value(st.agents.browsers().await),
+        #[cfg(unix)]
+        Call::BrowserOpen { session, agent, port } => {
+            let b = st.agents.browser(&session, &agent, true).await?;
+            b.open(&format!("http://127.0.0.1:{port}/")).await.map_err(agents::bad)?;
+            Ok(Value::Null)
+        }
+        #[cfg(unix)]
+        Call::BrowserView { session, agent, seen } => {
+            let b = st.agents.browser(&session, &agent, false).await?;
+            let v = b.view_after(seen, Duration::from_secs(10)).await;
+            value(axiom_proto::BrowserView {
+                version: v.version,
+                frame: v.frame.map(|f| f.to_string()),
+                width: v.width,
+                height: v.height,
+                url: v.url,
+                title: v.title,
+                person: v.person,
+                dark: v.dark,
+                loading: v.loading,
+                refused: v.refused,
+                ended: v.ended,
+            })
+        }
+        #[cfg(unix)]
+        Call::BrowserHold { session, agent, person } => {
+            st.agents.browser(&session, &agent, false).await?.hold(person);
+            Ok(Value::Null)
+        }
+        #[cfg(unix)]
+        Call::BrowserInput { session, agent, input } => {
+            let b = st.agents.browser(&session, &agent, false).await?;
+            let i = match input {
+                axiom_proto::BrowserInput::Mouse { event, x, y, button, clicks, modifiers } => {
+                    axiom_browser::Input::Mouse { kind: event, x, y, button, clicks, modifiers }
+                }
+                axiom_proto::BrowserInput::Wheel { x, y, dx, dy } => {
+                    axiom_browser::Input::Wheel { x, y, dx, dy }
+                }
+                axiom_proto::BrowserInput::Key { event, key, code, text, modifiers } => {
+                    axiom_browser::Input::Key { kind: event, key, code, text, modifiers }
+                }
+                axiom_proto::BrowserInput::Text { text } => axiom_browser::Input::Text(text),
+            };
+            b.input(i).await.map_err(agents::bad)?;
+            Ok(Value::Null)
+        }
+        #[cfg(unix)]
+        Call::BrowserSize { session, agent, width, height, dark } => {
+            let b = st.agents.browser(&session, &agent, false).await?;
+            b.size(width, height).await.map_err(agents::bad)?;
+            b.dark(dark).await.map_err(agents::bad)?;
+            Ok(Value::Null)
+        }
+        #[cfg(unix)]
+        Call::BrowserPoint { session, agent, x, y } => {
+            let b = st.agents.browser(&session, &agent, false).await?;
+            let p = b.point(x, y).await.map_err(agents::bad)?;
+            let url = b.view().borrow().url.clone();
+            let (l, t, w, h) = p.rect;
+            value(axiom_proto::Pointed {
+                selector: p.selector,
+                text: p.text,
+                styles: p.styles,
+                rect: [l, t, w, h],
+                picture: p.picture,
+                url,
+            })
+        }
+        #[cfg(not(unix))]
+        Call::BrowserOpen { .. }
+        | Call::BrowserView { .. }
+        | Call::BrowserHold { .. }
+        | Call::BrowserInput { .. }
+        | Call::BrowserSize { .. }
+        | Call::BrowserPoint { .. } => Err(agents::bad("there is no browser on this system yet")),
+        Call::BrowserClose { session, agent } => {
+            st.agents.close_browser(&session, &agent).await;
+            Ok(Value::Null)
         }
         Call::Terminals {} => {
             #[cfg(unix)]

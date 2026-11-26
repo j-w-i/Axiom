@@ -20,4 +20,7 @@
 {"id":17,"result":{"against":"main","ahead":2,"behind":1,"branch":"topic","default_branch":"main","diff":"--- a.rs\n+++ a.rs\n","files":[{"digest":"d1","path":"a.rs","what":"changed"}],"hooks":true,"remote":"origin","remote_url":"git@example.com:a/b.git","repositories":["","api"],"repository":true,"upstream":"origin/topic","whole":false}}
 {"id":18,"result":{"commit":{"at":1700000000,"author":"Ada","id":"c1","subject":"S"},"diff":"x","message":"S\n\nB","whole":true}}
 {"id":19,"result":{"branch":"b","changed":["a.rs"],"commit":{"at":1,"author":"Ada","id":"c2","subject":"T"},"hooks":true,"unsigned":true}}
+{"id":20,"result":[{"agent":"a_1","person":true,"session":"s_1","title":"App","url":"http://127.0.0.1:5173/"}]}
+{"id":21,"result":{"dark":true,"frame":"/9j/","height":800,"person":true,"refused":["https://example.com/a.png"],"title":"App","url":"http://127.0.0.1:5173/","version":7,"width":1280}}
+{"id":22,"result":{"picture":"iVBO","rect":[8.0,21.5,300.0,37.0],"selector":"main > h1.big","styles":[["font-size","32px"]],"text":"Hello","url":"http://127.0.0.1:5173/"}}
 {"open":"/w"}

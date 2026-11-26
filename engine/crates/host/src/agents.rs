@@ -211,6 +211,7 @@ impl Slot {
         Arc::strong_count(self) == 1
             && self.live.try_lock().is_ok_and(|l| l.is_none())
             && self.seen.1.running().is_empty()
+            && !self.seen.2.open()
             && self.owed.lock().is_ok_and(|o| o.is_empty())
             && self.attempt.try_lock().is_ok_and(|a| a.as_ref().is_none_or(|a| a.is_closed()))
     }
@@ -309,7 +310,63 @@ impl Agents {
     }
 
     pub fn slot(&self, s: &SessionId, a: &AgentId) -> Arc<Slot> {
-        self.party(s, |p| p.agents.entry(a.clone()).or_default().clone())
+        let slot = self.party(s, |p| p.agents.entry(a.clone()).or_default().clone());
+        // Its browser's profile is Axiom's own, one for each agent of each session (decision 0021).
+        let dir = self.data.join("browsers").join(plain(&s.0)).join(plain(&a.0));
+        if let Ok(profile) = Place::new(plain_verbatim(dir)) {
+            let usual = ["/usr/bin", "/bin"].iter().filter_map(|p| Place::new(p).ok()).collect();
+            let home = self.home.as_deref().and_then(|h| real(h).ok());
+            slot.seen.2.place(axiom_tools::browse::Where { profile, path: usual, home });
+        }
+        slot
+    }
+
+    /// The browsers agents have open, in every session this host has open.
+    pub async fn browsers(&self) -> Vec<axiom_proto::BrowserInfo> {
+        let all: Vec<(SessionId, AgentId, Arc<Slot>)> = self
+            .parties()
+            .iter()
+            .flat_map(|(s, p)| {
+                p.agents.iter().map(|(a, slot)| (s.clone(), a.clone(), slot.clone()))
+            })
+            .collect();
+        let mut out = Vec::new();
+        #[cfg(unix)]
+        for (session, agent, slot) in all {
+            if let Some(b) = slot.seen.2.current().await {
+                let v = b.view().borrow().clone();
+                let (url, title, person) = (v.url, v.title, v.person);
+                out.push(axiom_proto::BrowserInfo { session, agent, url, title, person });
+            }
+        }
+        #[cfg(not(unix))]
+        drop(all);
+        out
+    }
+
+    /// An agent's browser; started, if `start`, when there is none.
+    #[cfg(unix)]
+    pub async fn browser(
+        &self,
+        s: &SessionId,
+        a: &AgentId,
+        start: bool,
+    ) -> Result<Arc<axiom_browser::Browser>, WireError> {
+        let none = || WireError::new(ErrorCode::NotFound, "that agent has no browser open");
+        let slot = self.parties().get(s).and_then(|p| p.agents.get(a).cloned()).ok_or_else(none)?;
+        if !start {
+            return slot.seen.2.current().await.ok_or_else(none);
+        }
+        let slot = self.slot(s, a);
+        slot.seen.2.get(&slot.seen.1).await.map_err(bad)
+    }
+
+    /// An agent's browser ends.
+    pub async fn close_browser(&self, s: &SessionId, a: &AgentId) {
+        let slot = self.parties().get(s).and_then(|p| p.agents.get(a).cloned());
+        if let Some(slot) = slot {
+            slot.seen.2.end().await;
+        }
     }
 
     pub fn answer(
@@ -521,6 +578,7 @@ impl Agents {
             self.parties().values().flat_map(|p| p.agents.values().cloned()).collect();
         for s in slots {
             *s.attempt.lock().await = None;
+            s.seen.2.end().await;
         }
     }
 
@@ -1318,6 +1376,7 @@ impl Slot {
     /// What it has running began as what it was.
     pub async fn changed(&self) {
         self.stop_jobs();
+        self.seen.2.end().await;
         // Its program ends; what it was told is kept by the program, and gone on with.
         *self.attempt.lock().await = None;
     }

@@ -425,6 +425,43 @@ fn main() -> Result<(), serde_json::Error> {
                 changed: vec!["a.rs".into()],
             })?,
         },
+        Message::Ok {
+            id: 20,
+            result: serde_json::to_value(vec![BrowserInfo {
+                session: SessionId("s_1".into()),
+                agent: AgentId("a_1".into()),
+                url: "http://127.0.0.1:5173/".into(),
+                title: "App".into(),
+                person: true,
+            }])?,
+        },
+        Message::Ok {
+            id: 21,
+            result: serde_json::to_value(BrowserView {
+                version: 7,
+                frame: Some("/9j/".into()),
+                width: 1280,
+                height: 800,
+                url: "http://127.0.0.1:5173/".into(),
+                title: "App".into(),
+                person: true,
+                dark: true,
+                loading: false,
+                refused: vec!["https://example.com/a.png".into()],
+                ended: None,
+            })?,
+        },
+        Message::Ok {
+            id: 22,
+            result: serde_json::to_value(Pointed {
+                selector: "main > h1.big".into(),
+                text: "Hello".into(),
+                styles: vec![("font-size".into(), "32px".into())],
+                rect: [8.0, 21.5, 300.0, 37.0],
+                picture: Some("iVBO".into()),
+                url: "http://127.0.0.1:5173/".into(),
+            })?,
+        },
         Message::Open { open: "/w".into() },
     ] {
         println!("{}", serde_json::to_string(&m)?);
