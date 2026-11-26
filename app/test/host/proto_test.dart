@@ -138,6 +138,7 @@ void main() {
       [p.pid, p.parent, p.name, p.cpuMs, p.memory, p.orphan],
       [41, 1, 'node', 1500, 4096, true],
     );
+    expect(p.ports, [5173]);
     final d = FolderInfo.decode((result(14)! as List<Object?>).single! as Json);
     expect(
       [d.id, d.path, d.name, d.pinned, d.access, d.moved],

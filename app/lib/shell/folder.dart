@@ -1088,6 +1088,7 @@ class _JobsPartState extends State<JobsPart> {
 
   Widget _job(AxTheme t, JobInfo j) {
     final c = t.colors, key = (j.agent, j.job);
+    final ports = {for (final p in j.processes) ...p.ports}.toList()..sort();
     final open = _open.contains(key);
     final command = oneLine(literal(j.command), 200);
     final who = widget.names[j.agent];
@@ -1135,6 +1136,17 @@ class _JobsPartState extends State<JobsPart> {
               ),
           ],
         ),
+        for (final port in ports)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, 8, 6),
+            child: Row(
+              children: [
+                AxGlyph(AxIcon.web, color: c.ink3),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Serves 127.0.0.1:$port', style: t.type.small.ink(c.ink2))),
+              ],
+            ),
+          ),
         if (open)
           for (final p in j.processes)
             Padding(

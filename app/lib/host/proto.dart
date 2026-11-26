@@ -385,6 +385,7 @@ class ProcessInfo {
     this.cpuMs = 0,
     this.memory = 0,
     this.orphan = false,
+    this.ports = const [],
   });
   ProcessInfo.decode(Json j)
     : pid = j['pid']! as int,
@@ -392,9 +393,13 @@ class ProcessInfo {
       name = j['name']! as String,
       cpuMs = j['cpu_ms']! as int,
       memory = j['memory']! as int,
-      orphan = j['orphan'] == true;
+      orphan = j['orphan'] == true,
+      ports = [for (final p in j['ports'] as List<Object?>? ?? const []) p! as int];
   final int pid, parent, cpuMs, memory;
   final String name;
+
+  /// What it serves on this computer's loopback address.
+  final List<int> ports;
 
   /// Its parent has ended.
   final bool orphan;

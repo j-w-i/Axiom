@@ -355,7 +355,7 @@ void main() {
             age: 75,
             last: 'ready on :5173\n',
             processes: [
-              ProcessInfo(70, 'npm', cpuMs: 100, memory: 40 << 20),
+              ProcessInfo(70, 'npm', cpuMs: 100, memory: 40 << 20, ports: [5173]),
               ProcessInfo(71, 'node', parent: 1, cpuMs: 900, memory: 300 << 20, orphan: true),
             ],
           ),
@@ -371,9 +371,12 @@ void main() {
       expect(find.text('elsewhere'), findsNothing, reason: 'another session');
       await press(t, find.bySemanticsLabel(RegExp('^npm run dev')));
       expect(find.text('ready on :5173'), findsOneWidget);
+      // What it serves is said; it is not opened in the person's own browser (decision 0021).
+      expect(find.text('Serves 127.0.0.1:5173'), findsOneWidget);
+      expect(find.text('Open'), findsNothing);
       expect(find.text('npm  70'), findsOneWidget);
       expect(find.text('node  71  left behind'), findsOneWidget);
-      expect(find.text('300.0 MiB'), findsOneWidget);
+      expect(find.textContaining(RegExp(r'(^| )300\.0 MiB$')), findsOneWidget);
       await snap(t, 'jobs');
       await press(t, find.text('Stop'));
       expect(s.calls.last, ['stop', 'a', 1]);
