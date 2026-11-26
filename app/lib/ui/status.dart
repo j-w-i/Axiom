@@ -232,7 +232,12 @@ class _MeterPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_MeterPainter o) =>
-      o.v != v || o.dashed != dashed || o.hot != hot || o.track != track || o.vertical != vertical;
+      o.v != v ||
+      o.dashed != dashed ||
+      o.hot != hot ||
+      o.low != low ||
+      o.track != track ||
+      o.vertical != vertical;
 }
 
 /// A level as a ring, where there is room for a figure and not for a bar. Dashed when estimated, empty
