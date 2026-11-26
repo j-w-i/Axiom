@@ -59,7 +59,11 @@ class Beside extends StatelessWidget {
                 Positioned.fill(
                   child: Offstage(
                     offstage: over,
-                    child: ExcludeFocus(excluding: over, child: main),
+                    // What cannot be seen does not ask for frames.
+                    child: TickerMode(
+                      enabled: !over,
+                      child: ExcludeFocus(excluding: over, child: main),
+                    ),
                   ),
                 ),
                 if (over) Positioned.fill(child: panel!),
