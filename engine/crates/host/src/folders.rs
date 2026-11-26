@@ -215,12 +215,16 @@ mod tests {
         assert_eq!(again.list(), std::slice::from_ref(&one));
         let two = again.set(said(&w)).unwrap();
         assert_eq!((two.id == one.id, two.name, two.pinned), (true, None, false));
-        // Another folder at the same path is not it.
-        std::fs::remove_dir(&w).unwrap();
-        std::fs::create_dir(d.path().join("other")).unwrap();
-        std::fs::rename(d.path().join("other"), &w).unwrap();
-        assert!(again.list()[0].moved);
-        assert!(!again.set(said(&w)).unwrap().moved, "said again, it is this one");
+        // Another folder at the same path is not it. Made while the first is there, so that the
+        // system cannot give it the first one's number.
+        #[cfg(unix)]
+        {
+            std::fs::create_dir(d.path().join("other")).unwrap();
+            std::fs::remove_dir(&w).unwrap();
+            std::fs::rename(d.path().join("other"), &w).unwrap();
+            assert!(again.list()[0].moved);
+            assert!(!again.set(said(&w)).unwrap().moved, "said again, it is this one");
+        }
         again.remove(&one.id).unwrap();
         assert!(again.list().is_empty());
         assert_eq!(again.remove(&one.id).unwrap_err().code, ErrorCode::NotFound);

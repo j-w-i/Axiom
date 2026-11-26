@@ -1122,6 +1122,7 @@ async fn looked_at(
 
 /// Whether a process of a tree has lost its parent: it is not the first, and its parent is none of
 /// the tree.
+#[cfg(unix)]
 fn left(pid: u32, parent: u32, root: Option<u32>, pids: &[u32]) -> bool {
     Some(pid) != root && !pids.contains(&parent)
 }
@@ -2213,7 +2214,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod left_behind {
     #[test]
     fn a_process_whose_parent_is_gone_was_left_behind() {
