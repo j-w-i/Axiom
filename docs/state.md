@@ -8,7 +8,7 @@ Updated 2026-11-26. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), ins
 - **M2**: agents run. Policy, spawn with a sandbox, ten tools (read, write, edit, patch, list, glob, search, shell, job, fetch), codecs for Anthropic, OpenAI (Responses and Chat), Gemini, OpenRouter and Amazon Bedrock, the loop with compaction, approvals, accounts, CLI and app. A correctness review is filed with what became of each finding (`reviews/2026-11-25-m2-correctness.md`). What `product/worth-building.md` has for it is built, but for a setting for notifications, which comes with them (W-15, M5). Conversations are branched (0015), and what is contained on Linux has a seccomp filter (0008). **The independent security review has not been done** (K32).
 - **M3**: begun. `axiom-harness` drives Claude Code, Codex and ACP agents; host and app set them up, ask before each start, show and journal what they do. No real one has been started (K40). Claude Code can have several accounts, each in a folder of its own where a person signs in themselves (K44). They are given the tool `agent` by a server of the host's own (K41) and no other: a program works with its own tools (0017, the owner 2026-11-26; what stood in their place is gone). Axiom's own loop can run on a ChatGPT plan: signing in, renewing, using, leaving (0013); nobody has signed in yet (K47). What `product/worth-building.md` has for it is built: see below. Left: Copilot's own SDK (its CLI is reached by ACP), and one start of a real program (K40).
 - **M5**: begun. Several agents in a session, of any harness, added in the app; an agent gives others work with the tool `agent` (list, tell, wait, read), and a person is asked whenever that would widen what it may. An agent can work in a copy of the folder of its own; a person sees what it changed, with clashes, and brings it in (0014; reviewed for lost work, `reviews/2026-11-25-copies.md`). What waits for a person is one queue over all sessions (`host.waiting`), with what failed or finished and nobody has seen. What an agent was told to do reaches who asked by itself, once, also over a restart. Left: task graphs, copies that go by themselves (K48), and what `research/t3code-comparison.md` ranks (owner, 2026-11-25: look at what T3 Code does better).
-- **M4**: what has been changed in a folder is shown (git in the sandbox, not on Windows). Nothing else.
+- **M4**: begun (`m4/files`). Decisions 0018 (git for a person), 0019 (the person's editor), 0020 (no editing in Axiom) and 0021 (an agent's own server, the proxy, the browser) are written. Folders and files are built (W-11, W-12, W-18 to W-22, see below); the rest of M4's worth-building items are not yet. Repo map, LSP, MCP client and the benchmark are not begun.
 - **M6, M7**: nothing but `scripts/package.sh`.
 
 ## What was verified, and where
@@ -76,6 +76,17 @@ The owner, 2026-11-26, on the way: the harness is an advanced choice, off by def
 
 The star is not on the sheet of icons in the gallery, because goldens are not recorded again without the owner.
 
+## M4 from `product/worth-building.md`
+Folders and files (`m4/files`). All of it in the one panel: a file, a search, or the list (the plan, the box to find a file in, jobs, what has changed, the folder's files).
+- W-11: `job.list` and `job.stop`; the panel shows a session's jobs with their command, how long, the last 4 KiB they said (also what the agent has read) and Stop, looked at every 2 s while it is shown. Stopping is the job's own stop: its tree ends (SI-24). Processes by agent (W-38) are not yet.
+- W-12: side by side where the panel is 520 px or more, white space ignored in the view only, long lines wrapped, every file closed; kept with the window's settings.
+- W-18: `file.read`, by handle below the folder or an agent's copy, never what is kept from everybody (SI-12; a folder that holds `.ssh` does not show it). 16 MiB read at most, 2 MiB of text sent, 4 MiB of a picture. The reader: numbers, find with a count, go to line, wrap, Markdown as it reads, CSV as a table (500 rows), pictures. Highlighting is still the one-line scanner (K6): no grammar.
+- W-19: code in an answer that names a file (`src/a.rs:42`, `x.dart#L7`) and a link to a relative path open it in the reader at the line. Outside the folder the host refuses, with words; nothing asks (the worth-building text says it should ask: not built).
+- W-20: Go to file (⌘P, names ranked in the host), Search in files (⇧⌘F; case, whole words, an expression), the folder's files folder by folder. A file can be mentioned in the message as `@path`; what an agent does with that is its own.
+- W-21 (0019): `editor.list`, `file.open`, `file.show`. Started by a scripted stand-in in the tests (`host/src/editor.rs`); no real editor has been started here, because it would open a window.
+- W-22: a picture of the folder is shown in the reader, measured before it is decoded (40 million pixels, 16 384 a side), decoded off the screen's isolate, with zoom. Not in the transcript, and not saved or copied (K56).
+Verified on macOS 27 arm64: 58 Rust suites (870 tests), 497 app tests, offscreen. Deliberate breakages: 11 in the host and tools (one survives: `..` in a path, which `Place` refuses before), 7 in the client, all caught after two tests were made stronger.
+
 ## The look, round 12 (`design/flat`)
 Built 2026-11-25 on the owner's yes to pictures (`design/system.md`, history). In the pictures and not in the app, because the host has nothing for it: a plan, levels of use per service in the header, a terminal, renaming and removing sessions. The folder window (`file_selector`, by the Flutter team, BSD: a person had to type a whole path) has been opened by nobody. `spec-fable.md` is older than this and describes what was before.
 
@@ -91,7 +102,7 @@ Built on the owner's word (2026-11-25). In the pictures and not in the app, beca
 3. Owner: drag the window by its header and try full screen (K8).
 4. Owner: say whether the real Claude Code or Codex on this computer may be started once (K40); sign in with ChatGPT once, if wanted (K47).
 5. Somebody with the standing to do it: the security review (K32). It should see seccomp, branching's `points`, Bedrock, and now 0016: what a person may have a program given.
-6. M4's worth-building items (W-11, W-12, W-18 to W-22, W-36 to W-38, W-42 to W-52; each D-n written as a decision first), then M5, which begins with taking back what was said.
+6. M4's worth-building items left: W-36 to W-38, W-42 to W-52 (decisions 0018 to 0021 are written); then M5, which begins with taking back what was said.
 
 ## How to resume
 `AGENTS.md`, this file, `roadmap.md`, then the decision for the area. `scripts/check.sh` must pass before and after. Preferences the owner has stated are in `product/requirements.md` (PR-4, PR-44) and `design/system.md`.
