@@ -530,6 +530,16 @@ async fn jobs_go_on_and_are_read() {
     let one = shown.first().unwrap();
     assert_eq!((one.job, one.last.as_str(), one.ended.is_none()), (1, "up\n", true));
     assert!(one.command.starts_with("echo up"));
+    // What it runs is known while it runs.
+    let mut runs = Vec::new();
+    for _ in 0..100 {
+        runs = t.seen.1.shown().first().unwrap().processes.clone();
+        if runs.len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(runs.len() >= 2, "the shell and its sleep: {runs:?}");
     assert!(job(json!({"do": "list"})).await.text.starts_with("1: echo up"));
     assert!(job(json!({"do": "stop", "id": 1})).await.ok);
     let mut last = String::new();

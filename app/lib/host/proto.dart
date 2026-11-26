@@ -264,6 +264,7 @@ class JobInfo {
     this.age = 0,
     this.ended,
     this.last = '',
+    this.processes = const [],
   });
   JobInfo.decode(Json j)
     : session = j['session']! as String,
@@ -272,10 +273,117 @@ class JobInfo {
       command = j['command']! as String,
       age = j['age']! as int,
       ended = j['ended'] as String?,
-      last = j['last']! as String;
+      last = j['last']! as String,
+      processes = [
+        for (final p in j['processes'] as List<Object?>? ?? const [])
+          ProcessInfo.decode(p! as Json),
+      ];
   final String session, agent, command, last;
   final int job, age;
   final String? ended;
+
+  /// What it runs now, the first one first.
+  final List<ProcessInfo> processes;
+}
+
+/// One process of what an agent runs.
+class ProcessInfo {
+  const ProcessInfo(
+    this.pid,
+    this.name, {
+    this.parent = 0,
+    this.cpuMs = 0,
+    this.memory = 0,
+    this.orphan = false,
+  });
+  ProcessInfo.decode(Json j)
+    : pid = j['pid']! as int,
+      parent = j['parent']! as int,
+      name = j['name']! as String,
+      cpuMs = j['cpu_ms']! as int,
+      memory = j['memory']! as int,
+      orphan = j['orphan'] == true;
+  final int pid, parent, cpuMs, memory;
+  final String name;
+
+  /// Its parent has ended.
+  final bool orphan;
+}
+
+/// A folder as its person has named and set it up.
+class FolderInfo {
+  const FolderInfo(
+    this.id,
+    this.path, {
+    this.name,
+    this.pinned = false,
+    this.execution,
+    this.access,
+    this.commands = const [],
+    this.moved = false,
+  });
+  FolderInfo.decode(Json j)
+    : id = j['id']! as String,
+      path = j['path']! as String,
+      name = j['name'] as String?,
+      pinned = j['pinned'] == true,
+      execution = j['execution'] == null ? null : Execution.decode(j['execution']! as Json),
+      access = j['access'] == null
+          ? null
+          : Access.values.asNameMap()[j['access']] ?? Access.unknown,
+      commands = [
+        for (final c in j['commands'] as List<Object?>? ?? const [])
+          FolderCommand.decode(c! as Json),
+      ],
+      moved = j['moved'] == true;
+  final String id, path;
+  final String? name;
+  final bool pinned, moved;
+  final Execution? execution;
+  final Access? access;
+  final List<FolderCommand> commands;
+
+  /// As a call says all of it anew.
+  Json encode() => {
+    'path': path,
+    'name': ?name,
+    if (pinned) 'pinned': true,
+    if (execution case final x?) 'execution': x.encode(),
+    if (access case final a? when a != Access.unknown) 'access': a.name,
+    if (commands.isNotEmpty) 'commands': [for (final c in commands) c.encode()],
+  };
+
+  FolderInfo copyWith({
+    String? name,
+    bool clearName = false,
+    bool? pinned,
+    Execution? execution,
+    Access? access,
+    bool clearStart = false,
+    List<FolderCommand>? commands,
+  }) => FolderInfo(
+    id,
+    path,
+    name: clearName ? null : name ?? this.name,
+    pinned: pinned ?? this.pinned,
+    execution: clearStart ? null : execution ?? this.execution,
+    access: clearStart ? null : access ?? this.access,
+    commands: commands ?? this.commands,
+  );
+}
+
+/// What runs in a folder by a key.
+class FolderCommand {
+  const FolderCommand(this.name, this.command, {this.icon, this.key});
+  FolderCommand.decode(Json j)
+    : name = j['name']! as String,
+      command = j['command']! as String,
+      icon = j['icon'] as String?,
+      key = j['key'] as int?;
+  final String name, command;
+  final String? icon;
+  final int? key;
+  Json encode() => {'name': name, 'command': command, 'icon': ?icon, 'key': ?key};
 }
 
 /// An editor of the person's own.

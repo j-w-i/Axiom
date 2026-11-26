@@ -133,6 +133,20 @@ void main() {
     final j = JobInfo.decode((result(12)! as List<Object?>).single! as Json);
     expect([j.session, j.agent, j.job, j.command], ['s_1', 'a_1', 2, 'npm run dev']);
     expect([j.age, j.ended, j.last], [30, 'ended: exit 1', 'ready\n']);
+    final p = j.processes.single;
+    expect(
+      [p.pid, p.parent, p.name, p.cpuMs, p.memory, p.orphan],
+      [41, 1, 'node', 1500, 4096, true],
+    );
+    final d = FolderInfo.decode((result(14)! as List<Object?>).single! as Json);
+    expect(
+      [d.id, d.path, d.name, d.pinned, d.access, d.moved],
+      ['f_1', '/w', 'Web', true, Access.read, true],
+    );
+    expect([d.execution!.model, d.execution!.connection], ['m', 'c_2']);
+    final c = d.commands.single;
+    expect([c.name, c.command, c.icon, c.key], ['Dev', 'npm run dev', 'play', 1]);
+    expect(FolderInfo.decode({...d.encode(), 'id': 'f_1'}).encode(), d.encode());
     final e = EditorInfo.decode((result(13)! as List<Object?>).single! as Json);
     expect([e.id, e.name, e.path], ['zed', 'Zed', '/usr/local/bin/zed']);
   });

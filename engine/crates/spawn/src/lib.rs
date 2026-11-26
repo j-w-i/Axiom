@@ -19,6 +19,8 @@ mod seatbelt;
 mod seccomp;
 #[cfg(unix)]
 mod tree;
+#[cfg(unix)]
+pub use tree::{Usage, usage};
 
 /// What is to be started. Everything in it comes from the host; of a model's words only `args` and
 /// what is written to `stdin` may hold any.
@@ -410,6 +412,14 @@ impl Running {
         self.tree.kill();
         // Reaped by `wait`, or by the runtime.
         let _ = self.child.start_kill();
+    }
+
+    /// Its processes that still run, as far as they are known: the first one first.
+    pub fn members(&self) -> Vec<u32> {
+        #[cfg(unix)]
+        return self.tree.members();
+        #[cfg(not(unix))]
+        self.id().into_iter().collect()
     }
 
     /// Looks at what it has started; call now and then while it runs, so that what leaves its

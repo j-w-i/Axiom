@@ -294,6 +294,14 @@ fn main() -> Result<(), serde_json::Error> {
                 age: 30,
                 ended: Some("ended: exit 1".into()),
                 last: "ready\n".into(),
+                processes: vec![ProcessInfo {
+                    pid: 41,
+                    parent: 1,
+                    name: "node".into(),
+                    cpu_ms: 1500,
+                    memory: 4096,
+                    orphan: true,
+                }],
             }])?,
         },
         Message::Ok {
@@ -302,6 +310,29 @@ fn main() -> Result<(), serde_json::Error> {
                 id: "zed".into(),
                 name: "Zed".into(),
                 path: "/usr/local/bin/zed".into(),
+            }])?,
+        },
+        Message::Ok {
+            id: 14,
+            result: serde_json::to_value([FolderInfo {
+                id: "f_1".into(),
+                path: "/w".into(),
+                name: Some("Web".into()),
+                pinned: true,
+                execution: Some(Execution {
+                    harness: "axiom".into(),
+                    model: Some("m".into()),
+                    connection: Some("c_2".into()),
+                    ..Execution::default()
+                }),
+                access: Some(Access::Read),
+                commands: vec![FolderCommand {
+                    name: "Dev".into(),
+                    command: "npm run dev".into(),
+                    icon: Some("play".into()),
+                    key: Some(1),
+                }],
+                moved: true,
             }])?,
         },
         Message::Open { open: "/w".into() },

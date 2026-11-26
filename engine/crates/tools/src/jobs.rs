@@ -27,6 +27,8 @@ pub struct Shown {
     pub age: u64,
     pub ended: Option<String>,
     pub last: String,
+    /// Its processes, as they were last looked at: the first one first.
+    pub processes: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -53,6 +55,8 @@ struct One {
 struct State {
     fresh: VecDeque<u8>,
     last: VecDeque<u8>,
+    /// Its processes, as last looked at.
+    members: Vec<u32>,
     lost: u64,
     ended: Option<String>,
 }
@@ -108,6 +112,7 @@ impl Jobs {
                     }
                     _ = look.tick(), if ended.is_none() => {
                         p.look();
+                        lock(&s).members = p.members();
                         None
                     }
                     () = told(&mut stopped), if ended.is_none() => {
@@ -134,7 +139,9 @@ impl Jobs {
                 },
                 _ => "its end is not known".into(),
             };
-            lock(&s).ended = Some(words);
+            let mut s = lock(&s);
+            s.ended = Some(words);
+            s.members.clear();
         });
         all.next += 1;
         let id = all.next;
@@ -216,6 +223,7 @@ impl Jobs {
                     age: j.began.elapsed().as_secs(),
                     ended: s.ended.clone(),
                     last: plain(&bytes),
+                    processes: s.members.clone(),
                 }
             })
             .collect()

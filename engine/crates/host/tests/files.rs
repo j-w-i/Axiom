@@ -149,3 +149,37 @@ async fn what_signs_a_person_in_is_not_read_even_in_their_folder() {
     assert!(l.entries.iter().all(|e| e.name != ".ssh") && l.hidden >= 1, "{l:?}");
     assert!(search(&mut c, &s, "KEY", true).await.hits.is_empty());
 }
+
+#[tokio::test]
+async fn folders_are_kept_as_their_person_says() {
+    let f = fixture();
+    let (mut c, _) = start(&f).await;
+    let w = f.dir.path().join("w").to_str().unwrap().to_owned();
+    let set = |path: &str, name: Option<&str>| Call::FolderSet {
+        path: path.into(),
+        name: name.map(String::from),
+        pinned: true,
+        execution: None,
+        access: Some(Access::Read),
+        commands: vec![],
+    };
+    let one: FolderInfo =
+        serde_json::from_value(c.call(set(&w, Some("Web"))).await.unwrap()).unwrap();
+    assert_eq!(
+        (one.name.as_deref(), one.pinned, one.access),
+        (Some("Web"), true, Some(Access::Read))
+    );
+    let all: Vec<FolderInfo> =
+        serde_json::from_value(c.call(Call::Folders {}).await.unwrap()).unwrap();
+    assert_eq!(all, std::slice::from_ref(&one));
+    for bad in ["w", "/nonexistent/x", &format!("{w}/missing")] {
+        assert!(c.call(set(bad, None)).await.is_err(), "{bad}");
+    }
+    assert!(c.call(set(&w, Some("a\u{7}"))).await.is_err());
+    c.call(Call::FolderRemove { id: one.id.clone() }).await.unwrap();
+    let call = Call::FolderRemove { id: one.id };
+    assert_eq!(refused(c.call(call).await).code, ErrorCode::NotFound);
+    let all: Vec<FolderInfo> =
+        serde_json::from_value(c.call(Call::Folders {}).await.unwrap()).unwrap();
+    assert!(all.is_empty());
+}

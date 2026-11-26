@@ -687,6 +687,24 @@ pub struct JobInfo {
     pub ended: Option<String>,
     /// What it said last, at most 4 KiB, without what a terminal would do with it.
     pub last: String,
+    /// What it runs now, the first one first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processes: Vec<ProcessInfo>,
+}
+
+/// One process of what an agent runs, as the system says.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub parent: u32,
+    pub name: String,
+    /// Processor time it has used, in all.
+    pub cpu_ms: u64,
+    /// Memory it holds now, bytes.
+    pub memory: u64,
+    /// Its parent has ended: it was left behind, and ends with the job all the same.
+    #[serde(default, skip_serializing_if = "not")]
+    pub orphan: bool,
 }
 
 /// An editor of the person's own that was found.
@@ -695,6 +713,45 @@ pub struct EditorInfo {
     pub id: String,
     pub name: String,
     pub path: String,
+}
+
+/// A folder sessions are begun in, as its person has named and set it up. Kept by Axiom, never read
+/// from the folder (SI-5).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FolderInfo {
+    pub id: String,
+    /// Real, without links.
+    pub path: String,
+    /// What the person calls it; absent: the last part of its path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "not")]
+    pub pinned: bool,
+    /// What a new session there begins with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<Execution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<Access>,
+    /// What runs there by a key: dev, test, build.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<FolderCommand>,
+    /// Another folder is at its path now than when it was set up: nothing of it is used until its
+    /// person says so again.
+    #[serde(default, skip_serializing_if = "not")]
+    pub moved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FolderCommand {
+    pub name: String,
+    /// As a shell has it, whole.
+    pub command: String,
+    /// One of the client's icons, by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// 1 to 9: with the keys of the window it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<u8>,
 }
 
 /// A harness, as it was found without being run.
@@ -1114,6 +1171,28 @@ pub enum Call {
     /// Stops one, and what it started.
     #[serde(rename = "job.stop")]
     JobStop { session: SessionId, agent: AgentId, job: u32 },
+    /// The folders a person has named or set up: an array of [`FolderInfo`].
+    #[serde(rename = "folder.list")]
+    Folders {},
+    /// Says all of what is kept of a folder, by its path; it is added if it is not known. Answers
+    /// with it.
+    #[serde(rename = "folder.set")]
+    FolderSet {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "not")]
+        pinned: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        execution: Option<Execution>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access: Option<Access>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        commands: Vec<FolderCommand>,
+    },
+    /// Forgets what is kept of a folder. Its sessions stay.
+    #[serde(rename = "folder.remove")]
+    FolderRemove { id: String },
     /// The record of what was done, after `after`.
     #[serde(rename = "audit.read")]
     Audit {
