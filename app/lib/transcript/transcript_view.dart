@@ -771,7 +771,10 @@ class _RowView extends StatelessWidget {
     if (i != null && !r.isEnd) {
       final d = i.doc, blocks = d.closed, b = blocks[r.index], at = r.index;
       final opens = at == 0, afterTool = opens && afterWork;
-      final goesOn = at + 1 < blocks.length && blocks[at + 1].continues;
+      final goesOn =
+          (at + 1 < blocks.length && blocks[at + 1].continues) ||
+          // Its next part may still be being written.
+          (i.open && at + 1 == blocks.length && (d.tail.firstOrNull?.continues ?? false));
       final closes = !i.open && at + 1 == blocks.length && d.tail.isEmpty;
       // A closed block is built once: the rows around it are built again whenever one closes.
       final old = _views[b];
@@ -793,7 +796,7 @@ class _RowView extends StatelessWidget {
               afterTool: afterTool,
               goesOn: goesOn,
               closes: closes,
-              whole: () => wholeCode(i.doc.closed, at),
+              whole: () => wholeCode([...i.doc.closed, ...i.doc.tail], at),
               onLink: onLink,
             );
       return RepaintBoundary(child: _taken(i, w, stops: at == 0));
