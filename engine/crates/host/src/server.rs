@@ -1161,6 +1161,7 @@ fn processes(pids: &[u32]) -> Vec<ProcessInfo> {
                 cpu_ms: u.cpu_ms,
                 memory: u.memory,
                 orphan: left(u.pid, u.parent, root, pids),
+                ports: axiom_spawn::listening(u.pid),
             })
             .collect()
     }

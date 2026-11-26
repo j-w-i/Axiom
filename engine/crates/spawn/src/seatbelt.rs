@@ -30,6 +30,8 @@ const BASE: &str = r#"(version 1)
 (allow file-write-data file-ioctl (literal "/dev/null") (literal "/dev/zero") (literal "/dev/dtracehelper"))
 (allow ipc-posix-sem)
 (allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))
+(allow network-bind (local ip "localhost:*"))
+(allow network-inbound (local ip "localhost:*"))
 "#;
 
 pub fn wrap(job: &Job, real: &Real) -> (OsString, Vec<OsString>) {

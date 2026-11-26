@@ -12,7 +12,7 @@
 {"id":9,"result":{"bytes":"iVBORw0KGgo=","digest":"d","image":"png","kind":"image","path":"a/b.png","size":8,"text":"t","whole":true}}
 {"id":10,"result":{"entries":[{"folder":true,"name":"b"},{"name":"c.rs"}],"hidden":2,"path":"a","whole":false}}
 {"id":11,"result":{"ended":"too many files","files":1,"hits":[{"line":4,"path":"a/c.rs","text":"fn x"}],"unread":3,"whole":false}}
-{"id":12,"result":[{"age":30,"agent":"a_1","command":"npm run dev","ended":"ended: exit 1","job":2,"last":"ready\n","processes":[{"cpu_ms":1500,"memory":4096,"name":"node","orphan":true,"parent":1,"pid":41}],"session":"s_1"}]}
+{"id":12,"result":[{"age":30,"agent":"a_1","command":"npm run dev","ended":"ended: exit 1","job":2,"last":"ready\n","processes":[{"cpu_ms":1500,"memory":4096,"name":"node","orphan":true,"parent":1,"pid":41,"ports":[5173]}],"session":"s_1"}]}
 {"id":13,"result":[{"id":"zed","name":"Zed","path":"/usr/local/bin/zed"}]}
 {"id":14,"result":[{"access":"read","commands":[{"command":"npm run dev","icon":"play","key":1,"name":"Dev"}],"execution":{"connection":"c_2","harness":"axiom","model":"m"},"id":"f_1","moved":true,"name":"Web","path":"/w","pinned":true}]}
 {"id":15,"result":[{"busy":true,"ended":"ended: exit 0","session":"s_1","terminal":"t_1","title":"vim"}]}

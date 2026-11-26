@@ -783,6 +783,9 @@ pub struct ProcessInfo {
     /// Its parent has ended: it was left behind, and ends with the job all the same.
     #[serde(default, skip_serializing_if = "not")]
     pub orphan: bool,
+    /// The ports it listens on, on this computer's loopback address: a server (decision 0021).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<u16>,
 }
 
 /// An editor of the person's own that was found.

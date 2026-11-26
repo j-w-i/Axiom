@@ -20,7 +20,7 @@ mod seccomp;
 #[cfg(unix)]
 mod tree;
 #[cfg(unix)]
-pub use tree::{Usage, usage};
+pub use tree::{Usage, listening, usage};
 #[cfg(unix)]
 mod pty;
 #[cfg(unix)]

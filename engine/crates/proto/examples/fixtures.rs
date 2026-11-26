@@ -301,6 +301,7 @@ fn main() -> Result<(), serde_json::Error> {
                     cpu_ms: 1500,
                     memory: 4096,
                     orphan: true,
+                    ports: vec![5173],
                 }],
             }])?,
         },

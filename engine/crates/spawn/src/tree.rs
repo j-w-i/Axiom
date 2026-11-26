@@ -50,6 +50,16 @@ pub fn usage(pid: u32) -> Option<Usage> {
     sys::usage(i32::try_from(pid).ok()?)
 }
 
+/// The TCP ports `pid` listens on, as the system says, that this computer can reach: what it serves
+/// (decision 0021).
+pub fn listening(pid: u32) -> Vec<u16> {
+    let Ok(pid) = i32::try_from(pid) else { return Vec::new() };
+    let mut all = sys::listening(pid);
+    all.sort_unstable();
+    all.dedup();
+    all
+}
+
 /// Makes what `c` starts a session of its own, with the mark, `filter` if there is one, and no other
 /// open file.
 #[allow(unsafe_code)]
@@ -280,6 +290,76 @@ mod sys {
         info(pid).map(|i| i.pbi_start_tvsec * 1_000_000 + i.pbi_start_tvusec)
     }
 
+    /// What the system says of an open socket, as `sys/proc_info.h` lays it out: only what is read
+    /// here is named; the rest is room.
+    #[repr(C)]
+    struct SocketFd {
+        /// `proc_fileinfo`.
+        file: [u32; 6],
+        /// `vinfo_stat`.
+        stat: [u64; 17],
+        so: u64,
+        pcb: u64,
+        kind_type: i32,
+        protocol: i32,
+        family: i32,
+        shorts: [i16; 8],
+        oobmark: u32,
+        /// `sockbuf_info` twice.
+        bufs: [u32; 12],
+        kind: i32,
+        rfu: u32,
+        /// The union of what each kind of socket has: of TCP, `in_sockinfo` then the state.
+        proto: [u8; 640],
+    }
+    const PROC_PIDLISTFDS: i32 = 1;
+    const PROC_PIDFDSOCKETINFO: i32 = 3;
+    const PROX_FDTYPE_SOCKET: u32 = 2;
+    const SOCKINFO_TCP: i32 = 2;
+    const TSI_S_LISTEN: i32 = 1;
+
+    pub fn listening(pid: i32) -> Vec<u16> {
+        let mut fds: Vec<libc::proc_fdinfo> = Vec::with_capacity(4096);
+        let one = size_of::<libc::proc_fdinfo>();
+        let Ok(room) = i32::try_from(4096 * one) else { return Vec::new() };
+        // SAFETY: the buffer has room for as many as said; what is written is counted.
+        let n =
+            unsafe { libc::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds.as_mut_ptr().cast(), room) };
+        let Ok(n) = usize::try_from(n) else { return Vec::new() };
+        // SAFETY: the system wrote n bytes, whole entries.
+        unsafe { fds.set_len((n / one).min(4096)) };
+        let mut out = Vec::new();
+        for f in fds.iter().filter(|f| f.proc_fdtype == PROX_FDTYPE_SOCKET) {
+            let Ok(size) = i32::try_from(size_of::<SocketFd>()) else { continue };
+            // SAFETY: the buffer is as large as said, and all of it is integers.
+            let s = unsafe {
+                let mut s: SocketFd = zeroed();
+                let got = libc::proc_pidfdinfo(
+                    pid,
+                    f.proc_fd,
+                    PROC_PIDFDSOCKETINFO,
+                    (&raw mut s).cast(),
+                    size,
+                );
+                if got <= 0 {
+                    continue;
+                }
+                s
+            };
+            if s.kind != SOCKINFO_TCP || !matches!(s.family, libc::AF_INET | libc::AF_INET6) {
+                continue;
+            }
+            // in_sockinfo: the far port, the near one (as the network orders it), ...; its size is
+            // 80, after which the TCP state follows.
+            let lport = i32::from_ne_bytes([s.proto[4], s.proto[5], s.proto[6], s.proto[7]]);
+            let state = i32::from_ne_bytes([s.proto[80], s.proto[81], s.proto[82], s.proto[83]]);
+            if state == TSI_S_LISTEN {
+                out.push(u16::from_be(lport as u16));
+            }
+        }
+        out
+    }
+
     /// How long the machine's own unit of time is, in nanoseconds: `numer / denom`.
     #[repr(C)]
     struct Timebase {
@@ -389,6 +469,47 @@ mod sys {
         stat(pid).filter(|s| !matches!(s.0, 'Z' | 'X')).map(|s| s.2)
     }
 
+    /// What a process's network namespace lists as listening, by the file of each socket, and
+    /// those of them the process holds. Only if that is the host's own network: one a sandbox has
+    /// of its own cannot be reached from here, and what cannot be reached is not said.
+    pub fn listening(pid: i32) -> Vec<u16> {
+        let net = |p: &str| std::fs::read_link(format!("/proc/{p}/ns/net")).ok();
+        match (net("self"), net(&pid.to_string())) {
+            (Some(a), Some(b)) if a == b => {}
+            _ => return Vec::new(),
+        }
+        let mut by_inode = std::collections::HashMap::new();
+        for table in ["tcp", "tcp6"] {
+            let Ok(t) = std::fs::read_to_string(format!("/proc/{pid}/net/{table}")) else {
+                continue;
+            };
+            for l in t.lines().skip(1) {
+                let f: Vec<&str> = l.split_whitespace().collect();
+                // local address, its port after the colon in hex; the state; the inode at 9.
+                let (Some(local), Some(st), Some(inode)) = (f.get(1), f.get(3), f.get(9)) else {
+                    continue;
+                };
+                if *st != "0A" {
+                    continue;
+                }
+                let Some(port) =
+                    local.rsplit(':').next().and_then(|p| u16::from_str_radix(p, 16).ok())
+                else {
+                    continue;
+                };
+                by_inode.insert((*inode).to_owned(), port);
+            }
+        }
+        let fds = std::fs::read_dir(format!("/proc/{pid}/fd")).into_iter().flatten().flatten();
+        fds.filter_map(|e| std::fs::read_link(e.path()).ok())
+            .filter_map(|l| {
+                let l = l.to_string_lossy().into_owned();
+                let ino = l.strip_prefix("socket:[")?.strip_suffix(']')?.to_owned();
+                by_inode.get(&ino).copied()
+            })
+            .collect()
+    }
+
     #[allow(unsafe_code)]
     pub fn usage(pid: i32) -> Option<super::Usage> {
         let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
@@ -453,9 +574,28 @@ mod sys {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn what_a_process_listens_on_is_said() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let l6 = std::net::TcpListener::bind("[::1]:0").ok();
+        let me = std::process::id();
+        let ports = listening(me);
+        assert!(ports.contains(&port), "{port} in {ports:?}");
+        if let Some(l6) = &l6 {
+            assert!(ports.contains(&l6.local_addr().unwrap().port()), "{ports:?}");
+        }
+        // A connection is not a listener.
+        let c = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let near = c.local_addr().unwrap().port();
+        assert!(!listening(me).contains(&near));
+        drop(l);
+        assert!(!listening(me).contains(&port));
+    }
 
     #[test]
     fn what_a_process_uses_is_said() {
