@@ -16,6 +16,7 @@ import '../ui/commands.dart';
 import '../ui/controls.dart';
 import '../ui/editable.dart';
 import '../ui/icons.dart';
+import '../ui/overlay.dart';
 import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
@@ -997,10 +998,31 @@ class _JobsPartState extends State<JobsPart> {
     super.dispose();
   }
 
+  /// Processor time of each process when it was last looked at, and when that was.
+  final _was = <int, int>{};
+  final _share = <int, double>{};
+  DateTime? _at;
+
+  void _measure(List<JobInfo> all) {
+    final now = DateTime.now(), at = _at;
+    final ms = at == null ? 0 : now.difference(at).inMilliseconds;
+    final seen = <int>{};
+    for (final p in all.expand((j) => j.processes)) {
+      seen.add(p.pid);
+      final was = _was[p.pid];
+      if (was != null && ms > 0) _share[p.pid] = ((p.cpuMs - was) / ms).clamp(0, 64);
+      _was[p.pid] = p.cpuMs;
+    }
+    _was.removeWhere((k, _) => !seen.contains(k));
+    _share.removeWhere((k, _) => !seen.contains(k));
+    _at = now;
+  }
+
   Future<void> _look() async {
     try {
       final all = await widget.store.jobs();
       if (!mounted) return;
+      _measure(all);
       setState(
         () => _jobs = [
           for (final j in all)
@@ -1095,6 +1117,33 @@ class _JobsPartState extends State<JobsPart> {
               ),
           ],
         ),
+        if (open)
+          for (final p in j.processes)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, AxSpace.card, 4),
+              child: Semantics(
+                container: true,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${oneLine(literal(p.name), 60)}  ${p.pid}${p.orphan ? '  left behind' : ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.type.small.ink(p.orphan ? c.attentionText : c.ink2),
+                      ),
+                    ),
+                    Text(
+                      [
+                        if (_share[p.pid] case final s?) '${(s * 100).round()} %',
+                        _size(p.memory),
+                      ].join('   '),
+                      style: t.type.small.ink(c.ink3),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         if (open)
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
@@ -1279,3 +1328,155 @@ class PanelPress extends StatelessWidget {
     );
   }
 }
+
+enum _Of { rename, pin, start, forgetStart, forget }
+
+/// What is kept of a folder, from its heading in the list: its name, a pin, how sessions there
+/// begin, and forgetting all of it. Its sessions are not touched.
+class FolderMenu extends StatefulWidget {
+  const FolderMenu(this.store, this.path, {required this.name, super.key});
+  final HostStore store;
+  final String path, name;
+  @override
+  State<FolderMenu> createState() => _FolderMenuState();
+}
+
+class _FolderMenuState extends State<FolderMenu> {
+  final _name = TextEditingController();
+  bool _naming = false;
+  String? _problem;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  FolderInfo get _kept => widget.store.folderAt(widget.path) ?? FolderInfo('', widget.path);
+
+  /// The open session's first agent, if the session is in this folder.
+  (Execution, Access)? get _here {
+    final m = widget.store.current;
+    final a = m?.agents.values.firstOrNull;
+    if (m?.workspace != widget.path || a == null) return null;
+    final access = a.access;
+    if (access == null || a.execution.harness == 'replay') return null;
+    return (a.execution, access);
+  }
+
+  Future<void> _set(FolderInfo f, VoidCallback close) async {
+    try {
+      await widget.store.setFolder(f);
+      close();
+    } on Object catch (e) {
+      if (mounted) setState(() => _problem = wordsOf(e));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    final kept = _kept, here = _here;
+    return AxPopover(
+      width: 280,
+      anchor: (context, open, toggle) => AxButton.icon(
+        AxIcon.more,
+        label: 'Settings of ${widget.name}',
+        tone: AxTone.quiet,
+        size: 28,
+        onPressed: () {
+          setState(() {
+            _naming = false;
+            _problem = null;
+          });
+          toggle();
+        },
+      ),
+      panel: (context, close) => _naming
+          ? Padding(
+              padding: const EdgeInsets.all(6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AxField(
+                    label: 'Name of the folder',
+                    placeholder: folderLast(widget.path),
+                    controller: _name,
+                    autofocus: true,
+                    onSubmitted: (v) => unawaited(
+                      _set(
+                        v.trim().isEmpty
+                            ? kept.copyWith(clearName: true)
+                            : kept.copyWith(name: v.trim()),
+                        close,
+                      ),
+                    ),
+                  ),
+                  if (_problem case final p?)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(visible(p), style: t.type.small.ink(c.faultText)),
+                    ),
+                ],
+              ),
+            )
+          : AxMenu<_Of>(
+              label: 'Settings of ${widget.name}',
+              items: [
+                const AxMenuItem(_Of.rename, 'Rename…'),
+                AxMenuItem(_Of.pin, kept.pinned ? 'Unpin' : 'Pin to the top'),
+                AxMenuItem(
+                  _Of.start,
+                  'Begin new sessions like this one',
+                  enabled: here != null,
+                  why: 'Open a session of this folder first',
+                  detail: here == null ? null : _startWords(here.$1, here.$2),
+                ),
+                if (kept.execution != null || kept.access != null)
+                  AxMenuItem(
+                    _Of.forgetStart,
+                    'Forget how sessions begin here',
+                    detail: _startWords(kept.execution, kept.access),
+                  ),
+                if (kept.id.isNotEmpty)
+                  const AxMenuItem(_Of.forget, 'Forget this folder\'s settings'),
+              ],
+              onChosen: (v) {
+                switch (v) {
+                  case _Of.rename:
+                    _name.text = kept.name ?? '';
+                    setState(() => _naming = true);
+                  case _Of.pin:
+                    unawaited(_set(kept.copyWith(pinned: !kept.pinned), close));
+                  case _Of.start:
+                    if (here case (final x, final a)) {
+                      unawaited(_set(kept.copyWith(execution: x, access: a), close));
+                    }
+                  case _Of.forgetStart:
+                    unawaited(_set(kept.copyWith(clearStart: true), close));
+                  case _Of.forget:
+                    close();
+                    unawaited(widget.store.forgetFolder(kept.id).catchError((Object _) {}));
+                }
+              },
+            ),
+    );
+  }
+}
+
+String _startWords(Execution? x, Access? a) => [
+  ?x?.model,
+  ?x?.effort,
+  if (a != null)
+    switch (a) {
+      Access.read => 'reads only',
+      Access.ask => 'asks first',
+      Access.work => 'works',
+      Access.unknown => '',
+    },
+].where((w) => w.isNotEmpty).join(', ');
+
+/// The last part of a path.
+String folderLast(String path) =>
+    path.split(RegExp(r'[/\\]')).lastWhere((x) => x.isNotEmpty, orElse: () => path);

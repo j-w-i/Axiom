@@ -1216,12 +1216,18 @@ class _Side extends StatelessWidget {
           spoken: g.folder == null ? null : 'Folder ${g.folder}',
           act: g.folder == null
               ? null
-              : AxButton.icon(
-                  AxIcon.plus,
-                  label: 'New session in ${g.name}',
-                  tone: AxTone.quiet,
-                  size: 28,
-                  onPressed: () => _then(() => onStart(g.folder)),
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FolderMenu(store, g.folder!, name: g.name),
+                    AxButton.icon(
+                      AxIcon.plus,
+                      label: 'New session in ${g.name}',
+                      tone: AxTone.quiet,
+                      size: 28,
+                      onPressed: () => _then(() => onStart(g.folder)),
+                    ),
+                  ],
                 ),
         ),
         for (final x in g.sessions)
@@ -1379,14 +1385,22 @@ List<({String name, String? folder, List<SessionInfo?> sessions})> _groupsOf(Hos
         : oneLine(literal(parts.sublist(parts.length - 2).join('/')), 80);
   }
 
-  return [
+  final groups = [
     for (final MapEntry(key: f, value: v) in by.entries)
       (
-        name: f == null ? (by.length == 1 ? 'Sessions' : 'No folder') : called(f),
+        name: f == null
+            ? (by.length == 1 ? 'Sessions' : 'No folder')
+            : switch (store.folderAt(f)?.name) {
+                final n? => oneLine(literal(n), 80),
+                null => called(f),
+              },
         folder: f,
         sessions: v,
       ),
   ];
+  // Pinned folders first, in the order they would have stood in.
+  bool pinned(String? f) => f != null && (store.folderAt(f)?.pinned ?? false);
+  return [...groups.where((g) => pinned(g.folder)), ...groups.where((g) => !pinned(g.folder))];
 }
 
 /// The sessions as the list has them, from the top.
