@@ -25,6 +25,10 @@ pub use tree::{Usage, listening, usage};
 mod pty;
 #[cfg(unix)]
 pub use pty::{Pty, spawn_terminal};
+#[cfg(unix)]
+mod browser;
+#[cfg(unix)]
+pub use browser::{Chromium, Piped, chromium, spawn_browser};
 
 /// What is to be started. Everything in it comes from the host; of a model's words only `args` and
 /// what is written to `stdin` may hold any.
