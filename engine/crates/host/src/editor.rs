@@ -249,3 +249,41 @@ mod tests {
         assert!(w(Reach::of([place.clone()])).editors().is_empty(), "it was put there");
     }
 }
+
+#[cfg(all(test, unix))]
+mod started {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// A program in the editor's place that writes down how it was started, and opens nothing.
+    #[tokio::test]
+    async fn the_editor_is_told_the_file_and_the_line_and_nothing_else() {
+        let d = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(d.path()).unwrap();
+        let (bin, out) = (root.join("bin"), root.join("said"));
+        std::fs::create_dir(&bin).unwrap();
+        let zed = bin.join("zed");
+        std::fs::write(&zed, format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", out.display()))
+            .unwrap();
+        std::fs::set_permissions(&zed, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(root.join("a b.rs"), "x").unwrap();
+        let p = |x: &std::path::Path| Place::new(x).unwrap();
+        let mut path = vec![p(&bin)];
+        path.extend(["/usr/bin", "/bin"].map(|x| Place::new(x).unwrap()));
+        let w = Where { path, home: p(&root), written: Reach::none(), tmp: p(&root), apps: vec![] };
+        assert_eq!(w.editors().iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["zed"]);
+        w.open(&p(&root.join("a b.rs")), Some(7), None).unwrap();
+        let mut said = String::new();
+        for _ in 0..200 {
+            said = std::fs::read_to_string(&out).unwrap_or_default();
+            if said.ends_with('\n') {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(said, format!("{}:7\n", root.join("a b.rs").display()));
+        assert!(w.open(&p(&root.join("a b.rs")), None, Some("vscode")).is_err(), "not there");
+        assert!(w.open(&p(&root.join("a b.rs")), None, Some("vi")).is_err(), "not on the list");
+    }
+}
