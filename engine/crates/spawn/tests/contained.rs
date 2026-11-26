@@ -377,6 +377,8 @@ async fn a_persons_commit_writes_the_git_folder_only() {
     assert_eq!(o.out, "ok\n", "{o:?}");
     for s in ["mkdir .vscode", "echo x > .git/hooks/post-merge", "echo x > .envrc"] {
         let o = run(s, forward.clone()).await.unwrap();
-        assert!(!o.ok(), "{s:?}: {o:?}");
+        // Refused; or, where a name that is not there yet cannot be covered (Linux), said after.
+        assert!(!o.ok() || !o.ended.made.is_empty(), "{s:?}: {o:?}");
     }
+    assert!(f.read("home/w/.git/hooks/post-merge").is_none());
 }

@@ -134,6 +134,17 @@ impl Git {
             p.kill();
         }
         let ended = p.wait().await.map_err(|e| bad(e.to_string()))?;
+        // Where a sandbox can only say afterwards that a protected name was made (Linux), that it
+        // was is a failure, and its person is told what.
+        if let Some(m) = ended.made.first() {
+            return Ok(Said {
+                ok: false,
+                err: format!(
+                    "git made {}, which other programs take orders from: look at it first",
+                    m.display()
+                ),
+            });
+        }
         Ok(Said { ok: ended.code == Some(0), err: text::plain(&words).trim().to_owned() })
     }
 
@@ -917,6 +928,17 @@ impl Git {
             p.kill();
         }
         let ended = p.wait().await.map_err(|e| bad(e.to_string()))?;
+        // Where a sandbox can only say afterwards that a protected name was made (Linux), that it
+        // was is a failure, and its person is told what.
+        if let Some(m) = ended.made.first() {
+            return Ok(Said {
+                ok: false,
+                err: format!(
+                    "git made {}, which other programs take orders from: look at it first",
+                    m.display()
+                ),
+            });
+        }
         Ok(Said { ok: ended.code == Some(0), err: text::plain(&words).trim().to_owned() })
     }
 }
