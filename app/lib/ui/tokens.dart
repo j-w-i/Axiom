@@ -491,3 +491,63 @@ class Ax extends InheritedWidget {
 extension AxText on TextStyle {
   TextStyle ink(Color c) => copyWith(color: c);
 }
+
+/// The sixteen colours a terminal program names by number, for a dark and a light ground. Programs
+/// expect red to be red; these are toned to sit on the canvas.
+const _ansiDark = [
+  Color(0xFF2A2C31),
+  Color(0xFFE5767B),
+  Color(0xFF8BC48A),
+  Color(0xFFE2C16E),
+  Color(0xFF7AA7E8),
+  Color(0xFFC797E3),
+  Color(0xFF6FC3CF),
+  Color(0xFFC9CCD3),
+  Color(0xFF6B6F78),
+  Color(0xFFF08F93),
+  Color(0xFFA3D9A1),
+  Color(0xFFF0D48A),
+  Color(0xFF9BC0F2),
+  Color(0xFFD8B0EF),
+  Color(0xFF8FD6E0),
+  Color(0xFFF2F3F5),
+];
+const _ansiLight = [
+  Color(0xFF1F2126),
+  Color(0xFFC2363C),
+  Color(0xFF2F7D33),
+  Color(0xFF8A6A0E),
+  Color(0xFF2B5FB8),
+  Color(0xFF8A3FB0),
+  Color(0xFF167C8A),
+  Color(0xFF5A5E66),
+  Color(0xFF6B6F78),
+  Color(0xFFD9474D),
+  Color(0xFF3B8F3F),
+  Color(0xFFA07B12),
+  Color(0xFF3A70CC),
+  Color(0xFF9B4EC2),
+  Color(0xFF1E8FA0),
+  Color(0xFF2A2C31),
+];
+
+/// A colour a terminal program asked for: `0`..`255` (the sixteen above, a cube of 216 and 24 greys,
+/// as terminals have them) or `#rrggbb`. Null: the ground's own.
+Color? terminalColor(String? spec, AxColors c) {
+  if (spec == null) return null;
+  if (spec.startsWith('#') && spec.length == 7) {
+    final v = int.tryParse(spec.substring(1), radix: 16);
+    return v == null ? null : Color(0xFF000000 | v);
+  }
+  final i = int.tryParse(spec);
+  if (i == null || i < 0 || i > 255) return null;
+  final dark = c.canvas.fill.computeLuminance() < .5;
+  if (i < 16) return (dark ? _ansiDark : _ansiLight)[i];
+  if (i >= 232) {
+    final g = 8 + (i - 232) * 10;
+    return Color.fromARGB(255, g, g, g);
+  }
+  final n = i - 16;
+  int part(int v) => v == 0 ? 0 : 55 + v * 40;
+  return Color.fromARGB(255, part(n ~/ 36), part(n ~/ 6 % 6), part(n % 6));
+}

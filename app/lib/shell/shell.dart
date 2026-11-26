@@ -32,6 +32,7 @@ import 'drafts.dart';
 import 'drop.dart';
 import 'find.dart';
 import 'folder.dart';
+import 'terminal.dart';
 import 'new_session.dart';
 import 'settings.dart';
 import 'start.dart';
@@ -173,6 +174,20 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     return _look!;
   }
 
+  /// Runs the open session's folder's command [n], from 1, in a new terminal there.
+  bool _command(int n) {
+    final m = widget.store.current;
+    final all = widget.store.folderAt(m?.workspace ?? '')?.commands ?? const <FolderCommand>[];
+    final c = all.where((c) => c.key == n).firstOrNull ?? (n <= all.length ? all[n - 1] : null);
+    if (m == null || c == null || !Terminals.made) return false;
+    _inFolder((l) {
+      _do('The command could not be run', () async {
+        l.showTerminal(await widget.store.openTerminal(m.id, 100, 30, command: c.command));
+      });
+    });
+    return true;
+  }
+
   /// The panel shows a file, a search or the box to find one in.
   void _inFolder(void Function(FolderLook) f) {
     final m = widget.store.current;
@@ -278,6 +293,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
       _open(all[n - 1]);
       return true;
     }
+    if (commandKey(e) case final n? when !_finding) return _command(n);
     final c = Command.of(e);
     if (c == null) return false;
     // Nothing is decided on from under the search.
@@ -1654,21 +1670,40 @@ class _Display extends StatelessWidget {
           if (a.plans) AgentPlan(a, key: ValueKey((a.id, 'plan'))),
           if (look.finding) FileFinder(look, key: ValueKey((session.id, 'find'))),
           JobsPart(store, session.id, names: names, key: ValueKey((session.id, 'jobs'))),
+          if (Terminals.made)
+            TerminalsPart(
+              store,
+              session.id,
+              commands: store.folderAt(session.workspace ?? '')?.commands ?? const [],
+              onOpen: look.showTerminal,
+              key: ValueKey((session.id, 'terminals')),
+            ),
         ];
         final tail = [FileTree(look, key: ValueKey((session.id, a.apart ? a.id : '', 'tree')))];
-        final reading = look.reads || look.searching;
+        final reading = look.reads || look.searching || look.terminal != null;
         final panel = !open()
             ? null
             : CallbackShortcuts(
                 bindings: {
-                  const SingleActivator(LogicalKeyboardKey.escape): reading
-                      ? () => look.reads ? look.close() : look.search(false)
-                      : onClose,
+                  // Escape is a terminal's own.
+                  if (look.terminal == null)
+                    const SingleActivator(LogicalKeyboardKey.escape): reading
+                        ? () => look.reads ? look.close() : look.search(false)
+                        : onClose,
                 },
                 child: CommandArea(
                   3,
                   child: FocusTraversalGroup(
-                    child: look.reads
+                    child: look.terminal != null
+                        ? TerminalView(
+                            store,
+                            look.terminal!,
+                            draft: drafts.of(session.id, a.id),
+                            onClose: () => look.showTerminal(null),
+                            onPath: (p, l) => onPath(p, l, null),
+                            key: ValueKey((session.id, look.terminal)),
+                          )
+                        : look.reads
                         ? FileReader(
                             look,
                             draft: drafts.of(session.id, a.id),

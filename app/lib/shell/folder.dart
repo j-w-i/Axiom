@@ -21,6 +21,7 @@ import '../ui/press.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'terminal.dart' show commandKeys;
 import 'start.dart';
 
 /// What its person looks at in a session's folder beside what has changed: one file, the files
@@ -41,8 +42,24 @@ class FolderLook extends ChangeNotifier {
   bool loading = false;
   int _asked = 0;
 
-  /// What is shown instead of the list: a file, a search, or the box to find a file in.
+  /// What is shown instead of the list: a file, a terminal, a search, or the box to find a file in.
   bool get reads => path != null;
+
+  /// The terminal that is shown.
+  String? terminal;
+
+  void showTerminal(String? id) {
+    terminal = id;
+    if (id != null) {
+      _asked++;
+      path = null;
+      file = null;
+      searching = false;
+      finding = false;
+    }
+    notifyListeners();
+  }
+
   bool searching = false, finding = false;
 
   Future<void> read(String path, {int? line, String? agent}) async {
@@ -53,6 +70,7 @@ class FolderLook extends ChangeNotifier {
     problem = null;
     loading = true;
     finding = false;
+    terminal = null;
     final n = ++_asked;
     notifyListeners();
     try {
@@ -1329,7 +1347,7 @@ class PanelPress extends StatelessWidget {
   }
 }
 
-enum _Of { rename, pin, start, forgetStart, forget }
+enum _Of { rename, pin, start, forgetStart, commands, forget }
 
 /// What is kept of a folder, from its heading in the list: its name, a pin, how sessions there
 /// begin, and forgetting all of it. Its sessions are not touched.
@@ -1343,12 +1361,15 @@ class FolderMenu extends StatefulWidget {
 
 class _FolderMenuState extends State<FolderMenu> {
   final _name = TextEditingController();
-  bool _naming = false;
+  final _what = TextEditingController(), _how = TextEditingController();
+  bool _naming = false, _commanding = false;
   String? _problem;
 
   @override
   void dispose() {
     _name.dispose();
+    _what.dispose();
+    _how.dispose();
     super.dispose();
   }
 
@@ -1373,6 +1394,93 @@ class _FolderMenuState extends State<FolderMenu> {
     }
   }
 
+  /// The folder's commands, at most nine, with their keys by their place.
+  static List<FolderCommand> _numbered(List<FolderCommand> all) => [
+    for (final (i, x) in all.take(9).indexed)
+      FolderCommand(x.name, x.command, icon: x.icon ?? 'play', key: i + 1),
+  ];
+
+  Widget _commands(AxTheme t, FolderInfo kept) {
+    final c = t.colors;
+    void add() {
+      final name = _what.text.trim(), how = _how.text.trim();
+      if (name.isEmpty || how.isEmpty || kept.commands.length >= 9) return;
+      final all = _numbered([...kept.commands, FolderCommand(name, how)]);
+      unawaited(
+        _set(kept.copyWith(commands: all), () {
+          _what.clear();
+          _how.clear();
+        }),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final (i, x) in kept.commands.indexed)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${oneLine(literal(x.name), 40)}   ${commandKeys(i + 1) ?? ''}\n'
+                      '${oneLine(literal(x.command), 80)}',
+                      style: t.type.small.ink(c.ink2),
+                    ),
+                  ),
+                  AxButton.icon(
+                    AxIcon.close,
+                    label: 'Remove ${x.name}',
+                    tone: AxTone.quiet,
+                    size: 26,
+                    onPressed: () => unawaited(
+                      _set(
+                        kept.copyWith(commands: _numbered([...kept.commands]..removeAt(i))),
+                        () {},
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          AxField(
+            label: 'Name of the command',
+            placeholder: 'Dev',
+            controller: _what,
+            autofocus: true,
+          ),
+          const SizedBox(height: 6),
+          AxField(
+            label: 'What is typed',
+            placeholder: 'npm run dev',
+            controller: _how,
+            mono: true,
+            onSubmitted: (_) => add(),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              AxButton(label: 'Add', tone: AxTone.primary, onPressed: add),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Runs in a terminal of yours, here.', style: t.type.small.ink(c.ink3)),
+              ),
+            ],
+          ),
+          if (_problem case final p?)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(visible(p), style: t.type.small.ink(c.faultText)),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
@@ -1387,12 +1495,15 @@ class _FolderMenuState extends State<FolderMenu> {
         onPressed: () {
           setState(() {
             _naming = false;
+            _commanding = false;
             _problem = null;
           });
           toggle();
         },
       ),
-      panel: (context, close) => _naming
+      panel: (context, close) => _commanding
+          ? _commands(t, kept)
+          : _naming
           ? Padding(
               padding: const EdgeInsets.all(6),
               child: Column(
@@ -1439,6 +1550,13 @@ class _FolderMenuState extends State<FolderMenu> {
                     'Forget how sessions begin here',
                     detail: _startWords(kept.execution, kept.access),
                   ),
+                AxMenuItem(
+                  _Of.commands,
+                  'Commands…',
+                  detail: kept.commands.isEmpty
+                      ? 'Each runs in a terminal'
+                      : kept.commands.map((c) => c.name).join(', '),
+                ),
                 if (kept.id.isNotEmpty)
                   const AxMenuItem(_Of.forget, 'Forget this folder\'s settings'),
               ],
@@ -1453,6 +1571,8 @@ class _FolderMenuState extends State<FolderMenu> {
                     if (here case (final x, final a)) {
                       unawaited(_set(kept.copyWith(execution: x, access: a), close));
                     }
+                  case _Of.commands:
+                    setState(() => _commanding = true);
                   case _Of.forgetStart:
                     unawaited(_set(kept.copyWith(clearStart: true), close));
                   case _Of.forget:
