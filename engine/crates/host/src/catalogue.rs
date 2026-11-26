@@ -214,6 +214,24 @@ mod tests {
         assert_eq!((m.efforts.len(), m.adaptive, m.speeds.len()), (3, false, 0));
         let m = of(&a, "claude-x", axiom_model::About { efforts: Some(vec![]), ..said() });
         assert!(!m.effort);
+        // Where the list says nothing: what the model's page says, else what every model there takes.
+        let words = |m: &ModelInfo| m.efforts.join(" ");
+        let o = Profile::openai();
+        let none = axiom_model::About::default;
+        assert_eq!(words(&of(&o, "gpt-6.1-sol", none())), "low medium high xhigh max");
+        assert_eq!(words(&of(&o, "gpt-6-sol", none())), "none low medium high xhigh max");
+        assert_eq!(words(&of(&o, "gpt-5.5", none())), "none low medium high xhigh");
+        assert_eq!(words(&of(&o, "gpt-9", none())), "low medium high xhigh");
+        assert_eq!(
+            words(&of(&Profile::chatgpt(), "gpt-6-luna", none())),
+            "none low medium high xhigh max"
+        );
+        let b = Profile::bedrock();
+        assert_eq!(
+            words(&of(&b, "anthropic.claude-opus-5-5", none())),
+            "low medium high xhigh max"
+        );
+        assert_eq!(words(&of(&b, "anthropic.claude-sonnet-4-6", none())), "low medium high max");
         // Where there is no place for it, it is not offered, whatever is said.
         let m = of(&Profile::openrouter(), "a/b", said());
         assert_eq!((m.efforts.len(), m.adaptive), (2, false));

@@ -248,7 +248,34 @@ impl Profile {
     /// The OpenAI API with a key. From developers.openai.com/api/docs, read 2026-11-25: the effort
     /// (guides/reasoning#reasoning-effort), and that reasoning a model cannot read is left out by the
     /// API and is no error (guides/reasoning#reasoning-item-removal-across-requests).
+    /// Its list says nothing of effort (api/reference/resources/models). Each model's page says which
+    /// it takes (api/docs/models/<model>, read 2026-11-26); one that is not here is offered those that
+    /// every model there takes.
     pub fn openai() -> Self {
+        let levels = |l: &[&str]| Quirks {
+            efforts: Some(l.iter().map(|s| (*s).to_owned()).collect()),
+            ..Quirks::default()
+        };
+        let (all, no_none, no_max) = (
+            ["none", "low", "medium", "high", "xhigh", "max"],
+            ["low", "medium", "high", "xhigh", "max"],
+            ["none", "low", "medium", "high", "xhigh"],
+        );
+        let models = [
+            ("gpt-6.2-sol", &no_none[..]),
+            ("gpt-6.2-astra", &no_none),
+            ("gpt-6.1-sol", &no_none),
+            ("gpt-6.1-terra", &all),
+            ("gpt-6-astra", &no_none),
+            ("gpt-6-sol", &all),
+            ("gpt-6-luna", &all),
+            ("gpt-5.6-sol", &all),
+            ("gpt-5.5", &no_max),
+            ("gpt-5.4", &no_max),
+            ("gpt-5.3-codex", &["low", "medium", "high", "xhigh"]),
+        ]
+        .map(|(m, l)| (m.to_owned(), levels(l)))
+        .into();
         Self {
             provider: "openai".into(),
             codec: Codec::Responses,
@@ -258,10 +285,11 @@ impl Profile {
             listing: Listing::Data,
             quirks: Quirks {
                 effort: Some(Effort::Reasoning),
+                efforts: levels(&["low", "medium", "high", "xhigh"]).efforts,
                 replay: Some(Replay::SameProvider),
                 ..Quirks::default()
             },
-            models: BTreeMap::new(),
+            models,
         }
     }
 
@@ -324,7 +352,16 @@ impl Profile {
             result_status: Some(true),
             ..Quirks::default()
         };
-        let adaptive = Quirks { effort: Some(Effort::AdaptiveThinking), ..claude.clone() };
+        // platform.claude.com/docs/en/build-with-claude/effort, as of 2026-11-26: every level up to
+        // `max`; `xhigh` since Opus 4.7, so not on the 4.6 models.
+        let levels = |l: &[&str]| Some(l.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        let adaptive = Quirks {
+            effort: Some(Effort::AdaptiveThinking),
+            efforts: levels(&["low", "medium", "high", "xhigh", "max"]),
+            ..claude.clone()
+        };
+        let four_six =
+            Quirks { efforts: levels(&["low", "medium", "high", "max"]), ..adaptive.clone() };
         let nova = Quirks { cache_points: Some(CachePoints::NotTools), ..claude.clone() };
         let of = |names: &[&str], quirks: &Quirks| -> Vec<(String, Quirks)> {
             names.iter().map(|n| ((*n).to_owned(), quirks.clone())).collect()
@@ -344,11 +381,11 @@ impl Profile {
                 "anthropic.claude-sonnet-5",
                 "anthropic.claude-opus-4-8",
                 "anthropic.claude-opus-4-7",
-                "anthropic.claude-opus-4-6-v1",
-                "anthropic.claude-sonnet-4-6",
             ],
             &adaptive,
         );
+        let four_six =
+            of(&["anthropic.claude-opus-4-6-v1", "anthropic.claude-sonnet-4-6"], &four_six);
         let claude = of(
             &[
                 "anthropic.claude-opus-4-5-20251101-v1:0",
@@ -373,7 +410,7 @@ impl Profile {
             headers: BTreeMap::new(),
             listing: Listing::Data,
             quirks: Quirks::default(),
-            models: adaptive.into_iter().chain(claude).chain(nova).collect(),
+            models: adaptive.into_iter().chain(four_six).chain(claude).chain(nova).collect(),
         }
     }
 
@@ -512,9 +549,10 @@ mod tests {
         ] {
             assert_eq!((p.quirks.context, p.quirks.max_output), (None, None));
             assert!(p.quirks.body.is_empty());
-            // Of Bedrock's models it is written which can do what, of Anthropic's which can be fast; of
-            // none, how much.
-            assert_eq!(p.models.is_empty(), !["bedrock", "anthropic"].contains(&&*p.provider));
+            // Of Bedrock's models it is written which can do what, of Anthropic's which can be fast, of
+            // OpenAI's (and so a ChatGPT plan's) how hard they can try; of none, how much.
+            let written = ["bedrock", "anthropic", "openai", "chatgpt"];
+            assert_eq!(p.models.is_empty(), !written.contains(&&*p.provider), "{}", p.provider);
             for m in p.models.values() {
                 assert_eq!((m.context, m.max_output, m.body.len()), (None, None, 0));
             }

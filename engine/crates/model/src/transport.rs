@@ -212,12 +212,9 @@ impl Client {
         for raw in list.models {
             let m: Named = page.model(&raw)?;
             if m.visibility.as_deref() == Some("list") {
-                models.push(ModelInfo {
-                    id: m.slug,
-                    name: m.display_name,
-                    about: About::default(),
-                    native: Json::from(&*raw),
-                });
+                let native = Json::from(&*raw);
+                let about = about::chatgpt(&native.value());
+                models.push(ModelInfo { id: m.slug, name: m.display_name, about, native });
             }
         }
         Ok(models)

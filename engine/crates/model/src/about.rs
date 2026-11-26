@@ -36,6 +36,16 @@ pub(crate) fn anthropic(m: &Value) -> About {
     About { context: m.get("max_input_tokens").and_then(Value::as_u64), efforts, adaptive }
 }
 
+/// A ChatGPT plan's list, where it says which efforts a model takes (`supported_reasoning_levels`, as
+/// the Codex client reads it); where it does not, its model's page says.
+pub(crate) fn chatgpt(m: &Value) -> About {
+    let efforts = m
+        .get("supported_reasoning_levels")
+        .and_then(Value::as_array)
+        .map(|all| all.iter().take(MOST).filter_map(|l| l.get("effort").and_then(word)).collect());
+    About { efforts, ..About::default() }
+}
+
 /// aistudio.google.com/api-reference/models and /docs/thinking, read 2026-11-26: the list says whether
 /// a model thinks, and the page which levels each takes.
 pub(crate) fn gemini(id: &str, m: &Value) -> About {
@@ -127,6 +137,19 @@ mod tests {
         for odd in [json!({}), json!({"capabilities": null, "max_input_tokens": null})] {
             assert_eq!(anthropic(&odd), About::default());
         }
+    }
+
+    #[test]
+    fn as_a_chatgpt_plan_lists() {
+        let levels = json!({"supported_reasoning_levels": [
+            {"effort": "low", "description": "x"}, {"effort": "xhigh"}, {"effort": "no such word!"}, {}
+        ]});
+        assert_eq!(chatgpt(&levels).efforts, all(&["low", "xhigh"]));
+        assert_eq!(
+            chatgpt(&json!({"slug": "m"})),
+            About::default(),
+            "what is not said is not known"
+        );
     }
 
     #[test]
