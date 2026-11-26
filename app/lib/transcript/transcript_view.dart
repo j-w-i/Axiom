@@ -230,7 +230,13 @@ class TranscriptViewState extends State<TranscriptView> {
     scroll.addListener(_scrolled);
   }
 
+  /// A fling still going would go on from where it was, in a view whose origin has moved.
+  void _rest() {
+    if (scroll.hasClients) (scroll.position as _EndPosition).goIdle();
+  }
+
   void _open() {
+    _rest();
     _rows = TranscriptRows(widget.agent);
     widget.agent.addListener(_changed);
     _listen();
@@ -425,6 +431,7 @@ class TranscriptViewState extends State<TranscriptView> {
 
   /// Both ends are reached by moving the origin, not by laying out everything between.
   void toStart() => setState(() {
+    _rest();
     _epoch++;
     _pivot = 0;
     _atEnd = false;
@@ -432,6 +439,7 @@ class TranscriptViewState extends State<TranscriptView> {
   });
 
   void toEnd() => setState(() {
+    _rest();
     _epoch++;
     _pivot = _fromEnd();
     _atEnd = true;
