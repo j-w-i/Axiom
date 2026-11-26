@@ -208,12 +208,14 @@ class AxSegments<T> extends StatelessWidget {
                       : s.hovered
                       ? t.colors.ink2
                       : t.colors.ink3;
-                  return SizedBox(
-                    height: t.density.control - 4,
+                  // As tall as a key, and taller where the words are larger.
+                  return ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: t.density.control - 4),
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: icon == null ? 11 : 8),
+                      padding: EdgeInsets.symmetric(horizontal: icon == null ? 11 : 8, vertical: 2),
                       child: Center(
                         widthFactor: 1,
+                        heightFactor: 1,
                         child: icon == null
                             ? Text(name, style: t.type.labelStrong.ink(ink))
                             : AxGlyph(icon, color: ink),

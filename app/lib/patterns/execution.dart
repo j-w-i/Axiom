@@ -161,8 +161,11 @@ class _Question {
 /// Every part of the execution, one open at a time. A change that costs something is explained and
 /// confirmed here.
 class ExecutionPanel extends StatefulWidget {
-  const ExecutionPanel(this.choices, {super.key});
+  const ExecutionPanel(this.choices, {super.key, this.labels = 82});
   final List<ExecutionChoice> choices;
+
+  /// How wide the column of their names is, at the usual size: as wide as one beside it.
+  final double labels;
   @override
   State<ExecutionPanel> createState() => _ExecutionPanelState();
 }
@@ -306,7 +309,21 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
             _asked = null;
           }),
           children: [
-            SizedBox(width: 82, child: Text(ch.label, style: t.type.label.ink(c.ink3))),
+            // As wide as its words are at any size, and on one line.
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: MediaQuery.textScalerOf(context).scale(widget.labels),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  ch.label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: t.type.label.ink(c.ink3),
+                ),
+              ),
+            ),
             if (ch.item?.mark case final m?) ...[AxServiceMark(m), const SizedBox(width: 8)],
             Expanded(
               child: Text(
