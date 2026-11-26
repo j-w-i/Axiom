@@ -120,7 +120,7 @@ class AxPopoverState extends State<AxPopover> with WidgetsBindingObserver {
                     child: Padding(
                       padding: const EdgeInsets.all(AxSpace.menu),
                       // However much there is, it stays in the window and scrolls.
-                      child: SingleChildScrollView(child: widget.panel(context, close)),
+                      child: _Scrolls(child: widget.panel(context, close)),
                     ),
                   ),
                 ),
@@ -696,4 +696,145 @@ class AxSelect<T> extends StatelessWidget {
 
   Widget _commanded(VoidCallback toggle, Widget w) =>
       command == null ? w : OnCommand(command!, toggle, child: w);
+}
+
+/// The name of what shows only a mark, beside it while the hand rests on it or it has the keyboard.
+/// What reads the screen has the name already: this is for the eye.
+class AxHint extends StatefulWidget {
+  const AxHint(this.text, {required this.child, super.key});
+  final String text;
+  final Widget child;
+  @override
+  State<AxHint> createState() => _AxHintState();
+}
+
+class _AxHintState extends State<AxHint> {
+  final _ctl = OverlayPortalController();
+  final _link = LayerLink();
+  Timer? _wait;
+
+  void _show(bool on) {
+    _wait?.cancel();
+    if (!on) {
+      if (_ctl.isShowing) _ctl.hide();
+      return;
+    }
+    _wait = Timer(AxMotion.hoverDelay, () {
+      if (mounted && !_ctl.isShowing) _ctl.show();
+    });
+  }
+
+  @override
+  void dispose() {
+    _wait?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Focus(
+    canRequestFocus: false,
+    skipTraversal: true,
+    onFocusChange: _show,
+    child: MouseRegion(
+      onEnter: (_) => _show(true),
+      onExit: (_) => _show(false),
+      child: CompositedTransformTarget(
+        link: _link,
+        child: OverlayPortal(
+          controller: _ctl,
+          overlayChildBuilder: (context) {
+            final t = Ax.of(context);
+            // Before it where there is room, so that it covers nothing it stands beside.
+            final box = this.context.findRenderObject() as RenderBox?;
+            final before = box != null && box.hasSize && box.localToGlobal(Offset.zero).dx >= 200;
+            return CompositedTransformFollower(
+              link: _link,
+              targetAnchor: before ? Alignment.centerLeft : Alignment.centerRight,
+              followerAnchor: before ? Alignment.centerRight : Alignment.centerLeft,
+              offset: Offset(before ? -AxSpace.chip : AxSpace.chip, 0),
+              child: Align(
+                alignment: before ? Alignment.centerRight : Alignment.centerLeft,
+                widthFactor: 1,
+                heightFactor: 1,
+                child: IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: Surface(
+                      t.colors.overlay,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: AxSpace.chip, vertical: 5),
+                        child: Text(widget.text, style: t.type.label.ink(t.colors.ink1)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+          child: widget.child,
+        ),
+      ),
+    ),
+  );
+}
+
+/// What floats and is longer than the window: it scrolls, and goes out of sight gradually where it
+/// is cut off.
+class _Scrolls extends StatefulWidget {
+  const _Scrolls({required this.child});
+  final Widget child;
+  @override
+  State<_Scrolls> createState() => _ScrollsState();
+}
+
+class _ScrollsState extends State<_Scrolls> {
+  final _at = ScrollController();
+  (bool, bool) _cut = (false, false);
+
+  bool _look(ScrollMetricsNotification? _) {
+    final p = _at.hasClients ? _at.position : null;
+    final cut = (p != null && p.extentBefore > 0, p != null && p.extentAfter > 0);
+    if (cut != _cut) setState(() => _cut = cut);
+    return false;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _at.addListener(() => _look(null));
+    // Its first measure is told to nobody.
+    WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? _look(null) : null);
+  }
+
+  @override
+  void dispose() {
+    _at.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ground = Ax.of(context).colors.overlay.fill;
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: _look,
+      child: Stack(
+        children: [
+          SingleChildScrollView(controller: _at, child: widget.child),
+          if (_cut.$1)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: Fade(up: true, height: 16, ground: ground),
+            ),
+          if (_cut.$2)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Fade(up: false, height: 16, ground: ground),
+            ),
+        ],
+      ),
+    );
+  }
 }
