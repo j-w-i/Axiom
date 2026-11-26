@@ -98,8 +98,8 @@ class _PressableState extends State<Pressable> {
         onFocusChange: (v) => setState(() => _has = v),
         onShowFocusHighlight: (v) => setState(() => _focus = v),
         shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.enter, includeRepeats: false): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.space, includeRepeats: false): ActivateIntent(),
         },
         actions: {
           ActivateIntent: CallbackAction<ActivateIntent>(
@@ -234,4 +234,33 @@ class _RenderShield extends RenderProxyBox {
     result.add(BoxHitTestEntry(this, position));
     return true;
   }
+}
+
+/// When it goes, focus goes back to where it was when it came, if nothing else has taken it: the
+/// keyboard is not left with nothing to type into.
+class GivesFocusBack extends StatefulWidget {
+  const GivesFocusBack({required this.child, super.key});
+  final Widget child;
+  @override
+  State<GivesFocusBack> createState() => _GivesFocusBackState();
+}
+
+class _GivesFocusBackState extends State<GivesFocusBack> {
+  final _back = FocusManager.instance.primaryFocus;
+
+  @override
+  void dispose() {
+    final back = _back;
+    WidgetsBinding.instance.addPostFrameCallback(
+      // After the focus that left with it has gone, which is settled in a microtask.
+      (_) => scheduleMicrotask(() {
+        if (back?.context == null || FocusManager.instance.primaryFocus is! FocusScopeNode) return;
+        back!.requestFocus();
+      }),
+    );
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

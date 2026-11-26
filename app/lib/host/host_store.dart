@@ -226,7 +226,8 @@ class HostStore extends ChangeNotifier {
 
   Future<String> create(String title, {String? workspace}) async {
     final r = await _live.call('session.create', {'title': title, 'workspace': ?workspace});
-    await refresh();
+    // It is made: a list that fails to come must not make its person make it again.
+    await refresh().catchError((Object _) {});
     return (r! as Json)['session']! as String;
   }
 
@@ -279,12 +280,15 @@ class HostStore extends ChangeNotifier {
 
   /// Its person has what an agent came to before them.
   void seen(String session, String agent) {
+    // Said again when the host answers once more.
+    final link = _link;
+    if (link == null) return;
     for (final w in needs) {
       if (w.session != session || w.agent != agent || w.need == Need.asks) continue;
       // Said once; the host says when it is gone.
       if (!_seen.add((session, agent, w.at))) continue;
       unawaited(
-        _live
+        link
             .call('agent.seen', {'session': session, 'agent': agent})
             .then((_) {}, onError: (Object _) => _seen.remove((session, agent, w.at))),
       );
@@ -421,7 +425,8 @@ class HostStore extends ChangeNotifier {
       'url': ?url,
       'secret': ?secret,
     });
-    await loadConnections();
+    // It is added: a list that fails to come must not make its person add it again.
+    await loadConnections().catchError((Object _) {});
     return (r! as Json)['connection']! as String;
   }
 

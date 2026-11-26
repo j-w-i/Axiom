@@ -31,7 +31,10 @@ class ItemModel extends ChangeNotifier {
     ItemKind.prose || ItemKind.prompt || ItemKind.reasoning || ItemKind.plan => true,
     _ => false,
   };
-  String get plain => _ended ?? _plain.toString();
+  String get plain => _ended ?? (_now ??= _plain.toString());
+
+  /// What [plain] was last, until more comes: it is asked on every build of its row.
+  String? _now;
 
   /// What was said, as it was written: Markdown, with whatever hides in it.
   String get source => plain;
@@ -48,6 +51,7 @@ class ItemModel extends ChangeNotifier {
     _hash = _fold(_hash, t);
     if (rich) doc.append(t);
     _plain.write(t);
+    _now = null;
   }
 
   void _end(ItemEnded e) {
@@ -64,6 +68,7 @@ class ItemModel extends ChangeNotifier {
     }
     _ended = e.text;
     _plain.clear();
+    _now = null;
   }
 
   void _changed() => notifyListeners();

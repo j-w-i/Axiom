@@ -36,14 +36,12 @@ class SearchBox extends StatefulWidget {
 class _SearchBoxState extends State<SearchBox> {
   final _words = TextEditingController(), _focus = FocusNode(debugLabel: 'find');
   final _scroll = ScrollController();
-  FocusNode? _back;
   int _at = 0;
   static const _row = 34.0;
 
   @override
   void initState() {
     super.initState();
-    _back = FocusManager.instance.primaryFocus;
     _words.addListener(_changed);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
@@ -75,10 +73,7 @@ class _SearchBoxState extends State<SearchBox> {
     ];
   }
 
-  void _leave() {
-    widget.onClose();
-    _back?.requestFocus();
-  }
+  void _leave() => widget.onClose();
 
   void _go(Found f) {
     widget.onClose();

@@ -190,7 +190,10 @@ class TranscriptViewState extends State<TranscriptView> {
   /// Changes when the origin is moved outright, so that nothing laid out from the old one is kept.
   int _epoch = 0;
   Key get _center => ValueKey(('now', _epoch));
-  late final _end = _EndController(() => _atEnd);
+  late final _end = _EndController(() => _atEnd && _pressed == 0, _settle);
+
+  /// Pointers held down on it: text being chosen is not moved from under the pointer.
+  int _pressed = 0;
   ScrollController get scroll => _end;
   late TranscriptRows _rows;
 
@@ -230,7 +233,13 @@ class TranscriptViewState extends State<TranscriptView> {
     scroll.addListener(_scrolled);
   }
 
+  /// A fling still going would go on from where it was, in a view whose origin has moved.
+  void _rest() {
+    if (scroll.hasClients) (scroll.position as _EndPosition).goIdle();
+  }
+
   void _open() {
+    _rest();
     _rows = TranscriptRows(widget.agent);
     widget.agent.addListener(_changed);
     _listen();
@@ -332,8 +341,44 @@ class TranscriptViewState extends State<TranscriptView> {
       );
       if (at < 0) return;
     }
+    final now = rows[at];
+    // Its block is inside the end now, below those that went in with it.
+    _within = now.isEnd && !row.isEnd && now.index < row.index
+        ? (now, (row.item, row.index))
+        : null;
     _pivot = at;
     _end.shiftTo(-y);
+  }
+
+  /// A row that was read and is now part of an end row, and the block of it.
+  (TranscriptRow, (ItemModel?, int))? _within;
+
+  /// How far the block in [_within] stands below the top of its row, once that is laid out: the view
+  /// moves by as much in the same layout, so no frame shows it elsewhere.
+  double _settle() {
+    final w = _within;
+    _within = null;
+    final view = w == null || !mounted ? null : context.findRenderObject();
+    if (w == null || view == null) return 0;
+    RenderBox? find(RenderObject o, bool Function(Object?) wanted) {
+      RenderBox? found;
+      void visit(RenderObject o) {
+        if (found != null) return;
+        if (o is RenderMetaData && wanted(o.metaData)) {
+          found = o;
+          return;
+        }
+        o.visitChildren(visit);
+      }
+
+      o.visitChildren(visit);
+      return found;
+    }
+
+    final row = find(view, (m) => identical(m, w.$1));
+    final block = row == null ? null : find(row, (m) => m == w.$2);
+    if (row == null || block == null || !row.hasSize || !block.hasSize) return 0;
+    return block.localToGlobal(Offset.zero, ancestor: row).dy;
   }
 
   /// What was pressed stays where it is: someone who opens an output is reading, and the end is not
@@ -389,6 +434,7 @@ class TranscriptViewState extends State<TranscriptView> {
 
   /// Both ends are reached by moving the origin, not by laying out everything between.
   void toStart() => setState(() {
+    _rest();
     _epoch++;
     _pivot = 0;
     _atEnd = false;
@@ -396,6 +442,7 @@ class TranscriptViewState extends State<TranscriptView> {
   });
 
   void toEnd() => setState(() {
+    _rest();
     _epoch++;
     _pivot = _fromEnd();
     _atEnd = true;
@@ -481,59 +528,64 @@ class TranscriptViewState extends State<TranscriptView> {
         child: Stack(
           children: [
             Positioned.fill(
-              child: SelectableRegion(
-                focusNode: _focus,
-                selectionControls: axSelectionControls,
-                onSelectionChanged: (v) => _selected = v?.plainText ?? '',
-                contextMenuBuilder: (context, s) => AxContextMenu(
-                  anchors: s.contextMenuAnchors,
-                  items: [
-                    ...s.contextMenuButtonItems,
-                    if (widget.onQuote case final take? when _selected.trim().isNotEmpty)
-                      ContextMenuButtonItem(
-                        label: 'Quote',
-                        onPressed: () {
-                          // Whatever is selected here is of this agent's conversation.
-                          take(quoted('the conversation with $_whose', _selected));
-                          s.hideToolbar();
-                        },
-                      ),
-                  ],
-                ),
-                child: CustomScrollView(
-                  controller: scroll,
-                  center: _center,
-                  physics: const ClampingScrollPhysics(),
-                  scrollCacheExtent: const ScrollCacheExtent.pixels(400),
-                  slivers: [
-                    SliverPadding(
-                      key: ValueKey(('before', _epoch)),
-                      padding: side,
-                      sliver: SliverList.builder(
-                        itemCount: _pivot,
-                        itemBuilder: (_, i) => row(_pivot - 1 - i),
-                        findChildIndexCallback: (k) => find(k, _pivot - 1, -1),
-                      ),
-                    ),
-                    SliverPadding(
-                      key: _center,
-                      padding: side,
-                      sliver: SliverList.builder(
-                        itemCount: n - _pivot,
-                        itemBuilder: (_, i) => row(_pivot + i),
-                        findChildIndexCallback: (k) => find(k, _pivot, 1),
-                      ),
-                    ),
-                    SliverPadding(
-                      padding: side.copyWith(bottom: 28),
-                      sliver: SliverToBoxAdapter(
-                        child: ListenableBuilder(
-                          listenable: a,
-                          builder: (context, _) => _Ending(a),
+              child: Listener(
+                onPointerDown: (_) => _pressed++,
+                onPointerUp: (_) => _pressed--,
+                onPointerCancel: (_) => _pressed--,
+                child: SelectableRegion(
+                  focusNode: _focus,
+                  selectionControls: axSelectionControls,
+                  onSelectionChanged: (v) => _selected = v?.plainText ?? '',
+                  contextMenuBuilder: (context, s) => AxContextMenu(
+                    anchors: s.contextMenuAnchors,
+                    items: [
+                      ...s.contextMenuButtonItems,
+                      if (widget.onQuote case final take? when _selected.trim().isNotEmpty)
+                        ContextMenuButtonItem(
+                          label: 'Quote',
+                          onPressed: () {
+                            // Whatever is selected here is of this agent's conversation.
+                            take(quoted('the conversation with $_whose', _selected));
+                            s.hideToolbar();
+                          },
+                        ),
+                    ],
+                  ),
+                  child: CustomScrollView(
+                    controller: scroll,
+                    center: _center,
+                    physics: const ClampingScrollPhysics(),
+                    scrollCacheExtent: const ScrollCacheExtent.pixels(400),
+                    slivers: [
+                      SliverPadding(
+                        key: ValueKey(('before', _epoch)),
+                        padding: side,
+                        sliver: SliverList.builder(
+                          itemCount: _pivot,
+                          itemBuilder: (_, i) => row(_pivot - 1 - i),
+                          findChildIndexCallback: (k) => find(k, _pivot - 1, -1),
                         ),
                       ),
-                    ),
-                  ],
+                      SliverPadding(
+                        key: _center,
+                        padding: side,
+                        sliver: SliverList.builder(
+                          itemCount: n - _pivot,
+                          itemBuilder: (_, i) => row(_pivot + i),
+                          findChildIndexCallback: (k) => find(k, _pivot, 1),
+                        ),
+                      ),
+                      SliverPadding(
+                        padding: side.copyWith(bottom: 28),
+                        sliver: SliverToBoxAdapter(
+                          child: ListenableBuilder(
+                            listenable: a,
+                            builder: (context, _) => _Ending(a),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -555,8 +607,11 @@ class TranscriptViewState extends State<TranscriptView> {
 /// Keeps to the end while [atEnd] says so, within the layout that moved it: no frame shows the place
 /// before. A person's own scrolling is never overruled.
 class _EndController extends ScrollController {
-  _EndController(this.atEnd);
+  _EndController(this.atEnd, this.settle);
   final bool Function() atEnd;
+
+  /// How far the view is to move once laid out, because what was read moved within its row.
+  final double Function() settle;
 
   /// After a fling, until it comes to rest.
   bool get coasting => hasClients && (position as _EndPosition).coasting;
@@ -568,12 +623,19 @@ class _EndController extends ScrollController {
     ScrollPhysics physics,
     ScrollContext context,
     ScrollPosition? oldPosition,
-  ) => _EndPosition(atEnd, physics: physics, context: context, oldPosition: oldPosition);
+  ) => _EndPosition(atEnd, settle, physics: physics, context: context, oldPosition: oldPosition);
 }
 
 class _EndPosition extends ScrollPositionWithSingleContext {
-  _EndPosition(this.atEnd, {required super.physics, required super.context, super.oldPosition});
+  _EndPosition(
+    this.atEnd,
+    this.settle, {
+    required super.physics,
+    required super.context,
+    super.oldPosition,
+  });
   final bool Function() atEnd;
+  final double Function() settle;
   bool get coasting => activity is BallisticScrollActivity;
   bool _gone = false;
 
@@ -597,6 +659,12 @@ class _EndPosition extends ScrollPositionWithSingleContext {
 
   @override
   bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    final by = settle();
+    if (by != 0 && hasPixels) {
+      correctPixels(pixels + by);
+      super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+      return false;
+    }
     final follow = atEnd() && !isScrollingNotifier.value;
     if (follow && (!hasPixels || pixels != maxScrollExtent)) {
       correctPixels(maxScrollExtent);
@@ -660,6 +728,8 @@ class _Marked extends StatelessWidget {
   );
 }
 
+final _views = Expando<BlockView>('block views');
+
 class _RowView extends StatelessWidget {
   const _RowView(
     this.rows,
@@ -699,19 +769,37 @@ class _RowView extends StatelessWidget {
     final before = at > 0 ? rows[at - 1] : null;
     final afterWork = before != null && before.work.isNotEmpty;
     if (i != null && !r.isEnd) {
-      final blocks = i.doc.closed;
-      final w = BlockView(
-        blocks[r.index],
-        voice: i.kind,
-        by: i.name,
-        opens: r.index == 0,
-        afterTool: r.index == 0 && afterWork,
-        goesOn: r.index + 1 < blocks.length && blocks[r.index + 1].continues,
-        closes: !i.open && r.index + 1 == blocks.length && i.doc.tail.isEmpty,
-        whole: () => wholeCode(blocks, r.index),
-        onLink: onLink,
-      );
-      return RepaintBoundary(child: _taken(i, w, stops: r.index == 0));
+      final d = i.doc, blocks = d.closed, b = blocks[r.index], at = r.index;
+      final opens = at == 0, afterTool = opens && afterWork;
+      final goesOn =
+          (at + 1 < blocks.length && blocks[at + 1].continues) ||
+          // Its next part may still be being written.
+          (i.open && at + 1 == blocks.length && (d.tail.firstOrNull?.continues ?? false));
+      final closes = !i.open && at + 1 == blocks.length && d.tail.isEmpty;
+      // A closed block is built once: the rows around it are built again whenever one closes.
+      final old = _views[b];
+      final w =
+          old != null &&
+              old.voice == i.kind &&
+              old.by == i.name &&
+              old.opens == opens &&
+              old.afterTool == afterTool &&
+              old.goesOn == goesOn &&
+              old.closes == closes &&
+              old.onLink == onLink
+          ? old
+          : _views[b] = BlockView(
+              b,
+              voice: i.kind,
+              by: i.name,
+              opens: opens,
+              afterTool: afterTool,
+              goesOn: goesOn,
+              closes: closes,
+              whole: () => wholeCode([...i.doc.closed, ...i.doc.tail], at),
+              onLink: onLink,
+            );
+      return RepaintBoundary(child: _taken(i, w, stops: at == 0));
     }
     Widget prose() => i == null
         ? const SizedBox(width: double.infinity)
@@ -801,11 +889,15 @@ class _ProseState extends State<_Prose> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final (k, b) in all.indexed)
-          _block(
-            k,
-            b,
-            goesOn: k + 1 < all.length && all[k + 1].continues,
-            last: k + 1 == all.length,
+          // Found by where it stands in its passage, when it was a row of its own before.
+          MetaData(
+            metaData: (widget.item, from + k),
+            child: _block(
+              k,
+              b,
+              goesOn: k + 1 < all.length && all[k + 1].continues,
+              last: k + 1 == all.length,
+            ),
           ),
       ],
     );
@@ -1239,6 +1331,8 @@ class _CodeBlockState extends State<CodeBlock> {
                   onFocusChange: (v) => setState(() => _within = v),
                   child: Opacity(
                     opacity: _over || _within ? 1 : 0,
+                    // Hidden from the eye until wanted, never from a screen reader.
+                    alwaysIncludeSemantics: true,
                     child: AxButton(label: _copied ? 'Copied' : 'Copy', size: 28, onPressed: _copy),
                   ),
                 ),

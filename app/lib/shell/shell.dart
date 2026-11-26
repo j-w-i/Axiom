@@ -613,9 +613,11 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                 ),
                 if (_finding)
                   Positioned.fill(
-                    child: SearchBox(
-                      all: _everything(s),
-                      onClose: () => setState(() => _finding = false),
+                    child: GivesFocusBack(
+                      child: SearchBox(
+                        all: _everything(s),
+                        onClose: () => setState(() => _finding = false),
+                      ),
                     ),
                   ),
               ],
