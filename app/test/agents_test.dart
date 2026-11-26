@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ui' show Tristate;
+import 'dart:ui' show PointerDeviceKind, Tristate;
 
 import 'package:axiom/host/host_store.dart';
 import 'package:axiom/host/link.dart';
@@ -2354,7 +2354,7 @@ void main() {
       expect(find.textContaining('usage credits'), findsOneWidget);
       await snap(t, 'models-asked');
       await t.pump(AxMotion.settle);
-      await press(t, find.text('Keep it'));
+      await press(t, find.text('Keep Standard'));
       await press(t, find.bySemanticsLabel('Fast').last);
       await t.pump(AxMotion.settle);
       await press(t, find.text('Change to Fast'));
@@ -2396,6 +2396,28 @@ void main() {
       await press(t, find.bySemanticsLabel('Start session'));
       final add = s.calls.where((c) => c.first == 'add').single;
       expect(add.any((x) => '$x'.startsWith('effort')), isFalse);
+    });
+
+    testWidgets('a mark of the rail says whose it is to the eye', (t) async {
+      await begin(t);
+      await press(t, find.bySemanticsLabel('New session').first);
+      await part(t, 'Model');
+      final stop = find.bySemanticsLabel('Work, OpenRouter');
+      final hand = await t.createGesture(kind: PointerDeviceKind.mouse);
+      await hand.addPointer(location: Offset.zero);
+      addTearDown(hand.removePointer);
+      await hand.moveTo(t.getCenter(stop));
+      await t.pump();
+      expect(find.text('Work, OpenRouter'), findsNothing, reason: 'not at once');
+      await t.pump(AxMotion.hoverDelay);
+      await t.pump();
+      expect(find.text('Work, OpenRouter'), findsOneWidget);
+      // A screen reader has it once, from the key itself.
+      expect(find.bySemanticsLabel('Work, OpenRouter'), findsOneWidget);
+      await snap(t, 'models-hint');
+      await hand.moveTo(Offset.zero);
+      await t.pump();
+      expect(find.text('Work, OpenRouter'), findsNothing);
     });
 
     testWidgets('one that is in no list is asked about, and nobody else is', (t) async {

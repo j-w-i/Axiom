@@ -84,7 +84,7 @@ Built on the owner's word (2026-11-25). In the pictures and not in the app, beca
 
 ## Next
 1. Owner: merge the rest of M2 (j-w-i/Axiom#26), then M3's items (`m3/programs`, stacked on it). Drop a folder on the window once, and look at zoom (K52).
-2. Owner: look at the model picker (`design/system.md`, round 20) and at Programs and Models under Accounts; say whether programs' models belong in the list while the harness is not a choice; say whether `surfaces-*` may be recorded again with the star.
+2. Owner: look at the model picker (`design/system.md`, round 21; `app/build/shots/models-*.png`) and at Programs and Models under Accounts; say whether programs' models belong in the list while the harness is not a choice; say whether `surfaces-*` may be recorded again with the star.
 3. Owner: drag the window by its header and try full screen (K8).
 4. Owner: say whether the real Claude Code or Codex on this computer may be started once (K40); sign in with ChatGPT once, if wanted (K47).
 5. Somebody with the standing to do it: the security review (K32). It should see seccomp, branching's `points`, Bedrock, and now 0016: what a person may have a program given.
