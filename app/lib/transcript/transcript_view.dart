@@ -1331,6 +1331,8 @@ class _CodeBlockState extends State<CodeBlock> {
                   onFocusChange: (v) => setState(() => _within = v),
                   child: Opacity(
                     opacity: _over || _within ? 1 : 0,
+                    // Hidden from the eye until wanted, never from a screen reader.
+                    alwaysIncludeSemantics: true,
                     child: AxButton(label: _copied ? 'Copied' : 'Copy', size: 28, onPressed: _copy),
                   ),
                 ),
