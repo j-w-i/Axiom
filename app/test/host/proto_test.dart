@@ -189,6 +189,37 @@ void main() {
         ['a.rs'],
       ],
     );
+    final b = BrowserInfo.decode((result(20)! as List<Object?>).single! as Json);
+    expect(
+      [b.session, b.agent, b.url, b.title, b.person],
+      ['s_1', 'a_1', 'http://127.0.0.1:5173/', 'App', true],
+    );
+    final v = BrowserView.decode(result(21)! as Json);
+    expect(
+      [v.version, v.frame, v.width, v.height, v.person, v.dark, v.loading, v.refused, v.ended],
+      [
+        7,
+        '/9j/',
+        1280,
+        800,
+        true,
+        true,
+        false,
+        ['https://example.com/a.png'],
+        null,
+      ],
+    );
+    final pointed = Pointed.decode(result(22)! as Json);
+    expect(
+      [pointed.selector, pointed.text, pointed.styles, pointed.rect, pointed.picture],
+      [
+        'main > h1.big',
+        'Hello',
+        [('font-size', '32px')],
+        [8.0, 21.5, 300.0, 37.0],
+        'iVBO',
+      ],
+    );
     final red = sc.rows.first.last;
     expect([red.text, red.fg, red.bg, red.style], ['red', '1', '#102030', 17]);
     final e = EditorInfo.decode((result(13)! as List<Object?>).single! as Json);

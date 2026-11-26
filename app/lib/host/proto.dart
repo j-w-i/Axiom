@@ -492,6 +492,83 @@ class EditorInfo {
 }
 
 /// A person's own terminal.
+/// An agent's browser (decision 0021): one page, of what its jobs serve.
+class BrowserInfo {
+  const BrowserInfo(this.session, this.agent, this.url, this.title, {this.person = false});
+  BrowserInfo.decode(Json j)
+    : session = j['session']! as String,
+      agent = j['agent']! as String,
+      url = j['url']! as String,
+      title = j['title']! as String,
+      person = j['person'] == true;
+  final String session, agent, url, title;
+
+  /// Its person holds it: the agent waits.
+  final bool person;
+}
+
+/// What a person is shown of an agent's browser: a picture of the page, never the page (SI-14).
+class BrowserView {
+  const BrowserView({
+    this.version = 0,
+    this.frame,
+    this.width = 0,
+    this.height = 0,
+    this.url = '',
+    this.title = '',
+    this.person = false,
+    this.dark = false,
+    this.loading = false,
+    this.refused = const [],
+    this.ended,
+  });
+  BrowserView.decode(Json j)
+    : version = j['version']! as int,
+      frame = j['frame'] as String?,
+      width = j['width']! as int,
+      height = j['height']! as int,
+      url = j['url']! as String,
+      title = j['title']! as String,
+      person = j['person'] == true,
+      dark = j['dark'] == true,
+      loading = j['loading'] == true,
+      refused = [for (final r in j['refused'] as List<Object?>? ?? const []) r! as String],
+      ended = j['ended'] as String?;
+  final int version, width, height;
+
+  /// JPEG, in base64.
+  final String? frame;
+  final String url, title;
+  final bool person, dark, loading;
+
+  /// What the page asked for and was refused, last first.
+  final List<String> refused;
+  final String? ended;
+}
+
+/// What a person pointed at on an agent's page. All of it is the page's (SI-17).
+class Pointed {
+  const Pointed(this.selector, this.text, this.styles, this.rect, this.url, {this.picture});
+  Pointed.decode(Json j)
+    : selector = j['selector']! as String,
+      text = j['text']! as String,
+      styles = [
+        for (final s in j['styles']! as List<Object?>)
+          ((s! as List<Object?>)[0]! as String, (s as List<Object?>)[1]! as String),
+      ],
+      rect = [for (final r in j['rect']! as List<Object?>) (r! as num).toDouble()],
+      url = j['url']! as String,
+      picture = j['picture'] as String?;
+  final String selector, text, url;
+  final List<(String, String)> styles;
+
+  /// Left, top, width, height.
+  final List<double> rect;
+
+  /// PNG, in base64.
+  final String? picture;
+}
+
 class TerminalInfo {
   const TerminalInfo(this.terminal, this.session, this.title, {this.busy = false, this.ended});
   TerminalInfo.decode(Json j)

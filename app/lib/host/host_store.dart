@@ -543,6 +543,56 @@ class HostStore extends ChangeNotifier {
     return (r! as Json)['terminal']! as String;
   }
 
+  /// The browsers agents have open (decision 0021).
+  Future<List<BrowserInfo>> browsers() async => [
+    for (final j in (await _live.call('browser.list'))! as List<Object?>)
+      BrowserInfo.decode(j! as Json),
+  ];
+
+  /// Opens what an agent's job serves at [port] in that agent's browser.
+  Future<void> openBrowser(String session, String agent, int port) =>
+      _live.call('browser.open', {'session': session, 'agent': agent, 'port': port}, _long);
+
+  /// Its view, once it is past [seen], or after a while as it is.
+  Future<BrowserView> browserView(String session, String agent, int seen) async =>
+      BrowserView.decode(
+        (await _live.call('browser.view', {
+              'session': session,
+              'agent': agent,
+              'seen': seen,
+            }, _long))!
+            as Json,
+      );
+
+  Future<void> holdBrowser(String session, String agent, bool person) =>
+      _live.call('browser.hold', {'session': session, 'agent': agent, 'person': person});
+
+  /// What its person does on the page: as `browser.input` says it.
+  Future<void> browserInput(String session, String agent, Json input) =>
+      _live.call('browser.input', {'session': session, 'agent': agent, 'input': input});
+
+  Future<void> sizeBrowser(String session, String agent, int width, int height, bool dark) =>
+      _live.call('browser.size', {
+        'session': session,
+        'agent': agent,
+        'width': width,
+        'height': height,
+        'dark': dark,
+      }, _long);
+
+  Future<Pointed> pointAt(String session, String agent, double x, double y) async => Pointed.decode(
+    (await _live.call('browser.point', {
+          'session': session,
+          'agent': agent,
+          'x': x,
+          'y': y,
+        }, _long))!
+        as Json,
+  );
+
+  Future<void> closeBrowser(String session, String agent) =>
+      _live.call('browser.close', {'session': session, 'agent': agent}, _long);
+
   Future<List<TerminalInfo>> terminals() async => [
     for (final j in (await _live.call('terminal.list'))! as List<Object?>)
       TerminalInfo.decode(j! as Json),
