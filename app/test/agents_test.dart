@@ -2250,8 +2250,9 @@ void main() {
       'claude-opus-5-5',
       name: 'Claude Opus 5.5',
       context: 1000000,
-      // As Anthropic's list says of it.
+      // As Anthropic's list and its page say of it.
       efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultEffort: 'medium',
       speeds: ['fast'],
     );
     final lists = [
@@ -2267,6 +2268,7 @@ void main() {
           'opus',
           name: 'Opus',
           efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+          defaultEffort: 'medium',
           speeds: ['fast'],
         ),
       ]),
@@ -2354,10 +2356,16 @@ void main() {
       await part(t, 'Model');
       await press(t, find.bySemanticsLabel('Claude Code'));
       await press(t, find.bySemanticsLabel('Opus').last);
-      // Every effort it says the model takes, and none it does not say.
-      for (final e in ['Low', 'Medium', 'High', 'Extra high', 'Max']) {
+      // Every effort it says the model takes, and none it does not say; no "Default" of its own, but
+      // the one it begins with said to be it, and chosen while nothing else is.
+      for (final e in ['Low', 'Medium, default', 'High', 'Extra high', 'Max']) {
         expect(find.bySemanticsLabel(e), findsOneWidget, reason: e);
       }
+      expect(find.bySemanticsLabel('Default'), findsNothing);
+      expect(
+        t.getSemantics(find.bySemanticsLabel('Medium, default')).flagsCollection.isSelected,
+        Tristate.isTrue,
+      );
       expect(find.bySemanticsLabel('None'), findsNothing, reason: 'it does not say so');
       // Fast has a price, which is said before it is chosen.
       await press(t, find.bySemanticsLabel('Fast').last);
@@ -2369,7 +2377,11 @@ void main() {
       await t.pump(AxMotion.settle);
       await press(t, find.text('Change to Fast'));
       await leave(t);
-      expect(find.bySemanticsLabel(RegExp('Runs on Opus, Claude Code, Fast')), findsOneWidget);
+      // What it tries at, though it was told none: its default.
+      expect(
+        find.bySemanticsLabel(RegExp('Runs on Opus, Claude Code, Medium, Fast')),
+        findsOneWidget,
+      );
       // The one that is chosen already: nothing changes, and that is that.
       await part(t, 'Model');
       await press(t, find.bySemanticsLabel('Opus').last);

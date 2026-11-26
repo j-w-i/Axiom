@@ -199,6 +199,7 @@ class Hairline extends StatelessWidget {
 
 /// A trough with a raised thumb under one of its children. The thumb slides to the one that is
 /// chosen; a person's press moves it at once, and at either end it is squeezed rather than leaving.
+/// Where none is chosen (an index under 0) there is no thumb.
 class Trough extends StatelessWidget {
   const Trough({required this.index, required this.children, super.key});
   final int index;
@@ -212,7 +213,11 @@ class Trough extends StatelessWidget {
       radius: AxRadius.key + pad,
       child: Padding(
         padding: const EdgeInsets.all(pad),
-        child: _Sliding(index: index, slab: c.slab, children: children),
+        child: _Sliding(
+          index: index < 0 ? 0 : index,
+          slab: index < 0 ? null : c.slab,
+          children: children,
+        ),
       ),
     );
   }
@@ -221,7 +226,7 @@ class Trough extends StatelessWidget {
 class _Sliding extends StatefulWidget {
   const _Sliding({required this.index, required this.slab, required this.children});
   final int index;
-  final SurfaceSpec slab;
+  final SurfaceSpec? slab;
   final List<Widget> children;
   @override
   State<_Sliding> createState() => _SlidingState();
@@ -258,7 +263,7 @@ class _SlidingRow extends Flex {
   const _SlidingRow({required this.at, required this.slab, required super.children})
     : super(direction: Axis.horizontal, mainAxisSize: MainAxisSize.min);
   final Animation<double> at;
-  final SurfaceSpec slab;
+  final SurfaceSpec? slab;
   @override
   RenderFlex createRenderObject(BuildContext context) =>
       _RenderSliding(at, slab, textDirection: Directionality.of(context));
@@ -273,8 +278,8 @@ class _RenderSliding extends RenderFlex {
   _RenderSliding(this.at, this._slab, {super.textDirection})
     : super(direction: Axis.horizontal, mainAxisSize: MainAxisSize.min);
   final Animation<double> at;
-  SurfaceSpec _slab;
-  set slab(SurfaceSpec v) {
+  SurfaceSpec? _slab;
+  set slab(SurfaceSpec? v) {
     if (identical(v, _slab)) return;
     _slab = v;
     markNeedsPaint();
@@ -298,7 +303,8 @@ class _RenderSliding extends RenderFlex {
   @override
   void paint(PaintingContext context, Offset offset) {
     final all = getChildrenAsList();
-    if (all.isNotEmpty) {
+    final slab = _slab;
+    if (all.isNotEmpty && slab != null) {
       Rect of(int i) {
         final b = all[i.clamp(0, all.length - 1)];
         return (b.parentData! as FlexParentData).offset & b.size;
@@ -319,7 +325,7 @@ class _RenderSliding extends RenderFlex {
       }
       final c = context.canvas..save();
       c.translate(offset.dx + r.left, offset.dy + r.top);
-      paintSurface(c, _shape!, _slab, null);
+      paintSurface(c, _shape!, slab, null);
       c.restore();
     }
     super.paint(context, offset);

@@ -83,6 +83,10 @@ class ModelKey extends StatelessWidget {
         .firstOrNull;
     final known = source?.models.where((o) => o.key == now.key).firstOrNull;
     final program = now.harness != 'axiom';
+    // What it tries at: as it was told, else as it does when told none, where that is known.
+    final effort = now.effort.isNotEmpty
+        ? now.effort
+        : infoOf(store, now.harness, now.connection, now.model)?.defaultEffort ?? '';
     final name = now.model.isEmpty && !program
         ? 'Choose a model'
         : known?.name ?? (now.model.isEmpty ? 'Default model' : modelName(now.model));
@@ -101,7 +105,7 @@ class ModelKey extends StatelessWidget {
           oneLine(store.harnessName(now.harness), 40)
         else if (sources.length > 1 && source != null && now.model.isNotEmpty)
           oneLine(source.name, 40),
-        if (now.effort.isNotEmpty) effortName(now.effort),
+        if (effort.isNotEmpty) effortName(effort),
         if (now.speed.isNotEmpty) now.speed == 'fast' ? 'Fast' : oneLine(now.speed, 20),
       ],
       panel: (context, close) => ModelPicker(this, close: close),
@@ -530,8 +534,17 @@ class _ModelPickerState extends State<ModelPicker> {
     final program = of.store.harnesses.where((h) => h.id == of.now.harness).firstOrNull;
     final all =
         _info?.efforts ?? ((program?.effort ?? false) ? const ['low', 'medium', 'high'] : const []);
-    return all.isEmpty && of.now.effort.isEmpty ? const [] : {'', ...all, of.now.effort}.toList();
+    return {...all, if (of.now.effort.isNotEmpty) of.now.effort}.toList();
   }
+
+  /// Which it tries at when told none, where that is said.
+  String? get _byDefault => _info?.defaultEffort;
+
+  /// The one it tries at now: as it was told, else its default; empty where neither is known.
+  String get _chosenEffort => of.now.effort.isNotEmpty ? of.now.effort : _byDefault ?? '';
+
+  /// Choosing its default is telling it none, so that it goes on as its provider has it.
+  void _effortTo(String e) => of.onEffort(e == _byDefault ? '' : e);
 
   Widget _effort(BuildContext context, {required double headH, required double rowH}) {
     final t = Ax.of(context), c = t.colors, now = of.now, all = _efforts;
@@ -585,11 +598,11 @@ class _ModelPickerState extends State<ModelPicker> {
                 children: [
                   for (final e in all)
                     Pressable(
-                      label: effortName(e),
-                      selected: e == now.effort,
-                      onPressed: () => of.onEffort(e),
+                      label: e == _byDefault ? '${effortName(e)}, default' : effortName(e),
+                      selected: e == _chosenEffort,
+                      onPressed: () => _effortTo(e),
                       builder: (context, s) => _Chosen(
-                        on: e == now.effort,
+                        on: e == _chosenEffort,
                         hover: s.hovered || s.focused,
                         hue: hue?.color(c),
                         child: ConstrainedBox(
@@ -599,12 +612,24 @@ class _ModelPickerState extends State<ModelPicker> {
                             child: Row(
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    effortName(e),
-                                    style: e == now.effort ? t.type.uiMedium : t.type.ui,
+                                  child: Text.rich(
+                                    TextSpan(
+                                      text: effortName(e),
+                                      style: e == _chosenEffort ? t.type.uiMedium : t.type.ui,
+                                      children: [
+                                        // Beside the one it tries at when told none.
+                                        if (e == _byDefault)
+                                          TextSpan(
+                                            text: '  Default',
+                                            style: t.type.small.ink(c.ink3),
+                                          ),
+                                      ],
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                                if (e == now.effort)
+                                if (e == _chosenEffort)
                                   AxGlyph(AxIcon.check, color: hue?.color(c) ?? c.ink1),
                               ],
                             ),
@@ -648,9 +673,12 @@ class _ModelPickerState extends State<ModelPicker> {
           'Effort',
           AxSegments<String>(
             label: 'Effort',
-            items: [for (final e in _efforts) (e, effortName(e), null)],
-            value: now.effort,
-            onChanged: of.onEffort,
+            items: [
+              for (final e in _efforts)
+                (e, e == _byDefault ? '${effortName(e)} (default)' : effortName(e), null),
+            ],
+            value: _chosenEffort,
+            onChanged: _effortTo,
           ),
         ),
       if (speeds.isNotEmpty)
