@@ -98,8 +98,8 @@ class _PressableState extends State<Pressable> {
         onFocusChange: (v) => setState(() => _has = v),
         onShowFocusHighlight: (v) => setState(() => _focus = v),
         shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.enter, includeRepeats: false): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.space, includeRepeats: false): ActivateIntent(),
         },
         actions: {
           ActivateIntent: CallbackAction<ActivateIntent>(
