@@ -9,7 +9,7 @@ import '../ui/tokens.dart';
 /// What is being read, and a panel beside it on the same canvas. The room between them is the handle.
 /// The panel is slim while it only lists, and wide while something in it is read. Where there is no
 /// room for both, however slim, the panel stands in front, and what is behind it is kept.
-class Beside extends StatelessWidget {
+class Beside extends StatefulWidget {
   const Beside({
     required this.main,
     required this.panel,
@@ -35,9 +35,21 @@ class Beside extends StatelessWidget {
   static bool fits(double width) => width >= slimmest + gap + rest;
 
   @override
+  State<Beside> createState() => _BesideState();
+}
+
+class _BesideState extends State<Beside> {
+  /// The panel is the same one in front and beside: what is chosen in it is kept across the width.
+  final _panel = GlobalKey(debugLabel: 'panel');
+
+  @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
-      final w = box.maxWidth, both = fits(w);
+      final Beside(:main, :wide, :sizes, :onSizes, :called) = widget;
+      final panel = widget.panel == null ? null : KeyedSubtree(key: _panel, child: widget.panel!);
+      const gap = Beside.gap, rest = Beside.rest, least = Beside.least;
+      const slimmest = Beside.slimmest, widest = Beside.widest;
+      final w = box.maxWidth, both = Beside.fits(w);
       final over = panel != null && !both;
       final most = w - rest - gap;
       final has = !both
@@ -66,7 +78,7 @@ class Beside extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (over) Positioned.fill(child: panel!),
+                if (panel != null && over) Positioned.fill(child: panel),
               ],
             ),
           ),
