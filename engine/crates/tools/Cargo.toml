@@ -12,7 +12,6 @@ workspace = true
 axiom-policy.workspace = true
 axiom-proto.workspace = true
 axiom-spawn.workspace = true
-axiom-browser.workspace = true
 blake3.workspace = true
 cap-std = "4"
 cap-fs-ext = "4"
@@ -26,6 +25,9 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+axiom-browser.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

@@ -8,7 +8,8 @@ publish.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
+# Nothing on Windows: there is no browser there yet (decision 0021).
+[target.'cfg(unix)'.dependencies]
 axiom-policy.workspace = true
 axiom-spawn.workspace = true
 serde_json.workspace = true
@@ -18,5 +19,5 @@ rustls.workspace = true
 # Bodies and pictures over the DevTools pipe are in base64; the crate is in the tree already (rustls).
 base64 = "0.23"
 
-[dev-dependencies]
+[target.'cfg(unix)'.dev-dependencies]
 tempfile.workspace = true

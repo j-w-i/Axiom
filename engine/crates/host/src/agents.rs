@@ -330,18 +330,23 @@ impl Agents {
                 p.agents.iter().map(|(a, slot)| (s.clone(), a.clone(), slot.clone()))
             })
             .collect();
-        let mut out = Vec::new();
         #[cfg(unix)]
-        for (session, agent, slot) in all {
-            if let Some(b) = slot.seen.2.current().await {
-                let v = b.view().borrow().clone();
-                let (url, title, person) = (v.url, v.title, v.person);
-                out.push(axiom_proto::BrowserInfo { session, agent, url, title, person });
+        {
+            let mut out = Vec::new();
+            for (session, agent, slot) in all {
+                if let Some(b) = slot.seen.2.current().await {
+                    let v = b.view().borrow().clone();
+                    let (url, title, person) = (v.url, v.title, v.person);
+                    out.push(axiom_proto::BrowserInfo { session, agent, url, title, person });
+                }
             }
+            out
         }
         #[cfg(not(unix))]
-        drop(all);
-        out
+        {
+            drop(all);
+            Vec::new()
+        }
     }
 
     /// An agent's browser; started, if `start`, when there is none.
