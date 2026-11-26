@@ -336,3 +336,47 @@ async fn outside_every_sandbox_only_with_the_token() {
     let o = run(j).await.unwrap();
     assert!(o.out.starts_with("outside"), "{o:?}");
 }
+
+/// Decision 0018: a person's commit writes its repository's own `.git`, and nothing it runs or is
+/// told by, and nothing else of the folder; a fast-forward writes the folder too, but no protected
+/// name in it.
+#[tokio::test]
+async fn a_persons_commit_writes_the_git_folder_only() {
+    let f = fixture();
+    let reads = Caps { write: Reach::none(), ..f.caps() };
+    let git = f.at("home/w/.git");
+    let commit =
+        Profile::persons_git(&reads, &f.keep(), &system(), &f.at("tmp"), &git, false).unwrap();
+    let run = |s: &str, p: Profile| run(f.job(s, p));
+    let o = run(
+        "mkdir -p .git/objects/ab && echo x > .git/objects/ab/c && echo ref > .git/HEAD && echo ok",
+        commit.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(o.out, "ok\n", "{o:?}");
+    for s in [
+        "echo x > .git/hooks/pre-commit",
+        "echo x > .git/config",
+        "mkdir -p .git/info && echo x > .git/info/attributes",
+        "mkdir .git/modules",
+        "echo x > src/a.txt",
+        "echo x > ../x",
+    ] {
+        let o = run(s, commit.clone()).await.unwrap();
+        assert!(!o.ok(), "{s:?}: {o:?}");
+    }
+    assert_eq!(f.read("home/w/.git/config").as_deref(), Some("orig"));
+    assert!(f.read("home/w/.git/hooks/pre-commit").is_none());
+    assert_eq!(f.read("home/w/src/a.txt").as_deref(), Some("text"));
+    let forward =
+        Profile::persons_git(&reads, &f.keep(), &system(), &f.at("tmp"), &git, true).unwrap();
+    let o = run("echo y > src/a.txt && echo z > .git/ORIG_HEAD && echo ok", forward.clone())
+        .await
+        .unwrap();
+    assert_eq!(o.out, "ok\n", "{o:?}");
+    for s in ["mkdir .vscode", "echo x > .git/hooks/post-merge", "echo x > .envrc"] {
+        let o = run(s, forward.clone()).await.unwrap();
+        assert!(!o.ok(), "{s:?}: {o:?}");
+    }
+}

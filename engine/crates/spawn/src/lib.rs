@@ -337,6 +337,9 @@ struct Real {
     read: Vec<Place>,
     write: Vec<Place>,
     hidden: Vec<Place>,
+    /// Git folders a person's commit writes, and what in them stays protected.
+    vcs: Vec<Place>,
+    kept: Vec<Place>,
 }
 
 fn real_place(p: &Place) -> Result<Place, SpawnError> {
@@ -373,7 +376,12 @@ impl Real {
                 return Err(SpawnError::Hidden(w.clone()));
             }
         }
-        Ok(Self { read, write, hidden })
+        let vcs = all(p.vcs())?;
+        let kept = vcs
+            .iter()
+            .flat_map(|v| axiom_policy::profile::VCS_KEPT.iter().filter_map(|k| v.join(k).ok()))
+            .collect();
+        Ok(Self { read, write, hidden, vcs, kept })
     }
 }
 

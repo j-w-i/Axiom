@@ -70,6 +70,9 @@ fn profile(real: &Real) -> (String, Vec<(String, String)>) {
     for (n, _) in paths::PROTECTED_ENDINGS {
         let _ = writeln!(s, "(deny file-write* (regex #\"{}(/|$)\"))", any_case(n));
     }
+    // A person's commit: its git folder after all, but for what git runs or is told by.
+    rule(&mut s, "allow file-write*", &real.vcs, "subpath");
+    rule(&mut s, "deny file-write*", &real.kept, "subpath");
     s.push_str("(deny file-write-setugid)\n(deny file-mknod)\n");
     rule(
         &mut s,

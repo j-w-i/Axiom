@@ -60,7 +60,16 @@ pub fn wrap(job: &Job, real: &Real) -> Result<(OsString, Vec<OsString>), SpawnEr
     }
     for root in &write {
         for p in names(root, MOST).ok_or_else(too_many)? {
+            // A git folder a person's commit writes is written, but for what is kept in it.
+            if real.vcs.iter().any(|v| v.as_path() == p) {
+                continue;
+            }
             add(&[&"--ro-bind", &p, &p]);
+        }
+    }
+    for k in &real.kept {
+        if k.as_path().exists() {
+            add(&[&"--ro-bind", &k.as_path(), &k.as_path()]);
         }
     }
     // Links of the system's old names: /bin -> usr/bin.
