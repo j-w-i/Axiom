@@ -235,3 +235,32 @@ class _RenderShield extends RenderProxyBox {
     return true;
   }
 }
+
+/// When it goes, focus goes back to where it was when it came, if nothing else has taken it: the
+/// keyboard is not left with nothing to type into.
+class GivesFocusBack extends StatefulWidget {
+  const GivesFocusBack({required this.child, super.key});
+  final Widget child;
+  @override
+  State<GivesFocusBack> createState() => _GivesFocusBackState();
+}
+
+class _GivesFocusBackState extends State<GivesFocusBack> {
+  final _back = FocusManager.instance.primaryFocus;
+
+  @override
+  void dispose() {
+    final back = _back;
+    WidgetsBinding.instance.addPostFrameCallback(
+      // After the focus that left with it has gone, which is settled in a microtask.
+      (_) => scheduleMicrotask(() {
+        if (back?.context == null || FocusManager.instance.primaryFocus is! FocusScopeNode) return;
+        back!.requestFocus();
+      }),
+    );
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
