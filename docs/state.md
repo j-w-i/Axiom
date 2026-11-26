@@ -1,6 +1,6 @@
 # State (handover)
 
-Updated 2026-11-26. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), installed programs and signing in with ChatGPT (j-w-i/Axiom#16), copies for agents (j-w-i/Axiom#18), what needs a person (j-w-i/Axiom#19), results that reach who asked (j-w-i/Axiom#20), the design spec's steps 1–16 (j-w-i/Axiom#21), the redesign (j-w-i/Axiom#22), the groundwork for taking back what was said (j-w-i/Axiom#23), M2's talking and reading (j-w-i/Axiom#25). Open: the rest of M2 (j-w-i/Axiom#26, CI green on every system), and M3's worth-building items (`m3/programs`, stacked on it). What is worth building (`product/worth-building.md`) is in the roadmap.
+Updated 2026-11-26. Merged: M1 (j-w-i/Axiom#14), M2 so far (j-w-i/Axiom#15), installed programs and signing in with ChatGPT (j-w-i/Axiom#16), copies for agents (j-w-i/Axiom#18), what needs a person (j-w-i/Axiom#19), results that reach who asked (j-w-i/Axiom#20), the design spec's steps 1–16 (j-w-i/Axiom#21), the redesign (j-w-i/Axiom#22), the groundwork for taking back what was said (j-w-i/Axiom#23), M2's talking and reading (j-w-i/Axiom#25), the rest of M2 (j-w-i/Axiom#26) and M3's worth-building items (j-w-i/Axiom#27, merge commit `f676092`). What is worth building (`product/worth-building.md`) is in the roadmap.
 
 ## Where things stand
 - **M0**: done except the owner's reading of decisions 0006 (Google plans via Antigravity; Gemini CLI's consumer tier has ended) and 0007 (subscription lanes; written confirmation from Anthropic before launch).
@@ -86,7 +86,7 @@ Unitable's depth on round 12's layout, at the owner's word (2026-11-25). Not mea
 Built on the owner's word (2026-11-25). In the pictures and not in the app, because the host has nothing for it: the plan, the terminals and the levels of use. The panel of the app holds what has changed. Accepted by the owner at round 19 ("this looks great"). The fifteen goldens were recorded again with their yes (2026-11-25): every one of them shows the new look. Opened once in a real window with the owner's yes (2026-11-25, macOS 27 arm64, release, specimen content, 120 Hz, Impeller): scrolling, build p99 2.0 ms and raster p99 3.3 ms; everything painted again, 3.7 and 4.5 ms; the first frame 63 ms. Opened again with their yes and photographed: the buttons are on the header's line (26, where they were 16 against 33), shades show no rings. Dragging by the header reaches the system (`MoveArea`; nothing did before), shown by events sent to a real window, not by a hand. Full screen has been looked at by nobody (K8).
 
 ## Next
-1. Owner: merge the rest of M2 (j-w-i/Axiom#26), then M3's items (`m3/programs`, stacked on it). Drop a folder on the window once, and look at zoom (K52).
+1. Owner: drop a folder on the window once, and look at zoom (K52).
 2. Owner: look at the model picker (`design/system.md`, round 21; `app/build/shots/models-*.png`) and at Programs and Models under Accounts; say whether programs' models belong in the list while the harness is not a choice; say whether `surfaces-*` may be recorded again with the star.
 3. Owner: drag the window by its header and try full screen (K8).
 4. Owner: say whether the real Claude Code or Codex on this computer may be started once (K40); sign in with ChatGPT once, if wanted (K47).
