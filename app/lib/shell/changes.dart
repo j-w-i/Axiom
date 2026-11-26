@@ -132,6 +132,13 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
   }
 
   @override
+  void didUpdateWidget(ChangesView old) {
+    super.didUpdateWidget(old);
+    // The session was made again under its name: what it changed is looked at again.
+    if (!identical(old.changes, widget.changes)) unawaited(widget.changes.lookOnce());
+  }
+
+  @override
   Widget build(BuildContext context) =>
       ListenableBuilder(listenable: widget.changes, builder: (context, _) => _build(context));
 
@@ -518,6 +525,17 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
   @override
   void initState() {
     super.initState();
+    widget.agent.addListener(_changed);
+    _wasAtWork = _atWork;
+    unawaited(_look());
+  }
+
+  @override
+  void didUpdateWidget(CopyView old) {
+    super.didUpdateWidget(old);
+    if (identical(old.agent, widget.agent)) return;
+    // The session was made again under its name: the agent heard from is the new one.
+    old.agent.removeListener(_changed);
     widget.agent.addListener(_changed);
     _wasAtWork = _atWork;
     unawaited(_look());
