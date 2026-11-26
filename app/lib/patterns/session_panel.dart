@@ -334,7 +334,16 @@ class _AgentRowState extends State<AgentRow> {
                                       style: t.type.uiMedium,
                                     ),
                                   ),
-                                  if (!keys) ...[const SizedBox(width: 6), AxLamp(a.state)],
+                                  // Kept while the keys stand in its place, so that it turns on.
+                                  Visibility(
+                                    visible: !keys,
+                                    maintainState: true,
+                                    maintainAnimation: true,
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(left: 6),
+                                      child: AxLamp(a.state),
+                                    ),
+                                  ),
                                 ],
                               ),
                               if (says)
