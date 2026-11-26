@@ -190,7 +190,7 @@ class TranscriptViewState extends State<TranscriptView> {
   /// Changes when the origin is moved outright, so that nothing laid out from the old one is kept.
   int _epoch = 0;
   Key get _center => ValueKey(('now', _epoch));
-  late final _end = _EndController(() => _atEnd);
+  late final _end = _EndController(() => _atEnd, _settle);
   ScrollController get scroll => _end;
   late TranscriptRows _rows;
 
@@ -332,8 +332,44 @@ class TranscriptViewState extends State<TranscriptView> {
       );
       if (at < 0) return;
     }
+    final now = rows[at];
+    // Its block is inside the end now, below those that went in with it.
+    _within = now.isEnd && !row.isEnd && now.index < row.index
+        ? (now, (row.item, row.index))
+        : null;
     _pivot = at;
     _end.shiftTo(-y);
+  }
+
+  /// A row that was read and is now part of an end row, and the block of it.
+  (TranscriptRow, (ItemModel?, int))? _within;
+
+  /// How far the block in [_within] stands below the top of its row, once that is laid out: the view
+  /// moves by as much in the same layout, so no frame shows it elsewhere.
+  double _settle() {
+    final w = _within;
+    _within = null;
+    final view = w == null || !mounted ? null : context.findRenderObject();
+    if (w == null || view == null) return 0;
+    RenderBox? find(RenderObject o, bool Function(Object?) wanted) {
+      RenderBox? found;
+      void visit(RenderObject o) {
+        if (found != null) return;
+        if (o is RenderMetaData && wanted(o.metaData)) {
+          found = o;
+          return;
+        }
+        o.visitChildren(visit);
+      }
+
+      o.visitChildren(visit);
+      return found;
+    }
+
+    final row = find(view, (m) => identical(m, w.$1));
+    final block = row == null ? null : find(row, (m) => m == w.$2);
+    if (row == null || block == null || !row.hasSize || !block.hasSize) return 0;
+    return block.localToGlobal(Offset.zero, ancestor: row).dy;
   }
 
   /// What was pressed stays where it is: someone who opens an output is reading, and the end is not
@@ -555,8 +591,11 @@ class TranscriptViewState extends State<TranscriptView> {
 /// Keeps to the end while [atEnd] says so, within the layout that moved it: no frame shows the place
 /// before. A person's own scrolling is never overruled.
 class _EndController extends ScrollController {
-  _EndController(this.atEnd);
+  _EndController(this.atEnd, this.settle);
   final bool Function() atEnd;
+
+  /// How far the view is to move once laid out, because what was read moved within its row.
+  final double Function() settle;
 
   /// After a fling, until it comes to rest.
   bool get coasting => hasClients && (position as _EndPosition).coasting;
@@ -568,12 +607,19 @@ class _EndController extends ScrollController {
     ScrollPhysics physics,
     ScrollContext context,
     ScrollPosition? oldPosition,
-  ) => _EndPosition(atEnd, physics: physics, context: context, oldPosition: oldPosition);
+  ) => _EndPosition(atEnd, settle, physics: physics, context: context, oldPosition: oldPosition);
 }
 
 class _EndPosition extends ScrollPositionWithSingleContext {
-  _EndPosition(this.atEnd, {required super.physics, required super.context, super.oldPosition});
+  _EndPosition(
+    this.atEnd,
+    this.settle, {
+    required super.physics,
+    required super.context,
+    super.oldPosition,
+  });
   final bool Function() atEnd;
+  final double Function() settle;
   bool get coasting => activity is BallisticScrollActivity;
   bool _gone = false;
 
@@ -597,6 +643,12 @@ class _EndPosition extends ScrollPositionWithSingleContext {
 
   @override
   bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    final by = settle();
+    if (by != 0 && hasPixels) {
+      correctPixels(pixels + by);
+      super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+      return false;
+    }
     final follow = atEnd() && !isScrollingNotifier.value;
     if (follow && (!hasPixels || pixels != maxScrollExtent)) {
       correctPixels(maxScrollExtent);
@@ -801,11 +853,15 @@ class _ProseState extends State<_Prose> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final (k, b) in all.indexed)
-          _block(
-            k,
-            b,
-            goesOn: k + 1 < all.length && all[k + 1].continues,
-            last: k + 1 == all.length,
+          // Found by where it stands in its passage, when it was a row of its own before.
+          MetaData(
+            metaData: (widget.item, from + k),
+            child: _block(
+              k,
+              b,
+              goesOn: k + 1 < all.length && all[k + 1].continues,
+              last: k + 1 == all.length,
+            ),
           ),
       ],
     );
