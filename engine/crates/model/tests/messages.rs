@@ -489,17 +489,18 @@ fn a_request_to_the_byte() {
 }
 
 #[test]
-fn whether_to_think_and_how_fast() {
+fn how_to_think_and_how_fast() {
     let p = Profile::anthropic();
     let mut r = request();
     (r.system, r.tools) = (String::new(), Vec::new());
-    r.settings.thinking = Some(false);
+    r.settings.adaptive = true;
     let body = |r: &Request| String::from_utf8(encode(r, &p).unwrap().body).unwrap();
-    assert!(body(&r).contains(r#""thinking":{"type":"disabled"}"#), "{}", body(&r));
-    r.settings.thinking = Some(true);
-    assert!(body(&r).contains(r#""thinking":{"type":"adaptive"}"#));
-    r.settings.thinking = None;
-    assert!(!body(&r).contains("thinking"), "as is usual");
+    assert!(body(&r).contains(r#""thinking":{"type":"adaptive"}"#), "{}", body(&r));
+    let mut other = p.clone();
+    other.quirks.thinking = None;
+    assert_eq!(encode(&r, &other).unwrap_err(), EncodeError::Unsupported("how to think"));
+    r.settings.adaptive = false;
+    assert!(!body(&r).contains("thinking"), "as its provider does");
     // Only where it is documented, and as it is.
     r.settings.speed = Some("fast".into());
     assert_eq!(encode(&r, &p).unwrap_err(), EncodeError::Unsupported("the speed"));
@@ -515,7 +516,7 @@ fn whether_to_think_and_how_fast() {
         Profile::openai_compatible("x", "http://localhost"),
     ] {
         for settings in [
-            Settings { thinking: Some(true), ..request().settings },
+            Settings { adaptive: true, ..request().settings },
             Settings { speed: Some("fast".into()), ..request().settings },
         ] {
             let mut r = request();

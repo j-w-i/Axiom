@@ -1220,7 +1220,7 @@ async fn anthropics_models_come_in_pages() {
     assert_eq!((b.id.as_str(), b.name.as_deref()), ("claude-b", Some("Claude B")));
     assert_eq!(b.about.context, Some(1_000_000));
     assert_eq!(b.about.efforts.as_ref().map(Vec::len), Some(5));
-    assert_eq!(b.about.thinking, Some(false));
+    assert_eq!(b.about.adaptive, Some(true));
     assert_eq!((a.id.as_str(), &a.about), ("claude-a", &axiom_model::About::default()));
     let lines: Vec<&str> = asked.iter().map(|a| a.lines().next().unwrap()).collect();
     assert_eq!(

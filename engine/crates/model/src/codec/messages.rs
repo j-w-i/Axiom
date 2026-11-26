@@ -47,12 +47,10 @@ pub(super) fn encode(
         }
         (Some(_), _) => return Err(EncodeError::Unsupported("effort")),
     }
-    match (settings.thinking, quirks.thinking) {
-        (None, _) => {}
-        (Some(on), Some(Thinking::Adaptive)) => {
-            body.put("thinking", &json!({ "type": if on { "adaptive" } else { "disabled" } }))?;
-        }
-        (Some(_), None) => return Err(EncodeError::Unsupported("whether to think")),
+    match (settings.adaptive, quirks.thinking) {
+        (false, _) => {}
+        (true, Some(Thinking::Adaptive)) => body.put("thinking", &json!({ "type": "adaptive" }))?,
+        (true, None) => return Err(EncodeError::Unsupported("how to think")),
     }
     if let Some(s) = &settings.speed {
         if !quirks.speeds.as_ref().is_some_and(|all| all.contains(s)) {

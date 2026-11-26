@@ -23,10 +23,10 @@ mod schema;
 /// Most an answer may bring, as event data. Everything a decoder or an accumulator holds comes out
 /// of this.
 pub const MAX_ANSWER: usize = 64 * 1024 * 1024;
-/// For a protocol that has no place for whether to think and how fast.
+/// For a protocol that has no place for how to think and how fast.
 fn plain(s: &Settings) -> Result<(), EncodeError> {
-    match (s.thinking, &s.speed) {
-        (Some(_), _) => Err(EncodeError::Unsupported("whether to think")),
+    match (s.adaptive, &s.speed) {
+        (true, _) => Err(EncodeError::Unsupported("how to think")),
         (_, Some(_)) => Err(EncodeError::Unsupported("the speed")),
         _ => Ok(()),
     }

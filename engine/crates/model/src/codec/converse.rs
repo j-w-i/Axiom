@@ -68,14 +68,16 @@ pub(super) fn encode(
     }
     super::plain(settings)?;
     match (&settings.effort, quirks.effort) {
-        (None, _) => {}
-        // As printed in userguide/claude-messages-adaptive-thinking#converse.
-        (Some(effort), Some(Effort::AdaptiveThinking)) => {
-            let more = Object::default()
-                .with("thinking", &json!({ "type": "adaptive" }))?
-                .with("output_config", &json!({ "effort": effort }))?;
+        // As printed in userguide/claude-messages-adaptive-thinking#converse. A model that takes it
+        // thinks as much as it needs, always: without an effort, at its own.
+        (effort, Some(Effort::AdaptiveThinking)) => {
+            let mut more = Object::default().with("thinking", &json!({ "type": "adaptive" }))?;
+            if let Some(effort) = effort {
+                more.put("output_config", &json!({ "effort": effort }))?;
+            }
             body.put("additionalModelRequestFields", &more)?;
         }
+        (None, _) => {}
         (Some(_), _) => return Err(EncodeError::Unsupported("effort")),
     }
     for (key, value) in &quirks.body {

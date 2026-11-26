@@ -67,7 +67,7 @@ W-10: the event `todo`. Axiom's own agents say it with the tool `todo`; Codex, A
 
 W-23: an agent with `plan` only reads and hands in a plan with the tool `plan`; `plan.accept` is a person's. Axiom's own agents only (0017).
 
-W-29 and W-30: lists of models are kept in `models.json` with when (`model.known`); Anthropic's is read now, with what each model can be told. A program tells its models when it is started for something else, never for that. How large a window is comes from the list where nothing else says, so agents on Anthropic now make room before it is full. OpenAI's list says nothing of effort: low, medium and high are offered.
+W-29 and W-30: lists of models are kept in `models.json` with when (`model.known`); Anthropic's is read now, with what each model can be told. A program tells its models when it is started for something else, never for that. How large a window is comes from the list where nothing else says, so agents on Anthropic now make room before it is full. OpenAI's list says nothing of effort: low, medium and high are offered. Whether a model thinks is no choice (the owner, 2026-11-26): every one whose list says it takes adaptive thinking is told to think as much as it needs, and Claude over Bedrock always; the rest think as their provider has them do, which for Anthropic's models since Opus 5 is the same.
 
 The owner, 2026-11-26, on the way: the harness is an advanced choice, off by default (0017: it follows from the model; a program that is linked still shows its models); no field for a name; the picker after T3 Code's (accounts at the left, models, effort, speed below). Their verdict on it is open. Where nothing fits what is searched for, that name itself can be used: Bedrock, whose models nobody lists, needs it.
 

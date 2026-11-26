@@ -33,7 +33,7 @@ void main() {
       [x.harness, x.provider, x.model, x.connection, x.effort, x.environment],
       ['axiom', 'anthropic', 'm', 'c_2', 'high', 'e'],
     );
-    expect([x.thinking, x.speed], [false, 'fast']);
+    expect(x.speed, 'fast');
     expect(Execution.decode(x.encode()).encode(), x.encode());
     expect((b[AgentStateChanged]! as AgentStateChanged).state, AgentPhase.asking);
     final ended = b[RunEnded]! as RunEnded;
@@ -122,7 +122,7 @@ void main() {
     Object? first(int n) => ((messages[n] as Answered).result! as List<Object?>).first;
     final l = ModelList.decode(first(8)! as Json), m = l.models.single;
     expect([l.harness, l.connection, l.at], ['axiom', 'c_2', 9]);
-    expect([m.id, m.name, m.context, m.thinking], ['m', 'M', 1000, true]);
+    expect([m.id, m.name, m.context], ['m', 'M', 1000]);
     expect(
       [m.efforts, m.speeds],
       [

@@ -191,14 +191,13 @@ class _TalkState extends State<Talk> {
 
   Widget _model(BuildContext context, HostStore s, AgentModel a) {
     final x = a.execution, other = x.harness != 'axiom';
-    Execution with_({Offer? to, String? effort, (bool?,)? thinking, String? speed}) => Execution(
+    Execution with_({Offer? to, String? effort, String? speed}) => Execution(
       harness: x.harness,
       provider: to == null ? x.provider : to.provider,
       model: to == null ? x.model : (to.byDefault ? null : to.model.id),
       connection: to == null ? x.connection : to.connection,
       effort: effort == null ? x.effort : (effort.isEmpty ? null : effort),
       environment: x.environment,
-      thinking: thinking == null ? x.thinking : thinking.$1,
       speed: speed == null ? x.speed : (speed.isEmpty ? null : speed),
     );
     Future<bool> set(Execution e) => _do(() => s.setAgent(widget.session.id, a.id, execution: e));
@@ -209,7 +208,6 @@ class _TalkState extends State<Talk> {
         connection: x.connection,
         model: x.model ?? '',
         effort: x.effort ?? '',
-        thinking: x.thinking,
         speed: x.speed ?? '',
       ),
       of: a.id,
@@ -223,7 +221,6 @@ class _TalkState extends State<Talk> {
             with_(
               to: o,
               effort: m.efforts.contains(x.effort) ? null : '',
-              thinking: m.thinking ? null : (null,),
               speed: m.speeds.contains(x.speed) ? null : '',
             ),
           ),
@@ -240,7 +237,6 @@ class _TalkState extends State<Talk> {
           : 'The whole conversation has to be read again, none of it from the cache. Reasoning '
                 'this model kept is not carried over.',
       onEffort: (v) => unawaited(set(with_(effort: v))),
-      onThinking: (v) => unawaited(set(with_(thinking: (v,)))),
       onSpeed: (v) => unawaited(set(with_(speed: v))),
       advanced: [
         if (PrefsScope.of(context).harnesses)

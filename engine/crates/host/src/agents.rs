@@ -25,7 +25,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    catalogue::Catalogue,
+    catalogue::{self, Catalogue},
     connections::{self, Connections},
     copies::{self, Copies},
     delegated, mcp,
@@ -372,9 +372,6 @@ impl Agents {
                 }
                 self.connections.account(c, &execution.harness)?;
             }
-            if execution.thinking.is_some() {
-                return Err(bad("this harness cannot be told whether to think"));
-            }
             if !instructions.is_empty() {
                 return Err(bad("this harness reads the folder's words for agents by itself"));
             }
@@ -421,9 +418,6 @@ impl Agents {
             return Err(bad("the effort cannot be set for this provider and model"));
         }
         let quirks = client.profile().quirks(m);
-        if execution.thinking.is_some() && quirks.thinking.is_none() {
-            return Err(bad("whether it thinks cannot be set for this provider and model"));
-        }
         if let Some(s) = &execution.speed
             && !quirks.speeds.is_some_and(|all| all.contains(s))
         {
@@ -1073,7 +1067,7 @@ pub async fn load(
             .map(|m| u32::try_from(m.min(32_000)).unwrap_or(32_000))
             .or(messages.then_some(8192)),
         effort: setup.execution.effort.clone(),
-        thinking: setup.execution.thinking,
+        adaptive: catalogue::adaptive(&quirks, listed.as_ref()),
         speed: setup.execution.speed.clone(),
         stop: Vec::new(),
         cache: if marks { Cache::Short } else { Cache::Off },

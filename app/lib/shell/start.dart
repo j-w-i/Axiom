@@ -300,9 +300,8 @@ class StartDraft extends ChangeNotifier {
     }
   }
 
-  /// How hard it is to try; empty: as is usual. Whether it is to think, and how fast.
+  /// How hard it is to try, and how fast; empty: as is usual.
   String effort = '', speed = '';
-  bool? thinking;
 
   /// The account that is used now.
   String? get on => harness == 'axiom' ? connection ?? store.own.firstOrNull?.id : account;
@@ -317,7 +316,6 @@ class StartDraft extends ChangeNotifier {
   /// What cannot be said to what is chosen now is not said.
   void fitModel() {
     if (!efforts.contains(effort)) effort = '';
-    if (!(info?.thinking ?? false)) thinking = null;
     if (!(info?.speeds.contains(speed) ?? false)) speed = '';
   }
 
@@ -404,7 +402,6 @@ class StartDraft extends ChangeNotifier {
     }
     model.text = x.model ?? '';
     effort = x.effort ?? '';
-    thinking = x.thinking;
     fit();
   }
 
@@ -478,7 +475,6 @@ class StartDraft extends ChangeNotifier {
         model: written.isEmpty ? null : written,
         connection: other ? account : c!.id,
         effort: efforts.contains(effort) ? effort : null,
-        thinking: (info?.thinking ?? false) ? thinking : null,
         speed: (info?.speeds.contains(speed) ?? false) ? speed : null,
       );
       final followed = [
@@ -503,7 +499,6 @@ class StartDraft extends ChangeNotifier {
         x.connection,
         x.effort,
         x.environment,
-        x.thinking,
         x.speed,
         access,
         plan,

@@ -29,12 +29,10 @@ class Running {
     required this.connection,
     required this.model,
     this.effort = '',
-    this.thinking,
     this.speed = '',
   });
   final String harness, model, effort, speed;
   final String? connection;
-  final bool? thinking;
   String get key => offerKey(harness, connection, model);
 }
 
@@ -46,7 +44,6 @@ class ModelKey extends StatelessWidget {
     required this.of,
     required this.onModel,
     required this.onEffort,
-    required this.onThinking,
     required this.onSpeed,
     super.key,
     this.onOpen,
@@ -65,7 +62,6 @@ class ModelKey extends StatelessWidget {
   final bool keeps;
   final ValueChanged<Offer> onModel;
   final ValueChanged<String> onEffort, onSpeed;
-  final ValueChanged<bool?> onThinking;
   final VoidCallback? onOpen;
 
   /// What another model costs, in words, if it does: it is asked about before it is changed.
@@ -510,7 +506,6 @@ class _ModelPickerState extends State<ModelPicker> {
 
   /// What else the chosen one can be told, and the way to all of them.
   List<Widget> _below(BuildContext context, {required bool efforts}) {
-    final t = Ax.of(context), c = t.colors;
     final now = of.now, info = _info;
     final speeds = {...?info?.speeds, if (now.speed.isNotEmpty) now.speed};
     final keys = <Widget>[
@@ -544,25 +539,6 @@ class _ModelPickerState extends State<ModelPicker> {
               ),
             );
           },
-        ),
-      if ((info?.thinking ?? false) || now.thinking != null)
-        // No menu: it would stand outside what is open, and close it.
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Thinking', style: t.type.label.ink(c.ink3)),
-            const SizedBox(width: 8),
-            AxSegments<String>(
-              label: 'Thinking',
-              items: const [('', 'Default', null), ('on', 'On', null), ('off', 'Off', null)],
-              value: switch (now.thinking) {
-                null => '',
-                true => 'on',
-                false => 'off',
-              },
-              onChanged: (v) => of.onThinking(v.isEmpty ? null : v == 'on'),
-            ),
-          ],
         ),
     ];
     if (keys.isEmpty && of.onModels == null) return const [];

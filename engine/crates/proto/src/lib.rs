@@ -79,9 +79,6 @@ pub struct Execution {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
-    /// Whether the model thinks, where that can be told.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<bool>,
     /// How fast, where that can be told. It has a price.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<String>,
@@ -1048,9 +1045,10 @@ pub struct ModelInfo {
     /// As the model's provider calls them, the least first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub efforts: Vec<String>,
-    /// Whether it thinks can be said.
+    /// It is asked to think as much as it needs, as every model is that is known to take that. Not a
+    /// choice.
     #[serde(default, skip_serializing_if = "not")]
-    pub thinking: bool,
+    pub adaptive: bool,
     /// How fast it can be beside the standard, for a price.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub speeds: Vec<String>,

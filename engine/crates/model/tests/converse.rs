@@ -733,8 +733,11 @@ fn effort_goes_with_the_thinking_it_is_of() {
     assert!(body(&r).starts_with(
         r#"{"inferenceConfig":{"maxTokens":9},"additionalModelRequestFields":{"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}},"toolConfig""#
     ));
+    // Without one it thinks all the same, at its own.
     r.settings.effort = None;
-    assert!(!body(&r).contains("additional"));
+    assert!(body(&r).contains(
+        r#""additionalModelRequestFields":{"thinking":{"type":"adaptive"}},"toolConfig""#
+    ));
     r.model = "amazon.nova-pro-v1:0".into();
     r.settings.effort = Some("low".into());
     let mut p = Profile::bedrock();

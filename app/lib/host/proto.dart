@@ -39,7 +39,6 @@ class Execution {
     this.connection,
     this.effort,
     this.environment,
-    this.thinking,
     this.speed,
   });
   Execution.decode(Json j)
@@ -49,13 +48,11 @@ class Execution {
       connection = j['connection'] as String?,
       effort = j['effort'] as String?,
       environment = j['environment'] as String?,
-      thinking = j['thinking'] as bool?,
       speed = j['speed'] as String?;
   final String harness;
   final String? provider, model, connection, effort, environment;
 
-  /// Whether the model thinks, and how fast it is, where that can be told.
-  final bool? thinking;
+  /// How fast it is, where that can be told.
   final String? speed;
 
   Json encode() => {
@@ -65,7 +62,6 @@ class Execution {
     'connection': ?connection,
     'effort': ?effort,
     'environment': ?environment,
-    'thinking': ?thinking,
     'speed': ?speed,
   };
 }
@@ -415,7 +411,6 @@ class ModelInfo {
     this.name,
     this.context,
     this.efforts = const [],
-    this.thinking = false,
     this.speeds = const [],
   });
   ModelInfo.decode(Json j)
@@ -423,14 +418,11 @@ class ModelInfo {
       name = j['name'] as String?,
       context = j['context'] as int?,
       efforts = [for (final e in j['efforts'] as List<Object?>? ?? const []) e! as String],
-      thinking = j['thinking'] as bool? ?? false,
       speeds = [for (final e in j['speeds'] as List<Object?>? ?? const []) e! as String];
 
   /// How hard it can be told to try, the least first; how fast it can be beside the standard.
   final List<String> efforts, speeds;
 
-  /// Whether it thinks can be said.
-  final bool thinking;
   final String id;
   final String? name;
   final int? context;

@@ -239,9 +239,9 @@ pub struct Settings {
     pub max_output: Option<u32>,
     /// In the provider's own words. Asking a provider that has no such control is an error.
     pub effort: Option<String>,
-    /// Whether it thinks, where that can be told.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<bool>,
+    /// That it think as much as it needs. Asked of every model that is known to take it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adaptive: bool,
     /// How fast, in the provider's own words, where that can be told. It has a price.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<String>,

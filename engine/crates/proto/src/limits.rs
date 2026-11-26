@@ -134,16 +134,7 @@ pub struct TooLong {
 
 impl Execution {
     fn fit(&mut self) {
-        let Execution {
-            harness,
-            provider,
-            model,
-            connection,
-            effort,
-            environment,
-            thinking: _,
-            speed,
-        } = self;
+        let Execution { harness, provider, model, connection, effort, environment, speed } = self;
         clip(harness, NAME);
         for s in [provider, model, connection, effort, environment, speed] {
             clip_opt(s, NAME);

@@ -66,11 +66,11 @@ pub enum Effort {
     AdaptiveThinking,
 }
 
-/// How a model is told whether to think.
+/// How a model is told to think as much as it needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Thinking {
-    /// `thinking.type`: `adaptive` or `disabled`.
+    /// `thinking.type`: `adaptive`.
     Adaptive,
 }
 
@@ -129,7 +129,7 @@ pub struct Quirks {
     /// What it can be, the least first, where that is the same for all it is said of.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub efforts: Option<Vec<String>>,
-    /// Where whether to think goes; nowhere if absent.
+    /// Where it is told to think as much as it needs; nowhere if absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<Thinking>,
     /// Messages: how fast it can be asked to be beside the standard, in `speed`.

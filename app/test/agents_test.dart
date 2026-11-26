@@ -86,7 +86,6 @@ class Asked extends HostStore {
     for (final i in instructions) i.digest,
     if (apart) 'apart',
     if (plan) 'plan',
-    if (x.thinking case final v?) 'thinking $v',
     if (x.speed case final v?) 'speed $v',
   ], 'a_new');
 
@@ -182,7 +181,6 @@ class Asked extends HostStore {
     ?execution?.effort,
     access,
     if (plan ?? false) 'plan',
-    if (execution?.thinking case final v?) 'thinking $v',
     if (execution?.speed case final v?) 'speed $v',
   ], null);
   @override
@@ -2253,7 +2251,6 @@ void main() {
       name: 'Claude Opus 5.5',
       context: 1000000,
       efforts: ['low', 'xhigh'],
-      thinking: true,
       speeds: ['fast'],
     );
     final lists = [
@@ -2379,16 +2376,14 @@ void main() {
       await part(t, 'Model');
       await press(t, find.bySemanticsLabel('Opus 5.5').last);
       await press(t, find.bySemanticsLabel('Extra high').last);
-      await press(t, find.bySemanticsLabel('Off').last);
+      // Every model thinks as much as it needs: nobody is asked.
+      expect(find.bySemanticsLabel('Thinking'), findsNothing);
       await snap(t, 'models-told');
       await leave(t);
       await t.enterText(field('Task'), 'go');
       await folder(t, '/w');
       await press(t, find.bySemanticsLabel('Start session'));
-      expect(
-        s.calls.where((c) => c.first == 'add').single,
-        containsAll(['effort xhigh', 'thinking false']),
-      );
+      expect(s.calls.where((c) => c.first == 'add').single, contains('effort xhigh'));
       s.calls.clear();
       await press(t, find.bySemanticsLabel('New session').first);
       await part(t, 'Model');
@@ -2400,7 +2395,7 @@ void main() {
       await settled(t);
       await press(t, find.bySemanticsLabel('Start session'));
       final add = s.calls.where((c) => c.first == 'add').single;
-      expect(add.any((x) => '$x'.startsWith('effort') || '$x'.startsWith('thinking')), isFalse);
+      expect(add.any((x) => '$x'.startsWith('effort')), isFalse);
     });
 
     testWidgets('one that is in no list is asked about, and nobody else is', (t) async {
@@ -2429,7 +2424,6 @@ void main() {
               model: 'claude-opus-5-5',
               connection: 'c1',
               effort: 'xhigh',
-              thinking: false,
               speed: 'fast',
             ),
             Access.ask,

@@ -1088,10 +1088,7 @@ async fn models_and_connections_are_listed() {
     assert!(t.c.call(odd).await.is_err() && t.c.call(long).await.is_err());
     assert_eq!(t.server.requests().len(), before);
     // What it cannot be told is refused before it is set up.
-    for e in [
-        Execution { thinking: Some(false), ..t.execution() },
-        Execution { speed: Some("fast".into()), ..t.execution() },
-    ] {
+    for e in [Execution { speed: Some("fast".into()), ..t.execution() }] {
         let call = Call::AgentAdd {
             session: t.s.clone(),
             name: "Lead".into(),

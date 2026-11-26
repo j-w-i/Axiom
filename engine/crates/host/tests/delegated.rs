@@ -1000,10 +1000,6 @@ async fn the_models_it_has() {
     let mut call = t.add("claude", Access::Work, false);
     let Call::AgentAdd { execution, .. } = &mut call else { panic!() };
     (execution.speed, execution.effort) = (Some("fast".into()), Some("max".into()));
-    let mut thinks = call.clone();
-    let Call::AgentAdd { execution, .. } = &mut thinks else { panic!() };
-    execution.thinking = Some(true);
-    assert!(t.c.call(thinks).await.unwrap_err().to_string().contains("whether to think"));
     let a = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
     t.prompt(&a, "go").await;
     let (subject, _) = t.allow_start().await;

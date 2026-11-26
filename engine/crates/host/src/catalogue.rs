@@ -124,9 +124,15 @@ pub fn about(p: &axiom_model::Profile, m: axiom_model::ModelInfo) -> ModelInfo {
         context: m.about.context.or(q.context),
         effort: !efforts.is_empty(),
         efforts,
-        thinking: q.thinking.is_some() && m.about.thinking == Some(true),
+        adaptive: q.thinking.is_some() && m.about.adaptive == Some(true),
         speeds: q.speeds.unwrap_or_default(),
     }
+}
+
+/// Whether a model is asked to think as much as it needs: always, where its list says it takes that.
+/// Where nothing is said, it thinks as its provider has it do.
+pub fn adaptive(q: &axiom_model::Quirks, listed: Option<&ModelInfo>) -> bool {
+    q.thinking.is_some() && listed.is_some_and(|m| m.adaptive)
 }
 
 pub fn fit(mut m: ModelInfo) -> ModelInfo {
@@ -194,25 +200,36 @@ mod tests {
         let said = || axiom_model::About {
             context: Some(9),
             efforts: Some(vec!["low".into(), "max".into()]),
-            thinking: Some(true),
+            adaptive: Some(true),
         };
         let a = Profile::anthropic();
         let m = of(&a, "claude-opus-5-5", said());
-        assert_eq!((m.context, m.effort, m.thinking), (Some(9), true, true));
+        assert_eq!((m.context, m.effort, m.adaptive), (Some(9), true, true));
         assert_eq!(
             (m.efforts, m.speeds),
             (vec!["low".to_owned(), "max".into()], vec!["fast".to_owned()])
         );
         // One that is in no list: what most take, and nothing that is not written down.
         let m = of(&a, "claude-x", axiom_model::About::default());
-        assert_eq!((m.efforts.len(), m.thinking, m.speeds.len()), (3, false, 0));
+        assert_eq!((m.efforts.len(), m.adaptive, m.speeds.len()), (3, false, 0));
         let m = of(&a, "claude-x", axiom_model::About { efforts: Some(vec![]), ..said() });
         assert!(!m.effort);
         // Where there is no place for it, it is not offered, whatever is said.
         let m = of(&Profile::openrouter(), "a/b", said());
-        assert_eq!((m.efforts.len(), m.thinking), (2, false));
+        assert_eq!((m.efforts.len(), m.adaptive), (2, false));
         let m = of(&Profile::lm_studio(), "a", said());
-        assert_eq!((m.effort, m.efforts.len(), m.thinking), (false, 0, false));
+        assert_eq!((m.effort, m.efforts.len(), m.adaptive), (false, 0, false));
+    }
+
+    #[test]
+    fn it_thinks_where_it_can() {
+        use axiom_model::Profile;
+        let (a, o) = (Profile::anthropic(), Profile::openrouter());
+        let listed = |adaptive| ModelInfo { id: "m".into(), adaptive, ..ModelInfo::default() };
+        assert!(adaptive(&a.quirks("m"), Some(&listed(true))));
+        assert!(!adaptive(&a.quirks("m"), Some(&listed(false))));
+        assert!(!adaptive(&a.quirks("m"), None), "nothing is said of it");
+        assert!(!adaptive(&o.quirks("m"), Some(&listed(true))), "there is no place for it");
     }
 
     #[test]

@@ -10,8 +10,8 @@ pub struct About {
     pub context: Option<u64>,
     /// How hard it can be told to try, the least first. Empty: it cannot.
     pub efforts: Option<Vec<String>>,
-    /// It thinks or does not, as it is told.
-    pub thinking: Option<bool>,
+    /// It can be told to think as much as it needs.
+    pub adaptive: Option<bool>,
 }
 
 const MOST: usize = 12;
@@ -32,11 +32,8 @@ pub(crate) fn anthropic(m: &Value) -> About {
         let takes = |e: &&str| any && has(&format!("effort/{e}")) == Some(true);
         of.into_iter().filter(takes).map(str::to_owned).collect()
     });
-    // To be told to think and not to think: both have to be taken.
-    let thinking = has("thinking/types/adaptive")
-        .zip(has("thinking/types/disabled"))
-        .map(|(on, off)| on && off);
-    About { context: m.get("max_input_tokens").and_then(Value::as_u64), efforts, thinking }
+    let adaptive = has("thinking/types/adaptive");
+    About { context: m.get("max_input_tokens").and_then(Value::as_u64), efforts, adaptive }
 }
 
 /// aistudio.google.com/api-reference/models and /docs/thinking, read 2026-11-26: the list says whether
@@ -55,7 +52,7 @@ pub(crate) fn gemini(id: &str, m: &Value) -> About {
         Some(false) => Some(Vec::new()),
         _ => levels.map(|l| l.iter().map(|s| (*s).to_owned()).collect()),
     };
-    About { context: m.get("inputTokenLimit").and_then(Value::as_u64), efforts, thinking: None }
+    About { context: m.get("inputTokenLimit").and_then(Value::as_u64), efforts, adaptive: None }
 }
 
 /// openrouter.ai/docs/guides/best-practices/reasoning-tokens, read 2026-11-26: `reasoning` is there if
@@ -85,7 +82,7 @@ pub(crate) fn openrouter(m: &Value) -> About {
         None | Some(Value::Null) if m.get("supported_parameters").is_some() => Some(Vec::new()),
         _ => None,
     };
-    About { context: m.get("context_length").and_then(Value::as_u64), efforts, thinking: None }
+    About { context: m.get("context_length").and_then(Value::as_u64), efforts, adaptive: None }
 }
 
 #[cfg(test)]
@@ -115,11 +112,14 @@ mod tests {
         let a = anthropic(&m);
         assert_eq!(a.context, Some(1_000_000));
         assert_eq!(a.efforts, all(&["low", "medium", "high", "max"]));
-        assert_eq!(a.thinking, Some(true));
-        // It cannot be told not to.
+        assert_eq!(a.adaptive, Some(true));
+        // That it cannot be told not to think is no matter: it is never told that.
         let mut always = m.clone();
         always["capabilities"]["thinking"]["types"]["disabled"] = yes(false);
-        assert_eq!(anthropic(&always).thinking, Some(false));
+        assert_eq!(anthropic(&always).adaptive, Some(true));
+        let mut fixed = m.clone();
+        fixed["capabilities"]["thinking"]["types"]["adaptive"] = yes(false);
+        assert_eq!(anthropic(&fixed).adaptive, Some(false));
         let mut none = m.clone();
         none["capabilities"]["effort"] = json!({"supported": false, "low": yes(true)});
         assert_eq!(anthropic(&none).efforts, all(&[]));
@@ -136,7 +136,7 @@ mod tests {
         assert_eq!(of("gemini-x", json!({"thinking": true})).efforts, None);
         let a = of("gemini-4-neon", json!({"thinking": true, "inputTokenLimit": 1_048_576}));
         assert_eq!(a.efforts, all(&["low", "medium", "high", "xhigh"]));
-        assert_eq!((a.context, a.thinking), (Some(1_048_576), None));
+        assert_eq!((a.context, a.adaptive), (Some(1_048_576), None));
     }
 
     #[test]
