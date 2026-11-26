@@ -712,6 +712,8 @@ class _Marked extends StatelessWidget {
   );
 }
 
+final _views = Expando<BlockView>('block views');
+
 class _RowView extends StatelessWidget {
   const _RowView(
     this.rows,
@@ -751,19 +753,34 @@ class _RowView extends StatelessWidget {
     final before = at > 0 ? rows[at - 1] : null;
     final afterWork = before != null && before.work.isNotEmpty;
     if (i != null && !r.isEnd) {
-      final blocks = i.doc.closed;
-      final w = BlockView(
-        blocks[r.index],
-        voice: i.kind,
-        by: i.name,
-        opens: r.index == 0,
-        afterTool: r.index == 0 && afterWork,
-        goesOn: r.index + 1 < blocks.length && blocks[r.index + 1].continues,
-        closes: !i.open && r.index + 1 == blocks.length && i.doc.tail.isEmpty,
-        whole: () => wholeCode(blocks, r.index),
-        onLink: onLink,
-      );
-      return RepaintBoundary(child: _taken(i, w, stops: r.index == 0));
+      final d = i.doc, blocks = d.closed, b = blocks[r.index], at = r.index;
+      final opens = at == 0, afterTool = opens && afterWork;
+      final goesOn = at + 1 < blocks.length && blocks[at + 1].continues;
+      final closes = !i.open && at + 1 == blocks.length && d.tail.isEmpty;
+      // A closed block is built once: the rows around it are built again whenever one closes.
+      final old = _views[b];
+      final w =
+          old != null &&
+              old.voice == i.kind &&
+              old.by == i.name &&
+              old.opens == opens &&
+              old.afterTool == afterTool &&
+              old.goesOn == goesOn &&
+              old.closes == closes &&
+              old.onLink == onLink
+          ? old
+          : _views[b] = BlockView(
+              b,
+              voice: i.kind,
+              by: i.name,
+              opens: opens,
+              afterTool: afterTool,
+              goesOn: goesOn,
+              closes: closes,
+              whole: () => wholeCode(i.doc.closed, at),
+              onLink: onLink,
+            );
+      return RepaintBoundary(child: _taken(i, w, stops: at == 0));
     }
     Widget prose() => i == null
         ? const SizedBox(width: double.infinity)
