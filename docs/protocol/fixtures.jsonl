@@ -17,4 +17,7 @@
 {"id":14,"result":[{"access":"read","commands":[{"command":"npm run dev","icon":"play","key":1,"name":"Dev"}],"execution":{"connection":"c_2","harness":"axiom","model":"m"},"id":"f_1","moved":true,"name":"Web","path":"/w","pinned":true}]}
 {"id":15,"result":[{"busy":true,"ended":"ended: exit 0","session":"s_1","terminal":"t_1","title":"vim"}]}
 {"id":16,"result":{"app_cursor":true,"back":3,"bracketed":true,"cols":80,"cursor":[0,5],"most_back":40,"rows":[[{"text":"$ "},{"bg":"#102030","fg":"1","style":17,"text":"red"}],[]],"terminal":"t_1","title":"T","version":7}}
+{"id":17,"result":{"against":"main","ahead":2,"behind":1,"branch":"topic","default_branch":"main","diff":"--- a.rs\n+++ a.rs\n","files":[{"digest":"d1","path":"a.rs","what":"changed"}],"hooks":true,"remote":"origin","remote_url":"git@example.com:a/b.git","repositories":["","api"],"repository":true,"upstream":"origin/topic","whole":false}}
+{"id":18,"result":{"commit":{"at":1700000000,"author":"Ada","id":"c1","subject":"S"},"diff":"x","message":"S\n\nB","whole":true}}
+{"id":19,"result":{"branch":"b","changed":["a.rs"],"commit":{"at":1,"author":"Ada","id":"c2","subject":"T"},"hooks":true,"unsigned":true}}
 {"open":"/w"}

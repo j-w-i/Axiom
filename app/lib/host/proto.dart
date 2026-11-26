@@ -153,25 +153,115 @@ class Changes {
     this.files = const [],
     this.diff = '',
     this.whole = true,
+    this.repositories = const [],
+    this.upstream,
+    this.ahead,
+    this.behind,
+    this.against,
+    this.defaultBranch,
+    this.hooks = false,
+    this.remote,
+    this.remoteUrl,
   });
   Changes.decode(Json j)
     : repository = j['repository']! as bool,
       branch = j['branch'] as String?,
       files = [
         for (final f in j['files']! as List<Object?>)
-          Changed((f! as Json)['path']! as String, (f as Json)['what']! as String),
+          Changed(
+            (f! as Json)['path']! as String,
+            (f as Json)['what']! as String,
+            digest: f['digest'] as String?,
+          ),
       ],
       diff = j['diff']! as String,
-      whole = j['whole']! as bool;
+      whole = j['whole']! as bool,
+      repositories = [
+        for (final r in j['repositories'] as List<Object?>? ?? const []) r! as String,
+      ],
+      upstream = j['upstream'] as String?,
+      ahead = j['ahead'] as int?,
+      behind = j['behind'] as int?,
+      against = j['against'] as String?,
+      defaultBranch = j['default_branch'] as String?,
+      hooks = j['hooks'] == true,
+      remote = j['remote'] as String?,
+      remoteUrl = j['remote_url'] as String?;
   final bool repository, whole;
   final String? branch;
   final List<Changed> files;
   final String diff;
+
+  /// The repositories in the folder: `''` is its own.
+  final List<String> repositories;
+
+  /// What the branch follows, and how far apart they were at the last fetch.
+  final String? upstream;
+  final int? ahead, behind;
+
+  /// What it is compared with, if not the last commit.
+  final String? against;
+  final String? defaultBranch;
+
+  /// The repository has hooks, which Axiom does not run.
+  final bool hooks;
+  final String? remote, remoteUrl;
+}
+
+/// A commit, as the log says it.
+class CommitInfo {
+  const CommitInfo(this.id, this.author, this.at, this.subject);
+  CommitInfo.decode(Json j)
+    : id = j['id']! as String,
+      author = j['author']! as String,
+      at = j['at']! as int,
+      subject = j['subject']! as String;
+  final String id, author, subject;
+
+  /// Seconds since 1970.
+  final int at;
+}
+
+/// One commit, with what it changed.
+class CommitShown {
+  const CommitShown(this.commit, this.message, this.diff, {this.whole = true});
+  CommitShown.decode(Json j)
+    : commit = CommitInfo.decode(j['commit']! as Json),
+      message = j['message']! as String,
+      diff = j['diff']! as String,
+      whole = j['whole']! as bool;
+  final CommitInfo commit;
+  final String message, diff;
+  final bool whole;
+}
+
+/// What a commit came to.
+class Committed {
+  const Committed(
+    this.commit, {
+    this.branch,
+    this.hooks = false,
+    this.unsigned = false,
+    this.changed = const [],
+  });
+  Committed.decode(Json j)
+    : commit = CommitInfo.decode(j['commit']! as Json),
+      branch = j['branch'] as String?,
+      hooks = j['hooks'] == true,
+      unsigned = j['unsigned'] == true,
+      changed = [for (final c in j['changed'] as List<Object?>? ?? const []) c! as String];
+  final CommitInfo commit;
+  final String? branch;
+  final bool hooks, unsigned;
+  final List<String> changed;
 }
 
 class Changed {
-  const Changed(this.path, this.what);
+  const Changed(this.path, this.what, {this.digest});
   final String path, what;
+
+  /// Of what is there now; none if there is nothing, or it is too large to commit from here.
+  final String? digest;
 }
 
 /// A file of a folder, for its person to read.
@@ -511,7 +601,7 @@ class CopyFile extends Changed {
   const CopyFile(
     super.path,
     super.what, {
-    this.digest,
+    super.digest,
     this.run = false,
     this.there,
     this.diff,
@@ -522,8 +612,7 @@ class CopyFile extends Changed {
     this.others = const [],
   });
   CopyFile.decode(Json j)
-    : digest = j['digest'] as String?,
-      run = j['run'] as bool? ?? false,
+    : run = j['run'] as bool? ?? false,
       there = j['there'] as String?,
       diff = j['diff'] as String?,
       clash = j['clash'] as bool? ?? false,
@@ -531,10 +620,10 @@ class CopyFile extends Changed {
       never = j['never'] as String?,
       runs = j['runs'] as bool? ?? false,
       others = [for (final o in j['others'] as List<Object?>? ?? const []) o! as String],
-      super(j['path']! as String, j['what']! as String);
+      super(j['path']! as String, j['what']! as String, digest: j['digest'] as String?);
 
-  /// What the copy has now, and the folder; null if it has none.
-  final String? digest, there;
+  /// What the folder has now; null if it has none. The copy's is [digest].
+  final String? there;
 
   /// It can be run.
   final bool run;
