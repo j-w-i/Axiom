@@ -417,6 +417,12 @@ void main() {
       await shell(t, s);
       await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')).first);
       await settled(t);
+      if (!Browsers.made) {
+        // No browser on Windows yet: nothing offers one.
+        expect(find.text('Serves 127.0.0.1:5173'), findsOneWidget);
+        expect(find.text('Open'), findsNothing);
+        return;
+      }
       await press(t, find.text('Open'));
       expect(s.calls.last, ['open page', 's', 'a', 5173]);
       s.showPage(view(1));
