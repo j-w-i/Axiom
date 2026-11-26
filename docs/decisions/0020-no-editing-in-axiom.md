@@ -1,0 +1,5 @@
+# 0020 No editing of files in Axiom
+**Decision** (D-5, as recommended). A person reads files in Axiom (W-18), finds them (W-20) and opens them in their own editor (W-21, decision 0019); they do not change them there. Axiom is a place to direct agents and to see and bring in what they did, not an IDE.
+**What it means for what is built.** The viewer has no caret, no undo and no save. What a person changes reaches a folder only by bringing in an agent's copy (0014), by a commit (0018), or by their own editor. A remark on a line goes into the draft (row 3), not into the file.
+**Why.** An editor that is good enough is years of work, and a poor one is worse than none. Every write the host does is one that SI-9 and 0014 already describe; another path into a folder would need its own checks, and would race with the agents that write there.
+**Revisit.** If people keep leaving for an editor to change one line, a small change by a person in an agent's copy could come, through the same digests as bringing in.
