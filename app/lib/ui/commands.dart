@@ -8,6 +8,8 @@ enum Command {
   start('New session', LogicalKeyboardKey.keyN),
   find('Search', LogicalKeyboardKey.keyK),
   findHere('Find in the conversation', LogicalKeyboardKey.keyF),
+  goToFile('Go to file', LogicalKeyboardKey.keyP),
+  searchFiles('Search in files', LogicalKeyboardKey.keyF, shift: true),
   accounts('Accounts', LogicalKeyboardKey.comma),
   settings('Settings', LogicalKeyboardKey.comma, shift: true),
   // Plus is typed with Shift on many keyboards, and is a key of its own on others.
