@@ -85,7 +85,12 @@ Folders and files (`m4/files`). All of it in the one panel: a file, a search, or
 - W-20: Go to file (⌘P, names ranked in the host), Search in files (⇧⌘F; case, whole words, an expression), the folder's files folder by folder. A file can be mentioned in the message as `@path`; what an agent does with that is its own.
 - W-21 (0019): `editor.list`, `file.open`, `file.show`. Started by a scripted stand-in in the tests (`host/src/editor.rs`); no real editor has been started here, because it would open a window.
 - W-22: a picture of the folder is shown in the reader, measured before it is decoded (40 million pixels, 16 384 a side), decoded off the screen's isolate, with zoom. Not in the transcript, and not saved or copied (K56).
-Verified on macOS 27 arm64: 58 Rust suites (870 tests), 497 app tests, offscreen. Deliberate breakages: 11 in the host and tools (one survives: `..` in a path, which `Place` refuses before), 7 in the client, all caught after two tests were made stronger.
+Folders (`m4/folders`, stacked on `m4/files`):
+- W-36: `folder.list`, `folder.set`, `folder.remove`; `folders.json` keeps a folder's name, pin, how sessions there begin (model and access) and its commands, by its path as sessions name it and by device and file number: another folder at that path is shown as moved and nothing of it is used (T2). From the list: rename, pin to the top, begin new sessions like the open one, forget. A new session in a folder begins as the folder says until its person chooses otherwise. Sessions are still keyed by session only (K16): the folder's id is not part of a session's record. Row 10's setup command is not kept: nothing would run it yet (M5).
+- W-38, as far as jobs go: each job's processes with processor share, memory, and those left behind (`axiom-spawn` reads `proc_pidinfo` on macOS and `/proc` on Linux; nothing on Windows). What a shell command or a delegated program runs is not listed yet.
+- W-37: commands are kept with the folder; running them waits for terminals.
+Verified on macOS 27 arm64: 58 Rust suites (876 tests), 500 app tests, offscreen; clippy for Linux of `axiom-spawn`. Breakages: 7 more, all caught after one test was added (pinned folders first).
+Verified for folders and files on macOS 27 arm64: 58 Rust suites (870 tests), 497 app tests, offscreen. Deliberate breakages: 11 in the host and tools (one survives: `..` in a path, which `Place` refuses before), 7 in the client, all caught after two tests were made stronger.
 
 ## The look, round 12 (`design/flat`)
 Built 2026-11-25 on the owner's yes to pictures (`design/system.md`, history). In the pictures and not in the app, because the host has nothing for it: a plan, levels of use per service in the header, a terminal, renaming and removing sessions. The folder window (`file_selector`, by the Flutter team, BSD: a person had to type a whole path) has been opened by nobody. `spec-fable.md` is older than this and describes what was before.
@@ -103,6 +108,9 @@ Built on the owner's word (2026-11-25). In the pictures and not in the app, beca
 4. Owner: say whether the real Claude Code or Codex on this computer may be started once (K40); sign in with ChatGPT once, if wanted (K47).
 5. Somebody with the standing to do it: the security review (K32). It should see seccomp, branching's `points`, Bedrock, and now 0016: what a person may have a program given.
 6. M4's worth-building items left: W-36 to W-38, W-42 to W-52 (decisions 0018 to 0021 are written); then M5, which begins with taking back what was said.
+
+## The owner's next direction (2026-11-26)
+After M4, Axiom stops being a harness: models that no harness provides run on DeepSeek Harness (dsh, headless), and Axiom gives every agent tools for its own features. Storage used well, little downloaded. Not begun; first the owner wants a report on how T3 Code does it (agent loop, browser, simulators), and what becomes of Axiom's own loop is not decided.
 
 ## How to resume
 `AGENTS.md`, this file, `roadmap.md`, then the decision for the area. `scripts/check.sh` must pass before and after. Preferences the owner has stated are in `product/requirements.md` (PR-4, PR-44) and `design/system.md`.
