@@ -298,7 +298,8 @@ class _AgentRowState extends State<AgentRow> {
                 builder: (context, s) => _ground(
                   c,
                   selected: widget.selected,
-                  hovered: s.hovered,
+                  // Its own keys stand over it: the row is still under the pointer.
+                  hovered: s.hovered || _hover,
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(10, 5, keys ? (pause && stop ? 66 : 38) : 10, 6),
                     child: Row(
