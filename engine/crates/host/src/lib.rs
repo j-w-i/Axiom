@@ -32,6 +32,8 @@ mod session;
 pub mod signal;
 mod signin;
 mod store;
+#[cfg(unix)]
+mod terminals;
 pub mod vault;
 mod waiting;
 

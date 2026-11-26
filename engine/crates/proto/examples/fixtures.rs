@@ -335,6 +335,43 @@ fn main() -> Result<(), serde_json::Error> {
                 moved: true,
             }])?,
         },
+        Message::Ok {
+            id: 15,
+            result: serde_json::to_value([TerminalInfo {
+                terminal: "t_1".into(),
+                session: SessionId("s_1".into()),
+                title: "vim".into(),
+                busy: true,
+                ended: Some("ended: exit 0".into()),
+            }])?,
+        },
+        Message::Ok {
+            id: 16,
+            result: serde_json::to_value(Screen {
+                terminal: "t_1".into(),
+                version: 7,
+                cols: 80,
+                rows: vec![
+                    vec![
+                        Span { text: "$ ".into(), fg: None, bg: None, style: 0 },
+                        Span {
+                            text: "red".into(),
+                            fg: Some("1".into()),
+                            bg: Some("#102030".into()),
+                            style: 17,
+                        },
+                    ],
+                    vec![],
+                ],
+                cursor: Some((0, 5)),
+                title: "T".into(),
+                back: 3,
+                most_back: 40,
+                app_cursor: true,
+                bracketed: true,
+                ended: None,
+            })?,
+        },
         Message::Open { open: "/w".into() },
     ] {
         println!("{}", serde_json::to_string(&m)?);

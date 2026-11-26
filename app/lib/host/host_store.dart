@@ -449,6 +449,40 @@ class HostStore extends ChangeNotifier {
       EditorInfo.decode(e! as Json),
   ];
 
+  /// Opens a terminal of the person's own in a session's folder; [command] is typed into it.
+  Future<String> openTerminal(String session, int cols, int rows, {String? command}) async {
+    final r = await _live.call('terminal.open', {
+      'session': session,
+      'cols': cols,
+      'rows': rows,
+      'command': ?command,
+    }, _long);
+    return (r! as Json)['terminal']! as String;
+  }
+
+  Future<List<TerminalInfo>> terminals() async => [
+    for (final j in (await _live.call('terminal.list'))! as List<Object?>)
+      TerminalInfo.decode(j! as Json),
+  ];
+
+  /// Its screen, once it has changed since [seen], or after a while as it is.
+  Future<Screen> screen(String terminal, int seen) async => Screen.decode(
+    (await _live.call('terminal.screen', {'terminal': terminal, 'seen': seen}, _long))! as Json,
+  );
+
+  Future<void> typeInto(String terminal, String text) =>
+      _live.call('terminal.input', {'terminal': terminal, 'text': text});
+
+  Future<void> resizeTerminal(String terminal, int cols, int rows) =>
+      _live.call('terminal.resize', {'terminal': terminal, 'cols': cols, 'rows': rows});
+
+  Future<void> scrollTerminal(String terminal, int back) =>
+      _live.call('terminal.scroll', {'terminal': terminal, 'back': back});
+
+  /// While something runs in it, only with [force].
+  Future<void> closeTerminal(String terminal, {bool force = false}) =>
+      _live.call('terminal.close', {'terminal': terminal, if (force) 'force': true}, _long);
+
   /// What agents have left running, in all sessions.
   Future<List<JobInfo>> jobs() async => [
     for (final j in (await _live.call('job.list', {}))! as List<Object?>)

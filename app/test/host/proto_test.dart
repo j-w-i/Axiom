@@ -147,6 +147,17 @@ void main() {
     final c = d.commands.single;
     expect([c.name, c.command, c.icon, c.key], ['Dev', 'npm run dev', 'play', 1]);
     expect(FolderInfo.decode({...d.encode(), 'id': 'f_1'}).encode(), d.encode());
+    final term = TerminalInfo.decode((result(15)! as List<Object?>).single! as Json);
+    expect(
+      [term.terminal, term.session, term.title, term.busy, term.ended],
+      ['t_1', 's_1', 'vim', true, 'ended: exit 0'],
+    );
+    final sc = Screen.decode(result(16)! as Json);
+    expect([sc.terminal, sc.version, sc.cols, sc.cursor, sc.title], ['t_1', 7, 80, (0, 5), 'T']);
+    expect([sc.back, sc.mostBack, sc.appCursor, sc.bracketed, sc.ended], [3, 40, true, true, null]);
+    expect(sc.text, '\$ red\n');
+    final red = sc.rows.first.last;
+    expect([red.text, red.fg, red.bg, red.style], ['red', '1', '#102030', 17]);
     final e = EditorInfo.decode((result(13)! as List<Object?>).single! as Json);
     expect([e.id, e.name, e.path], ['zed', 'Zed', '/usr/local/bin/zed']);
   });

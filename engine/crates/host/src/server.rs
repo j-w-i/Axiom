@@ -81,6 +81,8 @@ pub struct Config {
     pub vault: Arc<dyn Vault>,
     /// Where a ChatGPT plan is signed in to and used.
     pub chatgpt: Places,
+    /// The shell a person's terminals run; `None`: theirs, as `SHELL` says, if it is the system's.
+    pub shell: Option<PathBuf>,
 }
 impl Config {
     pub fn new(paths: Paths) -> Self {
@@ -98,6 +100,7 @@ impl Config {
             bridge: None,
             vault: Arc::new(MemoryVault::default()),
             chatgpt: Places::default(),
+            shell: None,
         }
     }
 }
@@ -145,6 +148,8 @@ struct State {
     agents: Arc<Agents>,
     signins: Arc<Signins>,
     folders: crate::folders::Folders,
+    #[cfg(unix)]
+    terminals: crate::terminals::Terminals,
 }
 
 type Slot = tokio::sync::Mutex<Option<Opened>>;
@@ -335,6 +340,8 @@ impl Host {
             over: watch::Sender::new(false),
             open: watch::Sender::new(String::new()),
             folders: crate::folders::Folders::open(&p.data.join("folders.json"))?,
+            #[cfg(unix)]
+            terminals: crate::terminals::Terminals::default(),
             cfg,
         });
         let switch: std::sync::Weak<dyn Switch> = Arc::downgrade(&st) as _;
@@ -446,6 +453,8 @@ impl Host {
         // What runs between runs: it ends, and lets its session go.
         st.signins.end();
         st.agents.end().await;
+        #[cfg(unix)]
+        st.terminals.end();
         // The last answers and events reach whoever still reads.
         st.over.send_replace(true);
         while connections.join_next().await.is_some() {}
@@ -1096,6 +1105,9 @@ fn slow(c: &Call) -> bool {
             | Call::FileOpen { .. }
             | Call::FileShow { .. }
             | Call::Editors {}
+            | Call::TerminalScreen { .. }
+            | Call::TerminalOpen { .. }
+            | Call::TerminalClose { .. }
     )
 }
 
@@ -2165,6 +2177,83 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
         }
         Call::FolderRemove { id } => {
             st.folders.remove(&id)?;
+            Ok(json!({}))
+        }
+        Call::TerminalOpen { session, cols, rows, command } => {
+            #[cfg(unix)]
+            {
+                let folder = workspace(st, &session).await?;
+                let folder = axiom_policy::Place::new(
+                    std::fs::canonicalize(&folder)
+                        .map_err(|e| agents::bad(format!("{folder}: {e}")))?,
+                )
+                .map_err(|e| agents::bad(e.to_string()))?;
+                let written = st.agents.written(&st.store).await?;
+                let mut env = st.agents.editors(written)?.env()?;
+                for (k, v) in [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")] {
+                    env.set(k, v).map_err(|e| agents::bad(e.to_string()))?;
+                }
+                let what = command.as_deref().map_or_else(String::new, |c| format!(", typing {c}"));
+                person(
+                    st,
+                    &session,
+                    folder.as_str(),
+                    "terminal",
+                    format!("a terminal opens in {folder}{what}"),
+                )
+                .await?;
+                let shell = st.cfg.shell.as_ref().map(axiom_policy::Place::new).transpose();
+                let shell = shell.map_err(|e| agents::bad(e.to_string()))?;
+                let id = st.terminals.open(session, folder, env, (cols, rows), command, shell)?;
+                Ok(json!({ "terminal": id }))
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (session, cols, rows, command);
+                Err(agents::bad("terminals are not made on Windows yet"))
+            }
+        }
+        Call::Terminals {} => {
+            #[cfg(unix)]
+            return value(st.terminals.list());
+            #[cfg(not(unix))]
+            value(Vec::<TerminalInfo>::new())
+        }
+        Call::TerminalScreen { terminal, seen } => {
+            #[cfg(unix)]
+            return value(st.terminals.screen(&terminal, seen).await?);
+            #[cfg(not(unix))]
+            {
+                let _ = (terminal, seen);
+                Err(WireError::new(ErrorCode::NotFound, "no such terminal"))
+            }
+        }
+        Call::TerminalInput { terminal, text } => {
+            #[cfg(unix)]
+            st.terminals.input(&terminal, &text)?;
+            #[cfg(not(unix))]
+            let _ = (terminal, text);
+            Ok(json!({}))
+        }
+        Call::TerminalResize { terminal, cols, rows } => {
+            #[cfg(unix)]
+            st.terminals.resize(&terminal, cols, rows)?;
+            #[cfg(not(unix))]
+            let _ = (terminal, cols, rows);
+            Ok(json!({}))
+        }
+        Call::TerminalScroll { terminal, back } => {
+            #[cfg(unix)]
+            st.terminals.scroll(&terminal, back)?;
+            #[cfg(not(unix))]
+            let _ = (terminal, back);
+            Ok(json!({}))
+        }
+        Call::TerminalClose { terminal, force } => {
+            #[cfg(unix)]
+            st.terminals.close(&terminal, force).await?;
+            #[cfg(not(unix))]
+            let _ = (terminal, force);
             Ok(json!({}))
         }
         Call::Jobs {} => {

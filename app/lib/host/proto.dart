@@ -396,6 +396,85 @@ class EditorInfo {
   final String id, name, path;
 }
 
+/// A person's own terminal.
+class TerminalInfo {
+  const TerminalInfo(this.terminal, this.session, this.title, {this.busy = false, this.ended});
+  TerminalInfo.decode(Json j)
+    : terminal = j['terminal']! as String,
+      session = j['session']! as String,
+      title = j['title']! as String,
+      busy = j['busy'] == true,
+      ended = j['ended'] as String?;
+  final String terminal, session, title;
+
+  /// Something other than its shell runs in front.
+  final bool busy;
+  final String? ended;
+}
+
+/// What a terminal shows, as the host's emulator keeps it.
+class Screen {
+  const Screen(
+    this.terminal, {
+    this.version = 0,
+    this.cols = 80,
+    this.rows = const [],
+    this.cursor,
+    this.title = '',
+    this.back = 0,
+    this.mostBack = 0,
+    this.appCursor = false,
+    this.bracketed = false,
+    this.ended,
+  });
+  Screen.decode(Json j)
+    : terminal = j['terminal']! as String,
+      version = j['version']! as int,
+      cols = j['cols']! as int,
+      rows = [
+        for (final r in j['rows']! as List<Object?>)
+          [for (final s in r! as List<Object?>) Span.decode(s! as Json)],
+      ],
+      cursor = switch (j['cursor']) {
+        [final int r, final int c] => (r, c),
+        _ => null,
+      },
+      title = j['title']! as String,
+      back = j['back'] as int? ?? 0,
+      mostBack = j['most_back'] as int? ?? 0,
+      appCursor = j['app_cursor'] == true,
+      bracketed = j['bracketed'] == true,
+      ended = j['ended'] as String?;
+  final String terminal, title;
+  final int version, cols, back, mostBack;
+  final List<List<Span>> rows;
+
+  /// Row and column, from 0.
+  final (int, int)? cursor;
+
+  /// Arrow keys as an application has them; pasted text marked.
+  final bool appCursor, bracketed;
+  final String? ended;
+
+  /// Its text, a line for each row.
+  String get text => [for (final r in rows) r.map((s) => s.text).join()].join('\n');
+}
+
+/// Text of one look: colours as `0`..`255` or `#rrggbb`.
+class Span {
+  const Span(this.text, {this.fg, this.bg, this.style = 0});
+  Span.decode(Json j)
+    : text = j['text']! as String,
+      fg = j['fg'] as String?,
+      bg = j['bg'] as String?,
+      style = j['style'] as int? ?? 0;
+  final String text;
+  final String? fg, bg;
+
+  /// Bold 1, dim 2, italic 4, underlined 8, inverse 16.
+  final int style;
+}
+
 /// What an agent has changed in its own copy of the folder.
 class CopyChanges {
   const CopyChanges({
