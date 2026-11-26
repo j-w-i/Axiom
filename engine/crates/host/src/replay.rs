@@ -8,8 +8,8 @@ use std::{
 };
 
 use axiom_proto::{
-    AgentId, AgentState, Answerable, Body, ErrorCode, Execution, ItemId, Outcome, RequestId, RunId,
-    WireError,
+    AgentId, AgentState, Answerable, Body, Covers, ErrorCode, Execution, ItemId, Outcome,
+    RequestId, RunId, WireError,
     script::{Act, Step},
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
@@ -120,17 +120,20 @@ pub async fn start(
         Say::Event(Body::AgentAdded {
             agent: agent.clone(),
             name,
-            execution: Execution {
+            execution: Box::new(Execution {
                 harness: "replay".into(),
                 provider: None,
                 model,
                 connection: None,
                 effort: None,
                 environment: None,
-            },
+                ..Execution::default()
+            }),
             parent: None,
             access: None,
             apart: false,
+            from: None,
+            plan: false,
         }),
         Say::Event(Body::RunStarted { run: run.clone(), agent: agent.clone() }),
         Say::Event(Body::AgentState { agent: agent.clone(), state: AgentState::Running }),
@@ -206,9 +209,18 @@ impl Player {
                     Some(request) => Say::Event(Body::RequestClosed { request, answer }),
                     None => continue,
                 },
-                Act::Usage { usage, provenance } => {
-                    Say::Event(Body::Usage { agent: agent.clone(), usage, provenance })
-                }
+                Act::Usage { usage, provenance } => Say::Event(Body::Usage {
+                    agent: agent.clone(),
+                    usage,
+                    provenance,
+                    of: Covers::Unknown,
+                    run: Some(run.clone()),
+                    on: None,
+                    cost: None,
+                    totals: Vec::new(),
+                    cut: false,
+                    aside: false,
+                }),
                 Act::Finish { outcome: o, error: e } => {
                     (outcome, error) = (o, e);
                     break;

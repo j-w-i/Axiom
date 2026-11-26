@@ -575,6 +575,83 @@ fn schema_2_is_brought_forward() {
     assert_eq!(Journal::open(&p).unwrap().recover(9).unwrap().0, 1);
 }
 
+/// From 4, in which there were no places to branch at.
+#[test]
+fn schema_4_is_brought_forward() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j.db");
+    let s = SessionId("s".into());
+    let a = AgentId("a".into());
+    {
+        let mut j = Journal::open(&p).unwrap();
+        j.create(&s, "t", None, 1).unwrap();
+        j.put_message(&s, &a, 0, "m", None).unwrap();
+        j.put_owed(&s, &a, &RunId("r".into()), &a).unwrap();
+    }
+    let c = rusqlite::Connection::open(&p).unwrap();
+    c.execute_batch("drop table cut; pragma user_version=4;").unwrap();
+    drop(c);
+    for _ in 0..2 {
+        let mut j = Journal::open(&p).unwrap();
+        j.put_cut(&s, &a, &ItemId("i".into()), 1, true).unwrap();
+        let r = Reader::open(&p).unwrap();
+        assert_eq!(r.messages(&s, &a).unwrap(), ["m"]);
+        assert_eq!(r.owed(&s, &a).unwrap().len(), 1);
+        assert_eq!(r.cut(&s, &a, &ItemId("i".into())).unwrap(), Some((1, true)));
+    }
+}
+
+#[test]
+fn a_branch_has_the_first_turns_and_the_places_in_them() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("j");
+    let mut j = Journal::open(&p).unwrap();
+    let (s, other) = (SessionId("s".into()), SessionId("z".into()));
+    j.create(&s, "t", None, 1).unwrap();
+    j.create(&other, "t", None, 1).unwrap();
+    let (a, b, c) = (AgentId("a".into()), AgentId("b".into()), AgentId("c".into()));
+    let i = |n: &str| ItemId(n.into());
+    for (n, text) in ["p1", "a1", "p2", "a2"].into_iter().enumerate() {
+        j.put_message(&s, &a, n as u64, text, None).unwrap();
+        j.put_message(&other, &a, n as u64, "another's", None).unwrap();
+    }
+    j.put_cut(&s, &a, &i("p1"), 0, false).unwrap();
+    j.put_cut(&s, &a, &i("a1"), 2, true).unwrap();
+    j.put_cut(&s, &a, &i("p2"), 2, false).unwrap();
+    j.put_cut(&s, &a, &i("a2"), 4, true).unwrap();
+    j.put_cut(&other, &a, &i("x"), 0, true).unwrap();
+    let r = Reader::open(&p).unwrap();
+    assert_eq!((r.turns(&s, &a).unwrap(), r.turns(&s, &b).unwrap()), (4, 0));
+    assert_eq!(r.cut(&s, &a, &i("a1")).unwrap(), Some((2, true)));
+    assert_eq!(r.cut(&s, &a, &i("p2")).unwrap(), Some((2, false)));
+    assert_eq!(r.cut(&s, &b, &i("a1")).unwrap(), None);
+    assert_eq!(r.cut(&other, &a, &i("a1")).unwrap(), None);
+
+    j.branch(&s, &a, 2, &b, "setup").unwrap();
+    assert_eq!(r.messages(&s, &b).unwrap(), ["p1", "a1"]);
+    assert_eq!(r.messages(&s, &a).unwrap().len(), 4);
+    assert_eq!(r.agents(&s).unwrap(), [(b.clone(), "setup".into())]);
+    let places = |x: &AgentId| ["p1", "a1", "p2", "a2", "x"].map(|n| r.cut(&s, x, &i(n)).unwrap());
+    // What begins behind it is not in it.
+    assert_eq!(places(&b), [Some((0, false)), Some((2, true)), None, None, None]);
+    // It goes on as its own.
+    assert!(j.put_message(&s, &b, 1, "x", None).is_err());
+    j.put_message(&s, &b, 2, "other", None).unwrap();
+    j.branch(&s, &b, 3, &c, "setup").unwrap();
+    assert_eq!(r.messages(&s, &c).unwrap(), ["p1", "a1", "other"]);
+    // Not over one that is there, nor more than there is: then nothing.
+    assert!(j.branch(&s, &a, 2, &b, "again").is_err());
+    let d = AgentId("d".into());
+    assert!(j.branch(&s, &a, 5, &d, "setup").is_err());
+    assert_eq!(r.messages(&s, &d).unwrap().len(), 0);
+    assert_eq!(r.agents(&s).unwrap().len(), 2);
+    // One nobody was told of leaves nothing.
+    j.remove_agent(&s, &b).unwrap();
+    assert!(r.messages(&s, &b).unwrap().is_empty() && places(&b).iter().all(Option::is_none));
+    assert_eq!(r.messages(&s, &c).unwrap().len(), 3);
+    assert_eq!(r.messages(&s, &a).unwrap().len(), 4);
+}
+
 #[test]
 fn what_was_said_waits_until_it_is_heard() {
     let d = tempfile::tempdir().unwrap();

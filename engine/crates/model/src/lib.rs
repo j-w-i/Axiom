@@ -5,9 +5,11 @@
 //! providers differ, [`transport`] is HTTP, and [`Accumulator`] folds events into a [`Reply`]. There is
 //! no loop here: nothing is retried, and no tool is run.
 
+mod about;
 pub mod chatgpt;
 pub mod codec;
 pub mod error;
+pub mod eventstream;
 mod fold;
 pub mod profile;
 mod secret;
@@ -15,6 +17,7 @@ pub mod sse;
 pub mod transport;
 mod types;
 
+pub use about::About;
 pub use codec::{EncodeError, Encoded, Loss, Lost};
 pub use error::{Class, Error, Retry};
 pub use fold::{Accumulator, OutOfOrder, Reply};

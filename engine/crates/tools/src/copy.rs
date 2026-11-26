@@ -62,7 +62,7 @@ pub enum CopyError {
 }
 
 impl CopyError {
-    fn kind(&self) -> Option<io::ErrorKind> {
+    pub(crate) fn kind(&self) -> Option<io::ErrorKind> {
         match self {
             CopyError::Io(_, e) => Some(e.kind()),
             _ => None,
@@ -119,12 +119,12 @@ pub struct From<'a> {
     pub stop: &'a AtomicBool,
 }
 
-fn open(p: &Place) -> Result<Dir, CopyError> {
+pub(crate) fn open(p: &Place) -> Result<Dir, CopyError> {
     Dir::open_ambient_dir(p.as_path(), ambient_authority())
         .map_err(|e| CopyError::Io(p.to_string(), e))
 }
 
-type Each<'a> = &'a mut dyn FnMut(&Dir, &OsStr, &str) -> Result<(), CopyError>;
+pub(crate) type Each<'a> = &'a mut dyn FnMut(&Dir, &OsStr, &str) -> Result<(), CopyError>;
 
 struct Walk<'a> {
     base: &'a Place,
@@ -236,7 +236,7 @@ impl<'a> Walk<'a> {
 }
 
 /// The file that a name of an open folder is, without following a link.
-fn is_at(dir: &Dir, name: &OsStr) -> io::Result<Option<(Is, Option<String>)>> {
+pub(crate) fn is_at(dir: &Dir, name: &OsStr) -> io::Result<Option<(Is, Option<String>)>> {
     let m = match dir.symlink_metadata(name) {
         Ok(m) => m,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -291,7 +291,7 @@ fn stamp(_: &cap_std::fs::Metadata) -> Option<String> {
     None
 }
 
-fn parts(rel: &str) -> Option<(Vec<&str>, &str)> {
+pub(crate) fn parts(rel: &str) -> Option<(Vec<&str>, &str)> {
     let mut names: Vec<&str> = rel.split('/').collect();
     let last = names.pop()?;
     let plain = |n: &str| {
@@ -345,7 +345,13 @@ fn look(folder: &Dir, rel: &str, was: Option<&Was>) -> Result<Option<Was>, CopyE
 /// Puts a file of one folder into another, as the system can do it best. `over`: in the place of one
 /// that is there, whole or not at all; otherwise there must be none, by whatever name the system
 /// takes for the same.
-fn put(from: &Dir, name: &OsStr, to: &Dir, rel: &str, over: bool) -> Result<Was, CopyError> {
+pub(crate) fn put(
+    from: &Dir,
+    name: &OsStr,
+    to: &Dir,
+    rel: &str,
+    over: bool,
+) -> Result<Was, CopyError> {
     let err = |e| CopyError::Io(rel.to_owned(), e);
     let Some((names, last)) = parts(rel) else {
         return Err(err(io::ErrorKind::InvalidInput.into()));
@@ -377,7 +383,7 @@ fn put(from: &Dir, name: &OsStr, to: &Dir, rel: &str, over: bool) -> Result<Was,
 
 /// On Linux by the standard library, which ends when a file becomes shorter meanwhile.
 #[cfg(target_os = "linux")]
-fn content(from: &Dir, name: &OsStr, to: &Dir, new: &str) -> io::Result<()> {
+pub(crate) fn content(from: &Dir, name: &OsStr, to: &Dir, new: &str) -> io::Result<()> {
     let mut o = OpenOptions::new();
     o.read(true).follow(FollowSymlinks::No).nonblock(true);
     let mut r = from.open_with(name, &o)?.into_std();
@@ -392,16 +398,16 @@ fn content(from: &Dir, name: &OsStr, to: &Dir, new: &str) -> io::Result<()> {
     w.set_permissions(m.permissions())
 }
 #[cfg(not(target_os = "linux"))]
-fn content(from: &Dir, name: &OsStr, to: &Dir, new: &str) -> io::Result<()> {
+pub(crate) fn content(from: &Dir, name: &OsStr, to: &Dir, new: &str) -> io::Result<()> {
     from.copy(name, to, new).map(drop)
 }
 
 #[cfg(unix)]
-fn link(d: &Dir, contents: &Path, name: &str) -> io::Result<()> {
+pub(crate) fn link(d: &Dir, contents: &Path, name: &str) -> io::Result<()> {
     d.symlink_contents(contents, name)
 }
 #[cfg(not(unix))]
-fn link(_: &Dir, _: &Path, _: &str) -> io::Result<()> {
+pub(crate) fn link(_: &Dir, _: &Path, _: &str) -> io::Result<()> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "links are not copied on this system"))
 }
 
@@ -486,7 +492,7 @@ impl Count {
 }
 
 /// A file by its name, in the folder that holds it.
-fn at<'r>(top: &Dir, rel: &'r str) -> Result<Option<(Dir, &'r str)>, CopyError> {
+pub(crate) fn at<'r>(top: &Dir, rel: &'r str) -> Result<Option<(Dir, &'r str)>, CopyError> {
     let Some((names, last)) = parts(rel) else { return Ok(None) };
     let d = parent(top, &names, false).map_err(|e| CopyError::Io(rel.to_owned(), e))?;
     Ok(d.filter(|d| d.symlink_metadata(last).is_ok_and(|m| m.is_file() || m.is_symlink()))
@@ -508,7 +514,7 @@ impl From<'_> {
     }
 
     /// What lets git say what there was: read only, as all of it is for agents (SI-11).
-    fn git(&self, source: &Dir, f: Each<'_>) -> Result<(), CopyError> {
+    pub(crate) fn git(&self, source: &Dir, f: Each<'_>) -> Result<(), CopyError> {
         let err = |e| CopyError::Io(".git".into(), e);
         let place =
             self.folder.join(".git").map_err(|_| err(io::ErrorKind::InvalidInput.into()))?;
@@ -574,8 +580,7 @@ pub fn changes(
 ) -> Result<Changes, CopyError> {
     let (f, c) = (open(folder)?, open(copy)?);
     let mut all: BTreeMap<String, (Option<Is>, Option<Is>)> = BTreeMap::new();
-    let mut whole = true;
-    let mut found = |rel: &str, is: Option<Is>| -> Result<bool, CopyError> {
+    let d = differing(&c, copy, was, stop, &mut |rel, is| {
         let there = now(&f, rel)?;
         if has(there.as_ref(), is.as_ref()) {
             return Ok(true);
@@ -585,26 +590,6 @@ pub fn changes(
         }
         all.insert(rel.to_owned(), (is, there));
         Ok(true)
-    };
-    for (rel, w) in was {
-        if stop.load(Ordering::Relaxed) {
-            return Err(CopyError::Stopped);
-        }
-        let is = look(&c, rel, Some(w))?.map(|n| n.is);
-        if is.as_ref() != Some(&w.is) && !found(rel, is)? {
-            whole = false;
-            break;
-        }
-    }
-    let may = |_: &Place| true;
-    let walk = Walk { known: Some(was), ..Walk::new(copy, true, &may, stop) };
-    walk.each(&mut |d, n, rel| {
-        if was.contains_key(rel) || !whole {
-            return Ok(());
-        }
-        let is = is_at(d, n).map_err(|e| CopyError::Io(rel.to_owned(), e))?;
-        whole = found(rel, is.map(|i| i.0))?;
-        Ok(())
     })?;
     let mut out = Vec::new();
     for (path, (is, there)) in all {
@@ -623,7 +608,49 @@ pub fn changes(
         let clash = !alike(there.as_ref(), was);
         out.push(Change { clash, path, what, is, there, never, runs });
     }
-    Ok(Changes { all: out, whole, ignored: walk.ignored.get(), odd: walk.odd.get() })
+    Ok(Changes { all: out, whole: d.whole, ignored: d.ignored, odd: d.odd })
+}
+
+/// What came of looking through a copy.
+pub(crate) struct Differing {
+    pub whole: bool,
+    pub ignored: usize,
+    pub odd: usize,
+}
+
+/// Takes a file that is not what it was, or has enough.
+pub(crate) type Found<'a> = &'a mut dyn FnMut(&str, Option<Is>) -> Result<bool, CopyError>;
+
+/// Each file of a copy that is not what was copied, as it is now, until `found` has enough.
+pub(crate) fn differing(
+    c: &Dir,
+    copy: &Place,
+    was: &Files,
+    stop: &AtomicBool,
+    found: Found<'_>,
+) -> Result<Differing, CopyError> {
+    let mut whole = true;
+    for (rel, w) in was {
+        if stop.load(Ordering::Relaxed) {
+            return Err(CopyError::Stopped);
+        }
+        let is = look(c, rel, Some(w))?.map(|n| n.is);
+        if is.as_ref() != Some(&w.is) && !found(rel, is)? {
+            whole = false;
+            break;
+        }
+    }
+    let may = |_: &Place| true;
+    let walk = Walk { known: Some(was), ..Walk::new(copy, true, &may, stop) };
+    walk.each(&mut |d, n, rel| {
+        if was.contains_key(rel) || !whole {
+            return Ok(());
+        }
+        let is = is_at(d, n).map_err(|e| CopyError::Io(rel.to_owned(), e))?;
+        whole = found(rel, is.map(|i| i.0))?;
+        Ok(())
+    })?;
+    Ok(Differing { whole, ignored: walk.ignored.get(), odd: walk.odd.get() })
 }
 
 /// Nothing on the way to a file is anything but a folder, or not there.

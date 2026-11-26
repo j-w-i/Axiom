@@ -23,6 +23,7 @@ use crate::{
     frames::{Frame, Frames, Tail, Way, cut, frame},
     ledger::{Ledger, MOST_ASKED, size, weight},
     talk::{Out, Talk, Word},
+    vars::Hide,
 };
 
 /// A longer line ends the attempt.
@@ -148,6 +149,8 @@ pub(crate) struct Given<F> {
     pub read_only: bool,
     pub person_only: bool,
     pub probed: Option<oneshot::Sender<Probe>>,
+    /// Taken out of all it says.
+    pub hide: Hide,
 }
 
 /// Starts driving; nothing if the process has no pipes.
@@ -453,6 +456,8 @@ impl<F: Frames> Attempt<F> {
         if line.iter().all(u8::is_ascii_whitespace) {
             return;
         }
+        let hidden = self.g.hide.clone();
+        let line = &*hidden.out_of(line);
         let read = serde_json::from_slice::<Value>(line).ok();
         let f = frame(Way::In, line, read.as_ref());
         let raw = cut(&f.text, 4096).0.to_owned();
@@ -641,7 +646,7 @@ impl<F: Frames> Attempt<F> {
             words: over.words,
             ended,
             frames: self.tail.take(),
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+            stderr: String::from_utf8_lossy(&self.g.hide.out_of(&stderr)).into_owned(),
         })));
         while let Some(e) = self.waiting.front() {
             // Nothing runs any more: who listens may take as long as they like.

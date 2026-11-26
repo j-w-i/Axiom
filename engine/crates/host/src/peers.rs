@@ -16,19 +16,16 @@ use axiom_proto::{
 use axiom_tools::{Output, Spec};
 use serde_json::{Value, json};
 
-use crate::{
-    agents::{Agents, Debt, Finished, Floor, Setup, Slot, Told},
-    delegated,
-};
+use crate::agents::{Agents, Debt, Finished, Floor, Setup, Slot, Told};
 
 pub const TOOL: &str = "agent";
 
 /// Agents above one another, at most.
-const DEEPEST: usize = 3;
+pub const DEEPEST: usize = 3;
 /// Runs an agent has begun that it has not been told the end of.
-const OWED: usize = 16;
+pub const OWED: usize = 16;
 /// What one agent tells another, bytes.
-const TEXT: usize = 64 * 1024;
+pub const TEXT: usize = 64 * 1024;
 /// Of an answer, what is passed on.
 const ANSWER: usize = 24 * 1024;
 const LONGEST: u64 = 900;
@@ -128,12 +125,12 @@ fn rank(a: Access) -> u8 {
     }
 }
 
-fn runs_on(s: &Setup) -> String {
+fn runs_on(f: &Floor, s: &Setup) -> String {
     if s.execution.harness == "axiom" {
         s.execution.model.clone().unwrap_or_default()
     } else {
-        let k = delegated::known_as(&s.execution.harness);
-        k.map_or_else(|| s.execution.harness.clone(), |k| k.name.into())
+        let k = f.agents.programs.known_as(&s.execution.harness);
+        k.map_or_else(|| s.execution.harness.clone(), |k| k.name)
     }
 }
 
@@ -164,7 +161,7 @@ pub async fn judge(f: &Floor, args: &Value) -> Other {
     if slot.owed().len() >= OWED {
         return no("it has told as many as it may; wait for some of them".into());
     }
-    let known = delegated::known_as(&p.setup.execution.harness);
+    let known = f.agents.programs.known_as(&p.setup.execution.harness);
     if known.as_ref().is_some_and(|k| k.harness.person_only()) {
         return no(format!("{} may only be given a person's own words", p.setup.name));
     }
@@ -178,7 +175,8 @@ pub async fn judge(f: &Floor, args: &Value) -> Other {
         Access::Ask => "asks before each change",
         _ => "changes files without asking",
     };
-    let mut scope = format!("to {}, which runs on {} and {may}", p.setup.name, runs_on(&p.setup));
+    let mut scope =
+        format!("to {}, which runs on {} and {may}", p.setup.name, runs_on(f, &p.setup));
     if p.setup.apart.is_some() {
         scope.push_str(", in a copy of its own");
     }
@@ -355,7 +353,7 @@ async fn list(f: &Floor) -> Output {
             "{} ({}): {}, {access}{place}, {now}\n",
             p.setup.name,
             p.id.0,
-            runs_on(&p.setup)
+            runs_on(f, &p.setup)
         ));
     }
     if others.is_empty() {

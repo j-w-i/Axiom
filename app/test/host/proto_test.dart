@@ -24,12 +24,17 @@ void main() {
   test('every field arrives', () {
     final b = {for (final e in (messages[0] as Events).events) e.body.runtimeType: e.body};
     final added = b[AgentAdded]! as AgentAdded;
-    expect([added.name, added.parent], ['Lead', 'a_0']);
+    expect([added.name, added.parent, added.apart], ['Lead', 'a_0', true]);
+    expect([added.plan, (b[AgentChanged]! as AgentChanged).plan], [true, true]);
+    final from = added.from!;
+    expect([from.agent, from.item, from.kept], ['a_0', 'i_0', true]);
     final x = added.execution;
     expect(
       [x.harness, x.provider, x.model, x.connection, x.effort, x.environment],
       ['axiom', 'anthropic', 'm', 'c_2', 'high', 'e'],
     );
+    expect(x.speed, 'fast');
+    expect(Execution.decode(x.encode()).encode(), x.encode());
     expect((b[AgentStateChanged]! as AgentStateChanged).state, AgentPhase.asking);
     final ended = b[RunEnded]! as RunEnded;
     expect([ended.outcome, ended.error], [Outcome.failed, 'why']);
@@ -45,6 +50,25 @@ void main() {
       [1, 2, 3, 4, 5],
     );
     expect([u.usage.context, u.provenance], [.5, Known.estimated]);
+    expect([u.usage.prompt, u.usage.cacheWriteLong], [6, 7]);
+    expect([u.of, u.run, u.cut, u.aside], [Covers.turn, 'r_1', true, true]);
+    final on = u.on!;
+    expect(
+      [on.harness, on.lane, on.provider, on.connection],
+      ['claude', Lane.program, 'anthropic', 'c_2'],
+    );
+    expect([on.model, on.answered, on.speed], ['m', 'm-1', 'fast']);
+    final cost = u.cost!;
+    expect([cost.amount, cost.currency], [.25, 'USD']);
+    expect([cost.provenance, cost.of], [Known.estimated, Covers.session]);
+    final total = u.totals.single;
+    expect([total.model, total.usage.output, total.cost], ['m-1', 8, null]);
+    final todo = b[TodoSaid]! as TodoSaid;
+    expect([todo.agent, todo.run, todo.text], ['a_1', 'r_1', '# P']);
+    expect(
+      [for (final s in todo.steps) (s.text, s.state)],
+      [('Look', TodoState.done), ('Do', TodoState.doing), ('Say', TodoState.todo)],
+    );
     expect((messages[1] as Resync).last, 9);
     final s = SessionInfo.decode(
       ((messages[2] as Answered).result! as List<Object?>).first! as Json,
@@ -59,6 +83,66 @@ void main() {
     final begun = cut[0].body as ItemStarted, over = cut[1].body as ItemEnded;
     expect([begun.args, begun.argsCut, tool.argsCut], [null, 300000, 0]);
     expect([over.result, over.resultCut, done.resultCut], [null, 400000, 0]);
+  });
+
+  test('the limits of the host arrive, with words for how much', () {
+    final all = [
+      for (final j in (messages[7] as Answered).result! as List<Object?>)
+        HostLimit.decode(j! as Json),
+    ];
+    expect(
+      [for (final l in all) (l.of, l.what, l.amount)],
+      [
+        ('A run', 'Steps', '200'),
+        ('A run', 'Output tokens', 'No limit'),
+        ('Files', 'One file', '1 KiB'),
+        ('Files', 'One command', '10 minutes'),
+      ],
+    );
+    for (final (most, unit, want) in [
+      (0, 'bytes', '0'),
+      (999, 'count', '999'),
+      (1000, 'count', '1\u{a0}000'),
+      (1234567, 'parsecs', '1\u{a0}234\u{a0}567'),
+      (500, 'bytes', '500 B'),
+      (1536, 'bytes', '1536 B'),
+      (8 << 20, 'bytes', '8 MiB'),
+      (16 << 30, 'bytes', '16 GiB'),
+      (1, 'seconds', '1 second'),
+      (90, 'seconds', '90 seconds'),
+      (3600, 'seconds', '1 hour'),
+      (4 * 3600, 'seconds', '4 hours'),
+    ]) {
+      final l = HostLimit.decode({'of': 'x', 'what': 'y', 'most': most, 'unit': unit});
+      expect(l.amount, want);
+    }
+  });
+
+  test('lists of models and what is said of programs arrive', () {
+    Object? first(int n) => ((messages[n] as Answered).result! as List<Object?>).first;
+    final l = ModelList.decode(first(8)! as Json), m = l.models.single;
+    expect([l.harness, l.connection, l.at], ['axiom', 'c_2', 9]);
+    expect([m.id, m.name, m.context], ['m', 'M', 1000]);
+    expect(
+      [m.efforts, m.speeds],
+      [
+        ['low', 'max'],
+        ['fast'],
+      ],
+    );
+    final p = ProgramInfo.decode(first(9)! as Json);
+    expect([p.harness, p.account, p.name, p.path], ['claude', 'c_2', 'N', '/p']);
+    expect(p.args, ['a']);
+    expect(
+      [for (final v in p.vars) (v.name, v.value, v.lasts)],
+      [('A', '1', true), ('B', null, false)],
+    );
+    expect(const VarSet('A', value: 'v', secret: true).encode(), {
+      'name': 'A',
+      'value': 'v',
+      'secret': true,
+    });
+    expect(const VarSet('A').encode(), {'name': 'A', 'secret': false});
   });
 
   test('what is newer or malformed keeps its place', () {

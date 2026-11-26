@@ -13,7 +13,7 @@ class PrefsFile {
   final String path;
 
   /// Larger is not what was written here.
-  static const _most = 64 * 1024;
+  static const _most = 512 * 1024;
 
   /// Read at the start. What is not there or cannot be read is as it comes.
   Prefs read() {

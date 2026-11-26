@@ -24,15 +24,17 @@ use tokio::{
 
 use crate::{
     agents::{self, Agents, Apart, Finished, Holder, Setup, Spoken, Switch, Told},
-    changes,
+    catalogue, changes,
     connections::{Connections, MemoryVault, Vault},
-    copies,
+    copies::{self, Then},
     faults::{Access, Faults},
     log,
     net::{self, Boxed, Listener},
     outbox::{Follower, Outbox},
     paths::{Lock, Paths, Same, private_dir, private_file},
-    peers, replay,
+    peers, planning,
+    programs::{Programs, Said},
+    replay,
     session::{Joined, Opened, Refused, Say, Session, encode, lines},
     signin::Signins,
     store::Store,
@@ -107,11 +109,11 @@ fn home() -> Option<PathBuf> {
 /// Connections that have not shown the token. One more closes the oldest.
 const STRANGERS: usize = 32;
 /// Connections that have.
-const CLIENTS: usize = 64;
+pub(crate) const CLIENTS: usize = 64;
 /// All of them, with those that are being closed. More wait to be accepted.
 const CONNECTIONS: usize = 128;
 /// Runs at once.
-const RUNS: usize = 128;
+pub(crate) const RUNS: usize = 128;
 /// How many times in a row it may fail to look after its files.
 const LOOKS: u32 = 10;
 /// Bytes read ahead of a request that is being answered.
@@ -309,7 +311,7 @@ impl Host {
             p,
             cfg.home.clone(),
             cfg.scratch.clone(),
-            cfg.programs.clone(),
+            Programs::open(&p.data.join("programs.json"), cfg.vault.clone(), cfg.programs.clone())?,
             cfg.bridge.clone(),
             listener.path(),
         );
@@ -754,11 +756,11 @@ async fn requests(st: &Arc<State>, mut r: Reading, out: &Arc<Outbox>, stranger: 
                 (false, Call::PeerHello { grant }) => {
                     let place = st.clients.clone().try_acquire_owned();
                     match (st.agents.granted(&grant), place) {
-                        (Some(who), Ok(place)) => {
+                        (Some(_), Ok(place)) => {
                             _place = Some(place);
                             peer = Some(grant);
                             stranger = None;
-                            out.answer(req.id, Ok(json!({ "tools": tools_of(&who) })));
+                            out.answer(req.id, Ok(json!({ "tools": tools_of() })));
                         }
                         (None, _) => {
                             let e = WireError::new(ErrorCode::Unauthorised, "wrong key");
@@ -1071,22 +1073,27 @@ fn slow(c: &Call) -> bool {
         Call::Models { .. }
             | Call::Look { .. }
             | Call::Harnesses {}
+            | Call::ProgramSet { .. }
+            | Call::ProgramRemove { .. }
+            | Call::PlanAccept { .. }
             | Call::Changes { .. }
             | Call::CopyChanges { .. }
             | Call::CopyBring { .. }
             | Call::CopyBack { .. }
             | Call::CopyRenew { .. }
             | Call::CopyRemove { .. }
+            | Call::BranchLook { .. }
+            | Call::Branch { .. }
             | Call::ConnectionAdd { .. }
             | Call::ConnectionRemove { .. }
     )
 }
 
-/// What is said to an agent whose copy of the folder is still to be made.
+/// What is said to an agent whose copy of the folder is made, or looked through, first.
 async fn copies_first(st: &Arc<State>, c: &Call) -> bool {
     let Call::Prompt { session, agent, .. } = c else { return false };
     let s = setup(st, session, agent).await;
-    s.is_ok_and(|s| s.apart.is_some_and(|a| !a.made))
+    s.is_ok_and(|s| s.apart.is_some())
 }
 
 /// Most bytes of a client's own name for a prompt.
@@ -1138,6 +1145,130 @@ async fn prompt(
     Ok(json!({ "run": run, "queued": false }))
 }
 
+/// Where a conversation is to be branched.
+struct Place {
+    setup: Setup,
+    /// How many turns a branch has, and whether what it is branched at is in them.
+    n: u64,
+    with: bool,
+    /// Whose files those turns were about, and between which of its turns they are the same.
+    files: copies::Then,
+    /// What they were is kept.
+    kept: bool,
+    /// They are what they are now.
+    now: bool,
+}
+
+async fn place(
+    st: &Arc<State>,
+    session: &SessionId,
+    agent: &AgentId,
+    item: &ItemId,
+) -> Result<Place, WireError> {
+    let no = |e: axiom_journal::Error| internal(e.to_string());
+    let of = setup(st, session, agent).await?;
+    if of.execution.harness != "axiom" {
+        return Err(agents::bad(
+            "its program keeps its own conversation, and cannot go back in it",
+        ));
+    }
+    let n = st.store.cut(session.clone(), agent.clone(), item.clone()).await.map_err(no)?;
+    let (n, with) = n.ok_or_else(|| agents::bad("the conversation cannot be branched here"))?;
+    // Whose turns they are: a branch's first ones are the other's, and so are their files.
+    let (mut who, mut whose) = (agent.clone(), of.clone());
+    let mut kept = false;
+    let mut at;
+    loop {
+        let all = st.store.messages(session.clone(), who.clone()).await.map_err(no)?;
+        at = (axiom_engine::context::since(&all, n).map_err(|e| internal(e.to_string()))?, n);
+        let total = all.len() as u64;
+        if whose.apart.is_some() {
+            kept = copies::has_point(&st.agents, session, &who, &whose, at).await?;
+        }
+        let now = n == total && whose.apart.as_ref().is_some_and(|a| a.made);
+        match whose.from.clone().filter(|f| !kept && !now && n <= f.turns) {
+            Some(f) => {
+                whose = setup(st, session, &f.agent).await?;
+                who = f.agent;
+            }
+            None => {
+                let files = copies::Then { agent: who, setup: whose, at };
+                return Ok(Place {
+                    setup: of,
+                    n,
+                    with,
+                    files,
+                    kept: kept || now,
+                    now: now && !kept,
+                });
+            }
+        }
+    }
+}
+
+async fn branch(
+    st: Arc<State>,
+    session: SessionId,
+    agent: AgentId,
+    item: ItemId,
+    name: String,
+    files: bool,
+) -> Result<Value, WireError> {
+    let p = place(&st, &session, &agent, &item).await?;
+    if agents::full(stored(&st, &session).await?.len()) {
+        return Err(agents::bad("the session has as many agents as it may"));
+    }
+    if files && !p.kept {
+        return Err(agents::bad("what its files were there is not kept"));
+    }
+    let a = st.agents.clone();
+    let written = a.written(&st.store).await?;
+    let mut new = p.setup.clone();
+    new.name = name;
+    // What was handed in is the other's.
+    new.planned = None;
+    new.from = Some(agents::Origin { agent: agent.clone(), turns: p.n });
+    if let Some(apart) = &mut new.apart {
+        apart.made = false;
+        new.workspace.clone_from(&apart.folder);
+    }
+    let mut new = blocking(move || a.setup(new, &written)).await??;
+    let to = AgentId::new();
+    let folder = new.folder().to_owned();
+    if files {
+        let slot = st.agents.slot(&session, &p.files.agent);
+        // As it is now, if nothing of it is at work.
+        let _held = if p.now { Some(slot.hold().await?) } else { None };
+        if p.now {
+            let Then { agent, setup, .. } = &p.files;
+            if !copies::point(&st.agents, &session, agent, setup, p.n).await? {
+                return Err(agents::bad("what its files are cannot be kept"));
+            }
+        }
+        new.workspace = copies::again(&st.agents, &st.store, &session, p.files, &to).await?;
+        if let Some(apart) = &mut new.apart {
+            apart.made = true;
+        }
+    }
+    let made = async {
+        let text = serde_json::to_string(&new).map_err(|e| internal(e.to_string()))?;
+        let kept = st.store.branch(session.clone(), agent.clone(), p.n, to.clone(), text).await;
+        kept.map_err(|e| internal(e.to_string()))?;
+        let from = Branched { agent, item, with: p.with };
+        if let Err(e) = said(&st, &session, agents::added(&to, &new, Some(from))).await {
+            // Nobody knows of it.
+            let _ = st.store.remove_agent(session.clone(), to.clone()).await;
+            return Err(e);
+        }
+        Ok(json!({ "agent": to }))
+    };
+    let r = made.await;
+    if r.is_err() && files {
+        copies::unmake(&st.agents, &session, &to, &folder).await;
+    }
+    r
+}
+
 /// Why a run begins.
 enum Opening {
     /// Something is said to the agent: by a person, or by those in the chain.
@@ -1149,7 +1280,7 @@ enum Opening {
 }
 
 /// Runs of an agent that others' ends may begin, one after another, with no person in between.
-const WAKES: u32 = 8;
+pub(crate) const WAKES: u32 = 8;
 /// Ends that come together are told together.
 const TOGETHER: Duration = Duration::from_millis(300);
 
@@ -1303,6 +1434,14 @@ async fn start(
             }
             let (a, c) = (&st.agents, cancel.clone());
             setup = copies::ready(a, &st.store, &session, &agent, setup.clone(), c).await?;
+            // What its files are, for who goes back to before this.
+            if setup.apart.is_some() && setup.execution.harness == "axiom" && !compact {
+                let n = st.store.turns(session.clone(), agent.clone()).await;
+                let n = n.map_err(|e| internal(e.to_string()))?;
+                if let Err(e) = copies::point(&st.agents, &session, &agent, &setup, n).await {
+                    log::note(format!("keeping what a copy is: {}", e.message));
+                }
+            }
             // What is taken in here is answered: nothing is while room is made.
             let owed =
                 if compact { Vec::new() } else { collect(&st, &session, &agent, &slot).await? };
@@ -1315,10 +1454,11 @@ async fn start(
             if compact {
                 a.compacts();
             }
-            a.begin(&run, word).await.map_err(refused)?;
-            for (item, by, show) in owed {
-                said(&st, &session, axiom_engine::said(&item, &run, &agent, &show, &by)).await?;
-            }
+            // In the order in which it is told.
+            let owed = owed
+                .into_iter()
+                .flat_map(|(item, by, show)| axiom_engine::said(&item, &run, &agent, &show, &by));
+            a.begin(&run, owed.collect(), word).await.map_err(refused)?;
             Ok(a)
         };
         let mut a = match begin.await {
@@ -1369,7 +1509,7 @@ async fn start(
                     break;
                 }
             };
-            if a.begin(&run, None).await.is_err() {
+            if a.begin(&run, Vec::new(), None).await.is_err() {
                 slot.leave().await;
                 break;
             }
@@ -1416,16 +1556,11 @@ impl Switch for State {
     }
 }
 
-fn specs_of(who: &Holder) -> Vec<axiom_tools::Spec> {
-    let mut all = if who.all { axiom_tools::specs() } else { Vec::new() };
-    all.extend(peers::specs());
-    all
-}
-
-/// As they are told to the program.
-fn tools_of(who: &Holder) -> Vec<Value> {
+/// What a program is given of Axiom, as it is told: what is Axiom's to do, and nothing its own tools do
+/// (decision 0017).
+fn tools_of() -> Vec<Value> {
     let shown = |s: axiom_tools::Spec| json!({"name": s.name, "description": s.description, "schema": s.schema});
-    specs_of(who).into_iter().map(shown).collect()
+    peers::specs().into_iter().map(shown).collect()
 }
 
 /// What an installed program asks for.
@@ -1435,77 +1570,15 @@ async fn by_peer(
     tool: String,
     args: Value,
 ) -> Result<Value, WireError> {
-    let Holder { session, agent, all } = who.clone();
-    if !all && tool != peers::TOOL {
+    if tool != peers::TOOL {
         return Err(WireError::new(ErrorCode::Unauthorised, "this key opens nothing else"));
     }
+    let Holder { session, agent } = who;
     let s = st.open(&session).await?;
     let floor =
         agents::Floor { agents: st.agents.clone(), store: st.store.clone(), session: s, agent };
-    let desk = st.agents.desk(&session);
-    if !all {
-        let o = peers::call(&floor, &desk, &args).await;
-        return Ok(json!({"ok": o.ok, "text": o.text}));
-    }
-    // As one of Axiom's own agents, in the run it is in: nothing is done outside one.
-    let slot = st.agents.slot(&session, &floor.agent);
-    let Some((run, run_cancel)) = slot.now().await else {
-        return Err(agents::bad("the agent is in no run"));
-    };
-    let setup = setup(st, &session, &floor.agent).await?;
-    let site = agents::site_of(&st.agents, &setup, &floor.agent, &slot).await?;
-    // Stopped by a person, or no longer waited for: either way it ends in order, with its end said.
-    let (gone, cancel) = watch::channel(false);
-    let _gone = Leaves(gone);
-    let work = tokio::spawn(async move {
-        let mut cancel = either(run_cancel, cancel);
-        let specs = specs_of(&who);
-        let seen = slot.seen();
-        let hands = axiom_engine::Hands {
-            id: &floor.agent,
-            stage: &floor,
-            desk: &desk,
-            site: &site,
-            seen: &seen,
-            specs: &specs,
-        };
-        hands.tool(&run, &tool, &args, &mut cancel).await
-    });
-    match work.await {
-        Ok(Ok((text, ok))) => Ok(json!({"ok": ok, "text": text})),
-        Ok(Err(e)) => Err(agents::bad(e.to_string())),
-        Err(_) => Err(internal("the tool failed")),
-    }
-}
-
-/// Says that nobody waits any more.
-struct Leaves(watch::Sender<bool>);
-impl Drop for Leaves {
-    fn drop(&mut self) {
-        let _ = self.0.send(true);
-    }
-}
-
-/// True once one of them is.
-fn either(a: watch::Receiver<bool>, b: watch::Receiver<bool>) -> watch::Receiver<bool> {
-    let (tx, rx) = watch::channel(*a.borrow() || *b.borrow());
-    // One that nobody can make true any more says nothing of the other.
-    let is = |mut r: watch::Receiver<bool>| async move {
-        if r.wait_for(|x| *x).await.is_err() {
-            std::future::pending::<()>().await;
-        }
-    };
-    tokio::spawn(async move {
-        tokio::select! {
-            () = is(a) => {}
-            () = is(b) => {}
-            () = tx.closed() => return,
-        }
-        let _ = tx.send(true);
-        // As long as somebody looks at it.
-        tx.closed().await;
-    });
-    rx
+    let o = peers::call(&floor, &st.agents.desk(&session), &args).await;
+    Ok(json!({"ok": o.ok, "text": o.text}))
 }
 
 async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
@@ -1527,6 +1600,9 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 status["damaged"] = d.as_str().into();
             }
             Ok(status)
+        }
+        Call::Limits {} => {
+            serde_json::to_value(crate::limits::kept()).map_err(|e| internal(e.to_string()))
         }
         Call::Shutdown { force } => {
             if !st.close(force) {
@@ -1605,7 +1681,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             begun.await.map_err(|_| internal("the run did not start"))??;
             Ok(json!({ "run": run, "agent": agent }))
         }
-        Call::AgentAdd { session, name, execution, access, trust, instructions, apart } => {
+        Call::AgentAdd { session, name, execution, access, trust, instructions, apart, plan } => {
             let workspace = workspace(st, &session).await?;
             if agents::full(stored(st, &session).await?.len()) {
                 return Err(agents::bad("the session has as many agents as it may"));
@@ -1631,13 +1707,16 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                     resume,
                     began,
                     apart,
+                    from: None,
+                    plan,
+                    planned: None,
                 };
                 a.setup(s, &written)
             })
             .await??;
             let agent = AgentId::new();
             keep(st, &session, &agent, &setup).await?;
-            if let Err(e) = said(st, &session, agents::added(&agent, &setup)).await {
+            if let Err(e) = said(st, &session, agents::added(&agent, &setup, None)).await {
                 // Nobody knows of it.
                 let _ = st.store.remove_agent(session, agent).await;
                 return Err(e);
@@ -1723,12 +1802,33 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let all = blocking(move || a.harnesses(&written)).await??;
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
         }
+        Call::Programs {} => {
+            serde_json::to_value(st.agents.programs.list()).map_err(|e| internal(e.to_string()))
+        }
+        Call::ProgramSet { harness, account, name, path, args, vars } => {
+            let a = st.agents.clone();
+            let written = a.written(&st.store).await?;
+            let said = Said { harness, account, name, path, args, vars };
+            let harness = blocking(move || a.program(said, &written)).await??;
+            Ok(json!({ "harness": harness }))
+        }
+        Call::ProgramRemove { harness, account } => {
+            let a = st.agents.clone();
+            let remove = move || {
+                a.programs.remove(&harness, account.as_deref())?;
+                // What another program of that name says is another matter.
+                a.catalogue.forget(|l| l.harness == harness);
+                Ok::<_, WireError>(())
+            };
+            blocking(remove).await??;
+            Ok(json!({}))
+        }
         Call::Look { path } => {
             let a = st.agents.clone();
             let all = blocking(move || a.look(&path)).await??;
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
         }
-        Call::AgentSet { session, agent, execution, access } => {
+        Call::AgentSet { session, agent, execution, access, plan } => {
             let slot = st.agents.slot(&session, &agent);
             // Nothing begins meanwhile.
             let _held = slot.hold().await?;
@@ -1742,7 +1842,13 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 setup.resume = None;
             }
             setup.execution = execution.unwrap_or(setup.execution);
-            setup.access = access.unwrap_or(setup.access);
+            setup.access = match (access, plan) {
+                (Some(a), _) => a,
+                (None, Some(true)) => axiom_proto::Access::Read,
+                (None, _) => setup.access,
+            };
+            // Who may do something else is not asked for a plan any more.
+            setup.plan = plan.unwrap_or(setup.plan && access.is_none());
             let a = st.agents.clone();
             let written = a.written(&st.store).await?;
             let setup = blocking(move || a.setup(setup, &written)).await??;
@@ -1752,6 +1858,29 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             slot.changed().await;
             said(st, &session, agents::changed(&agent, &setup)).await?;
             Ok(json!({}))
+        }
+        Call::PlanAccept { session, agent, item, access, text } => {
+            if text.as_ref().is_some_and(|t| t.trim().is_empty() || t.len() > planning::MOST) {
+                return Err(agents::bad("a plan has between 1 and 65536 bytes"));
+            }
+            let slot = st.agents.slot(&session, &agent);
+            {
+                // Nothing begins meanwhile.
+                let _held = slot.hold().await?;
+                let mut setup = setup(st, &session, &agent).await?;
+                if !setup.plan || setup.planned.as_ref() != Some(&item) {
+                    return Err(agents::bad("this is not the plan the agent has handed in last"));
+                }
+                (setup.plan, setup.planned, setup.access) = (false, None, access);
+                let a = st.agents.clone();
+                let written = a.written(&st.store).await?;
+                let setup = blocking(move || a.setup(setup, &written)).await??;
+                keep(st, &session, &agent, &setup).await?;
+                st.agents.desk(&session).forget();
+                slot.changed().await;
+                said(st, &session, agents::changed(&agent, &setup)).await?;
+            }
+            prompt(st, session, agent, planning::accepted(text), None, None).await
         }
         Call::Open { path } => {
             // A folder, by its whole name: what a window is given is what will be worked in.
@@ -1763,6 +1892,14 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let windows = st.open.receiver_count();
             st.open.send_replace(path);
             Ok(json!({ "windows": windows }))
+        }
+        Call::BranchLook { session, agent, item } => {
+            let p = place(st, &session, &agent, &item).await?;
+            let info = BranchInfo { apart: p.setup.apart.is_some(), files: p.kept };
+            serde_json::to_value(info).map_err(|e| internal(e.to_string()))
+        }
+        Call::Branch { session, agent, item, name, files } => {
+            to_its_end(st, move |st| branch(st, session, agent, item, name, files)).await
         }
         Call::Compact { session, agent } => {
             if setup(st, &session, &agent).await?.execution.harness != "axiom" {
@@ -1798,7 +1935,6 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             if let (Some(words), Some(agent)) = (words, asked)
                 && let Ok(s) = setup(st, &session, &agent).await
                 && s.execution.harness != "axiom"
-                && !s.hands()
                 // Not if it was not to be started at all.
                 && st.agents.slot(&session, &agent).has_program().await
             {
@@ -1818,8 +1954,14 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
         }
         Call::ConnectionRemove { connection } => {
             // To its end, also when who asked is gone.
-            let leave = tokio::spawn(st.agents.connections.clone().leave(connection));
+            let leave = tokio::spawn(st.agents.connections.clone().leave(connection.clone()));
             let ended = leave.await.map_err(|e| internal(e.to_string()))??;
+            let a = st.agents.clone();
+            let forget = move || {
+                a.catalogue.forget(|l| l.connection.as_deref() == Some(&connection));
+                a.programs.forget(&connection)
+            };
+            blocking(forget).await??;
             Ok(ended.map_or_else(|| json!({}), |e| json!({ "ended": e })))
         }
         Call::SigninBegin { connection } => {
@@ -1832,7 +1974,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
         }
         Call::SigninCancel { signin } => st.signins.cancel(&signin).map(|()| json!({})),
         Call::Models { connection } => {
-            let a = st.agents.clone();
+            let (a, of) = (st.agents.clone(), connection.clone());
             let client = blocking(move || a.connections.client(&connection)).await??;
             // A provider that does not list them in one answer: they are named by hand.
             let all = match timeout(LISTING, client.list_models()).await {
@@ -1840,23 +1982,34 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 Ok(Err(axiom_model::CallError::Encode(_))) => Vec::new(),
                 Ok(r) => r.map_err(|e| agents::bad(e.to_string()))?,
             };
-            let quirks = |id: &str| client.profile().quirks(id);
-            let all: Vec<_> = all
+            let a = st.agents.clone();
+            let all: Vec<ModelInfo> = all
                 .into_iter()
-                .map(|m| {
-                    let (mut id, mut name) = (m.id, m.name);
-                    limits::clip(&mut id, limits::TITLE);
-                    if let Some(n) = &mut name {
-                        limits::clip(n, limits::TITLE);
-                    }
-                    {
-                        let q = quirks(&id);
-                        let effort = q.effort.is_some();
-                        axiom_proto::ModelInfo { context: q.context, name, effort, id }
-                    }
-                })
+                .map(|m| catalogue::fit(catalogue::about(client.profile(), m)))
                 .collect();
+            let keep = all.clone();
+            if !keep.is_empty() {
+                blocking(move || a.catalogue.put("axiom", Some(&of), keep)).await?;
+            }
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
+        }
+        Call::ModelsKnown {} => {
+            serde_json::to_value(st.agents.catalogue.list()).map_err(|e| internal(e.to_string()))
+        }
+        Call::ModelAbout { connection, model } => {
+            if model.trim().is_empty() || limits::text_len(&model) > limits::TITLE {
+                return Err(agents::bad("a model's name has between 1 and 500 bytes"));
+            }
+            let a = st.agents.clone();
+            let about = move || {
+                if let Some(m) = a.catalogue.find("axiom", Some(&connection), &model) {
+                    return Ok(m);
+                }
+                let client = a.connections.client(&connection)?;
+                let named = axiom_model::ModelInfo::named(model);
+                Ok::<_, WireError>(catalogue::about(client.profile(), named))
+            };
+            serde_json::to_value(blocking(about).await??).map_err(|e| internal(e.to_string()))
         }
         Call::Audit { after, limit } => {
             let all =

@@ -31,6 +31,21 @@ Future<bool> browse(String address) async {
 Future<String?> Function(String? at) folders = (at) =>
     getDirectoryPath(initialDirectory: at, confirmButtonText: 'Choose');
 
+/// The same for a file.
+@visibleForTesting
+Future<String?> Function(String? at) files = (at) async =>
+    (await openFile(initialDirectory: at, confirmButtonText: 'Choose'))?.path;
+
+/// The file a person chose, or null. Only because they pressed something that says so.
+Future<String?> chooseFile(String at) async {
+  try {
+    final cut = at.lastIndexOf(RegExp(r'[/\\]'));
+    return await files(cut > 0 ? at.substring(0, cut) : null);
+  } on Object {
+    return null;
+  }
+}
+
 /// The folder a person chose, or null. Only because they pressed something that says so.
 Future<String?> chooseFolder(String at) async {
   try {

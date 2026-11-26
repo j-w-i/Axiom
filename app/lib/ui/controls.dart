@@ -208,12 +208,14 @@ class AxSegments<T> extends StatelessWidget {
                       : s.hovered
                       ? t.colors.ink2
                       : t.colors.ink3;
-                  return SizedBox(
-                    height: t.density.control - 4,
+                  // As tall as a key, and taller where the words are larger.
+                  return ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: t.density.control - 4),
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: icon == null ? 11 : 8),
+                      padding: EdgeInsets.symmetric(horizontal: icon == null ? 11 : 8, vertical: 2),
                       child: Center(
                         widthFactor: 1,
+                        heightFactor: 1,
                         child: icon == null
                             ? Text(name, style: t.type.labelStrong.ink(ink))
                             : AxGlyph(icon, color: ink),
@@ -404,6 +406,7 @@ class AxField extends StatefulWidget {
     this.error,
     this.enabled = true,
     this.secret = false,
+    this.sunken = false,
     this.leading,
     this.onSubmitted,
     this.onChanged,
@@ -418,6 +421,9 @@ class AxField extends StatefulWidget {
   final FocusNode? focusNode;
   final int lines;
   final bool mono, enabled, secret;
+
+  /// On a card, which is as light as a field.
+  final bool sunken;
   final Widget? leading;
   final ValueChanged<String>? onSubmitted, onChanged;
   @override
@@ -461,7 +467,11 @@ class _AxFieldState extends State<AxField> {
           child: ListenableBuilder(
             listenable: _f,
             builder: (_, child) => Surface(
-              widget.enabled ? c.field : c.keyDown,
+              !widget.enabled
+                  ? c.keyDown
+                  : widget.sunken
+                  ? c.track
+                  : c.field,
               radius: AxRadius.key,
               ring: bad
                   ? c.fault

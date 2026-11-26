@@ -81,6 +81,27 @@ pub fn take(at: &Place, written: &Reach) -> Result<Program, NotFound> {
     Ok(Program(real))
 }
 
+/// The folder a person's program was named in, as a place to look for others: what it starts often
+/// lies beside it. Nobody but its owner may put anything there.
+pub fn beside(at: &Place, written: &Reach) -> Result<Place, NotFound> {
+    let cannot = |why: String| NotFound::Cannot(at.clone(), why);
+    let dir = at.as_path().parent().ok_or_else(|| cannot("it is in no folder".into()))?;
+    let real = std::fs::canonicalize(dir).map_err(|e| cannot(e.to_string()))?;
+    let real = Place::new(real).map_err(|e| cannot(e.to_string()))?;
+    if inside(&real, written) {
+        return Err(NotFound::Inside(real));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let m = std::fs::metadata(real.as_path()).map_err(|e| cannot(e.to_string()))?;
+        if m.permissions().mode() & 0o002 != 0 {
+            return Err(NotFound::Open(real));
+        }
+    }
+    Ok(real)
+}
+
 /// Also by the names that links in between lead to, and whatever the case.
 pub(crate) fn inside(p: &Place, written: &Reach) -> bool {
     written.roots().iter().any(|w| {

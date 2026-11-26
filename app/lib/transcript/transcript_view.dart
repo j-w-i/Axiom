@@ -165,8 +165,18 @@ class TranscriptRows {
 /// block being written rebuilds alone, at most once per frame. What is being read stays where it is;
 /// at the end, the view follows.
 class TranscriptView extends StatefulWidget {
-  const TranscriptView(this.agent, {super.key, this.onLink, this.onQuote, this.takes = false});
+  const TranscriptView(
+    this.agent, {
+    super.key,
+    this.onLink,
+    this.onQuote,
+    this.onBranch,
+    this.takes = false,
+  });
   final AgentModel agent;
+
+  /// Goes on from an item in another conversation.
+  final void Function(ItemModel)? onBranch;
 
   /// What was said can be copied whole, and quoted if somebody takes it.
   final bool takes;
@@ -434,6 +444,8 @@ class TranscriptViewState extends State<TranscriptView> {
               onToggle: _toggle,
               takes: widget.takes,
               onQuote: widget.onQuote == null ? null : _quote,
+              onBranch: widget.onBranch,
+              canBranch: widget.agent.canBranch,
             ),
           ),
         ),
@@ -657,9 +669,12 @@ class _RowView extends StatelessWidget {
     this.onLink,
     this.takes = false,
     this.onQuote,
+    this.onBranch,
+    this.canBranch,
   });
   final bool takes;
-  final void Function(ItemModel)? onQuote;
+  final void Function(ItemModel)? onQuote, onBranch;
+  final bool Function(ItemModel)? canBranch;
   final List<TranscriptRow> rows;
   final int at;
   final bool Function(ItemModel) opened;
@@ -672,6 +687,8 @@ class _RowView extends StatelessWidget {
       : Taking(
           text: () => i.source,
           onQuote: onQuote == null ? null : () => onQuote!(i),
+          onBranch: onBranch == null || !(canBranch?.call(i) ?? false) ? null : () => onBranch!(i),
+          branch: i.kind == ItemKind.prompt ? 'Edit' : 'Branch',
           stops: stops,
           child: w,
         );
@@ -963,6 +980,17 @@ class _BlockViewState extends State<BlockView> {
         : b.kind == BlockKind.item
         ? 6.0
         : 11.0;
+    if (widget.voice == ItemKind.plan && widget.opens) {
+      child = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SelectionContainer.disabled(child: Text('Plan', style: t.type.label.ink(c.ink3))),
+          const SizedBox(height: 4),
+          child,
+        ],
+      );
+    }
     if (asked && widget.opens && widget.by.isNotEmpty) {
       child = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1028,6 +1056,7 @@ class _BlockViewState extends State<BlockView> {
       label: switch (widget.voice) {
         ItemKind.prompt => widget.by.isEmpty ? 'Request' : 'Request from ${widget.by}',
         ItemKind.reasoning => 'Reasoning',
+        ItemKind.plan => 'Plan',
         _ => 'Answer',
       },
       child: child,
@@ -1372,6 +1401,7 @@ class ToolRow extends StatelessWidget {
     'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => AxIcon.terminal,
     'fetch' || 'webfetch' || 'websearch' => AxIcon.web,
     'delegate' || 'agent' || 'task' => AxIcon.delegate,
+    'plan' || 'todo' || 'todowrite' || 'taskcreate' || 'taskupdate' || 'tasklist' => AxIcon.list,
     _ => AxIcon.more,
   };
 
@@ -1388,6 +1418,11 @@ class ToolRow extends StatelessWidget {
     'shell' || 'test' || 'job' || 'bash' || 'execute' || 'exec_command' => ('Running', 'Ran'),
     'fetch' || 'webfetch' || 'websearch' => ('Fetching', 'Fetched'),
     'delegate' || 'agent' || 'task' => ('Working with another agent', 'Worked with another agent'),
+    'plan' => ('Writing a plan', 'Wrote a plan'),
+    'todo' ||
+    'todowrite' ||
+    'taskcreate' ||
+    'taskupdate' => ('Updating its plan', 'Updated its plan'),
     _ => null,
   };
 
@@ -1414,7 +1449,9 @@ class ToolRow extends StatelessWidget {
     for (final k in const ['path', 'file_path', 'command', 'pattern', 'url', 'query', 'title']) {
       if (args[k] case final v?) return '$v';
     }
-    return '${args.values.firstOrNull ?? ''}';
+    // A list is not a line, and is shown where it belongs.
+    final first = args.values.firstOrNull;
+    return first is List || first is Map ? '' : '${first ?? ''}';
   }
 
   @override
@@ -1430,7 +1467,12 @@ class ToolRow extends StatelessWidget {
     }
     // A patch is named by what it changed, and never by its own text.
     final patch = isPatch(item.name);
-    final detail = patch ? patched(item).join(', ') : detailOf(args);
+    final detail = patch
+        ? patched(item).join(', ')
+        // It stands under it, whole.
+        : item.name == 'plan'
+        ? ''
+        : detailOf(args);
     final shown = item.argsCut > 0 && !patch
         ? '${_bytes(item.argsCut)} of arguments, not kept'
         : oneLine(literal(cutTo(detail, 800)), 400);

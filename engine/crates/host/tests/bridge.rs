@@ -75,6 +75,7 @@ impl T {
             connection,
             effort: None,
             environment: None,
+            ..Execution::default()
         };
         let call = Call::AgentAdd {
             session: self.s.clone(),
@@ -84,6 +85,7 @@ impl T {
             trust: true,
             instructions: vec![],
             apart: false,
+            plan: false,
         };
         AgentId(self.c.call(call).await.unwrap()["agent"].as_str().unwrap().into())
     }
@@ -341,6 +343,7 @@ async fn its_key_opens_one_tool_and_dies_with_it() {
             agent: t.agent().await,
             execution: None,
             access: Some(Access::Ask),
+            plan: None,
         };
         let _ = t.c.call(set).await;
     }
@@ -371,281 +374,86 @@ impl T {
     }
 }
 
-// Claude Code with Axiom's tools in place of its own.
-
-fn claude_script(more: &[Value]) -> Vec<Value> {
-    let mut all = vec![
+/// It has its own tools, and of Axiom's only what is Axiom's to do (decision 0017).
+#[tokio::test]
+async fn a_program_keeps_its_own_tools() {
+    let mut t = T::new(&[
         json!({"hear": {"type": "control_request", "request": {"subtype": "initialize"}}, "as": "i"}),
         json!({"say": {"type": "control_response", "response": {"subtype": "success", "request_id": "$i/request_id", "response": {"commands": [], "models": []}}}}),
         json!({"hear": {"type": "user"}, "as": "p"}),
-        json!({"say": {"type": "system", "subtype": "init", "uuid": "u1", "session_id": "$p/session_id", "claude_code_version": "2.1.330", "cwd": "/w", "tools": [], "model": "claude-opus-5-5", "permissionMode": "dontAsk"}}),
-        // What it says of a call of Axiom's is not shown beside what Axiom says of it.
-        json!({"say": {"type": "assistant", "uuid": "u2", "session_id": "$p/session_id", "parent_tool_use_id": null, "message": {"id": "m1", "type": "message", "role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "mcp__axiom__list", "input": {"path": "."}}]}}}),
-    ];
-    all.extend_from_slice(more);
-    all
-}
-
-async fn with_hands(access: Access) -> (T, AgentId, RunId) {
-    let mut t = T::new(&claude_script(&[
         json!({"hear": {"type": "control_request", "request": {"subtype": "interrupt"}}, "as": "x"}),
-        json!({"say": {"type": "control_response", "response": {"subtype": "success", "request_id": "$x/request_id", "response": {}}}}),
-        json!({"say": {"type": "result", "subtype": "error_during_execution", "uuid": "u3", "session_id": "$p/session_id", "is_error": true, "num_turns": 1, "stop_reason": null, "usage": {}, "user_message_uuids": ["$p/uuid"]}}),
-    ]))
+    ])
     .await;
-    let execution = Execution {
-        harness: "claude".into(),
-        provider: None,
-        model: None,
-        connection: None,
-        effort: None,
-        environment: Some("axiom".into()),
-    };
-    let add = |e: Execution, access| Call::AgentAdd {
+    let add = |environment: Option<&str>, access, plan| Call::AgentAdd {
         session: t.s.clone(),
         name: "Lead".into(),
-        execution: e,
+        execution: Execution {
+            harness: "claude".into(),
+            environment: environment.map(str::to_owned),
+            ..Execution::default()
+        },
         access,
         trust: false,
         instructions: vec![],
         apart: false,
+        plan,
     };
-    // Its own way of asking is in no documentation; Axiom's needs none.
-    let own = add(Execution { environment: None, ..execution.clone() }, Access::Ask);
-    let odd = add(Execution { environment: Some("x".into()), ..execution.clone() }, access);
-    let goose = add(Execution { harness: "goose".into(), ..execution.clone() }, Access::Ask);
-    let good = add(execution, access);
-    for (call, why) in
-        [(own, "no mode"), (odd, "no such environment"), (goose, "no such environment")]
-    {
+    let refused = [
+        (add(Some("axiom"), Access::Work, false), "its own tools only"),
+        (add(None, Access::Read, true), "cannot be asked for a plan"),
+        (add(None, Access::Ask, false), "no mode"),
+    ];
+    let good = add(None, Access::Work, false);
+    for (call, why) in refused {
         let e = t.c.call(call).await.unwrap_err().to_string();
         assert!(e.contains(why), "{e}");
     }
     let v = t.c.call(good).await.unwrap();
     let a = AgentId(v["agent"].as_str().unwrap().into());
-    let call =
-        Call::Prompt { session: t.s.clone(), agent: a.clone(), text: "go".into(), key: None };
-    let run = RunId(t.c.call(call).await.unwrap()["run"].as_str().unwrap().into());
-    let (id, digest, subject) = t.question().await;
-    for part in [
-        "--tools ''",
-        "--permission-mode dontAsk",
-        "--strict-mcp-config",
-        "--setting-sources user",
-        "'mcp__axiom__*'",
-    ] {
-        assert!(subject.contains(part), "{part}: {subject}");
-    }
-    t.answer(id, Answer::Once, digest).await;
-    (t, a, run)
-}
-
-impl T {
-    async fn mcp(&self) -> (B, Vec<String>) {
-        let seen = self.f.dir.path().join("bin/seen.json");
-        for _ in 0..1000 {
-            if let Ok(s) = std::fs::read_to_string(&seen)
-                && let Ok(v) = serde_json::from_str::<Value>(&s)
-            {
-                let args: Vec<String> = v["args"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|a| a.as_str().unwrap().into())
-                    .collect();
-                assert_eq!(v["env"]["ENABLE_TOOL_SEARCH"], "false");
-                let at = args.iter().position(|a| a == "--mcp-config").unwrap();
-                let c: Value = serde_json::from_str(&args[at + 1]).unwrap();
-                let s = &c["mcpServers"]["axiom"];
-                let to =
-                    s["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_owned());
-                return (B::start(s["command"].as_str().unwrap(), &to.collect::<Vec<_>>()), args);
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("it was never started");
-    }
-    fn file(&self, n: &str) -> Option<String> {
-        std::fs::read_to_string(self.f.dir.path().join("w").join(n)).ok()
-    }
-}
-impl B {
-    async fn tool(&mut self, id: u64, name: &str, args: Value) {
-        self.say(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
-            "params": {"name": name, "arguments": args}}))
-            .await;
-    }
-    async fn told(&mut self, id: u64) -> (String, bool) {
-        let v = self.hear().await;
-        assert_eq!(v["id"], id, "{v}");
-        let r = &v["result"];
-        (r["content"][0]["text"].as_str().unwrap().to_owned(), r["isError"] == false)
-    }
-}
-
-#[tokio::test]
-async fn its_tools_are_axioms_and_so_is_what_holds_them_back() {
-    let (mut t, a, _) = with_hands(Access::Ask).await;
-    let (mut b, args) = t.mcp().await;
-    let words = args.iter().position(|a| a == "--append-system-prompt-file").unwrap();
-    let words = std::fs::read_to_string(&args[words + 1]).unwrap();
-    assert!(words.contains("a person is asked") && words.contains("Your only tools"), "{words}");
-    b.say(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
-    let v = b.hear().await;
-    let tools = v["result"]["tools"].as_array().unwrap();
-    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(
-        names,
-        [
-            "read", "write", "edit", "patch", "list", "glob", "search", "shell", "job", "fetch",
-            "agent"
-        ]
-    );
-    assert!(tools.iter().all(|t| t["_meta"]["anthropic/maxResultSizeChars"] == 200_000));
-    // What may be looked at is not asked about, and is shown once.
-    std::fs::write(t.f.dir.path().join("w/a.txt"), "one\n").unwrap();
-    b.tool(2, "read", json!({"path": "a.txt"})).await;
-    assert!(b.told(2).await.0.contains("one"));
-    // A change is, and a no is a no.
-    b.tool(3, "write", json!({"path": "n.txt", "content": "x\n"})).await;
-    let (id, digest, subject) = t.question().await;
-    assert!(subject.contains("+x"), "{subject}");
-    let call = Call::Answer {
-        session: t.s.clone(),
-        request: id,
-        answer: Answer::Deny,
-        digest,
-        words: Some("not there".into()),
-    };
+    let call = Call::Prompt { session: t.s.clone(), agent: a, text: "go".into(), key: None };
     t.c.call(call).await.unwrap();
-    let (said, ok) = b.told(3).await;
-    assert!(!ok && said.contains("a person said no. They said: not there"), "{said}");
-    assert!(t.file("n.txt").is_none());
-    // It is told with its no, and not once more as if its person had spoken.
-    assert!(!history(&t.f, &t.s).iter().any(|b| format!("{b:?}").contains("I said no")));
-    b.tool(4, "write", json!({"path": "n.txt", "content": "x\n"})).await;
-    let (id, digest, _) = t.question().await;
+    let (id, digest, subject) = t.question().await;
+    assert!(subject.contains("--allowedTools mcp__axiom__agent"), "{subject}");
+    for not in ["--tools", "mcp__axiom__*", "--strict-mcp-config", "--append-system"] {
+        assert!(!subject.contains(not), "{not}: {subject}");
+    }
     t.answer(id, Answer::Once, digest).await;
-    assert!(b.told(4).await.1);
-    assert_eq!(t.file("n.txt").as_deref(), Some("x\n"));
-    // A command runs in Axiom's sandbox: not outside the folder, not on the network, no secret.
-    b.tool(5, "shell", json!({"command": "echo in > in.txt; echo out > ../out.txt; echo done"}))
-        .await;
-    let (id, digest, _) = t.question().await;
-    t.answer(id, Answer::Once, digest).await;
-    let (said, _) = b.told(5).await;
-    assert!(said.contains("done") && t.file("in.txt").is_some(), "{said}");
-    assert!(!t.f.dir.path().join("out.txt").exists());
-    // What it is not allowed at all, nobody is asked about.
-    b.tool(6, "write", json!({"path": "../../x", "content": "x"})).await;
-    assert!(!b.told(6).await.1);
-    b.tool(7, "write", json!({"path": ".git/config", "content": "x"})).await;
-    assert!(b.told(7).await.0.contains("protected"));
-    for (id, tool, args) in [(8, "fly", json!({})), (9, "read", json!("x"))] {
-        b.tool(id, tool, args).await;
-        assert!(!b.told(id).await.1, "{tool}");
-    }
-    // Whoever asked waits no longer: it is taken back, and the call ends.
-    b.tool(10, "shell", json!({"command": "touch late"})).await;
-    let (id, digest, _) = t.question().await;
-    b.say(
-        json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 10}}),
-    )
-    .await;
-    assert_ne!(t.closed().await, "allowed");
-    let late = Call::Answer {
-        session: t.s.clone(),
-        request: id,
-        answer: Answer::Once,
-        digest,
-        words: None,
-    };
-    assert!(t.c.call(late).await.is_err());
-    assert!(t.file("late").is_none());
-    let v = t.c.call(Call::Audit { after: 0, limit: 20 }).await.unwrap();
-    let log: Vec<axiom_policy::audit::Entry> = serde_json::from_value(v).unwrap();
-    use axiom_policy::audit::Containment as C;
-    let of: Vec<_> = log.iter().map(|e| (e.tool.as_str(), e.containment)).collect();
-    assert_eq!(of, [("harness/claude", C::None), ("write", C::Axiom), ("shell", C::Axiom)]);
-    assert!(log.iter().all(|e| e.chain == [a.clone()] && e.answered.is_some()));
-    // Each on the transcript once, by Axiom's own word for it.
-    let mut c = t.f.client().await;
-    c.call(Call::Follow { session: t.s.clone(), after: 0 }).await.unwrap();
-    let mut names = Vec::new();
-    while names.len() < 9 {
-        let m = c.next_within(Duration::from_secs(10)).await.unwrap().unwrap();
-        if let Message::Events { events, .. } = m {
-            names.extend(events.into_iter().filter_map(|e| match e.body {
-                Body::ItemStarted { kind: ItemKind::Tool, name, .. } => Some(name),
-                _ => None,
-            }));
-        }
-    }
-    assert_eq!(
-        names,
-        ["read", "write", "write", "shell", "write", "write", "fly", "read", "shell"]
-    );
-}
-
-/// SI-24: stopped by a person, what it does stops; and outside a run nothing is done for it.
-#[tokio::test]
-async fn it_is_stopped_with_what_it_does() {
-    let (mut t, _, run) = with_hands(Access::Work).await;
-    let (mut b, args) = t.mcp().await;
-    let mark = format!("8{:05}", std::process::id() % 100_000);
-    let alive = || {
-        let o = std::process::Command::new("/bin/ps").args(["-axo", "args="]).output().unwrap();
-        String::from_utf8_lossy(&o.stdout).lines().any(|l| l.ends_with(&format!("sleep {mark}")))
-    };
-    b.tool(1, "job", json!({"do": "start", "command": format!("sleep {mark}")})).await;
-    assert!(b.told(1).await.1);
-    while !alive() {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    b.tool(2, "shell", json!({"command": "echo begun; sleep 60; touch late"})).await;
-    t.until(|b| matches!(b, Body::ItemDelta { text, .. } if text.contains("begun")).then_some(()))
-        .await;
-    let now = std::time::Instant::now();
-    t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
-    let outcome = t
-        .until(|b| match b {
-            Body::RunEnded { outcome, .. } => Some(*outcome),
-            _ => None,
-        })
-        .await;
-    assert_eq!(outcome, Outcome::Cancelled);
-    let (said, ok) = b.told(2).await;
-    assert!(!ok && said.contains("Not done") || said.contains("Stopped"), "{said}");
-    assert!(now.elapsed() < Duration::from_secs(20));
-    assert!(t.file("late").is_none());
-    // Also what ran in the background.
-    let now = std::time::Instant::now();
-    while alive() {
-        assert!(now.elapsed() < Duration::from_secs(10), "a job runs on");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    let mut refused = false;
-    for _ in 0..200 {
-        b.tool(3, "write", json!({"path": "after.txt", "content": "x"})).await;
-        let (said, ok) = b.told(3).await;
-        if !ok {
-            assert!(said.contains("in no run"), "{said}");
-            refused = true;
+    // What it is given is that, and no more.
+    let seen = t.f.dir.path().join("bin/seen.json");
+    let mut args = Vec::new();
+    for _ in 0..1000 {
+        if let Ok(s) = std::fs::read_to_string(&seen)
+            && let Ok(v) = serde_json::from_str::<Value>(&s)
+        {
+            args = v["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| a.as_str().unwrap().to_owned())
+                .collect();
             break;
         }
-        std::fs::remove_file(t.f.dir.path().join("w/after.txt")).unwrap();
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(refused && t.file("after.txt").is_none());
-    let words = args.iter().position(|a| a == "--append-system-prompt-file").unwrap();
-    assert!(std::path::Path::new(&args[words + 1]).exists());
-    // With the program, its words go.
-    t.c.call(Call::Shutdown { force: true }).await.unwrap();
-    for _ in 0..1500 {
-        if !std::path::Path::new(&args[words + 1]).exists() {
-            return;
-        }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    panic!("they are there still");
+    let at = args.iter().position(|a: &String| a == "--mcp-config").unwrap();
+    let c: Value = serde_json::from_str(&args[at + 1]).unwrap();
+    let s = &c["mcpServers"]["axiom"];
+    let to: Vec<String> =
+        s["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_owned()).collect();
+    let mut b = B::start(s["command"].as_str().unwrap(), &to);
+    b.say(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
+    let v = b.hear().await;
+    let names: Vec<&str> = v["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["agent"]);
+    b.say(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "shell", "arguments": {"command": "true"}}}))
+        .await;
+    let v = b.hear().await;
+    assert!(v["result"]["isError"] == true, "{v}");
+    assert!(v.to_string().contains("opens nothing else"), "{v}");
 }

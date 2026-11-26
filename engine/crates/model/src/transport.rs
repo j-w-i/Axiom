@@ -19,11 +19,11 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use crate::{
-    codec::{self, Decoder, EncodeError, Lost},
+    about::{self, About},
+    codec::{self, Decoder, EncodeError, Frames, Lost},
     error::{self, Class, Error, Retry},
     profile::{Listing, Profile},
     secret::{Credential, Endpoint, Secret, SetupError},
-    sse,
     types::*,
 };
 
@@ -161,7 +161,7 @@ impl Client {
         Ok(Answer {
             request_id: request_id(answer.headers(), credential.as_ref().map(|c| c.secret())),
             response: Some(answer),
-            sse: sse::Decoder::new(EVENT),
+            frames: Frames::new(self.profile.codec, EVENT),
             decoder: Decoder::new(self.profile.codec, &quirks),
             scope: codec::scope(request, &self.profile),
             ready: VecDeque::new(),
@@ -175,13 +175,15 @@ impl Client {
     /// What the server has: all of it, or an error. OpenAI's list, and that of any server that speaks
     /// its protocols, is one answer; Gemini's comes in pages.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, CallError> {
-        if self.profile.codec == Codec::Messages {
+        // Bedrock's is at another origin than its models, where no credential for these goes (SI-4).
+        if self.profile.codec == Codec::Converse {
             return Err(EncodeError::Unsupported("the list of models").into());
         }
         let credential = self.credential().await.map_err(|e| e.sealed(None))?;
         let c = credential.as_ref();
         let list = match (self.profile.codec, self.profile.listing) {
             (_, Listing::Slugs) => self.slugs(c).await,
+            (_, Listing::Capabilities) => self.capable(c).await,
             (Codec::Gemini, _) => self.pages(c).await,
             _ => self.list(c).await,
         };
@@ -210,14 +212,55 @@ impl Client {
         for raw in list.models {
             let m: Named = page.model(&raw)?;
             if m.visibility.as_deref() == Some("list") {
-                models.push(ModelInfo {
-                    id: m.slug,
-                    name: m.display_name,
-                    native: Json::from(&*raw),
-                });
+                let native = Json::from(&*raw);
+                let about = about::chatgpt(&native.value());
+                models.push(ModelInfo { id: m.slug, name: m.display_name, about, native });
             }
         }
         Ok(models)
+    }
+
+    /// Anthropic's, as long as there are more (platform.claude.com/docs/en/api/models/list, read
+    /// 2026-11-26).
+    async fn capable(&self, c: Option<&Arc<Credential>>) -> Result<Vec<ModelInfo>, Error> {
+        #[derive(Deserialize)]
+        struct List {
+            data: Vec<Box<RawValue>>,
+            #[serde(default)]
+            has_more: bool,
+            last_id: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct Named {
+            id: String,
+            display_name: Option<String>,
+        }
+        let first = self.endpoint.at("models").map_err(setup)?;
+        let (mut models, mut after, mut room) = (Vec::new(), None::<String>, LIST);
+        for _ in 0..PAGES {
+            let mut url = first.clone();
+            url.query_pairs_mut().append_pair("limit", PAGE);
+            if let Some(id) = &after {
+                url.query_pairs_mut().append_pair("after_id", id);
+            }
+            let page = self.page(&url, room, c).await?;
+            room -= page.body.len();
+            let list: List = page.read()?;
+            if models.len() + list.data.len() > MODELS {
+                return Err(too_many_models());
+            }
+            for raw in list.data {
+                let m: Named = page.model(&raw)?;
+                let native = Json::from(&*raw);
+                let about = about::anthropic(&native.value());
+                models.push(ModelInfo { id: m.id, name: m.display_name, about, native });
+            }
+            after = list.last_id.filter(|_| list.has_more);
+            if after.is_none() {
+                return Ok(models);
+            }
+        }
+        Err(Error::protocol(format!("the list of models has more than {PAGES} pages")))
     }
 
     async fn list(&self, c: Option<&Arc<Credential>>) -> Result<Vec<ModelInfo>, Error> {
@@ -228,6 +271,7 @@ impl Client {
         #[derive(Deserialize)]
         struct Named {
             id: String,
+            name: Option<serde_json::Value>,
         }
         let url = self.endpoint.at("models").map_err(setup)?;
         let page = self.page(&url, LIST, c).await?;
@@ -237,8 +281,17 @@ impl Client {
         }
         let mut models = Vec::with_capacity(list.data.len());
         for raw in list.data {
-            let Named { id } = page.model(&raw)?;
-            models.push(ModelInfo { id, name: None, native: Json::from(&*raw) });
+            let Named { id, name } = page.model(&raw)?;
+            let native = Json::from(&*raw);
+            // Where a name and what else there is to it are known to be.
+            let (name, about) = match self.profile.listing {
+                Listing::Reasoning => (
+                    name.and_then(|n| n.as_str().map(str::to_owned)),
+                    about::openrouter(&native.value()),
+                ),
+                _ => (None, About::default()),
+            };
+            models.push(ModelInfo { id, name, about, native });
         }
         Ok(models)
     }
@@ -283,7 +336,9 @@ impl Client {
                 let asked = |methods: Vec<String>| methods.iter().any(|m| m == "generateContent");
                 if named.supported_generation_methods.is_none_or(asked) {
                     let id = named.name.strip_prefix("models/").unwrap_or(&named.name).to_owned();
-                    models.push(ModelInfo { id, name: None, native: Json::from(&*raw) });
+                    let native = Json::from(&*raw);
+                    let about = about::gemini(&id, &native.value());
+                    models.push(ModelInfo { id, name: None, about, native });
                 }
             }
             token = list.next_page_token.filter(|t| !t.is_empty());
@@ -316,14 +371,15 @@ impl Client {
         c: Option<&Arc<Credential>>,
     ) -> Result<Response, Error> {
         let url = self.endpoint.at(path).map_err(setup)?;
+        let stream = codec::media_type(self.profile.codec);
         let request = self
-            .request(self.http.post(url.clone()), &url, "text/event-stream", c)?
+            .request(self.http.post(url.clone()), &url, stream, c)?
             .header(header::CONTENT_TYPE, "application/json")
             .body(body);
         let mut answer = self.send(request).await?;
         let kind = answer.headers().get(header::CONTENT_TYPE);
         let kind = kind.and_then(|v| v.to_str().ok()).unwrap_or("").trim().to_ascii_lowercase();
-        if kind.is_empty() || kind.starts_with("text/event-stream") {
+        if kind.is_empty() || kind.starts_with(stream) {
             return Ok(answer);
         }
         // Not a stream although it succeeded. It may still say what went wrong.
@@ -379,7 +435,10 @@ impl Client {
         }
         // What can be had of it: the status alone already says what to do.
         let body = read(&mut answer, ERROR_BODY, self.options.idle).await.unwrap_or_default();
-        Err(with_head(Error::provider(Some(status.as_u16()), &text(&body)), answer.headers()))
+        // Amazon's name of an error is in the head
+        // (smithy.io/2.0/aws/protocols/aws-restjson1-protocol.html#operation-error-serialization).
+        let name = answer.headers().get("x-amzn-errortype").and_then(|v| v.to_str().ok());
+        Err(with_head(Error::named(Some(status.as_u16()), name, &text(&body)), answer.headers()))
     }
 }
 
@@ -421,13 +480,21 @@ pub struct ModelInfo {
     pub id: String,
     /// For people, where the list has one beside the id.
     pub name: Option<String>,
+    pub about: About,
     pub native: Json,
+}
+
+impl ModelInfo {
+    /// One of which nothing else has been said.
+    pub fn named(id: String) -> Self {
+        Self { id, name: None, about: About::default(), native: serde_json::Value::Null.into() }
+    }
 }
 
 /// An answer on its way.
 pub struct Answer {
     response: Option<Response>,
-    sse: sse::Decoder,
+    frames: Frames,
     decoder: Decoder,
     scope: Scope,
     /// Of the last piece that came.
@@ -491,11 +558,11 @@ impl Answer {
         let done = match chunk {
             Ok(Ok(Some(bytes))) => {
                 let mut events = Vec::new();
-                let read = self.sse.push(bytes.as_ref(), &mut events);
+                let read = self.frames.push(bytes.as_ref(), &mut events);
                 events.iter().try_for_each(|e| self.decoder.event(e, &mut out)).and_then(|()| {
                     match read {
                         Err(_) if self.decoder.ended() => Ok(()),
-                        read => read.map_err(|e| Error::protocol(e.to_string())),
+                        read => read,
                     }
                 })
             }
@@ -579,7 +646,11 @@ fn text(body: &[u8]) -> String {
 
 fn with_head(mut e: Error, head: &HeaderMap) -> Error {
     let get = |name: &str| head.get(name).and_then(|v| v.to_str().ok());
-    e.request_id = get("request-id").or(get("x-request-id")).map(str::to_owned).or(e.request_id);
+    e.request_id = ["request-id", "x-request-id", "x-amzn-requestid"]
+        .into_iter()
+        .find_map(get)
+        .map(str::to_owned)
+        .or(e.request_id);
     e.retry_after = get("retry-after").and_then(|v| error::retry_after(v, now()));
     e
 }

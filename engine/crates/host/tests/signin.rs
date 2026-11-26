@@ -212,6 +212,8 @@ impl Other {
             "/v1/models" => (
                 200,
                 json!({"models": [{"slug": "gpt-a", "display_name": "GPT A", "visibility": "list"},
+                    {"slug": "gpt-b", "display_name": "GPT B", "visibility": "list",
+                        "supported_reasoning_levels": [{"effort": "low"}, {"effort": "max"}]},
                     {"slug": "x", "display_name": "X", "visibility": "hide"}]})
                 .to_string(),
             ),
@@ -426,7 +428,11 @@ async fn a_person_signs_in_and_their_plan_is_used() {
     assert_eq!((c.secret, c.lasts, c.problem, c.url), (true, false, None, None));
     assert_eq!(
         t.models(&id).await.unwrap(),
-        json!([{"id": "gpt-a", "name": "GPT A", "effort": true}])
+        // Of one nothing is said: what every model of OpenAI's takes. Of the other, what the list says.
+        json!([
+            {"id": "gpt-a", "name": "GPT A", "effort": true, "efforts": ["low", "medium", "high", "xhigh"]},
+            {"id": "gpt-b", "name": "GPT B", "effort": true, "efforts": ["low", "max"]}
+        ])
     );
     assert!(t.o.at("/v1/models")[0].0.contains("Bearer at-canary-1"));
     let asked = &t.o.at("/token")[0].1;
@@ -444,6 +450,7 @@ async fn several_accounts_and_the_same_installation() {
     let mut t = T::new().await;
     let (a, b) = (t.sign_in().await, t.sign_in().await);
     assert!(a != b && t.list().await.len() == 2);
+    assert_eq!(connections(&t).lane(&a), Lane::Plan);
     assert_eq!(vaulted(&t.vault, &a).as_deref(), Some("rt-canary-1"));
     assert_eq!(vaulted(&t.vault, &b).as_deref(), Some("rt-canary-2"));
     let one = t.begin().await.asked["ext_agent_host_id"].clone();
@@ -736,11 +743,13 @@ async fn an_agent_works_on_it() {
             connection: Some(id.clone()),
             effort: None,
             environment: None,
+            ..Execution::default()
         },
         access: axiom_proto::Access::Read,
         trust: false,
         instructions: vec![],
         apart: false,
+        plan: false,
     };
     let agent = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
     for over in [false, true] {

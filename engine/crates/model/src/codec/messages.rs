@@ -6,14 +6,16 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{
-    EncodeError, Encoded, Loss, Lost, MAX_BLOCKS, Unfinished, json as parse,
+    EncodeError, Encoded, Loss, Lost, MAX_BLOCKS, Unfinished, json as parse, name,
     object::{Array, Object},
     replays,
 };
-use crate::{error::Error, profile::Effort, profile::Quirks, sse, types::*};
+use crate::{error::Error, profile::Effort, profile::Quirks, profile::Thinking, sse, types::*};
 
 /// What the codec writes; a profile's `body` cannot.
-const OWN: [&str; 9] = [
+const OWN: [&str; 11] = [
+    "thinking",
+    "speed",
     "model",
     "max_tokens",
     "stream",
@@ -44,6 +46,17 @@ pub(super) fn encode(
             body.put("output_config", &json!({ "effort": effort }))?;
         }
         (Some(_), _) => return Err(EncodeError::Unsupported("effort")),
+    }
+    match (settings.adaptive, quirks.thinking) {
+        (false, _) => {}
+        (true, Some(Thinking::Adaptive)) => body.put("thinking", &json!({ "type": "adaptive" }))?,
+        (true, None) => return Err(EncodeError::Unsupported("how to think")),
+    }
+    if let Some(s) = &settings.speed {
+        if !quirks.speeds.as_ref().is_some_and(|all| all.contains(s)) {
+            return Err(EncodeError::Unsupported("the speed"));
+        }
+        body.put("speed", s)?;
     }
     for (key, value) in &quirks.body {
         if OWN.contains(&key.as_str()) {
@@ -371,6 +384,8 @@ impl Decoder {
             count("/cache_creation/ephemeral_1h_input_tokens").or(u.cache_write_long);
         u.output = count("/output_tokens").or(u.output);
         u.reasoning = count("/output_tokens_details/thinking_tokens").or(u.reasoning);
+        // build-with-claude/fast-mode, read 2026-11-26.
+        u.speed = told.get("speed").and_then(name).or(u.speed.take());
         u.prompt = match (u.uncached, u.cache_read, u.cache_write) {
             (Some(a), Some(b), Some(c)) => a.checked_add(b).and_then(|ab| ab.checked_add(c)),
             _ => None,

@@ -6,12 +6,14 @@
 //! - the listener is local, owned by one user, and needs a token (SI-20).
 
 mod agents;
+mod catalogue;
 mod changes;
 pub mod client;
 pub mod connections;
 mod copies;
 mod delegated;
 mod faults;
+mod limits;
 mod log;
 pub mod mcp;
 mod net;
@@ -19,6 +21,8 @@ mod outbox;
 pub mod paths;
 mod peers;
 mod plan;
+mod planning;
+pub mod programs;
 mod replay;
 mod server;
 mod session;

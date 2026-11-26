@@ -21,15 +21,18 @@ pub mod frames;
 mod ledger;
 mod rpc;
 mod talk;
+mod tasks;
 #[cfg(test)]
 mod test;
+pub mod vars;
 
 pub use acp::{Acp, KNOWN, Known};
-pub use claude::Prompts;
+pub use claude::{Prompts, default_effort as claude_default_effort};
 pub use drive::{Events, Handle, Limits, MOST_LINE, MOST_PROMPT, MOST_SUBJECT};
 pub use event::*;
 pub use find::{NotFound, Program, find};
 pub use frames::{Frame, Frames, Lost, Way};
+pub use vars::Var;
 
 use talk::{Talk, loose, plain};
 
@@ -59,6 +62,8 @@ pub struct Site {
     /// Where the program keeps what is its own, if that is another place than usual: an account
     /// beside the person's first ([`Harness::accounts`]).
     pub config: Option<Place>,
+    /// What else its person says it is given.
+    pub vars: Vec<Var>,
     pub limits: Limits,
 }
 
@@ -85,11 +90,10 @@ pub struct Start {
     pub by: By,
     /// A server of Axiom's own that it is given, if it can be and may act.
     pub tools: Option<Server>,
-    /// That server's tools in place of its own, all of which are off: what it does, it asks that
-    /// server for. Whoever is behind it judges and contains.
-    pub hands: bool,
-    /// Words for the model, in a file of the host's: what it works with and where.
-    pub system: Option<Place>,
+    /// How fast, where that can be told: it has a price.
+    pub speed: Option<String>,
+    /// Further arguments its person wants it started with.
+    pub extra: Vec<String>,
 }
 
 /// A Model Context Protocol server on standard streams.
@@ -128,21 +132,35 @@ impl Harness {
                 return Err(Error::BadValue(what, v.clone()));
             }
         }
-        if s.hands && (!self.takes_hands() || s.tools.is_none()) {
-            return Err(Error::NoHands);
+        if s.speed.is_some() && !self.takes_speed() {
+            return Err(Error::NoSpeed);
         }
         if self.person_only() && s.by != By::Person {
             return Err(Error::PersonOnly);
         }
-        let l = match self {
+        if let Some(a) = s.extra.iter().find(|a| vars::argument(a).is_some()) {
+            return Err(Error::Unsafe(a.clone()));
+        }
+        self.passes(&s.extra)?;
+        let mut l = match self {
             Harness::Acp(a) => a.launch(s)?,
             Harness::Codex => codex::launch(s)?,
             Harness::Claude(p) => claude::launch(*p, s)?,
         };
+        l.args.extend(s.extra.iter().cloned());
         // Whatever came to be in it (T34).
         match l.args.iter().find(|a| loose(a)) {
             Some(a) => Err(Error::Unsafe(a.clone())),
             None => Ok(l),
+        }
+    }
+
+    /// Whether these further arguments are passed on to it.
+    pub fn passes(&self, extra: &[String]) -> Result<(), Error> {
+        match self {
+            Harness::Acp(_) => Ok(()),
+            Harness::Codex => codex::passes(extra),
+            Harness::Claude(_) => claude::passes(extra),
         }
     }
 
@@ -163,18 +181,17 @@ impl Harness {
         !matches!(self, Harness::Codex)
     }
 
-    /// Whether all of its own tools can be switched off, so that it has only those it is given. Where
-    /// its documentation says so.
-    pub fn takes_hands(&self) -> bool {
-        // `--tools ""`: code.claude.com/docs/en/cli-reference, read 2026-11-25.
-        matches!(self, Harness::Claude(_))
-    }
-
     /// Whether it can be told how hard to try: low, medium or high, before it is started.
     pub fn takes_effort(&self) -> bool {
         // `--effort` and `model_reasoning_effort`: code.claude.com/docs/en/cli-reference and the
         // app-server's `turn/start`, read 2026-11-25. Of an ACP agent it is known once it runs.
         matches!(self, Harness::Claude(_) | Harness::Codex)
+    }
+
+    /// Whether it can be told to be fast, before it is started.
+    pub fn takes_speed(&self) -> bool {
+        // `fastMode` in `--settings`: code.claude.com/docs/en/fast-mode, read 2026-11-26.
+        matches!(self, Harness::Claude(_))
     }
 
     /// Whether its terms allow only what a person themselves says.
@@ -194,7 +211,7 @@ impl Harness {
             Harness::Acp(a) => a.checked()?,
             _ => codex::ARGS.map(String::from).into(),
         };
-        let process = run(self, site, args, &site.tmp, false, true, token)?;
+        let process = run(self, site, args, &site.tmp, true, token)?;
         let (tx, rx) = oneshot::channel();
         let given = drive::Given {
             process,
@@ -204,6 +221,7 @@ impl Harness {
             read_only: true,
             person_only: true,
             probed: Some(tx),
+            hide: vars::Hide::of(&site.vars),
         };
         let (_handle, mut events) = drive::drive(given).ok_or(Error::NoPipe)?;
         let mut words = None;
@@ -231,21 +249,30 @@ impl Harness {
                 return Err(Error::Inside(p.clone()));
             }
         }
+        // What they name is trusted as the program is.
+        for p in site.vars.iter().flat_map(|v| std::env::split_paths(&v.value)) {
+            if let Ok(p) = Place::new(p)
+                && find::inside(&p, &written)
+            {
+                return Err(Error::Inside(p));
+            }
+        }
         let read_only = s.access == Access::Read;
-        let (cwd, hands) = (s.workspace.clone(), s.hands);
+        let cwd = s.workspace.clone();
         let talk: Box<dyn Talk> = match self {
             Harness::Acp(a) => Box::new(a.talk(site, Some(s))),
             Harness::Codex => Box::new(codex::Codex::new(site, Some(s))),
             Harness::Claude(p) => Box::new(claude::Claude::new(*p, s, &l)),
         };
         let given = drive::Given {
-            process: run(self, site, l.args, &cwd, hands, true, token)?,
+            process: run(self, site, l.args, &cwd, true, token)?,
             talk,
             frames,
             limits: site.limits.clone(),
             read_only,
             person_only: self.person_only(),
             probed: None,
+            hide: vars::Hide::of(&site.vars),
         };
         let (handle, events) = drive::drive(given).ok_or(Error::NoPipe)?;
         Ok(Live { handle, events, containment: l.containment })
@@ -257,19 +284,25 @@ fn run(
     site: &Site,
     args: Vec<String>,
     cwd: &Place,
-    hands: bool,
     stdin: bool,
     token: Unsandboxed,
 ) -> Result<Running, Error> {
     let mut env = Env::harness(&site.path, &site.home, &site.user, &site.tmp)?;
+    for v in &site.vars {
+        if vars::refused(&v.name).is_some() {
+            return Err(Error::Spawn(axiom_spawn::SpawnError::Env(v.name.clone())));
+        }
+        env.set_said(&v.name, &v.value, v.secret)?;
+    }
+    if matches!(harness, Harness::Claude(_)) && site.vars.iter().any(|v| v.secret) {
+        // Then it keeps them from the commands it runs (code.claude.com/docs/en/env-vars, read
+        // 2026-11-26).
+        env.set("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1")?;
+    }
     if let Some(c) = &site.config {
         // Nothing would keep it apart: it is not started as if something did.
         let name = harness.accounts().ok_or(Error::OneAccount)?;
         env.set(name, c.as_str())?;
-    }
-    if hands {
-        // Otherwise the tools it is given are put off until a tool of its own finds them.
-        env.set("ENABLE_TOOL_SEARCH", "false")?;
     }
     Ok(spawn(Job {
         program: site.program.place().clone(),
@@ -288,7 +321,7 @@ async fn version(
     token: Unsandboxed,
     p: Prompts,
 ) -> Result<Probe, Error> {
-    let mut r = run(harness, site, vec!["--version".into()], &site.tmp, false, false, token)?;
+    let mut r = run(harness, site, vec!["--version".into()], &site.tmp, false, token)?;
     let out = r.stdout.take().ok_or(Error::NoPipe)?;
     let mut said = Vec::new();
     let mut first = out.take(4096);

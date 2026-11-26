@@ -47,6 +47,14 @@ class Opens extends HostStore {
   Future<void> open(String id) async => opened.add(id);
 }
 
+class Keeps extends HostStore {
+  Keeps() : super(paths: HostPaths('/nonexistent'), binary: null, spawn: false);
+  @override
+  Future<List<HostLimit>> limits() async => const [
+    HostLimit('Files', 'One', 1 << 20, LimitUnit.bytes),
+  ];
+}
+
 HostStore store() => HostStore(paths: HostPaths('/nonexistent'), binary: null, spawn: false);
 
 void main() {
@@ -485,12 +493,21 @@ void main() {
   test('no two commands have one key', () {
     for (final mac in [true, false]) {
       debugDefaultTargetPlatformOverride = mac ? TargetPlatform.macOS : TargetPlatform.linux;
-      final all = Command.values.map((c) => c.keys).toList();
+      final all = Command.values.map((c) => c.keys).nonNulls.toList();
       expect(all.toSet().length, all.length, reason: '$all');
       expect(Command.find.keys, mac ? '⌘K' : 'Ctrl+K');
       expect(Command.allow.keys, mac ? '⇧⌘Y' : 'Ctrl+Shift+Y');
     }
     debugDefaultTargetPlatformOverride = null;
+    // Nor by another place a keyboard has it at.
+    final taken = <(LogicalKeyboardKey, bool, bool, bool)>{};
+    for (final c in Command.values) {
+      for (final k in [?c.key, ...c.also]) {
+        for (final shift in c.eitherShift ? [true, false] : [c.shift]) {
+          expect(taken.add((k, shift, c.control, c.bare)), isTrue, reason: '$c');
+        }
+      }
+    }
   });
 
   testWidgets('room can be made in a conversation that can act and is not at work', (t) async {
@@ -540,6 +557,21 @@ void main() {
     expect(find.textContaining('from-a-terminal'), findsWidgets);
     await t.pumpWidget(const SizedBox());
     expect(s.onFolder, isNull);
+    s.dispose();
+  });
+
+  testWidgets('the settings show what the host keeps everything to', (t) async {
+    final s = Keeps()
+      ..phase = HostPhase.connected
+      ..current = recorded();
+    await mount(t, Shell(s), size: const Size(1100, 760), dpr: 1);
+    await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await keys(t, LogicalKeyboardKey.comma);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await t.tap(find.text('Limits'));
+    await t.pump();
+    await t.pump();
+    expect(find.text('1 MiB'), findsOneWidget);
     s.dispose();
   });
 

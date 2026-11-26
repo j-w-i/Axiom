@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    secret::{Auth, SetupError},
+    codec::converse,
+    secret::{Auth, Endpoint, SetupError},
     types::Codec,
 };
 
@@ -20,6 +21,10 @@ pub enum Listing {
     Data,
     /// `models`, each with a `slug`, a `display_name` and a `visibility`.
     Slugs,
+    /// `data` in pages, each with an `id`, a `display_name` and `capabilities`.
+    Capabilities,
+    /// `data`, each with an `id`, a `name` and, if it reasons, `reasoning`.
+    Reasoning,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -57,6 +62,16 @@ pub enum Effort {
     Reasoning,
     /// `generationConfig.thinkingConfig.thinkingLevel`
     ThinkingLevel,
+    /// `additionalModelRequestFields.output_config.effort`, with thinking that adapts to it.
+    AdaptiveThinking,
+}
+
+/// How a model is told to think as much as it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Thinking {
+    /// `thinking.type`: `adaptive`.
+    Adaptive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +79,16 @@ pub enum Effort {
 pub enum MaxTokens {
     MaxTokens,
     MaxCompletionTokens,
+}
+
+/// Where in a prompt there may be a `cachePoint`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CachePoints {
+    /// After tools, system and messages, for minutes or an hour.
+    All,
+    /// After system and messages, for minutes.
+    NotTools,
 }
 
 /// Where a model's own native blocks may go back to.
@@ -101,9 +126,27 @@ pub struct Quirks {
     /// Where the effort goes; nowhere if absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
+    /// What it can be, the least first, where that is the same for all it is said of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub efforts: Option<Vec<String>>,
+    /// Which of them it tries at when it is told none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
+    /// Where it is told to think as much as it needs; nowhere if absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<Thinking>,
+    /// Messages: how fast it can be asked to be beside the standard, in `speed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speeds: Option<Vec<String>>,
     /// Whether the prompt can be marked for caching (`cache_control`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_markers: Option<bool>,
+    /// Converse: the same, with points of its own; nowhere if absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_points: Option<CachePoints>,
+    /// Converse: a result can say that it is of a tool that failed. Default false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_status: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replay: Option<Replay>,
     /// Send each tool's arguments as they are written, unchecked by the provider.
@@ -125,6 +168,9 @@ pub struct Quirks {
     /// string may be what is left of something.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub empty_args: Option<bool>,
+    /// Chat: what the usage calls `cost` is what the provider took, in this unit. Not told if absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_unit: Option<String>,
     /// More members of the request body. None that the codec writes itself.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub body: BTreeMap<String, Value>,
@@ -140,7 +186,13 @@ impl Quirks {
             max_output: self.max_output.or(base.max_output),
             no_limit: self.no_limit.or(base.no_limit),
             effort: self.effort.or(base.effort),
+            efforts: self.efforts.clone().or(base.efforts.clone()),
+            default_effort: self.default_effort.clone().or(base.default_effort.clone()),
+            thinking: self.thinking.or(base.thinking),
+            speeds: self.speeds.clone().or(base.speeds.clone()),
             cache_markers: self.cache_markers.or(base.cache_markers),
+            cache_points: self.cache_points.or(base.cache_points),
+            result_status: self.result_status.or(base.result_status),
             replay: self.replay.or(base.replay),
             eager_tool_args: self.eager_tool_args.or(base.eager_tool_args),
             max_tokens_field: self.max_tokens_field.or(base.max_tokens_field),
@@ -148,6 +200,7 @@ impl Quirks {
             replay_reasoning: self.replay_reasoning.or(base.replay_reasoning),
             think: self.think.or(base.think),
             empty_args: self.empty_args.or(base.empty_args),
+            cost_unit: self.cost_unit.clone().or(base.cost_unit.clone()),
             body,
         }
     }
@@ -155,7 +208,12 @@ impl Quirks {
 
 impl Profile {
     pub fn quirks(&self, model: &str) -> Quirks {
-        match self.models.get(model) {
+        let own = self.models.get(model).or_else(|| {
+            // There a model has more than one name.
+            let mut names = converse::plain_names(model).filter(|_| self.codec == Codec::Converse);
+            names.find_map(|name| self.models.get(name))
+        });
+        match own {
             Some(own) => own.over(&self.quirks),
             None => self.quirks.clone(),
         }
@@ -172,21 +230,75 @@ impl Profile {
             base_url: Some("https://api.anthropic.com/v1".into()),
             auth: Auth::Header("x-api-key".into()),
             headers: BTreeMap::from([("anthropic-version".into(), "2026-10-21".into())]),
-            listing: Listing::Data,
+            listing: Listing::Capabilities,
             quirks: Quirks {
                 effort: Some(Effort::OutputConfig),
+                // build-with-claude/effort, read 2026-11-26: `high` where it is not said, and not of
+                // Opus 5.5 and Haiku 5.5.
+                default_effort: Some("high".into()),
+                thinking: Some(Thinking::Adaptive),
                 cache_markers: Some(true),
                 replay: Some(Replay::SameProvider),
                 ..Quirks::default()
             },
-            models: BTreeMap::new(),
+            // build-with-claude/fast-mode, read 2026-11-26: those that take it without a header that
+            // asks for what is not settled yet.
+            models: [
+                ("claude-fable-5-2", true, "high"),
+                ("claude-mythos-5-2", true, "high"),
+                ("claude-opus-5-5", true, "medium"),
+                ("claude-haiku-5-5", false, "medium"),
+            ]
+            .map(|(m, fast, by_default)| {
+                let quirks = Quirks {
+                    speeds: fast.then(|| vec!["fast".to_owned()]),
+                    default_effort: Some(by_default.into()),
+                    ..Quirks::default()
+                };
+                (m.to_owned(), quirks)
+            })
+            .into(),
         }
     }
 
     /// The OpenAI API with a key. From developers.openai.com/api/docs, read 2026-11-25: the effort
     /// (guides/reasoning#reasoning-effort), and that reasoning a model cannot read is left out by the
     /// API and is no error (guides/reasoning#reasoning-item-removal-across-requests).
+    /// Its list says nothing of effort (api/reference/resources/models). Each model's page says which
+    /// it takes (api/docs/models/<model>, read 2026-11-26); one that is not here is offered those that
+    /// every model there takes.
     pub fn openai() -> Self {
+        let levels = |l: &[&str]| Quirks {
+            efforts: Some(l.iter().map(|s| (*s).to_owned()).collect()),
+            ..Quirks::default()
+        };
+        // Where a page says which it tries at when told none.
+        let by_default = |m: &str| match m {
+            "gpt-6.1-sol" | "gpt-6.1-terra" | "gpt-6-sol" | "gpt-6-luna" | "gpt-5.6-sol"
+            | "gpt-5.5" => Some("medium".to_owned()),
+            "gpt-5.4" => Some("none".to_owned()),
+            _ => None,
+        };
+        let (all, no_none, no_max) = (
+            ["none", "low", "medium", "high", "xhigh", "max"],
+            ["low", "medium", "high", "xhigh", "max"],
+            ["none", "low", "medium", "high", "xhigh"],
+        );
+        let models = [
+            ("gpt-6.2-sol", &no_none[..]),
+            ("gpt-6.2-astra", &no_none),
+            ("gpt-6.1-sol", &no_none),
+            ("gpt-6.1-terra", &all),
+            ("gpt-6-astra", &no_none),
+            ("gpt-6-sol", &all),
+            ("gpt-6-luna", &all),
+            ("gpt-5.6-sol", &all),
+            ("gpt-5.5", &no_max),
+            ("gpt-5.4", &no_max),
+            ("gpt-5.3-codex", &["low", "medium", "high", "xhigh"]),
+        ]
+        .map(|(m, l)| (m.to_owned(), Quirks { default_effort: by_default(m), ..levels(l) }))
+        .into();
         Self {
             provider: "openai".into(),
             codec: Codec::Responses,
@@ -196,10 +308,11 @@ impl Profile {
             listing: Listing::Data,
             quirks: Quirks {
                 effort: Some(Effort::Reasoning),
+                efforts: levels(&["low", "medium", "high", "xhigh"]).efforts,
                 replay: Some(Replay::SameProvider),
                 ..Quirks::default()
             },
-            models: BTreeMap::new(),
+            models,
         }
     }
 
@@ -241,10 +354,110 @@ impl Profile {
                 effort: Some(Effort::ReasoningEffort),
                 max_tokens_field: Some(MaxTokens::MaxCompletionTokens),
                 replay_reasoning: Some(true),
+                // use-cases/usage-accounting, read 2026-11-26: told with every answer.
+                cost_unit: Some("credits".into()),
                 ..Quirks::default()
             },
+            listing: Listing::Reasoning,
             ..Self::openai_compatible("openrouter", "https://openrouter.ai/api/v1")
         }
+    }
+
+    /// Amazon Bedrock's Converse API with a Bedrock API key, at the endpoint of a region. From
+    /// docs.aws.amazon.com/bedrock/latest/userguide, read 2026-11-25: the key (api-keys-use), the models
+    /// that take cache points and where (prompt-caching#prompt-caching-models), and those whose thinking
+    /// adapts to an effort (claude-messages-adaptive-thinking). That a result can say its tool failed is
+    /// written of "Amazon Nova and Anthropic Claude 3 and 4" (API_runtime_ToolResultBlock), and taken to
+    /// hold for Claude 5. That one model reads what another signed is written only of some.
+    pub fn bedrock() -> Self {
+        let claude = Quirks {
+            cache_points: Some(CachePoints::All),
+            result_status: Some(true),
+            ..Quirks::default()
+        };
+        // platform.claude.com/docs/en/build-with-claude/effort, as of 2026-11-26: every level up to
+        // `max`; `xhigh` since Opus 4.7, so not on the 4.6 models.
+        let levels = |l: &[&str]| Some(l.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        let adaptive = Quirks {
+            effort: Some(Effort::AdaptiveThinking),
+            efforts: levels(&["low", "medium", "high", "xhigh", "max"]),
+            default_effort: Some("high".into()),
+            ..claude.clone()
+        };
+        let medium = Quirks { default_effort: Some("medium".into()), ..adaptive.clone() };
+        let four_six =
+            Quirks { efforts: levels(&["low", "medium", "high", "max"]), ..adaptive.clone() };
+        let nova = Quirks { cache_points: Some(CachePoints::NotTools), ..claude.clone() };
+        let of = |names: &[&str], quirks: &Quirks| -> Vec<(String, Quirks)> {
+            names.iter().map(|n| ((*n).to_owned(), quirks.clone())).collect()
+        };
+        let adaptive = of(
+            &[
+                "anthropic.claude-fable-5-2",
+                "anthropic.claude-mythos-5-2",
+                "anthropic.claude-sonnet-5-5",
+                "anthropic.claude-fable-5-1",
+                "anthropic.claude-mythos-5-1",
+                "anthropic.claude-fable-5",
+                "anthropic.claude-mythos-5",
+                "anthropic.claude-opus-5",
+                "anthropic.claude-sonnet-5",
+                "anthropic.claude-opus-4-8",
+                "anthropic.claude-opus-4-7",
+            ],
+            &adaptive,
+        );
+        let four_six =
+            of(&["anthropic.claude-opus-4-6-v1", "anthropic.claude-sonnet-4-6"], &four_six);
+        let medium = of(&["anthropic.claude-haiku-5-5", "anthropic.claude-opus-5-5"], &medium);
+        let claude = of(
+            &[
+                "anthropic.claude-opus-4-5-20251101-v1:0",
+                "anthropic.claude-haiku-4-5-20251001-v1:0",
+            ],
+            &claude,
+        );
+        let nova = of(
+            &[
+                "amazon.nova-2-lite-v1:0",
+                "amazon.nova-pro-v1:0",
+                "amazon.nova-lite-v1:0",
+                "amazon.nova-micro-v1:0",
+            ],
+            &nova,
+        );
+        Self {
+            provider: "bedrock".into(),
+            codec: Codec::Converse,
+            base_url: None,
+            auth: Auth::Bearer,
+            headers: BTreeMap::new(),
+            listing: Listing::Data,
+            quirks: Quirks::default(),
+            models: adaptive
+                .into_iter()
+                .chain(medium)
+                .chain(four_six)
+                .chain(claude)
+                .chain(nova)
+                .collect(),
+        }
+    }
+
+    /// Whether `url` is where that is: Amazon's own endpoint of a region
+    /// (docs.aws.amazon.com/general/latest/gr/bedrock.html, read 2026-11-25), or this machine.
+    pub fn is_bedrock(url: &str) -> bool {
+        let Ok(endpoint) = Endpoint::parse(url) else { return false };
+        let (host, port) = endpoint.host();
+        let region = host
+            .strip_suffix(".amazonaws.com")
+            .and_then(|h| {
+                h.strip_prefix("bedrock-runtime.").or(h.strip_prefix("bedrock-runtime-fips."))
+            })
+            .unwrap_or_default();
+        let label = !region.is_empty()
+            && region.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        endpoint.is_plain() || (label && port == 443 && endpoint.is_root())
     }
 
     /// Any server that speaks Chat Completions. Nothing beyond the protocol is taken for granted.
@@ -311,7 +524,13 @@ mod tests {
             context: Some(1),
             max_output: Some(2),
             effort: Some(Effort::OutputConfig),
+            efforts: Some(vec!["e".into()]),
+            default_effort: Some("e".into()),
+            thinking: Some(Thinking::Adaptive),
+            speeds: Some(vec!["s".into()]),
             cache_markers: Some(true),
+            cache_points: Some(CachePoints::NotTools),
+            result_status: Some(true),
             replay: Some(Replay::SameModel),
             eager_tool_args: Some(true),
             max_tokens_field: Some(MaxTokens::MaxCompletionTokens),
@@ -320,6 +539,7 @@ mod tests {
             think: Some(Think::Open),
             empty_args: Some(true),
             no_limit: Some(true),
+            cost_unit: Some("c".into()),
             body: BTreeMap::from([("a".into(), Value::from(1)), ("b".into(), Value::from(1))]),
         };
         let mut p = Profile::openai_compatible("p", "https://e.com/v1");
@@ -354,11 +574,19 @@ mod tests {
             Profile::openai(),
             Profile::gemini(),
             Profile::openrouter(),
+            Profile::bedrock(),
             Profile::lm_studio(),
             Profile::openai_compatible("p", "https://e.com"),
         ] {
             assert_eq!((p.quirks.context, p.quirks.max_output), (None, None));
-            assert!(p.models.is_empty() && p.quirks.body.is_empty());
+            assert!(p.quirks.body.is_empty());
+            // Of Bedrock's models it is written which can do what, of Anthropic's which can be fast, of
+            // OpenAI's (and so a ChatGPT plan's) how hard they can try; of none, how much.
+            let written = ["bedrock", "anthropic", "openai", "chatgpt"];
+            assert_eq!(p.models.is_empty(), !written.contains(&&*p.provider), "{}", p.provider);
+            for m in p.models.values() {
+                assert_eq!((m.context, m.max_output, m.body.len()), (None, None, 0));
+            }
             let again: Profile = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
             assert_eq!(again, p);
         }
@@ -384,6 +612,47 @@ mod tests {
             let secret = crate::Secret::new("k".into());
             assert!(crate::Credential::new(endpoint.origin(), &p.auth, secret).is_ok());
         }
+    }
+
+    #[test]
+    fn where_bedrock_is() {
+        for yes in [
+            "https://bedrock-runtime.us-east-1.amazonaws.com",
+            "https://bedrock-runtime.us-east-1.amazonaws.com/",
+            "https://BEDROCK-runtime.eu-west-2.amazonaws.com:443",
+            "https://bedrock-runtime-fips.us-gov-west-1.amazonaws.com",
+            "http://127.0.0.1:9/v1",
+            "http://localhost:9",
+        ] {
+            assert!(Profile::is_bedrock(yes), "{yes}");
+        }
+        for no in [
+            "",
+            "us-east-1",
+            "http://bedrock-runtime.us-east-1.amazonaws.com",
+            "https://bedrock.us-east-1.amazonaws.com",
+            "https://bedrock-runtime.amazonaws.com",
+            "https://bedrock-runtime..amazonaws.com",
+            "https://bedrock-runtime.a.b.amazonaws.com",
+            "https://bedrock-runtime.us-east-1.amazonaws.com.evil.example",
+            "https://bedrock-runtime.us-east-1.evil.example",
+            "https://bedrock-runtime.us-east-1.evil.example/.amazonaws.com",
+            "https://evil.example/bedrock-runtime.us-east-1.amazonaws.com",
+            "https://evil.bedrock-runtime.us-east-1.amazonaws.com",
+            "https://xbedrock-runtime.us-east-1.amazonaws.com",
+            "https://bedrock-runtime.us-east-1.amazonaws.com:8443",
+            "https://bedrock-runtime.us-east-1.amazonaws.com/v1",
+            "https://bedrock-runtime.us-east-1.amazonaws.com.",
+            "https://bedrock-runtime.us_east.amazonaws.com",
+            "https://u:p@bedrock-runtime.us-east-1.amazonaws.com",
+            "https://bedrock-runtime.us-east-1.amazonaws.com/?x",
+            "https://bucket.s3.us-east-1.amazonaws.com",
+            "https://localhost",
+        ] {
+            assert!(!Profile::is_bedrock(no), "{no}");
+        }
+        let p = Profile::bedrock();
+        assert_eq!((p.codec, p.base_url.is_none(), p.auth), (Codec::Converse, true, Auth::Bearer));
     }
 
     #[test]

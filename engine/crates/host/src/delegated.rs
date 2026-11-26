@@ -11,16 +11,16 @@ use std::{
 
 use axiom_engine::{Deed, Ended, FROM_AGENT, Refused, Say, Stage, Word, said};
 use axiom_harness::{
-    Answer, By, ChoiceKind, Diff, Done, Error, Event, Events, Frame, Frames, Gone, Handle, Harness,
-    KNOWN, Kind, Level, Lost, Program, Prompts, Question, Ready, Server, Settled, Site, Start,
-    Trust, Why, find,
+    Answer, By, Caps, ChoiceKind, Diff, Done, Error, Event, Events, Frame, Frames, Gone, Handle,
+    Harness, KNOWN, Kind, Level, Lost, Name, Names, NotFound, Program, Progress, Prompts, Question,
+    Ready, Server, Settled, Site, Start, Trust, Why, find, find::take,
 };
 use axiom_policy::{
     Access, Approval, Ask, Place, Reach, Unsandboxed, audit::Containment, rules::Decision,
 };
 use axiom_proto::{
-    AgentState, Answerable, Body, HarnessInfo, ItemId, ItemKind, Outcome, Provenance, RequestId,
-    RunId, Usage, limits,
+    AgentState, Answerable, Body, HarnessInfo, ItemId, ItemKind, Lane, ModelInfo, Outcome,
+    Provenance, RequestId, RunId, Todo, TodoState, Usage, UsedOn, limits,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -28,41 +28,52 @@ use tokio::{
     task::{AbortHandle, JoinSet},
 };
 
-use crate::agents::{Floor, Grant, Setup, Slot};
+use crate::{
+    agents::{Floor, Grant, Setup, Slot},
+    programs::How,
+};
 
 /// A program that has nothing to do for this long is ended; it goes on where it was when it is
 /// spoken to.
-const IDLE: Duration = Duration::from_secs(60 * 60);
+pub const IDLE: Duration = Duration::from_secs(60 * 60);
 
 /// A harness this host can drive.
+#[derive(Debug, Clone)]
 pub struct Known {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub program: &'static str,
+    pub id: String,
+    pub name: String,
+    /// What it is looked for by. One of the person's own is where they say.
+    pub program: String,
     pub harness: Harness,
+    /// The person added it.
+    pub own: bool,
 }
 
 pub fn known() -> Vec<Known> {
     let mut all = vec![
         Known {
-            id: "claude",
-            name: "Claude Code",
-            program: "claude",
+            id: "claude".into(),
+            name: "Claude Code".into(),
+            program: "claude".into(),
             harness: Harness::Claude(Prompts::Refused),
+            own: false,
         },
-        Known { id: "codex", name: "Codex", program: "codex", harness: Harness::Codex },
+        Known {
+            id: "codex".into(),
+            name: "Codex".into(),
+            program: "codex".into(),
+            harness: Harness::Codex,
+            own: false,
+        },
     ];
     all.extend(KNOWN.iter().map(|k| Known {
-        id: k.program,
-        name: k.name,
-        program: k.program,
+        id: k.program.into(),
+        name: k.name.into(),
+        program: k.program.into(),
         harness: Harness::Acp(k.acp()),
+        own: false,
     }));
     all
-}
-
-pub fn known_as(id: &str) -> Option<Known> {
-    known().into_iter().find(|k| k.id == id)
 }
 
 /// Axiom's own, as it is named to a program.
@@ -82,14 +93,22 @@ impl Known {
             trust: if trust { Trust::Given } else { Trust::Withheld },
             by: By::Person,
             tools: None,
-            hands: false,
-            system: None,
+            speed: None,
+            extra: Vec::new(),
+        }
+    }
+
+    /// Where it is: where its person says, or where programs are looked for.
+    fn find(&self, how: &How, path: &[Place], written: &Reach) -> Result<Program, NotFound> {
+        match &how.path {
+            Some(p) => take(p, written),
+            None => find(&self.program, path, written),
         }
     }
 
     /// What it is and may be, found without running it.
-    pub fn info(&self, path: &[Place], written: &Reach) -> HarnessInfo {
-        let program = find(self.program, path, written);
+    pub fn info(&self, how: &How, path: &[Place], written: &Reach) -> HarnessInfo {
+        let program = self.find(how, path, written);
         let here = path.first().cloned();
         let access = |trust| {
             [
@@ -106,14 +125,14 @@ impl Known {
         };
         let (trusted, not) = (access(true), access(false));
         HarnessInfo {
-            id: self.id.into(),
-            name: self.name.into(),
+            id: self.id.clone(),
+            name: self.name.clone(),
+            own: self.own,
             program: program.as_ref().ok().map(|p| p.place().to_string()),
             problem: program.err().map(|e| e.to_string()),
             needs_trust: not.is_empty(),
-            hands: self.harness.takes_hands(),
             effort: self.harness.takes_effort(),
-            accounts: crate::connections::provider_of(self.id).map(str::to_owned),
+            accounts: crate::connections::provider_of(&self.id).map(str::to_owned),
             access: trusted,
         }
     }
@@ -122,18 +141,18 @@ impl Known {
     pub fn check(
         &self,
         s: &Setup,
+        how: &How,
         access: Access,
         workspace: Place,
         path: &[Place],
         written: &Reach,
     ) -> Result<Program, String> {
-        let program = find(self.program, path, written).map_err(|e| e.to_string())?;
+        let program = self.find(how, path, written).map_err(|e| e.to_string())?;
         let start = Start {
+            extra: how.args.clone(),
+            speed: s.execution.speed.clone(),
             model: s.execution.model.clone(),
             effort: s.execution.effort.clone(),
-            hands: s.hands(),
-            // Only whether it could be given one.
-            tools: s.hands().then(|| server(program.place().clone(), Vec::new())),
             ..self.start(workspace, access, s.trust)
         };
         match self.harness.launch(&start) {
@@ -155,13 +174,12 @@ pub struct Worker {
     pub slot: Arc<Slot>,
     pub setup: Setup,
     pub known: Known,
+    pub how: How,
     pub site: Site,
     pub access: Access,
     pub workspace: Place,
     /// This program, for the tools it is given.
     pub bridge: Option<Place>,
-    /// What its model is told, if its hands are Axiom's.
-    pub words: Option<String>,
     pub inbox: mpsc::Receiver<Word>,
     /// Said and not yet told it.
     pub waits: Vec<(ItemId, String)>,
@@ -184,15 +202,28 @@ impl From<Refused> for Halt {
 
 impl Worker {
     /// As [`axiom_engine::Agent::begin`].
-    pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
+    pub async fn begin(
+        &mut self,
+        run: &RunId,
+        before: Vec<Say>,
+        prompt: Option<Word>,
+    ) -> Result<(), Refused> {
         self.floor.say(begun(&self.floor, run)).await?;
-        let Err(r) = self.opening(run, prompt).await else { return Ok(()) };
+        let Err(r) = self.opening(run, before, prompt).await else { return Ok(()) };
         let error = Some(r.to_string());
         let _ = self.floor.say(ended(&self.floor, run, Outcome::Failed, error)).await;
         Err(r)
     }
 
-    async fn opening(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
+    async fn opening(
+        &mut self,
+        run: &RunId,
+        before: Vec<Say>,
+        prompt: Option<Word>,
+    ) -> Result<(), Refused> {
+        if !before.is_empty() {
+            self.floor.say(before).await?;
+        }
         if let Some(Word { text, shown, .. }) = prompt {
             let item = ItemId::new();
             let (by, show) = match &shown {
@@ -266,27 +297,25 @@ impl Worker {
             trust: if self.setup.trust { Trust::Given } else { Trust::Withheld },
             by: By::Person,
             tools: None,
-            hands: self.setup.hands(),
-            system: None,
+            speed: self.setup.execution.speed.clone(),
+            extra: self.how.args.clone(),
         };
-        // A key for it alone, gone with its attempt. Without one it works all the same, unless it has
-        // nothing else to work with.
+        // A key for it alone, gone with its attempt. Without one it works all the same.
         let grant = match &self.bridge {
             Some(_) if self.known.harness.takes_tools() => {
                 let f = &self.floor;
-                let words = self.words.as_deref();
-                f.agents.grant(&f.session.id, &f.agent, &self.site.tmp, start.hands, words).ok()
+                f.agents.grant(&f.session.id, &f.agent, &self.site.tmp).ok()
             }
             _ => None,
         };
         if let (Some(g), Some(command)) = (&grant, &self.bridge) {
             let args = vec![crate::mcp::ARG.into(), g.file.display().to_string()];
             start.tools = Some(server(command.clone(), args));
-            start.system = g.words.as_ref().and_then(|w| Place::new(w).ok());
         }
         let failed = |e: Error| Halt::Failed(e.to_string());
         let launch = self.known.harness.launch(&start).map_err(failed)?;
-        let subject = command(self.site.program.place(), &launch.args);
+        let given = self.how.shown();
+        let subject = command(&given, self.site.program.place(), &launch.args);
         let ask = Ask {
             chain: vec![self.floor.agent.clone()],
             workspace: self.workspace.to_string(),
@@ -298,7 +327,7 @@ impl Worker {
                 launch.containment,
                 self.setup.trust,
                 self.site.config.as_ref(),
-                start.hands,
+                &given,
             ),
             unsandboxed: true,
         };
@@ -320,19 +349,17 @@ impl Worker {
             .await?;
         self.floor.sync().await?;
         let frames = Record(self.floor.clone());
-        let start_hands = start.hands;
         let live = self.known.harness.start(&self.site, start, token, frames).map_err(failed)?;
         let (tx, rx) = mpsc::channel(1);
         let attempt = Attempt {
             floor: self.floor.clone(),
             desk: self.desk.clone(),
-            name: self.known.name,
-            id: self.known.id,
+            name: self.known.name.clone(),
+            id: self.known.id.clone(),
             workspace: self.workspace.to_string(),
             handle: live.handle,
             events: live.events,
             containment: launch.containment,
-            hands: start_hands,
             _grant: grant,
             ready: false,
             resumes: false,
@@ -342,6 +369,8 @@ impl Worker {
             questions: HashMap::new(),
             slot: self.slot.clone(),
             model: self.setup.execution.model.clone(),
+            runs_on: None,
+            connection: self.setup.execution.connection.clone(),
             plan: None,
             limit: None,
             early: None,
@@ -427,14 +456,12 @@ pub struct Turn {
 struct Attempt {
     floor: Floor,
     desk: axiom_engine::Desk,
-    name: &'static str,
-    id: &'static str,
+    name: String,
+    id: String,
     workspace: String,
     handle: Handle,
     events: Events,
     containment: Containment,
-    /// Its tool calls are shown where they are done: by the host itself.
-    hands: bool,
     _grant: Option<Grant>,
     ready: bool,
     resumes: bool,
@@ -445,7 +472,10 @@ struct Attempt {
     questions: HashMap<String, (AbortHandle, RequestId, Option<String>)>,
     slot: Arc<Slot>,
     model: Option<String>,
-    plan: Option<String>,
+    /// As it says.
+    runs_on: Option<String>,
+    connection: Option<String>,
+    plan: Option<axiom_harness::Plan>,
     limit: Option<String>,
     /// A turn that ended before it was followed.
     early: Option<Done>,
@@ -751,8 +781,6 @@ impl Attempt {
                     self.floor.say(vec![Say::End(o.item, Outcome::Completed, None)]).await?;
                 }
             }
-            Event::ToolStarted(t)
-                if self.hands && t.name.starts_with(&format!("mcp__{SERVER}__")) => {}
             Event::ToolStarted(t) => {
                 let t = *t;
                 let name = [t.title.as_deref().unwrap_or_default(), &t.name];
@@ -813,23 +841,54 @@ impl Attempt {
                     .and_then(|(n, of)| (of > 0).then(|| (n as f64 / of as f64).clamp(0.0, 1.0)));
                 let usage = Usage { context: share.or(s.usage.context), ..s.usage };
                 let provenance = s.provenance.unwrap_or(Provenance::Reported);
-                let agent = self.floor.agent.clone();
-                let body = Body::Usage { agent, usage, provenance };
+                let on = UsedOn {
+                    harness: self.id.clone(),
+                    lane: Lane::Program,
+                    provider: None,
+                    connection: self.connection.clone(),
+                    model: self.model.clone(),
+                    answered: self.runs_on.clone(),
+                    speed: None,
+                };
+                let body = Body::Usage {
+                    agent: self.floor.agent.clone(),
+                    usage,
+                    provenance,
+                    of: s.of,
+                    run: self.run.clone(),
+                    on: Some(Box::new(on)),
+                    cost: s.cost.map(Box::new),
+                    totals: s.totals,
+                    cut: false,
+                    aside: false,
+                };
                 self.floor.say(vec![Say::Event(body)]).await?;
             }
             Event::Plan(p) => {
-                let mark = |p| match p {
-                    axiom_harness::Progress::Done => "[x]",
-                    axiom_harness::Progress::Doing => "[~]",
-                    _ => "[ ]",
-                };
-                let steps: Vec<String> =
-                    p.steps.iter().map(|(t, s)| format!("{} {t}", mark(*s))).collect();
-                let text = p.text.unwrap_or_default() + &steps.join("\n");
-                if !text.is_empty() && Some(&text) != self.plan.as_ref() {
-                    self.notice(&format!("Its plan:\n{text}")).await?;
-                    self.plan = Some(text);
+                // Told again as it was, it is not said again.
+                if self.plan.as_ref() == Some(&p) {
+                    return Ok(());
                 }
+                // One that is gone takes nothing with it but itself.
+                let gone = p.steps.is_empty() && p.text.as_ref().is_none_or(String::is_empty);
+                if gone && self.plan.as_ref().is_none_or(|q| q.id != p.id) {
+                    return Ok(());
+                }
+                let state = |s| match s {
+                    Progress::Todo => TodoState::Todo,
+                    Progress::Doing => TodoState::Doing,
+                    Progress::Done => TodoState::Done,
+                    Progress::Unknown => TodoState::Unknown,
+                };
+                let steps = p.steps.iter().take(limits::STEPS);
+                let body = Body::Todo {
+                    agent: self.floor.agent.clone(),
+                    run: self.run.clone(),
+                    steps: steps.map(|(t, s)| Todo { text: t.clone(), state: state(*s) }).collect(),
+                    text: p.text.clone().filter(|t| !t.is_empty()),
+                };
+                self.plan = Some(p);
+                self.floor.say(vec![Say::Event(body)]).await?;
             }
             Event::Notice { level, text } if level != Level::Info => self.notice(&text).await?,
             Event::NotHeard { why } => {
@@ -858,6 +917,13 @@ impl Attempt {
         self.resumes = r.caps.resume;
         // Otherwise it begins anew when its program has ended, and says so.
         self.floor.resume(r.caps.resume.then_some(r.session)).await;
+        self.runs_on.clone_from(&r.model);
+        if let Some(models) = offered(&r.caps) {
+            let (agents, id) = (self.floor.agents.clone(), self.id.clone());
+            let account = self.connection.clone();
+            let put = move || agents.catalogue.put(&id, account.as_deref(), models);
+            let _ = tokio::task::spawn_blocking(put).await;
+        }
         if let (Some(is), Some(asked)) = (&r.model, &self.model)
             && is != asked
         {
@@ -1108,8 +1174,32 @@ fn opened(f: &Floor, id: &RequestId, ask: &Ask, what: &str) -> Vec<Say> {
     ]
 }
 
+/// The models it says it has, if it says which.
+fn offered(c: &Caps) -> Option<Vec<ModelInfo>> {
+    let Names::Of(all) = &c.models else { return None };
+    let every: Vec<String> = match &c.efforts {
+        Names::Of(e) => e.iter().map(|e| e.id.clone()).collect(),
+        _ => Vec::new(),
+    };
+    // Where they depend on the model, one that names none has none.
+    let depends = all.iter().any(|m| !m.efforts.is_empty());
+    let one = |m: &Name| {
+        let efforts = if depends { m.efforts.clone() } else { every.clone() };
+        ModelInfo {
+            id: m.id.clone(),
+            name: m.label.clone(),
+            effort: !efforts.is_empty(),
+            default_effort: m.default_effort.clone().filter(|e| efforts.contains(e)),
+            efforts,
+            speeds: if m.fast { vec!["fast".into()] } else { Vec::new() },
+            ..ModelInfo::default()
+        }
+    };
+    Some(all.iter().map(one).collect())
+}
+
 /// As a person would write it in a shell.
-fn command(program: &Place, args: &[String]) -> String {
+fn command(given: &[(String, Option<String>)], program: &Place, args: &[String]) -> String {
     let quoted = |a: &str| {
         let plain = |c: char| c.is_ascii_alphanumeric() || "-_=./,:@%+".contains(c);
         if !a.is_empty() && a.chars().all(plain) {
@@ -1118,31 +1208,39 @@ fn command(program: &Place, args: &[String]) -> String {
             format!("'{}'", a.replace('\'', "'\\''"))
         }
     };
-    std::iter::once(program.as_str())
-        .chain(args.iter().map(String::as_str))
-        .map(quoted)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let given = given.iter().map(|(n, v)| match v {
+        Some(v) => format!("{n}={}", quoted(v)),
+        None => format!("{n}=(secret)"),
+    });
+    let words = std::iter::once(program.as_str()).chain(args.iter().map(String::as_str));
+    given.chain(words.map(quoted)).collect::<Vec<_>>().join(" ")
 }
 
-fn scope(k: &Known, c: Containment, trust: bool, account: Option<&Place>, hands: bool) -> String {
+fn scope(
+    k: &Known,
+    c: Containment,
+    trust: bool,
+    account: Option<&Place>,
+    given: &[(String, Option<String>)],
+) -> String {
     let held = match c {
-        _ if hands => {
-            "it has no tools of its own: what it does, it does with Axiom's, judged, asked \
-             about and contained as Axiom's own agents are"
-                .into()
-        }
         Containment::Harness => format!("{} says its own sandbox holds it back", k.name),
         _ => "nothing holds it back: it can do whatever you can".into(),
     };
-    let folder = if trust && !hands {
+    let folder = if trust {
         "The folder's own settings for it take effect."
     } else {
         "The folder's own settings for it are ignored."
     };
     let account = account.map(|a| format!(" Its account is kept in {a}.")).unwrap_or_default();
+    let secrets: Vec<&str> = given.iter().filter(|g| g.1.is_none()).map(|g| g.0.as_str()).collect();
+    let secrets = match secrets.as_slice() {
+        [] => String::new(),
+        all => format!(" It is given what you keep as {}.", all.join(", ")),
+    };
+    let sign_in = if k.own { "It" } else { "It signs in by itself, and" };
     format!(
-        "Outside Axiom's sandbox; {held}. It signs in by itself, and reaches the network. {folder}{account}"
+        "Outside Axiom's sandbox; {held}. {sign_in} reaches the network. {folder}{account}{secrets}"
     )
 }
 

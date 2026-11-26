@@ -54,6 +54,7 @@ pub(super) fn encode(
     if !settings.stop.is_empty() {
         body.put("stop", &settings.stop)?;
     }
+    super::plain(settings)?;
     match (&settings.effort, quirks.effort) {
         (None, _) => {}
         (Some(effort), Some(Effort::ReasoningEffort)) => body.put("reasoning_effort", effort)?,
@@ -187,6 +188,7 @@ const REASONING: [&str; 2] = ["reasoning_content", "reasoning"];
 pub(super) struct Decoder {
     think: Splitter,
     empty_args: bool,
+    cost_unit: Option<String>,
     started: bool,
     /// The answer's id, for calls that come without one.
     id: Option<String>,
@@ -252,6 +254,7 @@ impl Decoder {
         Self {
             think: Splitter::new(quirks.think.unwrap_or(Think::Off)),
             empty_args: quirks.empty_args == Some(true),
+            cost_unit: quirks.cost_unit.clone(),
             started: false,
             id: None,
             blocks: 0,
@@ -301,9 +304,14 @@ impl Decoder {
             }
         }
         if let Some(usage) = chunk.usage.filter(Value::is_object) {
-            out.push(Event::Usage(count(&usage)));
+            out.push(Event::Usage(Usage { cost: self.cost(&usage), ..count(&usage) }));
         }
         Ok(())
+    }
+
+    fn cost(&self, told: &Value) -> Option<Cost> {
+        let amount = told.get("cost")?.as_f64().filter(|a| *a >= 0.0)?;
+        Some(Cost { amount, unit: self.cost_unit.clone()? })
     }
 
     fn delta(&mut self, delta: &Object, out: &mut Vec<Event>) -> Result<(), Error> {
@@ -606,6 +614,7 @@ fn count(told: &Value) -> Usage {
         cache_write_long: None,
         output: count("/completion_tokens"),
         reasoning: count("/completion_tokens_details/reasoning_tokens"),
+        ..Usage::default()
     }
 }
 

@@ -24,6 +24,9 @@ impl Json {
     pub fn get(&self) -> &str {
         self.0.get()
     }
+    pub(crate) fn value(&self) -> Value {
+        serde_json::from_str(self.0.get()).unwrap_or(Value::Null)
+    }
     pub(crate) fn raw(&self) -> &RawValue {
         &self.0
     }
@@ -73,6 +76,8 @@ pub enum Codec {
     Responses,
     /// Google Gemini `generateContent`.
     Gemini,
+    /// Amazon Bedrock `ConverseStream`.
+    Converse,
 }
 
 /// Where a block's native JSON came from, and so where it may be valid.
@@ -87,7 +92,7 @@ pub struct Scope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Native {
     pub scope: Scope,
-    /// In the Messages codec the block itself, in the Responses codec the item. In the Chat codec,
+    /// In the Messages and Converse codecs the block itself, in the Responses codec the item. In the Chat codec,
     /// which has no blocks, an entry of `tool_calls`, or an object with the members of the assistant
     /// message that it was. In the Gemini codec a part, or several as an array.
     pub json: Json,
@@ -234,6 +239,12 @@ pub struct Settings {
     pub max_output: Option<u32>,
     /// In the provider's own words. Asking a provider that has no such control is an error.
     pub effort: Option<String>,
+    /// That it think as much as it needs. Asked of every model that is known to take it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adaptive: bool,
+    /// How fast, in the provider's own words, where that can be told. It has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
     pub stop: Vec<String>,
     pub cache: Cache,
 }
@@ -249,7 +260,7 @@ pub struct Request {
 
 /// Tokens as the provider counted them. What it did not say, and what does not follow from what it
 /// said, is absent.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     /// The whole prompt: uncached, read and written.
     pub prompt: Option<u64>,
@@ -262,6 +273,19 @@ pub struct Usage {
     pub output: Option<u64>,
     /// Part of `output`.
     pub reasoning: Option<u64>,
+    /// What the provider says it took for the answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Cost>,
+    /// How fast the provider says it was answered, where that has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Cost {
+    pub amount: f64,
+    /// What the provider calls what it took.
+    pub unit: String,
 }
 
 /// Why the model stopped, by its provider's account.
@@ -309,7 +333,7 @@ pub enum Delta {
 
 /// The stream, whoever it comes from. Blocks are numbered from 0 as they start, and several may be
 /// open at once.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Started {
         id: Option<String>,

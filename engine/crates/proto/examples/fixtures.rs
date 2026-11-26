@@ -15,29 +15,38 @@ fn main() -> Result<(), serde_json::Error> {
         Body::AgentAdded {
             agent: a.clone(),
             name: "Lead".into(),
-            execution: Execution {
+            execution: Box::new(Execution {
                 harness: "axiom".into(),
                 provider: Some("anthropic".into()),
                 model: Some("m".into()),
                 connection: Some("c_2".into()),
                 effort: Some("high".into()),
                 environment: Some("e".into()),
-            },
+                speed: Some("fast".into()),
+            }),
             parent: Some(AgentId("a_0".into())),
             access: Some(Access::Ask),
             apart: true,
+            from: Some(Box::new(Branched {
+                agent: AgentId("a_0".into()),
+                item: ItemId("i_0".into()),
+                with: true,
+            })),
+            plan: true,
         },
         Body::AgentChanged {
             agent: a.clone(),
-            execution: Execution {
+            execution: Box::new(Execution {
                 harness: "axiom".into(),
                 provider: None,
                 model: Some("n".into()),
                 connection: None,
                 effort: None,
                 environment: None,
-            },
+                ..Execution::default()
+            }),
             access: Some(Access::Work),
+            plan: true,
         },
         Body::AgentState { agent: a.clone(), state: AgentState::Asking },
         Body::RunStarted { run: r.clone(), agent: a.clone() },
@@ -80,8 +89,44 @@ fn main() -> Result<(), serde_json::Error> {
                 output: Some(4),
                 reasoning: Some(5),
                 context: Some(0.5),
+                prompt: Some(6),
+                cache_write_long: Some(7),
             },
             provenance: Provenance::Estimated,
+            of: Covers::Turn,
+            run: Some(RunId("r_1".into())),
+            on: Some(Box::new(UsedOn {
+                harness: "claude".into(),
+                lane: Lane::Program,
+                provider: Some("anthropic".into()),
+                connection: Some("c_2".into()),
+                model: Some("m".into()),
+                answered: Some("m-1".into()),
+                speed: Some("fast".into()),
+            })),
+            cost: Some(Box::new(Cost {
+                amount: 0.25,
+                currency: "USD".into(),
+                provenance: Provenance::Estimated,
+                of: Covers::Session,
+            })),
+            totals: vec![ModelTotal {
+                model: Some("m-1".into()),
+                usage: Usage { output: Some(8), ..Usage::default() },
+                cost: None,
+            }],
+            cut: true,
+            aside: true,
+        },
+        Body::Todo {
+            agent: AgentId("a_1".into()),
+            run: Some(RunId("r_1".into())),
+            steps: vec![
+                Todo { text: "Look".into(), state: TodoState::Done },
+                Todo { text: "Do".into(), state: TodoState::Doing },
+                Todo { text: "Say".into(), state: TodoState::Todo },
+            ],
+            text: Some("# P".into()),
         },
     ];
     let cut = vec![
@@ -143,6 +188,67 @@ fn main() -> Result<(), serde_json::Error> {
             }),
         },
         Message::Events { session: SessionId("s_1".into()), events: cut },
+        Message::Ok {
+            id: 4,
+            result: serde_json::to_value([
+                Limit {
+                    of: "A run".into(),
+                    what: "Steps".into(),
+                    most: Some(200),
+                    unit: Unit::Count,
+                },
+                Limit {
+                    of: "A run".into(),
+                    what: "Output tokens".into(),
+                    most: None,
+                    unit: Unit::Count,
+                },
+                Limit {
+                    of: "Files".into(),
+                    what: "One file".into(),
+                    most: Some(1024),
+                    unit: Unit::Bytes,
+                },
+                Limit {
+                    of: "Files".into(),
+                    what: "One command".into(),
+                    most: Some(600),
+                    unit: Unit::Seconds,
+                },
+            ])?,
+        },
+        Message::Ok {
+            id: 7,
+            result: serde_json::to_value([ModelList {
+                harness: "axiom".into(),
+                connection: Some("c_2".into()),
+                at: 9,
+                models: vec![ModelInfo {
+                    id: "m".into(),
+                    name: Some("M".into()),
+                    context: Some(1000),
+                    effort: true,
+                    efforts: vec!["low".into(), "max".into()],
+                    default_effort: Some("max".into()),
+                    adaptive: true,
+                    speeds: vec!["fast".into()],
+                }],
+            }])?,
+        },
+        Message::Ok {
+            id: 8,
+            result: serde_json::to_value([ProgramInfo {
+                harness: "claude".into(),
+                account: Some("c_2".into()),
+                name: Some("N".into()),
+                path: Some("/p".into()),
+                args: vec!["a".into()],
+                vars: vec![
+                    VarInfo { name: "A".into(), value: Some("1".into()), lasts: true },
+                    VarInfo { name: "B".into(), value: None, lasts: false },
+                ],
+            }])?,
+        },
         Message::Open { open: "/w".into() },
     ] {
         println!("{}", serde_json::to_string(&m)?);

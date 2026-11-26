@@ -65,8 +65,10 @@ fn its_first_words() {
     assert_eq!(all[0], json!({"method": "initialized", "params": {}}));
     assert_eq!(all[1]["method"], "model/list");
     d.hear(reply(1, json!({"data": [
-        {"id": "i", "model": "m1", "displayName": "M", "supportedReasoningEfforts": [{"reasoningEffort": "low"}, {"reasoningEffort": "high"}]},
-        {"id": "m2", "supportedReasoningEfforts": [{"reasoningEffort": "low"}]}, {"x": 1}]})));
+        {"id": "i", "model": "m1", "displayName": "M", "defaultReasoningEffort": "high",
+            "supportedReasoningEfforts": [{"reasoningEffort": "low"}, {"reasoningEffort": "high"}]},
+        {"id": "m2", "defaultReasoningEffort": "max", "supportedReasoningEfforts": [{"reasoningEffort": "low"}]},
+        {"x": 1}]})));
     let v = d.one();
     assert_eq!(v["method"], "thread/start");
     d.hear(reply(2, thread("workspaceWrite")));
@@ -79,6 +81,11 @@ fn its_first_words() {
     let Names::Of(m) = &r.caps.models else { panic!() };
     assert_eq!((m[0].id.as_str(), m[0].label.as_deref(), m[0].efforts.len()), ("m1", Some("M"), 2));
     assert_eq!((m.len(), m[1].id.as_str()), (2, "m2"));
+    // The one it begins with, if it is one it takes.
+    assert_eq!(
+        (m[0].default_effort.as_deref(), m[1].default_effort.as_deref()),
+        (Some("high"), None)
+    );
     let Names::Of(e) = &r.caps.efforts else { panic!() };
     assert_eq!(e.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["low", "high"]);
 }
@@ -501,9 +508,21 @@ fn plans_usage_and_limits() {
         cache_write: Some(1),
         output: Some(5),
         reasoning: Some(2),
-        context: None,
+        ..Usage::default()
     };
     assert_eq!((&s.usage, s.provenance, &s.cost), (&want, Some(Provenance::Reported), &None));
+    assert_eq!(s.of, axiom_proto::Covers::Unknown);
+    assert_eq!(s.totals[0].usage.input, Some(99));
+    d.hear(note(
+        "thread/tokenUsage/updated",
+        json!({"tokenUsage": {"last": {"outputTokens": 1}, "total": {"outputTokens": 6}}}),
+    ));
+    let e = d.events();
+    let Event::Usage(s) = &e[0] else { panic!("{e:?}") };
+    let usage = Usage { output: Some(6), ..Usage::default() };
+    assert_eq!(s.totals, [ModelTotal { model: None, usage, cost: None }]);
+    d.hear(note("thread/tokenUsage/updated", json!({"tokenUsage": {"last": {}}})));
+    assert!(matches!(&d.events()[0], Event::Usage(s) if s.totals.is_empty()));
     d.hear(note("thread/tokenUsage/updated", json!({"tokenUsage": {}})));
     assert_eq!(d.told(), ["unknown usage"]);
     d.hear(note(

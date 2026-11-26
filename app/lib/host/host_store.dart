@@ -168,6 +168,7 @@ class HostStore extends ChangeNotifier {
     // Nothing that is shown depends on it.
     unawaited(loadConnections().catchError((_) {}));
     unawaited(loadHarnesses().catchError((_) {}));
+    unawaited(loadLists().catchError((_) {}));
     unawaited(loadNeeds());
     if (current case final c? when c.fault == null) await _follow(c);
     notifyListeners();
@@ -310,6 +311,45 @@ class HostStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// What has been said of how programs are started.
+  List<ProgramInfo> programs = const [];
+
+  Future<void> loadPrograms() async {
+    final r = await _live.call('program.list');
+    programs = [for (final j in r! as List<Object?>) ProgramInfo.decode(j! as Json)];
+    notifyListeners();
+  }
+
+  /// Says how a program is started; without [harness], adds one. Secrets go to the host and are not
+  /// kept here.
+  Future<String> setProgram({
+    required List<String> args,
+    required List<VarSet> vars,
+    String? harness,
+    String? account,
+    String? name,
+    String? path,
+  }) async {
+    final r = await _live.call('program.set', {
+      'harness': ?harness,
+      'account': ?account,
+      'name': ?name,
+      'path': ?path,
+      'args': args,
+      'vars': [for (final v in vars) v.encode()],
+    });
+    await loadPrograms();
+    await loadHarnesses();
+    return (r! as Json)['harness']! as String;
+  }
+
+  /// Takes away one its person added, or what was said of another.
+  Future<void> removeProgram(String harness, {String? account}) async {
+    await _live.call('program.remove', {'harness': harness, 'account': ?account});
+    await loadPrograms();
+    await loadHarnesses();
+  }
+
   /// What has been changed in a session's folder.
   Future<Changes> changes(String session) async =>
       Changes.decode((await _live.call('workspace.changes', {'session': session}))! as Json);
@@ -368,8 +408,10 @@ class HostStore extends ChangeNotifier {
   }
 
   /// As a person knows it.
-  String harnessName(String id) =>
-      id == 'axiom' ? 'Axiom' : harnesses.where((h) => h.id == id).firstOrNull?.name ?? id;
+  String harnessName(String id) => id == 'axiom'
+      ? 'Axiom'
+      : harnesses.where((h) => h.id == id).firstOrNull?.name ??
+            (id.startsWith('p_') ? 'a program that was removed' : id);
 
   /// The secret goes to the host and is not kept here.
   Future<String> connect(String name, String provider, {String? url, String? secret}) async {
@@ -448,12 +490,44 @@ class HostStore extends ChangeNotifier {
   /// What was last heard of a connection's models; null before that.
   List<ModelInfo>? modelsOf(String connection) => _models[connection];
 
+  /// What providers and programs have said of their models, as the host has kept it.
+  List<ModelList> lists = const [];
+
+  Future<void> loadLists() async {
+    final r = await _live.call('model.known');
+    lists = [for (final j in r! as List<Object?>) ModelList.decode(j! as Json)];
+    notifyListeners();
+  }
+
+  /// What is known of models that are in no list, by account and name.
+  final _about = <(String, String), ModelInfo?>{};
+  static const _mostAbout = 200;
+  ModelInfo? aboutOf(String connection, String model) => _about[(connection, model)];
+
+  /// Asks the host once what can be said to a model; it asks nobody.
+  Future<void> about(String connection, String model) async {
+    final key = (connection, model);
+    if (model.isEmpty || _about.containsKey(key)) return;
+    if (_about.length >= _mostAbout) _about.clear();
+    _about[key] = null;
+    final r = await _live.call('model.about', {'connection': connection, 'model': model});
+    _about[key] = ModelInfo.decode(r! as Json);
+    notifyListeners();
+  }
+
   Future<List<ModelInfo>> models(String connection) async {
     final r = await _live.call('model.list', {'connection': connection});
     final all = [for (final j in r! as List<Object?>) ModelInfo.decode(j! as Json)];
     _models[connection] = all;
     notifyListeners();
+    unawaited(loadLists().catchError((Object _) {}));
     return all;
+  }
+
+  /// What the host keeps everything to.
+  Future<List<HostLimit>> limits() async {
+    final r = await _live.call('host.limits');
+    return [for (final j in r! as List<Object?>) HostLimit.decode(j! as Json)];
   }
 
   /// What a folder would have agents told; for a person to read.
@@ -470,9 +544,11 @@ class HostStore extends ChangeNotifier {
     List<Instructions> instructions = const [],
     bool trust = false,
     bool apart = false,
+    bool plan = false,
   }) async {
     final r = await _live.call('agent.add', {
       if (apart) 'apart': true,
+      if (plan) 'plan': true,
       'session': session,
       'name': name,
       'execution': x.encode(),
@@ -483,13 +559,62 @@ class HostStore extends ChangeNotifier {
     return (r! as Json)['agent']! as String;
   }
 
-  Future<void> setAgent(String session, String agent, {Execution? execution, Access? access}) =>
-      _live.call('agent.set', {
-        'session': session,
-        'agent': agent,
-        'execution': ?execution?.encode(),
-        'access': ?access?.name,
-      });
+  /// [plan]: whether it is to hand in a plan first; then it only reads.
+  Future<void> setAgent(
+    String session,
+    String agent, {
+    Execution? execution,
+    Access? access,
+    bool? plan,
+  }) => _live.call('agent.set', {
+    'session': session,
+    'agent': agent,
+    'execution': ?execution?.encode(),
+    'access': ?access?.name,
+    'plan': ?plan,
+  });
+
+  /// Accepts the plan an agent has handed in last, as it is or as [text] has it. It may do what
+  /// [access] says then, and begins.
+  Future<void> acceptPlan(
+    String session,
+    String agent,
+    String item,
+    Access access, {
+    String? text,
+  }) => _live.call('plan.accept', {
+    'session': session,
+    'agent': agent,
+    'item': item,
+    'access': access.name,
+    'text': ?text,
+  });
+
+  /// Whether a conversation can be branched at an item.
+  Future<BranchInfo> lookBranch(String session, String agent, String item) async {
+    final r = await _live.call('branch.look', {'session': session, 'agent': agent, 'item': item});
+    return BranchInfo.decode(r! as Json);
+  }
+
+  /// Adds an agent that begins with another's conversation as it was at an item; with the files of its
+  /// copy as they were, if so.
+  Future<String> branch(
+    String session,
+    String agent,
+    String item,
+    String name, {
+    bool files = false,
+  }) async {
+    final r = await _live.call('agent.branch', {
+      'session': session,
+      'agent': agent,
+      'item': item,
+      'name': name,
+      'files': files,
+      // A copy is made.
+    }, _long);
+    return (r! as Json)['agent']! as String;
+  }
 
   /// Summarises an agent's conversation now, to make room in it.
   Future<void> compact(String session, String agent) async {

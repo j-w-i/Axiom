@@ -14,7 +14,7 @@ use axiom_engine::{
 };
 use axiom_model::{Client, Endpoint, Options, Profile, Settings};
 use axiom_policy::{Access, Budget, Caps, Keep, Net, Place, Policy, Reach, Tools};
-use axiom_proto::{AgentId, Body, ItemId, ItemKind, Outcome, RequestId, RunId};
+use axiom_proto::{AgentId, Body, ItemId, ItemKind, Lane, Outcome, RequestId, RunId, UsedOn};
 use axiom_tools::{Seen, Site, specs, system};
 use tokio::sync::{mpsc, watch};
 
@@ -29,6 +29,8 @@ struct Kept {
     tool: String,
     shut: bool,
     no_turns: bool,
+    /// Where it can be branched.
+    cuts: Vec<(ItemId, u64, bool)>,
     /// What its person has taken back.
     taken: Vec<ItemId>,
     on_sync: Option<OnSync>,
@@ -88,6 +90,9 @@ impl Memory {
     pub fn keep(&self, t: &Turn) {
         self.0.lock().unwrap().turns.push(serde_json::to_string(t).unwrap());
     }
+    pub fn cuts(&self) -> Vec<(ItemId, u64, bool)> {
+        self.0.lock().unwrap().cuts.clone()
+    }
     pub fn deeds(&self) -> Vec<Deed> {
         self.0.lock().unwrap().deeds.clone()
     }
@@ -99,7 +104,7 @@ impl Memory {
         let at = |x: &str| l.iter().position(|y| y == x);
         matches!((at(a), at(b)), (Some(x), Some(y)) if x < y)
     }
-    fn items(&self, kind: ItemKind) -> Vec<(ItemId, String)> {
+    pub fn items(&self, kind: ItemKind) -> Vec<(ItemId, String)> {
         self.all()
             .into_iter()
             .filter_map(|s| match s {
@@ -109,6 +114,9 @@ impl Memory {
                 _ => None,
             })
             .collect()
+    }
+    pub fn ids(&self, kind: ItemKind) -> Vec<ItemId> {
+        self.items(kind).into_iter().map(|i| i.0).collect()
     }
     pub fn texts(&self, kind: ItemKind) -> Vec<String> {
         let all = self.all();
@@ -149,7 +157,15 @@ impl Memory {
             .collect()
     }
     pub fn usage(&self) -> usize {
-        self.all().iter().filter(|s| matches!(s, Say::Event(Body::Usage { .. }))).count()
+        self.used().len()
+    }
+    /// Every report of what was used.
+    pub fn used(&self) -> Vec<Body> {
+        let used = |s| match s {
+            Say::Event(b @ Body::Usage { .. }) => Some(b),
+            _ => None,
+        };
+        self.all().into_iter().filter_map(used).collect()
     }
     pub fn requests(&self) -> usize {
         self.all().iter().filter(|s| matches!(s, Say::Event(Body::RequestOpened { .. }))).count()
@@ -247,6 +263,11 @@ impl Stage for Memory {
         }
         Ok(true)
     }
+    async fn mark(&self, item: &ItemId, n: u64, with: bool) {
+        if let Ok(mut k) = self.op() {
+            k.cuts.push((item.clone(), n, with));
+        }
+    }
     async fn closed(&self) {
         loop {
             if self.0.lock().unwrap().shut {
@@ -342,6 +363,12 @@ impl T {
             desk: self.desk.clone(),
             client: Client::new(self.profile.clone(), endpoint, None, Options::default()).unwrap(),
             model: "m".into(),
+            on: UsedOn {
+                harness: "axiom".into(),
+                lane: Lane::Open,
+                connection: Some("c".into()),
+                ..UsedOn::default()
+            },
             settings: Settings { max_output: Some(1000), ..Settings::default() },
             window: Some(1000),
             site: Site {
@@ -372,6 +399,7 @@ impl T {
             fill: None,
             told: None,
             waited: Duration::ZERO,
+            last_words: None,
             noted: Default::default(),
             compact: false,
             retries: Retries {
@@ -390,7 +418,7 @@ impl T {
     pub async fn run_unsaid(&self, a: &mut Agent<Memory>) -> Ended {
         let (_tx, rx) = watch::channel(false);
         let id = RunId::new();
-        a.begin(&id, None).await.unwrap();
+        a.begin(&id, vec![], None).await.unwrap();
         let run = a.run(id, rx);
         tokio::time::timeout(Duration::from_secs(60), run).await.expect("it ends")
     }
@@ -402,7 +430,7 @@ impl T {
     ) -> Ended {
         let id = RunId::new();
         let run = async {
-            match a.begin(&id, Some(axiom_engine::Word::new(prompt.into()))).await {
+            match a.begin(&id, vec![], Some(axiom_engine::Word::new(prompt.into()))).await {
                 Ok(()) => a.run(id, cancel).await,
                 Err(_) => Ended { outcome: Outcome::Interrupted, error: None },
             }

@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use axiom_policy::{Access, Place, audit::Containment};
-use axiom_proto::{Outcome, Provenance, Usage};
+use axiom_proto::{Cost, Covers, Outcome, Provenance, Usage};
 use serde_json::{Value, json};
 
 use crate::{
@@ -450,7 +450,7 @@ impl Client {
                 inner => inner,
             });
             let values = groups.take(512).filter_map(|x| {
-                Some(Name { id: id(x, "/value")?, label: owned(x, "/name"), efforts: vec![] })
+                Some(Name { id: id(x, "/value")?, label: owned(x, "/name"), ..Name::default() })
             });
             let category = owned(c, "/category").unwrap_or_default();
             all.push(Opt { id: cid, category, current, values: values.collect() });
@@ -1042,12 +1042,15 @@ fn usage(u: &Value, o: &mut Out) {
     o.event(Event::Usage(Spent {
         usage: Usage { context, ..Usage::default() },
         context: Some((used, size)),
-        cost: cost.map(|(amount, currency)| Cost {
+        // "Total cumulative cost for the session" (rfds/session-usage, read 2026-11-26).
+        cost: cost.filter(|c| c.0 >= 0.0).map(|(amount, currency)| Cost {
             amount,
             currency,
             provenance: Provenance::Reported,
+            of: Covers::Session,
         }),
         provenance: Some(Provenance::Reported),
+        ..Spent::default()
     }));
 }
 

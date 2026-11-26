@@ -68,6 +68,7 @@ impl T {
             connection: Some(self.connection.clone()),
             effort: None,
             environment: None,
+            ..Execution::default()
         }
     }
     async fn agent(&mut self, access: Access) -> AgentId {
@@ -79,6 +80,7 @@ impl T {
             trust: false,
             instructions: self.instructions.clone(),
             apart: false,
+            plan: false,
         };
         let v = self.c.call(call).await.unwrap();
         AgentId(v["agent"].as_str().unwrap().into())
@@ -218,6 +220,111 @@ async fn an_agent_is_set_up_and_does_what_it_is_told() {
     assert_eq!(t.server.requests()[2]["messages"].as_array().unwrap().len(), 6);
 }
 
+/// From the connection to the tool and back, as Bedrock has it.
+#[tokio::test]
+async fn an_agent_works_on_bedrock() {
+    let mut t = T::new(vec![
+        bedrock(
+            Some(("I should write.", "<sig>")),
+            "Writing.",
+            &[("tooluse_1", "write", r#"{"path":"n.txt","content":"made\n"}"#)],
+        ),
+        bedrock(None, "All done.", &[]),
+    ])
+    .await;
+    let add = |url: &str, secret: Option<&str>| Call::ConnectionAdd {
+        name: "Amazon".into(),
+        provider: "bedrock".into(),
+        url: Some(url.into()),
+        secret: secret.map(|s| SecretText(s.into())),
+    };
+    for (url, secret) in [
+        ("https://evil.example", Some(CANARY)),
+        ("https://bedrock-runtime.us-east-1.amazonaws.com.evil.example", Some(CANARY)),
+        ("https://bedrock-runtime.us-east-1.amazonaws.com", None),
+    ] {
+        let e = t.c.call(add(url, secret)).await.unwrap_err().to_string();
+        assert!(e.contains("Bedrock") && !e.contains(CANARY), "{e}");
+    }
+    let url = t.server.url.trim_end_matches("/v1").to_owned();
+    let v = t.c.call(add(&url, Some(CANARY))).await.unwrap();
+    t.connection = v["connection"].as_str().unwrap().into();
+    // Its models are named by hand.
+    let connection = t.connection.clone();
+    assert_eq!(t.c.call(Call::Models { connection }).await.unwrap(), json!([]));
+    let mut setup = Call::AgentAdd {
+        session: t.s.clone(),
+        name: "Lead".into(),
+        execution: Execution {
+            model: Some("m".into()),
+            effort: Some("low".into()),
+            ..t.execution()
+        },
+        access: Access::Work,
+        trust: false,
+        instructions: vec![],
+        apart: false,
+        plan: false,
+    };
+    let e = t.c.call(setup.clone()).await.unwrap_err().to_string();
+    assert!(e.contains("effort"), "{e}");
+    let Call::AgentAdd { execution, .. } = &mut setup else { panic!() };
+    execution.model = Some("us.anthropic.claude-sonnet-5-5".into());
+    let v = t.c.call(setup).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    t.prompt(&a, "make it").await.unwrap();
+    let (o, e, all) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None));
+    assert_eq!(t.file("n.txt").as_deref(), Some("made\n"));
+    assert_eq!(texts(&all, ItemKind::Reasoning), ["I should write."]);
+    assert_eq!(texts(&all, ItemKind::Prose), ["Writing.", "All done."]);
+    let used: Vec<_> = all
+        .iter()
+        .filter_map(|b| match b {
+            Body::Usage { usage, provenance, on, of, run, .. } => {
+                let on = on.as_deref().unwrap();
+                assert!(run.is_some() && *of == Covers::Answer);
+                assert_eq!((on.harness.as_str(), on.lane), ("axiom", Lane::Key));
+                assert_eq!(on.provider.as_deref(), Some("bedrock"));
+                assert!(on.connection.as_deref().is_some_and(|c| c.starts_with("c_")));
+                assert_eq!(on.model.as_deref(), Some("us.anthropic.claude-sonnet-5-5"));
+                Some((usage.input, usage.output, *provenance))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(used, [(Some(40), Some(9), Provenance::Reported); 2]);
+    let asked = t.server.requests();
+    assert_eq!(asked[0]["additionalModelRequestFields"]["output_config"]["effort"], "low");
+    // Where it is kept between turns, and what was thought goes back signed.
+    assert_eq!(asked[0]["system"][1], json!({"cachePoint":{"type":"default"}}));
+    let turns = asked[1]["messages"].as_array().unwrap();
+    assert_eq!(
+        turns[1]["content"][0],
+        json!({"reasoningContent":{"reasoningText":{"text":"I should write.","signature":"<sig>"}}})
+    );
+    assert_eq!(turns[1]["content"][2]["toolUse"]["toolUseId"], "tooluse_1");
+    assert_eq!(turns[2]["content"][0]["toolResult"]["toolUseId"], "tooluse_1");
+    assert!(t.server.keys().iter().all(|k| *k == format!("Bearer {CANARY}")));
+
+    // Also when the host is another; and a failure after it began is one.
+    t.restart().await;
+    t.server.add(bedrock_exception("I ", "validationException", r#"{"message":"no more"}"#));
+    t.prompt(&a, "and now?").await.unwrap();
+    // What was before is told again first.
+    let (o, e, all) = loop {
+        let (o, e, all) = t.ended().await;
+        if o != Outcome::Completed {
+            break (o, e, all);
+        }
+    };
+    assert_eq!(o, Outcome::Failed);
+    assert!(e.unwrap().contains("no more"));
+    assert!(texts(&all, ItemKind::Prose).iter().all(|p| !p.contains(CANARY)));
+    let last = t.server.requests().pop().unwrap();
+    assert!(last["messages"].to_string().contains("<sig>"));
+}
+
 #[tokio::test]
 async fn a_person_is_asked_through_the_socket() {
     let mut t =
@@ -268,6 +375,7 @@ async fn it_is_spoken_to_and_stopped_while_it_works() {
         agent: a.clone(),
         execution: None,
         access: Some(Access::Read),
+        plan: None,
     };
     let e = t.c.call(set.clone()).await.unwrap_err();
     assert!(e.to_string().contains("at work"), "{e}");
@@ -408,6 +516,234 @@ async fn room_is_made_between_runs_when_nothing_waits() {
 }
 
 /// A client that did not see the answer says it again under the same name.
+/// Its own list of things to do: shown, not asked about, and nothing depends on it.
+#[tokio::test]
+async fn it_shows_what_it_means_to_do() {
+    let list = r#"{"steps":[{"text":"Look","state":"done"},{"text":"Do","state":"doing"}]}"#;
+    let mut t = T::new(vec![
+        calls(&[("c1", "todo", list), ("c2", "todo", r#"{"steps":[{"text":"x"}]}"#)]),
+        calls(&[("c3", "todo", r#"{"steps":[]}"#)]),
+        text(&["Done."]),
+    ])
+    .await;
+    // Also one that may change nothing.
+    let a = t.agent(Access::Read).await;
+    t.prompt(&a, "go").await.unwrap();
+    let (o, e, all) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None));
+    let told: Vec<_> = all
+        .iter()
+        .filter_map(|b| match b {
+            Body::Todo { agent, run, steps, text: None } => {
+                assert!(*agent == a && run.is_some());
+                Some(steps.iter().map(|s| (s.text.as_str(), s.state)).collect::<Vec<_>>())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(told, [vec![("Look", TodoState::Done), ("Do", TodoState::Doing)], vec![]]);
+    let ends: Vec<_> = all
+        .iter()
+        .filter_map(|b| match b {
+            Body::ItemEnded { result: Some(r), outcome, .. } => {
+                Some((*outcome, r["summary"].as_str().unwrap_or_default().to_owned()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ends[0], (Outcome::Completed, "1 of 2 done".into()));
+    assert_eq!(ends[1].0, Outcome::Failed, "what is not a list is told to the model");
+    assert_eq!(ends[2], (Outcome::Completed, "nothing".into()));
+    assert!(!all.iter().any(|b| matches!(b, Body::RequestOpened { .. })));
+    let asked = t.server.requests();
+    assert!(asked[0]["tools"].to_string().contains("\"todo\""));
+    assert!(asked[1]["messages"].to_string().contains("state is todo, doing or done"));
+}
+
+/// Who plans first changes nothing until the plan is accepted, and then may do what was chosen then.
+#[tokio::test]
+async fn a_plan_comes_first() {
+    let write = r#"{"path":"n.txt","content":"made\n"}"#;
+    let hand_in = |text: &str| json!({ "text": text }).to_string();
+    let mut t = T::new(vec![
+        calls(&[("c1", "write", write), ("c2", "plan", &hand_in(" "))]),
+        calls(&[("c3", "plan", &hand_in("# First\n\n1. Make n.txt."))]),
+        text(&["It is yours."]),
+        calls(&[("c4", "plan", &hand_in("# Second"))]),
+        text(&["Changed."]),
+        calls(&[("c5", "plan", &hand_in("# Third")), ("c6", "write", write)]),
+        text(&["Done."]),
+    ])
+    .await;
+    let call = |access, plan| Call::AgentAdd {
+        session: t.s.clone(),
+        name: "Lead".into(),
+        execution: t.execution(),
+        access,
+        trust: false,
+        instructions: vec![],
+        apart: false,
+        plan,
+    };
+    let (good, bad) = (call(Access::Read, true), call(Access::Work, true));
+    let e = t.c.call(bad).await.unwrap_err().to_string();
+    assert!(e.contains("only reads"), "{e}");
+    let v = t.c.call(good).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    t.prompt(&a, "make it").await.unwrap();
+    let (o, e, all) = t.ended().await;
+    assert_eq!((o, e), (Outcome::Completed, None));
+    assert!(
+        all.iter()
+            .any(|b| matches!(b, Body::AgentAdded { plan: true, access: Some(Access::Read), .. }))
+    );
+    assert_eq!(t.file("n.txt"), None, "it has changed nothing");
+    assert_eq!(texts(&all, ItemKind::Plan), ["# First\n\n1. Make n.txt."]);
+    let first = |all: &[Body]| {
+        all.iter()
+            .find_map(|b| match b {
+                Body::ItemStarted { kind: ItemKind::Plan, item, .. } => Some(item.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let one = first(&all);
+    let asked = t.server.requests();
+    assert!(asked[0]["messages"].to_string().contains("asked for a plan first"));
+    assert!(asked[0]["tools"].to_string().contains("Hands in your plan"));
+    // A branch goes on from it, and has handed in nothing.
+    let last = all.iter().rev().find_map(|b| match b {
+        Body::ItemStarted { kind: ItemKind::Prose, item, .. } => Some(item.clone()),
+        _ => None,
+    });
+    let v =
+        t.c.call(Call::Branch {
+            session: t.s.clone(),
+            agent: a.clone(),
+            item: last.unwrap(),
+            name: "Lead 2".into(),
+            files: false,
+        })
+        .await
+        .unwrap();
+    let (session, agent) = (t.s.clone(), AgentId(v["agent"].as_str().unwrap().into()));
+    let item = one.clone();
+    let call = Call::PlanAccept { session, agent, item, access: Access::Work, text: None };
+    assert!(t.c.call(call).await.unwrap_err().to_string().contains("handed in last"));
+    // Their person says why not, in their own words: it is another plan that stands then.
+    t.prompt(&a, "another way").await.unwrap();
+    let (_, _, all) = t.ended().await;
+    let two = first(&all);
+    let accept = |t: &T, item: &ItemId, access, text: Option<&str>| Call::PlanAccept {
+        session: t.s.clone(),
+        agent: a.clone(),
+        item: item.clone(),
+        access,
+        text: text.map(str::to_owned),
+    };
+    let mut tries = 0;
+    let e = loop {
+        // A run that has ended may not have left yet.
+        let e = t.c.call(accept(&t, &one, Access::Work, None)).await.unwrap_err().to_string();
+        tries += 1;
+        if tries == 500 || !e.contains("at work") {
+            break e;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert!(e.contains("handed in last"), "{e}");
+    let long = "x".repeat(64 * 1024 + 1);
+    for text in [" ", long.as_str()] {
+        assert!(t.c.call(accept(&t, &two, Access::Work, Some(text))).await.is_err());
+    }
+    assert!(t.c.call(accept(&t, &two, Access::Unknown, None)).await.is_err());
+    assert_eq!(t.file("n.txt"), None);
+    // Also when the host is another by then.
+    t.restart().await;
+    t.c.call(accept(&t, &two, Access::Work, Some("# Second, changed"))).await.unwrap();
+    loop {
+        let (_, _, all) = t.ended().await;
+        if texts(&all, ItemKind::Prose).contains(&"Done.".to_owned()) {
+            assert!(all.iter().any(|b| matches!(
+                b,
+                Body::AgentChanged { plan: false, access: Some(Access::Work), .. }
+            )));
+            let said = texts(&all, ItemKind::Prompt);
+            assert!(said.last().unwrap().ends_with("Do it now.\n\n# Second, changed"), "{said:?}");
+            // Nobody asks for one any more.
+            assert!(!texts(&all, ItemKind::Plan).contains(&"# Third".to_owned()));
+            break;
+        }
+    }
+    assert_eq!(t.file("n.txt").as_deref(), Some("made\n"));
+    let asked = t.server.requests();
+    let last = asked.last().unwrap();
+    assert!(!last["tools"].to_string().contains("Hands in your plan"));
+    assert!(last["messages"].to_string().contains("nobody asked for a plan"));
+    assert!(!last["messages"][0].to_string().contains("asked for a plan first"));
+    // Once.
+    assert!(t.c.call(accept(&t, &two, Access::Work, None)).await.is_err());
+}
+
+/// It is asked for one by what it is, not by what is said to it, and no more once it may do more.
+#[tokio::test]
+async fn a_plan_is_asked_for_and_no_more() {
+    let mut t =
+        T::new(vec![calls(&[("c1", "plan", r##"{"text":"# P"}"##)]), text(&["There."]).hangs()])
+            .await;
+    let a = t.agent(Access::Work).await;
+    let set = |t: &T, access, plan| Call::AgentSet {
+        session: t.s.clone(),
+        agent: a.clone(),
+        execution: None,
+        access,
+        plan,
+    };
+    let e = t.c.call(set(&t, Some(Access::Ask), Some(true))).await.unwrap_err().to_string();
+    assert!(e.contains("only reads"), "{e}");
+    let now = async |t: &mut T, access, plan| {
+        // A run that has ended may not have left yet.
+        let mut tries = 0;
+        while let Err(e) = t.c.call(set(t, access, plan)).await {
+            tries += 1;
+            assert!(tries < 500 && e.to_string().contains("at work"), "{e}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        t.until(|b| match b {
+            Body::AgentChanged { access, plan, .. } => Some((access.unwrap(), *plan)),
+            _ => None,
+        })
+        .await
+        .0
+    };
+    assert_eq!(now(&mut t, None, Some(true)).await, (Access::Read, true));
+    // What it runs on is another matter.
+    assert_eq!(now(&mut t, None, None).await, (Access::Read, true));
+    assert_eq!(now(&mut t, Some(Access::Ask), None).await, (Access::Ask, false));
+    assert_eq!(now(&mut t, None, Some(true)).await, (Access::Read, true));
+    let v = t.prompt(&a, "go").await.unwrap();
+    let run = RunId(v["run"].as_str().unwrap().into());
+    let (item, _) = t
+        .until(|b| match b {
+            Body::ItemStarted { kind: ItemKind::Plan, item, .. } => Some(item.clone()),
+            _ => None,
+        })
+        .await;
+    t.until(|b| matches!(b, Body::ItemStarted { kind: ItemKind::Prose, .. }).then_some(())).await;
+    // Not while it is at work.
+    let (session, agent) = (t.s.clone(), a.clone());
+    let accept = Call::PlanAccept { session, agent, item, access: Access::Work, text: None };
+    let e = t.c.call(accept.clone()).await.unwrap_err().to_string();
+    assert!(e.contains("at work"), "{e}");
+    let session = t.s.clone();
+    t.c.call(Call::Cancel { session, run }).await.unwrap();
+    t.ended_with(Outcome::Cancelled).await;
+    // Who may do something else has no plan to be accepted.
+    now(&mut t, Some(Access::Ask), None).await;
+    now(&mut t, None, Some(true)).await;
+    assert!(t.c.call(accept).await.is_err());
+}
+
 #[tokio::test]
 async fn a_prompt_of_one_name_is_heard_once() {
     let mut t = T::new(vec![text(&["thinking"]).hangs()]).await;
@@ -418,6 +754,8 @@ async fn a_prompt_of_one_name_is_heard_once() {
     assert_eq!(t.prompt_named(&a, "second;", Some("k2")).await.unwrap(), q);
     assert_eq!((v["queued"].as_bool(), q["queued"].as_bool()), (Some(false), Some(true)));
     let run = RunId(v["run"].as_str().unwrap().into());
+    // Stopped when it has been asked, not before: then what hangs would be the next one's answer.
+    t.until(|b| matches!(b, Body::ItemStarted { kind: ItemKind::Prose, .. }).then_some(())).await;
     t.c.call(Call::Cancel { session: t.s.clone(), run }).await.unwrap();
     t.ended().await;
     t.server.add(text(&["ok"]));
@@ -516,6 +854,7 @@ async fn an_agent_nobody_was_told_of_is_not_there() {
         trust: false,
         instructions: vec![],
         apart: false,
+        plan: false,
     };
     let (refused, kept) = (call(e), call(t.execution()));
     assert!(t.c.call(refused).await.unwrap_err().to_string().contains("effort"));
@@ -566,6 +905,7 @@ async fn what_an_agent_may_not_be() {
         trust: false,
         instructions: vec![],
         apart: false,
+        plan: false,
     };
     for (x, why) in [
         (Execution { harness: "codex".into(), ..ok.clone() }, "harness"),
@@ -678,6 +1018,7 @@ async fn instructions_are_followed_only_as_they_were_read() {
         trust: false,
         instructions: t.instructions.clone(),
         apart: false,
+        plan: false,
     };
     assert!(t.c.call(call).await.is_err());
 }
@@ -727,8 +1068,42 @@ async fn models_and_connections_are_listed() {
     let v = t.c.call(Call::Models { connection: t.connection.clone() }).await.unwrap();
     assert_eq!(v, json!([{"id": "m1"}, {"id": "m2"}]));
     assert!(t.c.call(Call::Models { connection: "c_x".into() }).await.is_err());
+    // It is kept, with when, also over a restart; nobody is asked for it.
+    let known = async |t: &mut T| -> Vec<ModelList> {
+        let v = t.c.call(Call::ModelsKnown {}).await.unwrap();
+        let all: Vec<ModelList> = serde_json::from_value(v).unwrap();
+        all.into_iter().filter(|l| l.harness == "axiom").collect()
+    };
+    let all = known(&mut t).await;
+    assert_eq!((all.len(), all[0].connection.as_ref()), (1, Some(&t.connection)));
+    assert!(all[0].at > 0 && all[0].models.len() == 2);
+    let before = t.server.requests().len();
+    t.restart().await;
+    assert_eq!(known(&mut t).await, all);
+    let about = |m: &str| Call::ModelAbout { connection: t.connection.clone(), model: m.into() };
+    let (one, other, odd, long) = (about("m1"), about("x"), about(" "), about(&"x".repeat(501)));
+    assert_eq!(t.c.call(one).await.unwrap(), json!({"id": "m1"}));
+    // One that is in no list has a name, and what its protocol can be told: nothing.
+    assert_eq!(t.c.call(other).await.unwrap(), json!({"id": "x"}));
+    assert!(t.c.call(odd).await.is_err() && t.c.call(long).await.is_err());
+    assert_eq!(t.server.requests().len(), before);
+    // What it cannot be told is refused before it is set up.
+    for e in [Execution { speed: Some("fast".into()), ..t.execution() }] {
+        let call = Call::AgentAdd {
+            session: t.s.clone(),
+            name: "Lead".into(),
+            execution: e,
+            access: Access::Read,
+            trust: false,
+            instructions: vec![],
+            apart: false,
+            plan: false,
+        };
+        assert!(t.c.call(call).await.unwrap_err().to_string().contains("cannot be set"));
+    }
     t.c.call(Call::ConnectionRemove { connection: t.connection.clone() }).await.unwrap();
     assert_eq!(t.c.call(Call::Connections {}).await.unwrap(), json!([]));
+    assert!(known(&mut t).await.is_empty(), "it goes with its account");
     assert!(t.c.call(Call::ConnectionRemove { connection: t.connection.clone() }).await.is_err());
 }
 
@@ -773,6 +1148,7 @@ async fn a_killed_host_leaves_nothing_running() {
         connection,
         effort: None,
         environment: None,
+        ..Execution::default()
     };
     c.call(Call::Follow { session: session.clone(), after: 0 }).await.unwrap();
     let call = Call::AgentAdd {
@@ -783,6 +1159,7 @@ async fn a_killed_host_leaves_nothing_running() {
         trust: false,
         instructions: vec![],
         apart: false,
+        plan: false,
     };
     let agent = AgentId(c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
     c.call(Call::Prompt { session: session.clone(), agent, text: "go".into(), key: None })
@@ -853,6 +1230,7 @@ async fn live_on_lm_studio() {
         trust: false,
         instructions: vec![],
         apart: false,
+        plan: false,
     };
     let a = AgentId(t.c.call(call).await.unwrap()["agent"].as_str().unwrap().into());
     t.prompt(&a, "Write a file hello.txt that says hello. Then say you are done.").await.unwrap();
@@ -1000,4 +1378,84 @@ async fn what_was_not_seen_is_kept() {
     t.ended_with(Outcome::Cancelled).await;
     tokio::time::sleep(Duration::from_millis(2500)).await;
     assert!(needs(&mut t, 0).await.is_empty());
+}
+
+#[tokio::test]
+async fn the_limits_that_are_told_are_those_that_are_kept() {
+    let mut t = T::new(vec![text(&["thinking"]).hangs()]).await;
+    let told = t.c.call(Call::Limits {}).await.unwrap();
+    let told: Vec<Limit> = serde_json::from_value(told).unwrap();
+    let most = |what: &str| {
+        let l = told.iter().find(|l| l.what == what).unwrap_or_else(|| panic!("{what}"));
+        l.most
+    };
+    let n = |what: &str| usize::try_from(most(what).unwrap()).unwrap();
+
+    // Each once, in words, those of one kind together.
+    let mut kinds: Vec<&str> = told.iter().map(|l| l.of.as_str()).collect();
+    kinds.dedup();
+    let mut once = kinds.clone();
+    once.sort_unstable();
+    once.dedup();
+    assert_eq!(kinds.len(), once.len(), "{kinds:?}");
+    let mut whats: Vec<&str> = told.iter().map(|l| l.what.as_str()).collect();
+    whats.sort_unstable();
+    whats.dedup();
+    assert_eq!(whats.len(), told.len());
+    assert!(told.iter().all(|l| l.unit != Unit::Unknown && l.most != Some(0)));
+    assert_eq!(most("Output tokens"), None);
+
+    let refused = |r: Result<Value, ClientError>| match r {
+        Err(ClientError::Refused(e)) => e.code,
+        r => panic!("{r:?}"),
+    };
+    // Messages: as long as may be, and as many as may wait for an agent that is at work.
+    let a = t.agent(Access::Read).await;
+    let longest = n("One message to an agent");
+    assert_eq!(refused(t.prompt(&a, &"x".repeat(longest + 1)).await), ErrorCode::BadRequest);
+    t.prompt(&a, "go").await.unwrap();
+    // From here on it takes in nothing before its next step.
+    t.until(|b| matches!(b, Body::ItemDelta { .. }).then_some(())).await;
+    t.prompt(&a, &"x".repeat(longest)).await.unwrap();
+    for i in 1..n("Messages that wait for an agent at work") {
+        let v = t.prompt(&a, "more").await.unwrap_or_else(|e| panic!("{i}: {e}"));
+        assert_eq!(v["queued"], true);
+    }
+    assert_eq!(refused(t.prompt(&a, "one more").await), ErrorCode::Busy);
+
+    // Agents, one of which is there.
+    for _ in 1..n("Agents in a session") {
+        t.agent(Access::Read).await;
+    }
+    let call = Call::AgentAdd {
+        session: t.s.clone(),
+        name: "One more".into(),
+        execution: t.execution(),
+        access: Access::Read,
+        trust: false,
+        instructions: vec![],
+        apart: false,
+        plan: false,
+    };
+    assert_ne!(refused(t.c.call(call).await), ErrorCode::Internal);
+
+    // Accounts, one of which is there.
+    let add = || Call::ConnectionAdd {
+        name: "A".into(),
+        provider: "openai-compatible".into(),
+        url: Some("http://127.0.0.1:9".into()),
+        secret: None,
+    };
+    for _ in 1..n("Accounts and servers") {
+        t.c.call(add()).await.unwrap();
+    }
+    assert_ne!(refused(t.c.call(add()).await), ErrorCode::Internal);
+
+    // Clients, one of which is this.
+    let mut held = Vec::new();
+    for _ in 1..n("Windows and terminals connected") {
+        held.push(t.f.client().await);
+    }
+    let one_more = Client::connect(&t.f.paths, "test").await;
+    assert!(matches!(one_more, Err(ClientError::Refused(e)) if e.code == ErrorCode::Busy));
 }

@@ -94,6 +94,16 @@ void main() {
     l.close();
   });
 
+  test('the host tells what it keeps everything to', () async {
+    final s = HostStore(paths: paths, binary: null, spawn: false);
+    await s.start();
+    final all = await s.limits();
+    expect(all.length, greaterThan(15));
+    expect(all.firstWhere((l) => l.what == 'Agents in a session').most, greaterThan(1));
+    expect(all.any((l) => l.unit == LimitUnit.unknown), isFalse);
+    s.dispose();
+  });
+
   test('a wrong token and a missing host are errors with words', () async {
     await expectLater(
       HostLink.connect(endpoint: File(paths.endpointFile).readAsStringSync(), token: 'no'),
@@ -401,6 +411,30 @@ void main() {
         secret: 'sk-e2e',
       );
       expect(store.connections.single.secret, isTrue);
+      // What can be said to a model that is in no list: here nothing. Nobody is asked.
+      await store.about(c, 'm');
+      expect(store.aboutOf(c, 'm')?.efforts, isEmpty);
+      await store.loadLists();
+      expect(store.lists.map((l) => l.harness), ['claude'], reason: 'as it is documented');
+      expect(seen, isEmpty);
+      // How a program is started: what it must not be is refused, and a secret does not come back.
+      await store.setProgram(
+        harness: 'goose',
+        args: const ['--quiet'],
+        vars: const [VarSet('X_TOKEN', value: 'e2e-secret-value', secret: true)],
+      );
+      expect(store.programs.single.vars.single.value, isNull);
+      expect(store.programs.single.args, ['--quiet']);
+      await expectLater(
+        store.setProgram(
+          harness: 'goose',
+          args: const [],
+          vars: const [VarSet('NODE_OPTIONS', value: 'x')],
+        ),
+        throwsA(isA<Failed>()),
+      );
+      await store.removeProgram('goose');
+      expect(store.programs, isEmpty);
       final id = await store.create('S', workspace: work.path);
       await store.open(id);
       final agent = await store.addAgent(
@@ -432,6 +466,37 @@ void main() {
       expect(m.requests, isEmpty);
       expect(seen.last['messages'].toString(), contains('changed made.txt'));
       await expectLater(store.answer(id, r, Answer.once), throwsA(isA<Failed>()));
+      // Another, which plans first; nothing has been handed in that could be accepted.
+      final planner = await store.addAgent(
+        id,
+        'Planner',
+        Execution(harness: 'axiom', model: 'm', connection: c),
+        Access.read,
+        plan: true,
+      );
+      await until(() => m.agents.containsKey(planner));
+      expect(m.agents[planner]!.planning, isTrue);
+      await expectLater(store.acceptPlan(id, planner, 'i_x', Access.work), throwsA(isA<Failed>()));
+      await store.setAgent(id, planner, access: Access.ask);
+      await until(() => !m.agents[planner]!.planning);
+
+      // Said differently, the conversation begins anew in a branch; from the answer on it goes on.
+      final places = m.agents[agent]!.items.where(m.agents[agent]!.canBranch).toList();
+      expect(places.map((i) => i.plain), ['Make it.', 'Done.']);
+      expect((await store.lookBranch(id, agent, places.first.id)).apart, isFalse);
+      final other = await store.branch(id, agent, places.first.id, 'Lead 2');
+      final after = await store.branch(id, agent, places.last.id, 'Lead 3');
+      await until(() => m.agents.length == 4);
+      expect(m.agents[other]!.items.map((i) => i.plain), ['Branched from Lead']);
+      expect(m.agents[after]!.items.length, m.agents[agent]!.items.length + 1);
+      for (final (a, turns) in [(other, 1), (after, 5)]) {
+        await store.prompt(id, a, 'Make another.');
+        await until(() => m.agents[a]!.ended == Outcome.completed);
+        final sent = seen.last['messages']! as List;
+        expect(sent.where((x) => (x as Json)['role'] != 'system').length, turns);
+      }
+      final tool = m.agents[agent]!.items.firstWhere((i) => i.kind == ItemKind.tool);
+      await expectLater(store.lookBranch(id, agent, tool.id), throwsA(isA<Failed>()));
       store.dispose();
       await provider.close(force: true);
     });

@@ -532,6 +532,7 @@ fn a_request_to_the_byte() {
         effort: Some("high".into()),
         stop: vec!["END".into()],
         cache: Cache::Long,
+        ..Settings::default()
     };
     // Calls of another model: the first of each step is marked as not signed.
     r.messages.push(assistant(vec![

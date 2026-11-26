@@ -10,9 +10,18 @@ enum Command {
   findHere('Find in the conversation', LogicalKeyboardKey.keyF),
   accounts('Accounts', LogicalKeyboardKey.comma),
   settings('Settings', LogicalKeyboardKey.comma, shift: true),
-  larger('Larger text', LogicalKeyboardKey.equal),
-  smaller('Smaller text', LogicalKeyboardKey.minus),
-  usual('Usual text size', LogicalKeyboardKey.digit0),
+  // Plus is typed with Shift on many keyboards, and is a key of its own on others.
+  zoomIn(
+    'Zoom in',
+    LogicalKeyboardKey.add,
+    also: [LogicalKeyboardKey.equal, LogicalKeyboardKey.numpadAdd],
+    eitherShift: true,
+  ),
+  zoomOut('Zoom out', LogicalKeyboardKey.minus, also: [LogicalKeyboardKey.numpadSubtract]),
+  zoomReset('Actual size', LogicalKeyboardKey.digit0, also: [LogicalKeyboardKey.numpad0]),
+  larger('Larger text', null),
+  smaller('Smaller text', null),
+  usual('Usual text size', null),
   panel('Show or hide the panel', LogicalKeyboardKey.keyD),
   list('Show or hide the sidebar', LogicalKeyboardKey.keyB),
   next('Next session', LogicalKeyboardKey.tab, control: true),
@@ -32,22 +41,32 @@ enum Command {
     this.shift = false,
     this.control = false,
     this.bare = false,
+    this.also = const [],
+    this.eitherShift = false,
   });
   final String label;
-  final LogicalKeyboardKey key;
+
+  /// Null: it is only found by the search. [also]: where else keyboards have it.
+  final LogicalKeyboardKey? key;
+  final List<LogicalKeyboardKey> also;
 
   /// With Shift; with Control on every system; with neither Control nor Command.
   final bool shift, control, bare;
 
+  /// With Shift and without.
+  final bool eitherShift;
+
   static bool get isMac => defaultTargetPlatform == TargetPlatform.macOS;
   static bool get _mac => isMac;
 
-  /// As it is written beside what it does.
-  String get keys {
+  /// As it is written beside what it does; null if it has none.
+  String? get keys {
     final name = switch (key) {
+      null => null,
       LogicalKeyboardKey.tab => 'Tab',
       final k => k.keyLabel,
     };
+    if (name == null) return null;
     if (!_mac) {
       return [if (!bare) 'Ctrl', if (shift) 'Shift', name].join('+');
     }
@@ -60,7 +79,7 @@ enum Command {
   }
 
   bool _held(HardwareKeyboard k) {
-    if (k.isAltPressed || k.isShiftPressed != shift) return false;
+    if (k.isAltPressed || !eitherShift && k.isShiftPressed != shift) return false;
     final command = !bare && !control && _mac;
     final ctrl = !bare && !command;
     return k.isControlPressed == ctrl && k.isMetaPressed == command;
@@ -72,7 +91,7 @@ enum Command {
     if (e is! KeyDownEvent) return null;
     final k = HardwareKeyboard.instance;
     for (final c in values) {
-      if (c.key == e.logicalKey && c._held(k)) return c;
+      if ((c.key == e.logicalKey || c.also.contains(e.logicalKey)) && c._held(k)) return c;
     }
     return null;
   }

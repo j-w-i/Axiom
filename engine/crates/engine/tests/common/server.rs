@@ -8,6 +8,9 @@ use std::{
 };
 
 use serde_json::{Value, json};
+
+#[path = "../../../model/tests/common/amazon.rs"]
+mod amazon;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -18,7 +21,7 @@ use tokio::{
 pub struct Reply {
     status: u16,
     headers: Vec<(String, String)>,
-    body: Vec<String>,
+    body: Vec<Vec<u8>>,
     /// The connection ends before the answer does.
     pub cut: bool,
     hang: bool,
@@ -34,9 +37,13 @@ impl Reply {
             for was in ["stop", "tool_calls"] {
                 let (a, z) =
                     (format!("finish_reason\":\"{was}\""), format!("finish_reason\":\"{reason}\""));
-                *b = b.replace(&a, &z);
+                *b = String::from_utf8(b.clone()).unwrap().replace(&a, &z).into_bytes();
             }
         }
+    }
+    /// Only its first events.
+    pub fn keep(&mut self, n: usize) {
+        self.body.truncate(n);
     }
     /// After what it says, nothing more comes.
     pub fn hangs(mut self) -> Self {
@@ -66,7 +73,7 @@ fn sse(body: Vec<String>) -> Reply {
     Reply {
         status: 200,
         headers: vec![("content-type".into(), "text/event-stream".into())],
-        body,
+        body: body.into_iter().map(String::into_bytes).collect(),
         cut: false,
         hang: false,
     }
@@ -150,6 +157,60 @@ pub fn anthropic(
     ));
     b.push(event(json!({"type": "message_stop"})));
     sse(b)
+}
+/// The same as Bedrock has it.
+pub fn bedrock(thinking: Option<(&str, &str)>, words: &str, calls: &[(&str, &str, &str)]) -> Reply {
+    let mut lines = vec![json!({"messageStart": {"role": "assistant"}})];
+    let mut i = 0;
+    let mut block = |start: Option<Value>, deltas: Vec<Value>| {
+        if let Some(s) = start {
+            lines.push(json!({"contentBlockStart": {"contentBlockIndex": i, "start": s}}));
+        }
+        for d in deltas {
+            lines.push(json!({"contentBlockDelta": {"contentBlockIndex": i, "delta": d}}));
+        }
+        lines.push(json!({"contentBlockStop": {"contentBlockIndex": i}}));
+        i += 1;
+    };
+    if let Some((t, signature)) = thinking {
+        block(
+            None,
+            vec![
+                json!({"reasoningContent": {"text": t}}),
+                json!({"reasoningContent": {"signature": signature}}),
+            ],
+        );
+    }
+    if !words.is_empty() {
+        block(None, vec![json!({"text": words})]);
+    }
+    for (id, name, args) in calls {
+        block(
+            Some(json!({"toolUse": {"toolUseId": id, "name": name}})),
+            vec![json!({"toolUse": {"input": args}})],
+        );
+    }
+    let stop = if calls.is_empty() { "end_turn" } else { "tool_use" };
+    lines.push(json!({"messageStop": {"stopReason": stop}}));
+    lines.push(
+        json!({"metadata": {"usage": {"inputTokens": 40, "outputTokens": 9, "totalTokens": 49},
+        "metrics": {"latencyMs": 1}}}),
+    );
+    eventstream(lines.iter().map(|l| amazon::stream(&l.to_string())).collect())
+}
+/// Begins to answer, and then says what went wrong.
+pub fn bedrock_exception(words: &str, name: &str, body: &str) -> Reply {
+    let begun = format!(
+        "{}\n{}",
+        json!({"messageStart": {"role": "assistant"}}),
+        json!({"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": words}}})
+    );
+    eventstream(vec![amazon::stream(&begun), amazon::exception(name, body)])
+}
+fn eventstream(body: Vec<Vec<u8>>) -> Reply {
+    let mut r = sse(Vec::new());
+    r.headers[0].1 = "application/vnd.amazon.eventstream".into();
+    Reply { body, ..r }
 }
 pub fn status(code: u16, body: &str) -> Reply {
     Reply {
@@ -236,10 +297,13 @@ impl Server {
         }
         c.write_all(format!("{h}\r\n").as_bytes()).await.ok()?;
         for b in &r.body {
-            if (r.cut || r.hang) && (b.contains("finish_reason\":\"") || b.contains("[DONE]")) {
+            let text = String::from_utf8_lossy(b);
+            let last = text.contains("finish_reason\":\"") || text.contains("[DONE]");
+            if (r.cut || r.hang) && last {
                 break;
             }
-            c.write_all(format!("{:x}\r\n{b}\r\n", b.len()).as_bytes()).await.ok()?;
+            let chunk = [format!("{:x}\r\n", b.len()).as_bytes(), b, b"\r\n"].concat();
+            c.write_all(&chunk).await.ok()?;
             c.flush().await.ok()?;
         }
         if r.hang {

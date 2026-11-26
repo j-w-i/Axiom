@@ -35,6 +35,7 @@ enum AxIcon {
   comment,
   chat,
   refresh,
+  star,
   more;
 
   (double, String, String) get _data => iconData[name]!;

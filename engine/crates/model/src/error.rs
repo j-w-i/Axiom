@@ -88,11 +88,20 @@ impl Error {
     /// The provider's own account: an answer's body, or an error in the stream, where `status` is
     /// none. The generic names decide only where no status does.
     pub(crate) fn provider(status: Option<u16>, body: &str) -> Self {
-        let told = Told::read(body);
+        Self::named(status, None, body)
+    }
+
+    /// The same, where the error's name is beside its body.
+    pub(crate) fn named(status: Option<u16>, name: Option<&str>, body: &str) -> Self {
+        let mut told = Told::read(body);
+        told.code = name.filter(|n| !n.is_empty()).map(str::to_owned).or(told.code);
         let code = told.code.as_deref().unwrap_or("");
+        // Kept as it came: of a part of it, it could not be said whether it is part of a secret.
+        let shape = shape(code);
         let class = specific(code, &told)
+            .or_else(|| specific(&shape, &told))
             .or_else(|| status.map(by_status))
-            .or_else(|| generic(code))
+            .or_else(|| generic(code).or_else(|| generic(&shape)))
             .or_else(|| told.status.map(by_status))
             .unwrap_or(Class::Server);
         let retry = match (class, status) {
@@ -157,8 +166,8 @@ fn clean(text: &str, longest: usize) -> String {
     out
 }
 
-/// What an error body says, in the shapes seen: Anthropic's, OpenAI's, Google's, OpenRouter's, LM
-/// Studio's (a string), and those of common Python servers (`detail`, `message`).
+/// What an error body says, in the shapes seen: Anthropic's, OpenAI's, Google's, OpenRouter's,
+/// Amazon's, LM Studio's (a string), and those of common Python servers (`detail`, `message`).
 #[derive(Default)]
 struct Told {
     code: Option<String>,
@@ -179,7 +188,9 @@ impl Told {
         };
         let text = |e: &Value| match e {
             Value::String(s) => Some(s.clone()),
-            e => string(e.get("message")).or_else(|| string(e.get("detail"))),
+            e => string(e.get("message"))
+                .or_else(|| string(e.get("Message")))
+                .or_else(|| string(e.get("detail"))),
         };
         // A code says more than a type; Anthropic's is one level down and has only some. Google's
         // and OpenRouter's codes are numbers, and what they mean is elsewhere.
@@ -189,8 +200,11 @@ impl Told {
             .or_else(|| string(error.pointer("/metadata/error_type")))
             .or_else(|| string(error.get("code")))
             .or_else(|| string(error.get("status")))
+            .or_else(|| string(error.get("__type")))
             .or_else(|| string(error.get("type")).filter(|t| t != "error"));
-        let number = error.get("code").and_then(Value::as_u64);
+        // The second is what a model answered Bedrock (API_runtime_ConverseStream#Errors).
+        let number = |key| error.get(key).and_then(Value::as_u64);
+        let number = number("code").or_else(|| number("originalStatusCode"));
         Self {
             code,
             status: number.and_then(|n| u16::try_from(n).ok()).filter(|n| (400..600).contains(n)),
@@ -200,7 +214,17 @@ impl Told {
     }
 }
 
+/// The name of an error's shape, as Amazon has servers and clients write it.
+fn shape(name: &str) -> String {
+    let name = name.split(':').next().unwrap_or_default();
+    let name = name.rsplit('#').next().unwrap_or_default().trim();
+    // In a stream it begins small.
+    let mut chars = name.chars();
+    chars.next().map(|c| c.to_ascii_uppercase()).into_iter().chain(chars).collect()
+}
+
 fn specific(code: &str, told: &Told) -> Option<Class> {
+    let message = told.message.as_deref().unwrap_or("").to_ascii_lowercase();
     match code {
         "billing_error"
         | "insufficient_quota"
@@ -228,30 +252,38 @@ fn specific(code: &str, told: &Told) -> Option<Class> {
         // Google answers 400 to this and OpenRouter 403 to these.
         "API_KEY_INVALID" => return Some(Class::Auth),
         "content_policy_violation" | "refusal" => return Some(Class::BadRequest),
+        // Bedrock's (APIReference/CommonErrors and userguide/troubleshooting-api-error-codes), where
+        // the status alone says less, or differs from page to page.
+        "ThrottlingException" => return Some(Class::RateLimit),
+        "ModelNotReadyException" => return Some(Class::Overloaded),
+        "NotAuthorized" | "RequestExpired" | "IncompleteSignature" => return Some(Class::Auth),
+        "ModelErrorException" | "ModelStreamErrorException" if !is_too_long(&message) => {
+            return Some(told.status.map_or(Class::Server, by_status));
+        }
         _ => {}
     }
     // Only words tell these from other bad requests.
-    let message = told.message.as_deref().unwrap_or("").to_ascii_lowercase();
     if message.starts_with("you have reached your specified") {
         return Some(Class::Billing);
     }
-    // The last is Gemini's, from memory: its documentation has no words for it.
+    is_too_long(&message).then_some(Class::ContextTooLong)
+}
+
+fn is_too_long(message: &str) -> bool {
+    // The last two are Gemini's and Bedrock's, from memory: their documentation has no words for it.
     let too_long = [
         "prompt is too long",
         "maximum context length",
         "context length",
         "context window",
         "input token count",
+        "input is too long",
     ];
     let vague = ["context length", "context window", "input token count"];
     let exceeded = ["exceed", "greater than", "too long", "larger than", "overflow", "not enough"];
-    too_long
-        .iter()
-        .any(|w| {
-            message.contains(w)
-                && (!vague.contains(w) || exceeded.iter().any(|e| message.contains(e)))
-        })
-        .then_some(Class::ContextTooLong)
+    too_long.iter().any(|w| {
+        message.contains(w) && (!vague.contains(w) || exceeded.iter().any(|e| message.contains(e)))
+    })
 }
 
 fn by_status(status: u16) -> Class {
@@ -275,11 +307,14 @@ fn generic(code: &str) -> Option<Class> {
         | "authentication"
         | "permission_denied"
         | "UNAUTHENTICATED"
+        | "AccessDeniedException"
+        | "ExpiredTokenException"
+        | "UnrecognizedClientException"
         | "PERMISSION_DENIED" => Class::Auth,
         "rate_limit_error" | "rate_limit_exceeded" | "slow_down" | "RESOURCE_EXHAUSTED" => {
             Class::RateLimit
         }
-        "UNAVAILABLE" => Class::Overloaded,
+        "UNAVAILABLE" | "ServiceUnavailableException" => Class::Overloaded,
         "invalid_request_error"
         | "not_found_error"
         | "conflict_error"
@@ -291,7 +326,9 @@ fn generic(code: &str) -> Option<Class> {
         | "misalignment_policy_violation"
         | "INVALID_ARGUMENT"
         | "FAILED_PRECONDITION"
-        | "NOT_FOUND" => Class::BadRequest,
+        | "NOT_FOUND"
+        | "ValidationException"
+        | "ResourceNotFoundException" => Class::BadRequest,
         _ => return None,
     })
 }

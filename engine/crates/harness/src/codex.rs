@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use axiom_policy::{Access, Place, audit::Containment};
-use axiom_proto::{Outcome, Provenance, Usage};
+use axiom_proto::{ModelTotal, Outcome, Provenance, Usage};
 use serde_json::{Value, json};
 
 use crate::{
@@ -18,6 +18,7 @@ use crate::{
     event::*,
     rpc::{Calls, Fault, Msg, NO_METHOD, read},
     talk::{Keep, Out, Talk, Word, has, id, list, owned, text},
+    vars::only,
 };
 
 pub(crate) const ARGS: [&str; 1] = ["app-server"];
@@ -30,6 +31,21 @@ fn sandbox(a: Access) -> (&'static str, &'static str) {
         Access::Read | Access::Ask => ("read-only", "readOnly"),
         Access::Work => ("workspace-write", "workspaceWrite"),
     }
+}
+
+/// learn.chatgpt.com/docs/config-file/config-reference, read 2026-11-26: how it answers and how much it
+/// reads, and nothing it may do.
+pub(crate) fn passes(extra: &[String]) -> Result<(), Error> {
+    let keys = [
+        "model_verbosity",
+        "model_reasoning_summary",
+        "model_context_window",
+        "model_auto_compact_token_limit",
+        "tool_output_token_limit",
+        "service_tier",
+    ];
+    let known = |_: &str, v: &str| v.split_once('=').is_some_and(|(k, _)| keys.contains(&k));
+    only(extra, &["-c", "--config"], known).map_err(Error::NotPassed)
 }
 
 pub(crate) fn launch(s: &Start) -> Result<Launch, Error> {
@@ -246,7 +262,10 @@ impl Codex {
                     every.push(Name { id: e.clone(), ..Name::default() });
                 }
             }
-            all.push(Name { id, label: owned(m, "/displayName"), efforts });
+            let default_effort =
+                crate::talk::id(m, "/defaultReasoningEffort").filter(|e| efforts.contains(e));
+            let label = owned(m, "/displayName");
+            all.push(Name { id, label, efforts, default_effort, fast: false });
         }
         if !all.is_empty() {
             (self.caps.models, self.caps.efforts) = (Names::Of(all), Names::Of(every));
@@ -723,16 +742,26 @@ fn usage(p: &Value, o: &mut Out) {
     if !has(p, "/tokenUsage/last") {
         return o.unknown("usage", p);
     }
-    let n = |k: &str| p.pointer(&format!("/tokenUsage/last/{k}")).and_then(Value::as_u64);
-    o.event(Event::Usage(Spent {
-        usage: Usage {
+    let of = |what: &str| {
+        let n = |k: &str| p.pointer(&format!("/tokenUsage/{what}/{k}")).and_then(Value::as_u64);
+        Usage {
             input: n("inputTokens"),
             cache_read: n("cachedInputTokens"),
             cache_write: n("cacheWriteInputTokens"),
             output: n("outputTokens"),
             reasoning: n("reasoningOutputTokens"),
-            context: None,
-        },
+            ..Usage::default()
+        }
+    };
+    let total = has(p, "/tokenUsage/total").then(|| ModelTotal {
+        model: None,
+        usage: of("total"),
+        cost: None,
+    });
+    // What the last is the last of, its documentation does not say.
+    o.event(Event::Usage(Spent {
+        usage: of("last"),
+        totals: total.into_iter().collect(),
         provenance: Some(Provenance::Reported),
         ..Spent::default()
     }));

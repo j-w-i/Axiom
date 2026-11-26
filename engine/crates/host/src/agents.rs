@@ -8,9 +8,7 @@ use std::{
     time::Duration,
 };
 
-use axiom_engine::{
-    Agent, Context, Deed, Desk, Ended, Limits, Other, Refused, Retries, Say, Stage, Word,
-};
+use axiom_engine::{Agent, Context, Deed, Desk, Ended, Other, Refused, Retries, Say, Stage, Word};
 use axiom_model::{Cache, Codec, Settings};
 use axiom_policy::{
     Access, Budget, Caps, Keep, Net, NotAnswered, Place, Policy, Profile, Reach, Tools,
@@ -18,8 +16,8 @@ use axiom_policy::{
     rules::Source,
 };
 use axiom_proto::{
-    AgentId, AgentState, Body, ErrorCode, Execution, HarnessInfo, Instructions, ItemId, Outcome,
-    RunId, SessionId, WireError, limits, now_ms,
+    AgentId, AgentState, Body, Branched, ErrorCode, Execution, HarnessInfo, Instructions, ItemId,
+    Outcome, RunId, SessionId, UsedOn, WireError, limits, now_ms,
 };
 use axiom_tools::{Output, Seen, Site, Spec};
 use serde::{Deserialize, Serialize};
@@ -27,11 +25,13 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::{
+    catalogue::{self, Catalogue},
     connections::{self, Connections},
     copies::{self, Copies},
     delegated, mcp,
     paths::{Paths, private_dir, private_file},
-    peers,
+    peers, planning,
+    programs::{How, Programs, Said},
     session::{self, Session},
     store::Store,
 };
@@ -60,6 +60,23 @@ pub struct Setup {
     /// It works in a copy of the folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apart: Option<Apart>,
+    /// Its conversation began as another's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Origin>,
+    /// It only reads, and hands in a plan.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub plan: bool,
+    /// The last it has handed in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned: Option<ItemId>,
+}
+
+/// Whose conversation, and how many turns of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Origin {
+    pub agent: AgentId,
+    pub turns: u64,
 }
 
 /// Of which folder, and whether there is one yet: then that is its workspace.
@@ -73,14 +90,14 @@ pub struct Apart {
 /// Files whose words are for agents, as they are named in the top folder of a workspace.
 const FOR_AGENTS: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 /// Longer ones are not followed.
-const INSTRUCTIONS: u64 = 64 * 1024;
+pub const INSTRUCTIONS: u64 = 64 * 1024;
 
 /// Of why a person said no.
 const WORDS: usize = 4096;
 /// Agents of one session.
-const MOST: usize = 64;
+pub const MOST: usize = 64;
 /// What may wait for an agent that is at work.
-const INBOX: usize = 32;
+pub const INBOX: usize = 32;
 /// How long what an agent began may take to end.
 const STILL: Duration = Duration::from_secs(15);
 /// Sessions whose agents are remembered beyond what the journal has.
@@ -140,12 +157,11 @@ pub struct Finished {
     pub text: String,
 }
 
-/// Who holds a key, and what it opens: the tool `agent`, or all an agent of Axiom's has.
+/// Who holds a key, which opens the tool `agent`.
 #[derive(Debug, Clone)]
 pub struct Holder {
     pub session: SessionId,
     pub agent: AgentId,
-    pub all: bool,
 }
 
 /// A key that is good until this is dropped.
@@ -153,16 +169,12 @@ pub struct Grant {
     agents: Arc<Agents>,
     key: String,
     pub file: PathBuf,
-    /// What the program's model is told.
-    pub words: Option<PathBuf>,
 }
 impl Drop for Grant {
     fn drop(&mut self) {
         let mut all = self.agents.grants.lock().unwrap_or_else(PoisonError::into_inner);
         all.remove(&self.key);
-        for f in [Some(&self.file), self.words.as_ref()].into_iter().flatten() {
-            let _ = std::fs::remove_file(f);
-        }
+        let _ = std::fs::remove_file(&self.file);
     }
 }
 
@@ -191,15 +203,7 @@ impl Setup {
     pub fn folder(&self) -> &str {
         self.apart.as_ref().map_or(&self.workspace, |a| &a.folder)
     }
-
-    /// A program of the person's own that works with Axiom's tools in place of its own.
-    pub fn hands(&self) -> bool {
-        self.execution.environment.as_deref() == Some(AXIOM)
-    }
 }
-
-/// The environment in which what an agent does is done by Axiom.
-pub const AXIOM: &str = "axiom";
 
 impl Slot {
     /// Nobody uses it, or is about to, and nothing runs in it.
@@ -244,7 +248,8 @@ pub struct Agents {
     home: Option<PathBuf>,
     own: Vec<PathBuf>,
     scratch: PathBuf,
-    programs: Option<Vec<PathBuf>>,
+    pub programs: Programs,
+    pub catalogue: Catalogue,
     rules: PathBuf,
     pub copies: Copies,
 }
@@ -262,7 +267,7 @@ impl Agents {
         paths: &Paths,
         home: Option<PathBuf>,
         scratch: PathBuf,
-        programs: Option<Vec<PathBuf>>,
+        programs: Programs,
         bridge: Option<PathBuf>,
         endpoint: &str,
     ) -> Self {
@@ -282,6 +287,7 @@ impl Agents {
             own,
             scratch,
             programs,
+            catalogue: Catalogue::open(&paths.data.join("models.json")),
             rules: paths.data.join("policy.toml"),
         }
     }
@@ -339,7 +345,11 @@ impl Agents {
     /// Checks what an agent is to be, and says it as it will be kept.
     pub fn setup(&self, s: Setup, written: &Reach) -> Result<Setup, WireError> {
         let Setup { name, execution, access, workspace, instructions, trust, .. } = s;
-        let (resume, began, apart) = (s.resume, s.began, s.apart);
+        let (resume, began, apart, from) = (s.resume, s.began, s.apart, s.from);
+        let (plan, planned) = (s.plan, s.planned.filter(|_| s.plan));
+        if plan && access != axiom_proto::Access::Read {
+            return Err(bad("who hands in a plan first only reads until it is accepted"));
+        }
         let workspace = workspace.as_str();
         let known =
             |i: &Instructions| FOR_AGENTS.contains(&i.path.as_str()) && i.digest.len() <= 128;
@@ -352,7 +362,9 @@ impl Agents {
             return Err(bad("an agent's name has between 1 and 200 bytes"));
         }
         if execution.harness != "axiom" {
-            let known = delegated::known_as(&execution.harness)
+            let known = self
+                .programs
+                .known_as(&execution.harness)
                 .ok_or_else(|| bad("this host does not know the harness"))?;
             if let Some(c) = &execution.connection {
                 if connections::provider_of(&execution.harness).is_none() {
@@ -363,10 +375,13 @@ impl Agents {
             if !instructions.is_empty() {
                 return Err(bad("this harness reads the folder's words for agents by itself"));
             }
-            match execution.environment.as_deref() {
-                None => {}
-                Some(AXIOM) if known.harness.takes_hands() && self.bridge.is_some() => {}
-                _ => return Err(bad("this harness has no such environment")),
+            if execution.environment.is_some() {
+                // One that was set up to work with Axiom's tools in place of its own (decision 0017)
+                // is not started with its own instead: it would be held back by something else.
+                return Err(bad("a program works with its own tools only; add another agent"));
+            }
+            if plan {
+                return Err(bad("this harness cannot be asked for a plan first"));
             }
             let workspace = real(Path::new(workspace))?.to_string();
             let execution = Execution { provider: None, ..execution };
@@ -380,11 +395,15 @@ impl Agents {
                 resume,
                 began,
                 apart,
+                from,
+                plan,
+                planned,
             };
             let site = self.site(&setup, &AgentId("check".into()), false)?;
-            let path = self.programs(&site.path)?;
+            let path = self.looked_in(&site.path)?;
+            let how = self.how(&setup)?;
             known
-                .check(&setup, site.access, site.workspace.clone(), &path, written)
+                .check(&setup, &how, site.access, site.workspace.clone(), &path, written)
                 .map_err(bad)?;
             return Ok(setup);
         }
@@ -398,6 +417,12 @@ impl Agents {
         if execution.effort.is_some() && client.profile().quirks(m).effort.is_none() {
             return Err(bad("the effort cannot be set for this provider and model"));
         }
+        let quirks = client.profile().quirks(m);
+        if let Some(s) = &execution.speed
+            && !quirks.speeds.is_some_and(|all| all.contains(s))
+        {
+            return Err(bad("the speed cannot be set for this provider and model"));
+        }
         let place = real(Path::new(workspace))?;
         let setup = Setup {
             name,
@@ -409,6 +434,9 @@ impl Agents {
             resume: None,
             began: false,
             apart,
+            from,
+            plan,
+            planned,
         };
         // What could not be contained later is refused now, in words.
         let site = self.site(&setup, &AgentId("check".into()), false)?;
@@ -433,6 +461,7 @@ impl Agents {
                 connection: None,
                 effort: None,
                 environment: None,
+                ..Execution::default()
             },
             access: axiom_proto::Access::Read,
             workspace: real(Path::new(workspace))?.to_string(),
@@ -441,6 +470,9 @@ impl Agents {
             resume: None,
             began: false,
             apart: None,
+            from: None,
+            plan: false,
+            planned: None,
         };
         self.site(&s, who, true)
     }
@@ -455,8 +487,8 @@ impl Agents {
     }
 
     /// Where programs of the person's own are looked for.
-    fn programs(&self, usual: &[Place]) -> Result<Vec<Place>, WireError> {
-        match &self.programs {
+    fn looked_in(&self, usual: &[Place]) -> Result<Vec<Place>, WireError> {
+        match &self.programs.looked_in {
             Some(p) => p.iter().map(|p| real(p)).collect(),
             None => Ok(usual.to_vec()),
         }
@@ -474,8 +506,23 @@ impl Agents {
 
     pub fn harnesses(&self, written: &Reach) -> Result<Vec<HarnessInfo>, WireError> {
         let home = self.home.as_deref().ok_or_else(|| bad("there is no home folder"))?;
-        let path = self.programs(&axiom_tools::system(&real(home)?).0)?;
-        Ok(delegated::known().iter().map(|k| k.info(&path, written)).collect())
+        let path = self.looked_in(&axiom_tools::system(&real(home)?).0)?;
+        let one =
+            |k: delegated::Known| Ok(k.info(&self.programs.how(&k.id, None)?, &path, written));
+        self.programs.known().into_iter().map(one).collect()
+    }
+
+    /// What a person says of how a program is started.
+    pub fn program(&self, s: Said, written: &Reach) -> Result<String, WireError> {
+        if let (Some(a), Some(h)) = (&s.account, &s.harness) {
+            self.connections.account(a, h)?;
+        }
+        self.programs.set(s, written)
+    }
+
+    /// How an agent's program is started.
+    fn how(&self, s: &Setup) -> Result<How, WireError> {
+        self.programs.how(&s.execution.harness, s.execution.connection.as_deref())
     }
 
     /// Where an agent works and what it may. `make`: with its scratch folder.
@@ -603,8 +650,6 @@ impl Agents {
         s: &SessionId,
         a: &AgentId,
         scratch: &Place,
-        all: bool,
-        words: Option<&str>,
     ) -> Result<Grant, String> {
         let mut b = [0u8; 32];
         axiom_proto::random(&mut b)?;
@@ -616,15 +661,8 @@ impl Agents {
         self.grants
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(key.clone(), Holder { session: s.clone(), agent: a.clone(), all });
-        // Whatever goes wrong from here on, the key and its file go again.
-        let mut grant = Grant { agents: self.clone(), key, file, words: None };
-        if let Some(w) = words {
-            let f = grant.file.with_extension("md");
-            private_file(&f, w).map_err(|e| e.to_string())?;
-            grant.words = Some(f);
-        }
-        Ok(grant)
+            .insert(key.clone(), Holder { session: s.clone(), agent: a.clone() });
+        Ok(Grant { agents: self.clone(), key, file })
     }
 
     /// Whose key it is.
@@ -749,14 +787,24 @@ fn refused(r: session::Refused) -> Refused {
 
 impl Stage for Floor {
     fn others(&self) -> Vec<Spec> {
-        peers::specs()
+        let mut all = peers::specs();
+        all.push(planning::todo());
+        all
     }
     async fn judge(&self, tool: &str, args: &Value) -> Option<Other> {
-        (tool == peers::TOOL).then_some(())?;
-        Some(peers::judge(self, args).await)
+        match tool {
+            peers::TOOL => Some(peers::judge(self, args).await),
+            planning::TODO => Some(planning::judge(args)),
+            planning::PLAN => Some(planning::judge_plan(self, args).await),
+            _ => None,
+        }
     }
-    async fn perform(&self, _: &str, args: &Value) -> Output {
-        peers::perform(self, args).await
+    async fn perform(&self, tool: &str, args: &Value) -> Output {
+        match tool {
+            planning::TODO => planning::perform(self, args).await,
+            planning::PLAN => planning::hand_in(self, args).await,
+            _ => peers::perform(self, args).await,
+        }
     }
     async fn say(&self, all: Vec<Say>) -> Result<(), Refused> {
         self.session.say(all).await.map_err(refused)
@@ -767,6 +815,10 @@ impl Stage for Floor {
     async fn remember(&self, n: u64, turn: String, heard: Option<ItemId>) -> Result<bool, Refused> {
         let (s, a) = (self.session.id.clone(), self.agent.clone());
         self.store.put_message(s, a, n, turn, heard).await.map_err(|e| Refused::This(e.to_string()))
+    }
+    async fn mark(&self, item: &ItemId, n: u64, with: bool) {
+        let (s, a) = (self.session.id.clone(), self.agent.clone());
+        let _ = self.store.put_cut(s, a, item.clone(), n, with).await;
     }
     async fn closed(&self) {
         self.session.closed().await;
@@ -787,11 +839,19 @@ impl Floor {
             .await
             .map_err(|e| Refused::This(format!("it cannot be put on record: {e}")))
     }
-    /// Where this agent works.
-    pub async fn workspace(&self) -> Option<String> {
+    /// The run it is in.
+    pub async fn run(&self) -> Option<RunId> {
+        self.agents.slot(&self.session.id, &self.agent).now().await.map(|n| n.0)
+    }
+    /// How this agent is set up.
+    pub async fn setup(&self) -> Option<Setup> {
         let all = self.store.agents(self.session.id.clone()).await.ok()?;
         let (_, text) = all.into_iter().find(|(a, _)| *a == self.agent)?;
-        Some(serde_json::from_str::<Setup>(&text).ok()?.workspace)
+        serde_json::from_str(&text).ok()
+    }
+    /// Where this agent works.
+    pub async fn workspace(&self) -> Option<String> {
+        self.setup().await.map(|s| s.workspace)
     }
     /// What was said waits until it is heard.
     pub async fn wait(&self, item: &ItemId, text: &str) -> Result<(), Refused> {
@@ -813,7 +873,7 @@ impl Floor {
     pub async fn began(&self) {
         self.keep(|s| s.began = true).await;
     }
-    async fn keep(&self, f: impl FnOnce(&mut Setup)) {
+    pub async fn keep(&self, f: impl FnOnce(&mut Setup)) {
         let Ok(all) = self.store.agents(self.session.id.clone()).await else { return };
         let Some((_, text)) = all.into_iter().find(|(a, _)| *a == self.agent) else { return };
         let Ok(mut s) = serde_json::from_str::<Setup>(&text) else { return };
@@ -856,19 +916,28 @@ impl Worker {
         let waits = store.pending(session.id.clone(), agent.clone()).await.map_err(internal)?;
         let written = agents.written(store).await?;
         let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
-        let (known, site, access, workspace, words) = tokio::task::spawn_blocking(move || {
-            let known = delegated::known_as(&s.execution.harness)
-                .ok_or_else(|| bad("this host does not know the agent's harness"))?;
+        let (known, how, site, access, workspace) = tokio::task::spawn_blocking(move || {
+            let known = a.programs.known_as(&s.execution.harness).ok_or_else(|| {
+                bad("this host does not know the agent's harness: its program was removed")
+            })?;
+            if s.execution.environment.is_some() {
+                return Err(bad("a program works with its own tools only; add another agent"));
+            }
             let site = a.site(&s, &ag, true)?;
-            let path = a.programs(&site.path)?;
+            let mut path = a.looked_in(&site.path)?;
+            let how = a.how(&s)?;
             let access = site.access;
-            let told = match s.apart {
-                Some(_) => format!("{HANDS}\n\n{}", copies::WORDS),
-                None => HANDS.to_owned(),
-            };
-            let words = s.hands().then(|| axiom_engine::context::system(&site, &told));
-            let program =
-                known.check(&s, access, site.workspace.clone(), &path, &written).map_err(bad)?;
+            let program = known
+                .check(&s, &how, access, site.workspace.clone(), &path, &written)
+                .map_err(bad)?;
+            if let Some(p) = &how.path {
+                // What it starts itself often lies beside it.
+                let beside =
+                    axiom_harness::find::beside(p, &written).map_err(|e| bad(e.to_string()))?;
+                path.retain(|p| *p != beside);
+                path.insert(0, beside);
+            }
+            let vars = a.programs.vars(&how)?;
             let config = match &s.execution.connection {
                 Some(c) => Some(real(&a.connections.account(c, &s.execution.harness)?)?),
                 None => None,
@@ -876,14 +945,15 @@ impl Worker {
             let site_of = axiom_harness::Site {
                 program,
                 config,
+                vars,
                 path,
                 home: site.keep.home().clone(),
                 user: user()?,
                 tmp: site.scratch.clone(),
                 written,
-                limits: axiom_harness::Limits::default(),
+                limits: crate::limits::program(),
             };
-            Ok::<_, WireError>((known, site_of, access, site.workspace, words))
+            Ok::<_, WireError>((known, how, site_of, access, site.workspace))
         })
         .await
         .map_err(internal)??;
@@ -893,11 +963,11 @@ impl Worker {
             slot: agents.slot(&session.id, agent),
             setup: setup.clone(),
             known,
+            how,
             site,
             access,
             workspace,
             bridge: agents.bridge.clone(),
-            words,
             inbox,
             waits,
         })))
@@ -909,10 +979,15 @@ impl Worker {
             a.compact = true;
         }
     }
-    pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
+    pub async fn begin(
+        &mut self,
+        run: &RunId,
+        before: Vec<Say>,
+        prompt: Option<Word>,
+    ) -> Result<(), Refused> {
         match self {
-            Self::Native(a) => a.begin(run, prompt).await,
-            Self::Delegated(w) => w.begin(run, prompt).await,
+            Self::Native(a) => a.begin(run, before, prompt).await,
+            Self::Delegated(w) => w.begin(run, before, prompt).await,
         }
     }
 
@@ -941,26 +1016,6 @@ impl Worker {
     }
 }
 
-/// For a model whose program describes other tools than it has.
-const HANDS: &str = "Your only tools are those of the server axiom (read, write, edit, patch, list, glob, search, shell, job, fetch, agent). What is said elsewhere of other tools does not apply: you have none of them. A call may wait for a person's answer.";
-
-/// Where an agent works, and under whom.
-pub async fn site_of(
-    agents: &Arc<Agents>,
-    setup: &Setup,
-    agent: &AgentId,
-    slot: &Slot,
-) -> Result<Site, WireError> {
-    let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
-    let mut site =
-        tokio::task::spawn_blocking(move || a.site(&s, &ag, true)).await.map_err(internal)??;
-    let chain = slot.chain.lock().unwrap_or_else(PoisonError::into_inner);
-    if !chain.is_empty() {
-        site.chain.clone_from(&chain);
-    }
-    Ok(site)
-}
-
 /// The person's name on this computer.
 fn user() -> Result<String, WireError> {
     ["USER", "LOGNAME", "USERNAME"]
@@ -981,7 +1036,9 @@ pub async fn load(
 ) -> Result<Agent<Floor>, WireError> {
     let id = session.id.clone();
     let connection = setup.execution.connection.clone().unwrap_or_default();
+    let asked = connection.clone();
     let model = setup.execution.model.clone().unwrap_or_default();
+    let listed = agents.catalogue.find("axiom", Some(&connection), &model);
     let (a, s, ag) = (agents.clone(), setup.clone(), agent.clone());
     // Links, folders, the system's store: off the runtime's own threads.
     let (client, site, (instructions, not)) = tokio::task::spawn_blocking(move || {
@@ -991,7 +1048,10 @@ pub async fn load(
         if s.apart.is_some() {
             told.0 = format!("{}\n\n{}", copies::WORDS, told.0);
         }
-        Ok::<_, WireError>((a.connections.client(&connection)?, site, told))
+        if s.plan {
+            told.0 = format!("{}\n\n{}", planning::WORDS, told.0);
+        }
+        Ok::<_, WireError>((a.connections.client(&asked)?, site, told))
     })
     .await
     .map_err(internal)??;
@@ -1000,14 +1060,17 @@ pub async fn load(
     let waits = store.pending(id.clone(), agent.clone()).await.map_err(internal)?;
     let quirks = client.profile().quirks(&model);
     let messages = client.profile().codec == Codec::Messages;
+    let marks = matches!(client.profile().codec, Codec::Messages | Codec::Converse);
     let settings = Settings {
         max_output: quirks
             .max_output
             .map(|m| u32::try_from(m.min(32_000)).unwrap_or(32_000))
             .or(messages.then_some(8192)),
         effort: setup.execution.effort.clone(),
+        adaptive: catalogue::adaptive(&quirks, listed.as_ref()),
+        speed: setup.execution.speed.clone(),
         stop: Vec::new(),
-        cache: if messages { Cache::Short } else { Cache::Off },
+        cache: if marks { Cache::Short } else { Cache::Off },
     };
     let floor =
         Floor { agents: agents.clone(), store: store.clone(), session, agent: agent.clone() };
@@ -1022,25 +1085,37 @@ pub async fn load(
     let mut a = Agent {
         id: agent.clone(),
         desk: agents.desk(&id),
+        on: UsedOn {
+            harness: setup.execution.harness.clone(),
+            lane: agents.connections.lane(&connection),
+            provider: Some(client.profile().provider.clone()),
+            connection: Some(connection),
+            ..UsedOn::default()
+        },
         client,
         model,
         settings,
-        window: quirks.context,
+        // As its provider's list has it, where nothing is known for certain.
+        window: quirks.context.or_else(|| listed?.context),
         site,
         seen: agents.slot(&id, agent).seen.clone(),
         context,
         specs: {
             let mut all = axiom_tools::specs();
             all.extend(floor.others());
+            if setup.plan {
+                all.push(planning::plan());
+            }
             all
         },
         stage: floor,
         instructions,
         not_followed: not,
-        limits: Limits::default(),
+        limits: crate::limits::run(),
         fill: None,
         told: None,
         waited: Duration::ZERO,
+        last_words: None,
         noted: Default::default(),
         compact: false,
         retries: Retries::default(),
@@ -1063,11 +1138,15 @@ pub enum Spoken {
 pub struct Ear {
     pub run: RunId,
     permit: mpsc::OwnedPermit<Word>,
-    _slot: tokio::sync::OwnedMutexGuard<Live>,
+    slot: tokio::sync::OwnedMutexGuard<Live>,
 }
 
 impl Ear {
-    pub fn tell(self, text: String, item: ItemId) -> RunId {
+    pub fn tell(mut self, text: String, item: ItemId) -> RunId {
+        // Only what is said counts as said: whoever merely looks for room says nothing.
+        if let Some(now) = self.slot.as_mut() {
+            now.late |= *now.cancel.borrow();
+        }
         self.permit.send(Word { text, item: Some(item), shown: None });
         self.run
     }
@@ -1109,18 +1188,14 @@ impl Slot {
 
     /// A place in the run that is on, or the place for a new one.
     pub async fn speak(&self) -> Result<Spoken, WireError> {
-        let mut live = self.live.clone().lock_owned().await;
-        if let Some(now) = live.as_mut()
+        let live = self.live.clone().lock_owned().await;
+        if let Some(now) = live.as_ref()
             && !now.tx.is_closed()
         {
             let busy = |words: &str| WireError::new(ErrorCode::Busy, words);
-            let late = *now.cancel.borrow();
             let (run, reserved) = (now.run.clone(), now.tx.clone().try_reserve_owned());
             return match reserved {
-                Ok(permit) => {
-                    now.late |= late;
-                    Ok(Spoken::Heard(Box::new(Ear { run, permit, _slot: live })))
-                }
+                Ok(permit) => Ok(Spoken::Heard(Box::new(Ear { run, permit, slot: live }))),
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     Err(busy("the agent has as much to hear as it may"))
                 }
@@ -1190,10 +1265,6 @@ impl Slot {
     /// Of a delegated agent: its program runs.
     pub async fn has_program(&self) -> bool {
         self.attempt.lock().await.as_ref().is_some_and(|a| !a.is_closed())
-    }
-
-    pub fn seen(&self) -> Seen {
-        self.seen.clone()
     }
 
     /// Whether it is in a run.
@@ -1268,15 +1339,17 @@ impl Turnstile {
 }
 
 /// The events that make an agent known.
-pub fn added(agent: &AgentId, s: &Setup) -> Vec<Say> {
+pub fn added(agent: &AgentId, s: &Setup, from: Option<Branched>) -> Vec<Say> {
     vec![
         Say::Event(Body::AgentAdded {
             agent: agent.clone(),
             name: s.name.clone(),
-            execution: s.execution.clone(),
+            execution: Box::new(s.execution.clone()),
             parent: None,
             access: Some(s.access),
             apart: s.apart.is_some(),
+            from: from.map(Box::new),
+            plan: s.plan,
         }),
         Say::Event(Body::AgentState { agent: agent.clone(), state: AgentState::Waiting }),
     ]
@@ -1284,8 +1357,9 @@ pub fn added(agent: &AgentId, s: &Setup) -> Vec<Say> {
 pub fn changed(agent: &AgentId, s: &Setup) -> Vec<Say> {
     vec![Say::Event(Body::AgentChanged {
         agent: agent.clone(),
-        execution: s.execution.clone(),
+        execution: Box::new(s.execution.clone()),
         access: Some(s.access),
+        plan: s.plan,
     })]
 }
 
@@ -1297,6 +1371,25 @@ pub fn full(n: usize) -> bool {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// What waited when a person stopped it waits until they speak, and not until something looks for
+    /// room.
+    #[tokio::test]
+    async fn looking_for_room_is_not_speaking() {
+        for (speaks, goes_on) in [(false, false), (true, true)] {
+            let slot = Slot::default();
+            let (tx, mut rx) = mpsc::channel(4);
+            let (_stop, cancel) = watch::channel(true);
+            tx.send(Word::new("before".into())).await.unwrap();
+            *slot.live.lock().await = Some(Now { run: RunId::new(), tx, cancel, late: false });
+            match slot.speak().await {
+                Ok(Spoken::Heard(ear)) if speaks => drop(ear.tell("x".into(), ItemId::new())),
+                Ok(Spoken::Heard(ear)) => drop(ear),
+                _ => unreachable!(),
+            }
+            assert_eq!(slot.after(&mut rx, true).await, goes_on);
+        }
+    }
 
     /// Two slots of one agent would be two runs of it.
     #[tokio::test]

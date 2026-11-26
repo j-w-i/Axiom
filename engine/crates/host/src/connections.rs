@@ -12,7 +12,7 @@ use axiom_model::{
     Client, Credential, Endpoint, Options, Profile, Secret,
     chatgpt::{Known, Places, Signed},
 };
-use axiom_proto::{Connection, ErrorCode, WireError, limits};
+use axiom_proto::{Connection, ErrorCode, Lane, WireError, limits};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -42,6 +42,15 @@ pub struct MemoryVault(Mutex<HashMap<String, Text>>);
 impl MemoryVault {
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Text>> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+#[cfg(test)]
+impl MemoryVault {
+    pub fn count(&self) -> usize {
+        self.lock().len()
+    }
+    pub fn clear(&self) {
+        self.lock().clear();
     }
 }
 impl Vault for MemoryVault {
@@ -87,7 +96,7 @@ fn secret_of(t: &Text) -> Secret {
 }
 
 /// Most connections.
-const MOST: usize = 200;
+pub const MOST: usize = 200;
 const NAME: usize = 200;
 const SECRET: usize = 16 * 1024;
 
@@ -127,6 +136,8 @@ fn profile(provider: &str, url: Option<&str>) -> Option<Profile> {
         "openai" => Some(Profile::openai()),
         "gemini" => Some(Profile::gemini()),
         "openrouter" => Some(Profile::openrouter()),
+        // At an endpoint of Amazon's: the key is for no one else.
+        "bedrock" => url.filter(|u| Profile::is_bedrock(u)).map(|_| Profile::bedrock()),
         "lm-studio" => Some(Profile::lm_studio()),
         "openai-compatible" => Some(Profile::openai_compatible("openai-compatible", url?)),
         _ => None,
@@ -230,8 +241,18 @@ impl Connections {
             }
             return self.keep(name, provider, None, None, None);
         }
-        let p = profile(&provider, url.as_deref())
-            .ok_or_else(|| bad("the provider is not one that can be added, or needs an address"))?;
+        let p = profile(&provider, url.as_deref()).ok_or_else(|| {
+            bad(match provider.as_str() {
+                "bedrock" => {
+                    "a connection to Amazon Bedrock has the address of a region, \
+                     https://bedrock-runtime.REGION.amazonaws.com"
+                }
+                _ => "the provider is not one that can be added, or needs an address",
+            })
+        })?;
+        if provider == "bedrock" && secret.is_none() {
+            return Err(bad("a connection to Amazon Bedrock has a key"));
+        }
         if keyed(&provider) && (url.is_some() || secret.is_none()) {
             return Err(bad("a connection to this provider has a key and no address"));
         }
@@ -282,6 +303,17 @@ impl Connections {
     fn one(&self, id: &str) -> Result<Kept, WireError> {
         let k = self.lock().iter().find(|k| k.id == id).cloned();
         k.ok_or_else(|| WireError::new(ErrorCode::NotFound, "no such connection"))
+    }
+
+    /// How it is paid for, as far as that is known here.
+    pub fn lane(&self, id: &str) -> Lane {
+        match self.one(id) {
+            Ok(k) if k.account.is_some() => Lane::Plan,
+            Ok(k) if PROGRAMS.iter().any(|p| p.0 == k.provider) => Lane::Program,
+            Ok(k) if k.secret => Lane::Key,
+            Ok(_) => Lane::Open,
+            Err(_) => Lane::Unknown,
+        }
     }
 
     /// An account that is to be signed in to again.
@@ -424,6 +456,7 @@ mod tests {
         }
     }
     const CANARY: &str = "sk-canary-81723";
+    const BEDROCK: &str = "https://bedrock-runtime.us-east-1.amazonaws.com";
 
     #[test]
     fn several_for_one_provider_and_no_secret_in_the_file() {
@@ -433,6 +466,10 @@ mod tests {
         let b = c.add("Work".into(), "anthropic".into(), None, Some("other".into())).unwrap();
         let l = c.add("Here".into(), "lm-studio".into(), None, None).unwrap();
         assert!(a != b && c.list().len() == 3);
+        let p = c.add("Own".into(), "claude-code".into(), None, None).unwrap();
+        let lanes = [a.as_str(), &l, &p, "c_none"].map(|x| c.lane(x));
+        assert_eq!(lanes, [Lane::Key, Lane::Open, Lane::Program, Lane::Unknown]);
+        c.remove(&p).unwrap();
         let text = std::fs::read_to_string(t.file()).unwrap();
         assert!(!text.contains(CANARY), "{text}");
         #[cfg(unix)]
@@ -476,6 +513,22 @@ mod tests {
     }
 
     #[test]
+    fn a_bedrock_key_goes_to_its_region() {
+        let t = T::new();
+        let c = t.open();
+        let (key, url) = (Some(CANARY.to_owned()), Some(BEDROCK.to_owned()));
+        let id = c.add("Mine".into(), "bedrock".into(), url, key).unwrap();
+        assert_eq!(t.open().client(&id).unwrap().profile().provider, "bedrock");
+        let text = std::fs::read_to_string(t.file()).unwrap();
+        assert!(!text.contains(CANARY) && text.contains(BEDROCK));
+        // Nor to what somebody made of the file.
+        let other = text.replace(BEDROCK, "https://evil.example");
+        std::fs::write(t.file(), other).unwrap();
+        let e = t.open().client(&id).unwrap_err();
+        assert!(!format!("{e:?}").contains(CANARY));
+    }
+
+    #[test]
     fn what_cannot_be_used_is_not_kept() {
         let t = T::new();
         let c = t.open();
@@ -497,6 +550,12 @@ mod tests {
             ("x", "openrouter", None, None),
             ("x", "openrouter", Some("https://evil.example/v1"), Some(CANARY)),
             ("x", "OpenAI", None, Some(CANARY)),
+            ("x", "bedrock", None, Some(CANARY)),
+            ("x", "bedrock", Some(BEDROCK), None),
+            ("x", "bedrock", Some("us-east-1"), Some(CANARY)),
+            ("x", "bedrock", Some("https://bedrock.us-east-1.amazonaws.com"), Some(CANARY)),
+            ("x", "bedrock", Some("https://bedrock-runtime.x.evil.example"), Some(CANARY)),
+            ("x", "bedrock", Some("http://bedrock-runtime.x.amazonaws.com"), Some(CANARY)),
         ] {
             let e =
                 c.add(name.into(), provider.into(), url.map(Into::into), secret.map(Into::into));

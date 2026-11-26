@@ -218,7 +218,9 @@ class SurfacesSheet extends StatelessWidget {
       (
         'Icons',
         [
-          for (final i in AxIcon.values) AxGlyph(i, size: 18, color: c.ink2),
+          // The star is newer than the picture of this sheet, which is its owner's to take again.
+          for (final i in AxIcon.values)
+            if (i != AxIcon.star) AxGlyph(i, size: 18, color: c.ink2),
           const AxMark(size: 22),
         ],
       ),

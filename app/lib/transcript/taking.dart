@@ -44,6 +44,8 @@ class Taking extends StatefulWidget {
     super.key,
     this.copy = 'Copy',
     this.onQuote,
+    this.onBranch,
+    this.branch = 'Branch',
     this.stops = true,
     this.low = false,
   });
@@ -55,6 +57,10 @@ class Taking extends StatefulWidget {
   /// What the key says.
   final String copy;
   final VoidCallback? onQuote;
+
+  /// Goes on from here in another conversation, and what that key says.
+  final VoidCallback? onBranch;
+  final String branch;
 
   /// The keyboard stops here: once for each message.
   final bool stops;
@@ -122,6 +128,13 @@ class _TakingState extends State<Taking> {
                                 tone: AxTone.quiet,
                                 size: 24,
                                 onPressed: quote,
+                              ),
+                            if (widget.onBranch case final branch?)
+                              AxButton(
+                                label: widget.branch,
+                                tone: AxTone.quiet,
+                                size: 24,
+                                onPressed: branch,
                               ),
                           ],
                         ),

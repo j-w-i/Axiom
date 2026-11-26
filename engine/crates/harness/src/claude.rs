@@ -14,13 +14,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axiom_policy::{Access, audit::Containment};
-use axiom_proto::{Outcome, Provenance, Usage};
+use axiom_proto::{Cost, Covers, ModelTotal, Outcome, Provenance, Usage, limits};
 use serde_json::{Value, json};
 
 use crate::{
-    Server, Start, Trust,
+    Start, Trust,
     event::*,
     talk::{Keep, Out, Talk, Word, has, id, list, loose, owned, text},
+    tasks::Tasks,
+    vars::only,
 };
 
 /// Who answers when Claude Code asks.
@@ -37,9 +39,24 @@ pub enum Prompts {
 
 pub(crate) const PROTOCOL: &str = "claude stream-json";
 
-/// Commands run in its own sandbox or not at all; what runs there is not asked about.
-const SANDBOX: &str =
-    r#"{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false}}"#;
+/// What it is told beside its flags. `contained`: commands run in its own sandbox or not at all; what
+/// runs there is not asked about.
+fn settings(contained: bool, s: &Start) -> Result<Option<String>, Error> {
+    let mut all = serde_json::Map::new();
+    if contained {
+        let sandbox =
+            json!({"enabled": true, "failIfUnavailable": true, "allowUnsandboxedCommands": false});
+        all.insert("sandbox".into(), sandbox);
+    }
+    match s.speed.as_deref() {
+        None => {}
+        Some("fast") => {
+            all.insert("fastMode".into(), json!(true));
+        }
+        Some(other) => return Err(Error::BadValue("a speed", other.to_owned())),
+    }
+    Ok((!all.is_empty()).then(|| Value::Object(all).to_string()))
+}
 
 /// Its modes by the names its answers use.
 fn mode(a: Access) -> &'static str {
@@ -50,45 +67,7 @@ fn mode(a: Access) -> &'static str {
     }
 }
 
-/// The model's loop alone: it has no tools but the server's, and reads no settings but its person's.
-fn hands(s: &Start, server: &Server) -> Result<Vec<String>, Error> {
-    let config = json!({"mcpServers": {server.name.as_str():
-        {"type": "stdio", "command": server.command.as_str(), "args": server.args}}});
-    let mut args: Vec<String> = [
-        "-p",
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        // Whatever is not allowed here is refused; whoever is behind the server does the asking.
-        "--permission-mode",
-        "dontAsk",
-        "--permission-prompts",
-        "none",
-        "--tools",
-        "",
-        "--setting-sources",
-        "user",
-        "--strict-mcp-config",
-        "--mcp-config",
-    ]
-    .map(String::from)
-    .into();
-    args.extend([config.to_string(), "--allowedTools".into(), format!("mcp__{}__*", server.name)]);
-    if let Some(f) = &s.system {
-        args.extend(["--append-system-prompt-file".into(), f.to_string()]);
-    }
-    Ok(args)
-}
-
 pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
-    if let (true, Some(server)) = (s.hands, &s.tools) {
-        let mut args = hands(s, server)?;
-        chosen(&mut args, s)?;
-        return Ok(Launch { args, containment: Containment::None });
-    }
     if s.access == Access::Ask && p == Prompts::Refused {
         return Err(Error::NoMode(s.access));
     }
@@ -118,9 +97,12 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
         }
         Access::Ask => add(&["--disallowedTools", "AskUserQuestion"]),
         Access::Work => {
-            add(&["--disallowedTools", "AskUserQuestion", "--settings", SANDBOX]);
+            add(&["--disallowedTools", "AskUserQuestion"]);
             containment = Containment::Harness;
         }
+    }
+    if let Some(all) = settings(s.access == Access::Work, s)? {
+        add(&["--settings", &all]);
     }
     // Who only looks has no tools of servers; whoever is asked about none of them could not use it.
     if let Some(t) = s.tools.as_ref().filter(|_| s.access == Access::Work) {
@@ -136,6 +118,12 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
     }
     chosen(&mut args, s)?;
     Ok(Launch { args, containment })
+}
+
+/// code.claude.com/docs/en/cli-reference, read 2026-11-26: none of these changes what it may do.
+pub(crate) fn passes(extra: &[String]) -> Result<(), Error> {
+    let flags = ["--fallback-model", "--max-turns", "--max-budget-usd", "--betas"];
+    only(extra, &flags, |_, _| true).map_err(Error::NotPassed)
 }
 
 /// What a person chose, and the session to go on with.
@@ -169,7 +157,7 @@ pub(crate) fn caps(p: Prompts) -> Caps {
         approvals: p == Prompts::Stdio,
         usage: true,
         quota: true,
-        plan: false,
+        plan: true,
         access,
         models: Names::Any,
         efforts: Names::Any,
@@ -211,8 +199,6 @@ struct Asked {
 pub(crate) struct Claude {
     prompts: Prompts,
     mode: &'static str,
-    /// What the names of all its tools begin with, if it has only those it was given.
-    only: Option<String>,
     model: Option<String>,
     session: String,
     caps: Caps,
@@ -231,6 +217,7 @@ pub(crate) struct Claude {
     /// same id.
     blocks: BTreeMap<String, u64>,
     error: Option<String>,
+    tasks: Tasks,
 }
 
 const MESSAGES: usize = 64;
@@ -241,8 +228,7 @@ impl Claude {
         let made = made.and_then(|i| l.args.get(i + 1)).cloned();
         Self {
             prompts,
-            mode: if s.hands { "dontAsk" } else { mode(s.access) },
-            only: s.tools.as_ref().filter(|_| s.hands).map(|t| format!("mcp__{}__", t.name)),
+            mode: mode(s.access),
             model: s.model,
             session: s.resume.or(made).unwrap_or_default(),
             caps: caps(prompts),
@@ -257,6 +243,7 @@ impl Claude {
             streaming: None,
             blocks: BTreeMap::new(),
             error: None,
+            tasks: Tasks::default(),
         }
     }
 
@@ -400,6 +387,7 @@ impl Claude {
     fn models(&mut self, v: &Value) {
         let mut all = vec![];
         let mut every: Vec<Name> = vec![];
+        // It does not say which effort it begins with; its page does.
         for m in list(v, "/response/response/models").iter().take(200) {
             let Some(id) = id(m, "/value") else { continue };
             let efforts: Vec<String> = list(m, "/supportedEffortLevels")
@@ -412,7 +400,9 @@ impl Claude {
                     every.push(Name { id: e.clone(), ..Name::default() });
                 }
             }
-            all.push(Name { id, label: owned(m, "/displayName"), efforts });
+            let fast = m.pointer("/supportsFastMode") == Some(&json!(true));
+            let default_effort = default_effort(&id, &efforts);
+            all.push(Name { id, label: owned(m, "/displayName"), efforts, default_effort, fast });
         }
         if !all.is_empty() {
             (self.caps.models, self.caps.efforts) = (Names::Of(all), Names::Of(every));
@@ -429,15 +419,6 @@ impl Claude {
                 self.cancels_queued = list(v, "/capabilities")
                     .iter()
                     .any(|c| c.as_str() == Some("interrupt_cancel_queued_v1"));
-                // Who was told to have only these, has only these.
-                if let Some(only) = &self.only
-                    && let Some(own) = list(v, "/tools")
-                        .iter()
-                        .find(|t| !t.as_str().is_some_and(|t| t.starts_with(only.as_str())))
-                {
-                    let own: String = own.to_string().chars().take(80).collect();
-                    o.end(Why::Boundary, format!("it has a tool it was told not to have: {own}"));
-                }
                 let mode = text(v, "/permissionMode").unwrap_or("none it names");
                 if !self.keeps_to(mode) {
                     o.end(
@@ -570,8 +551,12 @@ impl Claude {
         }
     }
 
-    fn tool(&self, b: &Value, parent: &Option<String>, o: &mut Out) {
+    fn tool(&mut self, b: &Value, parent: &Option<String>, o: &mut Out) {
         let Some(id) = id(b, "/id") else { return o.unknown("a tool call without an id", b) };
+        // What its own agents mean to do is theirs.
+        if parent.is_none() {
+            self.tasks.called(&id, text(b, "/name").unwrap_or_default(), b.pointer("/input"));
+        }
         o.event(Event::ToolStarted(Box::new(Tool {
             id,
             name: owned(b, "/name").unwrap_or_default(),
@@ -581,7 +566,7 @@ impl Claude {
         })));
     }
 
-    fn results(&self, v: &Value, o: &mut Out) {
+    fn results(&mut self, v: &Value, o: &mut Out) {
         // Told again; or only text, which is on record.
         if v.pointer("/isReplay") == Some(&json!(true)) {
             return;
@@ -594,7 +579,7 @@ impl Claude {
         }
     }
 
-    fn ended(&self, b: &Value, structured: &Value, o: &mut Out) {
+    fn ended(&mut self, b: &Value, structured: &Value, o: &mut Out) {
         let Some(id) = id(b, "/tool_use_id") else {
             return o.unknown("a result without its call", b);
         };
@@ -606,8 +591,12 @@ impl Claude {
         let failed = b.pointer("/is_error") == Some(&json!(true));
         let outcome = if failed { Outcome::Failed } else { Outcome::Completed };
         let diffs = patch(structured).into_iter().collect();
+        let plan = self.tasks.ended(&id, !failed, structured);
         let end = ToolEnd { id, outcome, output, output_cut: 0, diffs, error: None };
         o.event(Event::ToolEnded(Box::new(end)));
+        if let Some(p) = plan {
+            o.event(Event::Plan(p));
+        }
     }
 
     fn result(&mut self, v: &Value, o: &mut Out) {
@@ -753,10 +742,33 @@ fn patch(r: &Value) -> Option<Diff> {
     Some(Diff { path, new, ..Diff::default() })
 }
 
+/// `usage` is of this turn, and of the main loop only; the rest is of the whole session so far, what it
+/// was resumed with included (agent-sdk/cost-tracking, read 2026-11-26).
 fn usage(v: &Value, o: &mut Out) {
     let n = |k: &str| v.pointer(&format!("/usage/{k}")).and_then(Value::as_u64);
-    let cost = v.pointer("/total_cost_usd").and_then(Value::as_f64);
-    if !has(v, "/usage") && cost.is_none() {
+    let cost = v.pointer("/total_cost_usd").and_then(dollars);
+    let totals: Vec<ModelTotal> = v
+        .pointer("/modelUsage")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .take(limits::TOTALS)
+        .map(|(model, m)| {
+            let n = |k: &str| m.get(k).and_then(Value::as_u64);
+            ModelTotal {
+                model: Some(model.clone()),
+                usage: Usage {
+                    input: n("inputTokens"),
+                    cache_read: n("cacheReadInputTokens"),
+                    cache_write: n("cacheCreationInputTokens"),
+                    output: n("outputTokens"),
+                    ..Usage::default()
+                },
+                cost: m.get("costUSD").and_then(dollars),
+            }
+        })
+        .collect();
+    if !has(v, "/usage") && cost.is_none() && totals.is_empty() {
         return;
     }
     o.event(Event::Usage(Spent {
@@ -766,17 +778,26 @@ fn usage(v: &Value, o: &mut Out) {
             cache_write: n("cache_creation_input_tokens"),
             output: n("output_tokens"),
             reasoning: n("output_tokens_details/thinking_tokens"),
-            context: None,
+            cache_write_long: n("cache_creation/ephemeral_1h_input_tokens"),
+            ..Usage::default()
         },
         context: None,
-        // Its documentation: an estimate, not a bill.
-        cost: cost.map(|amount| Cost {
-            amount,
-            currency: "USD".into(),
-            provenance: Provenance::Estimated,
-        }),
+        of: Covers::Turn,
+        cost,
+        totals,
         provenance: Some(Provenance::Reported),
     }));
+}
+
+/// Its documentation: an estimate, not a bill.
+fn dollars(v: &Value) -> Option<Cost> {
+    let amount = v.as_f64().filter(|a| *a >= 0.0)?;
+    Some(Cost {
+        amount,
+        currency: "USD".into(),
+        provenance: Provenance::Estimated,
+        of: Covers::Session,
+    })
 }
 
 fn limit(v: &Value, o: &mut Out) {
@@ -793,3 +814,22 @@ fn limit(v: &Value, o: &mut Out) {
 #[cfg(test)]
 #[path = "claude_tests.rs"]
 mod tests;
+
+/// The effort Claude Code uses for a model when it is told none (code.claude.com/docs/en/model-config,
+/// "Adjust effort level", read 2026-11-26): `medium` for Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku
+/// 5.5, which its names `fable`, `opus`, `sonnet` and `haiku` stand for now; `xhigh` for Opus 4.7;
+/// `high` for the others that take an effort. One it does not say it takes is no default.
+pub fn default_effort(model: &str, efforts: &[String]) -> Option<String> {
+    let current = ["fable", "opus", "sonnet", "haiku"];
+    let medium = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+    let named =
+        |all: &[&str]| all.iter().any(|m| model == *m || model.starts_with(&format!("{m}[")));
+    let e = if named(&current) || named(&medium) {
+        "medium"
+    } else if model.starts_with("claude-opus-4-7") {
+        "xhigh"
+    } else {
+        "high"
+    };
+    efforts.iter().any(|x| x == e).then(|| e.to_owned())
+}

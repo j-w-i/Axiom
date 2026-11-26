@@ -2,11 +2,50 @@ import 'dart:math';
 
 import 'package:flutter/widgets.dart';
 
+/// A place in a conversation that a person goes on from in another one.
+class Branching {
+  Branching(this.item, {required this.apart, required this.files, this.words}) : withFiles = files;
+
+  /// The item, and, if it is something a person said, those words: they say it differently.
+  final String item;
+  final String? words;
+
+  /// The branch works in a copy of its own; what the files were there is kept, and it has them.
+  final bool apart, files;
+  bool withFiles;
+  String _before = '';
+}
+
 /// What a person is writing to one agent, and what went wrong with it. It outlives the part of the
 /// window it is written in.
 class Draft {
   final text = TextEditingController();
   final problem = ValueNotifier<String?>(null);
+
+  /// Where what is written goes, if not to the agent itself.
+  final branching = ValueNotifier<Branching?>(null);
+
+  /// What is written goes to a new agent that begins as the conversation was there. What had been
+  /// written waits.
+  void branchAt(Branching b) {
+    cancelBranch();
+    b._before = text.text;
+    branching.value = b;
+    if (b.words case final w?) _put(w);
+  }
+
+  /// It goes to the agent again.
+  void cancelBranch() {
+    final b = branching.value;
+    if (b == null) return;
+    branching.value = null;
+    if (b.words != null) _put(b._before);
+  }
+
+  void _put(String s) => text.value = TextEditingValue(
+    text: s,
+    selection: TextSelection.collapsed(offset: s.length),
+  );
   String? _said, _key;
 
   /// The name that saying [s] has: the same one if it is said again because nobody answered, so that
@@ -33,6 +72,18 @@ class Draft {
   void dispose() {
     text.dispose();
     problem.dispose();
+    branching.dispose();
+  }
+}
+
+/// A name like [name] that none of [taken] is.
+String nextName(String name, Iterable<String> taken) {
+  final m = RegExp(r'^(.*) (\d{1,3})$').firstMatch(name);
+  final base = m?.group(1) ?? name;
+  final all = taken.toSet();
+  for (var n = m == null ? 2 : int.parse(m.group(2)!) + 1; ; n++) {
+    final s = '$base $n';
+    if (!all.contains(s)) return s;
   }
 }
 

@@ -28,10 +28,16 @@ fn streams() -> Vec<(Codec, Vec<u8>)> {
         .chain(from(Codec::Responses, "responses", &responses))
         .chain(from(Codec::Gemini, "gemini", &gemini))
         .chain(from(Codec::Chat, "openrouter", &["reasoning", "error"]))
+        .chain(["text", "tool", "reasoning"].iter().map(|n| {
+            let text = fixture(&format!("bedrock-from-documentation/{n}.jsonl"));
+            (Codec::Converse, amazon::stream(&String::from_utf8(text).unwrap()))
+        }))
         .chain([
             (Codec::Chat, made_up()),
             (Codec::Responses, made_up_responses()),
             (Codec::Gemini, made_up_gemini()),
+            (Codec::Converse, made_up_converse()),
+            (Codec::Converse, made_up_exception()),
         ])
         .collect()
 }
@@ -70,6 +76,41 @@ fn made_up_gemini() -> Vec<u8> {
     )
 }
 
+fn made_up_converse() -> Vec<u8> {
+    amazon::stream(
+        r#"
+        {"messageStart":{"role":"assistant","p":"ab"}}
+        {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"reasoningContent":{"text":"é"}}}}
+        {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"reasoningContent":{"signature":"S"}}}}
+        {"contentBlockStop":{"contentBlockIndex":0}}
+        {"contentBlockStart":{"contentBlockIndex":1,"start":{"toolUse":{"toolUseId":"a","name":"f"}}}}
+        {"contentBlockStart":{"contentBlockIndex":2,"start":{"toolUse":{"toolUseId":"b","name":"g"}}}}
+        {"contentBlockDelta":{"contentBlockIndex":2,"delta":{"toolUse":{"input":"{"}}}}
+        {"contentBlockDelta":{"contentBlockIndex":1,"delta":{"toolUse":{"input":"{\"n\":1}"}}}}
+        {"novelEvent":{"x":1}}
+        {"contentBlockDelta":{"contentBlockIndex":3,"delta":{"novel":{"x":"…"}}}}
+        {"contentBlockDelta":{"contentBlockIndex":2,"delta":{"toolUse":{"input":"}"}}}}
+        {"contentBlockStop":{"contentBlockIndex":2}}
+        {"contentBlockStop":{"contentBlockIndex":1}}
+        {"contentBlockStop":{"contentBlockIndex":3}}
+        {"contentBlockDelta":{"contentBlockIndex":4,"delta":{"text":"…"}}}
+        {"messageStop":{"stopReason":"tool_use"}}
+        {"metadata":{"usage":{"inputTokens":1,"outputTokens":2,"totalTokens":3},"metrics":{"latencyMs":1}}}"#,
+    )
+}
+/// And what may come after an answer has begun.
+fn made_up_exception() -> Vec<u8> {
+    let mut begun = amazon::stream(
+        r#"
+        {"messageStart":{"role":"assistant"}}
+        {"contentBlockStart":{"contentBlockIndex":0,"start":{"toolUse":{"toolUseId":"a","name":"f"}}}}
+        {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"toolUse":{"input":"{}"}}}}
+        {"contentBlockStop":{"contentBlockIndex":0}}"#,
+    );
+    begun.extend(amazon::exception("throttlingException", r#"{"message":"slow down"}"#));
+    begun
+}
+
 /// What no recorded answer has: tags, interleaved calls, members of its own.
 fn made_up() -> Vec<u8> {
     lines(
@@ -98,6 +139,7 @@ fn what_is_made_up_says_something() {
     assert_eq!(calls(Codec::Chat, &made_up()), 2);
     assert_eq!(calls(Codec::Responses, &made_up_responses()), 2);
     assert_eq!(calls(Codec::Gemini, &made_up_gemini()), 2);
+    assert_eq!(calls(Codec::Converse, &made_up_converse()), 2);
 }
 
 #[test]

@@ -195,7 +195,7 @@ One searchable list over all accounts, with favourites, hiding and the last used
 *Care:* asking a program for its list starts it, so it needs the trust gate (0006, M3). Keep the last answer with its date.
 
 **30. What a model can be told** · M · M3
-Effort as the model names it, up to `xhigh` or `max`; thinking on or off; speed where there is one; the size of the context. Shown only where offered.
+Effort as the model names it, up to `xhigh` or `max`; speed where there is one; the size of the context. Shown only where offered.
 *Here:* three levels of effort are fixed in `start.dart`.
 *Care:* speed costs more. Say so, as the execution key does for a change of model.
 

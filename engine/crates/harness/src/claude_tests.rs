@@ -55,6 +55,7 @@ fn args(p: Prompts, s: &Start) -> Vec<String> {
 #[test]
 fn how_it_is_started() {
     use Prompts::*;
+    let sandbox = settings(true, &start(Access::Work)).unwrap().unwrap();
     let both = |p, a, words: &[&str]| {
         let all = args(p, &start(a)).join(" ");
         let want = format!(
@@ -82,11 +83,11 @@ fn how_it_is_started() {
         Access::Work,
         &[
             "--permission-mode acceptEdits --permission-prompts none --disallowedTools AskUserQuestion --settings",
-            SANDBOX,
+            &sandbox,
         ],
     );
     assert!(matches!(launch(Refused, &start(Access::Ask)), Err(Error::NoMode(Access::Ask))));
-    let s: Value = serde_json::from_str(SANDBOX).unwrap();
+    let s: Value = serde_json::from_str(&sandbox).unwrap();
     assert_eq!(
         s,
         json!({"sandbox": {"enabled": true, "failIfUnavailable": true, "allowUnsandboxedCommands": false}})
@@ -149,7 +150,7 @@ fn which_version_it_says() {
 #[test]
 fn what_it_can_do() {
     let c = caps(Prompts::Refused);
-    assert!(!c.approvals && c.resume && c.interrupt && c.usage && c.quota && !c.plan);
+    assert!(!c.approvals && c.resume && c.interrupt && c.usage && c.quota && c.plan);
     assert_eq!(c.access, [Access::Read, Access::Work]);
     assert_eq!((c.steer, c.models), (Steer::Yes, Names::Any));
     let c = caps(Prompts::Stdio);
@@ -588,11 +589,61 @@ fn what_else_it_asks_for_is_refused() {
     assert!(d.sent().is_empty());
 }
 
+/// Its list, told when what makes it was done; not what its own agents have.
+#[test]
+fn a_list_of_things_to_do() {
+    let mut d = at_work();
+    let call = |id: &str, parent: Value| {
+        json!({"type": "assistant", "uuid": "u", "session_id": "s", "parent_tool_use_id": parent,
+            "message": {"id": id, "type": "message", "role": "assistant", "content": [
+                {"type": "tool_use", "id": id, "name": "TaskCreate", "input": {"subject": "Look", "description": "d"}}]}})
+    };
+    let done = |id: &str, parent: Value| {
+        json!({"type": "user", "uuid": "u", "session_id": "s", "parent_tool_use_id": parent,
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "content": "ok"}]},
+            "tool_use_result": {"task": {"id": "1", "subject": "Look"}}})
+    };
+    d.hear(call("c1", Value::Null));
+    d.hear(done("c1", Value::Null));
+    d.hear(call("c2", json!("parent")));
+    d.hear(done("c2", json!("parent")));
+    let mut refused = done("c3", Value::Null);
+    refused["message"]["content"][0]["is_error"] = json!(true);
+    d.hear(call("c3", Value::Null));
+    d.hear(refused);
+    let plans: Vec<_> = d.told().into_iter().filter(|t| t.starts_with("plan")).collect();
+    assert_eq!(plans, ["plan tasks [(\"Look\", Todo)] None"]);
+}
+
+/// How fast, beside what holds it back and not in its place.
+#[test]
+fn it_can_be_told_to_be_fast() {
+    let of = |a: Access, speed: &str| {
+        let s = Start { speed: Some(speed.into()), ..start(a) };
+        launch(Prompts::Refused, &s).map(|l| {
+            let at = l.args.iter().position(|a| a == "--settings").unwrap();
+            assert_eq!(l.args.iter().filter(|a| *a == "--settings").count(), 1);
+            serde_json::from_str::<Value>(&l.args[at + 1]).unwrap()
+        })
+    };
+    assert_eq!(of(Access::Read, "fast").unwrap(), json!({"fastMode": true}));
+    let work = of(Access::Work, "fast").unwrap();
+    assert_eq!(work["fastMode"], true);
+    assert_eq!(work["sandbox"]["allowUnsandboxedCommands"], false);
+    assert!(matches!(of(Access::Work, "slow"), Err(Error::BadValue(..))));
+    let fast = || Start { speed: Some("fast".into()), ..start(Access::Ask) };
+    for h in [crate::Harness::Codex, crate::Harness::Acp(crate::Acp::default())] {
+        assert!(matches!(h.launch(&fast()), Err(Error::NoSpeed)));
+    }
+}
+
 #[test]
 fn usage_and_limits() {
     let mut d = at_work();
     d.hear(result(json!({"total_cost_usd": 0.12, "usage": {"input_tokens": 3, "cache_read_input_tokens": 40, "cache_creation_input_tokens": 5, "output_tokens": 6,
-        "output_tokens_details": {"thinking_tokens": 2}}})));
+        "output_tokens_details": {"thinking_tokens": 2}, "cache_creation": {"ephemeral_1h_input_tokens": 4}},
+        "modelUsage": {"claude-opus-5-5": {"inputTokens": 1, "outputTokens": 2, "cacheReadInputTokens": 3, "cacheCreationInputTokens": 4, "costUSD": 0.1},
+            "odd": {"inputTokens": -1, "costUSD": -2}}})));
     let e = d.events();
     let Event::Usage(s) = &e[0] else { panic!("{e:?}") };
     let want = Usage {
@@ -601,13 +652,27 @@ fn usage_and_limits() {
         cache_write: Some(5),
         output: Some(6),
         reasoning: Some(2),
-        context: None,
+        cache_write_long: Some(4),
+        ..Usage::default()
     };
+    assert_eq!(s.of, Covers::Turn);
     assert_eq!((&s.usage, s.provenance), (&want, Some(Provenance::Reported)));
-    assert_eq!(
-        s.cost,
-        Some(Cost { amount: 0.12, currency: "USD".into(), provenance: Provenance::Estimated })
-    );
+    let dollars = |amount| {
+        let (provenance, of) = (Provenance::Estimated, Covers::Session);
+        Some(Cost { amount, currency: "USD".into(), provenance, of })
+    };
+    assert_eq!(s.cost, dollars(0.12));
+    // The other loops and models it used, of the session so far.
+    let opus = Usage {
+        input: Some(1),
+        output: Some(2),
+        cache_read: Some(3),
+        cache_write: Some(4),
+        ..Usage::default()
+    };
+    let total = |model: &str, usage, cost| ModelTotal { model: Some(model.into()), usage, cost };
+    let nothing = total("odd", Usage::default(), None);
+    assert_eq!(s.totals, [total("claude-opus-5-5", opus, dollars(0.1)), nothing]);
     d.hear(json!({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed_warning", "resetsAt": 1_795_600_000, "utilization": 0.83}}));
     let e = d.events();
     let Event::Limit(l) = &e[0] else { panic!("{e:?}") };
@@ -728,67 +793,18 @@ fn it_is_given_a_server_where_it_may_act() {
 }
 
 #[test]
-fn with_hands_it_has_nothing_else() {
-    let server = crate::Server {
-        name: "axiom".into(),
-        tool: "agent".into(),
-        command: place("bin/axiom-host"),
-        args: vec!["--mcp".into(), "/f".into()],
-    };
-    let with = |access| Start {
-        tools: Some(server.clone()),
-        hands: true,
-        system: Some(place("words.md")),
-        ..start(access)
-    };
-    // Every access: whoever is behind the server does the asking.
-    for access in [Access::Read, Access::Ask, Access::Work] {
-        let s = Start { trust: Trust::Withheld, ..with(access) };
-        let l = Harness::Claude(Prompts::Refused).launch(&s).unwrap();
-        let after = |k: &str| {
-            let at = l.args.iter().position(|a| a == k).unwrap_or_else(|| panic!("{k}"));
-            l.args[at + 1].as_str()
-        };
-        assert_eq!(after("--tools"), "");
-        assert_eq!(after("--permission-mode"), "dontAsk");
-        assert_eq!(after("--allowedTools"), "mcp__axiom__*");
-        assert_eq!(after("--setting-sources"), "user");
-        assert_eq!(after("--append-system-prompt-file"), place("words.md").as_str());
-        assert!(l.args.iter().any(|a| a == "--strict-mcp-config"));
-        assert!(!l.args.iter().any(|a| a == "--settings" || a == "acceptEdits"));
-        assert_eq!(l.containment, Containment::None);
+fn the_effort_it_begins_with_is_as_its_page_says() {
+    let all: Vec<String> = ["low", "medium", "high", "xhigh", "max"].map(str::to_owned).into();
+    let of = |m: &str| default_effort(m, &all);
+    for m in ["opus", "sonnet", "fable", "haiku", "opus[1m]", "claude-opus-5-5", "claude-haiku-5-5"]
+    {
+        assert_eq!(of(m).as_deref(), Some("medium"), "{m}");
     }
-    let none = Start { tools: None, ..with(Access::Work) };
-    assert!(matches!(Harness::Claude(Prompts::Refused).launch(&none), Err(Error::NoHands)));
-    assert!(matches!(Harness::Codex.launch(&with(Access::Work)), Err(Error::NoHands)));
-    // What it says it has is compared with that.
-    for (tools, mode, why) in [
-        (json!([]), "dontAsk", None),
-        (json!(["mcp__axiom__read", "mcp__axiom__shell"]), "dontAsk", None),
-        (
-            json!(["mcp__axiom__read", "Bash"]),
-            "dontAsk",
-            Some("a tool it was told not to have: \"Bash\""),
-        ),
-        (json!(["mcp__axiomatic"]), "dontAsk", Some("told not to have")),
-        (json!([7]), "dontAsk", Some("told not to have")),
-        (json!([]), "acceptEdits", Some("runs in the mode")),
-    ] {
-        let s = Start { resume: Some("s1".into()), ..with(Access::Work) };
-        let l = launch(Prompts::Refused, &s).unwrap();
-        let mut d = D::new(Claude::new(Prompts::Refused, s, &l));
-        d.hear(begun());
-        d.told();
-        d.sent();
-        d.prompt("go").unwrap();
-        d.told();
-        d.hear(json!({"type": "system", "subtype": "init", "uuid": "u", "session_id": "s1", "claude_code_version": "2.1.330", "cwd": "/w", "tools": tools, "model": "m", "permissionMode": mode}));
-        match why {
-            None => assert!(d.end.is_none(), "{tools}"),
-            Some(w) => {
-                let (why, words) = d.end.take().unwrap_or_else(|| panic!("{tools} was let be"));
-                assert!(why == Why::Boundary && words.contains(w), "{words}");
-            }
-        }
+    assert_eq!(of("claude-opus-4-7").as_deref(), Some("xhigh"));
+    for m in ["claude-opus-5", "claude-sonnet-4-6", "claude-opus-4-8"] {
+        assert_eq!(of(m).as_deref(), Some("high"), "{m}");
     }
+    // Not one it says the model takes.
+    assert_eq!(default_effort("opus", &["low".into(), "max".into()]), None);
+    assert_eq!(default_effort("opus", &[]), None);
 }

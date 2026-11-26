@@ -46,6 +46,49 @@ fn a_name_is_a_name_and_a_folder_one_folder() {
     assert!(format!("{e:?}").contains("(\"PATH\", \"/c\")"), "{e:?}");
 }
 
+/// Whatever the case, and whatever it is for: nothing that makes something run.
+#[test]
+fn what_is_set_makes_nothing_run_and_a_secret_is_not_shown() {
+    let f = fixture();
+    let mut e = Env::harness(&[], &f.at("home"), "me", &f.at("tmp")).unwrap();
+    for bad in [
+        "",
+        "1A",
+        "A-B",
+        "A=B",
+        "LD_PRELOAD",
+        "ld_preload",
+        "DYLD_X",
+        "NODE_OPTIONS",
+        "PYTHONPATH",
+        "GIT_SSH",
+        "SSH_ASKPASS",
+        "RUBYOPT",
+        "PERL5LIB",
+        "SHELL",
+        "EDITOR",
+        "BASH_ENV",
+        "ENV",
+    ] {
+        assert!(matches!(e.set_said(bad, "x", false), Err(SpawnError::Env(_))), "{bad:?}");
+        assert!(e.set_said(bad, "x", true).is_err(), "{bad:?}");
+    }
+    assert!(
+        e.set_said("A", "a\0b", false).is_err()
+            && e.set_said(&"A".repeat(129), "x", false).is_err()
+    );
+    e.set_said("SHOWN", "value-one", false).unwrap();
+    e.set_said("HELD", "value-two", true).unwrap();
+    // Axiom's own are another matter.
+    e.set("GIT_CONFIG_NOSYSTEM", "1").unwrap();
+    assert!(e.set("LD_PRELOAD", "x").is_err());
+    let text = format!("{e:?}");
+    assert!(text.contains("value-one") && text.contains("HELD") && !text.contains("value-two"));
+    // What it was is not what it is.
+    e.set_said("HELD", "value-three", false).unwrap();
+    assert!(format!("{e:?}").contains("value-three"));
+}
+
 #[tokio::test]
 async fn its_input_stays_open_while_it_is_held() {
     let f = fixture();

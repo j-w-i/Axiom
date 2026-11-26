@@ -27,7 +27,10 @@ class ItemModel extends ChangeNotifier {
   /// without putting that together.
   int _length = 0, _hash = 0;
   String? _ended;
-  bool get rich => kind == ItemKind.prose || kind == ItemKind.prompt || kind == ItemKind.reasoning;
+  bool get rich => switch (kind) {
+    ItemKind.prose || ItemKind.prompt || ItemKind.reasoning || ItemKind.plan => true,
+    _ => false,
+  };
   String get plain => _ended ?? _plain.toString();
 
   /// What was said, as it was written: Markdown, with whatever hides in it.
@@ -75,6 +78,7 @@ class AgentModel extends ChangeNotifier {
     this.since, {
     this.access,
     this.apart = false,
+    this.planning = false,
   }) : name = oneLine(name, 60);
   final String id, name;
   Execution execution;
@@ -85,12 +89,30 @@ class AgentModel extends ChangeNotifier {
   /// It works in a copy of the folder of its own.
   final bool apart;
 
+  /// It only reads, and hands in a plan.
+  bool planning;
+
+  /// The plan that waits for its person: the last it handed in, if nothing has been said since.
+  ItemModel? get proposed {
+    if (!planning || run != null) return null;
+    for (final i in items.reversed) {
+      if (i.kind == ItemKind.prompt) return null;
+      if (i.kind == ItemKind.plan && i.agent == id && !i.open) return i;
+    }
+    return null;
+  }
+
   /// The run it is in.
   String? run;
   final String? parent;
   final int since;
   AgentPhase phase = AgentPhase.waiting;
   ItemModel? last;
+
+  /// What it says that it means to do. Its claim, and nothing more.
+  List<Todo> steps = const [];
+  String? stepsText;
+  bool get plans => steps.isNotEmpty || stepsText != null;
   double? context;
   Known contextKnown = Known.unknown;
 
@@ -98,6 +120,42 @@ class AgentModel extends ChangeNotifier {
   Outcome? ended;
   String? error;
   final List<ItemModel> items = [];
+
+  /// Where its conversation can be branched: what a person said that began a run, and the last answer
+  /// of one that was completed. Not of a program: it keeps its own conversation.
+  final _places = <ItemModel>{};
+  bool canBranch(ItemModel i) => execution.harness == 'axiom' && _places.contains(i);
+
+  void _begins(ItemModel i) {
+    if (i.kind != ItemKind.prompt || i.name.isNotEmpty) return;
+    // What others have come to may be told with it.
+    final before = items.reversed.where((o) => o.kind != ItemKind.prompt || o.name.isEmpty);
+    if (before.firstOrNull?.run != i.run) _places.add(i);
+  }
+
+  void _answered(String run) {
+    for (final i in items.reversed) {
+      if (i.run != run) return;
+      if (i.kind == ItemKind.prose) {
+        _places.add(i);
+        return;
+      }
+    }
+  }
+
+  /// It goes on from another's conversation: those items are its own too.
+  void _goesOn(AgentModel of, Branched from) {
+    final at = of.items.indexWhere((i) => i.id == from.item);
+    if (at < 0) return;
+    items.addAll(of.items.take(from.kept ? at + 1 : at));
+    _places.addAll(items.where(of._places.contains));
+    last = items.lastOrNull;
+    items.add(
+      ItemModel('$id from', id, '', ItemKind.notice, '', null)
+        ..outcome = Outcome.completed
+        .._ended = 'Branched from ${of.name}',
+    );
+  }
 
   /// What its person has said to it, the last first, the same only once in a row.
   List<String> get said {
@@ -181,8 +239,10 @@ class SessionModel extends ChangeNotifier {
         :final parent,
         :final access,
         :final apart,
+        :final from,
+        :final plan,
       ):
-        agents[agent] = AgentModel(
+        final a = AgentModel(
           agent,
           name,
           execution,
@@ -190,11 +250,17 @@ class SessionModel extends ChangeNotifier {
           e.at,
           access: access,
           apart: apart,
+          planning: plan,
         );
+        if (from != null) {
+          if (agents[from.agent] case final of?) a._goesOn(of, from);
+        }
+        agents[agent] = a;
         return true;
-      case AgentChanged(:final agent, :final execution, :final access):
+      case AgentChanged(:final agent, :final execution, :final access, :final plan):
         if (agents[agent] case final a?) {
           a
+            ..planning = plan
             ..execution = execution
             ..access = access;
           touched.add(a);
@@ -218,6 +284,7 @@ class SessionModel extends ChangeNotifier {
         return true;
       case RunEnded(:final run, :final outcome, :final error):
         if (agents[_runs.remove(run)] case final a?) {
+          if (outcome == Outcome.completed) a._answered(run);
           a
             ..run = null
             ..ended = outcome
@@ -249,6 +316,7 @@ class SessionModel extends ChangeNotifier {
         }
         final i = ItemModel(item, agent, run, kind, name, args, argsCut: argsCut);
         _open[item] = i;
+        a._begins(i);
         a.items.add(i);
         a.last = i;
         touched.add(a);
@@ -269,11 +337,19 @@ class SessionModel extends ChangeNotifier {
       case RequestClosed(:final request):
         requests.remove(request);
         return true;
-      case UsageReported(:final agent, :final usage, :final provenance):
-        if (agents[agent] case final a?) {
+      case UsageReported(:final agent, :final usage, :final provenance, :final cut):
+        // An answer that broke off says nothing of how full the context is.
+        if (agents[agent] case final a? when !cut) {
           a
             ..context = usage.context
             ..contextKnown = provenance;
+          touched.add(a);
+        }
+      case TodoSaid(:final agent, :final steps, :final text):
+        if (agents[agent] case final a?) {
+          a
+            ..steps = steps
+            ..stepsText = text;
           touched.add(a);
         }
       case UnknownBody():

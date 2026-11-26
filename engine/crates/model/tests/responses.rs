@@ -188,8 +188,13 @@ fn usage_is_what_was_told() {
         cache_write_long: None,
         output: Some(9),
         reasoning: Some(5),
+        ..Usage::default()
     };
     assert_eq!(got, want);
+    // The tier that served it, which need not be the one that was asked for.
+    let e = json!({"type":"response.completed","response":{"usage":{},"service_tier":"priority"}});
+    let r = read(&stream(&[CREATED, &e.to_string()])).0;
+    assert_eq!(r.usage.speed.as_deref(), Some("priority"));
     let got = of(json!({"input_tokens":10,"input_tokens_details":{"cached_tokens":4}}));
     assert_eq!((got.uncached, got.cache_write), (Some(6), None));
     // Without what was read, what was not is unknown. Nonsense is not a count.
@@ -556,6 +561,7 @@ fn a_request_to_the_byte() {
         effort: Some("high".into()),
         stop: Vec::new(),
         cache: Cache::Long,
+        ..Settings::default()
     };
     r.messages.push(assistant(vec![
         Block::text("yes"),

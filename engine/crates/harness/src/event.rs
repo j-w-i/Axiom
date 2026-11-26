@@ -2,7 +2,7 @@
 //! wrote is its own word: untrusted, bounded, and a report, not proof (T36).
 
 use axiom_policy::{Access, Place, audit::Containment};
-use axiom_proto::{Outcome, Provenance, Usage};
+use axiom_proto::{Cost, Covers, ModelTotal, Outcome, Provenance, Usage};
 use axiom_spawn::Ended;
 use serde_json::Value;
 
@@ -57,6 +57,10 @@ pub struct Name {
     pub label: Option<String>,
     /// The efforts this model takes, where that depends on it.
     pub efforts: Vec<String>,
+    /// The one of them it tries at when told none, where that is known.
+    pub default_effort: Option<String>,
+    /// It can be faster than the standard, for a price.
+    pub fast: bool,
 }
 
 impl Names {
@@ -269,16 +273,12 @@ pub struct Spent {
     pub usage: Usage,
     /// Tokens in the context, and how many there may be.
     pub context: Option<(u64, u64)>,
+    /// What `usage` covers.
+    pub of: Covers,
     pub cost: Option<Cost>,
+    /// By model, of the session so far.
+    pub totals: Vec<ModelTotal>,
     pub provenance: Option<Provenance>,
-}
-
-/// Of the session so far.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Cost {
-    pub amount: f64,
-    pub currency: String,
-    pub provenance: Provenance,
 }
 
 /// How much of a plan is used up, where the harness says so.
@@ -400,8 +400,10 @@ pub enum Error {
     BadValue(&'static str, String),
     #[error("{0:?} would switch off what holds it back")]
     Unsafe(String),
-    #[error("this program's own tools cannot be taken away")]
-    NoHands,
+    #[error("{0:?} is not passed on to this program: it could change what holds it back")]
+    NotPassed(String),
+    #[error("this program cannot be told how fast to be")]
+    NoSpeed,
     #[error("this program does not say how several accounts of it are kept apart")]
     OneAccount,
     #[error("this harness may only be started by a person")]

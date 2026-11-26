@@ -1,7 +1,9 @@
 import Cocoa
 import FlutterMacOS
 
-class MainFlutterWindow: NSWindow {
+class MainFlutterWindow: NSWindow, NSDraggingDestination {
+  private var drops: FlutterMethodChannel?
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
@@ -46,7 +48,47 @@ class MainFlutterWindow: NSWindow {
       default: result(FlutterMethodNotImplemented)
       }
     }
+    drops = FlutterMethodChannel(
+      name: "axiom/drop", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    // Files that are there. Nothing that would have to be written somewhere first.
+    registerForDraggedTypes([.fileURL])
     super.awakeFromNib()
+  }
+
+  /// What is dragged, two at most: of more than one, only that there are more is of interest.
+  private func dragged(_ sender: NSDraggingInfo) -> [URL] {
+    let only: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+    let all = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: only)
+    return (all ?? []).prefix(2).compactMap { ($0 as? NSURL)?.filePathURL }
+  }
+
+  /// Never to be moved: whoever drags it would remove it.
+  private func taken(_ sender: NSDraggingInfo) -> NSDragOperation {
+    let may = sender.draggingSourceOperationMask
+    return [.copy, .link, .generic].first { may.contains($0) } ?? []
+  }
+
+  func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    let all = dragged(sender)
+    // As it is named, without looking at the disk.
+    if all.count == 1, all[0].hasDirectoryPath {
+      drops?.invokeMethod("over", arguments: all[0].path)
+    }
+    return all.isEmpty ? [] : taken(sender)
+  }
+
+  func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { taken(sender) }
+
+  func draggingExited(_ sender: NSDraggingInfo?) { drops?.invokeMethod("out", arguments: nil) }
+
+  func draggingEnded(_ sender: NSDraggingInfo) { drops?.invokeMethod("out", arguments: nil) }
+
+  func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
+
+  func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    let all = dragged(sender)
+    drops?.invokeMethod("drop", arguments: all.map(\.path))
+    return !all.isEmpty
   }
 
   private func setBar() {

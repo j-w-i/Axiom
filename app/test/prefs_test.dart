@@ -22,7 +22,16 @@ void main() {
   test('what was chosen is there the next time', () async {
     final f = PrefsFile('${dir.path}/a/window.json');
     expect(f.read(), const Prefs());
-    const p = Prefs(look: Look.light, text: 1.3, density: AxDensity.compact, enterSends: false);
+    const p = Prefs(
+      look: Look.light,
+      text: 1.3,
+      zoom: 1.75,
+      density: AxDensity.compact,
+      enterSends: false,
+      favourites: ['axiom\nc\nm'],
+      hidden: ['a'],
+      used: ['b', 'c'],
+    );
     await f.write(p);
     expect(f.read(), p);
     expect(Directory('${dir.path}/a').listSync(), hasLength(1), reason: 'nothing is left beside');
@@ -34,14 +43,39 @@ void main() {
     expect(f.read().text, 1.75);
   });
 
+  test('models are kept as they are chosen, and not too many', () {
+    var p = const Prefs();
+    for (var i = 0; i < 20; i++) {
+      p = p.using('m$i');
+    }
+    expect(p.used, hasLength(Prefs.lately));
+    expect(p.used.first, 'm19');
+    expect(p.using('m12').used.take(2), ['m12', 'm19']);
+    p = p.offering('a', favourite: true).offering('b', hide: true).offering('a', hide: true);
+    expect(p.favourites, isEmpty);
+    expect(p.hidden, ['a', 'b']);
+    expect(p.offering('b').hidden, ['a']);
+    for (var i = 0; i < 300; i++) {
+      p = p.offering('f$i', favourite: true);
+    }
+    expect(p.favourites, hasLength(Prefs.most));
+    expect(p == p.using('x'), isFalse);
+  });
+
   test('what cannot be read is as it comes, and does not keep the window shut', () {
     final f = PrefsFile('${dir.path}/window.json');
     for (final (text, want) in [
       ('', const Prefs()),
       ('{', const Prefs()),
       ('[1]', const Prefs()),
-      ('{"look":"dusk","text":9e9,"density":3,"enterSends":"no"}', const Prefs()),
+      ('{"look":"dusk","text":9e9,"zoom":1.3,"density":3,"enterSends":"no"}', const Prefs()),
       ('{"look":"dark","new":true}', const Prefs(look: Look.dark)),
+      ('{"favourites":"x","hidden":[1,"","h"],"used":{}}', const Prefs(hidden: ['h'])),
+      ('{"favourites":["${'x' * 701}"]}', const Prefs()),
+      ('{"zoom":0}', const Prefs()),
+      ('{"zoom":-1}', const Prefs()),
+      ('{"zoom":"2"}', const Prefs()),
+      ('{"zoom":2}', const Prefs(zoom: 2)),
       ('{"text":1,"look":"light"}', const Prefs(look: Look.light)),
       ('"${'x' * 70000}"', const Prefs()),
     ]) {
@@ -139,7 +173,8 @@ void main() {
     for (var i = 0; i < 20; i++) {
       p = p.sized(1);
     }
-    expect(p.text, 2);
+    expect((p.text, p.zoom), (2, 1));
+    expect([for (final z in Prefs.zooms) Prefs(zoom: z).zoomed(0).zoom], Prefs.zooms);
     for (var i = 0; i < 20; i++) {
       p = p.sized(-1);
     }

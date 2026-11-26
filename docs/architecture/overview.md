@@ -46,7 +46,8 @@ projections they change (decision 0004): the session's row and what is open in i
 rebuilt by replay. Before an effect its intent is on the drive: the tool call's event, and its entry in the
 audit record (a chain: each entry holds the digest of the one before). The conversation as the model has it
 is kept turn by turn beside the events, each result alone. A host that is killed goes on from that: a call
-without a result is told to the model as unknown, and never done again. There is no outbox: nothing is
+without a result is told to the model as unknown, and never done again. A branch begins as another agent
+with a copy of those turns, cut between two runs (decision 0015). There is no outbox: nothing is
 ordered that has not been begun.
 
 ## Crates (engine/)

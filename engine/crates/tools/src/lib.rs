@@ -21,6 +21,7 @@ pub mod copy;
 pub mod edit;
 pub mod fs;
 pub mod jobs;
+pub mod points;
 pub mod shell;
 pub mod text;
 pub mod walk;
@@ -281,7 +282,9 @@ impl Output {
 }
 
 /// Files larger than this are not read whole.
-const LARGEST: u64 = 8 * 1024 * 1024;
+pub const LARGEST: u64 = 8 * 1024 * 1024;
+/// The longest a command that is waited for may take, in seconds.
+pub const COMMAND: u64 = 600;
 /// Of a file, at a time.
 const READ: usize = 64 * 1024;
 const FOUND: usize = 200;
@@ -459,7 +462,7 @@ fn understand(tool: &str, v: &Value, site: &Site, seen: &Seen) -> Result<Plan, S
             match a.todo.as_str() {
                 "start" => {
                     let command = a.command.clone().ok_or("say what: command")?;
-                    let a = ShellArgs { command, cwd: a.cwd.clone(), seconds: 600 };
+                    let a = ShellArgs { command, cwd: a.cwd.clone(), seconds: COMMAND };
                     run(site, a, "job", Op::JobStart)
                 }
                 "read" => go(Op::JobRead(id()?, Duration::from_secs(a.wait.min(30)))),
@@ -736,7 +739,7 @@ fn run(
         command: a.command.clone(),
         cwd,
         profile,
-        limit: Duration::from_secs(a.seconds.clamp(1, 600)),
+        limit: Duration::from_secs(a.seconds.clamp(1, COMMAND)),
         home: site.keep.home().clone(),
         path: site.path.clone(),
         scratch: site.scratch.clone(),

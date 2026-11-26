@@ -128,8 +128,15 @@ fn counts_are_kept_until_they_are_told_again() {
         cache_write_long: Some(10),
         output: Some(7),
         reasoning: Some(5),
+        ..Usage::default()
     };
     assert_eq!(r.usage, want);
+    // How fast it was done, whichever event says so.
+    for (first, last) in [(json!("fast"), json!(null)), (json!("standard"), json!("fast"))] {
+        let a = json!({"type":"message_start","message":{"usage":{"speed":first}}}).to_string();
+        let z = json!({"type":"message_delta","delta":{},"usage":{"speed":last}}).to_string();
+        assert_eq!(read(&stream(&[&a, &z, STOP])).0.usage.speed.as_deref(), Some("fast"));
+    }
     // Nonsense is not a count.
     let odd = r#"{"type":"message_start","message":{"usage":{"input_tokens":-1,"cache_read_input_tokens":"5","cache_creation_input_tokens":1.5,"output_tokens":null}}}"#;
     assert_eq!(read(&stream(&[odd])).0.usage, Usage::default());
@@ -482,6 +489,45 @@ fn a_request_to_the_byte() {
 }
 
 #[test]
+fn how_to_think_and_how_fast() {
+    let p = Profile::anthropic();
+    let mut r = request();
+    (r.system, r.tools) = (String::new(), Vec::new());
+    r.settings.adaptive = true;
+    let body = |r: &Request| String::from_utf8(encode(r, &p).unwrap().body).unwrap();
+    assert!(body(&r).contains(r#""thinking":{"type":"adaptive"}"#), "{}", body(&r));
+    let mut other = p.clone();
+    other.quirks.thinking = None;
+    assert_eq!(encode(&r, &other).unwrap_err(), EncodeError::Unsupported("how to think"));
+    r.settings.adaptive = false;
+    assert!(!body(&r).contains("thinking"), "as its provider does");
+    // Only where it is documented, and as it is.
+    r.settings.speed = Some("fast".into());
+    assert_eq!(encode(&r, &p).unwrap_err(), EncodeError::Unsupported("the speed"));
+    r.model = "claude-opus-5-5".into();
+    assert!(body(&r).contains(r#""speed":"fast""#));
+    r.settings.speed = Some("slow".into());
+    assert_eq!(encode(&r, &p).unwrap_err(), EncodeError::Unsupported("the speed"));
+    // Nowhere else.
+    for p in [
+        Profile::openai(),
+        Profile::gemini(),
+        Profile::bedrock(),
+        Profile::openai_compatible("x", "http://localhost"),
+    ] {
+        for settings in [
+            Settings { adaptive: true, ..request().settings },
+            Settings { speed: Some("fast".into()), ..request().settings },
+        ] {
+            let mut r = request();
+            r.settings = settings;
+            let e = encode(&r, &p).unwrap_err();
+            assert!(matches!(e, EncodeError::Unsupported(_)), "{} {e:?}", p.provider);
+        }
+    }
+}
+
+#[test]
 fn what_cannot_be_asked_for_is_an_error() {
     let mut r = request();
     r.settings.max_output = None;
@@ -494,10 +540,10 @@ fn what_cannot_be_asked_for_is_an_error() {
     p.quirks.effort = Some(axiom_model::profile::Effort::ReasoningEffort);
     assert_eq!(encode(&r, &p).unwrap_err(), EncodeError::Unsupported("effort"));
     let mut p = profile();
-    p.quirks.body.insert("thinking".into(), json!({"type":"adaptive"}));
+    p.quirks.body.insert("metadata".into(), json!({"user_id":"x"}));
     assert!(
         text_of(&encode(&request(), &p).unwrap().body)
-            .contains(r#","thinking":{"type":"adaptive"},"tools""#)
+            .contains(r#","metadata":{"user_id":"x"},"tools""#)
     );
     for own in [
         "messages",
@@ -509,6 +555,8 @@ fn what_cannot_be_asked_for_is_an_error() {
         "cache_control",
         "output_config",
         "stop_sequences",
+        "thinking",
+        "speed",
     ] {
         p.quirks.body = [(own.to_owned(), json!(1))].into();
         assert_eq!(encode(&request(), &p).unwrap_err(), EncodeError::Reserved(own.into()));

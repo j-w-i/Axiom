@@ -9,7 +9,10 @@ use axiom_model::{
     Accumulator, Args, Block, CallError, Class, Client, Content, Delta, Event, Message, Reply,
     Request, Retry, Role, Settings, Start, Stop, Tool,
 };
-use axiom_proto::{AgentId, AgentState, Body, ItemId, ItemKind, Outcome, Provenance, RunId, Usage};
+use axiom_proto::{
+    AgentId, AgentState, Body, Cost, Covers, ItemId, ItemKind, Outcome, Provenance, RunId, Usage,
+    UsedOn,
+};
 use axiom_tools::{Seen, Site, Spec};
 use serde_json::Value;
 use tokio::sync::{mpsc, watch};
@@ -74,6 +77,8 @@ pub struct Agent<S: Stage> {
     pub desk: Desk,
     pub client: Client,
     pub model: String,
+    /// What is said to be used, with what it is asked.
+    pub on: UsedOn,
     pub settings: Settings,
     /// Tokens the model takes, if they are known.
     pub window: Option<u64>,
@@ -99,6 +104,8 @@ pub struct Agent<S: Stage> {
     pub told: Option<String>,
     /// How long this run has waited for a person: that is not its own time.
     pub waited: Duration,
+    /// The last words of the answer that is being given or was given last, as they are shown.
+    pub last_words: Option<ItemId>,
 }
 
 fn fill(r: &Reply, window: Option<u64>) -> Option<f64> {
@@ -167,14 +174,20 @@ pub(crate) async fn stopped(c: &mut Cancel) {
 impl<S: Stage> Agent<S> {
     /// Begins a run, with what a person said if it is not waiting in the conversation already. It is
     /// in the journal for good when this returns; if it cannot begin, it has ended.
-    pub async fn begin(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Refused> {
+    /// `before`: what it is told with it and has been taken in: said first.
+    pub async fn begin(
+        &mut self,
+        run: &RunId,
+        before: Vec<Say>,
+        prompt: Option<Word>,
+    ) -> Result<(), Refused> {
         self.stage
             .say(vec![
                 Say::Event(Body::RunStarted { run: run.clone(), agent: self.id.clone() }),
                 Say::Event(Body::AgentState { agent: self.id.clone(), state: AgentState::Running }),
             ])
             .await?;
-        let r = match self.opening(run, prompt).await {
+        let r = match self.opening(run, before, prompt).await {
             Ok(()) => return Ok(()),
             Err(Halt::Failed(why) | Halt::Full(why)) => Refused::This(why),
             Err(Halt::Cancelled | Halt::Unbegun | Halt::Gone) => Refused::Closed,
@@ -188,7 +201,15 @@ impl<S: Stage> Agent<S> {
         Err(r)
     }
 
-    async fn opening(&mut self, run: &RunId, prompt: Option<Word>) -> Result<(), Halt> {
+    async fn opening(
+        &mut self,
+        run: &RunId,
+        before: Vec<Say>,
+        prompt: Option<Word>,
+    ) -> Result<(), Halt> {
+        if !before.is_empty() {
+            self.stage.say(before).await?;
+        }
         if let Some(w) = prompt {
             self.heard(run, w).await?;
         }
@@ -281,7 +302,6 @@ impl<S: Stage> Agent<S> {
             };
             output += reply.usage.output.unwrap_or(0);
             self.compare(run, &reply).await?;
-            self.usage(&reply).await?;
             self.fill = fill(&reply, self.window);
             if reply.stop == Some(Stop::ContextFull) {
                 // What it had said is not whole; it says it again, from its notes.
@@ -290,7 +310,6 @@ impl<S: Stage> Agent<S> {
                     Halt::Full(words) => Halt::Failed(words),
                     e => e,
                 })?;
-                self.usage(&reply).await?;
                 self.fill = fill(&reply, self.window);
             }
             let stop = reply.stop.clone();
@@ -318,6 +337,9 @@ impl<S: Stage> Agent<S> {
                         heard = self.heard(run, m).await?;
                     }
                     if !heard {
+                        if let Some(item) = self.last_words.take() {
+                            self.stage.mark(&item, self.context.turns(), true).await;
+                        }
                         return Ok(());
                     }
                 }
@@ -352,15 +374,24 @@ impl<S: Stage> Agent<S> {
         if w.item.as_ref().is_some_and(|i| self.noted.remove(i)) {
             return Ok(false);
         }
+        // What begins a run, and is a person's: the conversation before it can be gone on with
+        // otherwise.
+        let mut begins = None;
         if w.item.is_none() {
             let (by, text) = match &w.shown {
                 Some((by, text)) => (by.as_str(), text),
                 None => ("", &w.text),
             };
-            self.stage.say(said(&ItemId::new(), run, &self.id, text, by)).await?;
+            let item = ItemId::new();
+            self.stage.say(said(&item, run, &self.id, text, by)).await?;
             self.stage.sync().await?;
+            begins = w.shown.is_none().then_some((item, self.context.turns()));
         }
-        self.keep_turn(Turn::Message(Message::user(w.text)), w.item).await
+        let kept = self.keep_turn(Turn::Message(Message::user(w.text)), w.item).await?;
+        if let Some((item, before)) = begins {
+            self.stage.mark(&item, before, false).await;
+        }
+        Ok(kept)
     }
 
     /// Takes in what waits from before: a host that was gone, or a run that was stopped.
@@ -558,6 +589,7 @@ impl<S: Stage> Agent<S> {
             },
         };
         let mut fold = Accumulator::new(answer.scope().clone());
+        self.last_words = None;
         // By block: the item it is shown as, and whether it has ended.
         let mut items: Vec<Option<ItemId>> = Vec::new();
         let failed = loop {
@@ -567,10 +599,12 @@ impl<S: Stage> Agent<S> {
                     // The connection closes first.
                     drop(answer);
                     self.end_all(&mut items, Outcome::Cancelled).await?;
+                    let reply = fold.finish();
+                    self.usage(run, &reply, aside).await?;
                     if aside {
                         return Err(Halt::Cancelled);
                     }
-                    return self.keep(fold.finish()).await;
+                    return self.keep(reply).await;
                 }
                 () = self.stage.closed() => return Err(Halt::Gone),
                 e = answer.next() => e,
@@ -589,10 +623,13 @@ impl<S: Stage> Agent<S> {
         };
         if let Some(e) = failed {
             self.end_all(&mut items, Outcome::Failed).await?;
+            self.usage(run, &fold.finish(), aside).await?;
             return Ok(Err(CallError::Provider(e)));
         }
         self.end_all(&mut items, Outcome::Completed).await?;
-        Ok(Ok(fold.finish()))
+        let reply = fold.finish();
+        self.usage(run, &reply, aside).await?;
+        Ok(Ok(reply))
     }
 
     /// What a cancelled answer leaves: the words it had said, so that the agent knows them too.
@@ -622,7 +659,7 @@ impl<S: Stage> Agent<S> {
     }
 
     async fn show(
-        &self,
+        &mut self,
         run: &RunId,
         e: &Event,
         items: &mut Vec<Option<ItemId>>,
@@ -637,6 +674,9 @@ impl<S: Stage> Agent<S> {
                 };
                 let item = kind.map(|_| ItemId::new());
                 items.push(item.clone());
+                if kind == Some(ItemKind::Prose) {
+                    self.last_words.clone_from(&item);
+                }
                 match (kind, item) {
                     (Some(k), Some(i)) => vec![Say::Event(self.item(run, &i, k, "", None))],
                     _ => return Ok(()),
@@ -671,21 +711,51 @@ impl<S: Stage> Agent<S> {
         self.notice(run, &format!("{is} answers, not {}, which was asked for.", self.model)).await
     }
 
-    async fn usage(&self, r: &Reply) -> Result<(), Halt> {
+    /// Of every answer, also one that broke off and one that is no part of the conversation: all of
+    /// them are paid for.
+    async fn usage(&self, run: &RunId, r: &Reply, aside: bool) -> Result<(), Halt> {
         let u = &r.usage;
         if *u == axiom_model::Usage::default() {
             return Ok(());
         }
-        let context = fill(r, self.window).map(|f| f.min(1.0));
+        // How full the context is, only a whole answer of the conversation says.
+        let context = fill(r, self.window).filter(|_| r.complete && !aside).map(|f| f.min(1.0));
         let usage = Usage {
+            prompt: u.prompt,
             input: u.uncached.or(u.prompt),
+            cache_write_long: u.cache_write_long,
             cache_read: u.cache_read,
             cache_write: u.cache_write,
             output: u.output,
             reasoning: u.reasoning,
             context,
         };
-        let b = Body::Usage { agent: self.id.clone(), usage, provenance: Provenance::Reported };
+        let cost = u.cost.as_ref().map(|c| {
+            Box::new(Cost {
+                amount: c.amount,
+                currency: c.unit.clone(),
+                provenance: Provenance::Reported,
+                of: Covers::Answer,
+            })
+        });
+        let on = UsedOn {
+            model: Some(self.model.clone()),
+            answered: r.model.clone().filter(|m| !m.is_empty()),
+            speed: u.speed.clone(),
+            ..self.on.clone()
+        };
+        let b = Body::Usage {
+            agent: self.id.clone(),
+            usage,
+            provenance: Provenance::Reported,
+            of: Covers::Answer,
+            run: Some(run.clone()),
+            on: Some(Box::new(on)),
+            cost,
+            totals: Vec::new(),
+            cut: !r.complete,
+            aside,
+        };
         Ok(self.stage.say(vec![Say::Event(b)]).await?)
     }
 

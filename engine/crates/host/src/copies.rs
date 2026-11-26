@@ -18,7 +18,8 @@ use axiom_proto::{
 };
 use axiom_tools::{
     Site,
-    copy::{self, Files, From, Is, Most, Seen, Taking, Was, What, alike},
+    copy::{self, Files, From, Is, Seen, Taking, Was, What, alike},
+    points::{self, Delta},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -39,6 +40,11 @@ const DIFF: usize = 2 * 1024 * 1024;
 const FILES: usize = 2000;
 /// Of what is put on record of a change.
 const NAMES: usize = 200;
+/// Of one agent's copy: at how many points of its conversation it is kept, how much that may come to,
+/// and how long one may take.
+pub const POINTS: usize = 50;
+pub const KEPT: u64 = 256 * 1024 * 1024;
+const TAKES: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn internal(words: impl std::fmt::Display) -> WireError {
     WireError::new(ErrorCode::Internal, words.to_string())
@@ -133,8 +139,87 @@ fn set(files: &mut Files, path: &str, is: Option<Is>) {
     };
 }
 
+/// What a copy was when so many turns of its agent's conversation had been.
+#[derive(Serialize, Deserialize)]
+struct Point {
+    n: u64,
+    /// What counted as copied then: the name of the file it is in.
+    base: String,
+    delta: Delta,
+}
+
+type Base = BTreeMap<String, Is>;
+
+/// The points of a copy, in a folder of Axiom's own, the oldest first.
+#[derive(Default, Serialize, Deserialize)]
+struct Points {
+    all: Vec<Point>,
+}
+
+impl Points {
+    /// The last that is not before `lo` nor after `n`.
+    fn at(&self, lo: u64, n: u64) -> Option<&Point> {
+        self.all.iter().rev().find(|p| (lo..=n).contains(&p.n))
+    }
+    fn base(dir: &Path, name: &str) -> Result<Base, WireError> {
+        serde_json::from_slice(&std::fs::read(dir.join(name)).map_err(internal)?).map_err(internal)
+    }
+    fn load(dir: &Path) -> Result<Self, WireError> {
+        match std::fs::read(dir.join(POINTS_FILE)) {
+            Ok(b) => serde_json::from_slice(&b).map_err(internal),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(internal(e)),
+        }
+    }
+
+    /// Lets go of the oldest until they are few and small enough, and of what none of them needs.
+    fn keep(&mut self, dir: &Path) -> Result<(), WireError> {
+        let sizes: BTreeMap<String, u64> = std::fs::read_dir(dir)
+            .map_err(internal)?
+            .flatten()
+            .filter_map(|e| {
+                let size = e.metadata().map_or(0, |m| m.len());
+                Some((e.file_name().into_string().ok()?, size))
+            })
+            .collect();
+        let mut bases: BTreeMap<String, Base> = BTreeMap::new();
+        for p in &self.all {
+            if !bases.contains_key(&p.base) {
+                bases.insert(p.base.clone(), Self::base(dir, &p.base)?);
+            }
+        }
+        let needed = loop {
+            let mut needed: BTreeSet<String> = BTreeSet::new();
+            for p in &self.all {
+                needed.insert(p.base.clone());
+                needed.extend(p.delta.values().flatten().map(points::name));
+            }
+            // What was copied, as far as it is kept: of files that are something else by now.
+            needed.extend(bases.values().flat_map(Base::values).map(points::name));
+            let size: u64 = needed.iter().filter_map(|n| sizes.get(n)).sum();
+            if self.all.is_empty() || (self.all.len() <= POINTS && size <= KEPT) {
+                break needed;
+            }
+            let gone = self.all.remove(0);
+            if !self.all.iter().any(|p| p.base == gone.base) {
+                bases.remove(&gone.base);
+            }
+        };
+        let text = serde_json::to_string(self).map_err(internal)?;
+        private_file(&dir.join(POINTS_FILE), &text).map_err(internal)?;
+        for name in sizes.keys().filter(|n| *n != POINTS_FILE && !needed.contains(*n)) {
+            let _ = std::fs::remove_file(dir.join(name));
+        }
+        Ok(())
+    }
+}
+
+const POINTS_FILE: &str = "points.json";
+
 pub struct Copies {
     data: PathBuf,
+    /// Where what copies were at points of their agents' conversations is kept.
+    points: PathBuf,
     root: Option<PathBuf>,
     /// One thing at a time.
     turn: Arc<tokio::sync::Mutex<()>>,
@@ -148,6 +233,8 @@ struct Own {
     /// What is known of it, and the folder of what was there before.
     file: PathBuf,
     before: PathBuf,
+    /// What it was at points of its agent's conversation.
+    points: PathBuf,
 }
 
 /// Work off the runtime's threads that ends when nobody waits for it any more.
@@ -182,6 +269,7 @@ impl Copies {
     pub fn new(data: &Path, home: Option<&Path>) -> Self {
         Self {
             data: data.join("copies"),
+            points: data.join("points"),
             root: home.map(|h| h.join(".axiom-work")),
             turn: Arc::default(),
         }
@@ -226,7 +314,8 @@ impl Copies {
         let name = steps.join("-");
         let file = self.data.join(format!("{name}.json"));
         let before = self.data.join(format!("{name}.before"));
-        Ok(Own { folder, copy: here, file, before })
+        let points = self.points.join(&name);
+        Ok(Own { folder, copy: here, file, before, points })
     }
 }
 
@@ -256,10 +345,8 @@ impl Own {
     }
 
     fn remove(&self) -> Result<(), WireError> {
-        for r in
-            [std::fs::remove_dir_all(self.copy.as_path()), std::fs::remove_dir_all(&self.before)]
-        {
-            match r {
+        for d in [self.copy.as_path(), &self.before, &self.points] {
+            match std::fs::remove_dir_all(d) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(internal(e)),
                 _ => {}
             }
@@ -311,7 +398,7 @@ pub async fn ready(
             let own = a.copies.own(&folder, &s, &ag, true)?;
             let may = |p: &Place| site.reads(p);
             let from = From { folder: &own.folder, tracked: &tracked, may: &may, stop };
-            match copy::make(&from, &own.copy, Most::default()) {
+            match copy::make(&from, &own.copy, crate::limits::copied()) {
                 Ok((files, odd)) => {
                     own.keep(&Known { files, odd, ..Known::default() })?;
                     Ok(own.copy.to_string())
@@ -332,6 +419,132 @@ pub async fn ready(
     setup.apart = Some(Apart { made: true, ..apart });
     keep(store, session, agent, &setup).await?;
     Ok(setup)
+}
+
+/// Keeps what an agent's copy is, where its conversation has `n` turns. What cannot be kept is not, and
+/// nothing waits for it.
+pub async fn point(
+    agents: &Arc<Agents>,
+    session: &SessionId,
+    agent: &AgentId,
+    setup: &Setup,
+    n: u64,
+) -> Result<bool, WireError> {
+    if !setup.apart.as_ref().is_some_and(|a| a.made) {
+        return Ok(false);
+    }
+    let kept = async {
+        let turn = agents.copies.turn().await;
+        let (a, s, ag, setup) = (agents.clone(), session.clone(), agent.clone(), setup.clone());
+        work(turn, move |stop| {
+            let (own, known) = need(own_of(&a, &s, &ag, &setup)?)?;
+            for d in [&a.copies.points, &own.points] {
+                private_dir(d).map_err(internal)?;
+            }
+            let mut all = Points::load(&own.points)?;
+            all.all.retain(|p| p.n != n);
+            let delta =
+                points::keep(&own.folder, &own.copy, &known.files, &own.points, FILES, stop);
+            if let Some(delta) = delta.map_err(words)? {
+                let base: Base =
+                    known.files.iter().map(|(p, w)| (p.clone(), w.is.clone())).collect();
+                let text = serde_json::to_string(&base).map_err(internal)?;
+                let base = format!("{}.base", axiom_tools::fs::digest(text.as_bytes()));
+                if !own.points.join(&base).exists() {
+                    private_file(&own.points.join(&base), &text).map_err(internal)?;
+                }
+                all.all.push(Point { n, base, delta });
+            }
+            all.keep(&own.points)?;
+            Ok(all.all.last().is_some_and(|p| p.n == n))
+        })
+        .await
+    };
+    tokio::time::timeout(TAKES, kept).await.unwrap_or(Ok(false))
+}
+
+/// Whether what an agent's copy was is kept, for a place in its conversation.
+pub async fn has_point(
+    agents: &Arc<Agents>,
+    session: &SessionId,
+    agent: &AgentId,
+    setup: &Setup,
+    (lo, n): (u64, u64),
+) -> Result<bool, WireError> {
+    let turn = agents.copies.turn().await;
+    let (a, s, ag, setup) = (agents.clone(), session.clone(), agent.clone(), setup.clone());
+    work(turn, move |_| {
+        let Some(own) = own_of(&a, &s, &ag, &setup)? else { return Ok(false) };
+        Ok(Points::load(&own.points)?.at(lo, n).is_some())
+    })
+    .await
+}
+
+/// Whose copy a new one is made from, and for which place in their conversation.
+pub struct Then {
+    pub agent: AgentId,
+    pub setup: Setup,
+    pub at: (u64, u64),
+}
+
+/// Makes a copy for an agent, as another's was then: where it is.
+pub async fn again(
+    agents: &Arc<Agents>,
+    store: &Store,
+    session: &SessionId,
+    then: Then,
+    to: &AgentId,
+) -> Result<String, WireError> {
+    let turn = agents.copies.turn().await;
+    let subject = format!("another made for {}, as it was earlier", to.0);
+    record(agents, store, session, &then.agent, then.setup.folder(), subject).await?;
+    let (a, s, to) = (agents.clone(), session.clone(), to.clone());
+    work(turn, move |stop| {
+        let (own, known) = need(own_of(&a, &s, &then.agent, &then.setup)?)?;
+        let all = Points::load(&own.points)?;
+        let (lo, n) = then.at;
+        let point = all.at(lo, n).ok_or_else(|| bad("what its files were there is not kept"))?;
+        let base = Points::base(&own.points, &point.base)?;
+        let mut files = base.clone();
+        for (path, is) in &point.delta {
+            match is {
+                Some(is) => files.insert(path.clone(), is.clone()),
+                None => files.remove(path),
+            };
+        }
+        let new = a.copies.own(own.folder.as_str(), &s, &to, true)?;
+        let from = points::Sources { store: &own.points, copy: &own.copy, folder: &own.folder };
+        let made = points::again(&files, &from, &new.copy, crate::limits::copied(), stop);
+        let kept = made.map_err(words).and_then(|made| {
+            // What counted as copied then counts so now.
+            let counted = |(path, is): (String, Is)| {
+                let stamp = made.get(&path).filter(|w| w.is == is).and_then(|w| w.stamp.clone());
+                (path, Was { is, stamp })
+            };
+            // A clash that the first one has not settled is none of this one's doing either.
+            let clashes = known
+                .clashes
+                .into_iter()
+                .filter(|(path, _)| base.get(path) == known.files.get(path).map(|w| &w.is));
+            let known = Known { clashes: clashes.collect(), odd: known.odd, ..Known::default() };
+            new.keep(&Known { files: base.clone().into_iter().map(counted).collect(), ..known })
+        });
+        match kept {
+            Ok(()) => Ok(new.copy.to_string()),
+            Err(e) => {
+                let _ = new.remove();
+                Err(e)
+            }
+        }
+    })
+    .await
+}
+
+/// Throws away the copy of an agent there has never been.
+pub async fn unmake(agents: &Arc<Agents>, session: &SessionId, agent: &AgentId, folder: &str) {
+    let turn = agents.copies.turn().await;
+    let (a, s, ag, folder) = (agents.clone(), session.clone(), agent.clone(), folder.to_owned());
+    let _ = work(turn, move |_| a.copies.own(&folder, &s, &ag, false)?.remove()).await;
 }
 
 async fn keep(
@@ -654,11 +867,16 @@ pub async fn renew(
         let beside = a.beside(&agent)?;
         let may = |p: &Place| site.reads(p);
         let from = From { folder: &own.folder, tracked: &tracked, may: &may, stop };
-        let news = copy::news(&from, &own.copy, &mut known.files, Most::default()).map_err(words)?;
+        let news = copy::news(&from, &own.copy, &mut known.files, crate::limits::copied()).map_err(words)?;
         let mut not: Vec<Value> = news.left.iter().map(|(p, w)| left(p, w.as_str())).collect();
         // On record before it is done: what is taken over is the folder's, and nobody's change.
         known.taking = news.taking;
         own.keep(&known)?;
+        // For who goes back to before this.
+        if own.points.is_dir() {
+            let was = known.taking.keys().filter_map(|p| Some((p.as_str(), &known.files.get(p)?.is)));
+            points::keep_these(&own.copy, was, &own.points).map_err(words)?;
+        }
         let (c, f) =
             (copy::folder(&own.copy).map_err(words)?, copy::folder(&own.folder).map_err(words)?);
         let mut taken = 0;
@@ -755,4 +973,46 @@ pub async fn remove(
         work(turn, move |_| own.remove()).await?;
     }
     Ok(setup)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// The oldest go, and what none of the others needs.
+    #[test]
+    fn what_points_come_to_is_bounded() {
+        let d = tempfile::tempdir().unwrap();
+        let is = |n: u64| Is { digest: format!("d{n}"), link: false, run: false };
+        let file = |name: &str, size: u64| {
+            std::fs::File::create(d.path().join(name)).unwrap().set_len(size).unwrap();
+        };
+        std::fs::write(d.path().join("b.base"), r#"{"f":{"digest":"was"}}"#).unwrap();
+        file("was", 1);
+        file("nobodys", 1);
+        let mut all = Points::default();
+        for n in 0..5 {
+            file(&format!("d{n}"), KEPT / 4);
+            let delta = [("f".to_owned(), Some(is(n)))].into();
+            all.all.push(Point { n, base: "b.base".into(), delta });
+        }
+        // The same again costs nothing.
+        let delta = [("g".to_owned(), Some(is(4)))].into();
+        all.all.push(Point { n: 5, base: "b.base".into(), delta });
+        all.keep(d.path()).unwrap();
+        assert_eq!(all.all.iter().map(|p| p.n).collect::<Vec<_>>(), [2, 3, 4, 5]);
+        let names = || {
+            let all = std::fs::read_dir(d.path()).unwrap();
+            let mut all: Vec<_> =
+                all.map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+            all.sort();
+            all
+        };
+        assert_eq!(names(), ["b.base", "d2", "d3", "d4", "points.json", "was"]);
+        assert_eq!(Points::load(d.path()).unwrap().all.len(), 4);
+        all.all.clear();
+        all.keep(d.path()).unwrap();
+        assert_eq!(names(), ["points.json"]);
+    }
 }

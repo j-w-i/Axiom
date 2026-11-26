@@ -43,8 +43,23 @@ class ExecutionChoice {
 /// The agent's execution as one key: what it runs on, and everything about it when opened. [choices]
 /// begin with the model and the harness, which the key names.
 class ExecutionKey extends StatelessWidget {
-  const ExecutionKey(this.choices, {required this.of, super.key, this.onOpen});
+  const ExecutionKey(
+    this.choices, {
+    required this.of,
+    super.key,
+    this.onOpen,
+    this.words,
+    this.mark,
+    this.panel,
+    this.width = 440,
+  });
   final List<ExecutionChoice> choices;
+
+  /// What it says, and what it opens, in place of [choices].
+  final List<String>? words;
+  final ServiceMark? mark;
+  final Widget Function(BuildContext, VoidCallback close)? panel;
+  final double width;
 
   /// When somebody is about to look.
   final VoidCallback? onOpen;
@@ -55,13 +70,16 @@ class ExecutionKey extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    final words = [
-      choices.first.item?.label ?? 'Choose a ${choices.first.label.toLowerCase()}',
-      for (final ch in choices.skip(1).take(1)) ?ch.item?.label,
-    ];
+    final mark = panel == null ? choices.first.item?.mark : this.mark;
+    final words =
+        this.words ??
+        [
+          choices.first.item?.label ?? 'Choose a ${choices.first.label.toLowerCase()}',
+          for (final ch in choices.skip(1).take(1)) ?ch.item?.label,
+        ];
     return AxPopover(
       key: ValueKey(of),
-      width: 440,
+      width: width,
       anchor: (context, open, toggle) => OnCommand(
         Command.model,
         () {
@@ -91,7 +109,7 @@ class ExecutionKey extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (choices.first.item?.mark case final m?) ...[
+                    if (mark case final m?) ...[
                       AxServiceMark(m, size: 13),
                       const SizedBox(width: 7),
                     ],
@@ -105,7 +123,7 @@ class ExecutionKey extends StatelessWidget {
                             ),
                             if (words.length > 1)
                               TextSpan(
-                                text: '   ${words[1]}',
+                                text: '   ${words.skip(1).join('   ')}',
                                 style: TextStyle(color: c.ink3),
                               ),
                           ],
@@ -129,7 +147,7 @@ class ExecutionKey extends StatelessWidget {
           ),
         ),
       ),
-      panel: (context, close) => ExecutionPanel(choices),
+      panel: panel ?? (context, close) => ExecutionPanel(choices),
     );
   }
 }
@@ -143,8 +161,11 @@ class _Question {
 /// Every part of the execution, one open at a time. A change that costs something is explained and
 /// confirmed here.
 class ExecutionPanel extends StatefulWidget {
-  const ExecutionPanel(this.choices, {super.key});
+  const ExecutionPanel(this.choices, {super.key, this.labels = 82});
   final List<ExecutionChoice> choices;
+
+  /// How wide the column of their names is, at the usual size: as wide as one beside it.
+  final double labels;
   @override
   State<ExecutionPanel> createState() => _ExecutionPanelState();
 }
@@ -288,7 +309,21 @@ class _ExecutionPanelState extends State<ExecutionPanel> {
             _asked = null;
           }),
           children: [
-            SizedBox(width: 82, child: Text(ch.label, style: t.type.label.ink(c.ink3))),
+            // As wide as its words are at any size, and on one line.
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: MediaQuery.textScalerOf(context).scale(widget.labels),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  ch.label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: t.type.label.ink(c.ink3),
+                ),
+              ),
+            ),
             if (ch.item?.mark case final m?) ...[AxServiceMark(m), const SizedBox(width: 8)],
             Expanded(
               child: Text(

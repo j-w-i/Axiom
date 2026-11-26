@@ -64,26 +64,6 @@ struct Ready {
 }
 
 impl<S: Stage> Hands<'_, S> {
-    /// For a loop that is not Axiom's. What the model is told, and whether it was done.
-    pub async fn tool(
-        &self,
-        run: &RunId,
-        name: &str,
-        args: &Value,
-        cancel: &mut Cancel,
-    ) -> Result<(String, bool), Refused> {
-        let ready = match args {
-            Value::Object(_) => Ok(args.clone()),
-            _ => Err("the arguments are not an object".to_owned()),
-        };
-        let mut waited = Duration::ZERO;
-        match self.one(run, name, args.clone(), ready, cancel, &mut waited).await {
-            Ok(d) => Ok((d.text, !d.failed)),
-            Err(Halt::Failed(why) | Halt::Full(why)) => Err(Refused::This(why)),
-            Err(Halt::Gone | Halt::Cancelled | Halt::Unbegun) => Err(Refused::Closed),
-        }
-    }
-
     /// One call, from its first word on the record to its last. `args`: or why they cannot be read.
     pub(crate) async fn one(
         &self,

@@ -66,7 +66,7 @@ pub fn now_ms() -> u64 {
 }
 
 /// How a run reaches intelligence: five separate things (docs/architecture/overview.md).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Execution {
     pub harness: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,6 +79,9 @@ pub struct Execution {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
+    /// How fast, where that can be told. It has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
 }
 
 /// What an agent may do without asking (`axiom-policy`).
@@ -127,6 +130,8 @@ pub enum ItemKind {
     Reasoning,
     Tool,
     Notice,
+    /// A plan an agent has handed in, for its person to accept: Markdown.
+    Plan,
     #[serde(other)]
     Unknown,
 }
@@ -157,6 +162,133 @@ pub struct Usage {
     /// Share of the context window in use, 0–1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<f64>,
+    /// The whole prompt, where that is told: with what was read from a cache and written to one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<u64>,
+    /// Of `cache_write`, what was written to be kept for an hour, which costs more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_long: Option<u64>,
+}
+
+/// What a figure is the sum of.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Covers {
+    /// One answer of a model.
+    Answer,
+    /// From a prompt to the end of what came of it.
+    Turn,
+    /// Everything so far, as whoever runs the loop counts it: a running total, not to be added up.
+    Session,
+    /// Not said.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl Covers {
+    fn unknown(&self) -> bool {
+        *self == Self::Unknown
+    }
+}
+
+/// Who is paid, and how.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Lane {
+    /// By use.
+    Key,
+    /// A plan that was signed in to: a cost is what it would have been by use.
+    Plan,
+    /// A program of the person's own, which signs in by itself. Which way is its own.
+    Program,
+    /// Nobody: a server that takes no key.
+    Open,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// What was used, as it was then: accounts are removed, and agents run on something else.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsedOn {
+    pub harness: String,
+    #[serde(default)]
+    pub lane: Lane,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+    /// The one that was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The one that is said to have answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered: Option<String>,
+    /// How fast it is said to have been done, where that has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Cost {
+    pub amount: f64,
+    /// ISO 4217, or what a provider calls its own.
+    pub currency: String,
+    pub provenance: Provenance,
+    #[serde(default, skip_serializing_if = "Covers::unknown")]
+    pub of: Covers,
+}
+
+/// One model's part of everything so far, or all of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelTotal {
+    /// Absent: of all models together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub usage: Usage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Cost>,
+}
+
+/// One of the things an agent means to do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Todo {
+    pub text: String,
+    pub state: TodoState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoState {
+    Todo,
+    Doing,
+    Done,
+    #[serde(other)]
+    Unknown,
+}
+
+fn not(b: &bool) -> bool {
+    !*b
+}
+
+/// Where a branch begins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Branched {
+    pub agent: AgentId,
+    pub item: ItemId,
+    /// The item is the last of it; otherwise it is the first that is not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with: bool,
+}
+
+/// Whether there can be a branch, and what of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchInfo {
+    /// It would work in a copy of its own.
+    pub apart: bool,
+    /// What the files were there is kept.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub files: bool,
 }
 
 fn none(n: &u64) -> bool {
@@ -178,7 +310,7 @@ pub enum Body {
     AgentAdded {
         agent: AgentId,
         name: String,
-        execution: Execution,
+        execution: Box<Execution>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent: Option<AgentId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,14 +318,23 @@ pub enum Body {
         /// It works in a copy of the folder of its own.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         apart: bool,
+        /// It goes on from another's conversation, whose items are its own up to there.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Box<Branched>>,
+        /// It only reads, and hands in a plan.
+        #[serde(default, skip_serializing_if = "not")]
+        plan: bool,
     },
     /// What it runs on or may do is another from here on.
     #[serde(rename = "agent.changed")]
     AgentChanged {
         agent: AgentId,
-        execution: Execution,
+        execution: Box<Execution>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access: Option<Access>,
+        /// As [`Body::AgentAdded`].
+        #[serde(default, skip_serializing_if = "not")]
+        plan: bool,
     },
     #[serde(rename = "agent.state")]
     AgentState { agent: AgentId, state: AgentState },
@@ -260,7 +401,42 @@ pub enum Body {
     #[serde(rename = "request.closed")]
     RequestClosed { request: RequestId, answer: String },
     #[serde(rename = "usage")]
-    Usage { agent: AgentId, usage: Usage, provenance: Provenance },
+    Usage {
+        agent: AgentId,
+        usage: Usage,
+        provenance: Provenance,
+        /// What `usage` covers.
+        #[serde(default, skip_serializing_if = "Covers::unknown")]
+        of: Covers,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<Box<UsedOn>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost: Option<Box<Cost>>,
+        /// By model, where that is told.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        totals: Vec<ModelTotal>,
+        /// The answer broke off or was stopped: there may have been more than was told by then.
+        #[serde(default, skip_serializing_if = "not")]
+        cut: bool,
+        /// Not for the conversation itself, but to summarise it.
+        #[serde(default, skip_serializing_if = "not")]
+        aside: bool,
+    },
+    /// What an agent means to do, as it says itself: all of it, in place of what it said before.
+    /// Without steps and text there is none any more.
+    #[serde(rename = "todo")]
+    Todo {
+        agent: AgentId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+        #[serde(default)]
+        steps: Vec<Todo>,
+        /// Markdown.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
     /// Something newer than this build.
     #[serde(untagged)]
     Unknown(Value),
@@ -449,13 +625,76 @@ pub struct HarnessInfo {
     /// It can be told how hard to try (`low`, `medium`, `high`).
     #[serde(default)]
     pub effort: bool,
-    /// Axiom's tools can stand in place of its own (the environment `axiom`): then it is asked about
-    /// and contained as Axiom's own agents are, and has every mode of access.
-    #[serde(default)]
-    pub hands: bool,
     /// What an account of it beside the first is called as a provider, if there can be any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounts: Option<String>,
+    /// The person added it themself.
+    #[serde(default, skip_serializing_if = "not")]
+    pub own: bool,
+}
+
+/// How a program is started, as its person has said it, of it or of one account of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgramInfo {
+    /// [`HarnessInfo::id`].
+    pub harness: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// Of one the person added themself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Absent: it is looked for by its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub vars: Vec<VarInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VarInfo {
+    pub name: String,
+    /// Absent: it is a secret, and not shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// Whether it is there when the host has been restarted.
+    #[serde(default)]
+    pub lasts: bool,
+}
+
+/// A variable a program is to be given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VarSet {
+    pub name: String,
+    /// Absent: the secret that is there stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<SecretText>,
+    /// It goes to the system's store. One whose name says that it is a secret does in any case.
+    #[serde(default)]
+    pub secret: bool,
+}
+
+/// A limit the host keeps, in words for a person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Limit {
+    /// What it is a limit of; those of one kind come together.
+    pub of: String,
+    pub what: String,
+    /// Absent: there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub most: Option<u64>,
+    pub unit: Unit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unit {
+    Count,
+    Bytes,
+    Seconds,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -472,6 +711,9 @@ pub enum Call {
     Peer { tool: String, args: serde_json::Value },
     #[serde(rename = "host.status")]
     Status {},
+    /// The limits this host keeps: an array of [`Limit`].
+    #[serde(rename = "host.limits")]
+    Limits {},
     /// Stops the host if nothing runs, or always with `force`.
     #[serde(rename = "host.shutdown")]
     Shutdown {
@@ -533,6 +775,9 @@ pub enum Call {
         /// gets into the folder by `copy.bring` only.
         #[serde(default)]
         apart: bool,
+        /// It is to hand in a plan first, with the access `read`. Of Axiom's own.
+        #[serde(default, skip_serializing_if = "not")]
+        plan: bool,
     },
     /// What has been changed in a session's folder since its last commit.
     #[serde(rename = "workspace.changes")]
@@ -560,6 +805,34 @@ pub enum Call {
     /// The harnesses this host can drive.
     #[serde(rename = "harness.list")]
     Harnesses {},
+    /// What has been said of how programs are started: an array of [`ProgramInfo`].
+    #[serde(rename = "program.list")]
+    Programs {},
+    /// Says how a program, or one account of it, is started; without `harness`, adds one that speaks
+    /// ACP, with a name and a path. All of it is said anew. Answers with the harness. It is true of
+    /// the next start.
+    #[serde(rename = "program.set")]
+    ProgramSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        harness: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        vars: Vec<VarSet>,
+    },
+    /// Takes away one the person added, or what was said of another.
+    #[serde(rename = "program.remove")]
+    ProgramRemove {
+        harness: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+    },
     /// What a folder's owner would have agents told. For a person to read: nothing of it is followed
     /// unless they say so.
     #[serde(rename = "workspace.look")]
@@ -573,6 +846,20 @@ pub enum Call {
         execution: Option<Execution>,
         #[serde(default)]
         access: Option<Access>,
+        /// Whether it is to hand in a plan first. If it is, it only reads; another access ends it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan: Option<bool>,
+    },
+    /// Accepts an agent's plan, the last it handed in, between its runs: from here on it may do what
+    /// `access` says, and is told to begin. `text`: the plan as its person has changed it.
+    #[serde(rename = "plan.accept")]
+    PlanAccept {
+        session: SessionId,
+        agent: AgentId,
+        item: ItemId,
+        access: Access,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
     /// Says something to an agent. Starts a run, or is heard by the one that runs, before its next
     /// step. Answers with the run.
@@ -584,6 +871,21 @@ pub enum Call {
         /// The client's own name for it. Said twice with the same, it is said once.
         #[serde(default)]
         key: Option<String>,
+    },
+    /// Whether a conversation can be branched at an item, and whether the files there are kept.
+    #[serde(rename = "branch.look")]
+    BranchLook { session: SessionId, agent: AgentId, item: ItemId },
+    /// Adds an agent that begins with another's conversation, as it was before what a person said
+    /// (`item`, a prompt that began a run), or after an answer that ended one. `files`: with the
+    /// files of its copy as they were. Nothing is said to it. Answers with its id.
+    #[serde(rename = "agent.branch")]
+    Branch {
+        session: SessionId,
+        agent: AgentId,
+        item: ItemId,
+        name: String,
+        #[serde(default)]
+        files: bool,
     },
     /// Summarises an agent's conversation now, to make room. Only between runs, only for an agent of
     /// Axiom's own, and only when nothing waits to be heard. Answers with the run that does it.
@@ -643,6 +945,13 @@ pub enum Call {
     /// What can be used through a connection. Asks the provider.
     #[serde(rename = "model.list")]
     Models { connection: String },
+    /// What providers and programs have said of their models, as it was kept: an array of
+    /// [`ModelList`]. Nobody is asked.
+    #[serde(rename = "model.known")]
+    ModelsKnown {},
+    /// What is known of one model of a connection, also of one that is in no list. Nobody is asked.
+    #[serde(rename = "model.about")]
+    ModelAbout { connection: String, model: String },
     /// The record of what was done, after `after`.
     #[serde(rename = "audit.read")]
     Audit {
@@ -722,7 +1031,7 @@ pub struct Instructions {
 }
 
 /// What a provider says of a model. What it does not say is not there.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -730,9 +1039,34 @@ pub struct ModelInfo {
     /// Tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<u64>,
-    /// How hard it tries can be said (`low`, `medium`, `high`).
+    /// How hard it tries can be said: `efforts`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub effort: bool,
+    /// As the model's provider calls them, the least first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<String>,
+    /// Which of `efforts` it tries at when it is told none, where that is said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
+    /// It is asked to think as much as it needs, as every model is that is known to take that. Not a
+    /// choice.
+    #[serde(default, skip_serializing_if = "not")]
+    pub adaptive: bool,
+    /// How fast it can be beside the standard, for a price.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub speeds: Vec<String>,
+}
+
+/// What a provider or a program has said of the models it has.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelList {
+    /// [`Execution::harness`].
+    pub harness: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+    /// When it was said. 0: it is from its documentation.
+    pub at: u64,
+    pub models: Vec<ModelInfo>,
 }
 fn one() -> f64 {
     1.0
@@ -866,6 +1200,7 @@ pub const KNOWN: &[&str] = &[
     "request.opened",
     "request.closed",
     "usage",
+    "todo",
 ];
 
 impl Body {

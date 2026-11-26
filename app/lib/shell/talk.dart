@@ -8,17 +8,20 @@ import '../host/session_model.dart';
 import '../patterns/composer.dart';
 import '../patterns/context_gauge.dart';
 import '../patterns/execution.dart';
-import '../patterns/model_name.dart';
 import '../patterns/models.dart';
 import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
-import '../ui/marks.dart';
+import '../ui/icons.dart';
 import '../ui/overlay.dart';
+import '../ui/prefs.dart';
 import '../ui/status.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'model_picker.dart';
+import 'offers.dart';
 import 'outside.dart';
+import 'plan.dart';
 import 'start.dart';
 
 /// What an agent asks, and where it is spoken to. Only for an agent that can act: a replayed one is
@@ -33,8 +36,12 @@ class Talk extends StatefulWidget {
     this.room = double.infinity,
     this.onAgent,
     this.onStop,
+    this.drafts,
     super.key,
   });
+
+  /// Where what could not be said to a new agent is kept.
+  final Drafts? drafts;
 
   /// Ends the run that is on.
   final VoidCallback? onStop;
@@ -82,13 +89,94 @@ class _TalkState extends State<Talk> {
     });
   }
 
+  /// Makes the branch, and says it there.
+  Future<bool> _branch(Branching b, String text) {
+    final d = widget.draft, s = widget.store;
+    final session = widget.session, of = widget.agent;
+    final drafts = widget.drafts, show = widget.onAgent;
+    return _do(() async {
+      final files = b.withFiles;
+      final name = nextName(of.name, session.agents.values.map((a) => a.name));
+      final agent = await s.branch(session.id, of.id, b.item, name, files: files);
+      d.cancelBranch();
+      show?.call(agent);
+      // From here on it is the new one's: also what goes wrong.
+      final there = drafts?.of(session.id, agent);
+      try {
+        await s.prompt(session.id, agent, text, key: freshKey());
+      } on Object catch (e) {
+        there
+          ?..add(text)
+          ..problem.value = wordsOf(e);
+      }
+    });
+  }
+
+  Widget _branchHeader(BuildContext context, Branching b) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AxSpace.edge, 8, 8, 0),
+      child: Row(
+        children: [
+          AxGlyph(AxIcon.branch, color: c.ink2),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                b.words != null
+                    ? 'Said differently, in a new branch'
+                    : 'In a new branch, from this answer on',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: t.type.ui.ink(c.ink2),
+              ),
+            ),
+          ),
+          AxButton(
+            label: 'Cancel',
+            tone: AxTone.quiet,
+            size: 24,
+            onPressed: widget.draft.cancelBranch,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// What the branch works in.
+  Widget _branchFiles(BuildContext context, Branching b) {
+    final t = Ax.of(context), c = t.colors;
+    final words = switch (b) {
+      Branching(apart: false) => 'In the same folder. Its files stay as they are.',
+      Branching(files: false) => 'In a fresh copy of the folder. Its files then are not kept.',
+      _ => null,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: words != null
+          ? Text(words, style: t.type.small.ink(c.ink3))
+          : AxCheck(
+              label: 'With its files as they were then',
+              value: b.withFiles,
+              onChanged: (v) => setState(() => b.withFiles = v),
+            ),
+    );
+  }
+
   /// The models of the account, if they have not been asked for.
   void _look() {
     final c = widget.agent.execution.connection;
     // A program's account lists nothing.
     if (c == null || widget.agent.execution.harness != 'axiom') return;
-    if (widget.store.modelsOf(c) != null) return;
-    unawaited(_do(() => widget.store.models(c)));
+    final s = widget.store, m = widget.agent.execution.model ?? '';
+    unawaited(
+      _do(() async {
+        if (s.modelsOf(c) == null) await s.models(c);
+        // One that is in no list: what can be said to it.
+        if (infoOf(s, 'axiom', c, m) == null) await s.about(c, m);
+      }),
+    );
   }
 
   void _answer(RequestOpened r, Answer a, {String? words}) {
@@ -101,159 +189,103 @@ class _TalkState extends State<Talk> {
     );
   }
 
-  List<ExecutionChoice> _choices(HostStore s, AgentModel a) {
-    final x = a.execution;
-    final other = x.harness != 'axiom';
-    final program = other ? s.harnesses.where((h) => h.id == x.harness).firstOrNull : null;
-    final hands = x.environment == axiomTools;
-    final connection = s.connections.where((c) => c.id == x.connection).firstOrNull;
-    final models = s.modelsOf(x.connection ?? '');
-    final names = namesOf(models ?? const []);
-    final has = models?.any((m) => m.id == x.model) ?? false;
-    final tries = program?.effort ?? models?.any((m) => m.id == x.model && m.effort) ?? false;
-    Execution with_({
-      String? model,
-      String? connection,
-      String? provider,
-      bool? axioms,
-      String? effort,
-    }) => Execution(
+  Widget _model(BuildContext context, HostStore s, AgentModel a) {
+    final x = a.execution, other = x.harness != 'axiom';
+    Execution with_({Offer? to, String? effort, String? speed}) => Execution(
       harness: x.harness,
-      provider: provider ?? x.provider,
-      model: model ?? x.model,
-      connection: connection == null
-          ? x.connection
-          : connection.isEmpty
-          ? null
-          : connection,
-      effort: effort == null
-          ? x.effort
-          : effort.isEmpty
-          ? null
-          : effort,
-      environment: axioms == null
-          ? x.environment
-          : axioms
-          ? axiomTools
-          : null,
+      provider: to == null ? x.provider : to.provider,
+      model: to == null ? x.model : (to.byDefault ? null : to.model.id),
+      connection: to == null ? x.connection : to.connection,
+      effort: effort == null ? x.effort : (effort.isEmpty ? null : effort),
+      environment: x.environment,
+      speed: speed == null ? x.speed : (speed.isEmpty ? null : speed),
     );
-    void set({Execution? execution}) =>
-        unawaited(_do(() => s.setAgent(widget.session.id, a.id, execution: execution)));
-    return [
-      ExecutionChoice(
-        'Model',
-        [
-          if (other && x.model == null)
-            AxMenuItem('', 'Default model', mark: markOf(null, null, x.harness)),
-          if (!has && x.model != null)
-            AxMenuItem(
-              x.model!,
-              oneLine(modelName(x.model!), 60),
-              mark: markOf(x.provider, x.model, x.harness),
-            ),
-          for (final m in models ?? const <ModelInfo>[]) modelItem(m, names),
-        ],
-        x.model ?? '',
-        (v) => set(execution: with_(model: v)),
-        cost: (_) => a.items.isEmpty
-            ? null
-            : 'The whole conversation has to be read again, none of it from the cache. Reasoning '
-                  'this model kept is not carried over.',
+    Future<bool> set(Execution e) => _do(() => s.setAgent(widget.session.id, a.id, execution: e));
+    return ModelKey(
+      s,
+      Running(
+        harness: x.harness,
+        connection: x.connection,
+        model: x.model ?? '',
+        effort: x.effort ?? '',
+        speed: x.speed ?? '',
       ),
-      if (tries || x.effort != null)
-        ExecutionChoice(
-          'Effort',
-          [
-            ...efforts,
-            if (x.effort case final e? when !efforts.any((i) => i.value == e))
-              AxMenuItem(e, oneLine(e, 30)),
-          ],
-          x.effort ?? '',
-          (v) => set(execution: with_(effort: v)),
-        ),
-      ExecutionChoice(
-        'Harness',
-        [
-          AxMenuItem(
-            x.harness,
-            oneLine(s.harnessName(x.harness), 40),
-            mark: markOf(null, null, x.harness),
+      of: a.id,
+      keeps: true,
+      onOpen: _look,
+      onModel: (o) {
+        // What cannot be said to the new one is not said to it.
+        final m = o.model;
+        unawaited(
+          set(
+            with_(
+              to: o,
+              effort: m.efforts.contains(x.effort) ? null : '',
+              speed: m.speeds.contains(x.speed) ? null : '',
+            ),
           ),
-        ],
-        x.harness,
-        (_) {},
-      ),
-      ExecutionChoice(
-        'Account',
-        [
-          if (other) const AxMenuItem('', 'Default sign-in'),
-          if (connection == null && x.connection != null)
-            AxMenuItem(x.connection!, 'Removed', enabled: false, why: 'add it again'),
-          for (final c in other ? s.accountsOf(x.harness) : s.own)
-            AxMenuItem(
-              c.id,
-              oneLine(c.name, 60),
-              detail: providerName(c.provider),
-              mark: markOf(c.provider, null),
-              enabled: other || c.provider == x.provider,
-              why: other || c.provider == x.provider
-                  ? null
-                  : 'another provider: choose its model first',
-            ),
-        ],
-        x.connection ?? '',
-        (v) => set(execution: with_(connection: v)),
-        // What was said stays with the account it was said on.
-        cost: (_) => !other || a.items.isEmpty
-            ? null
-            : 'The other account does not know this conversation: it begins anew there. Nothing is '
-                  'sent from one account to the other.',
-      ),
-      if (program?.hands ?? hands)
-        ExecutionChoice(
-          'Tools',
-          [
-            const AxMenuItem('axiom', 'Axiom tools', detail: 'sandboxed', mark: ServiceMark.axiom),
-            AxMenuItem(
-              '',
-              'Built-in tools',
-              detail: 'not sandboxed',
-              mark: markOf(null, null, x.harness),
-              // It would not be refused only when it is started.
-              enabled: !hands || (program?.access.contains(a.access) ?? false),
-              why: 'it has no mode for this access',
-            ),
-          ],
-          hands ? 'axiom' : '',
-          (v) => set(execution: with_(axioms: v.isNotEmpty)),
-          cost: (v) => v.isNotEmpty
-              ? null
-              : '${s.harnessName(x.harness)} then works with its own tools, outside Axiom\'s sandbox '
-                    'and without Axiom\'s questions.',
-        ),
-    ];
+        );
+        final all = PrefsScope.maybeOf(context);
+        all?.value = all.value.using(o.key);
+      },
+      costs: (o) => a.items.isEmpty
+          ? null
+          : other && o.connection != x.connection
+          // What was said stays with the account it was said on.
+          ? 'The other account does not know this conversation: it begins anew there. Nothing is '
+                'sent from one account to the other.'
+          : 'The whole conversation has to be read again, none of it from the cache. Reasoning '
+                'this model kept is not carried over.',
+      onEffort: (v) => unawaited(set(with_(effort: v))),
+      onSpeed: (v) => unawaited(set(with_(speed: v))),
+      advanced: [
+        if (PrefsScope.of(context).harnesses)
+          ExecutionChoice(
+            'Harness',
+            [
+              AxMenuItem(
+                x.harness,
+                oneLine(s.harnessName(x.harness), 40),
+                detail: 'an agent keeps its harness',
+                mark: markOf(null, null, x.harness),
+              ),
+            ],
+            x.harness,
+            (_) {},
+          ),
+      ],
+    );
   }
 
   Widget _access(HostStore s, AgentModel a) {
     final x = a.execution;
-    final program = x.harness == 'axiom' || x.environment == axiomTools
+    final program = x.harness == 'axiom'
         ? null
         : s.harnesses.where((h) => h.id == x.harness).firstOrNull;
     return AccessKey(
       a.access ?? Access.ask,
       can: program?.access ?? Access.values,
       of: s.harnessName(x.harness),
-      onChanged: (v) => unawaited(_do(() => s.setAgent(widget.session.id, a.id, access: v))),
+      plan: a.planning,
+      plans: program == null,
+      onChanged: (v, plan) => unawaited(
+        _do(
+          () => plan
+              ? s.setAgent(widget.session.id, a.id, plan: true)
+              : s.setAgent(widget.session.id, a.id, access: v),
+        ),
+      ),
     );
   }
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
-    valueListenable: widget.draft.problem,
-    builder: (context, problem, _) => _build(context, problem),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([widget.draft.problem, widget.draft.branching]),
+    builder: (context, _) =>
+        _build(context, widget.draft.problem.value, widget.draft.branching.value),
   );
 
-  Widget _build(BuildContext context, String? problem) {
+  Widget _build(BuildContext context, String? problem, Branching? branch) {
     final t = Ax.of(context), c = t.colors;
     final s = widget.store, a = widget.agent;
     final asked = [
@@ -332,6 +364,17 @@ class _TalkState extends State<Talk> {
                     ],
                   ),
                 ),
+            if (a.proposed case final p? when widget.live && branch == null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: PlanBar(
+                  p.source,
+                  key: ValueKey(p.id),
+                  can: const [Access.ask, Access.work],
+                  onAccept: (access, text) =>
+                      _do(() => s.acceptPlan(widget.session.id, a.id, p.id, access, text: text)),
+                ),
+              ),
             // How a run failed is said once, by the conversation.
             if (problem case final p?)
               Semantics(
@@ -359,55 +402,68 @@ class _TalkState extends State<Talk> {
                 ),
               ),
             Composer(
-              key: ValueKey(a.id),
-              placeholder: works
+              key: ValueKey((a.id, branch)),
+              // The keyboard goes where the words are.
+              autofocus: branch != null,
+              header: branch == null ? null : _branchHeader(context, branch),
+              placeholder: branch != null
+                  ? 'Message the new branch'
+                  : a.proposed != null
+                  ? 'What should be different'
+                  : works
                   ? 'Message ${a.name}. Sent before its next step'
                   : 'Message ${a.name}',
-              action: works ? 'Queue' : 'Send',
+              action: works && branch == null ? 'Queue' : 'Send',
               enabled: widget.live,
               onStop: widget.onStop,
               leading: [
-                ExecutionKey(_choices(s, a), of: a.id, onOpen: _look),
-                _access(s, a),
-                if (a.context != null)
-                  ContextGauge(
-                    ContextView(
-                      share: a.context,
-                      provenance: switch (a.contextKnown) {
-                        Known.reported => Provenance.reported,
-                        Known.measured => Provenance.measured,
-                        Known.estimated => Provenance.estimated,
-                        Known.unknown => Provenance.unknown,
-                      },
+                if (branch != null)
+                  _branchFiles(context, branch)
+                else ...[
+                  _model(context, s, a),
+                  _access(s, a),
+                  if (a.context != null)
+                    ContextGauge(
+                      ContextView(
+                        share: a.context,
+                        provenance: switch (a.contextKnown) {
+                          Known.reported => Provenance.reported,
+                          Known.measured => Provenance.measured,
+                          Known.estimated => Provenance.estimated,
+                          Known.unknown => Provenance.unknown,
+                        },
+                      ),
                     ),
-                  ),
-                if (plan)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          'Using ChatGPT plan',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.type.small.ink(c.ink3),
+                  if (plan)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            'Using ChatGPT plan',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.type.small.ink(c.ink3),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      AxButton(
-                        label: 'Manage usage',
-                        // At the plan's limit it is the main act: OpenAI asks that of whoever uses a
-                        // plan. Nothing else is taken in the plan's place.
-                        tone: (a.error ?? '').startsWith('billing') ? AxTone.primary : AxTone.quiet,
-                        size: 24,
-                        onPressed: usage,
-                      ),
-                    ],
-                  ),
+                        const SizedBox(width: 6),
+                        AxButton(
+                          label: 'Manage usage',
+                          // At the plan's limit it is the main act: OpenAI asks that of whoever uses a
+                          // plan. Nothing else is taken in the plan's place.
+                          tone: (a.error ?? '').startsWith('billing')
+                              ? AxTone.primary
+                              : AxTone.quiet,
+                          size: 24,
+                          onPressed: usage,
+                        ),
+                      ],
+                    ),
+                ],
               ],
               controller: widget.draft.text,
-              onSubmit: _say,
+              onSubmit: branch == null ? _say : (text) => _branch(branch, text),
               earlier: () => widget.agent.said,
             ),
           ],

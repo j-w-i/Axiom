@@ -11,7 +11,7 @@ enum AgentPhase { waiting, running, asking, paused, done, failed, unknown }
 
 enum Outcome { completed, failed, cancelled, interrupted, unknown }
 
-enum ItemKind { prompt, prose, reasoning, tool, notice, unknown }
+enum ItemKind { prompt, prose, reasoning, tool, notice, plan, unknown }
 
 /// What an agent may do without asking.
 enum Access { read, ask, work, unknown }
@@ -20,6 +20,12 @@ enum Access { read, ask, work, unknown }
 enum Answer { once, session, deny }
 
 enum Known { reported, measured, estimated, unknown }
+
+/// What a figure is the sum of. [session] is a running total.
+enum Covers { answer, turn, session, unknown }
+
+/// Who is paid, and how. At [plan], a cost is what it would have been by use.
+enum Lane { key, plan, program, open, unknown }
 
 enum Answerable { live, message, no, unknown }
 
@@ -33,6 +39,7 @@ class Execution {
     this.connection,
     this.effort,
     this.environment,
+    this.speed,
   });
   Execution.decode(Json j)
     : harness = j['harness']! as String,
@@ -40,9 +47,13 @@ class Execution {
       model = j['model'] as String?,
       connection = j['connection'] as String?,
       effort = j['effort'] as String?,
-      environment = j['environment'] as String?;
+      environment = j['environment'] as String?,
+      speed = j['speed'] as String?;
   final String harness;
   final String? provider, model, connection, effort, environment;
+
+  /// How fast it is, where that can be told.
+  final String? speed;
 
   Json encode() => {
     'harness': harness,
@@ -51,6 +62,7 @@ class Execution {
     'connection': ?connection,
     'effort': ?effort,
     'environment': ?environment,
+    'speed': ?speed,
   };
 }
 
@@ -300,9 +312,6 @@ class Waits {
   final int at;
 }
 
-/// The environment in which what an agent does is done by Axiom, whatever its harness.
-const axiomTools = 'axiom';
-
 /// A program of the person's own that the host can drive.
 class HarnessInfo {
   const HarnessInfo(
@@ -313,8 +322,8 @@ class HarnessInfo {
     this.needsTrust = false,
     this.access = const [],
     this.accounts,
-    this.hands = false,
     this.effort = false,
+    this.own = false,
   });
   HarnessInfo.decode(Json j)
     : id = j['id']! as String,
@@ -323,8 +332,8 @@ class HarnessInfo {
       problem = j['problem'] as String?,
       needsTrust = j['needs_trust'] as bool? ?? true,
       accounts = j['accounts'] as String?,
-      hands = j['hands'] as bool? ?? false,
       effort = j['effort'] as bool? ?? false,
+      own = j['own'] as bool? ?? false,
       access = [
         for (final a in j['access'] as List<Object?>? ?? const [])
           _enum(Access.values, a, Access.unknown),
@@ -334,11 +343,11 @@ class HarnessInfo {
   /// Null if it is not there or may not be started; then [problem] says why.
   final String? program, problem;
 
+  /// Its person added it themself.
+  final bool own;
+
   /// It can be told how hard to try.
   final bool effort;
-
-  /// Axiom's tools can stand in place of its own: the environment [axiomTools].
-  final bool hands;
 
   /// What an account of it beside the first is called as a provider, if there can be any.
   final String? accounts;
@@ -348,32 +357,191 @@ class HarnessInfo {
   final List<Access> access;
 }
 
+/// How a program is started, as its person has said it, of it or of one account of it.
+class ProgramInfo {
+  const ProgramInfo(
+    this.harness, {
+    this.account,
+    this.name,
+    this.path,
+    this.args = const [],
+    this.vars = const [],
+  });
+  ProgramInfo.decode(Json j)
+    : harness = j['harness']! as String,
+      account = j['account'] as String?,
+      name = j['name'] as String?,
+      path = j['path'] as String?,
+      args = [for (final a in j['args'] as List<Object?>? ?? const []) a! as String],
+      vars = [for (final v in j['vars'] as List<Object?>? ?? const []) VarInfo.decode(v! as Json)];
+  final String harness;
+  final String? account, name, path;
+  final List<String> args;
+  final List<VarInfo> vars;
+}
+
+class VarInfo {
+  const VarInfo(this.name, {this.value, this.lasts = false});
+  VarInfo.decode(Json j)
+    : name = j['name']! as String,
+      value = j['value'] as String?,
+      lasts = j['lasts'] as bool? ?? false;
+  final String name;
+
+  /// Null: it is a secret, and not shown.
+  final String? value;
+
+  /// It is there when the host has been restarted.
+  final bool lasts;
+}
+
+/// A variable a program is to be given; without a value, the secret that is there stays.
+class VarSet {
+  const VarSet(this.name, {this.value, this.secret = false});
+  final String name;
+  final String? value;
+  final bool secret;
+  Json encode() => {'name': name, 'value': ?value, 'secret': secret};
+}
+
 /// What a provider says of a model.
 class ModelInfo {
-  const ModelInfo(this.id, {this.name, this.context, this.effort = false});
+  const ModelInfo(
+    this.id, {
+    this.name,
+    this.context,
+    this.efforts = const [],
+    this.defaultEffort,
+    this.speeds = const [],
+  });
   ModelInfo.decode(Json j)
     : id = j['id']! as String,
       name = j['name'] as String?,
       context = j['context'] as int?,
-      effort = j['effort'] as bool? ?? false;
+      efforts = [for (final e in j['efforts'] as List<Object?>? ?? const []) e! as String],
+      defaultEffort = j['default_effort'] as String?,
+      speeds = [for (final e in j['speeds'] as List<Object?>? ?? const []) e! as String];
 
-  /// How hard it tries can be said.
-  final bool effort;
+  /// How hard it can be told to try, the least first; how fast it can be beside the standard.
+  final List<String> efforts, speeds;
+
+  /// Which of [efforts] it tries at when it is told none, where that is said.
+  final String? defaultEffort;
+
   final String id;
   final String? name;
   final int? context;
 }
 
+/// What a provider or a program has said of the models it has.
+class ModelList {
+  const ModelList(this.harness, this.connection, this.at, this.models);
+  ModelList.decode(Json j)
+    : harness = j['harness']! as String,
+      connection = j['connection'] as String?,
+      at = j['at']! as int,
+      models = [for (final m in j['models']! as List<Object?>) ModelInfo.decode(m! as Json)];
+  final String harness;
+  final String? connection;
+
+  /// When, or 0 if it is from its documentation.
+  final int at;
+  final List<ModelInfo> models;
+}
+
+enum LimitUnit { count, bytes, seconds, unknown }
+
+/// A limit the host keeps: of what, and what it limits, in its own words.
+class HostLimit {
+  const HostLimit(this.of, this.what, this.most, this.unit);
+  HostLimit.decode(Json j)
+    : of = j['of']! as String,
+      what = j['what']! as String,
+      most = j['most'] as int?,
+      unit = _enum(LimitUnit.values, j['unit'], LimitUnit.unknown);
+  final String of, what;
+
+  /// Null: there is none.
+  final int? most;
+  final LimitUnit unit;
+
+  /// In the largest unit it is a whole number of.
+  String get amount {
+    final n = most;
+    if (n == null) return 'No limit';
+    String? whole(List<(int, String)> of) {
+      for (final (size, name) in of) {
+        if (n == 0 || n % size != 0) continue;
+        final k = n ~/ size;
+        return name.endsWith('B') || k == 1 ? '$k $name' : '$k ${name}s';
+      }
+      return null;
+    }
+
+    final named = switch (unit) {
+      LimitUnit.bytes => whole([(1 << 30, 'GiB'), (1 << 20, 'MiB'), (1 << 10, 'KiB'), (1, 'B')]),
+      LimitUnit.seconds => whole([(3600, 'hour'), (60, 'minute'), (1, 'second')]),
+      LimitUnit.count || LimitUnit.unknown => null,
+    };
+    return named ?? '$n'.replaceAllMapped(RegExp(r'\B(?=(\d{3})+$)'), (_) => '\u{a0}');
+  }
+}
+
 class Usage {
   Usage.decode(Json j)
-    : input = j['input'] as int?,
+    : prompt = j['prompt'] as int?,
+      cacheWriteLong = j['cache_write_long'] as int?,
+      input = j['input'] as int?,
       cacheRead = j['cache_read'] as int?,
       cacheWrite = j['cache_write'] as int?,
       output = j['output'] as int?,
       reasoning = j['reasoning'] as int?,
       context = (j['context'] as num?)?.toDouble();
   final int? input, cacheRead, cacheWrite, output, reasoning;
+
+  /// The whole prompt; of what was written to a cache, what is kept for an hour.
+  final int? prompt, cacheWriteLong;
   final double? context;
+}
+
+/// What was used, as it was then.
+class UsedOn {
+  UsedOn.decode(Json j)
+    : harness = j['harness']! as String,
+      lane = _enum(Lane.values, j['lane'], Lane.unknown),
+      provider = j['provider'] as String?,
+      connection = j['connection'] as String?,
+      model = j['model'] as String?,
+      answered = j['answered'] as String?,
+      speed = j['speed'] as String?;
+  final String harness;
+  final Lane lane;
+
+  /// [model] was asked for, [answered] is said to have answered.
+  final String? provider, connection, model, answered, speed;
+}
+
+class Cost {
+  Cost.decode(Json j)
+    : amount = (j['amount']! as num).toDouble(),
+      currency = j['currency']! as String,
+      provenance = _enum(Known.values, j['provenance'], Known.unknown),
+      of = _enum(Covers.values, j['of'], Covers.unknown);
+  final double amount;
+  final String currency;
+  final Known provenance;
+  final Covers of;
+}
+
+/// One model's part of everything so far; of no model, all of it.
+class ModelTotal {
+  ModelTotal.decode(Json j)
+    : model = j['model'] as String?,
+      usage = Usage.decode(j['usage']! as Json),
+      cost = j['cost'] == null ? null : Cost.decode(j['cost']! as Json);
+  final String? model;
+  final Usage usage;
+  final Cost? cost;
 }
 
 sealed class Body {
@@ -393,11 +561,21 @@ sealed class Body {
           j['parent'] as String?,
           access: j['access'] == null ? null : _enum(Access.values, j['access'], Access.unknown),
           apart: j['apart'] as bool? ?? false,
+          from: switch (j['from']) {
+            final Json f => Branched(
+              f['agent']! as String,
+              f['item']! as String,
+              kept: f['with'] as bool? ?? false,
+            ),
+            _ => null,
+          },
+          plan: j['plan'] as bool? ?? false,
         ),
         'agent.changed' => AgentChanged(
           j['agent']! as String,
           Execution.decode(j['execution']! as Json),
           j['access'] == null ? null : _enum(Access.values, j['access'], Access.unknown),
+          plan: j['plan'] as bool? ?? false,
         ),
         'agent.state' => AgentStateChanged(
           j['agent']! as String,
@@ -442,6 +620,22 @@ sealed class Body {
           j['agent']! as String,
           Usage.decode(j['usage']! as Json),
           _enum(Known.values, j['provenance'], Known.unknown),
+          of: _enum(Covers.values, j['of'], Covers.unknown),
+          run: j['run'] as String?,
+          on: j['on'] == null ? null : UsedOn.decode(j['on']! as Json),
+          cost: j['cost'] == null ? null : Cost.decode(j['cost']! as Json),
+          totals: [
+            for (final t in (j['totals'] as List<Object?>?) ?? const [])
+              ModelTotal.decode(t! as Json),
+          ],
+          cut: j['cut'] as bool? ?? false,
+          aside: j['aside'] as bool? ?? false,
+        ),
+        'todo' => TodoSaid(
+          j['agent']! as String,
+          [for (final s in (j['steps'] as List<Object?>?) ?? const []) Todo.decode(s! as Json)],
+          run: j['run'] as String?,
+          text: j['text'] as String?,
         ),
         _ => UnknownBody('$type'),
       };
@@ -464,6 +658,7 @@ sealed class Body {
     'request.opened',
     'request.closed',
     'usage',
+    'todo',
   };
 }
 
@@ -478,6 +673,22 @@ class SessionTitled extends Body {
   final String title;
 }
 
+/// Where a branch begins: with another's items up to one, which is [kept] with them or not.
+class Branched {
+  const Branched(this.agent, this.item, {this.kept = false});
+  final String agent, item;
+  final bool kept;
+}
+
+/// Whether there can be a branch, and what of.
+class BranchInfo {
+  const BranchInfo({required this.apart, this.files = false});
+  BranchInfo.decode(Json j) : this(apart: j['apart']! as bool, files: j['files'] as bool? ?? false);
+
+  /// It would work in a copy of its own; what the files were there is kept.
+  final bool apart, files;
+}
+
 class AgentAdded extends Body {
   const AgentAdded(
     this.agent,
@@ -486,10 +697,18 @@ class AgentAdded extends Body {
     this.parent, {
     this.access,
     this.apart = false,
+    this.from,
+    this.plan = false,
   });
+
+  /// It only reads, and hands in a plan.
+  final bool plan;
 
   /// It works in a copy of the folder of its own.
   final bool apart;
+
+  /// It goes on from another's conversation.
+  final Branched? from;
   final String agent, name;
   final Execution execution;
   final String? parent;
@@ -498,7 +717,10 @@ class AgentAdded extends Body {
 
 /// What it runs on or may do is another from here on.
 class AgentChanged extends Body {
-  const AgentChanged(this.agent, this.execution, this.access);
+  const AgentChanged(this.agent, this.execution, this.access, {this.plan = false});
+
+  /// It only reads, and hands in a plan.
+  final bool plan;
   final String agent;
   final Execution execution;
   final Access? access;
@@ -584,10 +806,57 @@ class RequestClosed extends Body {
 }
 
 class UsageReported extends Body {
-  const UsageReported(this.agent, this.usage, this.provenance);
+  const UsageReported(
+    this.agent,
+    this.usage,
+    this.provenance, {
+    this.of = Covers.unknown,
+    this.run,
+    this.on,
+    this.cost,
+    this.totals = const [],
+    this.cut = false,
+    this.aside = false,
+  });
   final String agent;
   final Usage usage;
   final Known provenance;
+
+  /// What [usage] covers.
+  final Covers of;
+  final String? run;
+  final UsedOn? on;
+  final Cost? cost;
+  final List<ModelTotal> totals;
+
+  /// The answer broke off: there may have been more.
+  final bool cut;
+
+  /// Not for the conversation itself, but to summarise it.
+  final bool aside;
+}
+
+enum TodoState { todo, doing, done, unknown }
+
+/// One of the things an agent means to do.
+class Todo {
+  const Todo(this.text, this.state);
+  Todo.decode(Json j)
+    : text = j['text']! as String,
+      state = _enum(TodoState.values, j['state'], TodoState.unknown);
+  final String text;
+  final TodoState state;
+}
+
+/// What an agent means to do, as it says itself: all of it, in place of what it said before.
+class TodoSaid extends Body {
+  const TodoSaid(this.agent, this.steps, {this.run, this.text});
+  final String agent;
+  final List<Todo> steps;
+  final String? run;
+
+  /// Markdown.
+  final String? text;
 }
 
 class UnknownBody extends Body {

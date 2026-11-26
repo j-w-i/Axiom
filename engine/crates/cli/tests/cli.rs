@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::{
-    io::Read,
+    io::{Read, Write},
     process::{Command, Output, Stdio},
     time::Duration,
 };
@@ -126,6 +126,32 @@ async fn a_signal_ends_it_even_while_nobody_reads() {
         assert!(Command::new("kill").args(["-s", signal, &id]).status().unwrap().success());
         assert_eq!(c.wait().unwrap().code(), Some(code));
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_for_bedrock_is_read_and_has_a_region() {
+    let f = fixture();
+    let connect = |args: &[&str]| {
+        let mut c = f.command(&[&["connect", "Work", "bedrock"], args].concat());
+        let mut c = c.stdin(Stdio::piped()).spawn().unwrap();
+        c.stdin.take().unwrap().write_all(b"sk-canary-5\n").unwrap();
+        c.wait_with_output().unwrap()
+    };
+    let here = "https://bedrock-runtime.eu-west-2.amazonaws.com";
+    for bad in [&["--key"][..], &["https://evil.example", "--key"], &[here]] {
+        let o = connect(bad);
+        let said = clean(&o.stderr);
+        assert!(!o.status.success() && said.contains("Amazon Bedrock"), "{said}");
+        assert!(!said.contains("canary"));
+    }
+    let o = connect(&[here, "--key"]);
+    assert!(o.status.success(), "{}", clean(&o.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    let all = clean(&f.run(&["connections"]).stdout);
+    assert!(all.contains(here) && !all.contains("canary"), "{all}");
+    // Its models are named by hand.
+    let o = f.run(&["models", v["connection"].as_str().unwrap()]);
+    assert_eq!((o.status.success(), clean(&o.stdout).trim()), (true, "[]"));
 }
 
 #[path = "../../engine/tests/common/server.rs"]
@@ -260,4 +286,27 @@ async fn a_folder_is_shown_in_the_windows_and_nothing_begins() {
     assert!(f.client().await.call(call).await.is_err());
     let all = f.client().await.call(Call::list()).await.unwrap();
     assert!(all.as_array().unwrap().is_empty(), "nothing has begun");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_limits_are_told_in_words_and_as_json() {
+    let f = fixture();
+    let told = f.client().await.call(Call::Limits {}).await.unwrap();
+    let o = f.run(&["--json", "limits"]);
+    assert_eq!(o.status.code(), Some(0));
+    let text = clean(&o.stdout);
+    assert_eq!(text.lines().count(), 1);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap(), told);
+    let o = f.run(&["limits"]);
+    assert_eq!(o.status.code(), Some(0));
+    let text = clean(&o.stdout);
+    for l in told.as_array().unwrap() {
+        let what = l["what"].as_str().unwrap();
+        assert_eq!(text.matches(&format!("\n  {what} ")).count(), 1, "{what} in {text}");
+        assert!(format!("\n{text}").contains(&format!("\n{}\n", l["of"].as_str().unwrap())));
+    }
+    let line = |what: &str| text.lines().find(|l| l.contains(what)).unwrap().to_owned();
+    assert!(line("Output tokens").ends_with("  no limit"));
+    assert!(line("An agent's copy of a folder").ends_with(" GiB"));
+    assert_eq!(f.run(&["limits", "more"]).status.code(), Some(1));
 }

@@ -7,7 +7,6 @@ import 'package:flutter/widgets.dart';
 import '../host/host_store.dart';
 import '../host/link.dart';
 import '../host/proto.dart';
-import '../patterns/model_name.dart';
 import '../transcript/safe_text.dart';
 import '../ui/commands.dart';
 import '../ui/controls.dart';
@@ -17,7 +16,10 @@ import '../ui/overlay.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
+import 'offers.dart';
 import 'outside.dart';
+import 'models_part.dart';
+import 'programs.dart';
 
 /// What the host said, in a sentence.
 String wordsOf(Object e) => switch (e) {
@@ -42,6 +44,7 @@ ServiceMark? markOf(String? provider, String? model, [String? harness]) =>
       'openai' || 'chatgpt' => ServiceMark.openai,
       'gemini' => ServiceMark.gemini,
       'openrouter' => ServiceMark.openrouter,
+      'bedrock' => ServiceMark.bedrock,
       _ => null,
     };
 
@@ -59,15 +62,24 @@ class AccessKey extends StatelessWidget {
     required this.of,
     required this.onChanged,
     super.key,
+    this.plan = false,
+    this.plans = false,
   });
   final Access access;
+
+  /// It is asked for a plan first; and whether it can be.
+  final bool plan, plans;
 
   /// What there is a mode for, and of which harness.
   final List<Access> can;
   final String of;
-  final ValueChanged<Access> onChanged;
+
+  /// How much, and whether it is to hand in a plan first.
+  final void Function(Access access, bool plan) onChanged;
+
+  static const _plan = (Access.read, true);
   @override
-  Widget build(BuildContext context) => AxSelect<Access>(
+  Widget build(BuildContext context) => AxSelect<(Access, bool)>(
     label: 'Access',
     quiet: true,
     command: Command.access,
@@ -75,22 +87,16 @@ class AccessKey extends StatelessWidget {
     items: [
       for (final i in accessItems)
         if (can.contains(i.value))
-          i
+          AxMenuItem((i.value, false), i.label, detail: i.detail)
         else
-          AxMenuItem(i.value, i.label, enabled: false, why: '$of has no mode for it'),
+          AxMenuItem((i.value, false), i.label, enabled: false, why: '$of has no mode for it'),
+      if (plans || plan)
+        const AxMenuItem(_plan, 'Plan first', detail: 'reads, and hands in a plan'),
     ],
-    value: access,
-    onChanged: onChanged,
+    value: (access, plan),
+    onChanged: (v) => onChanged(v.$1, v.$2),
   );
 }
-
-/// How hard a model is to try, where that can be said.
-const efforts = [
-  AxMenuItem('', 'Default effort'),
-  AxMenuItem('low', 'Low effort'),
-  AxMenuItem('medium', 'Medium effort'),
-  AxMenuItem('high', 'High effort'),
-];
 
 /// One labelled part of a form. Labels stand over what they name, on the surface itself.
 class FormPart extends StatelessWidget {
@@ -264,6 +270,7 @@ class StartDraft extends ChangeNotifier {
       c.addListener(notifyListeners);
     }
     folder.addListener(_folderNamed);
+    model.addListener(_modelNamed);
   }
   final HostStore store;
 
@@ -278,33 +285,60 @@ class StartDraft extends ChangeNotifier {
   /// The folder's own settings for that may take effect.
   bool trust = false;
 
-  /// Of a program: Axiom's tools in place of its own, where it can be told so.
-  bool hands = true;
-  bool get withHands => hands && (delegated?.hands ?? false);
-
   /// What it may be, as it is set up now.
-  List<Access> get can => withHands ? Access.values : delegated?.access ?? Access.values;
+  List<Access> get can => delegated?.access ?? Access.values;
+
+  /// It is to hand in a plan first. Of Axiom's own.
+  bool plan = false;
+  bool get plans => harness == 'axiom';
 
   void fit() {
+    plan = plan && plans;
     // The least it has a mode for, if not the one that is chosen.
     if (!can.contains(access)) {
       access = [Access.ask, Access.read, Access.work].where(can.contains).firstOrNull ?? access;
     }
   }
 
-  /// How hard it is to try; empty: as is usual.
-  String effort = '';
+  /// How hard it is to try, and how fast; empty: as is usual.
+  String effort = '', speed = '';
 
-  /// Whether that can be said of what is chosen.
-  bool get tries =>
-      delegated?.effort ??
-      (store.modelsOf(connection ?? store.own.firstOrNull?.id ?? '') ?? const []).any(
-        (m) => m.id == model.text.trim() && m.effort,
-      );
+  /// The account that is used now.
+  String? get on => harness == 'axiom' ? connection ?? store.own.firstOrNull?.id : account;
+
+  /// What is known of the model that is chosen.
+  ModelInfo? get info => infoOf(store, harness, on, model.text.trim());
+
+  /// How hard what is chosen can be told to try. A program may take it of a model it has not told of.
+  List<String> get efforts =>
+      info?.efforts ?? ((delegated?.effort ?? false) ? const ['low', 'medium', 'high'] : const []);
+
+  /// What cannot be said to what is chosen now is not said.
+  void fitModel() {
+    if (!efforts.contains(effort)) effort = '';
+    if (!(info?.speeds.contains(speed) ?? false)) speed = '';
+  }
+
+  /// Chooses one of those that are offered.
+  void choose(Offer o) => change(() {
+    if (o.harness != harness) {
+      harness = o.harness;
+      trust = false;
+      problem = null;
+    }
+    if (o.harness == 'axiom') {
+      connection = o.connection;
+    } else {
+      account = o.connection;
+    }
+    model.text = o.model.id;
+    fit();
+    fitModel();
+  });
 
   /// In a copy of the folder of its own. Beside others it is, if nobody says otherwise.
   late bool apart = into != null;
-  bool get worksApart => apart && access != Access.read;
+  bool get worksApart => apart && (access != Access.read || plan);
 
   /// Of a program: another account than its first.
   String? account;
@@ -319,6 +353,7 @@ class StartDraft extends ChangeNotifier {
     account = null;
     model.clear();
     fit();
+    fitModel();
   });
   String? connection, problem;
   Access access = Access.ask;
@@ -363,7 +398,6 @@ class StartDraft extends ChangeNotifier {
     } else {
       if (!store.harnesses.any((h) => h.id == x.harness && h.program != null)) return;
       harness = x.harness;
-      hands = x.environment == axiomTools;
       if (store.accountsOf(harness).any((c) => c.id == x.connection)) account = x.connection;
     }
     model.text = x.model ?? '';
@@ -373,6 +407,18 @@ class StartDraft extends ChangeNotifier {
 
   void tell() {
     if (!_gone) notifyListeners();
+  }
+
+  Timer? _named;
+
+  /// What can be said to a model that is in no list is asked for a moment after it has been named.
+  void _modelNamed() {
+    _named?.cancel();
+    final c = on, m = model.text.trim();
+    if (harness != 'axiom' || c == null || m.isEmpty || info != null) return;
+    _named = Timer(const Duration(milliseconds: 400), () {
+      unawaited(store.about(c, m).catchError((Object _) {}));
+    });
   }
 
   /// Looks into the folder a moment after it has been named.
@@ -428,8 +474,8 @@ class StartDraft extends ChangeNotifier {
         provider: other ? null : c!.provider,
         model: written.isEmpty ? null : written,
         connection: other ? account : c!.id,
-        effort: tries && effort.isNotEmpty ? effort : null,
-        environment: withHands ? axiomTools : null,
+        effort: efforts.contains(effort) ? effort : null,
+        speed: (info?.speeds.contains(speed) ?? false) ? speed : null,
       );
       final followed = [
         for (final w in words)
@@ -447,7 +493,16 @@ class StartDraft extends ChangeNotifier {
         m = _Made(session, where);
         _made = m;
       }
-      final how = (x.provider, x.model, x.connection, x.effort, x.environment, access);
+      final how = (
+        x.provider,
+        x.model,
+        x.connection,
+        x.effort,
+        x.environment,
+        x.speed,
+        access,
+        plan,
+      );
       if (m.agent == null) {
         m.agent = await store.addAgent(
           m.session,
@@ -457,12 +512,13 @@ class StartDraft extends ChangeNotifier {
           instructions: followed,
           trust: other && trust,
           apart: worksApart,
+          plan: plan,
         );
         m
           ..how = how
           ..follows = as;
       } else if (m.how != how) {
-        await store.setAgent(m.session, m.agent!, execution: x, access: access);
+        await store.setAgent(m.session, m.agent!, execution: x, access: access, plan: plan);
         m.how = how;
       }
       if (shown() && into == null) await store.open(m.session);
@@ -490,6 +546,7 @@ class StartDraft extends ChangeNotifier {
   void dispose() {
     _gone = true;
     _soon?.cancel();
+    _named?.cancel();
     say.dispose();
     folder.dispose();
     model.dispose();
@@ -512,6 +569,7 @@ String providerName(String p) => switch (p) {
   'chatgpt' => 'ChatGPT plan',
   'gemini' => 'Gemini API',
   'openrouter' => 'OpenRouter',
+  'bedrock' => 'Amazon Bedrock',
   'claude-code' => 'Claude Code, another account',
   'lm-studio' => 'LM Studio on this machine',
   'openai-compatible' => 'OpenAI-compatible server',
@@ -524,8 +582,13 @@ String? _keyFrom(String p) => switch (p) {
   'openai' => 'the OpenAI platform',
   'gemini' => 'Google AI Studio',
   'openrouter' => 'OpenRouter',
+  'bedrock' => 'the Amazon Bedrock console',
   _ => null,
 };
+
+/// Where Bedrock's models are, for a region. What is no region makes no such address, and the host
+/// refuses it.
+String bedrockAt(String region) => 'https://bedrock-runtime.$region.amazonaws.com';
 
 /// Accounts, keys and servers. Several for one provider is normal (PR-4).
 class AccountsPage extends StatefulWidget {
@@ -538,7 +601,7 @@ class AccountsPage extends StatefulWidget {
 
 class _AccountsPageState extends State<AccountsPage> {
   final _name = TextEditingController(), _url = TextEditingController();
-  final _key = TextEditingController();
+  final _key = TextEditingController(), _region = TextEditingController();
   String _provider = 'lm-studio';
   String? _problem, _leaving;
   bool _busy = false;
@@ -549,7 +612,7 @@ class _AccountsPageState extends State<AccountsPage> {
   @override
   void initState() {
     super.initState();
-    for (final c in [_name, _url, _key]) {
+    for (final c in [_name, _url, _key, _region]) {
       c.addListener(() => setState(() {}));
     }
   }
@@ -559,6 +622,7 @@ class _AccountsPageState extends State<AccountsPage> {
     _name.dispose();
     _url.dispose();
     _key.dispose();
+    _region.dispose();
     super.dispose();
   }
 
@@ -581,12 +645,17 @@ class _AccountsPageState extends State<AccountsPage> {
     await widget.store.connect(
       _name.text.trim(),
       _provider,
-      url: _provider == 'openai-compatible' ? _url.text.trim() : null,
+      url: switch (_provider) {
+        'openai-compatible' => _url.text.trim(),
+        'bedrock' => bedrockAt(_region.text.trim()),
+        _ => null,
+      },
       secret: secret.isEmpty ? null : secret,
     );
     _key.clear();
     _name.clear();
     _url.clear();
+    _region.clear();
   });
 
   /// Only for a person's press: it opens their browser.
@@ -601,6 +670,7 @@ class _AccountsPageState extends State<AccountsPage> {
     builder: (context, _) {
       final t = Ax.of(context), c = t.colors;
       final own = _provider == 'openai-compatible', plan = _provider == 'chatgpt';
+      final region = _provider == 'bedrock';
       final signin = widget.store.signin;
       final from = _keyFrom(_provider);
       final programs = [
@@ -612,6 +682,7 @@ class _AccountsPageState extends State<AccountsPage> {
           !_busy &&
           _name.text.trim().isNotEmpty &&
           (!own || _url.text.trim().isNotEmpty) &&
+          (!region || _region.text.trim().isNotEmpty) &&
           (from == null || _key.text.trim().isNotEmpty);
       return PageFrame(problem: _problem, [
         if (widget.store.connections.isNotEmpty) ...[
@@ -728,6 +799,7 @@ class _AccountsPageState extends State<AccountsPage> {
                   'openai',
                   'gemini',
                   'openrouter',
+                  'bedrock',
                   'openai-compatible',
                   'chatgpt',
                 ].followedBy(programs))
@@ -775,6 +847,17 @@ class _AccountsPageState extends State<AccountsPage> {
               placeholder: 'https://example.com/v1',
             ),
           ),
+        if (region)
+          FormPart(
+            'Region',
+            note: 'The AWS region the key is for. The key goes to Bedrock there and nowhere else.',
+            child: AxField(
+              label: 'Region',
+              controller: _region,
+              mono: true,
+              placeholder: 'us-east-1',
+            ),
+          ),
         if (program)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
@@ -811,6 +894,10 @@ class _AccountsPageState extends State<AccountsPage> {
               ),
           ],
         ),
+        const SizedBox(height: 28),
+        ProgramsPart(widget.store),
+        const SizedBox(height: 28),
+        ModelsPart(widget.store),
       ]);
     },
   );
@@ -964,18 +1051,4 @@ class _SignInState extends State<_SignIn> {
       ],
     );
   }
-}
-
-Map<String, (String, String?)> namesOf(List<ModelInfo> all) =>
-    modelNames([for (final m in all) (m.id, m.name)]);
-
-/// A model that is offered.
-AxMenuItem<String> modelItem(ModelInfo m, Map<String, (String, String?)> names) {
-  final (name, id) = names[m.id]!;
-  return AxMenuItem(
-    m.id,
-    oneLine(name, 80),
-    detail: id == null ? null : oneLine(id, 80),
-    mark: ServiceMark.of(m.id),
-  );
 }

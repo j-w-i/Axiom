@@ -5,12 +5,14 @@
 
 use std::{
     ffi::OsString,
+    io::Write,
+    os::fd::OwnedFd,
     path::{Path, PathBuf},
 };
 
 use axiom_policy::{Place, Profile, paths};
 
-use crate::{Job, Real, SpawnError};
+use crate::{Job, Real, SpawnError, seccomp, tree::FILTER};
 
 /// Of the system's own: never from a folder an agent can write to.
 const BWRAP: &[&str] = &["/usr/bin/bwrap", "/bin/bwrap", "/usr/local/bin/bwrap"];
@@ -43,6 +45,7 @@ pub fn wrap(job: &Job, real: &Real) -> Result<(OsString, Vec<OsString>), SpawnEr
         &"--hostname",
         &"sandbox",
     ]);
+    add(&[&"--seccomp", &FILTER.to_string()]);
     add(&[&"--dev", &"/dev", &"--proc", &"/proc", &"--tmpfs", &"/tmp"]);
     // Outermost first: what is inside another is mounted over it.
     let mut read = real.read.clone();
@@ -82,6 +85,15 @@ pub fn wrap(job: &Job, real: &Real) -> Result<(OsString, Vec<OsString>), SpawnEr
     add(&[&"--chdir", &job.cwd.as_path(), &"--", &job.program.as_path()]);
     a.extend(job.args.iter().map(OsString::from));
     Ok((OsString::from(*bwrap), a))
+}
+
+/// The calls that are refused, to be read by bubblewrap: less than a pipe holds.
+pub fn filter() -> Result<OwnedFd, SpawnError> {
+    let calls = seccomp::here()
+        .ok_or_else(|| SpawnError::NoSandbox("there is no filter for this processor".into()))?;
+    let (read, mut write) = std::io::pipe().map_err(SpawnError::Start)?;
+    write.write_all(&seccomp::program(calls)).map_err(SpawnError::Start)?;
+    Ok(read.into())
 }
 
 /// What is protected below `root` and exists; nothing if there is too much to look through. Not
