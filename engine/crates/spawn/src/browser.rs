@@ -75,7 +75,7 @@ pub struct Piped {
     pub from: File,
 }
 
-/// Starts `c` with `args` in `cwd`. Its output is nobody's: what it says, it says over the pipe.
+/// Starts `c` with `args` in `cwd`. What it says, it says over the pipe; its errors are `stderr`.
 #[allow(unsafe_code)]
 pub fn spawn_browser(
     c: &Chromium,
@@ -98,7 +98,8 @@ pub fn spawn_browser(
         .envs(env.vars.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        // What it says when it cannot start; read by whoever started it, a little at most.
+        .stderr(Stdio::piped());
     let mark = tree::prepare(&mut cmd, None).map_err(SpawnError::Start)?;
     // SAFETY: async-signal-safe calls on integers, after `prepare`'s own. Both are first put out of
     // the way, for either may be 3 or 4 already; `dup2` leaves what it makes open at the start.
@@ -115,14 +116,14 @@ pub fn spawn_browser(
             Ok(())
         });
     }
-    let child =
+    let mut child =
         tokio::process::Command::from(cmd).kill_on_drop(true).spawn().map_err(SpawnError::Start)?;
     let tree = tree::Tree::new(child.id().unwrap_or(0), Some(mark));
     reaper::add(child.id());
     let running = Running {
         stdin: None,
         stdout: None,
-        stderr: None,
+        stderr: child.stderr.take(),
         root: child.id(),
         tree,
         #[cfg(target_os = "linux")]

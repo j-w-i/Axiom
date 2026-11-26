@@ -62,7 +62,9 @@ async fn a_page_of_the_agents_own_server_is_seen_used_and_pointed_at() {
         panic!("no Chromium is installed here: Chrome, Chromium, Edge or Brave");
     };
     let d = tempfile::tempdir().unwrap();
-    let profile = Place::new(d.path().canonicalize().unwrap().join("profile")).unwrap();
+    // As deep as Axiom's own folder puts it: longer than a socket's name may be.
+    let deep = "Library/Application Support/axiom/browsers/s_1a21a0b0c0c6d183aa0aabbb0d4002a/a_1a21a0b0c0c6d183aa0aabbb0d4002b";
+    let profile = Place::new(d.path().canonicalize().unwrap().join(deep)).unwrap();
     let asked = Arc::new(Mutex::new(Vec::new()));
     // What is not the agent's, on this computer too: a WebSocket does not pass through `Fetch`.
     let other = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

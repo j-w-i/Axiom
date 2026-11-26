@@ -146,11 +146,21 @@ struct Inner {
     client: reqwest::Client,
     lanes: Semaphore,
     loaded: watch::Sender<u64>,
+    /// The end of what it wrote to its errors: why it ended, if it did.
+    said: Mutex<Vec<u8>>,
 }
 
 pub struct Browser {
     inner: Arc<Inner>,
     running: tokio::sync::Mutex<Option<Running>>,
+    /// Its own temporary folder: short, for the name of a socket in it is (Linux: 108 bytes).
+    tmp: std::path::PathBuf,
+}
+
+impl Drop for Browser {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.tmp);
+    }
 }
 
 impl std::fmt::Debug for Browser {
@@ -225,11 +235,28 @@ fn read(mut from: File, inner: Arc<Inner>, events: mpsc::Sender<Value>) {
             break;
         }
     }
-    lock(&inner.waiting).clear();
+    // What it said last, if anything; it may still be on its way.
+    std::thread::sleep(Duration::from_millis(100));
+    let why = last_line(&lock(&inner.said));
     inner.view.send_modify(|v| {
-        v.ended.get_or_insert_with(|| "the browser ended".into());
+        v.ended.get_or_insert_with(|| match why {
+            Some(w) => format!("the browser ended: {w}"),
+            None => "the browser ended".into(),
+        });
         v.version += 1;
     });
+    // Who waits is told why.
+    lock(&inner.waiting).clear();
+}
+
+/// Of what a browser wrote to its errors, kept.
+const SAID: usize = 8 * 1024;
+
+/// The last line that says something, plain and short.
+fn last_line(b: &[u8]) -> Option<String> {
+    let t = String::from_utf8_lossy(b);
+    let l = t.lines().map(str::trim).rfind(|l| !l.is_empty())?;
+    Some(l.chars().filter(|c| !c.is_control()).take(300).collect())
 }
 
 impl Inner {
@@ -250,7 +277,12 @@ impl Inner {
         }
         match tokio::time::timeout(ANSWER, rx).await {
             Ok(Ok(r)) => r,
-            Ok(Err(_)) => Err("the browser has ended".into()),
+            Ok(Err(_)) => Err(self
+                .view
+                .borrow()
+                .ended
+                .clone()
+                .unwrap_or_else(|| "the browser has ended".into())),
             Err(_) => {
                 lock(&self.waiting).remove(&id);
                 Err(format!("the browser did not answer {method}"))
@@ -367,6 +399,18 @@ impl Inner {
     }
 }
 
+/// A folder of this browser's own in the system's temporary folder, which only its person reads.
+fn private_tmp() -> Result<std::path::PathBuf, String> {
+    use std::os::unix::fs::DirBuilderExt;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let base = std::fs::canonicalize(std::env::temp_dir()).map_err(|e| e.to_string())?;
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let d = base.join(format!("axiom-browser-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::DirBuilder::new().mode(0o700).create(&d).map_err(|e| e.to_string())?;
+    Ok(d)
+}
+
 fn size(w: u32, h: u32) -> Result<(), String> {
     if SIZES.contains(&w) && SIZES.contains(&h) {
         Ok(())
@@ -414,7 +458,9 @@ impl Browser {
     pub async fn start(s: Setup, width: u32, height: u32, dark: bool) -> Result<Self, String> {
         size(width, height)?;
         std::fs::create_dir_all(s.profile.as_path()).map_err(|e| e.to_string())?;
-        let env = Env::new(&s.path, &s.profile, &s.profile);
+        let tmp_dir = private_tmp()?;
+        let tmp = Place::new(&tmp_dir).map_err(|e| e.to_string())?;
+        let env = Env::new(&s.path, &s.profile, &tmp);
         let p = axiom_spawn::spawn_browser(
             &s.chromium,
             &args(&s.profile, width, height),
@@ -422,6 +468,8 @@ impl Browser {
             &env,
         )
         .map_err(|e| format!("the browser could not be started: {e}"))?;
+        let mut p = p;
+        let errors = p.running.stderr.take();
         let client = proxy::client()?;
         let inner = Arc::new(Inner {
             to: Mutex::new(p.to),
@@ -434,8 +482,29 @@ impl Browser {
             client,
             lanes: Semaphore::new(LANES),
             loaded: watch::Sender::new(0),
+            said: Mutex::default(),
         });
-        let b = Self { inner: inner.clone(), running: tokio::sync::Mutex::new(Some(p.running)) };
+        if let Some(mut e) = errors {
+            let i = inner.clone();
+            tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut b = vec![0; 4096];
+                while let Ok(n) = e.read(&mut b).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let mut said = lock(&i.said);
+                    said.extend_from_slice(&b[..n]);
+                    let over = said.len().saturating_sub(SAID);
+                    said.drain(..over);
+                }
+            });
+        }
+        let b = Self {
+            inner: inner.clone(),
+            running: tokio::sync::Mutex::new(Some(p.running)),
+            tmp: tmp_dir,
+        };
         let (tx, mut rx) = mpsc::channel::<Value>(1024);
         let r = inner.clone();
         let from = p.from;
@@ -735,6 +804,7 @@ impl Browser {
         if let Some(mut r) = self.running.lock().await.take() {
             let _ = r.stop(Duration::from_secs(2)).await;
         }
+        let _ = std::fs::remove_dir_all(&self.tmp);
         self.inner.changed(|v| {
             v.ended.get_or_insert_with(|| "the browser was closed".into());
         });
