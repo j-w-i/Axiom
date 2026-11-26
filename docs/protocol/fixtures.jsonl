@@ -9,4 +9,9 @@
 {"id":4,"result":[{"most":200,"of":"A run","unit":"count","what":"Steps"},{"of":"A run","unit":"count","what":"Output tokens"},{"most":1024,"of":"Files","unit":"bytes","what":"One file"},{"most":600,"of":"Files","unit":"seconds","what":"One command"}]}
 {"id":7,"result":[{"at":9,"connection":"c_2","harness":"axiom","models":[{"adaptive":true,"context":1000,"default_effort":"max","effort":true,"efforts":["low","max"],"id":"m","name":"M","speeds":["fast"]}]}]}
 {"id":8,"result":[{"account":"c_2","args":["a"],"harness":"claude","name":"N","path":"/p","vars":[{"lasts":true,"name":"A","value":"1"},{"lasts":false,"name":"B"}]}]}
+{"id":9,"result":{"bytes":"iVBORw0KGgo=","digest":"d","image":"png","kind":"image","path":"a/b.png","size":8,"text":"t","whole":true}}
+{"id":10,"result":{"entries":[{"folder":true,"name":"b"},{"name":"c.rs"}],"hidden":2,"path":"a","whole":false}}
+{"id":11,"result":{"ended":"too many files","files":1,"hits":[{"line":4,"path":"a/c.rs","text":"fn x"}],"unread":3,"whole":false}}
+{"id":12,"result":[{"age":30,"agent":"a_1","command":"npm run dev","ended":"ended: exit 1","job":2,"last":"ready\n","session":"s_1"}]}
+{"id":13,"result":[{"id":"zed","name":"Zed","path":"/usr/local/bin/zed"}]}
 {"open":"/w"}

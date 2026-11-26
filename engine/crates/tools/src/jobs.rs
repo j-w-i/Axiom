@@ -16,6 +16,18 @@ use crate::{Output, shell, text::plain};
 pub const MOST: usize = 8;
 /// Output that has not been read; more pushes out the oldest.
 const KEPT: usize = 64 * 1024;
+/// What it said last, for a person, whether or not the agent has read it.
+const LAST: usize = 4 * 1024;
+
+/// A job as a person is shown it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shown {
+    pub job: u32,
+    pub command: String,
+    pub age: u64,
+    pub ended: Option<String>,
+    pub last: String,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Jobs(Arc<Mutex<All>>);
@@ -40,6 +52,7 @@ struct One {
 #[derive(Debug, Default)]
 struct State {
     fresh: VecDeque<u8>,
+    last: VecDeque<u8>,
     lost: u64,
     ended: Option<String>,
 }
@@ -108,6 +121,9 @@ impl Jobs {
                     let over = s.fresh.len().saturating_sub(KEPT);
                     s.fresh.drain(..over);
                     s.lost += over as u64;
+                    s.last.extend(bytes);
+                    let over = s.last.len().saturating_sub(LAST);
+                    s.last.drain(..over);
                 }
             }
             let words = match ended {
@@ -183,6 +199,26 @@ impl Jobs {
             text.push_str("(no jobs)\n");
         }
         Output::ok(text)
+    }
+
+    /// Each, for a person: its number, command, seconds since it began, how it ended, and what it
+    /// said last.
+    pub fn shown(&self) -> Vec<Shown> {
+        let all = lock(&self.0);
+        all.jobs
+            .iter()
+            .map(|(id, j)| {
+                let s = lock(&j.state);
+                let bytes: Vec<u8> = s.last.iter().copied().collect();
+                Shown {
+                    job: *id,
+                    command: j.command.chars().take(4000).collect(),
+                    age: j.began.elapsed().as_secs(),
+                    ended: s.ended.clone(),
+                    last: plain(&bytes),
+                }
+            })
+            .collect()
     }
 
     /// Those that still run, each in a few words.

@@ -71,6 +71,25 @@ pub struct Approval {
 #[derive(Debug)]
 pub struct Unsandboxed(());
 
+/// What a person does through the host with what is their own, by a key that says so in a client
+/// with the launch token: never for an agent, never from what an agent, a file or a page says
+/// (decisions 0018, 0019). Each is on record before it is done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersonsOwn {
+    /// Their editor opens a file (0019).
+    Editor,
+    /// The system's file manager shows one (0019).
+    Reveal,
+    /// Git talks to a remote with their credentials (0018).
+    Remote,
+}
+
+impl Unsandboxed {
+    pub fn persons(_act: PersonsOwn) -> Self {
+        Self(())
+    }
+}
+
 impl Approval {
     /// Of an ask that said so.
     pub fn unsandboxed(self, ask: &Ask) -> Option<Unsandboxed> {

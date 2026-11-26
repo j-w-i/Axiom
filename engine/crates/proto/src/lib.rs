@@ -607,6 +607,96 @@ pub struct CopySeen {
     pub there: Option<String>,
 }
 
+/// A file of a folder, for a person to read. Nothing of it is followed or run.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileText {
+    /// Below the folder, with `/` between names.
+    pub path: String,
+    pub size: u64,
+    /// Of all its bytes, as `copy.bring` has them.
+    pub digest: String,
+    /// `text`, `image` or `other`.
+    pub kind: String,
+    /// Of text, as far as it is sent; what is not UTF-8 is replaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Of an image: what kind (`png`, `jpeg`, `gif`, `webp`, `bmp`), and its bytes in base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<String>,
+    /// All of it is here.
+    pub whole: bool,
+}
+
+/// What is in a folder of a folder.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileList {
+    pub path: String,
+    pub entries: Vec<FileEntry>,
+    /// Left out: what git ignores, or what is kept from agents.
+    #[serde(default)]
+    pub hidden: usize,
+    /// These are all.
+    pub whole: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub folder: bool,
+}
+
+/// Lines found in a folder's files.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Found {
+    pub hits: Vec<Hit>,
+    /// In how many files.
+    pub files: usize,
+    /// Not searched: too large or not text.
+    #[serde(default)]
+    pub unread: usize,
+    /// All were looked through, and all that fit are here.
+    pub whole: bool,
+    /// Why it ended before that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hit {
+    pub path: String,
+    /// From 1.
+    pub line: u32,
+    /// The line, cut at 300 characters.
+    pub text: String,
+}
+
+/// A command an agent left running.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobInfo {
+    pub session: SessionId,
+    pub agent: AgentId,
+    pub job: u32,
+    pub command: String,
+    /// Seconds since it began.
+    pub age: u64,
+    /// How it ended; absent while it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<String>,
+    /// What it said last, at most 4 KiB, without what a terminal would do with it.
+    pub last: String,
+}
+
+/// An editor of the person's own that was found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorInfo {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
+
 /// A harness, as it was found without being run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnessInfo {
@@ -952,6 +1042,78 @@ pub enum Call {
     /// What is known of one model of a connection, also of one that is in no list. Nobody is asked.
     #[serde(rename = "model.about")]
     ModelAbout { connection: String, model: String },
+    /// A file of a session's folder, or of an agent's own copy of it, for its person to read.
+    #[serde(rename = "file.read")]
+    FileRead {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentId>,
+        path: String,
+    },
+    /// What a folder of it holds; `path` empty: the folder itself.
+    #[serde(rename = "file.list")]
+    FileList {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentId>,
+        #[serde(default)]
+        path: String,
+    },
+    /// Files whose path fits what is typed, the best first: an array of paths.
+    #[serde(rename = "file.find")]
+    FileFind {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentId>,
+        words: String,
+    },
+    /// Lines of its files that hold what is looked for.
+    #[serde(rename = "file.search")]
+    FileSearch {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentId>,
+        words: String,
+        /// Upper and lower case are told apart.
+        #[serde(default, skip_serializing_if = "not")]
+        case: bool,
+        /// Only whole words.
+        #[serde(default, skip_serializing_if = "not")]
+        word: bool,
+        /// `words` is a regular expression.
+        #[serde(default, skip_serializing_if = "not")]
+        regex: bool,
+    },
+    /// Opens a file in the person's editor, at a line (decision 0019). Only for a person's press.
+    #[serde(rename = "file.open")]
+    FileOpen {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentId>,
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        line: Option<u32>,
+        /// One of `editor.list`; the first that was found otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        editor: Option<String>,
+    },
+    /// Shows a file in the system's file manager.
+    #[serde(rename = "file.show")]
+    FileShow {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentId>,
+        path: String,
+    },
+    /// The person's editors that were found: an array of [`EditorInfo`].
+    #[serde(rename = "editor.list")]
+    Editors {},
+    /// What agents have left running, in all sessions: an array of [`JobInfo`].
+    #[serde(rename = "job.list")]
+    Jobs {},
+    /// Stops one, and what it started.
+    #[serde(rename = "job.stop")]
+    JobStop { session: SessionId, agent: AgentId, job: u32 },
     /// The record of what was done, after `after`.
     #[serde(rename = "audit.read")]
     Audit {

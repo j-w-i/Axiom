@@ -525,6 +525,11 @@ async fn jobs_go_on_and_are_read() {
     assert_eq!(o.text, "up\n(job 1: it runs)\n");
     let o = job(json!({"do": "read", "id": 1})).await;
     assert_eq!(o.text, "(job 1: it runs)\n", "nothing twice");
+    // A person sees what it said last, also what the agent has read.
+    let shown = t.seen.1.shown();
+    let one = shown.first().unwrap();
+    assert_eq!((one.job, one.last.as_str(), one.ended.is_none()), (1, "up\n", true));
+    assert!(one.command.starts_with("echo up"));
     assert!(job(json!({"do": "list"})).await.text.starts_with("1: echo up"));
     assert!(job(json!({"do": "stop", "id": 1})).await.ok);
     let mut last = String::new();
@@ -571,6 +576,8 @@ async fn jobs_go_on_and_are_read() {
         "{}",
         o.text.len()
     );
+    let last = t.seen.1.shown().into_iter().find(|j| j.job == 4).unwrap().last;
+    assert!(last.len() <= 4096 && last.ends_with("100000\n"), "{}", last.len());
     for _ in 0..8 {
         job(json!({"do": "start", "command": "sleep 30"})).await;
     }

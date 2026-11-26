@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use axiom_engine::Deed;
 use axiom_journal::{Journal, Reader};
 use axiom_model::chatgpt::Places;
 use axiom_proto::*;
@@ -28,7 +29,7 @@ use crate::{
     connections::{Connections, MemoryVault, Vault},
     copies::{self, Then},
     faults::{Access, Faults},
-    log,
+    files, log,
     net::{self, Boxed, Listener},
     outbox::{Follower, Outbox},
     paths::{Lock, Paths, Same, private_dir, private_file},
@@ -1086,7 +1087,69 @@ fn slow(c: &Call) -> bool {
             | Call::Branch { .. }
             | Call::ConnectionAdd { .. }
             | Call::ConnectionRemove { .. }
+            | Call::FileRead { .. }
+            | Call::FileList { .. }
+            | Call::FileFind { .. }
+            | Call::FileSearch { .. }
+            | Call::FileOpen { .. }
+            | Call::FileShow { .. }
+            | Call::Editors {}
     )
+}
+
+/// The folder a person looks at: the session's, or the copy an agent works in.
+async fn looked_at(
+    st: &Arc<State>,
+    session: &SessionId,
+    agent: Option<&AgentId>,
+) -> Result<files::Here, WireError> {
+    let mut folder = workspace(st, session).await?;
+    if let Some(a) = agent {
+        let s = setup(st, session, a).await?;
+        if s.apart.as_ref().is_some_and(|a| a.made) {
+            folder = s.workspace;
+        }
+    }
+    let a = st.agents.clone();
+    let id = AgentId(format!("person_{}", session.0));
+    let site = tokio::task::spawn_blocking(move || a.looking(&folder, &id))
+        .await
+        .map_err(|e| internal(e.to_string()))??;
+    Ok(files::Here { site })
+}
+
+/// Done off the runtime's threads.
+async fn off<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, WireError> + Send + 'static,
+) -> Result<T, WireError> {
+    tokio::task::spawn_blocking(f).await.map_err(|e| internal(e.to_string()))?
+}
+
+fn value(v: impl serde::Serialize) -> Result<Value, WireError> {
+    serde_json::to_value(v).map_err(|e| internal(e.to_string()))
+}
+
+/// Puts on record what a person had the host do for them (SI-23), before it is done.
+async fn person(
+    st: &Arc<State>,
+    session: &SessionId,
+    folder: &str,
+    tool: &str,
+    subject: String,
+) -> Result<(), WireError> {
+    let deed = Deed {
+        chain: vec![],
+        workspace: folder.to_owned(),
+        tool: tool.into(),
+        subject,
+        decision: axiom_policy::Decision::Allow,
+        rules: vec!["a person".into()],
+        answered: None,
+    };
+    st.agents
+        .record(&st.store, session, deed, axiom_policy::audit::Containment::None)
+        .await
+        .map_err(|e| internal(e.to_string()))
 }
 
 /// What is said to an agent whose copy of the folder is made, or looked through, first.
@@ -2010,6 +2073,70 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                 Ok::<_, WireError>(catalogue::about(client.profile(), named))
             };
             serde_json::to_value(blocking(about).await??).map_err(|e| internal(e.to_string()))
+        }
+        Call::FileRead { session, agent, path } => {
+            let here = looked_at(st, &session, agent.as_ref()).await?;
+            value(off(move || here.read(&path)).await?)
+        }
+        Call::FileList { session, agent, path } => {
+            let here = looked_at(st, &session, agent.as_ref()).await?;
+            value(off(move || here.list(&path)).await?)
+        }
+        Call::FileFind { session, agent, words } => {
+            let here = looked_at(st, &session, agent.as_ref()).await?;
+            value(off(move || here.find(&words)).await?)
+        }
+        Call::FileSearch { session, agent, words, case, word, regex } => {
+            let here = looked_at(st, &session, agent.as_ref()).await?;
+            value(off(move || here.search(&words, case, word, regex)).await?)
+        }
+        Call::FileOpen { session, agent, path, line, editor } => {
+            let here = looked_at(st, &session, agent.as_ref()).await?;
+            let folder = here.site.workspace.to_string();
+            let file = off(move || here.file(&path)).await?;
+            let written = st.agents.written(&st.store).await?;
+            let w = st.agents.editors(written)?;
+            let named = editor.clone().unwrap_or_else(|| "the first editor found".into());
+            person(st, &session, &folder, "editor", format!("{named} opens {file}")).await?;
+            off(move || w.open(&file, line, editor.as_deref())).await?;
+            Ok(json!({}))
+        }
+        Call::FileShow { session, agent, path } => {
+            let here = looked_at(st, &session, agent.as_ref()).await?;
+            let folder = here.site.workspace.to_string();
+            let file = off(move || here.file(&path)).await?;
+            let written = st.agents.written(&st.store).await?;
+            let w = st.agents.editors(written)?;
+            person(st, &session, &folder, "reveal", format!("the file manager shows {file}"))
+                .await?;
+            off(move || w.reveal(&file)).await?;
+            Ok(json!({}))
+        }
+        Call::Editors {} => {
+            let written = st.agents.written(&st.store).await?;
+            let w = st.agents.editors(written)?;
+            value(off(move || Ok(w.editors())).await?)
+        }
+        Call::Jobs {} => {
+            let mut all = Vec::new();
+            for (session, agent, jobs) in st.agents.jobs() {
+                for j in jobs {
+                    all.push(JobInfo {
+                        session: session.clone(),
+                        agent: agent.clone(),
+                        job: j.job,
+                        command: j.command,
+                        age: j.age,
+                        ended: j.ended,
+                        last: j.last,
+                    });
+                }
+            }
+            value(all)
+        }
+        Call::JobStop { session, agent, job } => {
+            st.agents.stop_job(&session, &agent, job)?;
+            Ok(json!({}))
         }
         Call::Audit { after, limit } => {
             let all =

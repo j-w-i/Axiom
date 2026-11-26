@@ -361,6 +361,79 @@ class HostStore extends ChangeNotifier {
   /// Much is read for it, and perhaps written.
   static const _long = Duration(minutes: 5);
 
+  Map<String, Object> _in(String session, String? agent, [Map<String, Object> more = const {}]) => {
+    'session': session,
+    'agent': ?agent,
+    ...more,
+  };
+
+  /// A file of a session's folder, or of an agent's copy of it.
+  Future<FileText> readFile(String session, String path, {String? agent}) async => FileText.decode(
+    (await _live.call('file.read', _in(session, agent, {'path': path}), _long))! as Json,
+  );
+
+  /// What a folder of it holds.
+  Future<FileList> listFiles(String session, String path, {String? agent}) async => FileList.decode(
+    (await _live.call('file.list', _in(session, agent, {'path': path}), _long))! as Json,
+  );
+
+  /// Paths that fit what is typed, the best first.
+  Future<List<String>> findFiles(String session, String words, {String? agent}) async => [
+    for (final p
+        in (await _live.call('file.find', _in(session, agent, {'words': words}), _long))!
+            as List<Object?>)
+      p! as String,
+  ];
+
+  /// Lines of its files that hold what is looked for.
+  Future<FoundLines> searchFiles(
+    String session,
+    String words, {
+    String? agent,
+    bool matchCase = false,
+    bool word = false,
+    bool regex = false,
+  }) async => FoundLines.decode(
+    (await _live.call(
+          'file.search',
+          _in(session, agent, {
+            'words': words,
+            if (matchCase) 'case': true,
+            if (word) 'word': true,
+            if (regex) 'regex': true,
+          }),
+          _long,
+        ))!
+        as Json,
+  );
+
+  /// Opens a file in the person's editor, at a line.
+  Future<void> openFile(String session, String path, {String? agent, int? line, String? editor}) =>
+      _live.call(
+        'file.open',
+        _in(session, agent, {'path': path, 'line': ?line, 'editor': ?editor}),
+        _long,
+      );
+
+  /// Shows a file in the system's file manager.
+  Future<void> showFile(String session, String path, {String? agent}) =>
+      _live.call('file.show', _in(session, agent, {'path': path}), _long);
+
+  /// The person's editors that were found.
+  Future<List<EditorInfo>> editors() async => [
+    for (final e in (await _live.call('editor.list', {}, _long))! as List<Object?>)
+      EditorInfo.decode(e! as Json),
+  ];
+
+  /// What agents have left running, in all sessions.
+  Future<List<JobInfo>> jobs() async => [
+    for (final j in (await _live.call('job.list', {}))! as List<Object?>)
+      JobInfo.decode(j! as Json),
+  ];
+
+  Future<void> stopJob(String session, String agent, int job) =>
+      _live.call('job.stop', {'session': session, 'agent': agent, 'job': job});
+
   /// What an agent has changed in its own copy of the folder.
   Future<CopyChanges> copyChanges(String session, String agent) async => CopyChanges.decode(
     (await _live.call('copy.changes', {'session': session, 'agent': agent}, _long))! as Json,
