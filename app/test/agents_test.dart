@@ -2250,19 +2250,25 @@ void main() {
       'claude-opus-5-5',
       name: 'Claude Opus 5.5',
       context: 1000000,
-      efforts: ['low', 'xhigh'],
+      // As Anthropic's list says of it.
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
       speeds: ['fast'],
     );
     final lists = [
       const ModelList('axiom', 'c1', 5, [opus, ModelInfo('claude-old')]),
       const ModelList('axiom', 'c7', 5, [
-        ModelInfo('a/b', name: 'A: B', efforts: ['none', 'max']),
+        ModelInfo('a/b', name: 'A: B', efforts: ['none', 'low', 'medium', 'high', 'max']),
       ]),
       // Of an account that is not there any more, and a program that is not.
       const ModelList('axiom', 'c0', 5, [ModelInfo('gone')]),
       const ModelList('codex', null, 5, [ModelInfo('gpt-gone')]),
       const ModelList('claude', null, 0, [
-        ModelInfo('opus', name: 'Opus', efforts: ['max'], speeds: ['fast']),
+        ModelInfo(
+          'opus',
+          name: 'Opus',
+          efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+          speeds: ['fast'],
+        ),
       ]),
     ];
     Future<(Asked, ValueNotifier<Prefs>)> begin(
@@ -2348,7 +2354,11 @@ void main() {
       await part(t, 'Model');
       await press(t, find.bySemanticsLabel('Claude Code'));
       await press(t, find.bySemanticsLabel('Opus').last);
-      expect(find.bySemanticsLabel('Low'), findsNothing, reason: 'it does not say so');
+      // Every effort it says the model takes, and none it does not say.
+      for (final e in ['Low', 'Medium', 'High', 'Extra high', 'Max']) {
+        expect(find.bySemanticsLabel(e), findsOneWidget, reason: e);
+      }
+      expect(find.bySemanticsLabel('None'), findsNothing, reason: 'it does not say so');
       // Fast has a price, which is said before it is chosen.
       await press(t, find.bySemanticsLabel('Fast').last);
       expect(find.textContaining('usage credits'), findsOneWidget);

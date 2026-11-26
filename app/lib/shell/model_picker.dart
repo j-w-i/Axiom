@@ -361,7 +361,10 @@ class _ModelPickerState extends State<ModelPicker> {
       child: LayoutBuilder(
         builder: (context, box) {
           // Larger words want the room the effort column would take.
-          final room = box.maxWidth / scaler.scale(1) >= 500;
+          // Every effort a model takes stays in sight in its column down to a small window; below
+          // that, and with larger words, they go below.
+          final room = box.maxWidth / scaler.scale(1) >= 400;
+          final effortsW = (box.maxWidth * .27).clamp(124.0, ModelPicker._efforts);
           // As tall as what is in it, up to where it scrolls; all groups end on one line.
           final stops = sources.length + (stars ? 1 : 0);
           final aparts =
@@ -429,7 +432,7 @@ class _ModelPickerState extends State<ModelPicker> {
               if (room) ...[
                 const SizedBox(width: _gap),
                 SizedBox(
-                  width: ModelPicker._efforts,
+                  width: effortsW,
                   child: _effort(context, headH: headH, rowH: rowH),
                 ),
               ],
@@ -636,9 +639,7 @@ class _ModelPickerState extends State<ModelPicker> {
           ),
         ),
         // However many there are, they stay in the picker: what does not fit scrolls sideways.
-        Flexible(
-          child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: segments),
-        ),
+        Flexible(child: _Sideways(child: segments)),
       ],
     );
     final keys = <Widget>[
@@ -886,6 +887,72 @@ class _Rail extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// What is wider than its room: it scrolls sideways, and goes out of sight gradually where it is cut.
+class _Sideways extends StatefulWidget {
+  const _Sideways({required this.child});
+  final Widget child;
+  @override
+  State<_Sideways> createState() => _SidewaysState();
+}
+
+class _SidewaysState extends State<_Sideways> {
+  final _at = ScrollController();
+  (bool, bool) _cut = (false, false);
+
+  void _look() {
+    final p = _at.hasClients ? _at.position : null;
+    final cut = (p != null && p.extentBefore > 0, p != null && p.extentAfter > 0);
+    if (cut != _cut && mounted) setState(() => _cut = cut);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _at.addListener(_look);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _look());
+  }
+
+  @override
+  void dispose() {
+    _at.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ground = Ax.of(context).colors.overlay.fill;
+    Widget fade(bool left) => IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: left ? Alignment.centerLeft : Alignment.centerRight,
+            end: left ? Alignment.centerRight : Alignment.centerLeft,
+            colors: [ground, ground.withValues(alpha: 0)],
+          ),
+        ),
+        child: const SizedBox(width: 24),
+      ),
+    );
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (_) {
+        _look();
+        return false;
+      },
+      child: Stack(
+        children: [
+          SingleChildScrollView(
+            controller: _at,
+            scrollDirection: Axis.horizontal,
+            child: widget.child,
+          ),
+          if (_cut.$1) Positioned(left: 0, top: 0, bottom: 0, child: fade(true)),
+          if (_cut.$2) Positioned(right: 0, top: 0, bottom: 0, child: fade(false)),
+        ],
+      ),
     );
   }
 }
