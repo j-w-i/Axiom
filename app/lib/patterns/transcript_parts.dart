@@ -138,10 +138,125 @@ class DiffBlock extends StatelessWidget {
   }
 }
 
+/// How a change is looked at. Only the view: what is brought in is what the digests say.
+@immutable
+class DiffShape {
+  const DiffShape({this.side = false, this.space = true, this.wrap = false});
+
+  /// The two sides beside each other, where there is room for both.
+  final bool side;
+
+  /// A line whose change is only in white space counts as changed. Off, it is shown as the same.
+  final bool space;
+
+  /// Long lines go on to the next; otherwise they fade at the edge.
+  final bool wrap;
+
+  /// How wide it must be for two sides.
+  static const room = 520.0;
+
+  DiffShape copyWith({bool? side, bool? space, bool? wrap}) =>
+      DiffShape(side: side ?? this.side, space: space ?? this.space, wrap: wrap ?? this.wrap);
+
+  @override
+  bool operator ==(Object other) =>
+      other is DiffShape && other.side == side && other.space == space && other.wrap == wrap;
+  @override
+  int get hashCode => Object.hash(side, space, wrap);
+}
+
+/// The same lines, where a line removed and the line added for it differ only in white space and
+/// are shown as one that stayed, with the new text and both numbers.
+List<DiffLine> withoutSpace(List<DiffLine> lines) {
+  String bare(String s) => s.replaceAll(RegExp(r'\s+'), '');
+  final out = <DiffLine>[];
+  var i = 0;
+  while (i < lines.length) {
+    if (lines[i].kind != DiffKind.remove) {
+      out.add(lines[i++]);
+      continue;
+    }
+    final removed = <DiffLine>[];
+    while (i < lines.length &&
+        lines[i].kind == DiffKind.remove &&
+        (removed.isEmpty || !lines[i].start)) {
+      removed.add(lines[i++]);
+    }
+    final added = <DiffLine>[];
+    while (i < lines.length && lines[i].kind == DiffKind.add && !lines[i].start) {
+      added.add(lines[i++]);
+    }
+    // Line for line, as far as both go; what is left over stays as it was.
+    final n = removed.length < added.length ? removed.length : added.length;
+    var k = 0;
+    final kept = <DiffLine>[], put = <DiffLine>[];
+    for (; k < n; k++) {
+      final r = removed[k], a = added[k];
+      if (bare(r.text) == bare(a.text)) {
+        out
+          ..addAll(kept)
+          ..addAll(put);
+        kept.clear();
+        put.clear();
+        out.add(DiffLine(DiffKind.same, a.number, a.text, was: r.number, start: r.start));
+      } else {
+        kept.add(r);
+        put.add(a);
+      }
+    }
+    out
+      ..addAll(kept)
+      ..addAll(removed.skip(n))
+      ..addAll(put)
+      ..addAll(added.skip(n));
+  }
+  return out;
+}
+
+/// The lines as rows of two sides: what was on the left, what is on the right. Removed lines are
+/// put beside the lines added after them.
+List<(DiffLine?, DiffLine?)> sideBySide(List<DiffLine> lines) {
+  final rows = <(DiffLine?, DiffLine?)>[];
+  var i = 0;
+  while (i < lines.length) {
+    final l = lines[i];
+    if (l.kind == DiffKind.same) {
+      rows.add((l, l));
+      i++;
+      continue;
+    }
+    final removed = <DiffLine>[], added = <DiffLine>[];
+    while (i < lines.length &&
+        lines[i].kind == DiffKind.remove &&
+        (removed.isEmpty || !lines[i].start)) {
+      removed.add(lines[i++]);
+    }
+    while (i < lines.length &&
+        lines[i].kind == DiffKind.add &&
+        (added.isEmpty || !lines[i].start)) {
+      if (removed.isNotEmpty && lines[i].start) break;
+      added.add(lines[i++]);
+    }
+    final n = removed.length > added.length ? removed.length : added.length;
+    for (var k = 0; k < n; k++) {
+      rows.add((k < removed.length ? removed[k] : null, k < added.length ? added[k] : null));
+    }
+  }
+  return rows;
+}
+
 /// The lines of one file's change.
 class DiffLines extends StatelessWidget {
-  const DiffLines(this.lines, {super.key, this.onLine, this.at, this.note});
+  const DiffLines(
+    this.lines, {
+    super.key,
+    this.onLine,
+    this.at,
+    this.note,
+    this.shape = const DiffShape(),
+  });
   final List<DiffLine> lines;
+  final DiffShape shape;
 
   /// One of them was pressed.
   final ValueChanged<DiffLine>? onLine;
@@ -150,24 +265,37 @@ class DiffLines extends StatelessWidget {
   final DiffLine? at;
   final Widget? note;
 
+  Color _fill(AxColors c, DiffKind k) => switch (k) {
+    DiffKind.add => c.diffAdd,
+    DiffKind.remove => c.diffRemove,
+    DiffKind.same => const Color(0x00000000),
+  };
+
+  Widget _text(AxTheme t, DiffLine l) => Text.rich(
+    highlight(literal(l.text), t.type.codeSmall, t.colors),
+    style: t.type.codeSmall,
+    maxLines: shape.wrap ? null : 1,
+    softWrap: shape.wrap,
+    overflow: shape.wrap ? TextOverflow.clip : TextOverflow.fade,
+  );
+
+  Widget _number(AxTheme t, int n) => SizedBox(
+    width: 34,
+    child: Text(
+      n > 0 ? '$n' : '',
+      textAlign: TextAlign.right,
+      style: t.type.codeSmall.ink(t.colors.ink3),
+    ),
+  );
+
   Widget _line(AxTheme t, DiffLine l) {
     final c = t.colors;
     final line = ColoredBox(
-      color: switch (l.kind) {
-        DiffKind.add => c.diffAdd,
-        DiffKind.remove => c.diffRemove,
-        DiffKind.same => const Color(0x00000000),
-      },
+      color: _fill(c, l.kind),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 34,
-            child: Text(
-              '${l.number}',
-              textAlign: TextAlign.right,
-              style: t.type.codeSmall.ink(c.ink3),
-            ),
-          ),
+          _number(t, l.number),
           SizedBox(
             width: 22,
             child: Text(
@@ -180,18 +308,35 @@ class DiffLines extends StatelessWidget {
               style: t.type.codeSmall.ink(l.kind == DiffKind.add ? c.doneText : c.faultText),
             ),
           ),
-          Expanded(
-            child: Text.rich(
-              highlight(literal(l.text), t.type.codeSmall, c),
-              style: t.type.codeSmall,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.fade,
-            ),
-          ),
+          Expanded(child: _text(t, l)),
         ],
       ),
     );
+    return _pressed(l, line);
+  }
+
+  /// One side of a row: what it was or what it is, or nothing.
+  Widget _half(AxTheme t, DiffLine? l, {required bool left}) {
+    if (l == null) return const SizedBox.shrink();
+    final c = t.colors;
+    final kind = l.kind == DiffKind.same ? DiffKind.same : (left ? DiffKind.remove : DiffKind.add);
+    return _pressed(
+      l,
+      ColoredBox(
+        color: _fill(c, kind),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _number(t, l.kind == DiffKind.same && left ? (l.was > 0 ? l.was : 0) : l.number),
+            const SizedBox(width: 10),
+            Expanded(child: _text(t, l)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _pressed(DiffLine l, Widget line) {
     if (onLine == null) return line;
     // The keyboard's way is the file's own button: hundreds of stops would be no way at all.
     return MouseRegion(
@@ -208,21 +353,52 @@ class DiffLines extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
-    return ClipPath(
-      clipper: const ContinuousClip(AxRadius.block),
-      child: ColoredBox(
-        color: c.block.fill,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (note != null && at == null) note!,
-              for (final l in lines) ...[_line(t, l), if (note != null && identical(l, at)) note!],
-            ],
+    final shown = shape.space ? lines : withoutSpace(lines);
+    bool under(DiffLine l) => note != null && l == at;
+    final gap = SizedBox(
+      height: 10,
+      child: Center(child: Text('⋯', style: t.type.codeSmall.ink(c.ink4))),
+    );
+    return LayoutBuilder(
+      builder: (context, box) {
+        final side = shape.side && box.maxWidth >= DiffShape.room;
+        final rows = <Widget>[if (note != null && at == null) note!];
+        if (side) {
+          for (final (l, r) in sideBySide(shown)) {
+            final first = l ?? r!;
+            if (first.start) rows.add(gap);
+            rows.add(
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: _half(t, l, left: true)),
+                    const SizedBox(width: 2),
+                    Expanded(child: _half(t, r, left: false)),
+                  ],
+                ),
+              ),
+            );
+            if ((l != null && under(l)) || (r != null && r != l && under(r))) rows.add(note!);
+          }
+        } else {
+          for (final l in shown) {
+            if (l.start) rows.add(gap);
+            rows.add(_line(t, l));
+            if (under(l)) rows.add(note!);
+          }
+        }
+        return ClipPath(
+          clipper: const ContinuousClip(AxRadius.block),
+          child: ColoredBox(
+            color: c.block.fill,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -244,6 +420,7 @@ List<FileDiff> readDiffs(String text, {int most = 400, int atAll = 20000}) {
   FileDiff? f;
   String? from;
   var was = 0, now = 0, olds = 0, news = 0, shown = 0;
+  var start = false;
   for (final l in text.split('\n')) {
     if (olds > 0 || news > 0) {
       final kind = switch (l.isEmpty ? ' ' : l[0]) {
@@ -263,8 +440,11 @@ List<FileDiff> readDiffs(String text, {int most = 400, int atAll = 20000}) {
             kind,
             kind == DiffKind.remove ? was : now,
             l.isEmpty ? '' : cutTo(l.substring(1), 1000),
+            was: kind == DiffKind.same ? was : 0,
+            start: start,
           ),
         );
+        start = false;
       }
       if (kind != DiffKind.add) {
         was++;
@@ -293,6 +473,7 @@ List<FileDiff> readDiffs(String text, {int most = 400, int atAll = 20000}) {
       olds = int.parse(m[2] ?? '1');
       now = int.parse(m[3]!);
       news = int.parse(m[4] ?? '1');
+      start = f != null && f.lines.isNotEmpty;
     }
   }
   return files;

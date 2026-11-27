@@ -15,6 +15,7 @@ import '../patterns/models.dart';
 import '../patterns/session_panel.dart';
 import '../transcript/find_here.dart';
 import '../transcript/safe_text.dart';
+import '../transcript/inline.dart';
 import '../transcript/transcript_view.dart';
 import '../ui/commands.dart';
 import '../ui/controls.dart';
@@ -30,6 +31,7 @@ import 'changes.dart';
 import 'drafts.dart';
 import 'drop.dart';
 import 'find.dart';
+import 'folder.dart';
 import 'new_session.dart';
 import 'settings.dart';
 import 'start.dart';
@@ -159,6 +161,28 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     return _changes!;
   }
 
+  /// What is read, found or searched for in the open session's folder.
+  FolderLook? _look;
+  FolderLook _lookOf(SessionModel m) {
+    if (_look?.session != m.id) {
+      // What is on the screen still listens to the one before, until the next frame.
+      final was = _look;
+      if (was != null) WidgetsBinding.instance.addPostFrameCallback((_) => was.dispose());
+      _look = FolderLook(widget.store, m.id);
+    }
+    return _look!;
+  }
+
+  /// The panel shows a file, a search or the box to find one in.
+  void _inFolder(void Function(FolderLook) f) {
+    final m = widget.store.current;
+    if (m == null || m.workspace == null) return;
+    final a = m.agents[_agent] ?? m.agents.values.firstOrNull;
+    final l = _lookOf(m)..agent = a?.apart ?? false ? a!.id : null;
+    f(l);
+    _change(true);
+  }
+
   /// Back from a page to what was shown before it.
   void _back() => _show(_View.work);
 
@@ -220,6 +244,10 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
         if (_panel(context) case final open?) _change(!open);
       case Command.list:
         setState(() => _list = !_list);
+      case Command.goToFile:
+        _inFolder((l) => l.find(!l.finding));
+      case Command.searchFiles:
+        _inFolder((l) => l.search(!l.searching));
       case Command.next:
         _by(1);
       case Command.previous:
@@ -304,6 +332,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     for (final c in Command.values)
       if (switch (c) {
         Command.panel => _panel(context) != null,
+        Command.goToFile || Command.searchFiles => s.current?.workspace != null,
         Command.list ||
         Command.zoomIn ||
         Command.zoomOut ||
@@ -389,6 +418,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     widget.store.onFolder = null;
     widget.drags?.stop();
     _changes?.dispose();
+    _look?.dispose();
     _forget?.cancel();
     _drafts.dispose();
     _start.dispose();
@@ -529,6 +559,9 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                 stale: stale,
                 drafts: _drafts,
                 changes: _changesOf(m),
+                look: _lookOf(m),
+                onPath: (path, line, agent) =>
+                    _inFolder((l) => unawaited(l.read(path, line: line, agent: agent))),
                 onClose: () => _change(false),
                 panelKey: panelKey,
                 open: () => _panel(context) ?? false,
@@ -1373,6 +1406,8 @@ class _Display extends StatelessWidget {
     required this.onStop,
     required this.onAgent,
     required this.changes,
+    required this.look,
+    required this.onPath,
     required this.open,
     required this.onClose,
     required this.panelKey,
@@ -1406,6 +1441,10 @@ class _Display extends StatelessWidget {
   /// The list is put away, so where one is has to be said; the window is small, and it is said above.
   final bool alone, small;
   final FolderChanges changes;
+  final FolderLook look;
+
+  /// A path in an answer was pressed: of the folder, or of the copy of the agent named.
+  final void Function(String path, int? line, String? agent) onPath;
   final ValueChanged<String> onAgent;
   final HostStore store;
   final Drafts drafts;
@@ -1530,6 +1569,13 @@ class _Display extends StatelessWidget {
                       a,
                       key: view,
                       takes: true,
+                      onLink: session.workspace == null
+                          ? null
+                          : (url) {
+                              if (pathIn(url) case (final path, final line)) {
+                                onPath(path, line, a.apart ? a.id : null);
+                              }
+                            },
                       onQuote: acts ? (q) => drafts.of(session.id, a.id).add(q) : null,
                       onBranch: acts && !stale ? (i) => unawaited(_branchAt(a, i)) : null,
                     ),
@@ -1586,24 +1632,45 @@ class _Display extends StatelessWidget {
       ),
     );
     final all = ListenableBuilder(
-      listenable: Listenable.merge([changes, a]),
+      listenable: Listenable.merge([changes, a, look]),
       child: talk,
       builder: (context, talk) {
-        final lead = [if (a.plans) AgentPlan(a, key: ValueKey((a.id, 'plan')))];
+        final names = {for (final x in session.agents.values) x.id: x.name};
+        final lead = [
+          if (a.plans) AgentPlan(a, key: ValueKey((a.id, 'plan'))),
+          if (look.finding) FileFinder(look, key: ValueKey((session.id, 'find'))),
+          JobsPart(store, session.id, names: names, key: ValueKey((session.id, 'jobs'))),
+        ];
+        final tail = [FileTree(look, key: ValueKey((session.id, a.apart ? a.id : '', 'tree')))];
+        final reading = look.reads || look.searching;
         final panel = !open()
             ? null
             : CallbackShortcuts(
-                bindings: {const SingleActivator(LogicalKeyboardKey.escape): onClose},
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.escape): reading
+                      ? () => look.reads ? look.close() : look.search(false)
+                      : onClose,
+                },
                 child: CommandArea(
                   3,
                   child: FocusTraversalGroup(
-                    child: a.apart
+                    child: look.reads
+                        ? FileReader(
+                            look,
+                            draft: drafts.of(session.id, a.id),
+                            key: ValueKey((session.id, 'read')),
+                          )
+                        : look.searching
+                        ? FileSearch(look, key: ValueKey((session.id, 'search')))
+                        : a.apart
                         ? CopyView(
                             store,
                             session,
                             a,
                             draft: drafts.of(session.id, a.id),
                             lead: lead,
+                            tail: tail,
+                            onRead: (p) => onPath(p, null, a.id),
                             key: ValueKey((session.id, a.id)),
                           )
                         : ChangesView(
@@ -1611,6 +1678,8 @@ class _Display extends StatelessWidget {
                             agent: a.name,
                             draft: drafts.of(session.id, a.id),
                             lead: lead,
+                            tail: tail,
+                            onRead: (p) => onPath(p, null, null),
                             key: ValueKey(session.id),
                           ),
                   ),
@@ -1620,7 +1689,7 @@ class _Display extends StatelessWidget {
           main: talk!,
           panel: panel,
           // What is in a copy is read before it is applied.
-          wide: a.apart || changes.reads,
+          wide: a.apart || changes.reads || reading,
           sizes: sizes,
           onSizes: onSizes,
         );

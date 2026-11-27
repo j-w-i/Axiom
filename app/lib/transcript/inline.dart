@@ -305,33 +305,53 @@ TextSpan inlineSpan(
   List<GestureRecognizer>? recognizers,
 }) => TextSpan(
   style: base,
-  children: [
-    for (final r in inlineRuns(source))
-      TextSpan(
-        text: r.text,
-        recognizer: r.url == null || onLink == null || recognizers == null
-            ? null
-            : (() {
-                final t = TapGestureRecognizer()..onTap = () => onLink(r.url!);
-                recognizers.add(t);
-                return t;
-              })(),
-        mouseCursor: r.url == null || onLink == null ? null : SystemMouseCursors.click,
-        semanticsLabel: r.url == null ? null : '${r.text}, link',
-        style: (r.code ? code : const TextStyle()).copyWith(
-          fontVariations: r.strong && !r.code ? const [FontVariation('wght', 640)] : null,
-          fontStyle: r.em ? FontStyle.italic : null,
-          decoration: r.url != null
-              ? TextDecoration.underline
-              : r.del
-              ? TextDecoration.lineThrough
-              : null,
-          decorationColor: r.url != null ? c.ink4 : null,
-          color: r.url != null ? c.liveText : null,
-        ),
-      ),
-  ],
+  children: [for (final r in inlineRuns(source)) _span(r, code, c, onLink, recognizers)],
 );
+
+/// A path as agents write it, with a line after a colon or `#L`: `src/a.rs:42`, `lib/x.dart#L7`.
+/// Only what has a name with an extension, and more than one letter on one side of its dot, so that
+/// `e.g` is not taken for a file.
+(String, int?)? pathIn(String s) {
+  final m = RegExp(
+    r'^(?:\./)?((?:[\w@+\-][\w@.+\-]*/)*([\w@+\-][\w@.+\-]*)\.([A-Za-z][A-Za-z0-9]{0,9}))(?:(?::|#L)(\d{1,7})(?::\d+)?)?$',
+  ).firstMatch(s.trim());
+  if (m == null || m[1]!.contains('..')) return null;
+  if (!m[1]!.contains('/') && m[2]!.length < 2 && m[3]!.length < 2) return null;
+  return (m[1]!, m[4] == null ? null : int.parse(m[4]!));
+}
+
+TextSpan _span(
+  InlineRun r,
+  TextStyle code,
+  AxColors c,
+  void Function(String url)? onLink,
+  List<GestureRecognizer>? recognizers,
+) {
+  final to = r.url ?? (r.code && onLink != null && pathIn(r.text) != null ? r.text : null);
+  return TextSpan(
+    text: r.text,
+    recognizer: to == null || onLink == null || recognizers == null
+        ? null
+        : (() {
+            final t = TapGestureRecognizer()..onTap = () => onLink(to);
+            recognizers.add(t);
+            return t;
+          })(),
+    mouseCursor: to == null || onLink == null ? null : SystemMouseCursors.click,
+    semanticsLabel: to == null ? null : '${r.text}, link',
+    style: (r.code ? code : const TextStyle()).copyWith(
+      fontVariations: r.strong && !r.code ? const [FontVariation('wght', 640)] : null,
+      fontStyle: r.em ? FontStyle.italic : null,
+      decoration: r.url != null
+          ? TextDecoration.underline
+          : r.del
+          ? TextDecoration.lineThrough
+          : null,
+      decorationColor: r.url != null ? c.ink4 : null,
+      color: r.url != null ? c.liveText : null,
+    ),
+  );
+}
 
 /// Paints a tile under each piece of code in [words], which [child] shows.
 class CodeTiles extends SingleChildRenderObjectWidget {

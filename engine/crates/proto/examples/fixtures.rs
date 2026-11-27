@@ -249,6 +249,61 @@ fn main() -> Result<(), serde_json::Error> {
                 ],
             }])?,
         },
+        Message::Ok {
+            id: 9,
+            result: serde_json::to_value(FileText {
+                path: "a/b.png".into(),
+                size: 8,
+                digest: "d".into(),
+                kind: "image".into(),
+                text: Some("t".into()),
+                image: Some("png".into()),
+                bytes: Some("iVBORw0KGgo=".into()),
+                whole: true,
+            })?,
+        },
+        Message::Ok {
+            id: 10,
+            result: serde_json::to_value(FileList {
+                path: "a".into(),
+                entries: vec![
+                    FileEntry { name: "b".into(), folder: true },
+                    FileEntry { name: "c.rs".into(), folder: false },
+                ],
+                hidden: 2,
+                whole: false,
+            })?,
+        },
+        Message::Ok {
+            id: 11,
+            result: serde_json::to_value(Found {
+                hits: vec![Hit { path: "a/c.rs".into(), line: 4, text: "fn x".into() }],
+                files: 1,
+                unread: 3,
+                whole: false,
+                ended: Some("too many files".into()),
+            })?,
+        },
+        Message::Ok {
+            id: 12,
+            result: serde_json::to_value([JobInfo {
+                session: SessionId("s_1".into()),
+                agent: AgentId("a_1".into()),
+                job: 2,
+                command: "npm run dev".into(),
+                age: 30,
+                ended: Some("ended: exit 1".into()),
+                last: "ready\n".into(),
+            }])?,
+        },
+        Message::Ok {
+            id: 13,
+            result: serde_json::to_value([EditorInfo {
+                id: "zed".into(),
+                name: "Zed".into(),
+                path: "/usr/local/bin/zed".into(),
+            }])?,
+        },
         Message::Open { open: "/w".into() },
     ] {
         println!("{}", serde_json::to_string(&m)?);

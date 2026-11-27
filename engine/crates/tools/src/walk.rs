@@ -335,6 +335,90 @@ impl Look<'_> {
     }
 }
 
+/// A line that was found, for a person: where, and what it says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hit {
+    pub path: String,
+    pub line: u32,
+    pub text: String,
+}
+
+/// What a person looks for, as an expression: the words as they are, or as a regular expression;
+/// whole words only; with case or without.
+pub fn pattern(
+    words: &str,
+    case: bool,
+    word: bool,
+    expression: bool,
+) -> Result<regex::bytes::Regex, String> {
+    if words.is_empty() || words.len() > 1000 {
+        return Err("say what to look for, in at most 1000 characters".into());
+    }
+    let body = if expression { words.to_owned() } else { regex::escape(words) };
+    let body = if word { format!(r"\b(?:{body})\b") } else { body };
+    regex::bytes::RegexBuilder::new(&body)
+        .case_insensitive(!case)
+        .size_limit(4 * 1024 * 1024)
+        .build()
+        .map_err(|e| format!("the pattern cannot be used: {e}"))
+}
+
+impl Look<'_> {
+    /// Every file's path below the folder, with `/` between names, in order, at most `most`.
+    pub fn names(&self, most: usize) -> (Vec<String>, Skipped) {
+        let mut out = Vec::new();
+        let mut w = self.walk();
+        w.files(self.dir, &mut |_, _, _, rel| {
+            out.push(rel.to_owned());
+            out.len() < most
+        });
+        if out.len() >= most && w.skipped.ended.is_none() {
+            w.skipped.ended = Some("too many files");
+        }
+        (out, w.skipped)
+    }
+
+    /// Lines that `re` finds, at most `most`, and in how many files.
+    pub fn hits(&self, re: &regex::bytes::Regex, most: usize) -> (Vec<Hit>, usize, Skipped) {
+        let (mut out, mut files, mut unread) = (Vec::new(), 0, 0);
+        let mut w = self.walk();
+        w.files(self.dir, &mut |dir, name, _, rel| {
+            let Some(text) = read_in(dir, name, LARGEST) else {
+                unread += 1;
+                return true;
+            };
+            if text[..text.len().min(8192)].contains(&0) {
+                unread += 1;
+                return true;
+            }
+            let mut any = false;
+            for (i, l) in text.split(|b| *b == b'\n').enumerate() {
+                if out.len() >= most {
+                    break;
+                }
+                if !re.is_match(l) {
+                    continue;
+                }
+                if !any {
+                    files += 1;
+                    any = true;
+                }
+                let l = String::from_utf8_lossy(l);
+                let l = l.trim_end_matches('\r');
+                let cut = l.char_indices().nth(SHOWN).map_or(l.len(), |c| c.0);
+                let line = u32::try_from(i + 1).unwrap_or(u32::MAX);
+                out.push(Hit { path: rel.to_owned(), line, text: l[..cut].to_owned() });
+            }
+            out.len() < most
+        });
+        if out.len() >= most && w.skipped.ended.is_none() {
+            w.skipped.ended = Some("there are more than can be shown");
+        }
+        w.skipped.unread = unread;
+        (out, files, w.skipped)
+    }
+}
+
 /// A pattern without a `/` fits a name in any folder.
 fn glob(pattern: &str) -> Result<ignore::overrides::Override, String> {
     if pattern.len() > 1000 {
@@ -401,6 +485,38 @@ mod tests {
         );
         let e = self::t(&[]);
         assert_eq!(e.look(ALL).list(10), "(the folder is empty)");
+    }
+
+    #[test]
+    fn names_and_lines_for_a_person() {
+        let t = t(&[
+            ("b.rs", "one\nTwo two\r\n"),
+            ("a/c.rs", "two\n"),
+            (".gitignore", "out/\n"),
+            ("out/x", "two\n"),
+            ("bin", "two\0"),
+        ]);
+        let (names, skipped) = t.look(ALL).names(10);
+        assert_eq!(names, [".gitignore", "a/c.rs", "b.rs", "bin"]);
+        assert_eq!(skipped, Skipped::default());
+        let (two, s) = t.look(ALL).names(2);
+        assert_eq!((two.len(), s.ended), (2, Some("too many files")));
+        let re = pattern("two", false, false, false).unwrap();
+        let (hits, files, s) = t.look(ALL).hits(&re, 10);
+        let got: Vec<_> = hits.iter().map(|h| (h.path.as_str(), h.line, h.text.as_str())).collect();
+        assert_eq!(got, [("a/c.rs", 1, "two"), ("b.rs", 2, "Two two")]);
+        assert_eq!((files, s.unread, s.ended), (2, 1, None));
+        let (one, _, s) = t.look(ALL).hits(&re, 1);
+        assert_eq!((one.len(), s.ended), (1, Some("there are more than can be shown")));
+        let (kept, _, s) = t.look(&|p| p.name() != "c.rs").hits(&re, 10);
+        assert_eq!((kept.len(), s.kept), (1, 1));
+        let n = |re| t.look(ALL).hits(&re, 10).0.len();
+        assert_eq!(n(pattern("Two", true, false, false).unwrap()), 1, "with case");
+        assert_eq!(n(pattern("tw", false, true, false).unwrap()), 0, "whole words");
+        assert_eq!(n(pattern("t.o", false, false, false).unwrap()), 0, "as written");
+        assert_eq!(n(pattern("t.o", false, false, true).unwrap()), 2, "an expression");
+        assert!(pattern("(", false, false, true).is_err());
+        assert!(pattern("", false, false, false).is_err());
     }
 
     #[test]

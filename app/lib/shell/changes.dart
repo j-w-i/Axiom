@@ -12,6 +12,8 @@ import '../patterns/transcript_parts.dart';
 import '../transcript/safe_text.dart';
 import '../ui/controls.dart';
 import '../ui/icons.dart';
+import '../ui/overlay.dart';
+import '../ui/prefs.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'drafts.dart';
@@ -44,6 +46,11 @@ class FolderChanges extends ChangeNotifier {
 
   void toggle(String path) {
     opened.contains(path) ? opened.remove(path) : opened.add(path);
+    notifyListeners();
+  }
+
+  void closeAll() {
+    opened.clear();
     notifyListeners();
   }
 
@@ -108,10 +115,15 @@ class ChangesView extends StatefulWidget {
     required this.draft,
     super.key,
     this.lead = const [],
+    this.tail = const [],
+    this.onRead,
   });
 
-  /// What stands over it in the panel.
-  final List<Widget> lead;
+  /// What stands over it in the panel, and under it.
+  final List<Widget> lead, tail;
+
+  /// A file is to be read, by its path in the folder.
+  final ValueChanged<String>? onRead;
   final FolderChanges changes;
 
   /// Who is told of what is said about a line, and where that is written.
@@ -185,6 +197,7 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
                 files.fold(0, (n, f) => n + f.$2.removed),
               ),
             const SizedBox(width: 2),
+            if (n > 0) DiffMenu(onClose: now.opened.isEmpty ? null : now.closeAll),
             AxButton.icon(
               AxIcon.refresh,
               label: 'Refresh',
@@ -212,17 +225,21 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
           ),
         ),
     ];
+    final more = words == null && !all!.whole && !now.folded ? 1 : 0;
+    final tail = [if (widget.tail.isNotEmpty) const SizedBox(height: 10), ...widget.tail];
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(8, 0, AxSpace.edge, AxSpace.edge),
-      itemCount: head.length + shown + (words == null && !all!.whole && !now.folded ? 1 : 0),
+      itemCount: head.length + shown + more + tail.length,
       itemBuilder: (context, i) => i < head.length
           ? head[i]
           : i < head.length + shown
           ? _file(files[i - head.length], i - head.length, n)
-          : Padding(
+          : i < head.length + shown + more
+          ? Padding(
               padding: const EdgeInsets.fromLTRB(AxSpace.card, 10, AxSpace.card, 0),
               child: Text('There is more than can be shown here.', style: t.type.label.ink(c.ink3)),
-            ),
+            )
+          : tail[i - head.length - shown - more],
     );
   }
 
@@ -236,6 +253,9 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
       last: i == n - 1,
       open: widget.changes.opened.contains(f.$1.path),
       onOpen: () => widget.changes.toggle(f.$1.path),
+      onRead: f.$1.what == 'removed' || widget.onRead == null
+          ? null
+          : () => widget.onRead!(f.$1.path),
     ),
   );
 }
@@ -254,8 +274,12 @@ class _FileRow extends StatelessWidget {
     this.tag,
     this.shut = false,
     this.last = false,
+    this.onRead,
   });
   final bool last;
+
+  /// The file is read, whole, in the panel.
+  final VoidCallback? onRead;
 
   /// What it is, in a word, where that is more than how it has changed.
   final String? tag;
@@ -278,6 +302,7 @@ class _FileRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Ax.of(context), c = t.colors;
+    final shape = diffShape(context);
     final lines = diff.lines, add = diff.added, remove = diff.removed, left = diff.left;
     final open = this.open && lines.isNotEmpty;
     final name = oneLine(literal(file.path), 300);
@@ -307,6 +332,14 @@ class _FileRow extends StatelessWidget {
                   liveRegion: true,
                   child: Text('In your message', style: t.type.small.ink(c.ink3)),
                 ),
+              ),
+            if (onRead case final read?)
+              AxButton.icon(
+                AxIcon.file,
+                label: 'Read $name',
+                tone: AxTone.quiet,
+                size: 28,
+                onPressed: read,
               ),
             if (open)
               AxButton.icon(
@@ -344,8 +377,9 @@ class _FileRow extends StatelessWidget {
               children: [
                 DiffLines(
                   lines,
+                  shape: shape,
                   onLine: (l) => remarks.begin(file.path, l),
-                  at: remarks.lineOf(file.path, lines),
+                  at: remarks.lineOf(file.path, shape.space ? lines : withoutSpace(lines)),
                   note: remarks.isOn(file.path) ? remarks.editor(context, digest) : null,
                 ),
                 if (left > 0)
@@ -389,11 +423,8 @@ mixin _Remarks<W extends StatefulWidget> on State<W> {
   bool isOn(String path) => _on == path;
 
   /// The line it is about, if it is there still.
-  DiffLine? lineOf(String path, List<DiffLine> lines) => _on != path || _at == null
-      ? null
-      : lines
-            .where((l) => l.kind == _at!.kind && l.number == _at!.number && l.text == _at!.text)
-            .firstOrNull;
+  DiffLine? lineOf(String path, List<DiffLine> lines) =>
+      _on != path || _at == null ? null : lines.where((l) => l == _at).firstOrNull;
 
   /// [line]: null, about the whole file.
   void begin(String path, DiffLine? line) {
@@ -488,8 +519,13 @@ class CopyView extends StatefulWidget {
     required this.draft,
     super.key,
     this.lead = const [],
+    this.tail = const [],
+    this.onRead,
   });
-  final List<Widget> lead;
+  final List<Widget> lead, tail;
+
+  /// A file of the copy is to be read, by its path in it.
+  final ValueChanged<String>? onRead;
   final HostStore store;
   final SessionModel session;
   final AgentModel agent;
@@ -757,12 +793,23 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         files.isEmpty
             ? '${widget.agent.name}\'s copy'
             : '${_files(files.length)} in ${widget.agent.name}\'s copy',
-        AxButton.icon(
-          AxIcon.refresh,
-          label: 'Refresh',
-          tone: AxTone.quiet,
-          size: 26,
-          onPressed: _busy ? null : () => unawaited(_look()),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (files.isNotEmpty)
+              DiffMenu(
+                onClose: files.every((f) => _shut.contains(f.path))
+                    ? null
+                    : () => setState(() => _shut.addAll(files.map((f) => f.path))),
+              ),
+            AxButton.icon(
+              AxIcon.refresh,
+              label: 'Refresh',
+              tone: AxTone.quiet,
+              size: 26,
+              onPressed: _busy ? null : () => unawaited(_look()),
+            ),
+          ],
         ),
         acts: true,
       ),
@@ -866,6 +913,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
           ),
         ),
       const SizedBox(height: 16),
+      ...widget.tail,
     ];
     final n = words == null ? files.length : 0;
     return ListView.builder(
@@ -896,6 +944,7 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
       onOpen: () => setState(() {
         _shut.contains(f.path) ? _shut.remove(f.path) : _shut.add(f.path);
       }),
+      onRead: f.digest == null || widget.onRead == null ? null : () => widget.onRead!(f.path),
       leading: Padding(
         padding: const EdgeInsets.only(left: 6, right: 4),
         child: AxCheck(
@@ -928,6 +977,69 @@ class _CopyViewState extends State<CopyView> with _Remarks<CopyView> {
         if (f.others.isNotEmpty)
           ('Also changed by ${f.others.map((o) => oneLine(o, 40)).join(', ')}.', true),
       ],
+    );
+  }
+}
+
+/// How changes are shown, as their person chose.
+DiffShape diffShape(BuildContext context) {
+  final p = PrefsScope.of(context);
+  return DiffShape(side: p.diffSide, space: p.diffSpace, wrap: p.diffWrap);
+}
+
+enum _Shape { side, space, wrap, close }
+
+/// How changes are looked at: two sides, white space, long lines; and every file closed.
+class DiffMenu extends StatelessWidget {
+  const DiffMenu({super.key, this.onClose});
+
+  /// Closes every file that is open; null if none is.
+  final VoidCallback? onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final prefs = PrefsScope.maybeOf(context);
+    final p = PrefsScope.of(context);
+    AxIcon? on(bool b) => b ? AxIcon.check : null;
+    return AxPopover(
+      width: 260,
+      alignEnd: true,
+      anchor: (context, open, toggle) => AxButton.icon(
+        AxIcon.more,
+        label: 'How changes are shown',
+        tone: AxTone.quiet,
+        size: 26,
+        onPressed: toggle,
+      ),
+      panel: (context, close) => AxMenu<_Shape>(
+        label: 'How changes are shown',
+        items: [
+          AxMenuItem(
+            _Shape.side,
+            'Side by side',
+            icon: on(p.diffSide),
+            detail: 'Where the panel is wide enough',
+          ),
+          AxMenuItem(_Shape.space, 'Ignore white space', icon: on(!p.diffSpace)),
+          AxMenuItem(_Shape.wrap, 'Wrap long lines', icon: on(p.diffWrap)),
+          AxMenuItem(_Shape.close, 'Close all files', enabled: onClose != null),
+        ],
+        onChosen: (v) {
+          close();
+          if (prefs == null) return;
+          final now = prefs.value;
+          switch (v) {
+            case _Shape.side:
+              prefs.value = now.copyWith(diffSide: !now.diffSide);
+            case _Shape.space:
+              prefs.value = now.copyWith(diffSpace: !now.diffSpace);
+            case _Shape.wrap:
+              prefs.value = now.copyWith(diffWrap: !now.diffWrap);
+            case _Shape.close:
+              onClose?.call();
+          }
+        },
+      ),
     );
   }
 }

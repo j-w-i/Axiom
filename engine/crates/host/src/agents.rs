@@ -477,6 +477,44 @@ impl Agents {
         self.site(&s, who, true)
     }
 
+    /// What agents have left running, in every session this host has open.
+    pub fn jobs(&self) -> Vec<(SessionId, AgentId, Vec<axiom_tools::jobs::Shown>)> {
+        let all = self.parties();
+        let mut out = Vec::new();
+        for (s, p) in all.iter() {
+            for (a, slot) in &p.agents {
+                let shown = slot.seen.1.shown();
+                if !shown.is_empty() {
+                    out.push((s.clone(), a.clone(), shown));
+                }
+            }
+        }
+        out
+    }
+
+    /// Stops one of an agent's jobs, if the host has it.
+    pub fn stop_job(&self, s: &SessionId, a: &AgentId, job: u32) -> Result<(), WireError> {
+        let slot = self.parties().get(s).and_then(|p| p.agents.get(a).cloned());
+        let slot = slot.ok_or_else(|| WireError::new(ErrorCode::NotFound, "no such job"))?;
+        let o = slot.seen.1.stop(job);
+        if o.ok {
+            Ok(())
+        } else {
+            Err(WireError::new(ErrorCode::NotFound, o.text.trim().to_owned()))
+        }
+    }
+
+    /// Where a person's own editors are looked for (decision 0019).
+    pub fn editors(&self, written: Reach) -> Result<crate::editor::Where, WireError> {
+        let home = self.home.as_deref().ok_or_else(|| bad("there is no home folder"))?;
+        let home = real(home)?;
+        let path = self.looked_in(&axiom_tools::system(&home).0)?;
+        let tmp =
+            Place::new(plain_verbatim(std::env::temp_dir())).map_err(|e| bad(e.to_string()))?;
+        let apps = vec![PathBuf::from("/Applications"), home.as_path().join("Applications")];
+        Ok(crate::editor::Where { path, home, written, tmp, apps })
+    }
+
     /// Programs of delegated agents end.
     pub async fn end(&self) {
         let slots: Vec<Arc<Slot>> =

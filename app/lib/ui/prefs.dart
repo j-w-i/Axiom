@@ -19,6 +19,9 @@ class Prefs {
     this.favourites = const [],
     this.hidden = const [],
     this.used = const [],
+    this.diffSide = false,
+    this.diffSpace = true,
+    this.diffWrap = false,
   });
 
   /// Whatever is not known is as it comes: an older or a newer Axiom may have written it.
@@ -45,6 +48,9 @@ class Prefs {
       favourites: names(j['favourites'], most),
       hidden: names(j['hidden'], most),
       used: names(j['used'], lately),
+      diffSide: j['diffSide'] is bool && j['diffSide'] as bool,
+      diffSpace: j['diffSpace'] is! bool || j['diffSpace'] as bool,
+      diffWrap: j['diffWrap'] is bool && j['diffWrap'] as bool,
     );
   }
 
@@ -80,6 +86,10 @@ class Prefs {
   final List<String> favourites, hidden, used;
   static const most = 200, lately = 12;
 
+  /// How changes are looked at: two sides where there is room, white space that counts, long lines
+  /// that go on.
+  final bool diffSide, diffSpace, diffWrap;
+
   /// One has been chosen.
   Prefs using(String model) =>
       copyWith(used: [model, ...used.where((m) => m != model)].take(lately).toList());
@@ -102,6 +112,9 @@ class Prefs {
     List<String>? favourites,
     List<String>? hidden,
     List<String>? used,
+    bool? diffSide,
+    bool? diffSpace,
+    bool? diffWrap,
   }) => Prefs(
     look: look ?? this.look,
     text: text ?? this.text,
@@ -113,6 +126,9 @@ class Prefs {
     favourites: favourites ?? this.favourites,
     hidden: hidden ?? this.hidden,
     used: used ?? this.used,
+    diffSide: diffSide ?? this.diffSide,
+    diffSpace: diffSpace ?? this.diffSpace,
+    diffWrap: diffWrap ?? this.diffWrap,
   );
 
   /// The next one up or down, as far as there is one.
@@ -132,6 +148,9 @@ class Prefs {
     'favourites': favourites,
     'hidden': hidden,
     'used': used,
+    'diffSide': diffSide,
+    'diffSpace': diffSpace,
+    'diffWrap': diffWrap,
   };
 
   @override
@@ -146,7 +165,10 @@ class Prefs {
       other.harnesses == harnesses &&
       listEquals(other.favourites, favourites) &&
       listEquals(other.hidden, hidden) &&
-      listEquals(other.used, used);
+      listEquals(other.used, used) &&
+      other.diffSide == diffSide &&
+      other.diffSpace == diffSpace &&
+      other.diffWrap == diffWrap;
   @override
   int get hashCode => Object.hash(
     look,
@@ -159,6 +181,9 @@ class Prefs {
     Object.hashAll(favourites),
     Object.hashAll(hidden),
     Object.hashAll(used),
+    diffSide,
+    diffSpace,
+    diffWrap,
   );
 }
 

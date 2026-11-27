@@ -89,6 +89,44 @@ class Asked extends HostStore {
     if (x.speed case final v?) 'speed $v',
   ], 'a_new');
 
+  /// What a folder holds, as M4's calls answer: by path.
+  Map<String, FileText> texts = const {};
+  Map<String, FileList> folders = const {};
+  List<String> fits = const [];
+  FoundLines found = const FoundLines([]);
+  List<JobInfo> running = const [];
+  @override
+  Future<FileText> readFile(String session, String path, {String? agent}) => _do([
+    'read',
+    path,
+    ?agent,
+  ], texts[path] ?? (throw const Failed(1, 'not_found', 'no such file')));
+  @override
+  Future<FileList> listFiles(String session, String path, {String? agent}) =>
+      _do(['list', path], folders[path] ?? FileList(path, const []));
+  @override
+  Future<List<String>> findFiles(String session, String words, {String? agent}) =>
+      _do(['find', words], fits);
+  @override
+  Future<FoundLines> searchFiles(
+    String session,
+    String words, {
+    String? agent,
+    bool matchCase = false,
+    bool word = false,
+    bool regex = false,
+  }) => _do(['search', words, if (matchCase) 'case', if (word) 'word', if (regex) 'regex'], found);
+  @override
+  Future<void> openFile(String session, String path, {String? agent, int? line, String? editor}) =>
+      _do(['edit', path, line], null);
+  @override
+  Future<void> showFile(String session, String path, {String? agent}) => _do(['show', path], null);
+  // Asked again and again while shown: not among the calls.
+  @override
+  Future<List<JobInfo>> jobs() async => running;
+  @override
+  Future<void> stopJob(String session, String agent, int job) => _do(['stop', agent, job], null);
+
   CopyChanges copy = const CopyChanges();
   @override
   Future<CopyChanges> copyChanges(String session, String agent) =>

@@ -174,6 +174,120 @@ class Changed {
   final String path, what;
 }
 
+/// A file of a folder, for its person to read.
+class FileText {
+  const FileText(
+    this.path, {
+    this.size = 0,
+    this.digest = '',
+    this.kind = 'text',
+    this.text,
+    this.image,
+    this.bytes,
+    this.whole = true,
+  });
+  FileText.decode(Json j)
+    : path = j['path']! as String,
+      size = j['size']! as int,
+      digest = j['digest']! as String,
+      kind = j['kind']! as String,
+      text = j['text'] as String?,
+      image = j['image'] as String?,
+      bytes = j['bytes'] as String?,
+      whole = j['whole']! as bool;
+  final String path, digest;
+  final int size;
+
+  /// `text`, `image` or `other`.
+  final String kind;
+  final String? text;
+
+  /// Of a picture: what kind it is, and its bytes in base64.
+  final String? image, bytes;
+  final bool whole;
+}
+
+/// What a folder of a folder holds.
+class FileList {
+  const FileList(this.path, this.entries, {this.hidden = 0, this.whole = true});
+  FileList.decode(Json j)
+    : path = j['path']! as String,
+      entries = [
+        for (final e in j['entries']! as List<Object?>)
+          FileEntry((e! as Json)['name']! as String, folder: (e as Json)['folder'] == true),
+      ],
+      hidden = j['hidden'] as int? ?? 0,
+      whole = j['whole']! as bool;
+  final String path;
+  final List<FileEntry> entries;
+  final int hidden;
+  final bool whole;
+}
+
+class FileEntry {
+  const FileEntry(this.name, {this.folder = false});
+  final String name;
+  final bool folder;
+}
+
+/// Lines found in a folder's files.
+class FoundLines {
+  const FoundLines(this.hits, {this.files = 0, this.unread = 0, this.whole = true, this.ended});
+  FoundLines.decode(Json j)
+    : hits = [
+        for (final h in j['hits']! as List<Object?>)
+          Hit((h! as Json)['path']! as String, (h as Json)['line']! as int, h['text']! as String),
+      ],
+      files = j['files']! as int,
+      unread = j['unread'] as int? ?? 0,
+      whole = j['whole']! as bool,
+      ended = j['ended'] as String?;
+  final List<Hit> hits;
+  final int files, unread;
+  final bool whole;
+  final String? ended;
+}
+
+class Hit {
+  const Hit(this.path, this.line, this.text);
+  final String path, text;
+  final int line;
+}
+
+/// A command an agent left running.
+class JobInfo {
+  const JobInfo(
+    this.session,
+    this.agent,
+    this.job,
+    this.command, {
+    this.age = 0,
+    this.ended,
+    this.last = '',
+  });
+  JobInfo.decode(Json j)
+    : session = j['session']! as String,
+      agent = j['agent']! as String,
+      job = j['job']! as int,
+      command = j['command']! as String,
+      age = j['age']! as int,
+      ended = j['ended'] as String?,
+      last = j['last']! as String;
+  final String session, agent, command, last;
+  final int job, age;
+  final String? ended;
+}
+
+/// An editor of the person's own.
+class EditorInfo {
+  const EditorInfo(this.id, this.name, this.path);
+  EditorInfo.decode(Json j)
+    : id = j['id']! as String,
+      name = j['name']! as String,
+      path = j['path']! as String;
+  final String id, name, path;
+}
+
 /// What an agent has changed in its own copy of the folder.
 class CopyChanges {
   const CopyChanges({

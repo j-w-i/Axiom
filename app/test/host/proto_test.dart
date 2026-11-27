@@ -118,6 +118,25 @@ void main() {
     }
   });
 
+  test('what a person reads in a folder arrives, and what agents left running', () {
+    Object? result(int id) => messages.whereType<Answered>().firstWhere((m) => m.id == id).result;
+    final f = FileText.decode(result(9)! as Json);
+    expect([f.path, f.size, f.digest, f.kind], ['a/b.png', 8, 'd', 'image']);
+    expect([f.text, f.image, f.bytes, f.whole], ['t', 'png', 'iVBORw0KGgo=', true]);
+    final l = FileList.decode(result(10)! as Json);
+    expect([l.path, l.hidden, l.whole], ['a', 2, false]);
+    expect([for (final e in l.entries) (e.name, e.folder)], [('b', true), ('c.rs', false)]);
+    final found = FoundLines.decode(result(11)! as Json);
+    final h = found.hits.single;
+    expect([h.path, h.line, h.text], ['a/c.rs', 4, 'fn x']);
+    expect([found.files, found.unread, found.whole, found.ended], [1, 3, false, 'too many files']);
+    final j = JobInfo.decode((result(12)! as List<Object?>).single! as Json);
+    expect([j.session, j.agent, j.job, j.command], ['s_1', 'a_1', 2, 'npm run dev']);
+    expect([j.age, j.ended, j.last], [30, 'ended: exit 1', 'ready\n']);
+    final e = EditorInfo.decode((result(13)! as List<Object?>).single! as Json);
+    expect([e.id, e.name, e.path], ['zed', 'Zed', '/usr/local/bin/zed']);
+  });
+
   test('lists of models and what is said of programs arrive', () {
     Object? first(int n) => ((messages[n] as Answered).result! as List<Object?>).first;
     final l = ModelList.decode(first(8)! as Json), m = l.models.single;

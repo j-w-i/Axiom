@@ -16,5 +16,5 @@ pub mod shell;
 pub use caps::{Budget, Caps, Host, Net, Reach, Tools};
 pub use paths::{BadPath, Place};
 pub use profile::{BadProfile, Keep, Profile};
-pub use request::{Answer, Approval, Ask, NotAnswered, Requests, Unsandboxed};
+pub use request::{Answer, Approval, Ask, NotAnswered, PersonsOwn, Requests, Unsandboxed};
 pub use rules::{Access, Action, Decision, Policy, Verdict};
