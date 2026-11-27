@@ -1,6 +1,7 @@
 //! Adapters through which Axiom drives agent programs a person has installed (decision 0006). The
-//! program is the vendor's, unmodified, and signs in by itself: no adapter reads, copies or passes a
-//! credential, or says it is another client than Axiom (decision 0007).
+//! program is the vendor's, unmodified. One that signs in by itself is never given, and never read
+//! for, a credential, and none is told it is another client than Axiom (decision 0007). One that runs
+//! the model of an account of Axiom's is given that account's key in its environment (0023).
 //!
 //! A harness needs its own network and its own sign-in, so it runs outside Axiom's sandbox, with a
 //! person's token for that. Who contains it is then the harness itself, if its sandbox is on, or
@@ -18,6 +19,7 @@ mod drive;
 mod event;
 pub mod find;
 pub mod frames;
+pub mod given;
 mod ledger;
 mod rpc;
 mod talk;
@@ -64,6 +66,9 @@ pub struct Site {
     pub config: Option<Place>,
     /// What else its person says it is given.
     pub vars: Vec<Var>,
+    /// An account of Axiom's that it runs a model of (decision 0023): what Axiom sets for it, after
+    /// what its person said, and the key. Its files are written before it is started.
+    pub given: given::Given,
     pub limits: Limits,
 }
 
@@ -94,6 +99,9 @@ pub struct Start {
     pub speed: Option<String>,
     /// Further arguments its person wants it started with.
     pub extra: Vec<String>,
+    /// It runs an account of Axiom's, and its access is in what Axiom gave it for that (decision
+    /// 0023), not in a mode it is set to.
+    pub configured: bool,
 }
 
 /// A Model Context Protocol server on standard streams.
@@ -221,7 +229,7 @@ impl Harness {
             read_only: true,
             person_only: true,
             probed: Some(tx),
-            hide: vars::Hide::of(&site.vars),
+            hide: vars::Hide::of(site.vars.iter().chain(&site.given.key)),
         };
         let (_handle, mut events) = drive::drive(given).ok_or(Error::NoPipe)?;
         let mut words = None;
@@ -272,7 +280,7 @@ impl Harness {
             read_only,
             person_only: self.person_only(),
             probed: None,
-            hide: vars::Hide::of(&site.vars),
+            hide: vars::Hide::of(site.vars.iter().chain(&site.given.key)),
         };
         let (handle, events) = drive::drive(given).ok_or(Error::NoPipe)?;
         Ok(Live { handle, events, containment: l.containment })
@@ -293,6 +301,13 @@ fn run(
             return Err(Error::Spawn(axiom_spawn::SpawnError::Env(v.name.clone())));
         }
         env.set_said(&v.name, &v.value, v.secret)?;
+    }
+    if let Some(k) = &site.given.key {
+        env.set_said(&k.name, &k.value, k.secret)?;
+    }
+    // Axiom's own, over whatever was said.
+    for (name, value) in &site.given.vars {
+        env.set(name, value)?;
     }
     if matches!(harness, Harness::Claude(_)) && site.vars.iter().any(|v| v.secret) {
         // Then it keeps them from the commands it runs (code.claude.com/docs/en/env-vars, read

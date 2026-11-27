@@ -87,6 +87,7 @@ impl World {
             written,
             config: None,
             vars: vec![],
+            given: Default::default(),
             limits: self.limits.clone(),
         }
     }
@@ -102,6 +103,7 @@ impl World {
             tools: None,
             speed: None,
             extra: vec![],
+            configured: false,
         }
     }
     pub fn run(&self, h: &Harness, access: Access) -> Run {

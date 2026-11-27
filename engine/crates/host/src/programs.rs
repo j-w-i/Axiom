@@ -412,7 +412,8 @@ fn acp() -> Harness {
 }
 
 fn own(id: &str, name: &str) -> Known {
-    Known { id: id.into(), name: name.into(), program: String::new(), harness: acp(), own: true }
+    let program = String::new();
+    Known { id: id.into(), name: name.into(), program, harness: acp(), own: true, runs: None }
 }
 
 #[cfg(all(test, unix))]

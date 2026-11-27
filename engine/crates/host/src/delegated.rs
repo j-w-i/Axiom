@@ -47,6 +47,8 @@ pub struct Known {
     pub harness: Harness,
     /// The person added it.
     pub own: bool,
+    /// It runs the models of accounts of Axiom's (decision 0023).
+    pub runs: Option<axiom_harness::given::Runs>,
 }
 
 pub fn known() -> Vec<Known> {
@@ -57,6 +59,7 @@ pub fn known() -> Vec<Known> {
             program: "claude".into(),
             harness: Harness::Claude(Prompts::Refused),
             own: false,
+            runs: None,
         },
         Known {
             id: "codex".into(),
@@ -64,6 +67,7 @@ pub fn known() -> Vec<Known> {
             program: "codex".into(),
             harness: Harness::Codex,
             own: false,
+            runs: None,
         },
     ];
     all.extend(KNOWN.iter().map(|k| Known {
@@ -72,6 +76,7 @@ pub fn known() -> Vec<Known> {
         program: k.program.into(),
         harness: Harness::Acp(k.acp()),
         own: false,
+        runs: k.runs,
     }));
     all
 }
@@ -95,6 +100,7 @@ impl Known {
             tools: None,
             speed: None,
             extra: Vec::new(),
+            configured: false,
         }
     }
 
@@ -148,10 +154,13 @@ impl Known {
         written: &Reach,
     ) -> Result<Program, String> {
         let program = self.find(how, path, written).map_err(|e| e.to_string())?;
+        let configured = self.runs.is_some() && s.execution.connection.is_some();
         let start = Start {
             extra: how.args.clone(),
             speed: s.execution.speed.clone(),
-            model: s.execution.model.clone(),
+            // What Axiom wrote for it says the model (decision 0023).
+            model: s.execution.model.clone().filter(|_| !configured),
+            configured,
             effort: s.execution.effort.clone(),
             ..self.start(workspace, access, s.trust)
         };
@@ -288,9 +297,11 @@ impl Worker {
         run: &RunId,
         cancel: &mut watch::Receiver<bool>,
     ) -> Result<mpsc::Sender<Turn>, Halt> {
+        let configured = self.known.runs.is_some() && self.setup.execution.connection.is_some();
         let mut start = Start {
             workspace: self.workspace.clone(),
-            model: self.setup.execution.model.clone(),
+            model: self.setup.execution.model.clone().filter(|_| !configured),
+            configured,
             effort: self.setup.execution.effort.clone(),
             access: self.access,
             resume: self.setup.resume.clone(),
@@ -298,7 +309,7 @@ impl Worker {
             by: By::Person,
             tools: None,
             speed: self.setup.execution.speed.clone(),
-            extra: self.how.args.clone(),
+            extra: self.how.args.iter().chain(&self.site.given.args).cloned().collect(),
         };
         // A key for it alone, gone with its attempt. Without one it works all the same.
         let grant = match &self.bridge {

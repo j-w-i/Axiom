@@ -405,6 +405,26 @@ impl Connections {
         Ok(())
     }
 
+    /// What a harness is given to run `model` of it (decision 0023): where, and its key from the
+    /// system's store. Never a plan's or a program's own account (0007).
+    pub fn given(&self, id: &str, model: &str) -> Result<axiom_harness::given::Account, WireError> {
+        let k = self.one(id)?;
+        if k.account.is_some() || PROGRAMS.iter().any(|p| p.0 == k.provider) {
+            return Err(bad("a plan or a program's own account runs only in its own program"));
+        }
+        let route = axiom_harness::given::Route::of(&k.provider, k.url.as_deref())
+            .ok_or_else(|| bad("no harness here runs this provider's models"))?;
+        let key = if k.secret {
+            let s = self.vault.get(&k.id).map_err(internal)?.ok_or_else(|| {
+                bad("the secret of this connection is not in the system's store any more; add it again")
+            })?;
+            Some(s.to_string())
+        } else {
+            None
+        };
+        Ok(axiom_harness::given::Account { route, model: model.to_owned(), key })
+    }
+
     /// A client for it.
     pub fn client(&self, id: &str) -> Result<Client, WireError> {
         let k = self.one(id)?;
