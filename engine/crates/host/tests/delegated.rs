@@ -1043,3 +1043,211 @@ async fn what_was_set_up_otherwise_is_not_started() {
     assert!(e.unwrap_err().to_string().contains("its own tools only"));
     assert!(!t.f.dir.path().join("bin/seen.json").exists());
 }
+
+// An account of Axiom's, run by DeepSeek Harness or OpenCode (decision 0023).
+
+const KEY: &str = "sk-canary-0023-key";
+
+impl T {
+    async fn account(&mut self, provider: &str, url: Option<&str>, key: Option<&str>) -> String {
+        let call = Call::ConnectionAdd {
+            name: "Mine".into(),
+            provider: provider.into(),
+            url: url.map(str::to_owned),
+            secret: key.map(|k| SecretText(k.into())),
+        };
+        self.c.call(call).await.unwrap()["connection"].as_str().unwrap().to_owned()
+    }
+    fn runs(&self, harness: &str, connection: &str, access: Access, trust: bool) -> Call {
+        let mut call = self.add(harness, access, trust);
+        let Call::AgentAdd { execution, .. } = &mut call else { unreachable!() };
+        execution.connection = Some(connection.into());
+        execution.model = Some("gpt-x".into());
+        call
+    }
+    fn seen(&self) -> Value {
+        let at = self.f.dir.path().join("bin/seen.json");
+        serde_json::from_str(&std::fs::read_to_string(at).unwrap()).unwrap()
+    }
+}
+
+#[tokio::test]
+async fn an_accounts_model_runs_in_deepseek_harness_with_the_key_in_its_environment_alone() {
+    // What it says of the key is not kept.
+    let said = format!("Done with {KEY}.");
+    let mut t = T::new(&acp(&[hear("go"), words(&said), end(2, "end_turn")])).await;
+    std::fs::copy(FAKE, t.f.dir.path().join("bin/dsh")).unwrap();
+    let c = t.account("openai", None, Some(KEY)).await;
+    // It reads what a folder says of it: only where a person said that may take effect.
+    let e = t.c.call(t.runs("dsh", &c, Access::Work, false)).await.unwrap_err().to_string();
+    assert!(e.contains("cannot be told to ignore the folder's own settings"), "{e}");
+    let v = t.c.call(t.runs("dsh", &c, Access::Work, true)).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    t.prompt(&a, "go").await;
+    let (subject, scope) = t.allow_start().await;
+    assert!(scope.contains("its own sandbox holds it back"), "{scope}");
+    assert!(!subject.contains(KEY) && !scope.contains(KEY));
+    let (o, _, all) = t.ended().await;
+    assert_eq!(o, Outcome::Completed);
+    assert_eq!(texts(&all, ItemKind::Prose), ["Done with (secret)."]);
+    let seen = t.seen();
+    let home = std::fs::canonicalize(t.f.paths.data.join("harnesses/dsh")).unwrap();
+    let patch = home.join(format!("agents/{}.patch.yml", a.0));
+    let args: Vec<&str> =
+        seen["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+    assert_eq!(args, ["--profile", "acp", "--patch", patch.to_str().unwrap()]);
+    let env = &seen["env"];
+    assert_eq!(env["OPENAI_API_KEY"], KEY);
+    assert_eq!(env["DSH_HOME"], home.to_str().unwrap());
+    assert_eq!(env["DSH_PERMISSION_MODE"], "workspace-write");
+    assert_eq!(env["DSH_TELEMETRY_DISABLED"], "1");
+    let text = std::fs::read_to_string(&patch).unwrap();
+    assert!(text.contains("provider: \"openai\"\n    model: \"gpt-x\""), "{text}");
+    // Nowhere else: not in what it was told, not in the journal, not in the record.
+    assert!(!text.contains(KEY));
+    assert!(!t.heard().contains(KEY));
+    assert!(!format!("{:?}", t.log).contains(KEY));
+    assert!(!format!("{:?}", t.audit().await).contains(KEY));
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(&patch).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(std::fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o700);
+    // The model, not set again over what it was given.
+    assert!(!t.heard().contains("session/set_config_option"));
+}
+
+#[tokio::test]
+async fn opencode_is_told_its_whole_configuration_and_reads_none_of_the_folders() {
+    let mut t = T::new(&acp(&[hear("go"), words("Done."), end(2, "end_turn")])).await;
+    std::fs::copy(FAKE, t.f.dir.path().join("bin/opencode")).unwrap();
+    let c = t.account("lm-studio", Some("http://127.0.0.1:1234/v1"), None).await;
+    // Without a person's word on the folder: it is told to read nothing of it.
+    let v = t.c.call(t.runs("opencode", &c, Access::Ask, false)).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    t.prompt(&a, "go").await;
+    t.allow_start().await;
+    assert_eq!(t.ended().await.0, Outcome::Completed);
+    let seen = t.seen();
+    assert_eq!(seen["args"], json!(["acp"]));
+    let env = &seen["env"];
+    let config: Value =
+        serde_json::from_str(env["OPENCODE_CONFIG_CONTENT"].as_str().unwrap()).unwrap();
+    assert_eq!(config["model"], "axiom-local/gpt-x");
+    assert_eq!(config["provider"]["axiom-local"]["options"]["baseURL"], "http://127.0.0.1:1234/v1");
+    assert_eq!(config["permission"], json!({"*": "ask"}));
+    assert_eq!(env["OPENCODE_DISABLE_PROJECT_CONFIG"], "1");
+    assert_eq!(env["AXIOM_LOCAL_KEY"], "none");
+    let data = std::fs::canonicalize(t.f.paths.data.join("harnesses/opencode")).unwrap();
+    assert_eq!(env["XDG_DATA_HOME"], data.join("data").to_str().unwrap());
+}
+
+#[tokio::test]
+async fn what_no_harness_here_runs_is_refused_in_words() {
+    let mut t = T::new(&acp(&[])).await;
+    for p in ["dsh", "opencode"] {
+        std::fs::copy(FAKE, t.f.dir.path().join("bin").join(p)).unwrap();
+    }
+    let bedrock = t
+        .account("bedrock", Some("https://bedrock-runtime.us-east-1.amazonaws.com"), Some(KEY))
+        .await;
+    let e = t.c.call(t.runs("opencode", &bedrock, Access::Ask, true)).await.unwrap_err();
+    assert!(e.to_string().contains("no harness here runs this provider's models"), "{e}");
+    // A program that runs no account of Axiom's is not given one.
+    let c = t.account("openai", None, Some(KEY)).await;
+    let e = t.c.call(t.runs("goose", &c, Access::Ask, true)).await.unwrap_err();
+    assert!(e.to_string().contains("its own sign-in"), "{e}");
+    let mut no_model = t.runs("dsh", &c, Access::Ask, true);
+    let Call::AgentAdd { execution, .. } = &mut no_model else { unreachable!() };
+    execution.model = None;
+    assert!(t.c.call(no_model).await.unwrap_err().to_string().contains("say which model"));
+}
+
+#[tokio::test]
+async fn who_runs_accounts_models_is_chosen_kept_and_said() {
+    let mut t = T::new(&acp(&[])).await;
+    let list = |v: Value| -> Vec<HarnessInfo> { serde_json::from_value(v).unwrap() };
+    let of = |all: &[HarnessInfo], id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+    let all = list(t.c.call(Call::Harnesses {}).await.unwrap());
+    let dsh = of(&all, "dsh");
+    // Not there: how a person installs it, at the version that was read.
+    assert!(dsh.runs_accounts && dsh.chosen && dsh.program.is_none());
+    assert_eq!(dsh.install.as_deref(), Some("npm install -g @deepseek-ai/dsh@0.2.2-rc.5"));
+    let goose = of(&all, "goose");
+    assert!(!goose.runs_accounts && !goose.chosen && goose.install.is_none());
+    assert_eq!(all.iter().filter(|h| h.chosen).count(), 1);
+    std::fs::copy(FAKE, t.f.dir.path().join("bin/dsh")).unwrap();
+    assert_eq!(of(&list(t.c.call(Call::Harnesses {}).await.unwrap()), "dsh").install, None);
+    // No harness said: the chosen one, and that is what is kept. (Without a key, which the store of
+    // the tests forgets with the host.)
+    let c = t.account("lm-studio", None, None).await;
+    let mut call = t.runs("", &c, Access::Ask, true);
+    t.c.call(call.clone()).await.unwrap();
+    let (on, _) = t
+        .until(|b| match b {
+            Body::AgentAdded { execution, .. } => Some(execution.harness.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(on, "dsh");
+    let e = t.c.call(Call::HarnessChoose { harness: "goose".into() }).await.unwrap_err();
+    assert!(e.to_string().contains("cannot run the models of accounts"), "{e}");
+    t.c.call(Call::HarnessChoose { harness: "opencode".into() }).await.unwrap();
+    t.restart().await;
+    let all = list(t.c.call(Call::Harnesses {}).await.unwrap());
+    assert!(of(&all, "opencode").chosen && !of(&all, "dsh").chosen);
+    let Call::AgentAdd { name, .. } = &mut call else { unreachable!() };
+    *name = "Second".into();
+    // Chosen while it is not there: an agent of it waits for it to be installed.
+    let e = t.c.call(call.clone()).await.unwrap_err().to_string();
+    assert!(e.contains("opencode is not in any of the folders"), "{e}");
+    std::fs::copy(FAKE, t.f.dir.path().join("bin/opencode")).unwrap();
+    t.c.call(call).await.unwrap();
+    let (on, _) = t
+        .until(|b| match b {
+            Body::AgentAdded { execution, name, .. } if name == "Second" => {
+                Some(execution.harness.clone())
+            }
+            _ => None,
+        })
+        .await;
+    assert_eq!(on, "opencode");
+}
+
+#[tokio::test]
+async fn pi_runs_an_accounts_model_by_its_rpc_and_only_works() {
+    let mut t = T::new(&[
+        json!({"hear": {"type": "get_state"}, "as": "s"}),
+        json!({"say": {"type": "response", "id": "$s/id", "command": "get_state", "success": true, "data": {"sessionId": "p1"}}}),
+        json!({"hear": {"type": "prompt", "message": "go"}, "as": "p"}),
+        json!({"say": {"type": "response", "id": "$p/id", "command": "prompt", "success": true}}),
+        json!({"say": {"type": "agent_start"}}),
+        json!({"say": {"type": "message_start", "message": {"role": "assistant"}}}),
+        json!({"say": {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "Done."}}}),
+        json!({"say": {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}}),
+        json!({"say": {"type": "agent_settled", "aborted": false}}),
+    ])
+    .await;
+    std::fs::copy(FAKE, t.f.dir.path().join("bin/pi")).unwrap();
+    let c = t.account("openai", None, Some(KEY)).await;
+    // It never asks: it is offered to work, and nothing else.
+    let e = t.c.call(t.runs("pi", &c, Access::Ask, true)).await.unwrap_err().to_string();
+    assert!(e.contains("no mode"), "{e}");
+    // Told to read none of the folder's own: no word on it is needed.
+    let v = t.c.call(t.runs("pi", &c, Access::Work, false)).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    t.prompt(&a, "go").await;
+    let (_, scope) = t.allow_start().await;
+    assert!(scope.contains("Outside Axiom's sandbox"), "{scope}");
+    let (o, _, all) = t.ended().await;
+    assert_eq!((o, texts(&all, ItemKind::Prose)), (Outcome::Completed, vec!["Done.".into()]));
+    let seen = t.seen();
+    let args: Vec<&str> =
+        seen["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+    let given = ["--no-session", "--offline", "--no-approve", "--provider", "openai"];
+    assert_eq!(args[..7], [&["--mode", "rpc"][..], &given[..]].concat());
+    assert_eq!(args[7..], ["--model", "gpt-x"]);
+    assert_eq!(seen["env"]["OPENAI_API_KEY"], KEY);
+    assert_eq!(seen["env"]["PI_OFFLINE"], "1");
+    let dir = std::fs::canonicalize(t.f.paths.data.join("harnesses/pi")).unwrap();
+    assert_eq!(seen["env"]["PI_CODING_AGENT_DIR"], dir.join("agents").join(&a.0).to_str().unwrap());
+    assert!(!t.heard().contains(KEY));
+}

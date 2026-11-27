@@ -557,7 +557,13 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                 onAccounts: () => _show(_View.accounts),
                 onCancel: _back,
               ),
-              _ when _view == _View.settings => SettingsPage(limits: widget.store.limits),
+              _ when _view == _View.settings => SettingsPage(
+                limits: widget.store.limits,
+                harnesses: widget.store.harnesses,
+                onChoose: (id) =>
+                    unawaited(widget.store.chooseHarness(id).catchError((Object _) {})),
+                onLook: () => unawaited(widget.store.loadHarnesses().catchError((Object _) {})),
+              ),
               _ when _view == _View.accounts => AccountsPage(
                 s,
                 onDone: () => _show(s.current == null ? _View.start : _View.work),

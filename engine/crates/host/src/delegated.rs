@@ -47,6 +47,20 @@ pub struct Known {
     pub harness: Harness,
     /// The person added it.
     pub own: bool,
+    /// It runs the models of accounts of Axiom's (decision 0023).
+    pub runs: Option<axiom_harness::given::Runs>,
+    /// What its own documentation has a person type to install it, at the version named here.
+    pub install: Option<&'static str>,
+}
+
+/// Read 2026-11-27 (`research/harnesses-for-accounts.md`): the versions whose configuration was read.
+fn install(program: &str) -> Option<&'static str> {
+    match program {
+        "dsh" => Some("npm install -g @deepseek-ai/dsh@0.2.2-rc.5"),
+        "opencode" => Some("npm install -g opencode-ai@1.19.6"),
+        "pi" => Some("npm install -g @earendil-works/pi-coding-agent@1.6.1"),
+        _ => None,
+    }
 }
 
 pub fn known() -> Vec<Known> {
@@ -57,6 +71,8 @@ pub fn known() -> Vec<Known> {
             program: "claude".into(),
             harness: Harness::Claude(Prompts::Refused),
             own: false,
+            runs: None,
+            install: None,
         },
         Known {
             id: "codex".into(),
@@ -64,6 +80,8 @@ pub fn known() -> Vec<Known> {
             program: "codex".into(),
             harness: Harness::Codex,
             own: false,
+            runs: None,
+            install: None,
         },
     ];
     all.extend(KNOWN.iter().map(|k| Known {
@@ -72,13 +90,24 @@ pub fn known() -> Vec<Known> {
         program: k.program.into(),
         harness: Harness::Acp(k.acp()),
         own: false,
+        runs: k.runs,
+        install: install(k.program),
     }));
+    all.push(Known {
+        id: "pi".into(),
+        name: "Pi".into(),
+        program: "pi".into(),
+        harness: Harness::Pi,
+        own: false,
+        runs: Some(axiom_harness::given::Runs::Pi),
+        install: install("pi"),
+    });
     all
 }
 
 /// Axiom's own, as it is named to a program.
 fn server(command: Place, args: Vec<String>) -> Server {
-    Server { name: SERVER.into(), tool: crate::peers::TOOL.into(), command, args }
+    Server { name: SERVER.into(), tools: crate::server::tool_names(), command, args }
 }
 const SERVER: &str = "axiom";
 
@@ -95,6 +124,7 @@ impl Known {
             tools: None,
             speed: None,
             extra: Vec::new(),
+            configured: false,
         }
     }
 
@@ -109,6 +139,7 @@ impl Known {
     /// What it is and may be, found without running it.
     pub fn info(&self, how: &How, path: &[Place], written: &Reach) -> HarnessInfo {
         let program = self.find(how, path, written);
+        let missing = matches!(program, Err(NotFound::Missing(_)));
         let here = path.first().cloned();
         let access = |trust| {
             [
@@ -134,6 +165,9 @@ impl Known {
             effort: self.harness.takes_effort(),
             accounts: crate::connections::provider_of(&self.id).map(str::to_owned),
             access: trusted,
+            runs_accounts: self.runs.is_some(),
+            chosen: false,
+            install: self.install.filter(|_| missing).map(str::to_owned),
         }
     }
 
@@ -148,10 +182,13 @@ impl Known {
         written: &Reach,
     ) -> Result<Program, String> {
         let program = self.find(how, path, written).map_err(|e| e.to_string())?;
+        let configured = self.runs.is_some() && s.execution.connection.is_some();
         let start = Start {
             extra: how.args.clone(),
             speed: s.execution.speed.clone(),
-            model: s.execution.model.clone(),
+            // What Axiom wrote for it says the model (decision 0023).
+            model: s.execution.model.clone().filter(|_| !configured),
+            configured,
             effort: s.execution.effort.clone(),
             ..self.start(workspace, access, s.trust)
         };
@@ -288,9 +325,11 @@ impl Worker {
         run: &RunId,
         cancel: &mut watch::Receiver<bool>,
     ) -> Result<mpsc::Sender<Turn>, Halt> {
+        let configured = self.known.runs.is_some() && self.setup.execution.connection.is_some();
         let mut start = Start {
             workspace: self.workspace.clone(),
-            model: self.setup.execution.model.clone(),
+            model: self.setup.execution.model.clone().filter(|_| !configured),
+            configured,
             effort: self.setup.execution.effort.clone(),
             access: self.access,
             resume: self.setup.resume.clone(),
@@ -298,7 +337,7 @@ impl Worker {
             by: By::Person,
             tools: None,
             speed: self.setup.execution.speed.clone(),
-            extra: self.how.args.clone(),
+            extra: self.how.args.iter().chain(&self.site.given.args).cloned().collect(),
         };
         // A key for it alone, gone with its attempt. Without one it works all the same.
         let grant = match &self.bridge {
@@ -350,6 +389,7 @@ impl Worker {
         self.floor.sync().await?;
         let frames = Record(self.floor.clone());
         let live = self.known.harness.start(&self.site, start, token, frames).map_err(failed)?;
+        self.slot.runs_in(live.handle.processes());
         let (tx, rx) = mpsc::channel(1);
         let attempt = Attempt {
             floor: self.floor.clone(),

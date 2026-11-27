@@ -766,7 +766,7 @@ fn control_requests_that_nobody_answers_end_it() {
 fn it_is_given_a_server_where_it_may_act() {
     let tools = Some(crate::Server {
         name: "axiom".into(),
-        tool: "agent".into(),
+        tools: vec!["agent".into(), "browser".into()],
         command: place("bin/axiom-host"),
         args: vec!["--mcp".into(), "/tmp/a file".into()],
     });
@@ -781,9 +781,9 @@ fn it_is_given_a_server_where_it_may_act() {
         assert_eq!(server["args"], json!(["--mcp", "/tmp/a file"]));
         assert_eq!(server["command"], place("bin/axiom-host").as_str());
         assert!(server.get("env").is_none());
-        // Its one tool, and no other.
+        // Its tools, and no other.
         let allowed = l.args.iter().position(|a| a == "--allowedTools").unwrap();
-        assert_eq!(l.args[allowed + 1], "mcp__axiom__agent");
+        assert_eq!(l.args[allowed + 1], "mcp__axiom__agent,mcp__axiom__browser");
     }
     // None of the folder's own comes with it.
     let s = Start { tools, trust: Trust::Withheld, ..start(Access::Work) };

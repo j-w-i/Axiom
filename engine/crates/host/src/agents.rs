@@ -206,6 +206,16 @@ impl Setup {
 }
 
 impl Slot {
+    /// What it asks of its browser (decision 0021), by Axiom's own tool or by its program's.
+    pub async fn browse(&self, act: axiom_tools::browse::Act) -> Output {
+        self.seen.2.act(&self.seen.1, act).await
+    }
+
+    /// The processes of its program that runs now, whose servers are its own.
+    pub fn runs_in(&self, p: axiom_harness::Processes) {
+        self.seen.2.theirs(std::sync::Arc::new(move || p.now()));
+    }
+
     /// Nobody uses it, or is about to, and nothing runs in it.
     fn idle(self: &Arc<Self>) -> bool {
         Arc::strong_count(self) == 1
@@ -406,7 +416,12 @@ impl Agents {
 
     /// Checks what an agent is to be, and says it as it will be kept.
     pub fn setup(&self, s: Setup, written: &Reach) -> Result<Setup, WireError> {
-        let Setup { name, execution, access, workspace, instructions, trust, .. } = s;
+        let Setup { name, mut execution, access, workspace, instructions, trust, .. } = s;
+        // No harness said: a model of an account runs in the one chosen for that (decision 0023),
+        // and is kept as that: who runs it is never hidden (PR-12).
+        if execution.harness.is_empty() && execution.connection.is_some() {
+            execution.harness = self.programs.chosen();
+        }
         let (resume, began, apart, from) = (s.resume, s.began, s.apart, s.from);
         let (plan, planned) = (s.plan, s.planned.filter(|_| s.plan));
         if plan && access != axiom_proto::Access::Read {
@@ -428,11 +443,25 @@ impl Agents {
                 .programs
                 .known_as(&execution.harness)
                 .ok_or_else(|| bad("this host does not know the harness"))?;
-            if let Some(c) = &execution.connection {
-                if connections::provider_of(&execution.harness).is_none() {
-                    return Err(bad("this harness has one account: its own sign-in"));
+            match (&execution.connection, known.runs) {
+                // A model of an account of Axiom's, which it runs (decision 0023).
+                (Some(c), Some(runs)) => {
+                    let m = execution.model.as_deref().ok_or_else(|| bad("say which model"))?;
+                    let a = self.connections.given(c, m)?;
+                    if !runs.runs(&a.route) {
+                        return Err(bad(format!(
+                            "{} cannot run this provider's models",
+                            known.name
+                        )));
+                    }
                 }
-                self.connections.account(c, &execution.harness)?;
+                (Some(c), None) => {
+                    if connections::provider_of(&execution.harness).is_none() {
+                        return Err(bad("this harness has one account: its own sign-in"));
+                    }
+                    self.connections.account(c, &execution.harness)?;
+                }
+                (None, _) => {}
             }
             if !instructions.is_empty() {
                 return Err(bad("this harness reads the folder's words for agents by itself"));
@@ -608,8 +637,12 @@ impl Agents {
     pub fn harnesses(&self, written: &Reach) -> Result<Vec<HarnessInfo>, WireError> {
         let home = self.home.as_deref().ok_or_else(|| bad("there is no home folder"))?;
         let path = self.looked_in(&axiom_tools::system(&real(home)?).0)?;
-        let one =
-            |k: delegated::Known| Ok(k.info(&self.programs.how(&k.id, None)?, &path, written));
+        let chosen = self.programs.chosen();
+        let one = |k: delegated::Known| {
+            let mut i = k.info(&self.programs.how(&k.id, None)?, &path, written);
+            i.chosen = i.runs_accounts && i.id == chosen;
+            Ok(i)
+        };
         self.programs.known().into_iter().map(one).collect()
     }
 
@@ -683,6 +716,33 @@ impl Agents {
             path,
             chain: vec![agent.clone()],
         })
+    }
+
+    /// What a harness is started with to run an account's model, its files written: its state in a
+    /// folder of Axiom's own for that harness, out of every workspace (decision 0023).
+    fn give(
+        &self,
+        runs: axiom_harness::given::Runs,
+        harness: &str,
+        account: &axiom_harness::given::Account,
+        access: Access,
+        agent: &AgentId,
+    ) -> Result<axiom_harness::given::Given, WireError> {
+        let dir = self.data.join("harnesses");
+        private_dir(&dir).map_err(internal)?;
+        let home = dir.join(plain(harness));
+        private_dir(&home).map_err(internal)?;
+        let home = real(&home)?;
+        let g = runs.give(account, access, &home, &plain(&agent.0)).map_err(bad)?;
+        for (at, text) in &g.files {
+            // Below the home, which is private already.
+            let mut parent = at.as_path().to_path_buf();
+            parent.pop();
+            std::fs::create_dir_all(&parent).map_err(internal)?;
+            private_dir(&parent).map_err(internal)?;
+            private_file(at.as_path(), text).map_err(internal)?;
+        }
+        Ok(g)
     }
 
     /// In the agent's own folder, where it is shown the folder's side of a clash.
@@ -1039,14 +1099,23 @@ impl Worker {
                 path.insert(0, beside);
             }
             let vars = a.programs.vars(&how)?;
-            let config = match &s.execution.connection {
-                Some(c) => Some(real(&a.connections.account(c, &s.execution.harness)?)?),
-                None => None,
-            };
+            let (mut config, mut given) = (None, axiom_harness::given::Given::default());
+            match (&s.execution.connection, known.runs) {
+                (Some(c), Some(runs)) => {
+                    let m = s.execution.model.as_deref().ok_or_else(|| bad("say which model"))?;
+                    let account = a.connections.given(c, m)?;
+                    given = a.give(runs, &known.id, &account, access, &ag)?;
+                }
+                (Some(c), None) => {
+                    config = Some(real(&a.connections.account(c, &s.execution.harness)?)?);
+                }
+                (None, _) => {}
+            }
             let site_of = axiom_harness::Site {
                 program,
                 config,
                 vars,
+                given,
                 path,
                 home: site.keep.home().clone(),
                 user: user()?,

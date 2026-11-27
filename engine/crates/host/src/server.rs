@@ -1085,6 +1085,7 @@ fn slow(c: &Call) -> bool {
         Call::Models { .. }
             | Call::Look { .. }
             | Call::Harnesses {}
+            | Call::HarnessChoose { .. }
             | Call::ProgramSet { .. }
             | Call::ProgramRemove { .. }
             | Call::PlanAccept { .. }
@@ -1692,9 +1693,20 @@ impl Switch for State {
 
 /// What a program is given of Axiom, as it is told: what is Axiom's to do, and nothing its own tools do
 /// (decision 0017).
+/// What Axiom gives every harness: what only Axiom can do (decision 0023), nothing a harness has
+/// (0017). A browser only where one can be started.
+fn specs() -> Vec<axiom_tools::Spec> {
+    let browser = cfg!(unix).then(axiom_tools::browse::spec);
+    peers::specs().into_iter().chain(browser).collect()
+}
+
+pub fn tool_names() -> Vec<String> {
+    specs().into_iter().map(|s| s.name.to_owned()).collect()
+}
+
 fn tools_of() -> Vec<Value> {
     let shown = |s: axiom_tools::Spec| json!({"name": s.name, "description": s.description, "schema": s.schema});
-    peers::specs().into_iter().map(shown).collect()
+    specs().into_iter().map(shown).collect()
 }
 
 /// What an installed program asks for.
@@ -1704,10 +1716,20 @@ async fn by_peer(
     tool: String,
     args: Value,
 ) -> Result<Value, WireError> {
-    if tool != peers::TOOL {
+    if !tool_names().contains(&tool) {
         return Err(WireError::new(ErrorCode::Unauthorised, "this key opens nothing else"));
     }
     let Holder { session, agent } = who;
+    if tool == axiom_tools::browse::spec().name {
+        // Only its own servers can be reached, and the host makes every request (0021).
+        return Ok(match axiom_tools::browse::understand(&args) {
+            Ok(act) => {
+                let o = st.agents.slot(&session, &agent).browse(act).await;
+                json!({"ok": o.ok, "text": o.text})
+            }
+            Err(e) => json!({"ok": false, "text": e}),
+        });
+    }
     let s = st.open(&session).await?;
     let floor =
         agents::Floor { agents: st.agents.clone(), store: st.store.clone(), session: s, agent };
@@ -1936,6 +1958,11 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let written = a.written(&st.store).await?;
             let all = blocking(move || a.harnesses(&written)).await??;
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
+        }
+        Call::HarnessChoose { harness } => {
+            let a = st.agents.clone();
+            blocking(move || a.programs.choose(&harness)).await??;
+            Ok(json!({}))
         }
         Call::Programs {} => {
             serde_json::to_value(st.agents.programs.list()).map_err(|e| internal(e.to_string()))

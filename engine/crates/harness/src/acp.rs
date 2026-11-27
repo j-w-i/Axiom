@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use crate::{
     CLIENT, Site, Start, Trust,
     event::*,
+    given::Runs,
     rpc::{Calls, Fault, Msg, NO_METHOD, read},
     talk::{Keep, Out, Talk, Word, base64, has, id, list, loose, owned, text},
 };
@@ -32,6 +33,11 @@ pub struct Acp {
     pub work: Option<String>,
     /// Its terms allow only what a person themselves says.
     pub person_only: bool,
+    /// Its documentation says that a sandbox of its own holds back what it runs, and that it fails
+    /// closed without one.
+    pub sandboxed: bool,
+    /// Where Axiom configures it, it can be told to read nothing of the folder's own configuration.
+    pub ignores_folder: bool,
 }
 
 /// An agent whose ACP command is documented (research/harness-integration.md §2a, 2026-11-24).
@@ -41,6 +47,8 @@ pub struct Known {
     pub program: &'static str,
     pub args: &'static [&'static str],
     pub person_only: bool,
+    /// It can run the models of an account of Axiom's (decision 0023).
+    pub runs: Option<Runs>,
 }
 
 const fn known(
@@ -49,19 +57,24 @@ const fn known(
     args: &'static [&'static str],
     person_only: bool,
 ) -> Known {
-    Known { name, program, args, person_only }
+    Known { name, program, args, person_only, runs: None }
 }
 
 /// Google's terms allow Antigravity in other clients only where a person is at work (decision 0006).
 pub const KNOWN: &[Known] = &[
     known("Antigravity", "agy", &["acp"], true),
     known("Cursor", "agent", &["acp"], false),
+    // research/harnesses-for-accounts.md, read 2026-11-27.
+    Known {
+        runs: Some(Runs::Dsh),
+        ..known("DeepSeek Harness", "dsh", &["--profile", "acp"], false)
+    },
     known("Gemini CLI", "gemini", &["--acp"], false),
     known("GitHub Copilot CLI", "copilot", &["--acp"], false),
     known("Goose", "goose", &["acp"], false),
     known("Grok Build", "grok", &["agent", "stdio"], false),
     known("Kimi Code", "kimi", &["acp"], false),
-    known("OpenCode", "opencode", &["acp"], false),
+    Known { runs: Some(Runs::OpenCode), ..known("OpenCode", "opencode", &["acp"], false) },
     known("Qwen Code", "qwen", &["--acp"], false),
 ];
 
@@ -70,6 +83,10 @@ impl Known {
         Acp {
             args: self.args.iter().map(|a| (*a).to_owned()).collect(),
             person_only: self.person_only,
+            // dsh's sandbox fails closed (`dsh-sandbox-local`); OpenCode is told
+            // `OPENCODE_DISABLE_PROJECT_CONFIG` where Axiom configures it.
+            sandboxed: self.runs == Some(Runs::Dsh),
+            ignores_folder: self.runs == Some(Runs::OpenCode),
             ..Acp::default()
         }
     }
@@ -92,17 +109,20 @@ impl Acp {
     }
 
     pub(crate) fn launch(&self, s: &Start) -> Result<Launch, Error> {
-        // The protocol has no way to tell an agent not to read what is in its folder.
-        if s.trust != Trust::Given {
+        // The protocol has no way to tell an agent not to read what is in its folder; what Axiom
+        // gives one may (decision 0023).
+        if s.trust != Trust::Given && !(s.configured && self.ignores_folder) {
             return Err(Error::Untrusted);
         }
         match self.mode(s.access) {
             Some(m) if loose(m) => return Err(Error::Unsafe(m.clone())),
-            None if s.access != Access::Ask => return Err(Error::NoMode(s.access)),
+            None if s.access != Access::Ask && !s.configured => {
+                return Err(Error::NoMode(s.access));
+            }
             _ => {}
         }
-        // It declares no sandbox.
-        Ok(Launch { args: self.checked()?, containment: Containment::None })
+        let containment = if self.sandboxed { Containment::Harness } else { Containment::None };
+        Ok(Launch { args: self.checked()?, containment })
     }
 
     pub(crate) fn talk(&self, site: &Site, start: Option<Start>) -> Client {

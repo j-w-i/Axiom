@@ -796,6 +796,9 @@ class HarnessInfo {
     this.accounts,
     this.effort = false,
     this.own = false,
+    this.runsAccounts = false,
+    this.chosen = false,
+    this.install,
   });
   HarnessInfo.decode(Json j)
     : id = j['id']! as String,
@@ -806,6 +809,9 @@ class HarnessInfo {
       accounts = j['accounts'] as String?,
       effort = j['effort'] as bool? ?? false,
       own = j['own'] as bool? ?? false,
+      runsAccounts = j['runs_accounts'] as bool? ?? false,
+      chosen = j['chosen'] as bool? ?? false,
+      install = j['install'] as String?,
       access = [
         for (final a in j['access'] as List<Object?>? ?? const [])
           _enum(Access.values, a, Access.unknown),
@@ -827,6 +833,12 @@ class HarnessInfo {
   /// It cannot be told to ignore a folder's own settings for it.
   final bool needsTrust;
   final List<Access> access;
+
+  /// It can run the models of accounts (decision 0023), and whether it is the one that does.
+  final bool runsAccounts, chosen;
+
+  /// Not there: what its own documentation has a person type to install it.
+  final String? install;
 }
 
 /// How a program is started, as its person has said it, of it or of one account of it.

@@ -29,6 +29,8 @@ const USAGE: &str = "usage: axiom [--json] COMMAND      --json: one line for eac
   axiom connect NAME PROVIDER [URL] [--key]     a key is read from standard input
   axiom disconnect CONNECTION
   axiom models CONNECTION
+  axiom harnesses                               what can run agents, and what runs accounts' models
+  axiom harness ID                              that runs the models of accounts from now on
   axiom agent SESSION NAME CONNECTION MODEL read|ask|work
   axiom set SESSION AGENT read|ask|work
   axiom say [--wait] SESSION AGENT TEXT         --wait: prints the answer, and ends with
@@ -156,6 +158,8 @@ async fn run(args: Vec<String>) -> Result<u8, Error> {
         }
         ["disconnect", c] => Call::ConnectionRemove { connection: c.into() },
         ["models", c] => Call::Models { connection: c.into() },
+        ["harnesses"] => Call::Harnesses {},
+        ["harness", id] => Call::HarnessChoose { harness: id.into() },
         ["agent", s, name, c, model, a] => Call::AgentAdd {
             session: SessionId(s.into()),
             name: name.into(),

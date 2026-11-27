@@ -339,6 +339,12 @@ class HostStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// From now on [id] runs the models of accounts (decision 0023).
+  Future<void> chooseHarness(String id) async {
+    await _live.call('harness.choose', {'harness': id});
+    await loadHarnesses();
+  }
+
   /// What has been said of how programs are started.
   List<ProgramInfo> programs = const [];
 

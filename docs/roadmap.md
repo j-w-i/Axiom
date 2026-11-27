@@ -46,7 +46,16 @@ Order: policy+spawn → Anthropic Messages codec → Chat codec (local servers) 
 - folders and files: jobs seen and stopped (W-11), ways to look at a diff (W-12), read a file (W-18), paths open it (W-19), find files and in files (W-20), open in an editor (W-21, D-3), pictures (W-22), folders with an identity (W-36) and commands (W-37), what uses the computer (W-38)
 - git for a person (W-42 to W-46, D-1), terminals (W-47 to W-49), browser (W-50 to W-52, D-6)
 
-## M5 Orchestration ← M3, M4 worktrees
+## The switch: Axiom is no harness ← M4 (decision 0023; owner, 2026-11-27: before M5)
+- [x] decision 0023, from `research/t3code-harness.md` and `research/harnesses-for-accounts.md`
+- an account's model runs in DeepSeek Harness (ACP) by default; OpenCode (ACP) and Pi (RPC) can be chosen in Settings; each declares the providers it can run, its configuration in a folder of Axiom's own, the key only in its environment
+- a harness that is not there is offered with its own install command, run by the person in their terminal; Axiom downloads nothing
+- Axiom's MCP server gives every harness `agent` and `browser`, nothing a harness has
+- the loop, its tools as a model's, compaction, branching of it and signing in with ChatGPT are gone; sessions of before are readable
+- a tool-less client for short texts; a suggested commit message (W-43)
+- each replayed from scripted programs through the real host; none of the three started for real without the owner's yes
+
+## M5 Orchestration ← M3, M4 worktrees, the switch
 - delegation across harnesses; exactly-once delivery under crash injection; child ⊆ parent under property test
 - worktree per writer; conflict forecast; gated merge; needs-you queue; score; task graph with gates
 - 10 agents on four harnesses for one hour: budgets met, no lost request
@@ -63,8 +72,8 @@ Order: policy+spawn → Anthropic Messages codec → Chat codec (local servers) 
 
 ## Dependency graph
 ```
-M0 ─ M1 ─┬─ policy+spawn ─┬─ codecs ─ loop ─ tools ─┬─ M4 ─┐
-         │                └─ M3 adapters ───────────┼──────┼─ M5 ─ M6 ─ M7
-         └─ transcript, deck, requests ─────────────┘      │
-                                     worktrees (M4) ───────┘
+M0 ─ M1 ─┬─ policy+spawn ─┬─ codecs ─ loop ─ tools ─┬─ M4 ─ switch ─┐
+         │                └─ M3 adapters ───────────┼───────────────┼─ M5 ─ M6 ─ M7
+         └─ transcript, deck, requests ─────────────┘               │
+                                     worktrees (M4) ────────────────┘
 ```

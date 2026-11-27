@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../host/proto.dart';
@@ -10,15 +11,31 @@ import '../ui/controls.dart';
 import '../ui/fonts.dart';
 import '../ui/overlay.dart';
 import '../ui/prefs.dart';
+import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import 'start.dart';
 
 /// What a person chooses about the window.
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, this.limits});
+  const SettingsPage({
+    super.key,
+    this.limits,
+    this.harnesses = const [],
+    this.onChoose,
+    this.onLook,
+  });
 
   /// Asks the host for what it keeps everything to; null without a host.
   final Future<List<HostLimit>> Function()? limits;
+
+  /// What can run agents, as the host found them (decision 0023).
+  final List<HarnessInfo> harnesses;
+
+  /// Another runs the models of accounts from now on.
+  final ValueChanged<String>? onChoose;
+
+  /// The host looks again for what is installed.
+  final VoidCallback? onLook;
 
   @override
   Widget build(BuildContext context) {
@@ -118,6 +135,25 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
       ]),
+      if (harnesses.where((h) => h.runsAccounts).toList() case final runs when runs.isNotEmpty) ...[
+        const SizedBox(height: 24),
+        Semantics(header: true, child: Text('Agents', style: t.type.title)),
+        const SizedBox(height: 12),
+        Card([
+          row(
+            'Runs the models of your accounts',
+            'Models of a key or of a server on this computer. Claude Code and Codex run their own.',
+            choose(
+              'Runs the models of your accounts',
+              [for (final h in runs) AxMenuItem(h.id, h.name)],
+              runs.firstWhere((h) => h.chosen, orElse: () => runs.first).id,
+              (v) => onChoose?.call(v),
+            ),
+          ),
+          if (runs.where((h) => h.chosen && h.program == null).firstOrNull case final h?)
+            _Install(h, onLook),
+        ]),
+      ],
       const SizedBox(height: 24),
       Semantics(header: true, child: Text('Advanced', style: t.type.title)),
       const SizedBox(height: 12),
@@ -134,6 +170,63 @@ class SettingsPage extends StatelessWidget {
       ]),
       if (limits case final f?) ...[const SizedBox(height: 18), _Limits(f)],
     ]);
+  }
+}
+
+/// The chosen one is not there: how its person installs it. Axiom runs nothing of it.
+class _Install extends StatefulWidget {
+  const _Install(this.harness, this.onLook);
+  final HarnessInfo harness;
+  final VoidCallback? onLook;
+  @override
+  State<_Install> createState() => _InstallState();
+}
+
+class _InstallState extends State<_Install> {
+  bool _copied = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors, h = widget.harness;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('${h.name} is not installed', style: t.type.uiMedium),
+        Text(
+          h.install == null
+              ? oneLine(visible(h.problem ?? ''), 200)
+              : 'Its own command installs it. Run it in a terminal, then look again.',
+          style: t.type.label.ink(c.ink3),
+        ),
+        if (h.install case final command?) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Surface(
+                  c.block,
+                  radius: AxRadius.key,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: Text(literal(command), style: t.type.codeSmall.ink(c.ink2)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              AxButton(
+                label: _copied ? 'Copied' : 'Copy',
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: command));
+                  if (mounted) setState(() => _copied = true);
+                },
+              ),
+              const SizedBox(width: 8),
+              AxButton(label: 'Look again', tone: AxTone.quiet, onPressed: widget.onLook),
+            ],
+          ),
+        ],
+      ],
+    );
   }
 }
 

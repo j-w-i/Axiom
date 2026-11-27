@@ -83,13 +83,34 @@ pub(crate) enum Command {
 
 /// Says things to an attempt. Dropped, it changes nothing.
 #[derive(Debug, Clone)]
-pub struct Handle(mpsc::Sender<Command>);
+pub struct Handle(mpsc::Sender<Command>, Processes);
+
+/// The processes of an attempt that still run, as last looked at: the program first. Shared with
+/// whoever holds its [`Handle`], for what they serve (decision 0023: its browser).
+#[derive(Debug, Clone, Default)]
+pub struct Processes(Arc<std::sync::Mutex<Vec<u32>>>);
+
+impl Processes {
+    pub fn now(&self) -> Vec<u32> {
+        self.0.lock().map(|p| p.clone()).unwrap_or_default()
+    }
+    fn set(&self, all: Vec<u32>) {
+        if let Ok(mut p) = self.0.lock() {
+            *p = all;
+        }
+    }
+}
 
 impl Handle {
     async fn ask<T>(&self, c: impl FnOnce(Reply<T>) -> Command) -> Result<T, Refused> {
         let (tx, rx) = oneshot::channel();
         self.0.send(c(tx)).await.map_err(|_| Refused::Closed)?;
         rx.await.map_err(|_| Refused::Closed)?
+    }
+
+    /// Its processes that still run.
+    pub fn processes(&self) -> Processes {
+        self.1.clone()
     }
 
     /// Nothing more is taken.
@@ -162,7 +183,10 @@ pub(crate) fn drive<F: Frames>(mut g: Given<F>) -> Option<(Handle, Events)> {
     let (writer, to_write) = mpsc::channel(UNREAD);
     let failed = tokio::spawn(write(stdin, to_write, g.limits.write));
     let now = Instant::now();
+    let processes = Processes::default();
+    processes.set(g.process.members());
     let a = Attempt {
+        processes: processes.clone(),
         room: Arc::new(Semaphore::new(WAITING)),
         lines: Lines::new(MOST_LINE),
         ledger: Ledger::default(),
@@ -181,7 +205,7 @@ pub(crate) fn drive<F: Frames>(mut g: Given<F>) -> Option<(Handle, Events)> {
         g,
     };
     tokio::spawn(a.run(out, err, told, failed));
-    Some((Handle(commands), Events(heard)))
+    Some((Handle(commands, processes), Events(heard)))
 }
 
 async fn write(
@@ -201,6 +225,7 @@ async fn write(
 
 struct Attempt<F> {
     g: Given<F>,
+    processes: Processes,
     room: Arc<Semaphore>,
     lines: Lines,
     ledger: Ledger,
@@ -343,11 +368,17 @@ impl<F: Frames> Attempt<F> {
                     }
                 }
                 Woke::Unheard => self.end(Why::Unheard, None, Outcome::Cancelled, false),
-                Woke::Look => self.g.process.look(),
+                Woke::Look => {
+                    self.g.process.look();
+                    self.processes.set(self.g.process.members());
+                }
                 Woke::Late => self.overdue(wrong.as_ref()).await,
             }
         }
+        let processes = self.processes.clone();
         self.finish(out, err, err_open, ended).await;
+        // Ended, and what it left is ended with it.
+        processes.set(Vec::new());
     }
 
     /// When something is next too late.

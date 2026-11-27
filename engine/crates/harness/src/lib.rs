@@ -1,6 +1,7 @@
 //! Adapters through which Axiom drives agent programs a person has installed (decision 0006). The
-//! program is the vendor's, unmodified, and signs in by itself: no adapter reads, copies or passes a
-//! credential, or says it is another client than Axiom (decision 0007).
+//! program is the vendor's, unmodified. One that signs in by itself is never given, and never read
+//! for, a credential, and none is told it is another client than Axiom (decision 0007). One that runs
+//! the model of an account of Axiom's is given that account's key in its environment (0023).
 //!
 //! A harness needs its own network and its own sign-in, so it runs outside Axiom's sandbox, with a
 //! person's token for that. Who contains it is then the harness itself, if its sandbox is on, or
@@ -18,7 +19,9 @@ mod drive;
 mod event;
 pub mod find;
 pub mod frames;
+pub mod given;
 mod ledger;
+mod pi;
 mod rpc;
 mod talk;
 mod tasks;
@@ -28,7 +31,7 @@ pub mod vars;
 
 pub use acp::{Acp, KNOWN, Known};
 pub use claude::{Prompts, default_effort as claude_default_effort};
-pub use drive::{Events, Handle, Limits, MOST_LINE, MOST_PROMPT, MOST_SUBJECT};
+pub use drive::{Events, Handle, Limits, MOST_LINE, MOST_PROMPT, MOST_SUBJECT, Processes};
 pub use event::*;
 pub use find::{NotFound, Program, find};
 pub use frames::{Frame, Frames, Lost, Way};
@@ -45,6 +48,8 @@ pub enum Harness {
     Codex,
     /// Claude Code, by its streamed JSON.
     Claude(Prompts),
+    /// Pi, by its RPC mode (decision 0023).
+    Pi,
 }
 
 /// Where and as whom it runs.
@@ -64,6 +69,9 @@ pub struct Site {
     pub config: Option<Place>,
     /// What else its person says it is given.
     pub vars: Vec<Var>,
+    /// An account of Axiom's that it runs a model of (decision 0023): what Axiom sets for it, after
+    /// what its person said, and the key. Its files are written before it is started.
+    pub given: given::Given,
     pub limits: Limits,
 }
 
@@ -94,14 +102,17 @@ pub struct Start {
     pub speed: Option<String>,
     /// Further arguments its person wants it started with.
     pub extra: Vec<String>,
+    /// It runs an account of Axiom's, and its access is in what Axiom gave it for that (decision
+    /// 0023), not in a mode it is set to.
+    pub configured: bool,
 }
 
 /// A Model Context Protocol server on standard streams.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Server {
     pub name: String,
-    /// The one tool it has, if it stands beside the program's own.
-    pub tool: String,
+    /// Its tools, which stand beside the program's own.
+    pub tools: Vec<String>,
     pub command: Place,
     /// No secret: they are seen by other users of the computer.
     pub args: Vec<String>,
@@ -145,6 +156,7 @@ impl Harness {
         let mut l = match self {
             Harness::Acp(a) => a.launch(s)?,
             Harness::Codex => codex::launch(s)?,
+            Harness::Pi => pi::launch(s)?,
             Harness::Claude(p) => claude::launch(*p, s)?,
         };
         l.args.extend(s.extra.iter().cloned());
@@ -160,6 +172,7 @@ impl Harness {
         match self {
             Harness::Acp(_) => Ok(()),
             Harness::Codex => codex::passes(extra),
+            Harness::Pi => pi::passes(extra),
             Harness::Claude(_) => claude::passes(extra),
         }
     }
@@ -171,14 +184,15 @@ impl Harness {
             // code.claude.com/docs/en/authentication, read 2026-11-25.
             Harness::Claude(_) => Some("CLAUDE_CONFIG_DIR"),
             // CODEX_HOME moves its files; whether it parts what is in the system's store is not said.
-            Harness::Codex | Harness::Acp(_) => None,
+            Harness::Codex | Harness::Acp(_) | Harness::Pi => None,
         }
     }
 
     /// Whether it can be given a server of Axiom's own, by what it documents.
     pub fn takes_tools(&self) -> bool {
         // Codex: the form of what it takes at a thread's start is nowhere documented.
-        !matches!(self, Harness::Codex)
+        // Pi: by a file of its folder, which is not written yet.
+        !matches!(self, Harness::Codex | Harness::Pi)
     }
 
     /// Whether it can be told how hard to try: low, medium or high, before it is started.
@@ -206,9 +220,11 @@ impl Harness {
             Harness::Claude(p) => return version(self, site, token, *p).await,
             Harness::Acp(a) => Box::new(a.talk(site, None)),
             Harness::Codex => Box::new(codex::Codex::new(site, None)),
+            Harness::Pi => Box::new(pi::Pi::new(site, None)),
         };
         let args = match self {
             Harness::Acp(a) => a.checked()?,
+            Harness::Pi => pi::ARGS.map(String::from).into(),
             _ => codex::ARGS.map(String::from).into(),
         };
         let process = run(self, site, args, &site.tmp, true, token)?;
@@ -221,7 +237,7 @@ impl Harness {
             read_only: true,
             person_only: true,
             probed: Some(tx),
-            hide: vars::Hide::of(&site.vars),
+            hide: vars::Hide::of(site.vars.iter().chain(&site.given.key)),
         };
         let (_handle, mut events) = drive::drive(given).ok_or(Error::NoPipe)?;
         let mut words = None;
@@ -262,6 +278,7 @@ impl Harness {
         let talk: Box<dyn Talk> = match self {
             Harness::Acp(a) => Box::new(a.talk(site, Some(s))),
             Harness::Codex => Box::new(codex::Codex::new(site, Some(s))),
+            Harness::Pi => Box::new(pi::Pi::new(site, Some(s))),
             Harness::Claude(p) => Box::new(claude::Claude::new(*p, s, &l)),
         };
         let given = drive::Given {
@@ -272,7 +289,7 @@ impl Harness {
             read_only,
             person_only: self.person_only(),
             probed: None,
-            hide: vars::Hide::of(&site.vars),
+            hide: vars::Hide::of(site.vars.iter().chain(&site.given.key)),
         };
         let (handle, events) = drive::drive(given).ok_or(Error::NoPipe)?;
         Ok(Live { handle, events, containment: l.containment })
@@ -293,6 +310,13 @@ fn run(
             return Err(Error::Spawn(axiom_spawn::SpawnError::Env(v.name.clone())));
         }
         env.set_said(&v.name, &v.value, v.secret)?;
+    }
+    if let Some(k) = &site.given.key {
+        env.set_said(&k.name, &k.value, k.secret)?;
+    }
+    // Axiom's own, over whatever was said.
+    for (name, value) in &site.given.vars {
+        env.set(name, value)?;
     }
     if matches!(harness, Harness::Claude(_)) && site.vars.iter().any(|v| v.secret) {
         // Then it keeps them from the commands it runs (code.claude.com/docs/en/env-vars, read

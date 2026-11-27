@@ -25,6 +25,7 @@ pub fn site() -> Site {
         written: Reach::none(),
         config: None,
         vars: vec![],
+        given: Default::default(),
         limits: Limits::default(),
     }
 }
@@ -41,6 +42,7 @@ pub fn start(access: Access) -> Start {
         tools: None,
         speed: None,
         extra: vec![],
+        configured: false,
     }
 }
 

@@ -150,9 +150,9 @@ pub(crate) fn only(
 pub(crate) struct Hide(Vec<Vec<u8>>);
 
 impl Hide {
-    pub fn of(vars: &[Var]) -> Self {
+    pub fn of<'a>(vars: impl IntoIterator<Item = &'a Var>) -> Self {
         let mut all: Vec<Vec<u8>> = Vec::new();
-        for v in vars.iter().filter(|v| v.secret && !v.value.is_empty()) {
+        for v in vars.into_iter().filter(|v| v.secret && !v.value.is_empty()) {
             all.push(v.value.clone().into_bytes());
             // As it is inside a string.
             if let Ok(s) = serde_json::to_string(&v.value) {

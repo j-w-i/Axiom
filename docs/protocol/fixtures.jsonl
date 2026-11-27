@@ -23,4 +23,5 @@
 {"id":20,"result":[{"agent":"a_1","person":true,"session":"s_1","title":"App","url":"http://127.0.0.1:5173/"}]}
 {"id":21,"result":{"dark":true,"frame":"/9j/","height":800,"person":true,"refused":["https://example.com/a.png"],"title":"App","url":"http://127.0.0.1:5173/","version":7,"width":1280}}
 {"id":22,"result":{"picture":"iVBO","rect":[8.0,21.5,300.0,37.0],"selector":"main > h1.big","styles":[["font-size","32px"]],"text":"Hello","url":"http://127.0.0.1:5173/"}}
+{"id":23,"result":[{"access":["read","ask","work"],"chosen":true,"effort":false,"id":"dsh","install":"npm install -g @deepseek-ai/dsh@0.2.2-rc.5","name":"DeepSeek Harness","needs_trust":true,"problem":"dsh is not in any of the folders that are looked in","runs_accounts":true}]}
 {"open":"/w"}
