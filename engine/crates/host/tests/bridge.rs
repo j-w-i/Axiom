@@ -174,7 +174,12 @@ impl B {
             .await;
     }
     async fn call(&mut self, id: u64, args: Value) -> (String, bool) {
-        self.ask(id, args).await;
+        self.use_tool(id, "agent", args).await
+    }
+    async fn use_tool(&mut self, id: u64, name: &str, args: Value) -> (String, bool) {
+        self.say(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": name, "arguments": args}}))
+            .await;
         let v = self.hear().await;
         assert_eq!(v["id"], id);
         let r = &v["result"];
@@ -413,7 +418,7 @@ async fn a_program_keeps_its_own_tools() {
     let call = Call::Prompt { session: t.s.clone(), agent: a, text: "go".into(), key: None };
     t.c.call(call).await.unwrap();
     let (id, digest, subject) = t.question().await;
-    assert!(subject.contains("--allowedTools mcp__axiom__agent"), "{subject}");
+    assert!(subject.contains("--allowedTools mcp__axiom__agent,mcp__axiom__browser"), "{subject}");
     for not in ["--tools", "mcp__axiom__*", "--strict-mcp-config", "--append-system"] {
         assert!(!subject.contains(not), "{not}: {subject}");
     }
@@ -449,11 +454,61 @@ async fn a_program_keeps_its_own_tools() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["agent"]);
+    // What only Axiom can do (decision 0023).
+    assert_eq!(names, ["agent", "browser"]);
     b.say(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
         "params": {"name": "shell", "arguments": {"command": "true"}}}))
         .await;
     let v = b.hear().await;
     assert!(v["result"]["isError"] == true, "{v}");
     assert!(v.to_string().contains("opens nothing else"), "{v}");
+}
+
+#[tokio::test]
+async fn a_programs_own_server_is_what_its_browser_reaches() {
+    let mut script = script();
+    script.insert(5, json!({"serve": true}));
+    let (mut t, lead) = {
+        let mut t = T::new(&script).await;
+        let lead = t.add("Lead", "goose", Access::Ask, None).await;
+        let call = Call::Prompt {
+            session: t.s.clone(),
+            agent: lead.clone(),
+            text: "go".into(),
+            key: None,
+        };
+        t.c.call(call).await.unwrap();
+        let (id, digest, _) = t.question().await;
+        t.answer(id, Answer::Once, digest).await;
+        (t, lead)
+    };
+    let (command, args) = t.bridge().await;
+    let at = t.f.dir.path().join("bin/port");
+    let mut port = String::new();
+    for _ in 0..1000 {
+        port = std::fs::read_to_string(&at).unwrap_or_default();
+        if !port.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // One that the program did not start: the test's own.
+    let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let other = other.local_addr().unwrap().port();
+    let mut b = B::start(&command, &args);
+    let open = |p: &str| json!({"do": "open", "url": format!("http://127.0.0.1:{p}/")});
+    let (said, ok) = b.use_tool(1, "browser", open(&port)).await;
+    let home = Some(t.f.dir.path().join("home"));
+    let chromium = home.as_ref().and_then(|h| axiom_policy::Place::new(h).ok());
+    if axiom_spawn::chromium(chromium.as_ref()).is_none() {
+        // Nothing is installed for it.
+        assert!(!ok && said.contains("no browser is installed"), "{said}");
+        return;
+    }
+    assert!(ok && said.contains("Served by its program."), "{said}");
+    let (said, ok) = b.use_tool(2, "browser", open(&other.to_string())).await;
+    assert!(!ok && said.contains("nothing of this agent's serves there"), "{said}");
+    let (said, ok) = b.use_tool(3, "browser", json!({"do": "fly"})).await;
+    assert!(!ok && said.contains("do is open"), "{said}");
+    t.c.call(Call::BrowserClose { session: t.s.clone(), agent: lead }).await.unwrap();
 }

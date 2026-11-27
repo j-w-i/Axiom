@@ -28,7 +28,7 @@ pub mod vars;
 
 pub use acp::{Acp, KNOWN, Known};
 pub use claude::{Prompts, default_effort as claude_default_effort};
-pub use drive::{Events, Handle, Limits, MOST_LINE, MOST_PROMPT, MOST_SUBJECT};
+pub use drive::{Events, Handle, Limits, MOST_LINE, MOST_PROMPT, MOST_SUBJECT, Processes};
 pub use event::*;
 pub use find::{NotFound, Program, find};
 pub use frames::{Frame, Frames, Lost, Way};
@@ -100,8 +100,8 @@ pub struct Start {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Server {
     pub name: String,
-    /// The one tool it has, if it stands beside the program's own.
-    pub tool: String,
+    /// Its tools, which stand beside the program's own.
+    pub tools: Vec<String>,
     pub command: Place,
     /// No secret: they are seen by other users of the computer.
     pub args: Vec<String>,

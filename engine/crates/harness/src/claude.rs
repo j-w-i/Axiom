@@ -109,7 +109,9 @@ pub(crate) fn launch(p: Prompts, s: &Start) -> Result<Launch, Error> {
         let server = json!({"mcpServers": {t.name.as_str():
             {"type": "stdio", "command": t.command.as_str(), "args": t.args}}});
         add(&["--mcp-config", &server.to_string()]);
-        add(&["--allowedTools", &format!("mcp__{}__{}", t.name, t.tool)]);
+        let allowed: Vec<String> =
+            t.tools.iter().map(|n| format!("mcp__{}__{n}", t.name)).collect();
+        add(&["--allowedTools", &allowed.join(",")]);
     }
     if s.trust == Trust::Withheld {
         // It shows no trust dialog in this mode, and runs what a project's settings and `.mcp.json`

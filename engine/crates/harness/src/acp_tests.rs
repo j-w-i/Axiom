@@ -98,7 +98,7 @@ fn a_server_is_given_in_the_form_that_is_settled() {
     for (v, given) in [(1, true), (2, false)] {
         let tools = Some(crate::Server {
             name: "axiom".into(),
-            tool: "agent".into(),
+            tools: vec!["agent".into()],
             command: crate::test::place("bin/axiom-host"),
             args: vec!["--mcp".into(), "/f".into()],
         });

@@ -206,6 +206,16 @@ impl Setup {
 }
 
 impl Slot {
+    /// What it asks of its browser (decision 0021), by Axiom's own tool or by its program's.
+    pub async fn browse(&self, act: axiom_tools::browse::Act) -> Output {
+        self.seen.2.act(&self.seen.1, act).await
+    }
+
+    /// The processes of its program that runs now, whose servers are its own.
+    pub fn runs_in(&self, p: axiom_harness::Processes) {
+        self.seen.2.theirs(std::sync::Arc::new(move || p.now()));
+    }
+
     /// Nobody uses it, or is about to, and nothing runs in it.
     fn idle(self: &Arc<Self>) -> bool {
         Arc::strong_count(self) == 1

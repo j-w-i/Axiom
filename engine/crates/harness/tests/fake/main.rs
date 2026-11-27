@@ -93,6 +93,17 @@ fn main() {
         if let Some(ms) = s["sleep"].as_u64() {
             std::thread::sleep(Duration::from_millis(ms));
         }
+        if s["serve"] == true {
+            // A server of its own on this computer, as a program's command would start one.
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port();
+            std::thread::spawn(move || {
+                for c in l.incoming().flatten() {
+                    std::thread::spawn(move || serve(c));
+                }
+            });
+            std::fs::write(dir.join("port"), port.to_string()).unwrap();
+        }
         if let Some(mark) = s["child"].as_str() {
             let c = std::process::Command::new("/bin/sleep").arg(mark).spawn().unwrap();
             std::mem::forget(c);
@@ -108,6 +119,21 @@ fn main() {
         }
     }
     while hear().is_some() {}
+}
+
+/// One page, to whoever asks.
+fn serve(mut c: std::net::TcpStream) {
+    let mut r = std::io::BufReader::new(c.try_clone().unwrap());
+    let mut l = String::new();
+    while r.read_line(&mut l).unwrap_or(0) > 2 {
+        l.clear();
+    }
+    let page = "<!doctype html><title>Its own</title><p>Served by its program.</p>";
+    let head = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        page.len()
+    );
+    let _ = c.write_all(head.as_bytes()).and_then(|()| c.write_all(page.as_bytes()));
 }
 
 /// Whether everything in `p` is in `v`.

@@ -78,7 +78,7 @@ pub fn known() -> Vec<Known> {
 
 /// Axiom's own, as it is named to a program.
 fn server(command: Place, args: Vec<String>) -> Server {
-    Server { name: SERVER.into(), tool: crate::peers::TOOL.into(), command, args }
+    Server { name: SERVER.into(), tools: crate::server::tool_names(), command, args }
 }
 const SERVER: &str = "axiom";
 
@@ -350,6 +350,7 @@ impl Worker {
         self.floor.sync().await?;
         let frames = Record(self.floor.clone());
         let live = self.known.harness.start(&self.site, start, token, frames).map_err(failed)?;
+        self.slot.runs_in(live.handle.processes());
         let (tx, rx) = mpsc::channel(1);
         let attempt = Attempt {
             floor: self.floor.clone(),
