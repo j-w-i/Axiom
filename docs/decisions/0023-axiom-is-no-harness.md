@@ -1,0 +1,23 @@
+# 0023 Axiom is no harness
+**Decision** (the owner, 2026-11-26: "I no longer want Axiom to be a harness"; asked, 2026-11-27: before M5, and Axiom's own loop goes, a client for short texts stays). Every agent runs in a harness program. Axiom's own loop is removed: `axiom-engine`, the ten tools as a model's tools, compaction, the conversation as a model had it, `todo` and `plan` as Axiom's tools, branching of it (0015), and signing in with ChatGPT for it (0013), with its listener: SI-20 has no exception any more. Evidence: `research/t3code-harness.md` (T3 Code has no loop either) and `research/harnesses-for-accounts.md`.
+
+**Who runs a model of an account.** An account is a key at a provider or a server on this computer (0005). Its models run in DeepSeek Harness unless the person chooses another in Settings (*Runs the models of accounts*): OpenCode and Pi are offered from the start, and any ACP program of the person's own (0016) can be chosen. A model a program brings (Claude Code, Codex, …) runs in that program, as before (0017).
+- **DeepSeek Harness**, `dsh --profile acp`: MIT; a sandbox of its own on all three systems that fails closed; asks before what its preset does not allow; takes MCP servers per session; can be cancelled and resumed. "Headless" in the owner's word is without a window of its own: its `headless` profile is one task and an end, takes MCP servers only from its profile's files, cannot ask, and has no published schema for its events. The ACP profile is the same harness without a window.
+- **OpenCode**, `opencode acp`. **Pi**, `pi --mode rpc` (it has no ACP of its own; an adapter of others' is not taken). Neither has a sandbox; Pi never asks before a tool. Each is said to run outside Axiom's sandbox before each start, as any program (0016, SI-26).
+- Which providers each can run is declared with it. A model that the chosen one cannot run is shown with why, and not given to another (PR-12).
+
+**How a harness is given an account.** The key in its environment and nowhere else, from the system's store at each start (0016); never in its arguments. Its configuration in a folder of Axiom's own for it in the data folder (`DSH_HOME`, `PI_CODING_AGENT_DIR`, OpenCode's `XDG_*`), written by the host for that start, never the person's own and never a workspace's (SI-5: OpenCode is told to ignore a project's; dsh's `<cwd>/.env` comes after the environment). Whatever it would download or report by itself is turned off where it says how (`DSH_TELEMETRY_DISABLED`, `PI_OFFLINE`, OpenCode's updates, language servers, model lists, plugins).
+
+**Installing.** Axiom downloads and installs nothing (SI-25). A harness is found where programs are looked for (SI-22). One that is not there is offered with its own documented command at a version named here, which the person runs in a terminal of their own (0022). A ChatGPT plan runs only in Codex (0007).
+
+**Axiom's tools for every harness.** By MCP, from the host's own server (`axiom --mcp`, its key in a file only its owner reads, never in an environment: SI-3): what only Axiom can do. Now `agent` and `browser` (0021, which moves from the loop); what M5 adds for tasks. None that reads, writes, runs, lists, searches, fetches, plans or keeps a list: every harness has its own (0017). To Pi by the `mcp.json` in its folder of Axiom's.
+
+**A client for short texts.** One request, no tools, one answer: titles (W-32), names of branches, commit messages (W-43). Through an account the person chooses for it, with a key or a server on this computer, never a plan; off until chosen; it says where the text goes (PR-2). It keeps the codecs of `axiom-model`, without their tool calls.
+
+**What is lost, and said.** Branching, until a harness documents a fork (OpenCode and Pi do). Axiom's rules for commands (SI-16): a harness's own asking, answered by a person, takes their place. Axiom's sandbox for what an agent runs, but for dsh's own. Never doing a call twice after a crash: each harness keeps its own. Sessions of the loop stay readable and cannot be spoken to.
+
+**Alternatives.** Keeping the loop as a harness of advanced settings: the owner chose not to. dsh's `headless` profile: above. Pi for everything, as T3 Code allows: no sandbox and no asking.
+
+**Risk.** dsh is a developer preview: its configuration may change from one version to the next, so the version is named and checked. It needs Node. Each harness's sandbox and asking are only as good as it is.
+
+**Reverses** 0013; 0015 and 0012 for the loop; the parts of 0005 and 0017 that were Axiom's loop's. **Look again** when a harness Axiom names changes its terms, its protocol or its sandbox.
