@@ -58,6 +58,7 @@ fn install(program: &str) -> Option<&'static str> {
     match program {
         "dsh" => Some("npm install -g @deepseek-ai/dsh@0.2.2-rc.5"),
         "opencode" => Some("npm install -g opencode-ai@1.19.6"),
+        "pi" => Some("npm install -g @earendil-works/pi-coding-agent@1.6.1"),
         _ => None,
     }
 }
@@ -92,6 +93,15 @@ pub fn known() -> Vec<Known> {
         runs: k.runs,
         install: install(k.program),
     }));
+    all.push(Known {
+        id: "pi".into(),
+        name: "Pi".into(),
+        program: "pi".into(),
+        harness: Harness::Pi,
+        own: false,
+        runs: Some(axiom_harness::given::Runs::Pi),
+        install: install("pi"),
+    });
     all
 }
 

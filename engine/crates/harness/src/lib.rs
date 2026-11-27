@@ -21,6 +21,7 @@ pub mod find;
 pub mod frames;
 pub mod given;
 mod ledger;
+mod pi;
 mod rpc;
 mod talk;
 mod tasks;
@@ -47,6 +48,8 @@ pub enum Harness {
     Codex,
     /// Claude Code, by its streamed JSON.
     Claude(Prompts),
+    /// Pi, by its RPC mode (decision 0023).
+    Pi,
 }
 
 /// Where and as whom it runs.
@@ -153,6 +156,7 @@ impl Harness {
         let mut l = match self {
             Harness::Acp(a) => a.launch(s)?,
             Harness::Codex => codex::launch(s)?,
+            Harness::Pi => pi::launch(s)?,
             Harness::Claude(p) => claude::launch(*p, s)?,
         };
         l.args.extend(s.extra.iter().cloned());
@@ -168,6 +172,7 @@ impl Harness {
         match self {
             Harness::Acp(_) => Ok(()),
             Harness::Codex => codex::passes(extra),
+            Harness::Pi => pi::passes(extra),
             Harness::Claude(_) => claude::passes(extra),
         }
     }
@@ -179,14 +184,15 @@ impl Harness {
             // code.claude.com/docs/en/authentication, read 2026-11-25.
             Harness::Claude(_) => Some("CLAUDE_CONFIG_DIR"),
             // CODEX_HOME moves its files; whether it parts what is in the system's store is not said.
-            Harness::Codex | Harness::Acp(_) => None,
+            Harness::Codex | Harness::Acp(_) | Harness::Pi => None,
         }
     }
 
     /// Whether it can be given a server of Axiom's own, by what it documents.
     pub fn takes_tools(&self) -> bool {
         // Codex: the form of what it takes at a thread's start is nowhere documented.
-        !matches!(self, Harness::Codex)
+        // Pi: by a file of its folder, which is not written yet.
+        !matches!(self, Harness::Codex | Harness::Pi)
     }
 
     /// Whether it can be told how hard to try: low, medium or high, before it is started.
@@ -214,9 +220,11 @@ impl Harness {
             Harness::Claude(p) => return version(self, site, token, *p).await,
             Harness::Acp(a) => Box::new(a.talk(site, None)),
             Harness::Codex => Box::new(codex::Codex::new(site, None)),
+            Harness::Pi => Box::new(pi::Pi::new(site, None)),
         };
         let args = match self {
             Harness::Acp(a) => a.checked()?,
+            Harness::Pi => pi::ARGS.map(String::from).into(),
             _ => codex::ARGS.map(String::from).into(),
         };
         let process = run(self, site, args, &site.tmp, true, token)?;
@@ -270,6 +278,7 @@ impl Harness {
         let talk: Box<dyn Talk> = match self {
             Harness::Acp(a) => Box::new(a.talk(site, Some(s))),
             Harness::Codex => Box::new(codex::Codex::new(site, Some(s))),
+            Harness::Pi => Box::new(pi::Pi::new(site, Some(s))),
             Harness::Claude(p) => Box::new(claude::Claude::new(*p, s, &l)),
         };
         let given = drive::Given {

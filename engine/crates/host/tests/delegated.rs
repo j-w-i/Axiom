@@ -1211,3 +1211,43 @@ async fn who_runs_accounts_models_is_chosen_kept_and_said() {
         .await;
     assert_eq!(on, "opencode");
 }
+
+#[tokio::test]
+async fn pi_runs_an_accounts_model_by_its_rpc_and_only_works() {
+    let mut t = T::new(&[
+        json!({"hear": {"type": "get_state"}, "as": "s"}),
+        json!({"say": {"type": "response", "id": "$s/id", "command": "get_state", "success": true, "data": {"sessionId": "p1"}}}),
+        json!({"hear": {"type": "prompt", "message": "go"}, "as": "p"}),
+        json!({"say": {"type": "response", "id": "$p/id", "command": "prompt", "success": true}}),
+        json!({"say": {"type": "agent_start"}}),
+        json!({"say": {"type": "message_start", "message": {"role": "assistant"}}}),
+        json!({"say": {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "Done."}}}),
+        json!({"say": {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}}),
+        json!({"say": {"type": "agent_settled", "aborted": false}}),
+    ])
+    .await;
+    std::fs::copy(FAKE, t.f.dir.path().join("bin/pi")).unwrap();
+    let c = t.account("openai", None, Some(KEY)).await;
+    // It never asks: it is offered to work, and nothing else.
+    let e = t.c.call(t.runs("pi", &c, Access::Ask, true)).await.unwrap_err().to_string();
+    assert!(e.contains("no mode"), "{e}");
+    // Told to read none of the folder's own: no word on it is needed.
+    let v = t.c.call(t.runs("pi", &c, Access::Work, false)).await.unwrap();
+    let a = AgentId(v["agent"].as_str().unwrap().into());
+    t.prompt(&a, "go").await;
+    let (_, scope) = t.allow_start().await;
+    assert!(scope.contains("Outside Axiom's sandbox"), "{scope}");
+    let (o, _, all) = t.ended().await;
+    assert_eq!((o, texts(&all, ItemKind::Prose)), (Outcome::Completed, vec!["Done.".into()]));
+    let seen = t.seen();
+    let args: Vec<&str> =
+        seen["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+    let given = ["--no-session", "--offline", "--no-approve", "--provider", "openai"];
+    assert_eq!(args[..7], [&["--mode", "rpc"][..], &given[..]].concat());
+    assert_eq!(args[7..], ["--model", "gpt-x"]);
+    assert_eq!(seen["env"]["OPENAI_API_KEY"], KEY);
+    assert_eq!(seen["env"]["PI_OFFLINE"], "1");
+    let dir = std::fs::canonicalize(t.f.paths.data.join("harnesses/pi")).unwrap();
+    assert_eq!(seen["env"]["PI_CODING_AGENT_DIR"], dir.join("agents").join(&a.0).to_str().unwrap());
+    assert!(!t.heard().contains(KEY));
+}
