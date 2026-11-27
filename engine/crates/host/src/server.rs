@@ -1085,6 +1085,7 @@ fn slow(c: &Call) -> bool {
         Call::Models { .. }
             | Call::Look { .. }
             | Call::Harnesses {}
+            | Call::HarnessChoose { .. }
             | Call::ProgramSet { .. }
             | Call::ProgramRemove { .. }
             | Call::PlanAccept { .. }
@@ -1957,6 +1958,11 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let written = a.written(&st.store).await?;
             let all = blocking(move || a.harnesses(&written)).await??;
             serde_json::to_value(all).map_err(|e| internal(e.to_string()))
+        }
+        Call::HarnessChoose { harness } => {
+            let a = st.agents.clone();
+            blocking(move || a.programs.choose(&harness)).await??;
+            Ok(json!({}))
         }
         Call::Programs {} => {
             serde_json::to_value(st.agents.programs.list()).map_err(|e| internal(e.to_string()))

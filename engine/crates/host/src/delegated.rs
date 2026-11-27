@@ -49,6 +49,17 @@ pub struct Known {
     pub own: bool,
     /// It runs the models of accounts of Axiom's (decision 0023).
     pub runs: Option<axiom_harness::given::Runs>,
+    /// What its own documentation has a person type to install it, at the version named here.
+    pub install: Option<&'static str>,
+}
+
+/// Read 2026-11-27 (`research/harnesses-for-accounts.md`): the versions whose configuration was read.
+fn install(program: &str) -> Option<&'static str> {
+    match program {
+        "dsh" => Some("npm install -g @deepseek-ai/dsh@0.2.2-rc.5"),
+        "opencode" => Some("npm install -g opencode-ai@1.19.6"),
+        _ => None,
+    }
 }
 
 pub fn known() -> Vec<Known> {
@@ -60,6 +71,7 @@ pub fn known() -> Vec<Known> {
             harness: Harness::Claude(Prompts::Refused),
             own: false,
             runs: None,
+            install: None,
         },
         Known {
             id: "codex".into(),
@@ -68,6 +80,7 @@ pub fn known() -> Vec<Known> {
             harness: Harness::Codex,
             own: false,
             runs: None,
+            install: None,
         },
     ];
     all.extend(KNOWN.iter().map(|k| Known {
@@ -77,6 +90,7 @@ pub fn known() -> Vec<Known> {
         harness: Harness::Acp(k.acp()),
         own: false,
         runs: k.runs,
+        install: install(k.program),
     }));
     all
 }
@@ -115,6 +129,7 @@ impl Known {
     /// What it is and may be, found without running it.
     pub fn info(&self, how: &How, path: &[Place], written: &Reach) -> HarnessInfo {
         let program = self.find(how, path, written);
+        let missing = matches!(program, Err(NotFound::Missing(_)));
         let here = path.first().cloned();
         let access = |trust| {
             [
@@ -140,6 +155,9 @@ impl Known {
             effort: self.harness.takes_effort(),
             accounts: crate::connections::provider_of(&self.id).map(str::to_owned),
             access: trusted,
+            runs_accounts: self.runs.is_some(),
+            chosen: false,
+            install: self.install.filter(|_| missing).map(str::to_owned),
         }
     }
 

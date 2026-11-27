@@ -1160,3 +1160,54 @@ async fn what_no_harness_here_runs_is_refused_in_words() {
     execution.model = None;
     assert!(t.c.call(no_model).await.unwrap_err().to_string().contains("say which model"));
 }
+
+#[tokio::test]
+async fn who_runs_accounts_models_is_chosen_kept_and_said() {
+    let mut t = T::new(&acp(&[])).await;
+    let list = |v: Value| -> Vec<HarnessInfo> { serde_json::from_value(v).unwrap() };
+    let of = |all: &[HarnessInfo], id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+    let all = list(t.c.call(Call::Harnesses {}).await.unwrap());
+    let dsh = of(&all, "dsh");
+    // Not there: how a person installs it, at the version that was read.
+    assert!(dsh.runs_accounts && dsh.chosen && dsh.program.is_none());
+    assert_eq!(dsh.install.as_deref(), Some("npm install -g @deepseek-ai/dsh@0.2.2-rc.5"));
+    let goose = of(&all, "goose");
+    assert!(!goose.runs_accounts && !goose.chosen && goose.install.is_none());
+    assert_eq!(all.iter().filter(|h| h.chosen).count(), 1);
+    std::fs::copy(FAKE, t.f.dir.path().join("bin/dsh")).unwrap();
+    assert_eq!(of(&list(t.c.call(Call::Harnesses {}).await.unwrap()), "dsh").install, None);
+    // No harness said: the chosen one, and that is what is kept. (Without a key, which the store of
+    // the tests forgets with the host.)
+    let c = t.account("lm-studio", None, None).await;
+    let mut call = t.runs("", &c, Access::Ask, true);
+    t.c.call(call.clone()).await.unwrap();
+    let (on, _) = t
+        .until(|b| match b {
+            Body::AgentAdded { execution, .. } => Some(execution.harness.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(on, "dsh");
+    let e = t.c.call(Call::HarnessChoose { harness: "goose".into() }).await.unwrap_err();
+    assert!(e.to_string().contains("cannot run the models of accounts"), "{e}");
+    t.c.call(Call::HarnessChoose { harness: "opencode".into() }).await.unwrap();
+    t.restart().await;
+    let all = list(t.c.call(Call::Harnesses {}).await.unwrap());
+    assert!(of(&all, "opencode").chosen && !of(&all, "dsh").chosen);
+    let Call::AgentAdd { name, .. } = &mut call else { unreachable!() };
+    *name = "Second".into();
+    // Chosen while it is not there: an agent of it waits for it to be installed.
+    let e = t.c.call(call.clone()).await.unwrap_err().to_string();
+    assert!(e.contains("opencode is not in any of the folders"), "{e}");
+    std::fs::copy(FAKE, t.f.dir.path().join("bin/opencode")).unwrap();
+    t.c.call(call).await.unwrap();
+    let (on, _) = t
+        .until(|b| match b {
+            Body::AgentAdded { execution, name, .. } if name == "Second" => {
+                Some(execution.harness.clone())
+            }
+            _ => None,
+        })
+        .await;
+    assert_eq!(on, "opencode");
+}

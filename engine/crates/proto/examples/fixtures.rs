@@ -462,6 +462,23 @@ fn main() -> Result<(), serde_json::Error> {
                 url: "http://127.0.0.1:5173/".into(),
             })?,
         },
+        Message::Ok {
+            id: 23,
+            result: serde_json::to_value([HarnessInfo {
+                id: "dsh".into(),
+                name: "DeepSeek Harness".into(),
+                program: None,
+                problem: Some("dsh is not in any of the folders that are looked in".into()),
+                needs_trust: true,
+                access: vec![Access::Read, Access::Ask, Access::Work],
+                effort: false,
+                accounts: None,
+                own: false,
+                runs_accounts: true,
+                chosen: true,
+                install: Some("npm install -g @deepseek-ai/dsh@0.2.2-rc.5".into()),
+            }])?,
+        },
         Message::Open { open: "/w".into() },
     ] {
         println!("{}", serde_json::to_string(&m)?);

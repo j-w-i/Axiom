@@ -1005,6 +1005,16 @@ pub struct HarnessInfo {
     /// The person added it themself.
     #[serde(default, skip_serializing_if = "not")]
     pub own: bool,
+    /// It can run the models of accounts of Axiom's (decision 0023).
+    #[serde(default, skip_serializing_if = "not")]
+    pub runs_accounts: bool,
+    /// It is the one that runs them now.
+    #[serde(default, skip_serializing_if = "not")]
+    pub chosen: bool,
+    /// Where it is not there: what its own documentation has a person type to install it, at the
+    /// version Axiom names. Axiom runs nothing of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install: Option<String>,
 }
 
 /// How a program is started, as its person has said it, of it or of one account of it.
@@ -1249,6 +1259,10 @@ pub enum Call {
     /// The harnesses this host can drive.
     #[serde(rename = "harness.list")]
     Harnesses {},
+    /// Which of them runs the models of accounts of Axiom's from now on (decision 0023): one whose
+    /// [`HarnessInfo::runs_accounts`]. Agents that run already keep theirs.
+    #[serde(rename = "harness.choose")]
+    HarnessChoose { harness: String },
     /// What has been said of how programs are started: an array of [`ProgramInfo`].
     #[serde(rename = "program.list")]
     Programs {},

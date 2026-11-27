@@ -416,7 +416,12 @@ impl Agents {
 
     /// Checks what an agent is to be, and says it as it will be kept.
     pub fn setup(&self, s: Setup, written: &Reach) -> Result<Setup, WireError> {
-        let Setup { name, execution, access, workspace, instructions, trust, .. } = s;
+        let Setup { name, mut execution, access, workspace, instructions, trust, .. } = s;
+        // No harness said: a model of an account runs in the one chosen for that (decision 0023),
+        // and is kept as that: who runs it is never hidden (PR-12).
+        if execution.harness.is_empty() && execution.connection.is_some() {
+            execution.harness = self.programs.chosen();
+        }
         let (resume, began, apart, from) = (s.resume, s.began, s.apart, s.from);
         let (plan, planned) = (s.plan, s.planned.filter(|_| s.plan));
         if plan && access != axiom_proto::Access::Read {
@@ -632,8 +637,12 @@ impl Agents {
     pub fn harnesses(&self, written: &Reach) -> Result<Vec<HarnessInfo>, WireError> {
         let home = self.home.as_deref().ok_or_else(|| bad("there is no home folder"))?;
         let path = self.looked_in(&axiom_tools::system(&real(home)?).0)?;
-        let one =
-            |k: delegated::Known| Ok(k.info(&self.programs.how(&k.id, None)?, &path, written));
+        let chosen = self.programs.chosen();
+        let one = |k: delegated::Known| {
+            let mut i = k.info(&self.programs.how(&k.id, None)?, &path, written);
+            i.chosen = i.runs_accounts && i.id == chosen;
+            Ok(i)
+        };
         self.programs.known().into_iter().map(one).collect()
     }
 

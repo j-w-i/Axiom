@@ -209,6 +209,18 @@ void main() {
         null,
       ],
     );
+    final runs = HarnessInfo.decode((result(23)! as List<Object?>).single! as Json);
+    expect(
+      [runs.id, runs.program, runs.runsAccounts, runs.chosen, runs.install, runs.access],
+      [
+        'dsh',
+        null,
+        true,
+        true,
+        'npm install -g @deepseek-ai/dsh@0.2.2-rc.5',
+        [Access.read, Access.ask, Access.work],
+      ],
+    );
     final pointed = Pointed.decode(result(22)! as Json);
     expect(
       [pointed.selector, pointed.text, pointed.styles, pointed.rect, pointed.picture],

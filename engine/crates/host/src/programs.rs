@@ -90,6 +90,18 @@ pub struct Programs {
     all: Mutex<Vec<Kept>>,
     /// Where those that nobody said a path of are looked for; `None`: where programs usually are.
     pub looked_in: Option<Vec<PathBuf>>,
+    /// Which harness runs the models of accounts of Axiom's (decision 0023), kept in `chosen`.
+    chosen: Mutex<String>,
+    chosen_file: PathBuf,
+}
+
+/// Who runs the models of accounts unless a person chose another (the owner, 2026-11-26).
+pub const RUNS_ACCOUNTS: &str = "dsh";
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Chosen {
+    accounts: String,
 }
 
 fn no_such() -> WireError {
@@ -114,7 +126,37 @@ impl Programs {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
         };
-        Ok(Self { file: file.into(), vault, all: Mutex::new(all), looked_in })
+        let chosen_file = file.with_file_name("harnesses.json");
+        let chosen = match std::fs::read_to_string(&chosen_file) {
+            Ok(t) => {
+                serde_json::from_str::<Chosen>(&t)
+                    .map_err(|e| io::Error::other(format!("{}: {e}", chosen_file.display())))?
+                    .accounts
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => RUNS_ACCOUNTS.into(),
+            Err(e) => return Err(e),
+        };
+        let chosen = Mutex::new(chosen);
+        Ok(Self { file: file.into(), vault, all: Mutex::new(all), looked_in, chosen, chosen_file })
+    }
+
+    /// Who runs the models of accounts now.
+    pub fn chosen(&self) -> String {
+        self.chosen.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// From now on `id` runs them; it must be one that can.
+    pub fn choose(&self, id: &str) -> Result<(), WireError> {
+        let k = self.known_as(id).ok_or_else(no_such)?;
+        if k.runs.is_none() {
+            return Err(bad(format!("{} cannot run the models of accounts", k.name)));
+        }
+        let mut chosen = self.chosen.lock().unwrap_or_else(PoisonError::into_inner);
+        let text =
+            serde_json::to_string_pretty(&Chosen { accounts: id.into() }).map_err(internal)?;
+        crate::paths::private_file(&self.chosen_file, &text).map_err(internal)?;
+        *chosen = id.into();
+        Ok(())
     }
 
     fn lock(&self) -> MutexGuard<'_, Vec<Kept>> {
@@ -413,7 +455,15 @@ fn acp() -> Harness {
 
 fn own(id: &str, name: &str) -> Known {
     let program = String::new();
-    Known { id: id.into(), name: name.into(), program, harness: acp(), own: true, runs: None }
+    Known {
+        id: id.into(),
+        name: name.into(),
+        program,
+        harness: acp(),
+        own: true,
+        runs: None,
+        install: None,
+    }
 }
 
 #[cfg(all(test, unix))]
