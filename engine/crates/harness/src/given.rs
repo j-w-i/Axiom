@@ -287,7 +287,7 @@ fn pi(a: &Account, home: &Place, agent: &str) -> Result<Given, String> {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
